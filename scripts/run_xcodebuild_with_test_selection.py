@@ -4,17 +4,123 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
+import plistlib
 import signal
 import shlex
 import subprocess
-from typing import Sequence
+from collections.abc import Callable
+from typing import Mapping, Sequence
 
 
 def parse_test_selection_args(selection_text: str) -> list[str]:
     """Split newline-delimited xcodebuild selection arguments."""
     return [line.strip() for line in selection_text.splitlines() if line.strip()]
+
+
+def selected_xcode_developer_dir_from_link(
+    link_path: str = "/var/db/xcode_select_link",
+) -> str | None:
+    """Return the global xcode-select developer directory without honoring DEVELOPER_DIR."""
+    try:
+        selected_path = os.readlink(link_path).strip()
+    except OSError:
+        return None
+    if not selected_path:
+        return None
+    if selected_path.endswith(".app"):
+        return os.path.join(selected_path, "Contents", "Developer")
+    return selected_path
+
+
+def selected_ui_test_developer_dir(
+    environment: Mapping[str, str],
+    selected_xcode_developer_dir: Callable[[], str | None] = selected_xcode_developer_dir_from_link,
+) -> str | None:
+    """Return the selected Xcode developer directory for UI-test host commands."""
+    ui_test_developer_dir = environment.get("UITEST_DEVELOPER_DIR")
+    if ui_test_developer_dir:
+        return ui_test_developer_dir
+
+    sdk_root = environment.get("MD_APPLE_SDK_ROOT")
+    if sdk_root:
+        return os.path.join(sdk_root, "Contents", "Developer")
+
+    xcode_select_developer_dir = selected_xcode_developer_dir()
+    if xcode_select_developer_dir:
+        return xcode_select_developer_dir
+
+    developer_dir = environment.get("DEVELOPER_DIR")
+    if developer_dir:
+        return developer_dir
+
+    return None
+
+
+def selection_requests_ui_tests(selection_text: str) -> bool:
+    """Return whether the xcodebuild selection explicitly asks for UI tests."""
+    return any(
+        argument.startswith("-only-testing:AndBibleUITests")
+        for argument in parse_test_selection_args(selection_text)
+    )
+
+
+def discover_single_xctestrun_path(derived_data_path: str | None) -> str | None:
+    """Return the sole .xctestrun file from a derived-data build output, if unambiguous."""
+    if derived_data_path is None:
+        return None
+    products_glob = os.path.join(derived_data_path, "Build", "Products", "*.xctestrun")
+    xctestrun_paths = sorted(glob.glob(products_glob))
+    if len(xctestrun_paths) != 1:
+        return None
+    return xctestrun_paths[0]
+
+
+def ui_test_host_environment_variables(environment: Mapping[str, str]) -> dict[str, str]:
+    """Return host-side environment overrides needed by UI-test subprocesses."""
+    variable_map = {
+        "HOME": "UITEST_HOST_HOME",
+        "TMPDIR": "UITEST_HOST_TMPDIR",
+        "USER": "UITEST_HOST_USER",
+        "LOGNAME": "UITEST_HOST_LOGNAME",
+        "__CF_USER_TEXT_ENCODING": "UITEST_HOST_CF_USER_TEXT_ENCODING",
+    }
+    return {
+        target_key: environment[source_key]
+        for source_key, target_key in variable_map.items()
+        if environment.get(source_key)
+    }
+
+
+def patch_xctestrun_ui_test_developer_dir(
+    xctestrun_path: str,
+    developer_dir: str,
+    host_environment: Mapping[str, str] | None = None,
+) -> bool:
+    """Inject selected Xcode paths into UI-test host environments in an .xctestrun file."""
+    with open(xctestrun_path, "rb") as plist_file:
+        xctestrun = plistlib.load(plist_file)
+
+    host_environment_variables = ui_test_host_environment_variables(host_environment or os.environ)
+    patched = False
+    for test_configuration in xctestrun.values():
+        if not isinstance(test_configuration, dict):
+            continue
+        if test_configuration.get("IsUITestBundle") is not True:
+            continue
+        for environment_key in ("EnvironmentVariables", "TestingEnvironmentVariables"):
+            environment = test_configuration.setdefault(environment_key, {})
+            environment["DEVELOPER_DIR"] = developer_dir
+            environment["UITEST_DEVELOPER_DIR"] = developer_dir
+            environment.update(host_environment_variables)
+            patched = True
+
+    if patched:
+        with open(xctestrun_path, "wb") as plist_file:
+            plistlib.dump(xctestrun, plist_file)
+    return patched
 
 
 def build_xcodebuild_command(
@@ -165,6 +271,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     selection_args_text = args.test_selection_args
     if selection_args_text is None:
         selection_args_text = os.environ.get("TEST_SELECTION_ARGS", "")
+    developer_dir = selected_ui_test_developer_dir(os.environ)
+    if developer_dir:
+        os.environ["UITEST_DEVELOPER_DIR"] = developer_dir
+        os.environ["DEVELOPER_DIR"] = developer_dir
+    effective_xctestrun_path = args.xctestrun_path
+    if (
+        args.action == "test-without-building"
+        and developer_dir is not None
+        and selection_requests_ui_tests(selection_args_text)
+    ):
+        if effective_xctestrun_path is None:
+            effective_xctestrun_path = discover_single_xctestrun_path(args.derived_data_path)
+        if effective_xctestrun_path is not None and os.path.exists(effective_xctestrun_path):
+            patch_xctestrun_ui_test_developer_dir(effective_xctestrun_path, developer_dir)
     command = build_xcodebuild_command(
         project=args.project,
         scheme=args.scheme,
@@ -175,7 +295,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         code_signing_allowed=args.code_signing_allowed,
         selection_args_text=selection_args_text,
         action=args.action,
-        xctestrun_path=args.xctestrun_path,
+        xctestrun_path=effective_xctestrun_path,
     )
     print("Running:", shlex.join(command))
     try:

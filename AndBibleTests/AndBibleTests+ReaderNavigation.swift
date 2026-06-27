@@ -126,6 +126,59 @@ extension AndBibleTests {
     }
 
     /**
+     Protects the extracted compare document builder's Android `MultiDocument` contract.
+
+     Android renders Compare through `FakeBookFactory.compareDocument` as a multi-fragment Bible
+     document with `compare=true`. This test exercises the builder directly against the bundled KJV
+     SWORD fixture so the controller can remain an orchestration boundary while the builder owns
+     module ordering, verse extraction, range titles, and typed bridge JSON assembly.
+     */
+    func testCompareDocumentBuilderBuildsAndroidMultiDocumentPayload() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let moduleInfo = try XCTUnwrap(manager.installedModules().first { $0.name == "KJV" })
+        let builder = BibleReaderCompareDocumentBuilder(
+            swordManager: manager,
+            installedBibleModules: [moduleInfo],
+            activeModuleName: "KJV"
+        )
+
+        let request = try XCTUnwrap(
+            builder.makeRequest(
+                osisBookId: "2Cor",
+                bookName: "2 Corinthians",
+                chapter: 2,
+                isNewTestament: true,
+                startVerse: 5,
+                endVerse: 7
+            )
+        )
+        let json = try XCTUnwrap(BibleReaderCompareDocumentBuilder.buildDocumentJSON(request))
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+
+        XCTAssertEqual(object["type"] as? String, "multi")
+        XCTAssertEqual(object["compare"] as? Bool, true)
+        let fragments = try XCTUnwrap(object["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(fragments.count, 1)
+        let fragment = try XCTUnwrap(fragments.first)
+        XCTAssertEqual(fragment["bookCategory"] as? String, DocumentCategory.bible.rawValue)
+        XCTAssertEqual(fragment["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(fragment["bookAbbreviation"] as? String, "KJV")
+        XCTAssertEqual(fragment["osisRef"] as? String, "2Cor.2.5-2Cor.2.7")
+        XCTAssertEqual(fragment["keyName"] as? String, "2 Corinthians 2:5-7")
+        XCTAssertEqual(fragment["isNewTestament"] as? Bool, true)
+        XCTAssertEqual(fragment["hasStrongs"] as? Bool, true)
+        XCTAssertEqual(fragment["language"] as? String, "en")
+        XCTAssertEqual(fragment["direction"] as? String, "ltr")
+        XCTAssertEqual(fragment["ordinalRange"] as? [Int], [
+            try XCTUnwrap(manager.module(named: "KJV")?.verseOrdinal(osisBookId: "2Cor", chapter: 2, verse: 5)),
+            try XCTUnwrap(manager.module(named: "KJV")?.verseOrdinal(osisBookId: "2Cor", chapter: 2, verse: 7)),
+        ])
+    }
+
+    /**
      Protects the extracted reader document payload factory's Bible document contract.
 
      Android and Vue consume document ordinals, Strong's capability, reading progress, and
@@ -765,10 +818,15 @@ extension AndBibleTests {
         let bridge = BibleBridge()
         let modulePath = try makeTemporaryBundledSwordPath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
-        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
 
         let multiDocJSON = try XCTUnwrap(
-            controller.buildStrongsMultiDocJSON(strongs: ["H00430"], robinson: []),
+            builder.buildStrongsMultiDocumentJSON(strongs: ["H00430"], robinson: []),
             "Expected Android-style missing-document fallback when no Strong's dictionary is installed"
         )
         let payloadData = try XCTUnwrap(multiDocJSON.data(using: .utf8))
@@ -813,7 +871,7 @@ extension AndBibleTests {
         XCTAssertEqual(features["keyName"] as? String, "00430")
         XCTAssertEqual(
             controller.renderedContentState,
-            "category=dictionary;module=StrongsHebrew;book=H00430;chapter=none;key=H00430"
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
         )
     }
 
@@ -844,14 +902,352 @@ extension AndBibleTests {
         )
         XCTAssertEqual(
             targetController.renderedContentState,
-            "category=dictionary;module=StrongsHebrew;book=H00430;chapter=none;key=H00430"
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
         )
 
         targetController.bridge(BibleBridge(), saveState: #"{"selectedStrongsDict":"HebrewGreek"}"#)
         XCTAssertEqual(
             targetController.renderedContentState,
-            "category=dictionary;module=HebrewGreek;book=H00430;chapter=none;key=H00430"
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
         )
+    }
+
+    /**
+     Protects Android links-window identity for Strong's and dictionary result documents.
+
+     Android opens Strong's results in the target links window as
+     `FakeBookFactory.multiDocument`, with the selected dictionaries rendered inside that page rather
+     than becoming the window's document identity. The setup renders a Strong's `MultiDocument` into a
+     target controller with a `PageManager`, then simulates Vue saving a different selected dictionary
+     tab. The expected result is that native page/category state remains the general-book `Multi`
+     special document, the links window stays non-Bible syncable behavior-wise, and tab selection does
+     not relabel the whole window as `HebrewGreek`. A failure means iOS has preserved an iOS-only
+     transient dictionary identity instead of Android's durable links-window document semantics.
+     */
+    @MainActor
+    func testDefinitionDocumentUsesAndroidMultiPageIdentityForLinksWindowTarget() throws {
+        let bridge = BibleBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+        let documentJSON = try XCTUnwrap(
+            controller.buildStrongsMultiDocJSON(strongs: ["H00430"], robinson: [])
+        )
+
+        controller.loadDefinitionDocument(
+            documentJSON,
+            renderedBook: "Strongs",
+            renderedKey: "strongs"
+        )
+
+        let androidBookAndKeyListRef = "StrongsHebrew:00430"
+        XCTAssertEqual(controller.currentCategory, .generalBook)
+        XCTAssertEqual(controller.currentGeneralBookKey, androidBookAndKeyListRef)
+        XCTAssertTrue(controller.hasStrongs)
+        XCTAssertFalse(controller.canUseBibleReferenceActions)
+        XCTAssertFalse(controller.isCurrentPageSearchable)
+        XCTAssertFalse(controller.isCurrentPageSpeakable)
+        XCTAssertFalse(controller.isCurrentPageSyncable)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.generalBook.pageManagerKey)
+        XCTAssertEqual(pageManager.generalBookDocument, "Multi")
+        XCTAssertEqual(pageManager.generalBookKey, androidBookAndKeyListRef)
+        XCTAssertGreaterThan(persistCount, 0)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
+        )
+
+        controller.bridge(bridge, saveState: #"{"selectedStrongsDict":"HebrewGreek"}"#)
+
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.generalBook.pageManagerKey)
+        XCTAssertEqual(pageManager.generalBookDocument, "Multi")
+        XCTAssertEqual(pageManager.generalBookKey, androidBookAndKeyListRef)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
+        )
+    }
+
+    /**
+     Protects Android links-window identity for multi-reference Bible link result documents.
+
+     Android does not leave a links-window target on the source Bible page after opening a multi-link;
+     it sets the destination window's current document to `FakeBookFactory.multiDocument` and stores
+     the synthetic key for that special document. The setup sends a minimal serialized Vue
+     `MultiDocument` through the native target-controller entry point. The expected result is a
+     persisted general-book `Multi` page identity with no mutation of the underlying Bible module
+     selection. A failure means bottom tabs and restored window state can report a Bible window while
+     visually displaying a link-result page.
+     */
+    @MainActor
+    func testMultiReferenceDocumentUsesAndroidMultiPageIdentity() {
+        let controller = BibleReaderController(bridge: BibleBridge())
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        let bibleDocumentBeforeLoad = pageManager.bibleDocument
+        let documentJSON = """
+        {
+          "id": "multi-test",
+          "type": "multi",
+          "osisFragments": [
+            {"bookInitials": "KJV", "osisRef": "Gen.1.1"},
+            {"bookInitials": "KJV", "osisRef": "John.3.16"}
+          ],
+          "compare": false
+        }
+        """
+
+        controller.loadMultiReferenceDocument(documentJSON)
+
+        let androidBookAndKeyListRef = "KJV:Gen.1.1||KJV:John.3.16"
+        XCTAssertEqual(controller.currentCategory, .generalBook)
+        XCTAssertEqual(controller.currentGeneralBookKey, androidBookAndKeyListRef)
+        XCTAssertFalse(controller.canUseBibleReferenceActions)
+        XCTAssertFalse(controller.isCurrentPageSearchable)
+        XCTAssertFalse(controller.isCurrentPageSpeakable)
+        XCTAssertFalse(controller.isCurrentPageSyncable)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.generalBook.pageManagerKey)
+        XCTAssertEqual(pageManager.generalBookDocument, "Multi")
+        XCTAssertEqual(pageManager.generalBookKey, androidBookAndKeyListRef)
+        XCTAssertEqual(pageManager.bibleDocument, bibleDocumentBeforeLoad)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=multi"
+        )
+    }
+
+    /**
+     Protects restored Android `Multi` keys from malformed transient result payloads.
+
+     Android's durable links-window restore key is the `BookAndKeyList` string stored in the general
+     book page. iOS may still receive malformed transient JSON from a bridge path, but that should not
+     overwrite the last restorable key with `nil`. The setup restores an existing Android `Multi`
+     page, then loads a malformed multi-reference payload that cannot produce a new
+     `BookAndKeyList`. The expected result is no durable PageManager mutation; a failure means one
+     bad transient render can make the links window unrestorable after restart.
+     */
+    @MainActor
+    func testMalformedMultiReferenceDocumentDoesNotEraseRestoredAndroidMultiKey() {
+        let controller = BibleReaderController(bridge: BibleBridge())
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.generalBook.pageManagerKey)
+        pageManager.generalBookDocument = "Multi"
+        pageManager.generalBookKey = "KJV:Gen.1.1||KJV:John.3.16"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.restoreSavedPosition()
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.loadMultiReferenceDocument(#"{"id":"bad-multi","type":"multi"}"#)
+
+        XCTAssertEqual(controller.currentCategory, .generalBook)
+        XCTAssertEqual(controller.currentGeneralBookKey, "KJV:Gen.1.1||KJV:John.3.16")
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.generalBook.pageManagerKey)
+        XCTAssertEqual(pageManager.generalBookDocument, "Multi")
+        XCTAssertEqual(pageManager.generalBookKey, "KJV:Gen.1.1||KJV:John.3.16")
+        XCTAssertEqual(persistCount, 0)
+    }
+
+    /**
+     Protects restoration of Android's synthetic `Multi` document identity.
+
+     Android persists links-window result pages as a general-book page whose document initials are
+     `Multi`, even though that document is created by `FakeBookFactory` rather than installed from
+     SWORD. The setup restores a controller from those PageManager fields without registering any real
+     general-book module named `Multi`. The expected result is that iOS still marks the window as the
+     synthetic `Multi` general-book document and treats it like Android's special non-navigation page.
+     A failure means restored links-window tabs can fall back to stale Bible identity simply because
+     the synthetic document is not a SWORD module.
+     */
+    @MainActor
+    func testRestoreSavedPositionRecognizesAndroidMultiDocumentIdentity() {
+        let controller = BibleReaderController(bridge: BibleBridge())
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.generalBook.pageManagerKey)
+        pageManager.generalBookDocument = "Multi"
+        pageManager.generalBookKey = "KJV:Gen.1.1||KJV:John.3.16"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.currentCategory, .generalBook)
+        XCTAssertEqual(controller.activeGeneralBookModuleName, "Multi")
+        XCTAssertEqual(controller.currentGeneralBookKey, "KJV:Gen.1.1||KJV:John.3.16")
+        XCTAssertTrue(controller.hasStrongs)
+        XCTAssertFalse(controller.hasNext)
+        XCTAssertFalse(controller.hasPrevious)
+        XCTAssertFalse(controller.canUseBibleReferenceActions)
+        XCTAssertFalse(controller.isCurrentPageSearchable)
+        XCTAssertFalse(controller.isCurrentPageSpeakable)
+        XCTAssertFalse(controller.isCurrentPageSyncable)
+    }
+
+    /**
+     Protects Android's durable restore behavior for links-window `Multi` result pages.
+
+     Android restores `FakeBookFactory.multiDocument` by parsing the persisted `BookAndKeyList` OSIS
+     reference back into source document/key pairs, then rendering a `MultiFragmentDocument`. The setup
+     starts with only the persisted PageManager category/document/key fields, as a process restart would.
+     The expected result is a real Vue `MultiDocument` payload derived from the saved key; a failure
+     means iOS has only fixed the bottom-tab label while losing the actual restored links-window content.
+     */
+    @MainActor
+    func testRestoredAndroidMultiDocumentRebuildsPayloadFromPersistedKey() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.generalBook.pageManagerKey)
+        pageManager.generalBookDocument = "Multi"
+        pageManager.generalBookKey = "KJV:Gen.1.1||KJV:John.3.16"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.restoreSavedPosition()
+
+        controller.loadCurrentContent()
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertEqual(fragments.count, 2)
+        XCTAssertEqual(fragments[0]["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(fragments[0]["osisRef"] as? String, "Gen.1.1")
+        XCTAssertEqual(fragments[1]["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(fragments[1]["osisRef"] as? String, "John.3.16")
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=multi"
+        )
+    }
+
+    #if os(iOS)
+    /**
+     Protects native selection state and payload decisions as a focused reader responsibility.
+
+     Android action mode tracks selection state separately from page navigation, and `Multi`/generic
+     pages must not fabricate Bible references from the pane that opened them. The setup exercises the
+     coordinator directly with a normal Bible page and an Android-style non-Bible page. The expected
+     result is a Bible copy/share payload only for Bible-capable pages, text-only copy for non-Bible
+     pages, and cleared state after deselection. A failure means the selection extraction either lost
+     state transitions or reintroduced stale Bible-reference behavior outside controller orchestration.
+     The test performs no simulator, pasteboard, or persistence side effects and is deterministic.
+     */
+    func testReaderSelectionCoordinatorOwnsSelectionStateAndReferencePayloads() {
+        var coordinator = BibleReaderSelectionCoordinator()
+        let bibleContext = BibleReaderSelectionPageContext(
+            canUseBibleReferenceActions: true,
+            currentBook: "Genesis",
+            currentChapter: 1,
+            activeModuleName: "KJV"
+        )
+        let multiContext = BibleReaderSelectionPageContext(
+            canUseBibleReferenceActions: false,
+            currentBook: "Genesis",
+            currentChapter: 1,
+            activeModuleName: "KJV"
+        )
+
+        coordinator.selectionChanged("In the beginning")
+
+        XCTAssertTrue(coordinator.hasActiveSelection)
+        XCTAssertEqual(coordinator.selectedText, "In the beginning")
+        XCTAssertEqual(
+            coordinator.copyText(context: bibleContext),
+            "In the beginning\n\u{2014} Genesis 1 (KJV)"
+        )
+        XCTAssertEqual(
+            coordinator.shareText(context: bibleContext),
+            "In the beginning\n\u{2014} Genesis 1 (KJV)"
+        )
+        XCTAssertEqual(coordinator.copyText(context: multiContext), "In the beginning")
+        XCTAssertNil(coordinator.shareText(context: multiContext))
+
+        coordinator.clearSelection()
+
+        XCTAssertFalse(coordinator.hasActiveSelection)
+        XCTAssertEqual(coordinator.selectedText, "")
+        XCTAssertNil(coordinator.copyText(context: bibleContext))
+        XCTAssertNil(coordinator.shareText(context: bibleContext))
+    }
+
+    /**
+     Protects native selection actions from falling back to the stale Bible page behind `Multi`.
+
+     Android treats `FakeBookFactory.multiDocument` as a special general-book page. Bible-only
+     actions such as sharing verse references are unavailable there, while plain copy must not invent
+     a Bible reference from the source pane. The setup renders a `Multi` links-window document and
+     marks a native text selection. The expected result is a text-only copy payload and no Bible share
+     callback. A failure means iOS can expose stale `Genesis 1 (KJV)` style output for a links-window
+     document that Android no longer considers a Bible page.
+     */
+    @MainActor
+    func testMultiDocumentNativeSelectionActionsDoNotUseStaleBibleReference() {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.loadMultiReferenceDocument("""
+        {
+          "id": "multi-selection-test",
+          "type": "multi",
+          "osisFragments": [
+            {"bookInitials": "KJV", "osisRef": "Gen.1.1"}
+          ],
+          "compare": false
+        }
+        """)
+
+        controller.bridge(bridge, selectionChanged: "Selected definition text")
+        var sharedText: String?
+        controller.onShareVerseText = { sharedText = $0 }
+
+        XCTAssertEqual(controller.selectionCopyTextForCurrentPage(), "Selected definition text")
+        XCTAssertNil(sharedText)
+
+        controller.bridge(bridge, selectionChanged: "Selected definition text")
+        controller.shareSelection()
+
+        XCTAssertNil(sharedText)
+    }
+    #endif
+
+    /**
+     Protects pane menu action visibility before the pane controller is registered.
+
+     SwiftUI can build a `BibleWindowPane` menu while the persisted `PageManager` already says the
+     links window is Android's `general_book/Multi` page, but before `windowManager.controllers`
+     contains the live controller. Android does not expose copy-reference or sync controls for that
+     special page. The expected fallback is therefore based on persisted category/document state, not a
+     permissive controller-nil default. A failure means the menu can briefly show stale Bible actions
+     during initial render or controller re-registration.
+     */
+    func testPaneMenuCapabilitiesUsePageManagerBeforeControllerRegistration() {
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.generalBook.pageManagerKey)
+        pageManager.generalBookDocument = "Multi"
+        pageManager.generalBookKey = "KJV:Gen.1.1"
+        window.pageManager = pageManager
+
+        let capabilities = BibleWindowPaneMenuCapabilities(window: window, controller: nil)
+
+        XCTAssertFalse(capabilities.canCopyReference)
+        XCTAssertFalse(capabilities.canSyncWindow)
     }
 
     @MainActor
@@ -887,7 +1283,7 @@ extension AndBibleTests {
         XCTAssertNotEqual(fragment["osisRef"] as? String, "Gen.1")
         XCTAssertEqual(
             controller.renderedContentState,
-            "category=dictionary;module=StrongsHebrew;book=H00430;chapter=none;key=H00430"
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
         )
     }
 
@@ -1078,6 +1474,15 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies Android-style `multi://` links render as a Vue MultiDocument instead of a native sheet.
+
+     Setup uses a temporary bundled KJV module and a recording bridge, then invokes the production
+     external-link bridge path with two OSIS parameters. The expected result is an `add_documents`
+     payload containing a multi document and no cross-reference sheet callback. A failure means iOS
+     regressed to an iOS-only presentation path for links Android handles as in-reader documents. The
+     test is main-actor isolated for controller callbacks and creates only temporary module fixtures.
+     */
     @MainActor
     func testMultiReferenceLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -1103,6 +1508,15 @@ extension AndBibleTests {
         XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Exod.2.1""#))
     }
 
+    /**
+     Verifies comma-separated `osis://` links use the same MultiDocument path as Android.
+
+     Setup records bridge emissions from the production external-link handler with a temporary KJV
+     module. The expected result is one Vue multi-document payload containing both references and no
+     cross-reference sheet callback. A failure means iOS is splitting or presenting multi-reference
+     OSIS links differently from Android. The test is synchronous except for the main-run-loop drain
+     needed to capture bridge emission.
+     */
     @MainActor
     func testMultiReferenceOsisLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -1193,6 +1607,15 @@ extension AndBibleTests {
         XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Exod.2.1""#))
     }
 
+    /**
+     Protects the single-reference `osis://` path from being widened into MultiDocument behavior.
+
+     Android opens a single OSIS reference as normal reader navigation, while multi-reference links
+     become MultiDocument content. Setup drives the bridge with one OSIS reference and a recording
+     bridge. The expected result is controller navigation to Exodus 2 without a multi-document payload
+     or cross-reference sheet. A failure means the resolver/link split changed user-visible
+     navigation semantics.
+     */
     @MainActor
     func testSingleOsisReferenceStillNavigatesWithoutMultiDocument() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -1206,6 +1629,153 @@ extension AndBibleTests {
         XCTAssertEqual(controller.currentBook, "Exodus")
         XCTAssertEqual(controller.currentChapter, 2)
         XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
+    }
+
+    /**
+     Protects Android's boundary between `osis://` navigation and `multi://` MultiDocument links.
+
+     Android's `SCHEME_REFERENCE` handler reads only `getQueryParameter("osis")`; repeated `osis`
+     query values are not a MultiDocument signal. Setup sends a deliberately duplicated `osis://`
+     link through the native bridge with no SWORD module so the route is deterministic. The expected
+     result is navigation to the first reference only and no transient multi-document payload. A
+     failure means iOS widened single-reference links into invented multi-reference behavior instead
+     of requiring Android's `multi://` route.
+     */
+    @MainActor
+    func testOsisReferenceUsesFirstQueryValueLikeAndroidReferenceScheme() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge)
+
+        controller.bridge(bridge, openExternalLink: "osis://?osis=Exod.2.1&osis=Gen.1.1&v11n=KJVA")
+
+        XCTAssertEqual(controller.currentBook, "Exodus")
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
+    }
+
+    /**
+     Protects Android-style external-link classification outside controller orchestration.
+
+     Android splits responsibilities between `BibleJavascriptInterface.openExternalLink`,
+     `BibleView.openLink`, and `LinkControl`: pseudo-links become typed app routes while unknown
+     web links remain platform URLs. The setup exercises the new pure router with Strong's,
+     morphology, MyBible, MySword, multi-reference, EPUB, Downloads, My Notes, and StudyPad inputs.
+     The expected result is typed route data with no bridge, SWORD, pasteboard, or simulator side
+     effects. A failure means the extraction preserved the controller code shape without preserving
+     Android's routing contract.
+     */
+    func testExternalLinkRouterClassifiesAndroidPseudoSchemes() {
+        let router = BibleReaderExternalLinkRouter()
+
+        XCTAssertEqual(
+            router.route(for: "ab-w://?strong=H0430&robinson=N-NSM"),
+            .definition(strongs: ["H0430"], robinson: ["N-NSM"])
+        )
+        XCTAssertEqual(
+            router.route(for: "strongs://G2316"),
+            .definition(strongs: ["G2316"], robinson: [])
+        )
+        XCTAssertEqual(
+            router.route(for: "morphology://robinson/V-PAI-3S"),
+            .definition(strongs: [], robinson: ["V-PAI-3S"])
+        )
+        XCTAssertEqual(
+            router.route(for: "ab-find-all://?type=hebrew&name=5775"),
+            .findAllOccurrences("H5775")
+        )
+        XCTAssertEqual(
+            router.route(for: "download://?initials=KJV"),
+            .downloads(searchText: "KJV")
+        )
+        XCTAssertEqual(
+            router.route(for: "epub-ref://?book=Pilgrim&toKey=chapter1.xhtml&toId=anchor"),
+            .epubReference(book: "Pilgrim", toKey: "chapter1.xhtml", toId: "anchor")
+        )
+        XCTAssertEqual(
+            router.route(for: "my-notes://?osis=Gen.1.1&ordinal=1"),
+            .myNotes(osisRef: "Gen.1.1", ordinal: 1)
+        )
+        XCTAssertEqual(
+            router.route(for: "journal://?id=00000000-0000-0000-0000-000000000001&bookmarkId=00000000-0000-0000-0000-000000000002"),
+            .studyPad(
+                labelId: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                bookmarkId: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+            )
+        )
+        XCTAssertEqual(
+            router.route(for: "osis://?osis=Gen.1.1,Exod.2.1&v11n=KJVA"),
+            .osisReferences(["Gen.1.1,Exod.2.1"])
+        )
+        XCTAssertEqual(
+            router.route(for: "multi://?osis=Gen.1.1&osis=Exod.2.1&v11n=KJVA"),
+            .multiReferences(["Gen.1.1", "Exod.2.1"])
+        )
+        XCTAssertEqual(
+            router.route(for: "sword://Bible/John.3.16"),
+            .swordReference("John.3.16")
+        )
+        XCTAssertEqual(
+            router.route(for: "B:470 1:1"),
+            .osisNavigation("Matt.1.1")
+        )
+        XCTAssertEqual(
+            router.route(for: "#b40.1.1"),
+            .osisNavigation("Matt.1.1")
+        )
+        XCTAssertEqual(
+            router.route(for: "S:G2424"),
+            .definition(strongs: ["G2424"], robinson: [])
+        )
+        XCTAssertEqual(
+            router.route(for: "#dH0430"),
+            .definition(strongs: ["H0430"], robinson: [])
+        )
+        XCTAssertEqual(
+            router.route(for: "https://andbible.org"),
+            .platformURL(URL(string: "https://andbible.org")!)
+        )
+    }
+
+    /**
+     Protects multi-reference document construction as its own Android `Multi` responsibility.
+
+     Android stores cross-reference results as `FakeBookFactory.multiDocument` backed by a
+     `BookAndKeyList`, not as a controller-local sheet. The setup feeds parsed references into the
+     builder without an active SWORD module so fallback XML is deterministic. The expected JSON has
+     the Vue `type: "multi"` shape, one OSIS fragment per reference, stable module/key metadata, and
+     escaped fallback text. A failure means the extraction left document construction coupled to the
+     controller or changed the persisted/rendered document contract.
+     */
+    func testMultiReferenceDocumentBuilderCreatesAndroidMultiPayload() throws {
+        let refs = [
+            OsisRef(book: "Genesis", chapter: 1, verse: 1, osisId: "Gen"),
+            OsisRef(book: "Exodus", chapter: 2, verse: 1, osisId: "Exod"),
+        ]
+        let builder = BibleReaderMultiReferenceDocumentBuilder(
+            activeModule: nil,
+            activeModuleName: "KJV",
+            compatibilityOrdinal: { chapter, verse in chapter * 1_000 + verse },
+            isNewTestament: { $0 == "Matthew" }
+        )
+
+        let json = try XCTUnwrap(builder.buildDocumentJSON(refs: refs))
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertEqual(payload["compare"] as? Bool, false)
+        XCTAssertEqual(fragments.count, 2)
+        XCTAssertEqual(fragments[0]["key"] as? String, "KJV--Gen.1.1")
+        XCTAssertEqual(fragments[0]["osisRef"] as? String, "Gen.1.1")
+        XCTAssertEqual(fragments[0]["bookCategory"] as? String, "BIBLE")
+        XCTAssertEqual(fragments[0]["ordinalRange"] as? [Int], [1001, 1001])
+        XCTAssertTrue(
+            (fragments[0]["xml"] as? String)?.contains("Genesis 1:1") == true,
+            "Expected fallback XML to include the display reference when no module is available."
+        )
+        XCTAssertEqual(fragments[1]["key"] as? String, "KJV--Exod.2.1")
+        XCTAssertEqual(fragments[1]["ordinalRange"] as? [Int], [2001, 2001])
     }
 
     /**
@@ -1578,6 +2148,425 @@ extension AndBibleTests {
         XCTAssertEqual(appSettings["hasActiveIndicator"] as? Bool, false)
     }
 
+    /**
+     Protects the extracted reader configuration coordinator's ownership of active-window projection.
+
+     The setup mirrors Android's `windowControl.activeWindow.id == window.id` rule with two visible
+     windows and active-indicator preference enabled. The focused contract is that the coordinator
+     computes both `activeWindow` and `hasActiveIndicator` together so the controller does not keep
+     duplicate window-state math beside the config payload builder. A failure means #146 regressed by
+     moving state projection mechanically without preserving Android's active-pane semantics.
+     */
+    @MainActor
+    func testReaderConfigurationCoordinatorComputesActiveWindowProjection() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Config Coordinator")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        windowManager.activeWindow = firstWindow
+
+        let coordinator = BibleReaderConfigurationCoordinator()
+
+        let activeProjection = coordinator.activeWindowState(
+            activeWindow: firstWindow,
+            windowManager: windowManager,
+            activeIndicatorEnabled: true
+        )
+        let inactiveProjection = coordinator.activeWindowState(
+            activeWindow: secondWindow,
+            windowManager: windowManager,
+            activeIndicatorEnabled: true
+        )
+
+        XCTAssertEqual(activeProjection.isActive, true)
+        XCTAssertEqual(activeProjection.hasActiveIndicator, true)
+        XCTAssertEqual(activeProjection.eventJSON, #"{"hasActiveIndicator":true,"isActive":true}"#)
+        XCTAssertEqual(inactiveProjection.isActive, false)
+        XCTAssertEqual(inactiveProjection.hasActiveIndicator, false)
+        XCTAssertEqual(inactiveProjection.eventJSON, #"{"hasActiveIndicator":false,"isActive":false}"#)
+    }
+
+    /**
+     Protects workspace-backed compare visibility as coordinator-owned reader configuration state.
+
+     Android stores compare-document visibility with workspace settings instead of treating it as
+     transient pane state. This test creates a persisted workspace, toggles one module through the
+     coordinator, and verifies the updated set is written to `WorkspaceSettings`, mirrored to the
+     coordinator fallback, and persisted exactly once. A failure means the extraction preserved file
+     shape but left #146's reader/window/workspace state ownership split across the controller.
+     */
+    @MainActor
+    func testReaderConfigurationCoordinatorPersistsHiddenCompareDocumentsToWorkspace() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let workspace = workspaceStore.createWorkspace(name: "Compare Coordinator")
+        workspace.workspaceSettings = WorkspaceSettings(hideCompareDocuments: ["ESV"])
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        var coordinator = BibleReaderConfigurationCoordinator()
+        var persistCount = 0
+
+        coordinator.toggleHiddenCompareDocument("KJV", activeWindow: window) {
+            persistCount += 1
+        }
+
+        XCTAssertEqual(workspace.workspaceSettings?.hideCompareDocuments, ["ESV", "KJV"])
+        XCTAssertEqual(coordinator.hiddenCompareDocuments(activeWindow: window), ["ESV", "KJV"])
+        XCTAssertEqual(persistCount, 1)
+
+        coordinator.toggleHiddenCompareDocument("ESV", activeWindow: nil) {
+            persistCount += 1
+        }
+
+        XCTAssertEqual(coordinator.hiddenCompareDocuments(activeWindow: nil), ["KJV"])
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /**
+     Protects recent bookmark-label state as a coordinator-owned reader configuration input.
+
+     Android exposes recently used bookmark labels through reader configuration without making the
+     top-level reader controller own the de-duplication, ordering, and persisted setting value. The
+     setup starts from the legacy comma-separated setting, reuses one older label, then adds enough
+     labels to exceed the five-label cap. The expected result is most-recent-first ordering, no
+     duplicate reused label, cap enforcement, and one persisted comma-separated value per tracked
+     label. A failure means #146 regressed by leaving state semantics in the controller or changing
+     the config payload behavior that Vue receives.
+     */
+    func testReaderRecentLabelCoordinatorLoadsDeduplicatesCapsAndPersistsRecentLabels() {
+        var coordinator = BibleReaderRecentLabelCoordinator()
+        var persistedValues: [String] = []
+
+        coordinator.load(storedValue: "oldA,oldB")
+        XCTAssertEqual(coordinator.labelIds, ["oldA", "oldB"])
+
+        for labelId in ["oldC", "oldA", "oldD", "oldE", "oldF", "oldG"] {
+            coordinator.track(labelId) { persistedValues.append($0) }
+        }
+
+        XCTAssertEqual(coordinator.labelIds, ["oldG", "oldF", "oldE", "oldD", "oldA"])
+        XCTAssertEqual(
+            persistedValues,
+            [
+                "oldC,oldA,oldB",
+                "oldA,oldC,oldB",
+                "oldD,oldA,oldC,oldB",
+                "oldE,oldD,oldA,oldC,oldB",
+                "oldF,oldE,oldD,oldA,oldC",
+                "oldG,oldF,oldE,oldD,oldA"
+            ]
+        )
+    }
+
+    /**
+     Protects pending/active transient `MultiDocument` state as a coordinator-owned reader concern.
+
+     Android links-window `Multi` documents can be requested before the WebView client is ready, so
+     iOS must remember the same transient document as both the active special document and the
+     pending client-ready replay. The test then consumes that pending replay once and verifies that a
+     later client-ready request remains active without leaving stale pending replay state. A failure
+     means the controller has regained hidden transient state ownership or the Android `Multi`
+     restore/replay contract can duplicate or lose special documents.
+     */
+    func testReaderTransientDocumentCoordinatorStoresActiveAndPendingReplayState() {
+        var coordinator = BibleReaderTransientDocumentCoordinator()
+        let pendingRequest = BibleReaderTransientDocumentRequest(
+            documentJSON: #"{"id":"pending"}"#,
+            renderedBook: "Multi",
+            renderedKey: "multi",
+            renderedCategory: .generalBook,
+            renderedModuleName: "Multi",
+            pageCategory: .generalBook,
+            pageDocumentInitials: "Multi",
+            pageKey: "KJV:Gen.1.1"
+        )
+        let readyRequest = BibleReaderTransientDocumentRequest(
+            documentJSON: #"{"id":"ready"}"#,
+            renderedBook: "Compare",
+            renderedKey: "compare",
+            renderedCategory: .bible,
+            renderedModuleName: nil,
+            pageCategory: nil,
+            pageDocumentInitials: nil,
+            pageKey: nil
+        )
+
+        coordinator.store(pendingRequest, clientReady: false)
+
+        XCTAssertEqual(coordinator.activeRequest(isShowingAndroidMultiDocument: true)?.documentJSON, pendingRequest.documentJSON)
+        XCTAssertNil(coordinator.activeRequest(isShowingAndroidMultiDocument: false))
+        XCTAssertEqual(coordinator.consumePendingClientReadyRequest()?.documentJSON, pendingRequest.documentJSON)
+        XCTAssertNil(coordinator.consumePendingClientReadyRequest())
+
+        coordinator.store(readyRequest, clientReady: true)
+
+        XCTAssertEqual(coordinator.activeRequest(isShowingAndroidMultiDocument: true)?.documentJSON, readyRequest.documentJSON)
+        XCTAssertNil(coordinator.consumePendingClientReadyRequest())
+    }
+
+    /**
+     Protects the extracted special-document coordinator's Android fake-document identity rule.
+
+     Android renders links-window results as Vue `MultiDocument` content while native page state is
+     persisted as `general_book/Multi` plus a `BookAndKeyList` key. The setup sends both a valid
+     durable `Multi` request and a malformed request without a durable key. The expected result is
+     that valid requests produce a PageManager persistence plan, while malformed requests still move
+     the visible category to general book without erasing the previous restorable key. A failure
+     means the controller could regress into either iOS-only transient state or data-lossy restore
+     semantics.
+     */
+    func testReaderSpecialDocumentCoordinatorBuildsAndroidMultiPageIdentityPlan() {
+        let coordinator = BibleReaderSpecialDocumentCoordinator()
+        let validRequest = BibleReaderTransientDocumentRequest(
+            documentJSON: #"{"id":"valid"}"#,
+            renderedBook: "Multi",
+            renderedKey: "multi",
+            renderedCategory: .generalBook,
+            renderedModuleName: "Multi",
+            pageCategory: .generalBook,
+            pageDocumentInitials: "Multi",
+            pageKey: "KJV:Gen.1.1"
+        )
+        let malformedRequest = BibleReaderTransientDocumentRequest(
+            documentJSON: #"{"id":"bad"}"#,
+            renderedBook: "Multi",
+            renderedKey: "multi",
+            renderedCategory: .generalBook,
+            renderedModuleName: "Multi",
+            pageCategory: .generalBook,
+            pageDocumentInitials: "Multi",
+            pageKey: nil
+        )
+        let missingInitialsRequest = BibleReaderTransientDocumentRequest(
+            documentJSON: #"{"id":"missing-initials"}"#,
+            renderedBook: "Multi",
+            renderedKey: "multi",
+            renderedCategory: .generalBook,
+            renderedModuleName: "Multi",
+            pageCategory: .generalBook,
+            pageDocumentInitials: nil,
+            pageKey: "KJV:Gen.1.1"
+        )
+
+        let validUpdate = coordinator.pageIdentityUpdate(for: validRequest)
+        XCTAssertEqual(validUpdate.currentCategory, .generalBook)
+        XCTAssertTrue(validUpdate.clearsActiveGeneralBookModule)
+        XCTAssertTrue(validUpdate.assignsActiveGeneralBookModuleName)
+        XCTAssertEqual(validUpdate.activeGeneralBookModuleName, "Multi")
+        XCTAssertEqual(validUpdate.currentGeneralBookKey, "KJV:Gen.1.1")
+        XCTAssertEqual(validUpdate.pageManagerCategoryName, DocumentCategory.generalBook.pageManagerKey)
+        XCTAssertEqual(validUpdate.pageManagerGeneralBookDocument, "Multi")
+        XCTAssertEqual(validUpdate.pageManagerGeneralBookKey, "KJV:Gen.1.1")
+        XCTAssertTrue(validUpdate.persistsPageManagerState)
+
+        let malformedUpdate = coordinator.pageIdentityUpdate(for: malformedRequest)
+        XCTAssertEqual(malformedUpdate.currentCategory, .generalBook)
+        XCTAssertTrue(malformedUpdate.clearsActiveGeneralBookModule)
+        XCTAssertTrue(malformedUpdate.assignsActiveGeneralBookModuleName)
+        XCTAssertEqual(malformedUpdate.activeGeneralBookModuleName, "Multi")
+        XCTAssertNil(malformedUpdate.currentGeneralBookKey)
+        XCTAssertFalse(malformedUpdate.persistsPageManagerState)
+
+        let missingInitialsUpdate = coordinator.pageIdentityUpdate(for: missingInitialsRequest)
+        XCTAssertEqual(missingInitialsUpdate.currentCategory, .generalBook)
+        XCTAssertTrue(missingInitialsUpdate.clearsActiveGeneralBookModule)
+        XCTAssertTrue(missingInitialsUpdate.assignsActiveGeneralBookModuleName)
+        XCTAssertNil(missingInitialsUpdate.activeGeneralBookModuleName)
+        XCTAssertNil(missingInitialsUpdate.currentGeneralBookKey)
+        XCTAssertFalse(missingInitialsUpdate.persistsPageManagerState)
+    }
+
+    /**
+     Protects My Documents active-page identity as a coordinator-owned reader state rule.
+
+     Android treats My Documents as generated general-book modules, so iOS must keep the active
+     local page only while the rendered content still points at the same general-book document. The
+     setup records one active page, exercises an unrelated module/category render, and expects the
+     coordinator to preserve or clear the page key exactly where the controller previously did. A
+     failure means #146 moved state ownership without preserving the reload/delete guard that keeps
+     My Documents bridge actions scoped to the visible local document.
+     */
+    func testReaderMyDocumentCoordinatorTracksActivePageUntilDifferentRenderedContent() {
+        var coordinator = BibleReaderMyDocumentCoordinator()
+
+        coordinator.setActivePage(bookInitials: "MYDOC", pageKey: "intro")
+
+        XCTAssertEqual(coordinator.activePageKey(for: "MYDOC"), "intro")
+        XCTAssertNil(coordinator.activePageKey(for: "OTHER"))
+
+        coordinator.clearActivePageUnless(category: .generalBook, moduleName: "MYDOC")
+        XCTAssertEqual(coordinator.activePageKey(for: "MYDOC"), "intro")
+
+        coordinator.clearActivePageUnless(category: .commentary, moduleName: "MYDOC")
+        XCTAssertNil(coordinator.activePageKey(for: "MYDOC"))
+
+        coordinator.setActivePage(bookInitials: "MYDOC", pageKey: "intro")
+        coordinator.clearActivePageUnless(category: .generalBook, moduleName: "OTHER")
+
+        XCTAssertNil(coordinator.activePageKey(for: "MYDOC"))
+    }
+
+    /**
+     Protects the Android-compatible My Documents document payload outside the reader controller.
+
+     Android exposes My Documents through the general-book document pipeline while retaining raw
+     editable content behind bridge calls. The setup builds a Markdown page containing XML-sensitive
+     characters and expects the coordinator to emit a valid Vue `OsisDocument` JSON payload with the
+     same category, identity, AI metadata, and escaped markup fields used by the current reader. A
+     failure means the extraction changed the WebView payload contract rather than simply moving it
+     out of `BibleReaderController`.
+     */
+    func testReaderMyDocumentCoordinatorBuildsAndroidGeneralBookDocumentPayload() throws {
+        let coordinator = BibleReaderMyDocumentCoordinator()
+        let pageId = try XCTUnwrap(UUID(uuidString: "77777777-7777-7777-7777-777777777777"))
+        let sourcePromptId = try XCTUnwrap(UUID(uuidString: "88888888-8888-8888-8888-888888888888"))
+        let document = MyDocument(name: "My Document", initials: "MYDOC")
+        let page = MyDocumentPage(
+            id: pageId,
+            title: "Intro",
+            pageKey: "intro",
+            contentType: .markdown,
+            sourcePromptId: sourcePromptId,
+            languageCode: "en"
+        )
+        let content = MyDocumentPageContent(pageId: pageId, content: "Raw <markdown> & \"quoted\"")
+        page.pageContent = content
+        page.document = document
+
+        let json = try XCTUnwrap(coordinator.documentJSON(document: document, page: page))
+        let renderedDocument = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let osisFragment = try XCTUnwrap(renderedDocument["osisFragment"] as? [String: Any])
+
+        XCTAssertEqual(renderedDocument["type"] as? String, "osis")
+        XCTAssertEqual(renderedDocument["bookInitials"] as? String, "MYDOC")
+        XCTAssertEqual(renderedDocument["bookCategory"] as? String, DocumentCategory.generalBook.rawValue)
+        XCTAssertEqual(renderedDocument["bookName"] as? String, "My Document")
+        XCTAssertEqual(renderedDocument["key"] as? String, "intro")
+        XCTAssertEqual(renderedDocument["isMyDocument"] as? Bool, true)
+        XCTAssertEqual(renderedDocument["isAiDocument"] as? Bool, false)
+        XCTAssertEqual(renderedDocument["myDocumentPageId"] as? String, pageId.uuidString)
+        XCTAssertEqual(renderedDocument["sourcePromptId"] as? String, sourcePromptId.uuidString)
+        XCTAssertEqual(osisFragment["bookCategory"] as? String, DocumentCategory.generalBook.rawValue)
+        XCTAssertEqual(osisFragment["bookInitials"] as? String, "MYDOC")
+        XCTAssertEqual(osisFragment["keyName"] as? String, "Intro")
+        XCTAssertEqual(osisFragment["language"] as? String, "en")
+        XCTAssertEqual(
+            osisFragment["xml"] as? String,
+            "<div class=\"mydoc-markdown\"><markdown>Raw &lt;markdown&gt; &amp; &quot;quoted&quot;</markdown></div>"
+        )
+    }
+
+    /**
+     Protects infinite-scroll loaded-range state as a coordinator-owned reader concern.
+
+     Android advances the loaded Bible range only after an adjacent chapter document is available.
+     The setup asks for a previous chapter, deliberately does not commit it, and then asks again to
+     prove failed document loading cannot advance the lower bound. It then commits the candidate and
+     verifies the next request crosses into the previous book. A failure means the controller has
+     regained mutate-and-revert loaded-range state that can drift after failed prepend loads.
+     */
+    func testReaderInfiniteScrollCoordinatorKeepsPreviousCandidateUncommittedUntilLoadSucceeds() {
+        var coordinator = BibleReaderInfiniteScrollCoordinator()
+        coordinator.reset(book: "Exodus", chapter: 2)
+
+        let firstCandidate = coordinator.previousCandidate(
+            previousBook: { $0 == "Exodus" ? "Genesis" : nil },
+            chapterCount: { $0 == "Genesis" ? 50 : 40 }
+        )
+        XCTAssertEqual(firstCandidate, BibleReaderInfiniteScrollChapter(book: "Exodus", chapter: 1))
+
+        XCTAssertEqual(
+            coordinator.previousCandidate(
+                previousBook: { $0 == "Exodus" ? "Genesis" : nil },
+                chapterCount: { $0 == "Genesis" ? 50 : 40 }
+            ),
+            BibleReaderInfiniteScrollChapter(book: "Exodus", chapter: 1)
+        )
+
+        if let firstCandidate {
+            coordinator.commitPrevious(firstCandidate)
+        }
+
+        XCTAssertEqual(
+            coordinator.previousCandidate(
+                previousBook: { $0 == "Exodus" ? "Genesis" : nil },
+                chapterCount: { $0 == "Genesis" ? 50 : 40 }
+            ),
+            BibleReaderInfiniteScrollChapter(book: "Genesis", chapter: 50)
+        )
+    }
+
+    /**
+     Protects the controller's pre-render infinite-scroll sentinel behavior during extraction.
+
+     The legacy controller kept its loaded range at Genesis chapter 0 until the first reader render.
+     Vue can still request append/prepend during that window: prepend has no valid chapter, while
+     append resolves to Genesis 1. A failure here means the extracted coordinator changed startup
+     bridge behavior instead of only moving the range ownership out of `BibleReaderController`.
+     */
+    func testReaderInfiniteScrollCoordinatorPreservesPreRenderAppendSentinel() {
+        let coordinator = BibleReaderInfiniteScrollCoordinator()
+
+        XCTAssertNil(
+            coordinator.previousCandidate(
+                previousBook: { $0 == "Genesis" ? nil : "Genesis" },
+                chapterCount: { book in
+                    XCTFail("Genesis sentinel prepend should not query chapter count, got \(book)")
+                    return 0
+                }
+            )
+        )
+
+        XCTAssertEqual(
+            coordinator.nextCandidate(
+                nextBook: { book in
+                    XCTFail("Genesis sentinel append should not query a next book, got \(book)")
+                    return nil
+                },
+                chapterCount: { $0 == "Genesis" ? 50 : 0 }
+            ),
+            BibleReaderInfiniteScrollChapter(book: "Genesis", chapter: 1)
+        )
+    }
+
+    /**
+     Protects infinite-scroll append range state as a coordinator-owned reader concern.
+
+     Android appends within the current book until the active versification reaches the final
+     chapter, then crosses to the next book. The setup starts at the final Genesis chapter, verifies
+     that the next candidate is Exodus 1, commits it, and then verifies normal same-book append
+     resumes at Exodus 2. A failure means the extraction changed cross-book append behavior instead
+     of only moving loaded-range ownership out of `BibleReaderController`.
+     */
+    func testReaderInfiniteScrollCoordinatorCrossesToNextBookAfterFinalChapter() {
+        var coordinator = BibleReaderInfiniteScrollCoordinator()
+        coordinator.reset(book: "Genesis", chapter: 50)
+
+        let nextBookCandidate = coordinator.nextCandidate(
+            nextBook: { $0 == "Genesis" ? "Exodus" : nil },
+            chapterCount: { $0 == "Genesis" ? 50 : 40 }
+        )
+        XCTAssertEqual(nextBookCandidate, BibleReaderInfiniteScrollChapter(book: "Exodus", chapter: 1))
+
+        if let nextBookCandidate {
+            coordinator.commitNext(nextBookCandidate)
+        }
+
+        XCTAssertEqual(
+            coordinator.nextCandidate(
+                nextBook: { $0 == "Genesis" ? "Exodus" : nil },
+                chapterCount: { $0 == "Genesis" ? 50 : 40 }
+            ),
+            BibleReaderInfiniteScrollChapter(book: "Exodus", chapter: 2)
+        )
+    }
+
     @MainActor
     func testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -1612,6 +2601,48 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Protects append infinite-scroll bridge responses after the reader content is rendered.
+
+     The setup loads Genesis 1 through the real controller path, records the existing bridge output,
+     then requests more content at the end and verifies the original call id receives a full Genesis 2
+     document payload. A failure means the coordinator extraction broke the controller delegate path,
+     stale call id handling, or the Android-compatible document shape used by Vue infinite scroll.
+     */
+    @MainActor
+    func testRequestMoreToEndSendsDocumentResponseWithOriginalCallId() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.loadCurrentContent()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+
+        let baselineCount = recordedScripts().count
+        controller.bridge(bridge, requestMoreToEnd: 3703)
+
+        let responseScript = try XCTUnwrap(
+            recordedScripts().dropFirst(baselineCount).first {
+                $0.contains("bibleView.response(3703")
+            }
+        )
+
+        XCTAssertTrue(
+            responseScript.hasPrefix("bibleView.response(3703, {"),
+            "Expected a document JSON response for the original callId. Script: \(responseScript)"
+        )
+        XCTAssertTrue(
+            responseScript.contains(#""key":"Gen.2""#),
+            "Expected the next chapter document to be returned. Script: \(responseScript)"
+        )
+        XCTAssertTrue(
+            responseScript.contains(#""osisFragment""#),
+            "Expected the response payload to preserve the Bible document shape. Script: \(responseScript)"
+        )
+    }
+
     @MainActor
     func testRefChooserDialogSendsResponseWithOriginalCallId() {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -1625,6 +2656,17 @@ extension AndBibleTests {
         XCTAssertEqual(recordedScripts().last, #"bibleView.response(3702, "Gen.1.1");"#)
     }
 
+    /**
+     Verifies the bridge `parseRef` response preserves call IDs and JSword-compatible parsing.
+
+     Setup uses a recording bridge and temporary KJV module so reference parsing goes through the
+     active-module parser path, matching Android's JSword `PassageKeyFactory` behavior. The expected
+     result is a response with the original call ID for each request, compact OSIS serialization for
+     valid references/lists/ranges, and `null` for out-of-range or reverse inputs. Failures indicate
+     either bridge response routing drift or parser semantics that diverge from Android. The test is
+     main-actor isolated, uses temporary module files only, and has deterministic synchronous parser
+     inputs.
+     */
     @MainActor
     func testParseRefSendsResponseWithOriginalCallId() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -1707,6 +2749,76 @@ extension AndBibleTests {
             "bibleView.response(3712, null);",
             "parseRef must reject reverse ranges using active module ordinals instead of accepting fabricated ordering values."
         )
+    }
+
+    /**
+     Protects reference parsing as a standalone reader responsibility instead of controller state.
+
+     The resolver must preserve Android/JSword `PassageKeyFactory` behavior while being usable
+     without routing through the bridge: active-module parsing accepts JSword-compatible book names,
+     serializes verse lists and chapter ranges in compact OSIS form, and rejects coordinates SWORD
+     would otherwise normalize. A failure means the controller extraction changed reference parsing
+     semantics or left this behavior coupled to `BibleReaderController` orchestration.
+
+     Setup uses the bundled temporary KJV SWORD module because Android validates these cases through
+     the active document's JSword versification rather than a static iOS table. The expected result is
+     exact OSIS serialization for valid references and `nil` for invalid explicit coordinates. The
+     test creates only temporary module files through the shared fixture helper, performs no persisted
+     app-state writes, and is deterministic because all parsing runs synchronously against the fixture
+     module.
+     */
+    func testReferenceResolverPreservesActiveModuleParseRefSemantics() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let books = BibleReaderSwordCoordinator().bookList(for: module)
+        let resolver = BibleReaderReferenceResolver(
+            activeModule: module,
+            bookList: books,
+            fallbackBooks: BibleReaderController.defaultBooks,
+            fallbackVerseCount: BibleReaderController.verseCount(for:chapter:)
+        )
+
+        XCTAssertEqual(resolver.resolveReference("Genesis 1:1"), "Gen.1.1")
+        XCTAssertEqual(resolver.resolveReference("III John 1:2"), "3John.1.2")
+        XCTAssertEqual(resolver.resolveReference("Genesis 1:1, Exodus 2:1"), "Gen.1.1 Exod.2.1")
+        XCTAssertEqual(resolver.resolveReference("Genesis 1:1, 2"), "Gen.1.1-Gen.1.2")
+        XCTAssertEqual(resolver.resolveReference("Genesis 1"), "Gen.1")
+        XCTAssertEqual(resolver.resolveReference("Genesis 1-2"), "Gen.1-Gen.2")
+        XCTAssertNil(resolver.resolveReference("Gen.1.99"))
+        XCTAssertNil(resolver.resolveReference("Genesis 1:1, 99"))
+        XCTAssertNil(resolver.resolveReference("Genesis 1:1-99"))
+        XCTAssertNil(resolver.resolveReference("Genesis 2-1"))
+    }
+
+    /**
+     Guards active-module reference resolution against static-canon fallback drift.
+
+     Android resolves editor references through the active document versification. If iOS has an
+     active SWORD module but cannot expose that module's book list, the resolver must fail closed
+     instead of accepting KJV/default-canon names and OSIS IDs. A failure means the extraction
+     reintroduced iOS-only fallback behavior that can fabricate references for the active module.
+
+     Setup intentionally supplies a valid active KJV module with an empty book list, which models a
+     metadata failure after module selection. The expected result is rejection from the full parser,
+     direct OSIS parser, and human-readable parser. The test creates only temporary module files via
+     the shared fixture helper, performs no persisted app-state writes, and has no async ordering
+     assumptions.
+     */
+    func testReferenceResolverRejectsStaticFallbackWhenActiveModuleBookListIsUnavailable() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let resolver = BibleReaderReferenceResolver(
+            activeModule: module,
+            bookList: [],
+            fallbackBooks: BibleReaderController.defaultBooks,
+            fallbackVerseCount: BibleReaderController.verseCount(for:chapter:)
+        )
+
+        XCTAssertNil(resolver.resolveReference("Genesis 1:1"))
+        XCTAssertNil(resolver.resolveOsisRef("Gen.1.1"))
+        XCTAssertNil(resolver.resolveHumanRef("Genesis 1:1"))
     }
 
     @MainActor
@@ -2236,6 +3348,43 @@ extension AndBibleTests {
         XCTAssertEqual(controller.currentVerse, 5)
         XCTAssertEqual(window.pageManager?.bibleVerseNo, 5)
         wait(for: [rebroadcast], timeout: 0.35)
+    }
+
+    /**
+     Protects the synchronized-scroll feedback state machine used by reader panes.
+
+     Android keeps secondary synchronized panes passive until explicit user interaction, including
+     when a target scroll arrives before the Vue client is ready. The setup drives the extracted
+     state machine without a WebView: it defers a target ordinal, promotes it after client-ready
+     replay, acknowledges intermediate and matching callbacks, and finally clears through explicit
+     interaction. The expected result is that sync-origin callbacks and native deltas stay passive
+     until interaction. A failure means the state owner can reintroduce target-pane ping-pong even
+     when controller-level tests pass through incidental state.
+     */
+    func testReaderSynchronizedScrollCoordinatorPreservesPassiveTargetStateUntilInteraction() {
+        let coordinator = BibleReaderSynchronizedScrollCoordinator()
+
+        XCTAssertTrue(coordinator.shouldTreatNativeScrollDeltaAsUserInteraction)
+
+        coordinator.deferUntilClientReady(ordinal: 105)
+        XCTAssertFalse(coordinator.shouldTreatNativeScrollDeltaAsUserInteraction)
+
+        let deferredOrdinal = coordinator.consumeDeferredClientReadyOrdinalForReplay()
+        XCTAssertEqual(deferredOrdinal, 105)
+        if let deferredOrdinal {
+            coordinator.markClientReadyReplayPending(ordinal: deferredOrdinal)
+        }
+
+        XCTAssertTrue(coordinator.acknowledgeVisibleOrdinal(104))
+        XCTAssertFalse(coordinator.shouldTreatNativeScrollDeltaAsUserInteraction)
+        XCTAssertTrue(coordinator.acknowledgeVisibleOrdinal(105))
+        XCTAssertFalse(coordinator.shouldTreatNativeScrollDeltaAsUserInteraction)
+        XCTAssertTrue(coordinator.acknowledgeVisibleOrdinal(106))
+
+        coordinator.clearForUserInteraction()
+
+        XCTAssertTrue(coordinator.shouldTreatNativeScrollDeltaAsUserInteraction)
+        XCTAssertFalse(coordinator.acknowledgeVisibleOrdinal(105))
     }
 
     /**
@@ -2773,6 +3922,224 @@ extension AndBibleTests {
         XCTAssertEqual(controller.currentVerse, 5)
         XCTAssertEqual(pageManager.bibleChapterNo, 2)
         XCTAssertEqual(pageManager.bibleVerseNo, 5)
+    }
+
+    /**
+     Mutable state captured by the navigation context test closures.
+
+     The production coordinator receives escaping closures owned by `BibleReaderController`. Tests
+     use this reference type to model the same lifetime explicitly without unsafe pointer captures.
+     A failure involving this helper usually means the test fixture no longer matches the
+     coordinator's closure-based dependency contract.
+     */
+    private final class NavigationCoordinatorStateBox {
+        /// Current visible Bible position.
+        var position: BibleReaderNavigationPosition
+
+        /// Recorded history keys supplied by explicit navigation.
+        var history: [String] = []
+
+        /// Number of durable persistence requests.
+        var persistCount = 0
+
+        /// Number of host content reload requests.
+        var loadCount = 0
+
+        /// Creates a fixture state box for one coordinator test.
+        init(position: BibleReaderNavigationPosition) {
+            self.position = position
+        }
+    }
+
+    /**
+     Builds a deterministic navigation context backed by in-memory state.
+
+     The fixture uses two books and synthetic ordinals (`chapter * 100 + verse`) so assertions can
+     focus on coordinator ownership rather than SWORD lookups. This mirrors the production contract:
+     the controller supplies versification lookups, while the coordinator decides when to use them
+     and when to persist PageManager state.
+     */
+    private func makeNavigationCoordinatorContext(
+        state: NavigationCoordinatorStateBox,
+        pageManager: PageManager,
+        clientReady: Bool = true,
+        isShowingAndroidMultiDocument: Bool = false
+    ) -> BibleReaderNavigationContext {
+        let books = [
+            BibleReaderNavigationBook(name: "Genesis", osisId: "Gen", chapterCount: 50),
+            BibleReaderNavigationBook(name: "Exodus", osisId: "Exod", chapterCount: 40),
+        ]
+
+        func book(named name: String) -> BibleReaderNavigationBook? {
+            books.first { $0.name == name }
+        }
+
+        func osisId(for name: String) -> String {
+            book(named: name)?.osisId ?? name
+        }
+
+        return BibleReaderNavigationContext(
+            currentPosition: { state.position },
+            setCurrentPosition: { state.position = $0 },
+            pageManager: { pageManager },
+            bookList: { books },
+            isShowingAndroidMultiDocument: { isShowingAndroidMultiDocument },
+            clientReady: { clientReady },
+            chapterCount: { book(named: $0)?.chapterCount ?? 0 },
+            nextBook: { name in
+                guard let index = books.firstIndex(where: { $0.name == name }),
+                      index + 1 < books.count else {
+                    return nil
+                }
+                return books[index + 1].name
+            },
+            previousBook: { name in
+                guard let index = books.firstIndex(where: { $0.name == name }),
+                      index > 0 else {
+                    return nil
+                }
+                return books[index - 1].name
+            },
+            bookNameForOsisId: { osisId in
+                books.first { $0.osisId == osisId }?.name
+            },
+            ordinalForVerse: { _, chapter, verse in
+                chapter * 100 + verse
+            },
+            verseReference: { bookName, ordinal in
+                BibleReaderNavigationVerseReference(
+                    chapter: ordinal / 100,
+                    verse: ordinal % 100,
+                    osisBookId: osisId(for: bookName)
+                )
+            },
+            recordHistory: { bookName, chapter, verse in
+                state.history.append("\(osisId(for: bookName)).\(chapter).\(verse)")
+            },
+            persistState: {
+                state.persistCount += 1
+            },
+            loadCurrentContent: {
+                state.loadCount += 1
+            }
+        )
+    }
+
+    /**
+     Protects the extracted direct-navigation state transition.
+
+     Setup creates an active in-memory PageManager and a client-ready context. Navigation to an
+     explicit verse should update visible state, persist the Bible position, record the Android-style
+     OSIS history key, retain the explicit ordinal range for the next render, and ask the host to
+     reload content once. A failure means direct reader navigation has drifted back into ad hoc
+     controller mutations instead of a single durable page-position transition.
+     */
+    func testReaderNavigationCoordinatorPersistsHistoryAndExplicitRestoreTarget() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let state = NavigationCoordinatorStateBox(
+            position: BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 1)
+        )
+        let pageManager = PageManager()
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager
+        )
+
+        coordinator.navigateTo(book: "Exodus", chapter: 2, verse: 3, context: context)
+
+        XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Exodus", chapter: 2, verse: 3))
+        XCTAssertEqual(pageManager.bibleBibleBook, 1)
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 3)
+        XCTAssertEqual(state.history, ["Exod.2.3"])
+        XCTAssertEqual(state.persistCount, 1)
+        XCTAssertEqual(state.loadCount, 1)
+        XCTAssertEqual(coordinator.originalNavigationOrdinalRange, [203, 203])
+        XCTAssertEqual(
+            coordinator.consumeContentRestoreTarget(
+                currentPosition: state.position,
+                ordinalForVerse: { _, chapter, verse in chapter * 100 + verse }
+            ),
+            .ordinal(203)
+        )
+    }
+
+    /**
+     Protects visible-scroll state updates reported by the Vue reader.
+
+     Android treats WebView visible-position callbacks as page-manager updates, not transient UI
+     hints. This test scrolls from Genesis into an Exodus key and expects the coordinator to update
+     the visible book/chapter/verse, persist the new PageManager position immediately, and preserve a
+     restore target for the current visible verse. A failure means iOS can reopen or synchronize a
+     stale verse after infinite-scroll movement.
+     */
+    func testReaderNavigationCoordinatorVisibleScrollUpdatesBookChapterVerseAndPageManager() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let state = NavigationCoordinatorStateBox(
+            position: BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 1)
+        )
+        let pageManager = PageManager()
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager
+        )
+
+        let changed = coordinator.updateVisiblePosition(
+            ordinal: 205,
+            key: "Exod.2",
+            atChapterTop: false,
+            context: context
+        )
+
+        XCTAssertTrue(changed)
+        XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Exodus", chapter: 2, verse: 5))
+        XCTAssertEqual(pageManager.bibleBibleBook, 1)
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
+        XCTAssertEqual(state.persistCount, 1)
+        XCTAssertEqual(state.loadCount, 0)
+        XCTAssertEqual(
+            coordinator.consumeContentRestoreTarget(
+                currentPosition: state.position,
+                ordinalForVerse: { _, chapter, verse in chapter * 100 + verse }
+            ),
+            .ordinal(205)
+        )
+    }
+
+    /**
+     Protects Android-style chapter wrapping and synthetic multi-document blocking.
+
+     The reader host delegates next/previous chapter controls into the same coordinator used by
+     bridge navigation. Genesis 50 should wrap to Exodus 1, Exodus 1 should wrap back to Genesis 50,
+     and Android synthetic multi documents must not advertise Bible chapter navigation. A failure
+     means toolbar, keyboard, swipe, and bridge navigation can diverge.
+     */
+    func testReaderNavigationCoordinatorChapterWrappingAndMultiDocumentNavigationAvailability() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let state = NavigationCoordinatorStateBox(
+            position: BibleReaderNavigationPosition(book: "Genesis", chapter: 50, verse: 1)
+        )
+        let pageManager = PageManager()
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager
+        )
+
+        XCTAssertTrue(coordinator.hasNext(context: context))
+        coordinator.navigateNext(context: context)
+        XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Exodus", chapter: 1, verse: 1))
+
+        coordinator.navigatePrevious(context: context)
+        XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Genesis", chapter: 50, verse: 1))
+
+        let multiDocumentContext = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager,
+            isShowingAndroidMultiDocument: true
+        )
+        XCTAssertFalse(coordinator.hasNext(context: multiDocumentContext))
+        XCTAssertFalse(coordinator.hasPrevious(context: multiDocumentContext))
     }
 
 }

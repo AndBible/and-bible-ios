@@ -29,13 +29,19 @@ struct LabelAssignmentView: View {
     /// Bookmark identifier for either a Bible or generic bookmark.
     let bookmarkId: UUID
 
-    /// Optional callback invoked before the view dismisses itself.
+    /**
+     Caller-owned dismissal action for parent-managed navigation routes.
+
+     When this callback is provided, the parent owns the navigation state and the view must not
+     also call SwiftUI's environment dismiss. Doing both can pop past the parent list after route
+     state has already been cleared.
+     */
     var onDismiss: (() -> Void)?
 
     /// SwiftData context used for bookmark fetches, relationship creation, and persistence.
     @Environment(\.modelContext) private var modelContext
 
-    /// Dismiss action for closing the sheet.
+    /// Dismiss action for standalone presentations that do not provide `onDismiss`.
     @Environment(\.dismiss) private var dismiss
 
     /// All labels queried from SwiftData, including system labels.
@@ -83,6 +89,8 @@ struct LabelAssignmentView: View {
                                 .font(.body)
                         }
                         .buttonStyle(.plain)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .accessibilityIdentifier(labelInlineActionIdentifier("labelAssignmentFavouriteButton", for: label))
                         .accessibilityValue(label.favourite ? "favourite" : "notFavourite")
 
@@ -94,6 +102,8 @@ struct LabelAssignmentView: View {
                                 .font(.body)
                         }
                         .buttonStyle(.plain)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .accessibilityIdentifier(labelInlineActionIdentifier("labelAssignmentToggleButton", for: label))
                         .accessibilityValue(assignedLabelIds.contains(label.id) ? "assigned" : "unassigned")
                     }
@@ -121,8 +131,11 @@ struct LabelAssignmentView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") {
                     logger.info("Done button tapped, onDismiss=\(onDismiss != nil)")
-                    onDismiss?()
-                    dismiss()
+                    if let onDismiss {
+                        onDismiss()
+                    } else {
+                        dismiss()
+                    }
                 }
                 .accessibilityIdentifier("labelAssignmentDoneButton")
             }

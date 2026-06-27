@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "Новое окно";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";
@@ -478,6 +479,9 @@
 "hide_bible_reference_overlay_title" = "Скрыть наложение/оверлей ссылки на Библию";
 "hide_window_buttons_summary" = "Кнопки окна, которые отображаются справа от просмотра Библии, скрыты. Панель навигации окна внизу по-прежнему отображается, и вы можете открыть всплывающее меню окна, нажав и удерживая ее.";
 "hide_window_buttons_title" = "Скрыть кнопки окна";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Множитель размера шрифта";
 "prefs_bible_view_swipe_mode_summary" = "Жест смахивания влево/вправо можно использовать для перехода к следующей странице/главе.";
 "prefs_bible_view_swipe_mode_title" = "Действие для жеста смахивания влево/вправо";

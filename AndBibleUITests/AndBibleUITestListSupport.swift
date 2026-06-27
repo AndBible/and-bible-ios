@@ -35,10 +35,10 @@ extension AndBibleUITests {
         )
         if let promptElement = waitForAnyElement(
             [
-                "workspaceNamePromptConfirmButton",
-                "workspaceNamePromptCancelButton",
                 "workspaceNamePromptScreen",
                 "workspaceNamePromptTextField",
+                "workspaceNamePromptConfirmButton",
+                "workspaceNamePromptCancelButton",
             ],
             in: app,
             timeout: timeout
@@ -160,7 +160,7 @@ extension AndBibleUITests {
      * - Parameter app: Running application whose reader shell should present the bookmark list.
      * - Returns: The root accessibility-identified bookmark list element.
      * - Side effects:
-     *   - opens the reader overflow menu and pushes the bookmark list
+     *   - opens the reader drawer and pushes the bookmark list
      * - Failure modes:
      *   - fails if the reader menu button, bookmark action, or bookmark list root never appears
      */
@@ -181,10 +181,10 @@ extension AndBibleUITests {
     /**
      Dismisses the bookmark list and reopens it from the reader shell.
      *
-     * - Parameter app: Running application whose bookmark sheet should be reopened.
+     * - Parameter app: Running application whose bookmark surface should be reopened.
      * - Side effects:
-     *   - dismisses the bookmark sheet through the real Done button when available and falls back
-     *     to a top-edge sheet drag gesture otherwise
+     *   - dismisses the bookmark surface through the real Done button, navigation-stack back
+     *     affordance, or legacy sheet drag fallback when available
      *   - opens the bookmark list again through the standard reader navigation path
      * - Failure modes:
      *   - fails when the bookmark list cannot be dismissed or reopened
@@ -197,7 +197,24 @@ extension AndBibleUITests {
         _ = openBookmarkList(in: app, timeout: 20)
     }
 
-    /// Dismisses the bookmark-list sheet, retrying the real close affordance while search focus settles.
+    /**
+     Dismisses the bookmark-list surface from either the legacy sheet host or reader destination.
+
+     - Parameters:
+       - app: Running application whose bookmark list should close.
+       - timeout: Maximum number of seconds to spend on close attempts.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Returns: `true` once the reader shell is visible and the bookmark-list sentinels disappear.
+     - Side effects:
+       - taps the sheet `Done` button when present
+       - taps the reader-destination back affordance when the bookmark list is hosted as an
+         Android-parity app route
+       - taps the navigation-stack back button for drawer-owned destination hosting
+       - falls back to a top-edge drag for the older sheet route
+     - Failure modes:
+       - returns `false` when no close path dismisses the list before the timeout
+     */
     func dismissBookmarkList(
         in app: XCUIApplication,
         timeout: TimeInterval,
@@ -216,9 +233,23 @@ extension AndBibleUITests {
                 continue
             }
 
+            let destinationBackButton = app.buttons["readerDestinationBackButton"].firstMatch
+            if tapElementIfPossible(destinationBackButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
+                continue
+            }
+
             dismissKeyboardIfPresent(in: app)
             let refreshedDoneButton = app.buttons["bookmarkListDoneButton"].firstMatch
             if tapElementIfPossible(refreshedDoneButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
+                continue
+            }
+            let refreshedDestinationBackButton = app.buttons["readerDestinationBackButton"].firstMatch
+            if tapElementIfPossible(refreshedDestinationBackButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
+                continue
+            }
+
+            let backButton = app.navigationBars.buttons.element(boundBy: 0)
+            if tapElementIfPossible(backButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
                 continue
             }
 
@@ -256,7 +287,7 @@ extension AndBibleUITests {
             || (readerDocumentHeaderStateValue(in: app) != nil && bookmarkListHidden)
     }
 
-    /// Returns whether the bookmark-list sheet still exposes one of its lightweight sentinels.
+    /// Returns whether the bookmark-list surface still exposes one of its lightweight sentinels.
     func bookmarkListSurfaceIsVisible(in app: XCUIApplication) -> Bool {
         let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
         if doneButton.exists {
@@ -526,6 +557,74 @@ extension AndBibleUITests {
             missingCountsAsSuccess: true,
             failureDescription: { _ in
                 "Expected element 'labelManagerStateExport' to stop containing '\(token)' within \(timeout) seconds."
+            }
+        )
+    }
+
+    /**
+     Builds one row token for My Documents semantic state assertions.
+
+     - Parameter value: Raw document initials or page key rendered by the My Documents UI.
+     - Returns: Token formatted the same way as the `MyDocumentsListView` state export.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    func myDocumentsRowStateToken(_ value: String) -> String {
+        "|\(sanitizedLabelManagerStateToken(value))|"
+    }
+
+    /**
+     Waits for the My Documents list state export to contain one expected token.
+
+     - Parameters:
+       - token: Serialized token expected in the list state.
+       - app: Running application whose My Documents destination should publish the state.
+       - timeout: Maximum number of seconds to wait before failing.
+     - Side effects:
+       - polls the compact accessibility state export instead of walking every visible row
+     - Failure modes:
+       - records an XCTest failure when the expected token never appears
+     */
+    func waitForMyDocumentsListState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        waitForResolvedSemanticState(
+            named: "myDocumentsListStateExport",
+            timeout: timeout,
+            valueProvider: { self.resolvedMyDocumentsListStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected element 'myDocumentsListStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            }
+        )
+    }
+
+    /**
+     Waits for the My Document pages state export to contain one expected token.
+
+     - Parameters:
+       - token: Serialized token expected in the page-list state.
+       - app: Running application whose page-list destination should publish the state.
+       - timeout: Maximum number of seconds to wait before failing.
+     - Side effects:
+       - polls the compact accessibility state export instead of walking every visible row
+     - Failure modes:
+       - records an XCTest failure when the expected token never appears
+     */
+    func waitForMyDocumentPagesState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        waitForResolvedSemanticState(
+            named: "myDocumentPagesStateExport",
+            timeout: timeout,
+            valueProvider: { self.resolvedMyDocumentPagesStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected element 'myDocumentPagesStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
             }
         )
     }

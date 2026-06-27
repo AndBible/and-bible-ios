@@ -67,8 +67,199 @@ def swift_function_bodies(source: str, name: str) -> list[str]:
     return bodies
 
 
+def swift_property_body(source: str, name: str) -> str:
+    """Return the Swift computed property body for focused source-contract checks."""
+    match = re.search(rf"\bvar\s+{re.escape(name)}\b", source)
+    if match is None:
+        raise AssertionError(f"Expected Swift property {name} to exist.")
+
+    brace_index = source.find("{", match.end())
+    if brace_index == -1:
+        raise AssertionError(f"Expected Swift property {name} to have a body.")
+
+    depth = 0
+    for index in range(brace_index, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[brace_index + 1 : index]
+
+    raise AssertionError(f"Expected Swift property {name} body to close.")
+
+
 class SemanticWaitGuardrailsTests(unittest.TestCase):
     """Protects pure semantic-state waits from regressing to ad hoc run-loop polling."""
+
+    def test_workspace_create_prompt_waits_on_prompt_root_before_buttons(self) -> None:
+        """Avoid hosted XCTest stalls from proving absent prompt buttons before root exists."""
+        list_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestListSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(list_source, "openWorkspaceCreatePrompt")
+
+        prompt_root = '"workspaceNamePromptScreen"'
+        prompt_field = '"workspaceNamePromptTextField"'
+        confirm_button = '"workspaceNamePromptConfirmButton"'
+        cancel_button = '"workspaceNamePromptCancelButton"'
+
+        for identifier in [prompt_root, prompt_field, confirm_button, cancel_button]:
+            self.assertIn(identifier, body)
+
+        self.assertLess(body.find(prompt_root), body.find(confirm_button))
+        self.assertLess(body.find(prompt_field), body.find(confirm_button))
+        self.assertLess(body.find(prompt_root), body.find(cancel_button))
+        self.assertLess(body.find(prompt_field), body.find(cancel_button))
+
+    def test_workspace_prompt_button_candidates_prefer_prompt_scope_and_titles(self) -> None:
+        """Keep workspace prompt button lookup off expensive app-wide identifier queries first."""
+        element_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "workspaceNamePromptButtonCandidates")
+
+        prompt_candidate = 'app.otherElements["workspaceNamePromptScreen"].firstMatch'
+        scoped_button_candidates = "modalButtonCandidates("
+        title_candidate = "app.buttons[title].firstMatch"
+        identifier_candidate = "app.buttons[identifier].firstMatch"
+
+        for snippet in [
+            prompt_candidate,
+            scoped_button_candidates,
+            title_candidate,
+            identifier_candidate,
+        ]:
+            self.assertIn(snippet, body)
+
+        self.assertLess(body.find(prompt_candidate), body.find(identifier_candidate))
+        self.assertLess(body.find(scoped_button_candidates), body.find(identifier_candidate))
+        self.assertLess(body.find(title_candidate), body.find(identifier_candidate))
+
+    def test_search_state_candidates_prefer_hidden_export_before_screen_root(self) -> None:
+        """Keep Search state polling on the dedicated lightweight export before the root."""
+        element_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "semanticStateValueCandidates")
+        search_case_start = body.find('case "searchStateExport":')
+        bookmark_case_start = body.find('case "bookmarkListStateExport":')
+        self.assertNotEqual(search_case_start, -1)
+        self.assertNotEqual(bookmark_case_start, -1)
+
+        search_case = body[search_case_start:bookmark_case_start]
+        root_candidate = 'app.otherElements["searchScreen"].firstMatch'
+        hidden_export_candidate = (
+            'screenScopedStateCandidates(identifier, within: "searchScreen", in: app)'
+        )
+
+        self.assertIn(root_candidate, search_case)
+        self.assertIn(hidden_export_candidate, search_case)
+        self.assertLess(
+            search_case.find(hidden_export_candidate),
+            search_case.find(root_candidate),
+        )
+
+    def test_search_interaction_ready_does_not_read_state_before_poll_loop(self) -> None:
+        """Keep the Search readiness timeout from being consumed by a pre-loop XCTest snapshot."""
+        search_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(search_source, "waitForSearchInteractionReady")
+        loop_start = body.find("while Date() < deadline")
+        self.assertNotEqual(loop_start, -1)
+
+        pre_loop = body[:loop_start]
+        self.assertNotIn("resolvedSearchStateValue", pre_loop)
+        self.assertNotIn("searchScreen.value", pre_loop)
+
+    def test_search_opening_verifies_presentation_before_success(self) -> None:
+        """Keep reader-triggered Search opening state-driven instead of tap-assumption driven."""
+        search_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+        open_body = swift_function_body(search_source, "openSearch")
+        presentation_body = swift_function_body(search_source, "presentSearchFromReader")
+
+        self.assertIn("presentSearchFromReader", open_body)
+        self.assertNotIn("tapReaderSearchEntry", open_body)
+        self.assertIn("resolvedSearchScreenElement", presentation_body)
+        self.assertIn('readerRenderedContentStateContains("searchVisible=true"', presentation_body)
+        drawer_action = re.search(
+            r"tapReaderAction\s*\(\s*\"readerOpenSearchAction\"",
+            presentation_body,
+        )
+        self.assertIsNotNone(drawer_action)
+        self.assertLess(
+            presentation_body.find("tapReaderSearchEntry"),
+            drawer_action.start(),
+        )
+
+    def test_window_tab_bar_identifier_belongs_to_scroll_view_container(self) -> None:
+        """Keep tab-button lookup scoped to the actual container that owns the buttons."""
+        source = (
+            REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bible/WindowTabBar.swift"
+        ).read_text(encoding="utf-8")
+        body_start = source.find("var body: some View")
+        footer_start = source.find("private func footerStrip")
+        self.assertNotEqual(body_start, -1)
+        self.assertNotEqual(footer_start, -1)
+
+        body_section = source[body_start:footer_start]
+        footer_body = swift_function_body(source, "footerStrip")
+        scroll_view = "ScrollView(.horizontal, showsIndicators: false)"
+        identifier = '.accessibilityIdentifier("windowTabBar")'
+
+        self.assertNotIn(identifier, body_section)
+        self.assertIn(scroll_view, footer_body)
+        self.assertIn(identifier, footer_body)
+        self.assertLess(footer_body.find(scroll_view), footer_body.find(identifier))
+
+    def test_window_tab_helpers_avoid_app_wide_button_fallbacks(self) -> None:
+        """Keep tab selection from falling back to expensive full-hierarchy button queries."""
+        element_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        reader_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestReaderSupport.swift"
+        ).read_text(encoding="utf-8")
+
+        candidates_body = swift_function_body(element_source, "windowTabBarButtonCandidates")
+        tap_body = swift_function_body(element_source, "tapWindowTab")
+        coordinate_tap_body = swift_function_body(
+            element_source,
+            "tapWindowTabAtExpectedFooterCoordinate",
+        )
+        add_body = swift_function_body(element_source, "addWindowTab")
+        existence_body = swift_function_body(reader_source, "waitForElementExistence")
+
+        self.assertIn('app.scrollViews["windowTabBar"].firstMatch', candidates_body)
+        self.assertIn('app.otherElements["windowTabBar"].firstMatch', candidates_body)
+        self.assertNotIn("app.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.collectionViews.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.cells.buttons[identifier]", candidates_body)
+
+        self.assertIn("requireWindowTabBarButton", tap_body)
+        self.assertNotIn("requireElement(identifier", tap_body)
+        self.assertIn("tapWindowTabAtExpectedFooterCoordinate", tap_body)
+        self.assertIn('waitForReaderRenderedContentStateIfPresent', coordinate_tap_body)
+        self.assertIn('"windowOrder=\\(order)"', coordinate_tap_body)
+        self.assertIn("requireWindowTabBarButton", add_body)
+        self.assertIn("resolvedWindowTabBarButton", add_body)
+        self.assertIn("isWindowTabBarButtonIdentifier", existence_body)
+        self.assertIn("resolvedWindowTabBarButton", existence_body)
+
+    def test_reader_state_export_includes_window_tab_orders_for_tab_fallback(self) -> None:
+        """Expose tab order metadata so tests can tap the real footer without stale queries."""
+        source = (
+            REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_property_body(source, "readerRenderedContentStateValue")
+
+        self.assertIn("windowTabOrders=", body)
+        self.assertIn("windowManager.allWindows", body)
+        self.assertIn('return "\\(windowToken);\\(contentToken);\\(tabOrdersToken);', body)
 
     def test_resolved_semantic_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
         """Ensure the shared pure-observation wait is backed by XCTest wait primitives."""

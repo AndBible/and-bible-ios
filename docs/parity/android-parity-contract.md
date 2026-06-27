@@ -21,6 +21,10 @@ for current status, verification evidence, and next actions during migration,
 but durable decisions should move into ADRs over time rather than expanding
 tracker-style docs indefinitely.
 
+[ADR 0006](../adr/0006-modal-presentation-ownership-for-android-parity.md)
+defines the required ownership classification for parity-sensitive modal,
+sheet, dialog, picker, and transient presentation surfaces.
+
 ## Source Of Truth
 
 The Android checkout is the behavior and visual oracle.
@@ -205,6 +209,9 @@ When changing parity-sensitive code:
 7. Add or update an ADR when the change records a durable architecture,
    platform-divergence, or documentation-ownership decision. Keep parity docs
    focused on current status, evidence, and links back to the ADR.
+8. For modal, sheet, dialog, picker, popover, alert, and share/file surfaces,
+   classify the owner using ADR 0006 before claiming parity or documenting an
+   adaptation.
 
 ## Current Priority Interpretation
 

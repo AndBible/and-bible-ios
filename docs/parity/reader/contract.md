@@ -32,6 +32,17 @@ The current iOS reader keeps the same basic split Android users expect:
 - a right overflow popup for reader-local toggles and configuration actions
 - Android-parity settings that drive runtime reader behavior
 
+## Presentation Ownership
+
+Reader sheets, modal coordinator routes, navigation destinations, and
+state-backed transient dialogs must be classified through
+[ADR 0006](../../adr/0006-modal-presentation-ownership-for-android-parity.md)
+before they are treated as Android parity.
+
+The current classification is maintained in
+[modal-ownership-matrix.md](modal-ownership-matrix.md). New reader presentation
+routes must be added there before claiming `Pass` or `Adapted Pass`.
+
 ## Reader Shell and Toolbar
 
 At the shell level, iOS is now aiming for the same overall structure and
@@ -163,9 +174,10 @@ document. The desired behavior is:
 - multi-reference links render through the shared Vue `MultiDocument` path
 - "open all" style flows stay compatible with the embedded document client
 
-The current native iOS `CrossReferenceView` sheet is tracked as remaining parity
-drift in #124. The intended endpoint is the shared Vue `MultiDocument` flow, not
-preserving the native sheet.
+iOS now sends multi-reference links through the shared Vue `MultiDocument` path,
+matching Android's fake multi-document route. The legacy native
+`CrossReferenceView` callback must not be expanded as a substitute for that
+document pipeline.
 
 ## Vue Modal State
 

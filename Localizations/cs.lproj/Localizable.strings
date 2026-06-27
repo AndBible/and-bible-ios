@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "Nové okno";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";
@@ -443,6 +444,9 @@
 "hide_bible_reference_overlay_title" = "Skrýt biblický odkaz";
 "hide_window_buttons_summary" = "Tlačítka oken, která se zobrazují na pravé straně Bible, jsou skrytá. Navigační lišta oken naspodu je stále zobrazená a vyskakovací menu oken můžete otevřít dlouhým stiskem.";
 "hide_window_buttons_title" = "Skrýt tlačítka okna";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Násobitel velikosti písma ";
 "prefs_bible_view_swipe_mode_summary" = "Gesto přejetí prstem doleva / doprava lze použít k přechodu na další stránku/kapitolu.";
 "prefs_bible_view_swipe_mode_title" = "Akce při přejetí prstem doleva / doprava";

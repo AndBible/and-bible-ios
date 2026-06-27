@@ -57,13 +57,38 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         self.assertNotIn("descendants(matching: .any)", candidates_body)
         self.assertNotIn("prompt.textFields", candidates_body)
 
+    def test_workspace_prompt_button_candidates_stay_on_prompt_buttons(self) -> None:
+        """The prompt button lookup avoids unrelated containers that can stall hosted XCTest.
+
+        The prompt confirm and cancel controls are selector-owned overlay buttons. They should not
+        be looked up through navigation bars, toolbars, table rows, scroll views, or generic
+        `otherElements` before the actual button surface has had a chance to appear.
+        """
+        source = (
+            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
+        ).read_text()
+        candidates_start = source.index("func workspaceNamePromptButtonCandidates")
+        candidates_end = source.index("func semanticStateCandidates", candidates_start)
+        candidates_body = source[candidates_start:candidates_end]
+
+        self.assertIn("app.buttons[identifier].firstMatch", candidates_body)
+        self.assertIn("app.buttons[title].firstMatch", candidates_body)
+        self.assertNotIn("app.navigationBars.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.toolbars.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.collectionViews.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.tables.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.scrollViews.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.otherElements[identifier]", candidates_body)
+
     def test_workspace_prompt_screen_uses_prompt_specific_container_lookup(self) -> None:
-        """The prompt surface lookup must not ask XCTest to resolve absent scroll/list containers.
+        """The prompt surface lookup must stay bounded and must not drive text-entry focus.
 
         The CI shard failure timed out while `waitForAnyElement(["workspaceNamePromptScreen"])`
         evaluated generic table/collection/scroll candidates before reaching the SwiftUI prompt's
-        actual accessibility node. A failure here means the create-workspace test can regress to
-        the hosted XCTest snapshot path that stalls before the field lookup starts.
+        actual accessibility node. A later shard failure showed that even the bounded prompt-root
+        query can wedge if the typing helper reads the root frame for a tap coordinate after the
+        text field is already resolved. A failure here means the create-workspace test can regress
+        to a hosted XCTest snapshot path that stalls before text entry.
         """
         source = (
             REPO_ROOT / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
@@ -80,16 +105,18 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         element_candidates_start = source.index("func elementCandidates(")
         element_candidates_end = source.index("func resolvedElement(", element_candidates_start)
         element_candidates_body = source[element_candidates_start:element_candidates_end]
-        coordinate_start = state_source.index('case "workspaceNamePromptTextField":')
-        coordinate_end = state_source.index("default:", coordinate_start)
+        coordinate_start = state_source.index("func promptOwnedTextEntryTapCoordinate")
+        coordinate_end = state_source.index("func observedPromptTextValue", coordinate_start)
         coordinate_body = state_source[coordinate_start:coordinate_end]
 
         self.assertIn("app.otherElements[identifier].firstMatch", prompt_candidates_body)
         self.assertNotIn("app.collectionViews[identifier]", prompt_candidates_body)
         self.assertNotIn("app.scrollViews[identifier]", prompt_candidates_body)
-        self.assertIn("workspaceNamePromptScreenCandidates(in: app)", coordinate_body)
+        self.assertNotIn("workspaceNamePromptScreenCandidates(in: app)", coordinate_body)
         self.assertNotIn('app.collectionViews["workspaceNamePromptScreen"]', coordinate_body)
         self.assertNotIn('app.scrollViews["workspaceNamePromptScreen"]', coordinate_body)
+        self.assertNotIn('case "workspaceNamePromptTextField"', coordinate_body)
+        self.assertNotIn("CGVector(dx: 0.5, dy: 0.46)", coordinate_body)
         self.assertIn(
             'case "workspaceNamePromptScreen":\n'
             "            return workspaceNamePromptScreenCandidates(in: app)",
@@ -100,6 +127,61 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
             '"workspaceNamePromptScreen"',
             element_candidates_body,
         )
+
+    def test_workspace_prompt_typing_avoids_text_field_value_reads(self) -> None:
+        """The workspace prompt typing path verifies submit readiness instead of field value.
+
+        Hosted XCTest can resolve the SwiftUI `Name` text field, focus it through a stable app
+        coordinate, and then lose that text-field snapshot when the helper reads `value`. The
+        workspace create flow should prove text entry by the prompt submit button becoming enabled
+        and by the later workspace-row assertions, not by re-sampling the transient field.
+        """
+        state_source = (
+            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
+        ).read_text()
+        typing_start = state_source.index("func typePromptText(")
+        typing_end = state_source.index("func dismissLabelAssignment", typing_start)
+        typing_body = state_source[typing_start:typing_end]
+        submit_helper_start = typing_body.index("func waitForWorkspacePromptSubmitButtonToEnable")
+        submit_helper_end = typing_body.index("func clearObservedPromptTextValue", submit_helper_start)
+        submit_helper_body = typing_body[submit_helper_start:submit_helper_end]
+        workspace_branch_start = typing_body.index("if skipsPromptValueObservation")
+        workspace_branch_end = typing_body.index("focusResolvedPromptTextEntryElement", workspace_branch_start)
+        workspace_branch = typing_body[workspace_branch_start:workspace_branch_end]
+
+        self.assertIn('resolvedIdentifier == "workspaceNamePromptTextField"', typing_body)
+        self.assertIn("waitForWorkspacePromptSubmitButtonToEnable", typing_body)
+        self.assertIn('"workspaceNamePromptConfirmButton"', submit_helper_body)
+        self.assertIn("promptTextField.typeText(text)", workspace_branch)
+        self.assertNotIn("app.typeText(text)", workspace_branch)
+        self.assertNotIn("focusResolvedPromptTextEntryElement", workspace_branch)
+        self.assertNotIn("observedPromptTextValue", workspace_branch)
+        self.assertNotIn("currentTextEntryValue", workspace_branch)
+
+    def test_workspace_prompt_requests_focus_after_attachment(self) -> None:
+        """The workspace name prompt owns focus like Android's `EditText` dialog.
+
+        Android calls `requestFocus()` and shows the soft input when creating, renaming, or cloning a
+        workspace. The iOS prompt must keep that behavior in product code so tests do not focus the
+        field by tapping an approximate screen coordinate that can dismiss the dialog.
+        """
+        source = (
+            REPO_ROOT
+            / "Sources"
+            / "BibleUI"
+            / "Sources"
+            / "BibleUI"
+            / "Workspace"
+            / "WorkspaceSelectorView.swift"
+        ).read_text()
+        prompt_start = source.index("private struct WorkspaceNamePromptView")
+        prompt_source = source[prompt_start:]
+
+        self.assertIn(".focused($isNameFieldFocused)", prompt_source)
+        self.assertIn(".onAppear", prompt_source)
+        self.assertIn("requestNameFieldFocus()", prompt_source)
+        self.assertIn(".task(id: prompt.id)", prompt_source)
+        self.assertIn("await Task.yield()", prompt_source)
 
     def test_workspace_prompt_is_selector_owned_instead_of_nested_sheet(self) -> None:
         """The create/rename/clone prompt is owned by the selector, matching Android dialog scope.

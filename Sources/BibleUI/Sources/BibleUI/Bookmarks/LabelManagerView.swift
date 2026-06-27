@@ -8,7 +8,7 @@ import BibleCore
  Manages user-created bookmark labels and launches label-specific editing flows.
 
  The screen lists all real user labels, supports creating new labels inline, presents a dedicated
- edit sheet for label styling changes, and optionally forwards the selected label into the
+ edit destination for label styling changes, and optionally forwards the selected label into the
  StudyPad flow.
 
  Data dependencies:
@@ -20,7 +20,8 @@ import BibleCore
  Side effects:
  - creating or deleting a label mutates SwiftData and attempts to save the updated label set
  - selecting a label presents `LabelEditView`, which edits the bound label in place and persists
-   changes on interaction and dismissal
+   changes on interaction and dismissal, unless the caller explicitly configures StudyPad
+   primary-row selection
  - swipe and context-menu actions can route into the StudyPad flow for a specific label
  */
 public struct LabelManagerView: View {
@@ -47,14 +48,31 @@ public struct LabelManagerView: View {
     /// Optional callback used to open the selected label in StudyPad.
     var onOpenStudyPad: ((UUID) -> Void)?
 
+    /// Title shown for the current label-management mode.
+    private let navigationTitle: String
+
+    /// Whether tapping a row opens the StudyPad document instead of the label editor.
+    private let opensStudyPadOnRowTap: Bool
+
     /**
      Creates the label manager and optionally enables StudyPad handoff actions.
 
      - Parameter onOpenStudyPad: Callback invoked with a label identifier when the user chooses to
        open that label in StudyPad.
+     - Parameter navigationTitle: Optional screen title override. Defaults to the normal label
+       manager title so existing label-editing callers keep their current chrome.
+     - Parameter opensStudyPadOnRowTap: When true and `onOpenStudyPad` is present, primary row taps
+       open the StudyPad document. This matches Android `ManageLabels.Mode.STUDYPAD`; the default
+       false value preserves the label editor behavior used by non-StudyPad label-management routes.
      */
-    public init(onOpenStudyPad: ((UUID) -> Void)? = nil) {
+    public init(
+        onOpenStudyPad: ((UUID) -> Void)? = nil,
+        navigationTitle: String? = nil,
+        opensStudyPadOnRowTap: Bool = false
+    ) {
         self.onOpenStudyPad = onOpenStudyPad
+        self.navigationTitle = navigationTitle ?? String(localized: "labels")
+        self.opensStudyPadOnRowTap = opensStudyPadOnRowTap
     }
 
     /// Visible label list after filtering out non-user/system labels.
@@ -109,7 +127,7 @@ public struct LabelManagerView: View {
         .overlay(alignment: .topLeading) {
             labelManagerStateExport
         }
-        .navigationTitle(String(localized: "labels"))
+        .navigationTitle(navigationTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -148,52 +166,36 @@ public struct LabelManagerView: View {
      Builds the main label-selection row button for one label.
      *
      * - Parameter label: Label represented by the selectable row body.
-     * - Returns: A button that opens the label editor for the requested label.
+     * - Returns: A row that opens either the label editor or the StudyPad document, depending on
+     *   the mode supplied by the parent screen.
      * - Side effects:
-     *   - stores the selected label in local state and navigates to the edit destination
+     *   - stores the selected label in local state and navigates to the edit destination, or calls
+     *     `onOpenStudyPad` when StudyPad primary-row selection is enabled
      * - Failure modes: This helper cannot fail.
      */
     private func labelSelectionButton(_ label: BibleCore.Label) -> some View {
-        NavigationLink {
-            labelEditDestination(for: label.id)
-        } label: {
-            HStack(spacing: 10) {
-                if let icon = label.customIcon, !icon.isEmpty {
-                    Image(systemName: BibleCore.Label.sfSymbol(for: icon) ?? icon)
-                        .font(.body)
-                        .foregroundStyle(Color(argbInt: label.color))
-                } else {
-                    Circle()
-                        .fill(Color(argbInt: label.color))
-                        .frame(width: 14, height: 14)
+        Group {
+            if opensStudyPadOnRowTap, let onOpenStudyPad {
+                Button {
+                    onOpenStudyPad(label.id)
+                } label: {
+                    labelRowContent(label, showsDisclosureIndicator: false)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
-
-                Text(label.name)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                if label.favourite {
-                    Image(systemName: "heart.fill")
-                        .foregroundStyle(.red)
-                        .font(.caption)
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(labelRowIdentifier(label))
+                .accessibilityLabel(label.name)
+            } else {
+                NavigationLink {
+                    labelEditDestination(for: label.id)
+                } label: {
+                    labelRowContent(label, showsDisclosureIndicator: true)
                 }
-
-                if label.underlineStyle {
-                    Image(systemName: "underline")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                }
-
-                Image(systemName: "chevron.right")
-                    .foregroundStyle(.tertiary)
-                    .font(.caption)
+                .accessibilityIdentifier(labelRowIdentifier(label))
+                .accessibilityLabel(label.name)
             }
         }
-        .contentShape(Rectangle())
-        .accessibilityIdentifier(labelRowIdentifier(label))
-        .accessibilityLabel(label.name)
         .swipeActions(edge: .trailing) {
             Button(String(localized: "delete"), role: .destructive) {
                 deleteLabel(label)
@@ -227,6 +229,59 @@ public struct LabelManagerView: View {
                 deleteLabel(label)
             } label: {
                 SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
+            }
+        }
+    }
+
+    /**
+     Renders the shared row body for label-management and StudyPad-selection modes.
+
+     - Parameters:
+       - label: Label represented by the visible row.
+       - showsDisclosureIndicator: Whether to show the editor/navigation affordance used by the
+         normal label manager. StudyPad selection suppresses it because the row performs a document
+         open action instead of pushing the label editor.
+     - Returns: The visual row content used inside either a `NavigationLink` or primary `Button`.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func labelRowContent(
+        _ label: BibleCore.Label,
+        showsDisclosureIndicator: Bool
+    ) -> some View {
+        HStack(spacing: 10) {
+            if let icon = label.customIcon, !icon.isEmpty {
+                Image(systemName: BibleCore.Label.sfSymbol(for: icon) ?? icon)
+                    .font(.body)
+                    .foregroundStyle(Color(argbInt: label.color))
+            } else {
+                Circle()
+                    .fill(Color(argbInt: label.color))
+                    .frame(width: 14, height: 14)
+            }
+
+            Text(label.name)
+                .font(.body)
+                .foregroundStyle(.primary)
+
+            Spacer()
+
+            if label.favourite {
+                Image(systemName: "heart.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+
+            if label.underlineStyle {
+                Image(systemName: "underline")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+
+            if showsDisclosureIndicator {
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.tertiary)
+                    .font(.caption)
             }
         }
     }

@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "Nouvelle fenêtre";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";
@@ -478,6 +479,9 @@
 "hide_bible_reference_overlay_title" = "Masquer la superposition des références bibliques";
 "hide_window_buttons_summary" = "Les boutons de fenêtre qui sont affichés sur le côté droit des vues de la Bible sont cachés. La barre de navigation des fenêtres en bas est toujours affichée et vous pouvez ouvrir le menu contextuel des fenêtres en les cliquant longuement.";
 "hide_window_buttons_title" = "Cacher les boutons de fenêtres";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Multiplicateur de taille de police";
 "prefs_bible_view_swipe_mode_summary" = "Le geste de balayage vers la gauche/droite permet de passer à la page/au chapitre suivant.";
 "prefs_bible_view_swipe_mode_title" = "Action pour le geste de balayage vers la gauche / droite";

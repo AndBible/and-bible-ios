@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "新视窗";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";
@@ -443,6 +444,9 @@
 "hide_bible_reference_overlay_title" = "隐藏圣经参考浮动窗口";
 "hide_window_buttons_summary" = "隐藏在圣经窗口右边的视窗按钮。底部的窗口导航栏仍会显示，你可以长按以开启窗口弹出菜单。";
 "hide_window_buttons_title" = "隐藏窗口按钮";
+"show_window_buttons_title" = "显示窗口按钮";
+"hide_window_buttons_hint" = "隐藏窗口按钮栏";
+"show_window_buttons_hint" = "显示窗口按钮栏";
 "pref_font_size_multiplier_title" = "字体大小倍数";
 "prefs_bible_view_swipe_mode_summary" = "左右滑动手势可用于翻到下一页/章节。";
 "prefs_bible_view_swipe_mode_title" = "左右滑动手势动作";

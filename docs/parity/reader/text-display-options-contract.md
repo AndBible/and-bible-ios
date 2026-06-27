@@ -27,6 +27,11 @@ without exposing controls that do not yet have an iOS model, bridge payload, and
 
 ## Routing Contract
 
+Workspace color scope and application are governed by
+[ADR 0005](../../adr/0005-workspace-color-scope-and-reader-chrome.md). In
+short, `workspace_color` is workspace metadata used for reader chrome. It is not
+a global text-display color and must not be applied to reader document content.
+
 Android has two relevant text-display settings routes:
 
 - Main reader overflow `allTextOptions` opens workspace-scoped text display settings.
@@ -91,3 +96,5 @@ workspace/global or from workspace to global.
   Android's `MainBibleActivity` route.
 - Keep the pane hamburger All Text Options entry window-scoped because it matches Android's
   `SplitBibleArea` per-window popup route.
+- Do not move `workspace_color` into true global settings or reader document
+  colors; ADR 0005 owns that scope decision.

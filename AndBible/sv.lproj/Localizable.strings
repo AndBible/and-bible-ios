@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "Nytt fönster";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";
@@ -478,6 +479,9 @@
 "hide_bible_reference_overlay_title" = "Dölj meddelanderuta om bibelställe";
 "hide_window_buttons_summary" = "Fönsterknappar som visas på höger sida av bibelvyerna döljs. Navigeringsfältet för fönster visas fortfarande nere på skärmen och man kan öppna fönstermenyn genom att långtrycka där.";
 "hide_window_buttons_title" = "Dölj fönsterknappar";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Faktor för textstorlek";
 "prefs_bible_view_swipe_mode_summary" = "Du kan svepa till vänster/höger för att gå till nästa sida/kapitel.";
 "prefs_bible_view_swipe_mode_title" = "Åtgärd vid svepgest till vänster/höger";

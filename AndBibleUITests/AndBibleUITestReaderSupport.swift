@@ -146,6 +146,8 @@ extension AndBibleUITests {
      * - Side effects:
      *   - repeatedly samples the live XCUI hierarchy until the requested element exists or
      *     disappears
+     *   - keeps reader tab-bar controls scoped to `windowTabBar` so negative waits do not snapshot
+     *     the full reader hierarchy
      * - Failure modes:
      *   - records an XCTest failure when the element never reaches the requested existence state
      */
@@ -158,15 +160,21 @@ extension AndBibleUITests {
         line: UInt = #line
     ) {
         let deadline = Date().addingTimeInterval(timeout)
+        let resolveElement: () -> XCUIElement? = {
+            if self.isWindowTabBarButtonIdentifier(identifier) {
+                return self.resolvedWindowTabBarButton(identifier, in: app)
+            }
+            return self.resolvedElement(identifier, in: app)
+        }
         repeat {
-            let currentExists = resolvedElement(identifier, in: app) != nil
+            let currentExists = resolveElement() != nil
             if currentExists == shouldExist {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let currentExists = resolvedElement(identifier, in: app) != nil
+        let currentExists = resolveElement() != nil
         XCTAssertEqual(
             currentExists,
             shouldExist,
@@ -1212,6 +1220,8 @@ extension AndBibleUITests {
             "readingPlanListStateExport",
             "availablePlansStateExport",
             "labelManagerStateExport",
+            "myDocumentsListStateExport",
+            "myDocumentPagesStateExport",
             "syncSettingsState":
             return true
         default:
@@ -1223,9 +1233,9 @@ extension AndBibleUITests {
      Samples the value from compact state-export probes without first asking XCTest for existence.
      *
      * XCTest can spend tens of seconds rebuilding snapshots for volatile SwiftUI surfaces when a test
-     * repeatedly calls `exists` before reading a known state probe. These probes are emitted only for
-     * UI automation and carry their contract in `accessibilityValue`, so callers can sample the value
-     * directly and let a missing value mean "not observable yet".
+     * repeatedly calls `exists` before reading a known state probe. Direct `.value` reads can also
+     * record hard failures when a SwiftUI sheet disappears during polling, so this helper takes one
+     * throwing snapshot per candidate and treats absence as "not observable yet".
      *
      * - Parameters:
      *   - identifier: Accessibility identifier of a compact state-export probe.
@@ -1239,13 +1249,32 @@ extension AndBibleUITests {
         in app: XCUIApplication
     ) -> String? {
         for candidate in semanticStateValueCandidates(for: identifier, in: app) {
-            if let value = candidate.value as? String,
+            if let value = semanticStateSnapshotValue(candidate),
                !value.isEmpty
             {
                 return value
             }
         }
         return nil
+    }
+
+    /**
+     Reads one semantic state export from a single XCTest snapshot.
+
+     - Parameter element: Candidate state-export element whose `accessibilityValue` carries the
+       compact UI-test state contract.
+     - Returns: Non-empty accessibility value when the candidate is currently snapshottable.
+     - Side effects: none.
+     - Failure modes: returns `nil` when XCTest cannot snapshot the candidate during a SwiftUI
+       transition instead of recording a hard query failure.
+     */
+    private func semanticStateSnapshotValue(_ element: XCUIElement) -> String? {
+        guard let snapshot = try? element.snapshot(),
+              let value = snapshot.value as? String,
+              !value.isEmpty else {
+            return nil
+        }
+        return value
     }
 
     /**

@@ -47,11 +47,30 @@ public struct BookmarkListVerseReference: Sendable, Equatable {
 
  Side effects:
  - deleting rows or context-menu deletions mutate SwiftData and save immediately
- - opening the label manager or label-assignment sheet changes modal presentation state
+ - opening the label manager or label assignment changes bookmark-list navigation route state
  - selecting a bookmark dismisses through the caller-provided navigation callback rather than
    performing navigation directly inside the list
  */
 public struct BookmarkListView: View {
+    /// Bookmark-list destinations that should stay inside the app-owned bookmark browser stack.
+    private enum BookmarkListRoute: Identifiable, Hashable {
+        /// Manage the full set of user labels.
+        case labelManager
+
+        /// Assign labels to the selected bookmark.
+        case labelAssignment(UUID)
+
+        /// Stable route identity for SwiftUI navigation.
+        var id: String {
+            switch self {
+            case .labelManager:
+                return "labelManager"
+            case .labelAssignment(let bookmarkId):
+                return "labelAssignment::\(bookmarkId.uuidString)"
+            }
+        }
+    }
+
     /// SwiftData context used for bookmark deletion and save operations.
     @Environment(\.modelContext) private var modelContext
 
@@ -76,11 +95,8 @@ public struct BookmarkListView: View {
     /// Search text applied to formatted references and note previews.
     @State private var searchText = ""
 
-    /// Bookmark currently being edited in the label-assignment sheet.
-    @State private var editingLabelsBookmarkId: UUID?
-
-    /// Presents the label manager sheet.
-    @State private var showLabelManager = false
+    /// Current bookmark-list route for label management or label assignment.
+    @State private var activeBookmarkListRoute: BookmarkListRoute?
 
     /// Optional callback used to navigate back into the reader for a bookmark.
     var onNavigate: ((String, Int) -> Void)?
@@ -91,6 +107,9 @@ public struct BookmarkListView: View {
     /// Optional SWORD-backed resolver for Bible bookmark ordinals.
     var bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)?
 
+    /// Whether the list should expose sheet-style explicit dismiss chrome.
+    private let showsDismissButton: Bool
+
     /**
      Creates the bookmark list view.
 
@@ -99,15 +118,19 @@ public struct BookmarkListView: View {
        - onOpenStudyPad: Callback invoked when the user wants to open a selected label's study pad.
        - bibleOrdinalResolver: Optional resolver that maps `(bookName, ordinal)` to a concrete
          chapter/verse using the active Bible versification.
+       - showsDismissButton: Whether to show the sheet-style Done button; app-owned destination
+         routes rely on navigation-stack back chrome instead.
      */
     public init(
         onNavigate: ((String, Int) -> Void)? = nil,
         onOpenStudyPad: ((UUID) -> Void)? = nil,
-        bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil
+        bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
+        showsDismissButton: Bool = true
     ) {
         self.onNavigate = onNavigate
         self.onOpenStudyPad = onOpenStudyPad
         self.bibleOrdinalResolver = bibleOrdinalResolver
+        self.showsDismissButton = showsDismissButton
     }
 
     /**
@@ -162,7 +185,7 @@ public struct BookmarkListView: View {
     }
 
     /**
-     Builds the bookmark list screen, empty state, and related sheets.
+     Builds the bookmark list screen, empty state, and related navigation destinations.
      */
     public var body: some View {
         Group {
@@ -183,20 +206,21 @@ public struct BookmarkListView: View {
         .overlay(alignment: .topLeading) {
             bookmarkListStateExport
         }
-        .searchable(text: $searchText, prompt: String(localized: "search_bookmarks"))
         .navigationTitle(String(localized: "bookmarks"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "done")) { dismiss() }
-                    .accessibilityIdentifier("bookmarkListDoneButton")
+            if showsDismissButton {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "done")) { dismiss() }
+                        .accessibilityIdentifier("bookmarkListDoneButton")
+                }
             }
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 12) {
                     Button {
-                        showLabelManager = true
+                        activeBookmarkListRoute = .labelManager
                     } label: {
                         Image(systemName: "tag")
                     }
@@ -204,26 +228,25 @@ public struct BookmarkListView: View {
                 }
             }
         }
-        .sheet(isPresented: $showLabelManager) {
-            NavigationStack {
-                LabelManagerView(onOpenStudyPad: onOpenStudyPad != nil ? { labelId in
-                    showLabelManager = false
-                    onOpenStudyPad?(labelId)
-                } : nil)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button(String(localized: "done")) { showLabelManager = false }
-                        }
-                    }
-            }
+        .navigationDestination(item: $activeBookmarkListRoute) { route in
+            bookmarkListDestination(route)
         }
-        .sheet(item: $editingLabelsBookmarkId) { bookmarkId in
-            NavigationStack {
-                LabelAssignmentView(
-                    bookmarkId: bookmarkId,
-                    onDismiss: { editingLabelsBookmarkId = nil }
-                )
-            }
+    }
+
+    /// Builds app-owned bookmark-list destinations without introducing nested iOS sheets.
+    @ViewBuilder
+    private func bookmarkListDestination(_ route: BookmarkListRoute) -> some View {
+        switch route {
+        case .labelManager:
+            LabelManagerView(onOpenStudyPad: onOpenStudyPad != nil ? { labelId in
+                activeBookmarkListRoute = nil
+                onOpenStudyPad?(labelId)
+            } : nil)
+        case .labelAssignment(let bookmarkId):
+            LabelAssignmentView(
+                bookmarkId: bookmarkId,
+                onDismiss: { activeBookmarkListRoute = nil }
+            )
         }
     }
 
@@ -235,12 +258,14 @@ public struct BookmarkListView: View {
                 labelFilterSection
             }
 
+            bookmarkSearchSection
+
             // Bookmark list
             ForEach(filteredBookmarks) { bookmark in
                 BookmarkRow(
                     bookmark: bookmark,
                     onNavigate: onNavigate,
-                    onEditLabels: { editingLabelsBookmarkId = bookmark.id }
+                    onEditLabels: { activeBookmarkListRoute = .labelAssignment(bookmark.id) }
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button(role: .destructive) {
@@ -252,7 +277,7 @@ public struct BookmarkListView: View {
                 }
                 .contextMenu {
                     Button {
-                        editingLabelsBookmarkId = bookmark.id
+                        activeBookmarkListRoute = .labelAssignment(bookmark.id)
                     } label: {
                         SwiftUI.Label(String(localized: "edit_labels"), systemImage: "tag")
                     }
@@ -267,13 +292,49 @@ public struct BookmarkListView: View {
         }
     }
 
-    /// Stable bookmark-list state exported for UI automation, including modal presentation flags.
+    /**
+     Visible bookmark search control that mirrors Android's in-content bookmark search layout.
+
+     Android's `Bookmarks` activity owns an `EditText` under the label selector instead of relying
+     on action-bar search chrome. Keeping this as a normal list row makes the filter reachable when
+     the bookmark list is hosted inside the reader's app-owned destination stack, where SwiftUI's
+     navigation `.searchable` chrome is not reliably exposed.
+     */
+    private var bookmarkSearchSection: some View {
+        Section {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+
+                TextField(String(localized: "search_bookmarks"), text: $searchText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("bookmarkListSearchField")
+
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("bookmarkListClearSearchButton")
+                    .accessibilityLabel(String(localized: "clear"))
+                }
+            }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    /// Stable bookmark-list state exported for UI automation, including route presentation flags.
     private var bookmarkListAccessibilityValue: String {
         let baseState = [
             "count=\(filteredBookmarks.count)",
             "selectedLabel=\(bookmarkListSelectedLabelAccessibilityToken)",
             "query=\(bookmarkListAccessibilitySegment(searchText))",
-            "labelAssignment=\(editingLabelsBookmarkId == nil ? "false" : "true")",
+            "labelAssignment=\(bookmarkListIsAssigningLabels ? "true" : "false")",
         ].joined(separator: ";")
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return baseState
@@ -283,6 +344,14 @@ public struct BookmarkListView: View {
             "|\($0.accessibilitySegment)|"
         }.joined(separator: ",")
         return "\(baseState);rows=\(rowTokens)"
+    }
+
+    /// Whether the bookmark-list route is currently showing label assignment.
+    private var bookmarkListIsAssigningLabels: Bool {
+        if case .labelAssignment = activeBookmarkListRoute {
+            return true
+        }
+        return false
     }
 
     /// Compact hidden state probe used by UI tests instead of snapshotting the live list surface.

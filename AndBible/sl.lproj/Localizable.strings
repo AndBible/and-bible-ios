@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "Novo okno";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";
@@ -478,6 +479,9 @@
 "hide_bible_reference_overlay_title" = "Skrij prekrivni naslov biblije";
 "hide_window_buttons_summary" = "Gumbi za okna, ki so prikazani na desni strani biblijskih pogledov, so skriti. Vrstica za krmarjenje po oknih na dnu je še vedno prikazana in lahko z dolgim klikom odprete pojavni meni okna.";
 "hide_window_buttons_title" = "Skrij gumbe oken";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Pomnožitev velikosti pisave";
 "prefs_bible_view_swipe_mode_summary" = "Poteg levo / desno lahko uporabite za naslednjo stran / poglavje.";
 "prefs_bible_view_swipe_mode_title" = "Akcija za poteg levo / desno";

@@ -743,7 +743,7 @@ int inflate_raw_file_range_to_file(const char *input_path,
                 result = -8;
                 break;
             }
-        } while ((stream.avail_in > 0 || stream.avail_out == 0) && ret != Z_STREAM_END);
+        } while (stream.avail_in > 0 && ret != Z_STREAM_END);
 
         if (result != 0) break;
     }

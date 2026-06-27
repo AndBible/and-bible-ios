@@ -54,6 +54,18 @@ public final class WindowManager {
         !controllerPendingWindowIds.isEmpty
     }
 
+    /**
+     Active workspace windows in persisted `orderNumber` order.
+
+     Android's move-window menu uses `windowRepository.windowList`, not the visible/display-grouped
+     ordering. Exposing this read-only list lets UI code build Android-parity move targets while
+     keeping mutation centralized in `WindowManager`.
+     */
+    public var windowsInPersistedOrder: [Window] {
+        guard let workspace = activeWorkspace else { return [] }
+        return workspaceStore.windows(workspaceId: workspace.id)
+    }
+
     /// ID of the currently maximized window, if any.
     public var maximizedWindowId: UUID? {
         get { activeWorkspace?.maximizedWindowId }
@@ -310,9 +322,26 @@ public final class WindowManager {
         }
     }
 
-    /// Remove a window from the workspace.
+    /**
+     Removes a window from the active workspace.
+
+     The window is detached from published reader state before its SwiftData graph is deleted. That
+     ordering prevents SwiftUI from re-evaluating a pane with a deleted `Window` or cascaded
+     `PageManager` during the close transaction.
+     */
     public func removeWindow(_ window: Window) {
-        unregisterController(for: window.id)
+        let removedWindowId = window.id
+        let nextActiveWindow = visibleWindows.first { $0.id != removedWindowId }
+
+        unregisterController(for: removedWindowId)
+        if activeWorkspace?.maximizedWindowId == removedWindowId {
+            activeWorkspace?.maximizedWindowId = nil
+        }
+        visibleWindows.removeAll { $0.id == removedWindowId }
+        allWindows.removeAll { $0.id == removedWindowId }
+        if activeWindow?.id == removedWindowId {
+            activeWindow = nextActiveWindow ?? visibleWindows.first
+        }
         workspaceStore.delete(window)
         refreshWindows()
     }
@@ -329,6 +358,108 @@ public final class WindowManager {
         refreshWindows()
     }
 
+    /**
+     Moves a window to Android's absolute position inside its current pin-mode bucket.
+
+     Android's pane menu builds `Move to...` rows from `windowList.filter { isPinMode matches }`
+     and passes the target row's zero-based order into `moveWindowToPosition`. This method mirrors
+     that behavior: pinned and unpinned buckets are reordered independently, then persisted as one
+     workspace order while display grouping still keeps links windows at the end.
+
+     - Parameters:
+       - window: Window to reposition.
+       - position: Zero-based target position inside the window's current pin-mode bucket.
+     - Side Effects: Rewrites persisted window order numbers through `WorkspaceStore` and refreshes
+       visible/all window lists.
+     - Failure Modes: Missing active workspace, missing source window, or out-of-range positions
+       are ignored.
+     */
+    public func moveWindow(_ window: Window, toPosition position: Int) {
+        guard let workspace = activeWorkspace else { return }
+        let workspaceWindows = workspaceStore.windows(workspaceId: workspace.id)
+        var pinnedWindows = workspaceWindows.filter(\.isPinMode)
+        var unpinnedWindows = workspaceWindows.filter { !$0.isPinMode }
+        var targetBucket = window.isPinMode ? pinnedWindows : unpinnedWindows
+
+        guard let originalIndex = targetBucket.firstIndex(where: { $0.id == window.id }),
+              position >= 0,
+              position < targetBucket.count else {
+            return
+        }
+
+        let movedWindow = targetBucket.remove(at: originalIndex)
+        targetBucket.insert(movedWindow, at: position)
+
+        if window.isPinMode {
+            pinnedWindows = targetBucket
+        } else {
+            unpinnedWindows = targetBucket
+        }
+
+        workspaceStore.reorderWindows(pinnedWindows + unpinnedWindows)
+        refreshWindows()
+    }
+
+    /**
+     Converts a links window into a normal window using Android's clone-and-close behavior.
+
+     Android handles `Change to normal window` by adding a new window from the links source,
+     clearing `isLinksWindow`, and then closing the original links window. The source pin state is
+     intentionally preserved because Android does not clear it during conversion.
+
+     - Parameter window: Links window to convert.
+     - Returns: Newly created normal window, or `nil` when the source is not a links window or
+       window creation fails.
+     - Side Effects: Adds a cloned window, clears its links flag, removes the source links window,
+       focuses the new window, and refreshes visible/all window lists.
+     - Failure Modes: Returns `nil` without mutation for non-links windows or inactive workspaces.
+     */
+    @discardableResult
+    public func changeLinksWindowToNormal(_ window: Window) -> Window? {
+        guard window.isLinksWindow,
+              let newWindow = addWindow(from: window) else {
+            return nil
+        }
+
+        newWindow.isLinksWindow = false
+        removeWindow(window)
+        activeWindow = newWindow
+        refreshWindows()
+        return newWindow
+    }
+
+    /**
+     Mirrors Android's `WindowControl.setPinMode` behavior for pane-menu pin changes.
+
+     Pinning a hidden window restores it. Unpinning a visible normal window minimizes it when
+     another unpinned normal window is already visible, matching Android's one-active-unpinned-pane
+     rule. Links windows should not call this method because their menu row is hidden.
+
+     - Parameters:
+       - window: Window whose pin state should change.
+       - value: New pin-mode value.
+     - Side Effects: Mutates pin/layout state and refreshes observable window lists.
+     - Failure Modes: None.
+     */
+    public func setPinMode(_ window: Window, value: Bool) {
+        guard window.isPinMode != value else { return }
+        window.isPinMode = value
+
+        if value && window.layoutState == "minimized" {
+            restoreWindow(window)
+            return
+        }
+
+        if !value,
+           window.layoutState != "minimized",
+           visibleWindows.filter({ !$0.isPinMode && !$0.isLinksWindow }).count > 1 {
+            minimizeWindow(window)
+            return
+        }
+
+        refreshWindows()
+    }
+
     /// Restore all windows from maximized state.
     public func unmaximize() {
         activeWorkspace?.maximizedWindowId = nil
@@ -341,6 +472,42 @@ public final class WindowManager {
     }
 
     // MARK: - Synchronization
+
+    /**
+     Mirrors Android's `WindowControl.setSynchronised` for pane-menu disable behavior.
+
+     - Parameters:
+       - window: Window whose synchronization flag should change.
+       - value: New synchronization state.
+     - Side Effects: Mutates the window, refreshes observable window lists, and leaves sync-group
+       membership unchanged.
+     - Failure Modes: None.
+     */
+    public func setSynchronized(_ window: Window, value: Bool) {
+        guard window.isSynchronized != value else { return }
+        window.isSynchronized = value
+        refreshWindows()
+    }
+
+    /**
+     Mirrors Android's `WindowControl.changeSyncGroup` selection behavior.
+
+     Selecting a sync group also enables synchronization for the window. Actual verse realignment is
+     handled by existing scroll/navigation sync paths after state changes propagate.
+
+     - Parameters:
+       - window: Window whose synchronization group should be selected.
+       - groupNumber: Zero-based group identifier matching Android's internal storage.
+     - Side Effects: Enables synchronization, updates `syncGroup`, and refreshes observable window
+       state.
+     - Failure Modes: Out-of-range groups are ignored.
+     */
+    public func changeSyncGroup(_ window: Window, groupNumber: Int) {
+        guard (0..<6).contains(groupNumber) else { return }
+        window.isSynchronized = true
+        window.syncGroup = groupNumber
+        refreshWindows()
+    }
 
     /// Get windows in the same sync group as the given window.
     public func syncedWindows(for window: Window) -> [Window] {

@@ -12,6 +12,16 @@ import SwiftData
  */
 @Model
 public final class Workspace {
+    /**
+     Android-compatible fallback accent color for workspaces.
+
+     Android defines `defaultWorkspaceColor` as `Color.parseColor("#ff444444")` and uses it when a
+     workspace has no durable `WorkspaceSettings.workspaceColor` value. iOS stores colors using the
+     same signed ARGB integer convention, so this constant is the shared fallback for new local
+     workspaces, reset behavior, and selector rendering.
+     */
+    public static let defaultWorkspaceColor = Int(Int32(bitPattern: 0xFF444444))
+
     /// Stable identifier mirrored from Android's workspace IdType contract.
     public var id: UUID = UUID()
 
@@ -78,6 +88,7 @@ public struct WorkspaceSettings: Codable, Sendable {
         case enableTiltToScroll
         case enableReverseSplitMode
         case autoPin
+        case restoreButtonsVisible
         case recentLabels
         case autoAssignLabels
         case autoAssignPrimaryLabel
@@ -94,6 +105,9 @@ public struct WorkspaceSettings: Codable, Sendable {
 
     /// Automatically pins new or updated windows according to workspace behavior rules.
     public var autoPin: Bool
+
+    /// Shows Android's bottom restore-button strip for multi-window workspaces.
+    public var restoreButtonsVisible: Bool
 
     /// Most recently used labels, ordered by access time for quick-pick UI.
     public var recentLabels: [RecentLabel]
@@ -120,6 +134,7 @@ public struct WorkspaceSettings: Codable, Sendable {
        - enableTiltToScroll: Whether tilt-to-scroll is enabled for the workspace.
        - enableReverseSplitMode: Whether split ordering is reversed.
        - autoPin: Whether windows should auto-pin by default.
+       - restoreButtonsVisible: Whether Android's bottom restore-button strip is expanded.
        - recentLabels: Recently used labels for quick selection UI.
        - autoAssignLabels: Labels automatically assigned to new bookmarks.
        - autoAssignPrimaryLabel: Primary label automatically assigned to new bookmarks; normalized to an assigned label or `nil` when inconsistent.
@@ -131,6 +146,7 @@ public struct WorkspaceSettings: Codable, Sendable {
         enableTiltToScroll: Bool = false,
         enableReverseSplitMode: Bool = false,
         autoPin: Bool = false,
+        restoreButtonsVisible: Bool = true,
         recentLabels: [RecentLabel] = [],
         autoAssignLabels: Set<UUID> = [],
         autoAssignPrimaryLabel: UUID? = nil,
@@ -141,6 +157,7 @@ public struct WorkspaceSettings: Codable, Sendable {
         self.enableTiltToScroll = enableTiltToScroll
         self.enableReverseSplitMode = enableReverseSplitMode
         self.autoPin = autoPin
+        self.restoreButtonsVisible = restoreButtonsVisible
         self.recentLabels = recentLabels
         self.autoAssignLabels = autoAssignLabels
         self.autoAssignPrimaryLabel = autoAssignPrimaryLabel
@@ -162,6 +179,7 @@ public struct WorkspaceSettings: Codable, Sendable {
         enableTiltToScroll = try container.decodeIfPresent(Bool.self, forKey: .enableTiltToScroll) ?? false
         enableReverseSplitMode = try container.decodeIfPresent(Bool.self, forKey: .enableReverseSplitMode) ?? false
         autoPin = try container.decodeIfPresent(Bool.self, forKey: .autoPin) ?? false
+        restoreButtonsVisible = try container.decodeIfPresent(Bool.self, forKey: .restoreButtonsVisible) ?? true
         recentLabels = try container.decodeIfPresent([RecentLabel].self, forKey: .recentLabels) ?? []
         autoAssignLabels = try container.decodeIfPresent(Set<UUID>.self, forKey: .autoAssignLabels) ?? []
         autoAssignPrimaryLabel = try container.decodeIfPresent(UUID.self, forKey: .autoAssignPrimaryLabel)
@@ -395,17 +413,19 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
      Provides the fully populated application-level fallback settings.
 
      The values are encoded using the same conventions expected by the Vue reader and the
-     Android-compatible settings model. Accessing this constant does not read or write user
-     defaults; it is an in-memory baseline used by resolution helpers.
+     Android-compatible settings model. Numeric reader defaults mirror Android's
+     `WorkspaceEntities.TextDisplaySettings.default` so global reset and inherited reader state
+     resolve to the same concrete values on both platforms. Accessing this constant does not read
+     or write user defaults; it is an in-memory baseline used by resolution helpers.
      */
     public static let appDefaults: TextDisplaySettings = {
         var s = TextDisplaySettings()
-        s.fontSize = 18
+        s.fontSize = 16
         s.fontFamily = "sans-serif"
-        s.lineSpacing = 10
-        s.marginLeft = 2
-        s.marginRight = 2
-        s.maxWidth = 600
+        s.lineSpacing = 16
+        s.marginLeft = 3
+        s.marginRight = 3
+        s.maxWidth = 170
         s.topMargin = 0
         s.strongsMode = 0
         s.showMorphology = false

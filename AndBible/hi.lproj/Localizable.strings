@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "नयी विंडो";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";
@@ -478,6 +479,9 @@
 "hide_bible_reference_overlay_title" = "बाइबिल संदर्भ उपरिशायी छुपाएं ";
 "hide_window_buttons_summary" = "विंडो बटन जो बाइबिल के दृश्य के दाईं ओर प्रदर्शित होते हैं, छिपे हुए हैं। नीचे की ओर विंडो नेविगेशन बार अभी भी प्रदर्शित है और आप विंडो पॉपअप मेनू को लॉन्ग-क्लिक करके खोल सकते हैं।";
 "hide_window_buttons_title" = " विंडो बटन छिपाएं";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "फ़ॉन्ट आकार गुणक";
 "prefs_bible_view_swipe_mode_summary" = "बाएं/दाएं स्वाइप जेस्चर का उपयोग अगले पेज/अध्याय पर जाने के लिए किया जा सकता है।";
 "prefs_bible_view_swipe_mode_title" = "बाएं/दाएं स्वाइप जेस्चर की क्रिया";

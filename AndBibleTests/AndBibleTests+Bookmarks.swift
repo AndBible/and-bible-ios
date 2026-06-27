@@ -165,6 +165,35 @@ extension AndBibleTests {
     }
 
     #if os(iOS)
+    /**
+     Verifies the reader WebView bridge hands label assignment to native reader-owned routing.
+
+     Android opens `ManageLabels.Mode.ASSIGN` from `BibleView.assignLabels` rather than letting the
+     web document own label assignment. iOS mirrors that by translating the WebView `assignLabels`
+     bridge call into `BibleReaderController.onAssignLabels`, which the SwiftUI reader coordinator
+     presents as the app-owned label assignment route.
+
+     Expected result:
+     - a valid bookmark UUID is forwarded exactly once to the native assignment callback
+     - malformed bookmark identifiers are ignored without presenting a stale route
+
+     Failure meaning:
+     - reader-origin bookmark label editing has drifted back toward WebView-owned or invalid native
+     routing instead of Android's app-owned assignment flow.
+     */
+    @MainActor
+    func testReaderAssignLabelsBridgeRequestsNativeLabelAssignment() {
+        let bookmarkId = UUID(uuidString: "10000000-0000-0000-0000-000000000246")!
+        let controller = BibleReaderController(bridge: BibleBridge())
+        var requestedBookmarkIds: [UUID] = []
+        controller.onAssignLabels = { requestedBookmarkIds.append($0) }
+
+        controller.bridge(BibleBridge(), assignLabels: "not-a-uuid")
+        controller.bridge(BibleBridge(), assignLabels: bookmarkId.uuidString)
+
+        XCTAssertEqual(requestedBookmarkIds, [bookmarkId])
+    }
+
     @MainActor
     func testReaderBookmarkBridgeUpdateEmitsTypedPayloadShape() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -216,6 +245,100 @@ extension AndBibleTests {
         XCTAssertEqual(relation["type"] as? String, "BibleBookmarkToLabel")
         XCTAssertEqual(relation["bookmarkId"] as? String, bookmark.id.uuidString)
         XCTAssertEqual(relation["labelId"] as? String, Label.unlabeledId.uuidString)
+    }
+
+    /**
+     Verifies My Notes requests made before the Vue client is ready replay after client-ready.
+
+     Android's `ChooseDocument` can select the My Notes fake document while the reader surface is
+     still bootstrapping. iOS must preserve that visible document intent instead of dropping the tap
+     at `clientReady == false`, then emit the same notes payload and pending row jump once Vue is
+     able to receive bridge events.
+     */
+    @MainActor
+    func testReaderMyNotesDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bookmarkService = bookmarkService
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: startOrdinal,
+            endOrdinal: startOrdinal,
+            wholeVerse: true
+        )
+        bookmark.book = "Genesis"
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Replay note")
+
+        controller.loadMyNotesDocument(jumpToOrdinal: 1)
+
+        XCTAssertFalse(recordedScripts().contains { $0.contains("emit('add_documents'") })
+        XCTAssertTrue(controller.myNotesAccessibilityState.contains("myNotesVisible=true"))
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "notes")
+        let bookmarks = try XCTUnwrap(payload["bookmarks"] as? [[String: Any]])
+        let bookmarkObject = try XCTUnwrap(bookmarks.first)
+        XCTAssertEqual(bookmarkObject["notes"] as? String, "Replay note")
+
+        let setupPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(setupPayload["jumpToOrdinal"] as? Int, 1)
+    }
+
+    /**
+     Verifies native reader label assignment refreshes generic bookmarks as well as Bible
+     bookmarks.
+
+     Android's bookmark bridge event model emits both Bible and generic bookmark payloads through
+     the same `add_or_update_bookmarks` event. iOS label assignment supports `GenericBookmark`
+     records too, so the reader refresh path must not silently drop generic bookmark updates after
+     the native label editor dismisses.
+
+     Failure meaning:
+     - the reader label-assignment refresh path only supports Bible bookmarks and leaves generic
+       bookmark rows stale in Vue after native label edits.
+     */
+    @MainActor
+    func testReaderBookmarkBridgeRefreshEmitsGenericBookmarkPayload() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+
+        let bookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "MHC",
+            key: "Gen.1.1",
+            startOrdinal: 1,
+            endOrdinal: 1
+        )
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Generic note")
+
+        controller.refreshBookmarkInVueJS(bookmarkId: bookmark.id)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_or_update_bookmarks") as? [[String: Any]]
+        )
+        let bookmarkObject = try XCTUnwrap(payload.first)
+        XCTAssertEqual(bookmarkObject["type"] as? String, "generic-bookmark")
+        XCTAssertEqual(bookmarkObject["bookInitials"] as? String, "MHC")
+        XCTAssertEqual(bookmarkObject["key"] as? String, "Gen.1.1")
+        XCTAssertEqual(bookmarkObject["notes"] as? String, "Generic note")
     }
 
     /**

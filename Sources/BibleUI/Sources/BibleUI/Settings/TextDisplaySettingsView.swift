@@ -3,9 +3,189 @@
 import SwiftUI
 import BibleCore
 import SwiftData
-#if os(iOS)
-import UIKit
-#endif
+
+/**
+ One Android `FontDefinition` row exposed by the text-display font-family dialog.
+
+ Android builds this list from add-on fonts followed by fixed platform family names in
+ `FontSizeWidget.kt`. iOS currently has no Android add-on font provider, so the built-in rows are
+ the durable parity contract. `androidIndex` is part of the identity because Android's source list
+ intentionally contains a duplicated `sans-serif-condensed` value and Spinner selection resolves the
+ first matching value after updates.
+
+ - Note: This type is value-only and has no file, database, or UI side effects.
+ */
+struct TextDisplayFontFamilyOption: Equatable, Identifiable, Sendable {
+    /// Android list position used for stable identity even when values are duplicated.
+    let androidIndex: Int
+
+    /// User-visible label produced from Android's `FontDefinition.name` convention.
+    let label: String
+
+    /// Stored `TextDisplaySettings.fontFamily` value written by Android's `realFontFamily`.
+    let value: String
+
+    /// Stable SwiftUI identity for list rendering.
+    var id: String { "\(androidIndex)::\(value)" }
+}
+
+/**
+ Non-switch text-display editor kinds that Android opens through dialogs.
+
+ Each case maps to one `TextDisplaySettings.Types` preference whose Android implementation stages
+ local dialog state and applies changes only from OK or Reset. The enum is shared by tests and UI so
+ source-level route checks and mutation tests exercise the same behavioral contract.
+ */
+enum TextDisplayPreferenceEditorKind: String, Identifiable, Sendable {
+    /// Android `STRONGS` single-choice editor.
+    case strongsMode
+
+    /// Android `FONTSIZE` numeric editor.
+    case fontSize
+
+    /// Android `FONTFAMILY` spinner editor.
+    case fontFamily
+
+    /// Android `MARGINSIZE` multi-field numeric editor.
+    case margins
+
+    /// Android `TOPMARGIN` numeric editor.
+    case topMargin
+
+    /// Android `LINE_SPACING` numeric editor.
+    case lineSpacing
+
+    /// Android `PAGE_SCROLL_AMOUNT` single-choice editor.
+    case pageScrollAmount
+
+    /// Stable identity for SwiftUI overlay presentation.
+    var id: String { rawValue }
+}
+
+/**
+ Draft state for Android-style text-display preference dialogs.
+
+ Android widgets keep mutable values inside the dialog view and commit through the positive button;
+ cancelling closes the dialog without writing settings. This value mirrors that contract for iOS by
+ separating temporary editor values from the bound `TextDisplaySettings` model until `commit` or
+ `reset` is invoked.
+
+ - Important: `reset` follows Android's scope ownership: global settings receive concrete app
+   defaults, while workspace/window settings become `nil` so parent inheritance can resolve them.
+ - Note: This type performs no persistence and is deterministic for a given input settings value.
+ */
+struct TextDisplayPreferenceEditorDraft: Equatable, Sendable {
+    /// Draft Strong's mode value.
+    var strongsMode: Int?
+
+    /// Draft font-size value in points.
+    var fontSize: Int?
+
+    /// Draft Android font-family value.
+    var fontFamily: String?
+
+    /// Draft left margin in millimeters.
+    var marginLeft: Int?
+
+    /// Draft right margin in millimeters.
+    var marginRight: Int?
+
+    /// Draft maximum text width in millimeters.
+    var maxWidth: Int?
+
+    /// Draft top margin in millimeters.
+    var topMargin: Int?
+
+    /// Draft line-spacing value in Android tenths.
+    var lineSpacing: Int?
+
+    /// Draft page-scroll amount percentage.
+    var pageScrollAmount: Int?
+
+    /**
+     Seeds a draft from the currently stored scope settings.
+
+     - Parameter settings: Scope-owned text-display settings currently bound to the editor.
+     - Side effects: none.
+     */
+    init(settings: TextDisplaySettings) {
+        strongsMode = settings.strongsMode
+        fontSize = settings.fontSize
+        fontFamily = settings.fontFamily
+        marginLeft = settings.marginLeft
+        marginRight = settings.marginRight
+        maxWidth = settings.maxWidth
+        topMargin = settings.topMargin
+        lineSpacing = settings.lineSpacing
+        pageScrollAmount = settings.pageScrollAmount
+    }
+
+    /**
+     Commits one edited field group into stored text-display settings.
+
+     - Parameters:
+       - editor: Dialog whose values should be persisted.
+       - scope: Current settings owner. Included for API symmetry with `reset`; commit writes the
+         current draft value, including `nil` values produced by a scope reset.
+       - settings: Stored settings value to mutate.
+     - Side effects: Mutates only `settings`; callers own persistence callbacks.
+     - Failure modes: Unknown values are not rejected here because Android preferences also write the
+       selected widget value directly. Normalization happens before draft mutation.
+     */
+    func commit(_ editor: TextDisplayPreferenceEditorKind, scope: TextDisplaySettingsScope, to settings: inout TextDisplaySettings) {
+        switch editor {
+        case .strongsMode:
+            settings.strongsMode = strongsMode
+        case .fontSize:
+            settings.fontSize = fontSize
+        case .fontFamily:
+            settings.fontFamily = fontFamily
+        case .margins:
+            settings.marginLeft = marginLeft
+            settings.marginRight = marginRight
+            settings.maxWidth = maxWidth
+        case .topMargin:
+            settings.topMargin = topMargin
+        case .lineSpacing:
+            settings.lineSpacing = lineSpacing
+        case .pageScrollAmount:
+            settings.pageScrollAmount = pageScrollAmount
+        }
+    }
+
+    /**
+     Applies Android's neutral Reset behavior to one dialog field group.
+
+     - Parameters:
+       - editor: Dialog whose values should be reset.
+       - scope: Current settings owner. Global uses app defaults; workspace/window use `nil` to
+         restore inheritance.
+     - Side effects: Mutates only this draft.
+     - Failure modes: none; every editor maps to a fixed set of optional fields.
+     */
+    mutating func reset(_ editor: TextDisplayPreferenceEditorKind, scope: TextDisplaySettingsScope) {
+        let useDefaults = scope == .global
+        let defaults = TextDisplaySettings.appDefaults
+        switch editor {
+        case .strongsMode:
+            strongsMode = useDefaults ? defaults.strongsMode : nil
+        case .fontSize:
+            fontSize = useDefaults ? defaults.fontSize : nil
+        case .fontFamily:
+            fontFamily = useDefaults ? defaults.fontFamily : nil
+        case .margins:
+            marginLeft = useDefaults ? defaults.marginLeft : nil
+            marginRight = useDefaults ? defaults.marginRight : nil
+            maxWidth = useDefaults ? defaults.maxWidth : nil
+        case .topMargin:
+            topMargin = useDefaults ? defaults.topMargin : nil
+        case .lineSpacing:
+            lineSpacing = useDefaults ? defaults.lineSpacing : nil
+        case .pageScrollAmount:
+            pageScrollAmount = useDefaults ? defaults.pageScrollAmount : nil
+        }
+    }
+}
 
 /**
  Flat Android-style preference editor for text presentation settings used by the Bible reader.
@@ -20,6 +200,9 @@ import UIKit
 
  Data dependencies:
  - `settings` is the persisted display-settings model owned by the parent screen
+ - `workspaceColor`, when supplied by workspace-scoped callers, exposes Android's workspace accent
+   row from the nested color editor while keeping that metadata separate from inherited text-display
+   settings
  - `scope` determines which Android parent-scope links are visible
  - SwiftData labels back the Android `BOOKMARKS_HIDELABELS` picker
  - `onChange` lets the parent push updated settings into the reader after each mutation
@@ -28,7 +211,7 @@ import UIKit
  - every binding write mutates `settings` and invokes `onChange`
  - parent-scope link taps invoke parent routing closures without mutating `settings`
  - hidden bookmark-label choices mutate `settings.bookmarksHideLabels`
- - on iOS, presenting the font picker bridges into `UIFontPickerViewController`
+ - non-switch editor dialogs stage a draft and mutate `settings` only from OK or Reset
  */
 public struct TextDisplaySettingsView: View {
     /// Shared text display settings being edited by the form.
@@ -36,6 +219,9 @@ public struct TextDisplaySettingsView: View {
 
     /// Callback invoked after any user-visible settings mutation.
     var onChange: (() -> Void)?
+
+    /// Optional workspace accent-color binding passed to the nested Android color editor.
+    private var workspaceColor: Binding<Int?>?
 
     /// Localized navigation title that reflects the Android settings scope currently being edited.
     private let navigationTitleText: String
@@ -55,54 +241,41 @@ public struct TextDisplaySettingsView: View {
     /// User-visible and system labels available for the hidden-bookmark-label picker.
     @Query private var allLabels: [BibleCore.Label]
 
-    /**
-     Non-switch Android preferences whose value editors are presented from the flat row list.
+    /// Current system appearance used by the Android dialog color palette.
+    @Environment(\.colorScheme) private var colorScheme
 
-     Android keeps these controls as rows and opens a dialog or activity when the user taps them.
-     The enum tracks the active SwiftUI editor sheet without changing the persisted settings model.
-     */
-    private enum ActivePreferenceEditor: String, Identifiable {
-        /// Android `STRONGS` single-choice editor.
-        case strongsMode
+    /// Active non-switch preference editor dialog, if one is open.
+    @State private var activePreferenceEditor: TextDisplayPreferenceEditorKind?
 
-        /// Android `FONTSIZE` numeric editor.
-        case fontSize
+    /// Local staged editor values that mirror Android dialog widgets.
+    @State private var preferenceEditorDraft = TextDisplayPreferenceEditorDraft(settings: TextDisplaySettings())
 
-        /// Android `FONTFAMILY` editor used by the macOS fallback.
-        case fontFamily
+    /// Inclusive Android-backed slider bounds used by `FONTSIZE`.
+    static let androidFontSizeRange: ClosedRange<Int> = 1...60
 
-        /// Android `MARGINSIZE` multi-field numeric editor.
-        case margins
+    /// Inclusive Android-backed slider bounds used by left and right `MARGINSIZE` controls.
+    static let androidMarginRange: ClosedRange<Int> = 0...30
 
-        /// Android `TOPMARGIN` numeric editor.
-        case topMargin
+    /// Inclusive Android-backed slider bounds used by the maximum text-width `MARGINSIZE` control.
+    static let androidMaxTextWidthRange: ClosedRange<Int> = 0...500
 
-        /// Android `LINE_SPACING` numeric editor.
-        case lineSpacing
-
-        /// Android `PAGE_SCROLL_AMOUNT` single-choice editor.
-        case pageScrollAmount
-
-        /// Stable identity for SwiftUI sheet presentation.
-        var id: String { rawValue }
-    }
-
-    #if os(iOS)
-    /// Whether the native iOS font picker sheet is currently presented.
-    @State private var showFontPicker = false
-    #endif
-
-    /// Active non-switch preference editor sheet, if one is open.
-    @State private var activePreferenceEditor: ActivePreferenceEditor?
+    /// Inclusive Android-backed slider bounds used by `TOPMARGIN`.
+    static let androidTopMarginRange: ClosedRange<Int> = 0...60
 
     /// Inclusive Android-backed slider bounds used by `LINE_SPACING`.
-    private static let lineSpacingRange: ClosedRange<Int> = 10...30
+    static let androidLineSpacingRange: ClosedRange<Int> = 10...30
+
+    /// Android seekbar-backed text-display numeric editors all move in whole-number increments.
+    static let androidNumericSliderStep: Double = 1
 
     /**
      Creates a text-display settings editor bound to a persisted settings model.
 
      - Parameters:
        - settings: Shared display settings value to mutate from the form.
+       - workspaceColor: Optional workspace accent color edited from Android's color settings
+         screen. Supplying this binding exposes the workspace color row for workspace-owned routes;
+         omitting it keeps true global/window routes from mutating workspace metadata.
        - navigationTitle: Optional Android-scope title shown by the surrounding navigation stack.
          Passing `nil` uses the localized global text-options title.
        - scope: Android text-display scope currently being edited.
@@ -113,6 +286,7 @@ public struct TextDisplaySettingsView: View {
      */
     public init(
         settings: Binding<TextDisplaySettings>,
+        workspaceColor: Binding<Int?>? = nil,
         navigationTitle: String? = nil,
         scope: TextDisplaySettingsScope = .global,
         workspaceName: String? = nil,
@@ -121,6 +295,7 @@ public struct TextDisplaySettingsView: View {
         onChange: (() -> Void)? = nil
     ) {
         self._settings = settings
+        self.workspaceColor = workspaceColor
         self.navigationTitleText = navigationTitle ?? String(
             localized: "global_text_display_settings_title",
             defaultValue: "Global text options"
@@ -130,41 +305,6 @@ public struct TextDisplaySettingsView: View {
         self.onOpenWorkspaceSettings = onOpenWorkspaceSettings
         self.onOpenGlobalSettings = onOpenGlobalSettings
         self.onChange = onChange
-    }
-
-    /// Slider binding that maps the optional stored font size to a concrete numeric control.
-    private var fontSizeBinding: Binding<Double> {
-        Binding(
-            get: { Double(settings.fontSize ?? 18) },
-            set: { settings.fontSize = Self.sliderInteger($0, fallback: settings.fontSize ?? 18); onChange?() }
-        )
-    }
-
-    /// Picker binding that maps the optional stored font family to a concrete selection value.
-    private var fontFamilyBinding: Binding<String> {
-        Binding(
-            get: { settings.fontFamily ?? "sans-serif" },
-            set: { settings.fontFamily = $0; onChange?() }
-        )
-    }
-
-    /// Single-choice binding for Android's `STRONGS` preference editor.
-    private var strongsModeBinding: Binding<Int> {
-        Binding(
-            get: { settings.strongsMode ?? 0 },
-            set: { settings.strongsMode = $0; onChange?() }
-        )
-    }
-
-    /// Single-choice binding for Android's `PAGE_SCROLL_AMOUNT` preference editor.
-    private var pageScrollAmountBinding: Binding<Int> {
-        Binding(
-            get: { TextDisplaySettings.normalizedPageScrollAmount(settings.pageScrollAmount) },
-            set: {
-                settings.pageScrollAmount = TextDisplaySettings.normalizedPageScrollAmount($0)
-                onChange?()
-            }
-        )
     }
 
     /**
@@ -209,46 +349,9 @@ public struct TextDisplaySettingsView: View {
      - Failure modes: none; nil settings fall back to Android-compatible default spacing.
      */
     private var displayedLineSpacing: Int {
-        min(max(settings.lineSpacing ?? 10, Self.lineSpacingRange.lowerBound), Self.lineSpacingRange.upperBound)
-    }
-
-    /// Slider binding that maps the optional stored line spacing to a concrete numeric control.
-    private var lineSpacingBinding: Binding<Double> {
-        Binding(
-            get: { Double(displayedLineSpacing) },
-            set: { settings.lineSpacing = Self.sliderInteger($0, fallback: displayedLineSpacing); onChange?() }
-        )
-    }
-
-    /// Left margin slider binding backed by the Android `MARGINSIZE` setting.
-    private var marginLeftBinding: Binding<Double> {
-        Binding(
-            get: { Double(settings.marginLeft ?? 2) },
-            set: { settings.marginLeft = Self.sliderInteger($0, fallback: settings.marginLeft ?? 2); onChange?() }
-        )
-    }
-
-    /// Right margin slider binding backed by the Android `MARGINSIZE` setting.
-    private var marginRightBinding: Binding<Double> {
-        Binding(
-            get: { Double(settings.marginRight ?? 2) },
-            set: { settings.marginRight = Self.sliderInteger($0, fallback: settings.marginRight ?? 2); onChange?() }
-        )
-    }
-
-    /// Maximum text width slider binding backed by the Android `MARGINSIZE` setting.
-    private var maxWidthBinding: Binding<Double> {
-        Binding(
-            get: { Double(settings.maxWidth ?? 600) },
-            set: { settings.maxWidth = Self.sliderInteger($0, fallback: settings.maxWidth ?? 600); onChange?() }
-        )
-    }
-
-    /// Top margin slider binding backed by the Android `TOPMARGIN` setting.
-    private var topMarginBinding: Binding<Double> {
-        Binding(
-            get: { Double(settings.topMargin ?? 0) },
-            set: { settings.topMargin = Self.sliderInteger($0, fallback: settings.topMargin ?? 0); onChange?() }
+        min(
+            max(settings.lineSpacing ?? TextDisplaySettings.appDefaults.lineSpacing ?? 16, Self.androidLineSpacingRange.lowerBound),
+            Self.androidLineSpacingRange.upperBound
         )
     }
 
@@ -325,7 +428,7 @@ public struct TextDisplaySettingsView: View {
                 localized: "text_display_font_size_title_format",
                 defaultValue: "Font size (%d pt)"
             ),
-            settings.fontSize ?? 18
+            settings.fontSize ?? TextDisplaySettings.appDefaults.fontSize ?? 16
         )
     }
 
@@ -358,9 +461,9 @@ public struct TextDisplaySettingsView: View {
                 localized: "text_display_margin_size_title_format",
                 defaultValue: "Margin size (%d/%d/%d mm)"
             ),
-            settings.marginLeft ?? 2,
-            settings.marginRight ?? 2,
-            settings.maxWidth ?? 600
+            settings.marginLeft ?? TextDisplaySettings.appDefaults.marginLeft ?? 3,
+            settings.marginRight ?? TextDisplaySettings.appDefaults.marginRight ?? 3,
+            settings.maxWidth ?? TextDisplaySettings.appDefaults.maxWidth ?? 170
         )
     }
 
@@ -395,12 +498,8 @@ public struct TextDisplaySettingsView: View {
     /// Accessibility-exported state for the currently edited justify-text preference.
     private var accessibilityState: String {
         let justifyState = (settings.justifyText ?? false) ? "justifyTextOn" : "justifyTextOff"
-        #if os(iOS)
-        let fontPickerState = showFontPicker ? "fontPickerPresented" : "fontPickerHidden"
-        return "\(justifyState)|\(fontPickerState)|scope=\(scope.rawValue)"
-        #else
-        return "\(justifyState)|fontPickerUnavailable|scope=\(scope.rawValue)"
-        #endif
+        let editorState = activePreferenceEditor.map { "preferenceEditor=\($0.rawValue)" } ?? "preferenceEditor=none"
+        return "\(justifyState)|\(editorState)|scope=\(scope.rawValue)"
     }
 
     /// Whether Android's parent-settings category should be visible for the current scope.
@@ -440,7 +539,7 @@ public struct TextDisplaySettingsView: View {
                             detail: strongsModeDetail,
                             accessibilityIdentifier: "textDisplayStrongsModeButton"
                         ) {
-                            activePreferenceEditor = .strongsMode
+                            openPreferenceEditor(.strongsMode)
                         }
                         preferenceSwitchRow(
                             androidKey: "MORPH",
@@ -502,7 +601,11 @@ public struct TextDisplaySettingsView: View {
 
                     preferenceSection(.appearance) {
                         NavigationLink {
-                            ColorSettingsView(settings: $settings, onChange: onChange)
+                            ColorSettingsView(
+                                settings: $settings,
+                                workspaceColor: workspaceColor,
+                                onChange: onChange
+                            )
                         } label: {
                             preferenceRowContent(
                                 androidKey: "COLORS",
@@ -522,28 +625,17 @@ public struct TextDisplaySettingsView: View {
                             summary: androidSummary("FONTSIZE"),
                             accessibilityIdentifier: "textDisplayFontSizeButton"
                         ) {
-                            activePreferenceEditor = .fontSize
+                            openPreferenceEditor(.fontSize)
                         }
 
-                        #if os(iOS)
                         preferenceActionRow(
                             androidKey: "FONTFAMILY",
                             title: fontFamilyTitle,
                             summary: androidSummary("FONTFAMILY"),
                             accessibilityIdentifier: "textDisplayFontFamilyButton"
                         ) {
-                            showFontPicker = true
+                            openPreferenceEditor(.fontFamily)
                         }
-                        #else
-                        preferenceActionRow(
-                            androidKey: "FONTFAMILY",
-                            title: fontFamilyTitle,
-                            summary: androidSummary("FONTFAMILY"),
-                            accessibilityIdentifier: "textDisplayFontFamilyButton"
-                        ) {
-                            activePreferenceEditor = .fontFamily
-                        }
-                        #endif
 
                         preferenceActionRow(
                             androidKey: "MARGINSIZE",
@@ -551,7 +643,7 @@ public struct TextDisplaySettingsView: View {
                             summary: androidSummary("MARGINSIZE"),
                             accessibilityIdentifier: "textDisplayMarginSizeButton"
                         ) {
-                            activePreferenceEditor = .margins
+                            openPreferenceEditor(.margins)
                         }
                         preferenceActionRow(
                             androidKey: "TOPMARGIN",
@@ -559,7 +651,7 @@ public struct TextDisplaySettingsView: View {
                             summary: androidSummary("TOPMARGIN"),
                             accessibilityIdentifier: "textDisplayTopMarginButton"
                         ) {
-                            activePreferenceEditor = .topMargin
+                            openPreferenceEditor(.topMargin)
                         }
                         preferenceActionRow(
                             androidKey: "LINE_SPACING",
@@ -567,7 +659,7 @@ public struct TextDisplaySettingsView: View {
                             summary: androidSummary("LINE_SPACING"),
                             accessibilityIdentifier: "textDisplayLineSpacingButton"
                         ) {
-                            activePreferenceEditor = .lineSpacing
+                            openPreferenceEditor(.lineSpacing)
                         }
                         preferenceSwitchRow(
                             androidKey: "REDLETTERS",
@@ -616,7 +708,7 @@ public struct TextDisplaySettingsView: View {
                             summary: androidSummary("PAGE_SCROLL_AMOUNT"),
                             accessibilityIdentifier: "textDisplayPageScrollAmountButton"
                         ) {
-                            activePreferenceEditor = .pageScrollAmount
+                            openPreferenceEditor(.pageScrollAmount)
                         }
                         preferenceSwitchRow(
                             androidKey: "ORDINALS",
@@ -686,17 +778,11 @@ public struct TextDisplaySettingsView: View {
             .accessibilityIdentifier("textDisplaySettingsScrollView")
 
             textDisplaySettingsStateExport
+            textDisplayPreferenceEditorOverlay
         }
         .background(textDisplayScreenBackground.ignoresSafeArea())
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(navigationTitleText)
-        .sheet(item: $activePreferenceEditor) { editor in
-            preferenceEditorSheet(editor)
-        }
-        #if os(iOS)
-        .sheet(isPresented: $showFontPicker) {
-            FontPickerView(selectedFamily: fontFamilyBinding)
-        }
-        #endif
     }
 
     /**
@@ -1021,128 +1107,226 @@ public struct TextDisplaySettingsView: View {
     }
 
     /**
-     Presents the editor for a non-switch Android preference.
+     Opens a non-switch Android preference editor with a fresh staged draft.
 
-     - Parameter editor: Active preference editor selected from the flat row list.
-     - Returns: Navigation-wrapped editor content suitable for a SwiftUI sheet.
-     - Side effects: Slider and picker writes mutate `settings`; Done clears presentation state.
-     - Failure modes: This helper does not throw; invalid slider input is normalized by bindings.
+     - Parameter editor: Editor selected from the flat row list.
+     - Side effects: Copies the current stored settings into `preferenceEditorDraft` and presents the
+       in-place Android dialog overlay.
+     - Failure modes: none; every enum case is renderable by the overlay.
      */
-    private func preferenceEditorSheet(_ editor: ActivePreferenceEditor) -> some View {
-        NavigationStack {
-            Form {
-                switch editor {
-                case .strongsMode:
-                    Picker(androidTitle("STRONGS"), selection: strongsModeBinding) {
-                        ForEach(strongsModeOptions, id: \.value) { option in
-                            Text(option.label)
-                                .tag(option.value)
-                        }
+    private func openPreferenceEditor(_ editor: TextDisplayPreferenceEditorKind) {
+        preferenceEditorDraft = TextDisplayPreferenceEditorDraft(settings: settings)
+        activePreferenceEditor = editor
+    }
+
+    /**
+     Builds the dimmed modal layer used for Android-style text-display preference dialogs.
+
+     The overlay is owned by this settings screen rather than SwiftUI sheet presentation so the
+     editor matches Android's in-place `AlertDialog` behavior. Tapping the dimmer follows Android's
+     cancel path and discards the draft.
+
+     - Returns: Full-screen modal dimmer and centered editor dialog when an editor is active.
+     - Side effects: Child button actions can mutate the draft, commit settings, reset settings, or
+       dismiss the overlay.
+     - Failure modes: If no editor is active, renders no overlay.
+     */
+    @ViewBuilder
+    private var textDisplayPreferenceEditorOverlay: some View {
+        if let editor = activePreferenceEditor {
+            ZStack {
+                Color.black.opacity(colorScheme == .dark ? 0.45 : 0.32)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        cancelPreferenceEditor()
                     }
-                    .pickerStyle(.inline)
-                case .fontSize:
-                    numericSlider(
-                        title: fontSizeTitle,
-                        value: settings.fontSize ?? 18,
-                        binding: fontSizeBinding,
-                        range: 1...60,
-                        step: 1
-                    )
-                case .fontFamily:
-                    Picker(androidTitle("FONTFAMILY"), selection: fontFamilyBinding) {
-                        ForEach(Self.fontOptions, id: \.value) { option in
-                            Text(option.label)
-                                .font(.custom(option.previewFont, size: 16))
-                                .tag(option.value)
-                        }
-                    }
-                case .margins:
-                    marginSlider(
-                        title: String.localizedStringWithFormat(
-                            String(
-                                localized: "text_display_left_margin_title_format",
-                                defaultValue: "Left margin (%d mm)"
-                            ),
-                            settings.marginLeft ?? 2
-                        ),
-                        value: settings.marginLeft ?? 2,
-                        binding: marginLeftBinding,
-                        range: 0...30,
-                        step: 1
-                    )
-                    marginSlider(
-                        title: String.localizedStringWithFormat(
-                            String(
-                                localized: "text_display_right_margin_title_format",
-                                defaultValue: "Right margin (%d mm)"
-                            ),
-                            settings.marginRight ?? 2
-                        ),
-                        value: settings.marginRight ?? 2,
-                        binding: marginRightBinding,
-                        range: 0...30,
-                        step: 1
-                    )
-                    marginSlider(
-                        title: String.localizedStringWithFormat(
-                            String(
-                                localized: "text_display_max_width_title_format",
-                                defaultValue: "Maximum width of text (%d mm)"
-                            ),
-                            settings.maxWidth ?? 600
-                        ),
-                        value: settings.maxWidth ?? 600,
-                        binding: maxWidthBinding,
-                        range: 0...1000,
-                        step: 10
-                    )
-                case .topMargin:
-                    numericSlider(
-                        title: topMarginTitle,
-                        value: settings.topMargin ?? 0,
-                        binding: topMarginBinding,
-                        range: 0...60,
-                        step: 1
-                    )
-                case .lineSpacing:
-                    numericSlider(
-                        title: lineSpacingTitle,
-                        value: displayedLineSpacing,
-                        binding: lineSpacingBinding,
-                        range: Double(Self.lineSpacingRange.lowerBound)...Double(Self.lineSpacingRange.upperBound),
-                        step: 1
-                    )
-                case .pageScrollAmount:
-                    Picker(androidTitle("PAGE_SCROLL_AMOUNT"), selection: pageScrollAmountBinding) {
-                        ForEach(pageScrollAmountOptions, id: \.value) { option in
-                            Text(option.label)
-                                .tag(option.value)
-                        }
-                    }
-                    .pickerStyle(.inline)
-                }
+                    .accessibilityHidden(true)
+
+                makePreferenceEditorDialog(editor)
+                    .padding(.horizontal, 24)
             }
-            .navigationTitle(preferenceEditorTitle(editor))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(String(localized: "done", defaultValue: "Done")) {
-                        activePreferenceEditor = nil
-                    }
-                }
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .zIndex(20)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("textDisplayPreferenceEditorOverlay")
+            .accessibilityValue(editor.rawValue)
         }
     }
 
     /**
-     Resolves the editor sheet title for one non-switch Android preference.
+     Builds one centered AppCompat-style editor dialog.
+
+     - Parameter editor: Active Android preference editor being rendered.
+     - Returns: Dialog chrome with title, field content, and Reset/Cancel/OK actions.
+     - Side effects: Action buttons call reset, cancel, or commit helpers; field controls only mutate
+       `preferenceEditorDraft`.
+     - Failure modes: none; unsupported editor cases would be compile-time switch failures.
+     */
+    private func makePreferenceEditorDialog(_ editor: TextDisplayPreferenceEditorKind) -> some View {
+        VStack(spacing: 0) {
+            Text(preferenceEditorTitle(editor))
+                .font(.headline)
+                .foregroundStyle(dialogPrimaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.top, 20)
+                .padding(.bottom, 12)
+
+            Divider()
+                .background(dialogSecondaryText.opacity(0.25))
+
+            preferenceEditorDialogContent(editor)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 16)
+
+            Divider()
+                .background(dialogSecondaryText.opacity(0.25))
+
+            HStack(spacing: 16) {
+                Button(String(localized: "reset_generic", defaultValue: "Reset")) {
+                    resetPreferenceEditor(editor)
+                }
+                .accessibilityIdentifier("textDisplayPreferenceEditorResetButton")
+
+                Spacer(minLength: 8)
+
+                Button(String(localized: "cancel")) {
+                    cancelPreferenceEditor()
+                }
+                .accessibilityIdentifier("textDisplayPreferenceEditorCancelButton")
+
+                Button(String(localized: "ok", defaultValue: "OK")) {
+                    commitPreferenceEditor(editor)
+                }
+                .fontWeight(.semibold)
+                .accessibilityIdentifier("textDisplayPreferenceEditorOKButton")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(dialogAccent)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 14)
+        }
+        .frame(maxWidth: 430)
+        .background(dialogBackground, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(dialogSecondaryText.opacity(0.28), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.22), radius: 20, x: 0, y: 12)
+        .accessibilityIdentifier("textDisplayPreferenceEditorDialog")
+    }
+
+    /**
+     Dispatches active editor content to the Android-equivalent widget body.
+
+     - Parameter editor: Active preference editor whose controls should be shown.
+     - Returns: Staged controls for the selected editor.
+     - Side effects: Controls mutate only `preferenceEditorDraft`.
+     - Failure modes: none.
+     */
+    @ViewBuilder
+    private func preferenceEditorDialogContent(_ editor: TextDisplayPreferenceEditorKind) -> some View {
+        switch editor {
+        case .strongsMode:
+            dialogChoiceList(
+                options: strongsModeOptions,
+                selection: draftIntBinding(\.strongsMode, fallback: 0)
+            )
+        case .fontSize:
+            VStack(alignment: .leading, spacing: 14) {
+                fontSampleText(size: displayedDraftFontSize)
+                dialogNumericSlider(
+                    title: String(
+                        localized: "font_size_title",
+                        defaultValue: "Font size"
+                    ),
+                    valueText: String.localizedStringWithFormat(
+                        String(localized: "font_size_pt", defaultValue: "%d pt"),
+                        displayedDraftFontSize
+                    ),
+                    binding: draftDoubleBinding(\.fontSize, fallback: TextDisplaySettings.appDefaults.fontSize ?? 16),
+                    range: Double(Self.androidFontSizeRange.lowerBound)...Double(Self.androidFontSizeRange.upperBound),
+                    step: Self.androidNumericSliderStep
+                )
+            }
+        case .fontFamily:
+            VStack(alignment: .leading, spacing: 14) {
+                fontSampleText(size: displayedDraftFontSize)
+                Text(String(localized: "pref_font_family_label", defaultValue: "Font family"))
+                    .font(.callout)
+                    .foregroundStyle(dialogPrimaryText)
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Self.androidFontFamilyOptions()) { option in
+                            fontFamilyChoiceRow(option)
+                            Divider()
+                                .background(dialogSecondaryText.opacity(0.18))
+                        }
+                    }
+                }
+                .frame(maxHeight: 260)
+                .accessibilityIdentifier("textDisplayFontFamilyOptionList")
+            }
+        case .margins:
+            VStack(alignment: .leading, spacing: 16) {
+                dialogNumericSlider(
+                    title: String(localized: "text_display_left_margin_label", defaultValue: "Left margin"),
+                    valueText: millimeterValueText(displayedDraftMarginLeft),
+                    binding: draftDoubleBinding(\.marginLeft, fallback: TextDisplaySettings.appDefaults.marginLeft ?? 3),
+                    range: Double(Self.androidMarginRange.lowerBound)...Double(Self.androidMarginRange.upperBound),
+                    step: Self.androidNumericSliderStep
+                )
+                dialogNumericSlider(
+                    title: String(localized: "text_display_right_margin_label", defaultValue: "Right margin"),
+                    valueText: millimeterValueText(displayedDraftMarginRight),
+                    binding: draftDoubleBinding(\.marginRight, fallback: TextDisplaySettings.appDefaults.marginRight ?? 3),
+                    range: Double(Self.androidMarginRange.lowerBound)...Double(Self.androidMarginRange.upperBound),
+                    step: Self.androidNumericSliderStep
+                )
+                dialogNumericSlider(
+                    title: String(localized: "text_display_max_width_label", defaultValue: "Maximum width of text"),
+                    valueText: millimeterValueText(displayedDraftMaxWidth),
+                    binding: draftDoubleBinding(\.maxWidth, fallback: TextDisplaySettings.appDefaults.maxWidth ?? 170),
+                    range: Double(Self.androidMaxTextWidthRange.lowerBound)...Double(Self.androidMaxTextWidthRange.upperBound),
+                    step: Self.androidNumericSliderStep
+                )
+            }
+        case .topMargin:
+            dialogNumericSlider(
+                title: String(localized: "prefs_top_margin_title", defaultValue: "Top margin"),
+                valueText: millimeterValueText(displayedDraftTopMargin),
+                binding: draftDoubleBinding(\.topMargin, fallback: 0),
+                range: Double(Self.androidTopMarginRange.lowerBound)...Double(Self.androidTopMarginRange.upperBound),
+                step: Self.androidNumericSliderStep
+            )
+        case .lineSpacing:
+            dialogNumericSlider(
+                title: String(localized: "line_spacing_title", defaultValue: "Line spacing"),
+                valueText: String.localizedStringWithFormat(
+                    String(localized: "prefs_line_spacing_pt", defaultValue: "Line spacing %1.1fx"),
+                    Double(displayedDraftLineSpacing) / 10.0
+                ),
+                binding: draftDoubleBinding(\.lineSpacing, fallback: TextDisplaySettings.appDefaults.lineSpacing ?? 16),
+                range: Double(Self.androidLineSpacingRange.lowerBound)...Double(Self.androidLineSpacingRange.upperBound),
+                step: Self.androidNumericSliderStep
+            )
+        case .pageScrollAmount:
+            dialogChoiceList(
+                options: pageScrollAmountOptions,
+                selection: draftIntBinding(\.pageScrollAmount, fallback: 100)
+            )
+        }
+    }
+
+    /**
+     Resolves the dialog title for one non-switch Android preference.
 
      - Parameter editor: Active editor selected by the user.
-     - Returns: Android row title used as the sheet title.
+     - Returns: Android row title used as the dialog title.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    private func preferenceEditorTitle(_ editor: ActivePreferenceEditor) -> String {
+    private func preferenceEditorTitle(_ editor: TextDisplayPreferenceEditorKind) -> String {
         switch editor {
         case .strongsMode:
             return androidTitle("STRONGS")
@@ -1162,36 +1346,305 @@ public struct TextDisplaySettingsView: View {
     }
 
     /**
-     Builds a generic labeled numeric slider for editor sheets.
+     Builds a single-choice list matching Android `AlertDialog.setSingleChoiceItems`.
 
      - Parameters:
-       - title: User-visible slider title.
-       - value: Current integer value displayed beside the title.
-       - binding: Slider binding that persists value changes.
-       - range: Allowed slider range.
-       - step: Slider increment.
-     - Returns: A compact editor row for one numeric preference value.
-     - Side effects: Moving the slider mutates `binding`.
-     - Failure modes: This helper cannot fail; non-finite values are handled by the binding setter.
+       - options: Value/label pairs in Android dialog order.
+       - selection: Staged selection binding.
+     - Returns: Scrollable radio-list rows for the dialog.
+     - Side effects: Row taps mutate only `selection`.
+     - Failure modes: Empty option arrays render an empty scroll region.
      */
-    private func numericSlider(
+    private func dialogChoiceList(
+        options: [(value: Int, label: String)],
+        selection: Binding<Int>
+    ) -> some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(options, id: \.value) { option in
+                    Button {
+                        selection.wrappedValue = option.value
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: selection.wrappedValue == option.value ? "largecircle.fill.circle" : "circle")
+                                .foregroundStyle(selection.wrappedValue == option.value ? dialogAccent : dialogSecondaryText)
+                            Text(option.label)
+                                .font(.body)
+                                .foregroundStyle(dialogPrimaryText)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("textDisplayPreferenceChoice::\(option.value)")
+                    .accessibilityValue(selection.wrappedValue == option.value ? "selected" : "unselected")
+                    Divider()
+                        .background(dialogSecondaryText.opacity(0.18))
+                }
+            }
+        }
+        .frame(maxHeight: 320)
+    }
+
+    /**
+     Builds one Android-like numeric seekbar row for a staged dialog value.
+
+     - Parameters:
+       - title: User-visible setting label.
+       - valueText: Current value text shown below the slider.
+       - binding: Draft binding mutated by the slider.
+       - range: Inclusive Android seekbar range.
+       - step: Slider increment.
+     - Returns: Labeled slider and current value text.
+     - Side effects: Moving the slider mutates only `preferenceEditorDraft`.
+     - Failure modes: Non-finite values are normalized by `draftDoubleBinding`.
+     */
+    private func dialogNumericSlider(
         title: String,
-        value: Int,
+        valueText: String,
         binding: Binding<Double>,
         range: ClosedRange<Double>,
         step: Double
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                Spacer()
-                Text("\(value)")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .font(.body)
+                    .foregroundStyle(dialogPrimaryText)
+                Text(valueText)
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(dialogSecondaryText)
             }
             Slider(value: binding, in: range, step: step)
         }
-        .padding(.vertical, 4)
+    }
+
+    /**
+     Builds one row in the Android font-family selection list.
+
+     - Parameter option: Font-family option from Android's widget list.
+     - Returns: Tappable row with Android-style first-match selection semantics.
+     - Side effects: Row taps mutate only `preferenceEditorDraft.fontFamily`.
+     - Failure modes: Unknown font family names fall back to SwiftUI's default font rendering.
+     */
+    private func fontFamilyChoiceRow(_ option: TextDisplayFontFamilyOption) -> some View {
+        let selectedIndex = Self.androidFontFamilySelectedIndex(for: preferenceEditorDraft.fontFamily)
+        let isSelected = option.androidIndex == selectedIndex
+        return Button {
+            preferenceEditorDraft.fontFamily = option.value
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(isSelected ? dialogAccent : dialogSecondaryText)
+                Text(option.label)
+                    .font(fontPreview(for: option.value, size: 16))
+                    .foregroundStyle(dialogPrimaryText)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("textDisplayFontFamilyOption::\(option.androidIndex)")
+        .accessibilityValue(isSelected ? "selected" : "unselected")
+    }
+
+    /**
+     Builds Android's sample text preview for font-size and font-family dialogs.
+
+     - Parameter size: Point size used for the sample.
+     - Returns: Two-line preview text rendered with the draft font family.
+     - Side effects: none.
+     - Failure modes: Unknown Android font-family names fall back to SwiftUI system font rendering.
+     */
+    private func fontSampleText(size: Int) -> some View {
+        Text(String(localized: "prefs_text_size_sample_text", defaultValue: "The quick brown fox jumps over the lazy dog."))
+            .font(fontPreview(for: preferenceEditorDraft.fontFamily ?? "sans-serif", size: CGFloat(size)))
+            .foregroundStyle(dialogSecondaryText)
+            .lineLimit(2)
+            .frame(height: 60, alignment: .bottomLeading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("textDisplayPreferenceEditorSampleText")
+    }
+
+    /**
+     Resolves an Android font-family string to the nearest SwiftUI preview font.
+
+     Android and iOS do not share platform font implementations, but the dialog should preview the
+     broad design family instead of dumping every row into the same system font. Stored values remain
+     the Android strings; this helper affects only visual preview.
+
+     - Parameters:
+       - family: Android font-family value.
+       - size: Point size for the preview font.
+     - Returns: SwiftUI font that approximates the Android family category.
+     - Side effects: none.
+     - Failure modes: Unknown values use the default system design.
+     */
+    private func fontPreview(for family: String, size: CGFloat) -> Font {
+        if family.contains("monospace") || family == "monospace" {
+            return .system(size: size, design: .monospaced)
+        }
+        if family == "serif" {
+            return .system(size: size, design: .serif)
+        }
+        if family == "casual" || family == "cursive" {
+            return .system(size: size, design: .rounded)
+        }
+        return .system(size: size)
+    }
+
+    /**
+     Creates a staged integer binding for single-choice Android dialog rows.
+
+     - Parameters:
+       - keyPath: Draft optional integer field being edited.
+       - fallback: Value used when the draft currently inherits from a parent scope.
+     - Returns: Non-optional binding suitable for radio-list rows.
+     - Side effects: Setting the binding mutates only `preferenceEditorDraft`.
+     - Failure modes: none.
+     */
+    private func draftIntBinding(
+        _ keyPath: WritableKeyPath<TextDisplayPreferenceEditorDraft, Int?>,
+        fallback: Int
+    ) -> Binding<Int> {
+        Binding(
+            get: { preferenceEditorDraft[keyPath: keyPath] ?? fallback },
+            set: { preferenceEditorDraft[keyPath: keyPath] = $0 }
+        )
+    }
+
+    /**
+     Creates a staged numeric binding for Android seekbar-style dialog rows.
+
+     - Parameters:
+       - keyPath: Draft optional integer field being edited.
+       - fallback: Value used when the draft currently inherits from a parent scope.
+     - Returns: Slider-compatible binding that stores rounded integer values in the draft.
+     - Side effects: Setting the binding mutates only `preferenceEditorDraft`.
+     - Failure modes: Non-finite slider values preserve the current fallback through
+       `sliderInteger`.
+     */
+    private func draftDoubleBinding(
+        _ keyPath: WritableKeyPath<TextDisplayPreferenceEditorDraft, Int?>,
+        fallback: Int
+    ) -> Binding<Double> {
+        Binding(
+            get: { Double(preferenceEditorDraft[keyPath: keyPath] ?? fallback) },
+            set: { preferenceEditorDraft[keyPath: keyPath] = Self.sliderInteger($0, fallback: fallback) }
+        )
+    }
+
+    /// Draft font size shown in the active dialog.
+    private var displayedDraftFontSize: Int {
+        preferenceEditorDraft.fontSize ?? TextDisplaySettings.appDefaults.fontSize ?? 16
+    }
+
+    /// Draft left margin shown in the active dialog.
+    private var displayedDraftMarginLeft: Int {
+        preferenceEditorDraft.marginLeft ?? TextDisplaySettings.appDefaults.marginLeft ?? 3
+    }
+
+    /// Draft right margin shown in the active dialog.
+    private var displayedDraftMarginRight: Int {
+        preferenceEditorDraft.marginRight ?? TextDisplaySettings.appDefaults.marginRight ?? 3
+    }
+
+    /// Draft maximum text width shown in the active dialog.
+    private var displayedDraftMaxWidth: Int {
+        preferenceEditorDraft.maxWidth ?? TextDisplaySettings.appDefaults.maxWidth ?? 170
+    }
+
+    /// Draft top margin shown in the active dialog.
+    private var displayedDraftTopMargin: Int {
+        preferenceEditorDraft.topMargin ?? TextDisplaySettings.appDefaults.topMargin ?? 0
+    }
+
+    /// Draft line-spacing value clamped to Android's 10...30 seekbar range.
+    private var displayedDraftLineSpacing: Int {
+        min(
+            max(
+                preferenceEditorDraft.lineSpacing ?? TextDisplaySettings.appDefaults.lineSpacing ?? 16,
+                Self.androidLineSpacingRange.lowerBound
+            ),
+            Self.androidLineSpacingRange.upperBound
+        )
+    }
+
+    /**
+     Formats a millimeter value using Android's value-label convention.
+
+     - Parameter value: Integer millimeter value.
+     - Returns: Localized value string for slider detail text.
+     - Side effects: none.
+     - Failure modes: Missing localization uses the default `"%d mm"` format.
+     */
+    private func millimeterValueText(_ value: Int) -> String {
+        String.localizedStringWithFormat(
+            String(localized: "value_mm", defaultValue: "%d mm"),
+            value
+        )
+    }
+
+    /**
+     Commits the active staged editor values to persisted settings and closes the dialog.
+
+     - Parameter editor: Dialog whose draft field group should be persisted.
+     - Side effects: Mutates `settings`, invokes `onChange`, and dismisses the overlay.
+     - Failure modes: none; draft values are normalized by their controls before commit.
+     */
+    private func commitPreferenceEditor(_ editor: TextDisplayPreferenceEditorKind) {
+        preferenceEditorDraft.commit(editor, scope: scope, to: &settings)
+        activePreferenceEditor = nil
+        onChange?()
+    }
+
+    /**
+     Applies Android's neutral Reset action for the active editor and closes the dialog.
+
+     - Parameter editor: Dialog whose field group should reset.
+     - Side effects: Mutates the draft, commits the reset value into `settings`, invokes `onChange`,
+       and dismisses the overlay.
+     - Failure modes: none.
+     */
+    private func resetPreferenceEditor(_ editor: TextDisplayPreferenceEditorKind) {
+        preferenceEditorDraft.reset(editor, scope: scope)
+        preferenceEditorDraft.commit(editor, scope: scope, to: &settings)
+        activePreferenceEditor = nil
+        onChange?()
+    }
+
+    /**
+     Cancels the active editor without writing staged values.
+
+     - Side effects: Dismisses the overlay and leaves `settings` unchanged.
+     - Failure modes: none.
+     */
+    private func cancelPreferenceEditor() {
+        activePreferenceEditor = nil
+    }
+
+    /// Android-dialog background color for the current system appearance.
+    private var dialogBackground: Color {
+        AndroidDialogSurfacePalette.background(for: colorScheme)
+    }
+
+    /// Android-dialog primary text color for the current system appearance.
+    private var dialogPrimaryText: Color {
+        AndroidDialogSurfacePalette.primaryText(for: colorScheme)
+    }
+
+    /// Android-dialog secondary text color for the current system appearance.
+    private var dialogSecondaryText: Color {
+        AndroidDialogSurfacePalette.secondaryText(for: colorScheme)
+    }
+
+    /// Android-dialog accent color for interactive editor actions.
+    private var dialogAccent: Color {
+        AndroidDialogSurfacePalette.accent(for: colorScheme)
     }
 
     /**
@@ -1235,67 +1688,84 @@ public struct TextDisplaySettingsView: View {
         AndBibleSettingsSectionHeader(title: title)
     }
 
-    /**
-     Builds one numeric slider row nested beneath the Android `MARGINSIZE` label.
-
-     - Parameters:
-       - title: User-visible subfield title.
-       - value: Current numeric value shown beside the subfield.
-       - binding: Slider binding that writes back into `TextDisplaySettings`.
-       - range: Allowed slider range.
-       - step: Slider increment.
-     - Returns: A compact labeled slider aligned beneath the parent row text.
-     - Side effects: Mutating the slider writes through `binding`.
-     - Failure modes: This helper cannot fail.
-     */
-    private func marginSlider(
-        title: String,
-        value: Int,
-        binding: Binding<Double>,
-        range: ClosedRange<Double>,
-        step: Double
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.callout)
-                Spacer()
-                Text("\(value)")
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            Slider(value: binding, in: range, step: step)
-        }
-    }
-
-    /**
-     Static font option descriptor used by the macOS fallback picker.
-     */
-    private struct FontOption {
-        /// User-visible label shown in the picker.
-        let label: String
-
-        /// Stored font-family value written back to `TextDisplaySettings`.
-        let value: String
-
-        /// Preview font name used to render the picker label.
-        let previewFont: String
-    }
-
-    /// MacOS fallback font-family choices used when the UIKit font picker is unavailable.
-    private static let fontOptions: [FontOption] = [
-        FontOption(label: "Sans Serif (Default)", value: "sans-serif", previewFont: ".AppleSystemUIFont"),
-        FontOption(label: "Serif", value: "serif", previewFont: "Georgia"),
-        FontOption(label: "Georgia", value: "Georgia", previewFont: "Georgia"),
-        FontOption(label: "Palatino", value: "Palatino", previewFont: "Palatino"),
-        FontOption(label: "Times New Roman", value: "Times New Roman", previewFont: "TimesNewRomanPSMT"),
-        FontOption(label: "Baskerville", value: "Baskerville", previewFont: "Baskerville"),
-        FontOption(label: "Didot", value: "Didot", previewFont: "Didot"),
-        FontOption(label: "American Typewriter", value: "American Typewriter", previewFont: "AmericanTypewriter"),
-        FontOption(label: "Courier New", value: "Courier New", previewFont: "CourierNewPSMT"),
-        FontOption(label: "Menlo", value: "Menlo", previewFont: "Menlo-Regular"),
-        FontOption(label: "Monospace", value: "monospace", previewFont: "Menlo-Regular"),
+    /// Android built-in font families from `FontSizeWidget.kt`, preserving source order and duplicates.
+    static let androidStandardFontFamilies: [String] = [
+        "sans-serif-thin",
+        "sans-serif-light",
+        "sans-serif",
+        "sans-serif-medium",
+        "sans-serif-black",
+        "sans-serif-condensed-light",
+        "sans-serif-condensed",
+        "sans-serif-condensed-medium",
+        "sans-serif-condensed",
+        "serif",
+        "monospace",
+        "serif-monospace",
+        "casual",
+        "cursive",
+        "sans-serif-smallcaps",
     ]
+
+    /**
+     Builds Android's font-family option list for the text-display dialog.
+
+     - Parameter providedFonts: Optional Android add-on font names that would precede the standard
+       list on Android. iOS currently passes no add-on fonts because those files are not installed
+       through the iOS document pipeline.
+     - Returns: Font option rows in Android widget order.
+     - Side effects: none.
+     - Failure modes: none; empty input still returns the Android standard family list.
+     */
+    static func androidFontFamilyOptions(providedFonts: [String] = []) -> [TextDisplayFontFamilyOption] {
+        (providedFonts + androidStandardFontFamilies)
+            .enumerated()
+            .map { index, value in
+                TextDisplayFontFamilyOption(
+                    androidIndex: index,
+                    label: androidFontFamilyDisplayName(value),
+                    value: value
+                )
+            }
+    }
+
+    /**
+     Mirrors Android `FontDefinition.name` for built-in font-family labels.
+
+     Android replaces hyphens with spaces and capitalizes only the first character. This deliberately
+     does not title-case each word because that would make iOS look nicer while drifting from the
+     source widget.
+
+     - Parameter fontFamily: Android font-family value.
+     - Returns: User-visible label matching Android's built-in family naming convention.
+     - Side effects: none.
+     - Failure modes: Empty strings return an empty label.
+     */
+    static func androidFontFamilyDisplayName(_ fontFamily: String) -> String {
+        let normalized = fontFamily.replacingOccurrences(of: "-", with: " ")
+        guard let first = normalized.first else { return normalized }
+        return String(first).uppercased() + normalized.dropFirst()
+    }
+
+    /**
+     Resolves the first Android option index matching a stored font-family value.
+
+     Android's spinner calls `availableFonts.find { it.realFontFamily == fontFamilyVal }`, so the
+     duplicated `sans-serif-condensed` row resolves to the first duplicate after updates.
+
+     - Parameter value: Stored font-family value, or `nil` to use the Android default.
+     - Returns: First matching Android option index, falling back to the default `sans-serif` row.
+     - Side effects: none.
+     - Failure modes: Unknown values fall back to index `0` when even the default is unavailable.
+     */
+    static func androidFontFamilySelectedIndex(for value: String?) -> Int {
+        let resolvedValue = value ?? TextDisplaySettings.appDefaults.fontFamily ?? "sans-serif"
+        let options = androidFontFamilyOptions()
+        if let exactIndex = options.firstIndex(where: { $0.value == resolvedValue }) {
+            return exactIndex
+        }
+        return options.firstIndex(where: { $0.value == "sans-serif" }) ?? 0
+    }
 }
 
 /**
@@ -1391,63 +1861,3 @@ private struct HiddenBookmarkLabelsView: View {
         .navigationTitle(String(localized: "hide_labels", defaultValue: "Hide labels"))
     }
 }
-
-// MARK: - UIFontPickerViewController Wrapper (iOS only)
-
-#if os(iOS)
-/**
- UIKit bridge that presents the native iOS font picker and writes the selected family name back to
- the SwiftUI settings form.
- */
-private struct FontPickerView: UIViewControllerRepresentable {
-    /// Bound font family updated when the user chooses a font.
-    @Binding var selectedFamily: String
-
-    /// Dismiss action used to close the presented picker sheet.
-    @Environment(\.dismiss) private var dismiss
-
-    /// Creates the configured UIKit font picker controller.
-    func makeUIViewController(context: Context) -> UIFontPickerViewController {
-        let config = UIFontPickerViewController.Configuration()
-        config.includeFaces = false
-        let picker = UIFontPickerViewController(configuration: config)
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    /// No-op updater because the UIKit picker is configured once during presentation.
-    func updateUIViewController(_ uiViewController: UIFontPickerViewController, context: Context) {}
-
-    /// Creates the delegate coordinator that forwards picker events back into SwiftUI.
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    /**
-     Delegate bridge that handles UIKit font-picker callbacks.
-     */
-    class Coordinator: NSObject, UIFontPickerViewControllerDelegate {
-        /// Parent SwiftUI wrapper updated by UIKit delegate callbacks.
-        let parent: FontPickerView
-
-        /// Creates a coordinator bound to one picker wrapper instance.
-        init(_ parent: FontPickerView) {
-            self.parent = parent
-        }
-
-        /// Writes the selected font family back into the SwiftUI binding and dismisses the sheet.
-        func fontPickerViewControllerDidPickFont(_ viewController: UIFontPickerViewController) {
-            guard let descriptor = viewController.selectedFontDescriptor else { return }
-            if let family = descriptor.object(forKey: .family) as? String {
-                parent.selectedFamily = family
-            }
-            parent.dismiss()
-        }
-
-        /// Dismisses the picker without mutating the selected font family.
-        func fontPickerViewControllerDidCancel(_ viewController: UIFontPickerViewController) {
-            parent.dismiss()
-        }
-    }
-}
-#endif

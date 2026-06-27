@@ -5,6 +5,8 @@ to get to a similar result.
 
 For the durable decision behind the reader document/modal routing split, see
 [ADR 0002](../../adr/0002-route-reader-document-modals-through-shared-document-pipeline.md).
+For the cross-domain owner categories used below, see
+[ADR 0006](../../adr/0006-modal-presentation-ownership-for-android-parity.md).
 
 ## 1. Reader shell routing uses a native drawer plus a custom anchored overflow popup
 
@@ -107,20 +109,26 @@ Why this still remains a gap:
 - iOS does not expose app-level interception of hardware volume buttons for this
   type of custom reader action.
 
-## 7. Reader-adjacent native app surfaces remain acceptable adaptations after the modal audit
+## 7. Reader presentation routes must remain classified by owner
 
-- Status: intentional adaptations or acceptable platform surfaces
+- Status: documented guardrail
 
-What the #122 audit classified as acceptable for now:
+What we do:
 
-- Book chooser and reference chooser: Android also uses native chooser flows
-  here, so iOS sheet presentation is an adaptation rather than confirmed
-  Vue-modal drift.
-- Search, bookmarks list, history, settings, reading plans/progress, workspaces,
-  about, sync/import-export/help, speak controls, and dictionary/general-book/
-  map/EPUB browsers: these are app-level/native surfaces or Android native
-  activity equivalents, not confirmed Vue `ModalDialog` replacements.
-- Label assignment: Vue bookmark label actions call Android native
-  `assignLabels`; iOS `LabelAssignmentView` is equivalent in kind.
-- Memorize: iOS already emits the Vue memorize document, so no new reader-modal
-  drift was identified there.
+- The current reader sheets, modals, destinations, and state-backed transient
+  routes are classified in
+  [modal-ownership-matrix.md](modal-ownership-matrix.md).
+- App-owned Android surfaces can remain native iOS app surfaces only when the
+  behavior, choice set, and visual information architecture stay equivalent.
+- Platform boundaries such as iOS sharing are acceptable only at the OS handoff
+  point.
+- WebView-owned document flows, such as multi-reference/cross-reference
+  rendering, should move through the shared document pipeline rather than keep a
+  native sheet.
+
+Why this replaces the older audit language:
+
+- The #122 audit was useful, but its broad "acceptable native surface" language
+  made it too easy to preserve iOS sheets without re-checking ownership.
+- ADR 0006 now requires an explicit owner category before a presentation route
+  can be called parity.

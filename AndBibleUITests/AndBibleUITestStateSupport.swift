@@ -114,8 +114,12 @@ extension AndBibleUITests {
      - Side effects:
        - taps the resolved prompt field, verifies or clears any existing prompt value, emits
          keyboard input, and clears/retries if CI drops the input without appending duplicate text
+       - for the workspace creation prompt, relies on the prompt's Android-parity autofocus and
+         verifies text entry through the prompt-owned submit button because hosted XCTest can lose
+         the SwiftUI text-field snapshot after focus
      - Failure modes:
-       - records an XCTest failure when the field value never matches `text`
+       - records an XCTest failure when the field value or prompt-owned submit readiness never
+         reflects `text`
      */
     @discardableResult
     func typePromptText(
@@ -136,9 +140,30 @@ extension AndBibleUITests {
             "labelManagerNewLabelNameField",
             "workspaceNamePromptTextField",
         ].contains(resolvedIdentifier)
+        let skipsPromptValueObservation = resolvedIdentifier == "workspaceNamePromptTextField"
 
         func promptFocusedTextEntryCandidates() -> [XCUIElement] {
             usesPromptScopedResolvedField ? [] : focusedTextEntryCandidates(in: app)
+        }
+
+        func appCoordinate(for frame: CGRect, normalizedOffset: CGVector) -> XCUICoordinate? {
+            let appFrame = app.frame
+            guard elementFrameIsUsable(frame),
+                  elementFrameIsUsable(appFrame),
+                  appFrame.width > 0,
+                  appFrame.height > 0
+            else {
+                return nil
+            }
+
+            let absoluteX = frame.minX + frame.width * normalizedOffset.dx
+            let absoluteY = frame.minY + frame.height * normalizedOffset.dy
+            return app.coordinate(
+                withNormalizedOffset: CGVector(
+                    dx: absoluteX / appFrame.width,
+                    dy: absoluteY / appFrame.height
+                )
+            )
         }
 
         func resolvedPromptTextField() -> XCUIElement {
@@ -186,16 +211,10 @@ extension AndBibleUITests {
                       elementFrameIsUsable(prompt.frame) else {
                     return nil
                 }
-                return prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
-            case "workspaceNamePromptTextField":
-                guard let prompt = firstExistingElement(
-                    workspaceNamePromptScreenCandidates(in: app),
-                    timeout: 0.2
-                ),
-                    elementFrameIsUsable(prompt.frame) else {
-                    return nil
-                }
-                return prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18))
+                return appCoordinate(
+                    for: prompt.frame,
+                    normalizedOffset: CGVector(dx: 0.5, dy: 0.52)
+                )
             default:
                 return nil
             }
@@ -246,6 +265,30 @@ extension AndBibleUITests {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             } while Date() < clearDeadline
             return observedPromptTextValue(preferred: preferredCandidates).isEmpty
+        }
+
+        func waitForWorkspacePromptSubmitButtonToEnable(timeout: TimeInterval) -> Bool {
+            let submitDeadline = Date().addingTimeInterval(timeout)
+            repeat {
+                let submitCandidates = workspaceNamePromptButtonCandidates(
+                    "workspaceNamePromptConfirmButton",
+                    in: app
+                )
+                for submitButton in submitCandidates where submitButton.exists {
+                    if submitButton.isEnabled {
+                        return true
+                    }
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            } while Date() < submitDeadline
+
+            let submitCandidates = workspaceNamePromptButtonCandidates(
+                "workspaceNamePromptConfirmButton",
+                in: app
+            )
+            return submitCandidates.contains { submitButton in
+                submitButton.exists && submitButton.isEnabled
+            }
         }
 
         func clearObservedPromptTextValue(
@@ -324,6 +367,16 @@ extension AndBibleUITests {
         repeat {
             let promptTextField = resolvedPromptTextField()
             let preferredPromptCandidates = [promptTextField]
+            if skipsPromptValueObservation {
+                promptTextField.typeText(text)
+                if waitForWorkspacePromptSubmitButtonToEnable(
+                    timeout: min(5, max(0.5, deadline.timeIntervalSinceNow))
+                ) {
+                    return true
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                continue
+            }
             focusResolvedPromptTextEntryElement(
                 promptTextField,
                 in: app,
@@ -385,6 +438,16 @@ extension AndBibleUITests {
             _ = clearObservedPromptTextValue(preferred: preferredPromptCandidates, forceKeyboardDelete: true)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
+
+        if skipsPromptValueObservation {
+            XCTAssertTrue(
+                waitForWorkspacePromptSubmitButtonToEnable(timeout: 0),
+                "Expected workspace prompt submit button to become enabled after typing '\(text)'.",
+                file: file,
+                line: line
+            )
+            return false
+        }
 
         XCTAssertEqual(
             observedPromptTextValue(),
@@ -702,6 +765,44 @@ extension AndBibleUITests {
     }
 
     /**
+     Reads the current exported My Documents list state without broad list queries.
+
+     - Parameter app: Running application whose reader destination may expose My Documents state.
+     - Returns: Compact state string from the hidden export or screen fallback, if present.
+     - Side effects: none.
+     - Failure modes: Returns `nil` when the destination is not visible or has not exported state.
+     */
+    func resolvedMyDocumentsListStateValue(in app: XCUIApplication) -> String? {
+        if let value = semanticStateExportValue("myDocumentsListStateExport", in: app) {
+            return value
+        }
+        if let screen = resolvedElement("myDocumentsListScreen", in: app),
+           let value = screen.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /**
+     Reads the current exported My Document pages state without broad list queries.
+
+     - Parameter app: Running application whose reader destination may expose page-list state.
+     - Returns: Compact state string from the hidden export or screen fallback, if present.
+     - Side effects: none.
+     - Failure modes: Returns `nil` when the destination is not visible or has not exported state.
+     */
+    func resolvedMyDocumentPagesStateValue(in app: XCUIApplication) -> String? {
+        if let value = semanticStateExportValue("myDocumentPagesStateExport", in: app) {
+            return value
+        }
+        if let screen = resolvedElement("myDocumentPagesScreen", in: app),
+           let value = screen.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /**
      Waits for a lightweight exported semantic state value instead of re-querying full XCUI surfaces.
      *
      * - Parameters:
@@ -794,6 +895,76 @@ extension AndBibleUITests {
     }
 
     /**
+     Taps one inline Label Assignment control until the row reports the expected semantic value.
+     *
+     * - Parameters:
+     *   - controlPrefix: Accessibility identifier prefix for the inline control to tap.
+     *   - labelSegment: Identifier-safe label segment shared by the row and inline controls.
+     *   - expectedRowValue: Full row accessibility value expected after the mutation.
+     *   - expectedControlValue: Control accessibility value expected after the mutation.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time allowed for the row state to settle.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - re-resolves the row and inline control while polling
+     *   - retries the tap only while the control itself still reports the pre-mutation state
+     * - Failure modes:
+     *   - fails if the row never reaches `expectedRowValue` before timeout
+     */
+    func tapLabelAssignmentControlUntilRowValue(
+        _ controlPrefix: String,
+        labelSegment: String,
+        expectedRowValue: String,
+        expectedControlValue: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let rowIdentifier = "labelAssignmentRow::\(labelSegment)"
+        let controlIdentifier = "\(controlPrefix)::\(labelSegment)"
+        let deadline = Date().addingTimeInterval(timeout)
+        var didTap = false
+        var lastTapTime = Date.distantPast
+        var lastRowValue = "nil"
+        var lastControlValue = "nil"
+
+        repeat {
+            if let row = resolvedElement(rowIdentifier, in: app) {
+                lastRowValue = row.value.map { "\($0)" } ?? "nil"
+                if lastRowValue == expectedRowValue {
+                    return
+                }
+            } else {
+                lastRowValue = "missing"
+            }
+
+            if let control = resolvedElement(controlIdentifier, in: app) {
+                lastControlValue = control.value.map { "\($0)" } ?? "nil"
+                if lastControlValue != expectedControlValue,
+                   !didTap || Date().timeIntervalSince(lastTapTime) >= 1.0 {
+                    let remaining = max(0.1, deadline.timeIntervalSinceNow)
+                    if tapElementIfPossible(control, timeout: min(1, remaining)) {
+                        didTap = true
+                        lastTapTime = Date()
+                    }
+                }
+            } else {
+                lastControlValue = "missing"
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected label assignment row '\(rowIdentifier)' to reach value '\(expectedRowValue)' within \(timeout) seconds; last row value was '\(lastRowValue)' and last control value for '\(controlIdentifier)' was '\(lastControlValue)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Toggles the seeded label row inside Label Assignment and verifies the combined state change.
      *
      * - Parameter app: Running application under test.
@@ -812,27 +983,48 @@ extension AndBibleUITests {
             "Expected the seeded label row to start in a known non-favourite state, got '\(initialState ?? "nil")'."
         )
 
-        let favouriteButton = requireElement(
+        _ = requireElement(
             "labelAssignmentFavouriteButton::UI_Test_Seed",
             in: app,
             timeout: 10
         )
-        let toggleButton = requireElement(
+        _ = requireElement(
             "labelAssignmentToggleButton::UI_Test_Seed",
             in: app,
             timeout: 10
         )
 
-        tapElementReliably(favouriteButton, timeout: 10)
-        waitForElementValue("labelAssignmentRow::UI_Test_Seed", toEqual: "assigned,favourite", in: app, timeout: 10)
+        let favouritedState = initialState == "assigned,notFavourite"
+            ? "assigned,favourite"
+            : "unassigned,favourite"
+        tapLabelAssignmentControlUntilRowValue(
+            "labelAssignmentFavouriteButton",
+            labelSegment: "UI_Test_Seed",
+            expectedRowValue: favouritedState,
+            expectedControlValue: "favourite",
+            in: app,
+            timeout: 10
+        )
 
         if initialState == "assigned,notFavourite" {
-            tapElementReliably(toggleButton, timeout: 10)
-            waitForElementValue("labelAssignmentRow::UI_Test_Seed", toEqual: "unassigned,favourite", in: app, timeout: 10)
+            tapLabelAssignmentControlUntilRowValue(
+                "labelAssignmentToggleButton",
+                labelSegment: "UI_Test_Seed",
+                expectedRowValue: "unassigned,favourite",
+                expectedControlValue: "unassigned",
+                in: app,
+                timeout: 10
+            )
         }
 
-        tapElementReliably(toggleButton, timeout: 10)
-        waitForElementValue("labelAssignmentRow::UI_Test_Seed", toEqual: "assigned,favourite", in: app, timeout: 10)
+        tapLabelAssignmentControlUntilRowValue(
+            "labelAssignmentToggleButton",
+            labelSegment: "UI_Test_Seed",
+            expectedRowValue: "assigned,favourite",
+            expectedControlValue: "assigned",
+            in: app,
+            timeout: 10
+        )
     }
 
     /**
@@ -989,15 +1181,15 @@ extension AndBibleUITests {
     }
 
     /**
-     Resolves one label row by its accessibility label.
+     Resolves one label row through the production row identifier or visible row text.
      *
      * - Parameters:
      *   - name: User-visible label name expected on the row.
      *   - app: Running application under test.
-     * - Returns: The first matching Label Manager row button for the requested label name.
+     * - Returns: The first matching Label Manager row surface for the requested label name.
      * - Side effects:
-     *   - queries the live accessibility hierarchy for a label-manager row whose label matches
-     *     `name`
+     *   - queries the live accessibility hierarchy for the label-manager row identifier, then for
+     *     the visible label text SwiftUI exposes inside that row
      * - Failure modes:
      *   - returns an unresolved query when no matching row currently exists
      */
@@ -1008,6 +1200,10 @@ extension AndBibleUITests {
             if scopedButton.exists {
                 return scopedButton
             }
+            let scopedText = labelManagerScreen.staticTexts[name].firstMatch
+            if scopedText.exists {
+                return scopedText
+            }
             let scopedLink = labelManagerScreen.links[identifier].firstMatch
             if scopedLink.exists {
                 return scopedLink
@@ -1017,6 +1213,10 @@ extension AndBibleUITests {
         let globalButton = app.buttons[identifier].firstMatch
         if globalButton.exists {
             return globalButton
+        }
+        let globalText = app.staticTexts[name].firstMatch
+        if globalText.exists {
+            return globalText
         }
         let globalLink = app.links[identifier].firstMatch
         if globalLink.exists {
@@ -1048,14 +1248,23 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let element = labelRow(named: name, in: app)
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let element = labelRow(named: name, in: app)
+            if element.exists {
+                return element
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let fallback = labelRow(named: name, in: app)
         XCTAssertTrue(
-            element.waitForExistence(timeout: timeout),
+            fallback.exists,
             "Expected label row '\(name)' to exist within \(timeout) seconds.",
             file: file,
             line: line
         )
-        return element
+        return fallback
     }
 
     /**

@@ -180,8 +180,10 @@ extension AndBibleUITests {
         addWindowTab(expectingOrder: 1, in: app, timeout: 15)
         let paneMenu = requireElement("windowPaneMenuButton::1", in: app, timeout: 10)
         tapElementReliably(paneMenu, timeout: 10)
-        let textOptionsAction = requireElement("windowPaneTextOptionsButton", in: app, timeout: 10)
-        tapElementReliably(textOptionsAction, timeout: 10)
+        let textOptionsSubmenu = requirePaneMenuItem("windowPaneMenuItem::textOptions", in: app, timeout: 10)
+        tapElementReliably(textOptionsSubmenu, timeout: 10)
+        let allTextOptionsAction = requirePaneMenuItem("windowPaneMenuItem::allTextOptions", in: app, timeout: 10)
+        tapElementReliably(allTextOptionsAction, timeout: 10)
 
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=window", in: app, timeout: 10)
         let workspaceLink = requireElement("textDisplayOpenWorkspaceSettingsButton", in: app, timeout: 10)
@@ -191,6 +193,110 @@ extension AndBibleUITests {
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
         XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
         XCTAssertTrue(requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10).exists)
+    }
+
+    /**
+     Verifies that closing a pane from Android's pane hamburger menu leaves the reader alive.
+
+     The close action removes the active SwiftData `Window` and its cascaded `PageManager`. The
+     reader must detach that window from visible SwiftUI state before deleting it so the split view
+     never re-renders a pane backed by invalidated model objects.
+     *
+     - Side effects:
+     *   - launches the app, creates a second reader window through the tab bar, and opens the
+     *     active pane hamburger menu
+     *   - activates the pane-level Close command
+     * - Failure modes:
+     *   - fails if the pane menu close action terminates the app
+     *   - fails if the closed window tab remains visible after the close transaction settles
+     *   - fails if the remaining one-window pane loses Android's pane hamburger affordance
+     *   - fails if the remaining one-window footer cannot create another window
+     */
+    func testPaneMenuCloseWindowKeepsReaderAlive() {
+        let app = makeApp()
+        app.launch()
+
+        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
+        tapElementReliably(requireElement("windowPaneMenuButton::1", in: app, timeout: 10), timeout: 10)
+        tapElementReliably(
+            requirePaneMenuItem("windowPaneMenuItem::close", in: app, timeout: 12),
+            timeout: 10
+        )
+
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected reader shell to remain alive after pane-menu Close."
+        )
+        waitForElementExistence("windowTabButton::1", in: app, shouldExist: false, timeout: 10)
+        let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        XCTAssertFalse(finalState.contains("windowOrder=none"), "Expected an active reader window after Close; state=\(finalState)")
+        XCTAssertTrue(requireElement("windowPaneMenuButton::0", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("windowTabAddButton", in: app, timeout: 10).exists)
+    }
+
+    /**
+     Resolves one Android-style pane-menu row, scrolling the custom popup when the row is below the
+     first visible viewport.
+
+     - Parameters:
+     *   - identifier: Accessibility identifier for the pane-menu row.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to search while scrolling.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The first matching row with a usable frame, or the unresolved query after failure.
+     * - Side effects: swipes the `windowPaneMenu` popup surface upward while re-querying rows.
+     * - Failure modes: records an XCTest failure when the row never materializes.
+     */
+    private func requirePaneMenuItem(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let item = resolvedPaneMenuItem(identifier, in: app) {
+                return item
+            }
+
+            let menuScrollView = app.scrollViews["windowPaneMenu"].firstMatch
+            if elementHasUsableFrame(menuScrollView) {
+                menuScrollView.swipeUp()
+            } else if let menuSurface = resolvedElement("windowPaneMenu", in: app),
+                      elementHasUsableFrame(menuSurface) {
+                menuSurface.swipeUp()
+            } else {
+                app.swipeUp()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let item = app.buttons[identifier].firstMatch.exists
+            ? app.buttons[identifier].firstMatch
+            : unresolvedElement(identifier, in: app)
+        XCTAssertTrue(
+            item.exists,
+            "Expected pane menu item '\(identifier)' to become visible within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return item
+    }
+
+    private func resolvedPaneMenuItem(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> XCUIElement? {
+        let menuScrollView = app.scrollViews["windowPaneMenu"].firstMatch
+        let candidates = [
+            menuScrollView.buttons[identifier].firstMatch,
+            app.buttons[identifier].firstMatch,
+            menuScrollView.otherElements[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+        return candidates.first(where: { isElementHittable($0) })
     }
 
     /**
@@ -239,9 +345,9 @@ extension AndBibleUITests {
      *
      * - Side effects:
      *   - launches the app on the reader shell with the initial query `earth` queued for Search
-     *   - opens Search from the toolbar and waits for the search sheet to settle
+     *   - opens Search from the toolbar and waits for the Search destination to settle
      * - Failure modes:
-     *   - fails if the Search sheet never appears
+     *   - fails if the Search screen never appears
      *   - fails if the seeded query is dropped before the Search screen reaches its settled state
      */
     func testSearchDirectLaunchRetainsSeededQuery() {
@@ -251,6 +357,32 @@ extension AndBibleUITests {
         _ = openSearch(in: app)
         waitForSearchQuery("earth", in: app, timeout: 20)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
+    }
+
+    /**
+     Verifies Search opens as an integrated reader destination instead of an iOS sheet.
+     *
+     * Android Search is a full activity with toolbar navigation, not a bottom/large iOS sheet with a
+     * `Done` affordance. This test protects that presentation contract separately from Search's
+     * query behavior so future visual parity work does not accidentally reintroduce sheet chrome.
+     *
+     * - Setup: Launches the standard seeded Search fixture and opens Search through the reader entry.
+     * - Expected result: The reader state reports `readerDestination=search`, and no navigation-bar
+     *   `Done` button is exposed by the Search surface.
+     * - Failure meaning: Search has drifted back to sheet/modal presentation instead of Android's
+     *   destination-style surface.
+     * - Side effects: Presents Search from the reader shell.
+     */
+    func testSearchPresentsAsReaderDestinationInsteadOfSheet() {
+        let app = makeApp(searchQuery: "earth")
+        app.launch()
+
+        _ = openSearch(in: app)
+        waitForReaderRenderedContentState(containing: "readerDestination=search", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Search should not expose iOS sheet-style Done chrome when opened from the reader."
+        )
     }
 
     /**
@@ -368,18 +500,26 @@ extension AndBibleUITests {
      *
      * - Side effects:
      *   - launches Search with deterministic KJV and UITESTWEB index rows for `earth`
-     *   - opens the real translation picker and selects UITESTWEB
+     *   - uses the seeded startup reader reference `Genesis 1:1` as the before-navigation value
+     *   - verifies picker Cancel ignores a draft UITESTWEB row selection
+     *   - verifies outside dismissal ignores a draft UITESTWEB row selection
+     *   - verifies Select all followed by Select none and OK preserves the prior selection
+     *   - opens the real translation picker, selects UITESTWEB, and commits with OK
+     *   - verifies the visible selected-translation summary matches Android's abbreviation list
      *   - waits for the active query to rerun and export grouped per-translation counts
      * - Failure modes:
      *   - fails if the translation picker is not reachable from Search options
-     *   - fails if selecting a second translation does not rerun the active query
+     *   - fails if Cancel, outside dismissal, or empty OK mutates the committed module selection
+     *   - fails if selecting a second translation does not rerun the active query with KJV first
+     *   - fails if the selected-translation button collapses Android's abbreviation list into a
+     *     generic iOS count label
      *   - fails if grouped totals collapse to single-translation results
      */
     func testSearchMultiTranslationSelectionUpdatesGroupedTotals() {
         let app = makeApp(searchQuery: "earth")
         app.launch()
 
-        let initialReference = requireReaderReferenceValue(in: app, timeout: 15)
+        let initialReference = "Genesis 1:1"
 
         _ = openSearch(in: app)
         waitForSearchState(containing: "query=earth", in: app, timeout: 20)
@@ -393,8 +533,42 @@ extension AndBibleUITests {
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
         tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 10)
-        tapSearchTranslationDone(in: app, timeout: 10)
+        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
+        tapSearchTranslationCancel(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 10,
+            description: "still exactly KJV after cancel"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
+        tapSearchTranslationOutsideDismiss(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 10,
+            description: "still exactly KJV after outside dismissal"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationOK(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 10,
+            description: "still exactly KJV after empty OK"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
+        tapSearchTranslationOK(in: app, timeout: 10)
 
         waitForSearchSelectedModules(
             in: app,
@@ -403,6 +577,11 @@ extension AndBibleUITests {
         ) { modules in
             modules.count > 1 && modules.contains("UITESTWEB")
         }
+        waitForSearchState(containing: "selectedModuleOrder=KJV,UITESTWEB", in: app, timeout: 20)
+        XCTAssertTrue(
+            app.staticTexts["KJV, UITESTWEB"].waitForExistence(timeout: 5),
+            "Expected the Search translation button to show Android's selected abbreviation list."
+        )
         waitForSearchState(containing: "groupedTotal=3", in: app, timeout: 20)
         waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
         waitForSearchState(containing: "UITESTWEB:2", in: app, timeout: 20)
@@ -520,10 +699,8 @@ extension AndBibleUITests {
 
         let noahResultIdentifier = "searchResultRow::Genesis_6_8"
         waitForSearchResultRow(noahResultIdentifier, in: app, shouldExist: true, timeout: 20)
-        let noahResult = requireElement(noahResultIdentifier, in: app, timeout: 20)
-        tapElementReliably(noahResult, timeout: 10)
-
-        let updatedReference = waitForReaderReferenceValueToChange(
+        let updatedReference = tapSearchResultRowAndWaitForReaderReferenceChange(
+            noahResultIdentifier,
             from: initialReference,
             in: app,
             timeout: 20

@@ -370,7 +370,6 @@ extension AndBibleUITests {
         XCTAssertTrue(openLabelManager(in: app).exists)
 
         tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
-        waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: 10)
         let newLabelNameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
         guard typePromptText(
             originalName,
@@ -786,17 +785,21 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the font-family control presents the native font picker from Text Display.
+     Verifies that the font-family control presents the Android-style text-display dialog.
+     *
+     * Android opens `FontFamilyWidget` inside an `AlertDialog`, not the platform font picker. The
+     * iOS route should therefore stay inside the Text Display screen, expose the shared editor
+     * overlay, and report the active `fontFamily` editor state without any iOS sheet chrome.
      *
      * - Side effects:
      *   - launches the app on the reader shell and opens the text-display editor
-     *   - taps the font-family control, which presents the iOS font picker sheet
+     *   - taps the font-family control, which presents the in-place Android-style dialog
      * - Failure modes:
      *   - fails if the text-display editor never appears
-     *   - fails if the font-family control is missing or if the screen never reports
-     *     `fontPickerPresented` after the tap
+     *   - fails if the font-family control is missing, the Android dialog is not rendered, or the
+     *     screen does not report `preferenceEditor=fontFamily`
      */
-    func testTextDisplayFontFamilyButtonPresentsFontPicker() {
+    func testTextDisplayFontFamilyButtonPresentsAndroidDialog() {
         let app = makeApp()
         app.launch()
 
@@ -804,7 +807,11 @@ extension AndBibleUITests {
         XCTAssertTrue(textDisplayScreen.exists)
         let fontFamilyButton = requireReachableTextDisplayButton("textDisplayFontFamilyButton", in: app, timeout: 10)
         tapElementReliably(fontFamilyButton, timeout: 10)
-        waitForElementValue("textDisplaySettingsScreen", toContain: "fontPickerPresented", in: app, timeout: 10)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "preferenceEditor=fontFamily", in: app, timeout: 10)
+        XCTAssertTrue(
+            app.otherElements["textDisplayPreferenceEditorOverlay"].waitForExistence(timeout: 10),
+            "Expected the Android-style text display editor overlay to be visible."
+        )
     }
 
     /**

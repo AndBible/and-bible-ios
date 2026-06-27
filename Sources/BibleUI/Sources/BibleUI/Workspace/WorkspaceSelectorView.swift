@@ -176,14 +176,15 @@ public struct WorkspaceSelectorView: View {
 
     /**
      Builds one workspace row with color indicator, summary text, and active-workspace marker.
+
+     Nil workspace colors render with Android's `#ff444444` fallback so legacy or restored rows
+     still show the same selector affordance Android provides.
      */
     private func workspaceRow(_ workspace: Workspace) -> some View {
         HStack {
-            if let color = workspace.workspaceColor {
-                Circle()
-                    .fill(Color(argbInt: color))
-                    .frame(width: 12, height: 12)
-            }
+            Circle()
+                .fill(Color(argbInt: workspace.workspaceColor ?? Workspace.defaultWorkspaceColor))
+                .frame(width: 12, height: 12)
             VStack(alignment: .leading, spacing: 2) {
                 Text(workspace.name.isEmpty ? String(localized: "untitled") : workspace.name)
                     .font(.body)
@@ -600,10 +601,23 @@ private struct WorkspaceNamePromptView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workspaceNamePromptScreen")
         .tint(dialogAccent)
-        .task {
-            await MainActor.run {
-                isNameFieldFocused = true
-            }
+        .onAppear {
+            requestNameFieldFocus()
         }
+        .task(id: prompt.id) {
+            await requestNameFieldFocusAfterAttachment()
+        }
+    }
+
+    @MainActor
+    private func requestNameFieldFocus() {
+        isNameFieldFocused = true
+    }
+
+    @MainActor
+    private func requestNameFieldFocusAfterAttachment() async {
+        requestNameFieldFocus()
+        await Task.yield()
+        requestNameFieldFocus()
     }
 }

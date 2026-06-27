@@ -6,11 +6,30 @@ import UIKit
 #endif
 
 extension AndBibleUITests {
+    /**
+     Verifies the drawer Reading Plan route opens as an app-owned destination and can advance a day.
+     *
+     * Android opens reading plans through app-owned activities, not a platform sheet. This workflow
+     * protects the presentation route before exercising the existing plan-start and progress path.
+     *
+     * - Side effects:
+     *   - opens Reading Plans from the drawer
+     *   - starts the first available plan and marks the first day read
+     * - Failure modes:
+     *   - fails if Reading Plans regresses to sheet presentation
+     *   - fails if the plan cannot be started or advanced through the visible controls
+     */
     func testReadingPlansStartPlanAndAdvanceDay() {
         let app = makeApp()
         app.launch()
 
         _ = openReadingPlans(in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=readingPlans", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer Reading Plan should use reader destination back chrome, not iOS sheet Done chrome."
+        )
         tapElementReliably(requireElement("readingPlanStartButton", in: app, timeout: 10), timeout: 10)
         XCTAssertTrue(requireElement("availablePlansScreen", in: app, timeout: 10).exists)
         tapElementReliably(requireElement("readingPlanTemplateButton", in: app, timeout: 15), timeout: 10)

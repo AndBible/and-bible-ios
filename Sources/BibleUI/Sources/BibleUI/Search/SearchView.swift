@@ -61,7 +61,7 @@ enum UITestSearchQuerySeed {
  - `onAppear` seeds initial module selection, applies `initialQuery`, and triggers the index check
  - `startIndexCreation()` launches asynchronous index creation through `SearchIndexService`
  - `performSearch()` launches detached search work and marshals results back onto the main actor
- - `navigateTo(_:)` dismisses the sheet and notifies the caller with the selected passage
+ - `navigateTo(_:)` notifies the caller and dismisses Search with the active presentation mechanism
  */
 public struct SearchView: View {
     /// Callback invoked when the user selects a search hit and wants to navigate to it.
@@ -112,16 +112,19 @@ public struct SearchView: View {
     /// Installed module names selected for indexed multi-translation search.
     @State private var selectedModules: Set<String> = []
 
-    /// Whether the options panel is expanded above the results list.
-    @State private var showOptions = true
+    /// Draft module names edited inside the Android-style translation picker before OK commits.
+    @State private var pendingTranslationSelection: Set<String> = []
 
     /// Whether the system search field currently owns focus.
     @FocusState private var isSearchFieldFocused: Bool
 
+    /// Current system color scheme used for Android-dialog surface colors.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Navigation-title summary of the most recent search results.
     @State private var resultSummary: String = ""
 
-    /// Dismiss action for closing the search sheet after navigation or cancellation.
+    /// Dismiss action for popping Search after result navigation.
     @Environment(\.dismiss) private var dismiss
 
     /**
@@ -235,7 +238,7 @@ public struct SearchView: View {
      Builds the search UI for the current `viewState`.
 
      The body switches between index-check progress, index-creation prompt/progress, and the full
-     search interface while also wiring the toolbar and translation-picker sheet.
+     search interface while also wiring the toolbar and translation-picker overlay.
      */
     public var body: some View {
         Group {
@@ -262,29 +265,15 @@ public struct SearchView: View {
             // snapshot the full Search container while result lists are changing.
             searchStateExport
         }
+        .overlay {
+            if showTranslationPicker {
+                translationPickerOverlay
+            }
+        }
         .navigationTitle(navigationTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "done")) { dismiss() }
-            }
-            if case .ready = viewState {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        withAnimation { showOptions.toggle() }
-                    } label: {
-                        Image(systemName: showOptions ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                    }
-                    .accessibilityIdentifier("searchOptionsToggleButton")
-                    .accessibilityValue(showOptions ? "visible" : "hidden")
-                }
-            }
-        }
-        .sheet(isPresented: $showTranslationPicker) {
-            makeTranslationPicker(modules: installedBibleModules)
-        }
         .onAppear {
             if selectedModules.isEmpty, let mod = swordModule {
                 selectedModules = [mod.info.name]
@@ -362,13 +351,43 @@ public struct SearchView: View {
 
     /// Stable selected-translation token exported for UI automation.
     private var searchAccessibilitySelectionToken: String {
-        "selectedModules=\(selectedModules.sorted().joined(separator: ","))"
+        let orderedModules = Self.androidOrderedSelectedSearchModuleNames(
+            selectedModuleNames: selectedModules,
+            primaryModuleName: swordModule?.info.name,
+            installedModules: installedBibleModules
+        )
+        return "selectedModules=\(selectedModules.sorted().joined(separator: ","));selectedModuleOrder=\(orderedModules.joined(separator: ","))"
+    }
+
+    /**
+     User-visible selected translation summary shown on the Search translation picker button.
+
+     Android renders the committed selected translations as a comma-separated abbreviation list after
+     moving the primary document to the front. iOS uses the same helper as search execution so the
+     visible control, request order, and grouped result order cannot drift independently.
+
+     - Returns: Ordered abbreviations such as `KJV, UITESTWEB`, or a localized fallback label when
+       no module can be resolved.
+     - Side effects: none.
+     - Failure modes: Empty selection and missing primary module metadata produce the generic
+       `search_translations` fallback instead of a malformed empty button.
+     */
+    private var selectedTranslationSummaryLabel: String {
+        let orderedModules = Self.androidOrderedSelectedSearchModuleNames(
+            selectedModuleNames: selectedModules,
+            primaryModuleName: swordModule?.info.name,
+            installedModules: installedBibleModules
+        )
+        guard !orderedModules.isEmpty else {
+            return String(localized: "search_translations", defaultValue: "Translations")
+        }
+        return orderedModules.joined(separator: ", ")
     }
 
     /**
      Stable translation-picker presentation token exported for UI automation.
      *
-     - Returns: `translationPicker=open` while SwiftUI is presenting the picker sheet, otherwise
+     - Returns: `translationPicker=open` while Search is presenting the custom picker overlay, otherwise
        `translationPicker=closed`.
      - Side effects: none.
      - Failure modes: This computed token does not fail.
@@ -502,11 +521,7 @@ public struct SearchView: View {
     /// Main search UI shown once the view reaches the `.ready` state.
     private var searchContent: some View {
         VStack(spacing: 0) {
-            searchQueryBar
-
-            if showOptions {
-                searchOptionsPanel
-            }
+            searchCriteriaForm
 
             List {
                 if isSearching {
@@ -517,63 +532,41 @@ public struct SearchView: View {
                     multiResultsSection(multi)
                 } else if !results.isEmpty {
                     singleResultsSection
-                } else if query.isEmpty {
-                    ContentUnavailableView(
-                        String(localized: "search_bible"),
-                        systemImage: "magnifyingglass",
-                        description: Text(String(localized: "search_enter_prompt"))
-                    )
-                } else if !resultSummary.isEmpty {
-                    ContentUnavailableView(
-                        String(localized: "no_results"),
-                        systemImage: "magnifyingglass",
-                        description: Text("No matches found for \"\(query)\"")
-                    )
+                } else if !query.isEmpty, !resultSummary.isEmpty {
+                    Text(String(localized: "no_results"))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .listRowSeparator(.hidden)
                 }
             }
+            .listStyle(.plain)
             .accessibilityIdentifier("searchResultsList")
+
+            searchSubmitButton
         }
     }
 
     /// Stable app-owned query field used for both user input and UI automation.
     private var searchQueryBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-
-            TextField(String(localized: "search_bible_text"), text: $query)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .submitLabel(.search)
-                .focused($isSearchFieldFocused)
-                .accessibilityIdentifier("searchQueryField")
-                .onSubmit {
-                    isSearchFieldFocused = false
-                    performSearch()
-                }
-
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                    clearSearchResults()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(String(localized: "clear"))
-                .accessibilityIdentifier("searchClearQueryButton")
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.quaternary)
+        TextField(
+            String(localized: "type_text_or_bible_reference", defaultValue: "Type text or Bible reference"),
+            text: $query
         )
-        .padding(.horizontal)
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled(true)
+        .submitLabel(.search)
+        .focused($isSearchFieldFocused)
+        .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 8)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+        .accessibilityIdentifier("searchQueryField")
+        .onSubmit {
+            isSearchFieldFocused = false
+            performSearch()
+        }
         .onAppear {
             if UITestRuntimeConfiguration.shouldAutofocusSearchField {
                 DispatchQueue.main.async {
@@ -583,91 +576,175 @@ public struct SearchView: View {
         }
     }
 
-    // MARK: - Search Options Panel
+    // MARK: - Search Criteria Form
 
-    /// Search-mode, scope, and translation controls shown above the result list.
-    private var searchOptionsPanel: some View {
-        VStack(spacing: 12) {
-            Picker(String(localized: "search_match"), selection: $wordMode) {
-                ForEach(SearchWordMode.allCases, id: \.self) { mode in
-                    Text(mode.rawValue)
-                        .tag(mode)
-                        .accessibilityIdentifier("searchWordModeButton::\(searchWordModeToken(for: mode))")
-                }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("searchWordModePicker")
+    /// Android-style Search criteria form shown above inline results.
+    private var searchCriteriaForm: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            searchQueryBar
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    scopeButton(String(localized: "search_scope_all"), choice: .wholeBible)
-                    scopeButton(String(localized: "search_scope_ot"), choice: .oldTestament)
-                    scopeButton(String(localized: "search_scope_nt"), choice: .newTestament)
-                    scopeButton(currentBook, choice: .currentBook)
-                }
-                .font(.subheadline)
+            HStack(alignment: .top, spacing: 16) {
+                searchScopeRadioGroup
+                searchWordModeRadioGroup
             }
-            .accessibilityIdentifier("searchScopeStrip")
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
 
-            if installedBibleModules.count > 1 {
-                Button {
-                    isSearchFieldFocused = false
-                    showTranslationPicker = true
-                } label: {
-                    HStack {
-                        Image(systemName: "book.closed")
-                            .font(.caption)
-                        if selectedModules.count == 1, let name = selectedModules.first {
-                            Text(name)
-                        } else {
-                            Text("\(selectedModules.count) translations")
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                    }
-                    .font(.subheadline)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("searchTranslationPickerButton")
-                .accessibilityValue("\(searchAccessibilitySelectionToken);\(searchAccessibilityTranslationPickerToken)")
-            }
+            searchTranslationsSection
         }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
-        .background(.bar)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("searchOptionsPanel")
         .accessibilityValue("visible")
     }
 
+    /// Android search-scope radio group.
+    private var searchScopeRadioGroup: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(String(localized: "search_bible_section_group_prompt", defaultValue: "Bible section"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            searchRadioRow(
+                label: String(localized: "search_scope_all", defaultValue: "All Bible"),
+                isSelected: scopeOption == .wholeBible,
+                identifier: searchScopeIdentifier(for: .wholeBible)
+            ) {
+                scopeOption = .wholeBible
+            }
+
+            searchRadioRow(
+                label: String(localized: "search_scope_ot", defaultValue: "Old Testament"),
+                isSelected: scopeOption == .oldTestament,
+                identifier: searchScopeIdentifier(for: .oldTestament)
+            ) {
+                scopeOption = .oldTestament
+            }
+
+            searchRadioRow(
+                label: String(localized: "search_scope_nt", defaultValue: "New Testament"),
+                isSelected: scopeOption == .newTestament,
+                identifier: searchScopeIdentifier(for: .newTestament)
+            ) {
+                scopeOption = .newTestament
+            }
+
+            searchRadioRow(
+                label: currentBook,
+                isSelected: scopeOption == .currentBook,
+                identifier: searchScopeIdentifier(for: .currentBook)
+            ) {
+                scopeOption = .currentBook
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("searchScopeStrip")
+    }
+
+    /// Android word-matching radio group.
+    private var searchWordModeRadioGroup: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(String(localized: "search_words_group_prompt", defaultValue: "Words"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(SearchWordMode.allCases, id: \.self) { mode in
+                searchRadioRow(
+                    label: mode.rawValue,
+                    isSelected: wordMode == mode,
+                    identifier: "searchWordModeButton::\(searchWordModeToken(for: mode))"
+                ) {
+                    wordMode = mode
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// Android translations selector row.
+    private var searchTranslationsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(String(localized: "search_translations", defaultValue: "Translations"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button {
+                openTranslationPicker()
+            } label: {
+                HStack(spacing: 10) {
+                    Text(selectedTranslationSummaryLabel)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "pencil")
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("searchTranslationPickerButton")
+            .accessibilityValue("\(searchAccessibilitySelectionToken);\(searchAccessibilityTranslationPickerToken)")
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    /// Android-style bottom submit button for executing Search criteria.
+    private var searchSubmitButton: some View {
+        Button {
+            isSearchFieldFocused = false
+            performSearch()
+        } label: {
+            Text(String(localized: "search", defaultValue: "Search"))
+                .font(.body.weight(.medium))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+        }
+        .buttonStyle(.borderedProminent)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+        .accessibilityIdentifier("searchSubmitButton")
+    }
+
     /**
-     Builds one pill-style scope selector button.
+     Builds an Android-style radio row used by Search criteria groups.
 
      - Parameters:
-       - label: User-visible scope label.
-       - choice: Scope value activated when the button is tapped.
+       - label: User-visible option label.
+       - isSelected: Whether this option is the active value.
+       - identifier: Stable UI automation identifier for the row.
+       - action: Mutation performed when the row is tapped.
      */
-    private func scopeButton(_ label: String, choice: ScopeChoice) -> some View {
-        Button(label) {
-            scopeOption = choice
+    private func searchRadioRow(
+        label: String,
+        isSelected: Bool,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                    .font(.caption)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                Text(label)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .contentShape(Rectangle())
+            .accessibilityIdentifier(identifier)
         }
-        .font(.subheadline)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            scopeOption == choice ? Color.accentColor.opacity(0.2) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 8)
-        )
-        .foregroundStyle(scopeOption == choice ? Color.accentColor : Color.primary)
-        .lineLimit(1)
-        .accessibilityElement(children: .ignore)
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
         .accessibilityLabel(label)
-        .accessibilityValue(scopeOption == choice ? "selected" : "unselected")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier(searchScopeIdentifier(for: choice))
+        .accessibilityValue(isSelected ? "selected" : "unselected")
+        .accessibilityIdentifier(identifier)
     }
 
     /**
@@ -720,14 +797,6 @@ public struct SearchView: View {
         case .phrase:
             return "phrase"
         }
-    }
-
-    /// Resets Search result state when the visible query is explicitly cleared.
-    private func clearSearchResults() {
-        results = []
-        multiResults = nil
-        resultSummary = ""
-        isSearching = false
     }
 
     // MARK: - Results Sections
@@ -936,67 +1005,155 @@ public struct SearchView: View {
     // MARK: - Translation Picker
 
     /**
-     Builds the translation picker used for multi-translation searches.
+     Builds the dimmed modal layer used for Android-style multi-translation selection.
 
-     - Parameter modules: Installed Bible modules available for selection.
+     The overlay is owned by `SearchView` rather than SwiftUI sheet presentation so Search matches
+     Android's in-place `AlertDialog` behavior: the picker edits a local draft, Cancel discards it,
+     and OK is the only commit path.
+
+     - Returns: Full-screen modal dimmer and centered picker dialog.
+     - Side effects: Button actions inside the dialog can mutate `pendingTranslationSelection`,
+       commit to `selectedModules`, or dismiss the overlay; tapping the dimmer follows Android's
+       dialog-cancel path and discards the draft.
+     - Failure modes: Empty module sets render an empty scroll region; the caller only presents the
+       picker when more than one installed Bible module exists.
      */
-    private func makeTranslationPicker(modules: [ModuleInfo]) -> some View {
-        NavigationStack {
-            List {
-                ForEach(modules) { (mod: ModuleInfo) in
-                    translationRow(mod)
+    private var translationPickerOverlay: some View {
+        ZStack {
+            Color.black.opacity(colorScheme == .dark ? 0.45 : 0.32)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    cancelTranslationPicker()
                 }
-            }
-            .accessibilityIdentifier("searchTranslationPickerList")
-            .navigationTitle(String(localized: "search_translations"))
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "done")) { showTranslationPicker = false }
-                        .accessibilityIdentifier("searchTranslationDoneButton")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button(String(localized: "search_all")) {
-                        selectedModules = Set(installedBibleModules.map(\.name))
-                    }
-                    .accessibilityIdentifier("searchTranslationSelectAllButton")
-                }
-            }
+                .accessibilityHidden(true)
+
+            makeTranslationPicker(modules: installedBibleModules)
+                .padding(.horizontal, 24)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("searchTranslationPickerOverlay")
     }
 
-    @ViewBuilder
     /**
-     Builds one row in the translation picker.
+     Builds the Android-style Search translation multiselect dialog.
+
+     Android's `Search.showTranslationSelector` presents a multi-choice `AlertDialog` with all
+     Bible modules sorted by abbreviation, existing selections prechecked, explicit Cancel/OK
+     buttons, and a neutral Select all/none toggle. This SwiftUI surface mirrors that contract
+     without using an iOS sheet or committing row taps directly to Search state.
+
+     - Parameter modules: Installed Bible modules available for selection.
+     - Returns: Centered modal dialog containing title, selectable rows, and dialog actions.
+     - Side effects: Row and Select all/none actions mutate only `pendingTranslationSelection`; OK
+       may commit to `selectedModules` through `commitTranslationPickerSelection()`.
+     - Failure modes: Missing index-service state is treated as unknown and therefore does not add
+       the unindexed warning label.
+     */
+    private func makeTranslationPicker(modules: [ModuleInfo]) -> some View {
+        VStack(spacing: 0) {
+            Text(String(localized: "compare_choose_translations"))
+                .font(.headline)
+                .foregroundStyle(dialogPrimaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.top, 20)
+                .padding(.bottom, 12)
+
+            Divider()
+                .background(dialogSecondaryText.opacity(0.25))
+
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Self.androidSortedTranslationModules(modules)) { mod in
+                        translationRow(mod)
+                        Divider()
+                            .background(dialogSecondaryText.opacity(0.18))
+                            .padding(.leading, 22)
+                    }
+                }
+                .accessibilityIdentifier("searchTranslationPickerList")
+            }
+            .frame(maxHeight: 420)
+
+            Divider()
+                .background(dialogSecondaryText.opacity(0.25))
+
+            HStack(spacing: 14) {
+                Button(String(localized: "cancel")) {
+                    cancelTranslationPicker()
+                }
+                .foregroundStyle(dialogAccent)
+                .accessibilityIdentifier("searchTranslationCancelButton")
+
+                Spacer(minLength: 8)
+
+                Button(searchTranslationSelectToggleTitle) {
+                    toggleAllTranslationRows()
+                }
+                .foregroundStyle(dialogAccent)
+                .accessibilityIdentifier("searchTranslationSelectAllButton")
+                .accessibilityValue(searchTranslationSelectToggleAccessibilityValue)
+
+                Button(String(localized: "ok", defaultValue: "OK")) {
+                    commitTranslationPickerSelection()
+                }
+                .fontWeight(.semibold)
+                .foregroundStyle(dialogAccent)
+                .accessibilityIdentifier("searchTranslationOKButton")
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 14)
+        }
+        .frame(maxWidth: 430)
+        .background(dialogBackground, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(dialogSecondaryText.opacity(0.28), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.22), radius: 20, x: 0, y: 12)
+    }
+
+    /**
+     Builds one Android-style checkbox row in the Search translation picker.
 
      - Parameter mod: Installed module metadata for the row being rendered.
+     - Returns: A full-width button that toggles the row's draft checked state.
+     - Side effects: Mutates `pendingTranslationSelection`; it does not mutate committed Search
+       module selection until the dialog OK action runs.
+     - Failure modes: If index readiness cannot be determined, the row label omits the unindexed
+       suffix rather than presenting possibly false status.
      */
     private func translationRow(_ mod: ModuleInfo) -> some View {
         let modName = mod.name
-        let modDesc = mod.description
-        let isSelected = selectedModules.contains(modName)
-        Button {
-            if isSelected {
-                if selectedModules.count > 1 { selectedModules.remove(modName) }
-            } else {
-                selectedModules.insert(modName)
-            }
+        let isSelected = pendingTranslationSelection.contains(modName)
+        let rowLabel = Self.androidTranslationPickerLabel(
+            for: mod,
+            isIndexed: isTranslationModuleIndexed(modName),
+            unindexedStatus: String(localized: "search_index_not_created", defaultValue: "Search index not created")
+        )
+        return Button {
+            togglePendingTranslationSelection(modName)
         } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(modName).font(.headline)
-                    Text(modDesc).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer()
+            HStack(spacing: 14) {
                 if isSelected {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+                    Image(systemName: "checkmark.square.fill")
+                        .foregroundStyle(dialogAccent)
                 } else {
-                    Image(systemName: "circle").foregroundStyle(.secondary)
+                    Image(systemName: "square")
+                        .foregroundStyle(dialogSecondaryText)
                 }
+                Text(rowLabel)
+                    .font(.body)
+                    .foregroundStyle(dialogPrimaryText)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 13)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1004,10 +1161,165 @@ public struct SearchView: View {
         .accessibilityValue(isSelected ? "selected" : "unselected")
     }
 
+    /// Android-dialog background color for the current system appearance.
+    private var dialogBackground: Color {
+        AndroidDialogSurfacePalette.background(for: colorScheme)
+    }
+
+    /// Android-dialog primary text color for the current system appearance.
+    private var dialogPrimaryText: Color {
+        AndroidDialogSurfacePalette.primaryText(for: colorScheme)
+    }
+
+    /// Android-dialog secondary text color for the current system appearance.
+    private var dialogSecondaryText: Color {
+        AndroidDialogSurfacePalette.secondaryText(for: colorScheme)
+    }
+
+    /// Android-dialog accent color for interactive picker actions.
+    private var dialogAccent: Color {
+        AndroidDialogSurfacePalette.accent(for: colorScheme)
+    }
+
+    /**
+     Opens the Search translation picker with a draft that mirrors Android prechecked rows.
+
+     Android loads the existing saved/current selection before presenting the multiselect dialog,
+     then lets the dialog mutate temporary checked state until an action is pressed. This method
+     seeds that draft from the committed iOS Search selection and the current primary module.
+
+     Side effects:
+     - clears Search field focus so the dialog is not obscured by the keyboard
+     - mutates `pendingTranslationSelection`
+     - sets `showTranslationPicker` to present the overlay
+
+     Failure modes:
+     - if no committed selection and no primary module exist, the draft is empty and OK will leave
+       the committed Search selection unchanged.
+     */
+    private func openTranslationPicker() {
+        isSearchFieldFocused = false
+        pendingTranslationSelection = Set(Self.androidOrderedSelectedSearchModuleNames(
+            selectedModuleNames: selectedModules,
+            primaryModuleName: swordModule?.info.name,
+            installedModules: installedBibleModules
+        ))
+        showTranslationPicker = true
+    }
+
+    /**
+     Dismisses the Search translation picker without committing the draft selection.
+
+     Android's dialog Cancel path returns an empty result and leaves the existing selected
+     translations untouched. iOS mirrors that by clearing only the draft state.
+
+     Side effects:
+     - clears `pendingTranslationSelection`
+     - sets `showTranslationPicker` to false
+     */
+    private func cancelTranslationPicker() {
+        pendingTranslationSelection.removeAll()
+        showTranslationPicker = false
+    }
+
+    /**
+     Commits the Search translation picker draft according to Android's non-empty result contract.
+
+     Android ignores an empty selected result, including the case where the user presses OK after
+     toggling all rows off. This method preserves the previous selection for empty drafts, otherwise
+     it commits the draft while preserving the primary module first for downstream search ordering.
+
+     Side effects:
+     - may mutate `selectedModules`
+     - clears the draft and dismisses the overlay
+     - triggers the existing `selectedModules` change observer when the committed set changes
+     */
+    private func commitTranslationPickerSelection() {
+        let orderedSelection = Self.androidCommittedTranslationSelection(
+            previousModuleNames: selectedModules,
+            draftModuleNames: pendingTranslationSelection,
+            primaryModuleName: swordModule?.info.name,
+            installedModules: installedBibleModules
+        )
+        if !orderedSelection.isEmpty {
+            selectedModules = Set(orderedSelection)
+        }
+        pendingTranslationSelection.removeAll()
+        showTranslationPicker = false
+    }
+
+    /**
+     Toggles one draft module check state in the Search translation picker.
+
+     Android allows the dialog's checked set to become empty while the dialog remains open; the
+     empty OK result is ignored later. This method intentionally does not enforce "at least one"
+     selection at row-tap time.
+
+     - Parameter moduleName: SWORD module abbreviation for the tapped row.
+     - Side effects: Mutates `pendingTranslationSelection`.
+     */
+    private func togglePendingTranslationSelection(_ moduleName: String) {
+        if pendingTranslationSelection.contains(moduleName) {
+            pendingTranslationSelection.remove(moduleName)
+        } else {
+            pendingTranslationSelection.insert(moduleName)
+        }
+    }
+
+    /**
+     Selects every module or clears the draft selection using Android's neutral-button behavior.
+
+     Android's multiselect neutral button toggles between Select all and Select none without
+     closing the dialog. This method mirrors that behavior against the abbreviation-sorted module
+     list.
+
+     Side effects: Mutates `pendingTranslationSelection`; does not commit to `selectedModules`.
+     */
+    private func toggleAllTranslationRows() {
+        let allModuleNames = Set(Self.androidSortedTranslationModules(installedBibleModules).map(\.name))
+        if pendingTranslationSelection.count == allModuleNames.count {
+            pendingTranslationSelection.removeAll()
+        } else {
+            pendingTranslationSelection = allModuleNames
+        }
+    }
+
+    /**
+     Resolves whether one module has a completed Search index for picker labeling.
+
+     Android appends "Search index not created" when JSword reports an index status other than
+     done. iOS can only render that status when a `SearchIndexService` is available; absent service
+     means direct SWORD fallback is in use, so the picker omits an unverified warning.
+
+     - Parameter moduleName: SWORD module abbreviation to inspect.
+     - Returns: `true` when the module should render without the unindexed suffix.
+     - Side effects: Reads Search index metadata through `SearchIndexService`.
+     */
+    private func isTranslationModuleIndexed(_ moduleName: String) -> Bool {
+        searchIndexService?.hasIndex(for: moduleName) ?? true
+    }
+
+    /// Visible Select all/none label for the Search translation picker neutral action.
+    private var searchTranslationSelectToggleTitle: String {
+        let allCount = Self.androidSortedTranslationModules(installedBibleModules).count
+        if allCount > 0, pendingTranslationSelection.count == allCount {
+            return String(localized: "select_none", defaultValue: "Select none")
+        }
+        return String(localized: "select_all", defaultValue: "Select all")
+    }
+
+    /// Stable UI-test semantic state for the picker neutral select toggle.
+    private var searchTranslationSelectToggleAccessibilityValue: String {
+        let allCount = Self.androidSortedTranslationModules(installedBibleModules).count
+        return allCount > 0 && pendingTranslationSelection.count == allCount
+            ? "selectNone"
+            : "selectAll"
+    }
+
     // MARK: - Navigation
 
     /**
-     Forwards the selected result to the caller and dismisses the search sheet.
+     Forwards the selected result to the caller and dismisses Search.
 
      - Parameter hit: Selected search result.
      */
@@ -1078,8 +1390,12 @@ public struct SearchView: View {
             return
         }
 
-        let moduleNames = selectedModules.isEmpty ? [mod.info.name] : Array(selectedModules)
-        if let missingModuleName = moduleNames.sorted().first(where: { !service.hasIndex(for: $0) }) {
+        let moduleNames = Self.androidOrderedSelectedSearchModuleNames(
+            selectedModuleNames: selectedModules,
+            primaryModuleName: mod.info.name,
+            installedModules: installedBibleModules
+        )
+        if let missingModuleName = moduleNames.first(where: { !service.hasIndex(for: $0) }) {
             viewState = .needsIndex(
                 moduleName: missingModuleName,
                 moduleDescription: moduleDescription(for: missingModuleName)
@@ -1188,7 +1504,12 @@ public struct SearchView: View {
             }
             // Also index any other selected modules
             if let mgr = swordManager {
-                for name in selectedModules where !service.hasIndex(for: name) {
+                let selectedNames = Self.androidOrderedSelectedSearchModuleNames(
+                    selectedModuleNames: selectedModules,
+                    primaryModuleName: swordModule?.info.name,
+                    installedModules: installedBibleModules
+                )
+                for name in selectedNames where !service.hasIndex(for: name) {
                     if let existing = list.first(where: { $0.1 == name }) {
                         _ = existing // already queued
                     } else if let mod = mgr.module(named: name) {
@@ -1237,7 +1558,11 @@ public struct SearchView: View {
         let currentQuery = query
         let currentWordMode = wordMode
         let currentScope = scopeOption
-        let currentSelectedModules = selectedModules
+        let currentSelectedModules = Self.androidOrderedSelectedSearchModuleNames(
+            selectedModuleNames: selectedModules,
+            primaryModuleName: swordModule?.info.name,
+            installedModules: installedBibleModules
+        )
         let bookName = currentBook
         let osisBookId = currentOsisBookId
         let currentSwordModule = swordModule
@@ -1308,14 +1633,21 @@ public struct SearchView: View {
                 if currentSelectedModules.count > 1 {
                     let grouped = service.searchMultiple(
                         query: currentQuery,
-                        moduleNames: Array(currentSelectedModules),
+                        moduleNames: currentSelectedModules,
                         wordMode: currentWordMode,
                         scopeBookName: scopeBookName,
                         scopeTestament: scopeTestament
                     )
-                    let hits = Self.convertGroupedResults(grouped, query: currentQuery)
-                    let perModule = grouped.map { (name: $0.key, count: $0.value.count) }
-                        .sorted { $0.name < $1.name }
+                    let hits = Self.convertGroupedResults(
+                        grouped,
+                        moduleOrder: currentSelectedModules
+                    )
+                    let perModule = Self.orderedGroupedModuleNames(
+                        grouped,
+                        moduleOrder: currentSelectedModules
+                    ).map { moduleName in
+                        (name: moduleName, count: grouped[moduleName]?.count ?? 0)
+                    }
                     let totalCount = perModule.reduce(0) { $0 + $1.count }
 
                     await MainActor.run {
@@ -1373,6 +1705,129 @@ public struct SearchView: View {
     }
 
     // MARK: - Helpers
+
+    /**
+     Sorts Search translation picker modules using Android's abbreviation ordering.
+
+     Android builds the Search translation multiselect with
+     `SwordDocumentFacade.bibles.sortedBy { it.abbreviation }`. The iOS picker and commit helpers
+     use this shared function so row order, select-all order, and result grouping do not depend on
+     installer order or `Set` iteration.
+
+     - Parameter modules: Installed Bible modules available to Search.
+     - Returns: Modules sorted by their SWORD abbreviation (`ModuleInfo.name`).
+     - Side effects: none.
+     - Failure modes: Duplicate module names retain Swift's sort stability expectations only for
+       equal keys; installed SWORD modules should have unique abbreviations.
+     */
+    nonisolated static func androidSortedTranslationModules(_ modules: [ModuleInfo]) -> [ModuleInfo] {
+        modules.sorted { lhs, rhs in
+            lhs.name < rhs.name
+        }
+    }
+
+    /**
+     Resolves selected Search module names in Android commit/search order.
+
+     Android collects selected rows from the abbreviation-sorted dialog and then moves the current
+     document to the front with `ensurePrimaryDocumentFirst()`. This function provides the same
+     deterministic order for Search requests, grouped-result summaries, and UI-test state exports.
+
+     - Parameters:
+       - selectedModuleNames: Committed module abbreviations selected for Search.
+       - primaryModuleName: Current reader/search module abbreviation, preferred first when present.
+       - installedModules: Installed Bible modules used to derive Android dialog order.
+     - Returns: Selected module abbreviations with the primary module first, followed by remaining
+       selected modules in Android abbreviation order and unknown selections alphabetically.
+     - Side effects: none.
+     - Failure modes: If `selectedModuleNames` is empty and no primary exists, returns an empty
+       array so callers can preserve their existing no-selection fallback.
+     */
+    nonisolated static func androidOrderedSelectedSearchModuleNames(
+        selectedModuleNames: Set<String>,
+        primaryModuleName: String?,
+        installedModules: [ModuleInfo]
+    ) -> [String] {
+        var effectiveSelection = selectedModuleNames
+        if effectiveSelection.isEmpty, let primaryModuleName {
+            effectiveSelection.insert(primaryModuleName)
+        }
+
+        var orderedNames = androidSortedTranslationModules(installedModules)
+            .map(\.name)
+            .filter { effectiveSelection.contains($0) }
+
+        let unknownNames = effectiveSelection.subtracting(orderedNames).sorted()
+        orderedNames.append(contentsOf: unknownNames)
+
+        if let primaryModuleName,
+           let primaryIndex = orderedNames.firstIndex(of: primaryModuleName) {
+            orderedNames.remove(at: primaryIndex)
+            orderedNames.insert(primaryModuleName, at: 0)
+        }
+
+        return orderedNames
+    }
+
+    /**
+     Applies Android's Search translation dialog commit rule to a picker draft.
+
+     Android's positive button returns checked rows, but `Search.showTranslationSelector` only
+     commits when that result is non-empty. This helper keeps iOS OK-with-no-selection equivalent
+     to Android's ignored empty result while still returning a deterministic module order for
+     non-empty commits.
+
+     - Parameters:
+       - previousModuleNames: Currently committed Search selection.
+       - draftModuleNames: Draft checked rows from the open picker dialog.
+       - primaryModuleName: Current reader/search module abbreviation, preferred first.
+       - installedModules: Installed Bible modules used to derive Android dialog order.
+     - Returns: Ordered effective selection: draft when non-empty, otherwise previous selection.
+     - Side effects: none.
+     - Failure modes: If both previous and draft selections are empty and no primary exists, returns
+       an empty array.
+     */
+    nonisolated static func androidCommittedTranslationSelection(
+        previousModuleNames: Set<String>,
+        draftModuleNames: Set<String>,
+        primaryModuleName: String?,
+        installedModules: [ModuleInfo]
+    ) -> [String] {
+        let effectiveSelection = draftModuleNames.isEmpty ? previousModuleNames : draftModuleNames
+        return androidOrderedSelectedSearchModuleNames(
+            selectedModuleNames: effectiveSelection,
+            primaryModuleName: primaryModuleName,
+            installedModules: installedModules
+        )
+    }
+
+    /**
+     Builds the Android Search translation picker row label for one module.
+
+     Android renders each row as "ABBR - Name" and appends the localized
+     `search_index_not_created` text in parentheses when the module lacks a completed index. iOS
+     keeps that exact information model while allowing the caller to supply localized status text.
+
+     - Parameters:
+       - module: Installed Bible module metadata for the row.
+       - isIndexed: Whether Search can treat the module as index-ready.
+       - unindexedStatus: Localized status suffix for modules without an index.
+     - Returns: User-visible row label matching Android's abbreviation, description, and index
+       readiness semantics.
+     - Side effects: none.
+     - Failure modes: Empty descriptions fall back to the module abbreviation to avoid rendering an
+       incomplete "ABBR - " label.
+     */
+    nonisolated static func androidTranslationPickerLabel(
+        for module: ModuleInfo,
+        isIndexed: Bool,
+        unindexedStatus: String
+    ) -> String {
+        let moduleName = module.description.isEmpty ? module.name : module.description
+        let baseLabel = "\(module.name) - \(moduleName)"
+        guard !isIndexed else { return baseLabel }
+        return "\(baseLabel) (\(unindexedStatus))"
+    }
 
     /**
      Resolves `SearchIndexService` scope parameters from the selected scope choice.
@@ -1435,16 +1890,19 @@ public struct SearchView: View {
 
      - Parameters:
        - grouped: Raw grouped index results keyed by module name.
-       - query: Original query string. Present for signature parity with earlier helpers.
+       - moduleOrder: Android-ordered module names selected for the search.
      - Returns: Flat passage-level hits annotated with their source module name.
+     - Side effects: none.
+     - Failure modes: Groups whose module names are not in `moduleOrder` are appended
+       alphabetically so no Search hits are dropped.
      */
     nonisolated private static func convertGroupedResults(
         _ grouped: [String: [SearchIndexService.IndexSearchResult]],
-        query: String
+        moduleOrder: [String]
     ) -> [SearchHit] {
         var allHits: [SearchHit] = []
-        for (moduleName, results) in grouped.sorted(by: { $0.key < $1.key }) {
-            for result in results {
+        for moduleName in orderedGroupedModuleNames(grouped, moduleOrder: moduleOrder) {
+            for result in grouped[moduleName] ?? [] {
                 guard let parsed = StrongsSearchSupport.parseVerseKey(result.key) else { continue }
                 allHits.append(SearchHit(
                     book: parsed.book, chapter: parsed.chapter,
@@ -1455,6 +1913,32 @@ public struct SearchView: View {
             }
         }
         return allHits
+    }
+
+    /**
+     Resolves grouped Search result module names in selected Android order.
+
+     `SearchIndexService.searchMultiple` returns a dictionary, so iOS must restore Android's
+     primary-first selected module order before building summaries or flattening rows. Any
+     unexpected dictionary keys are appended alphabetically to preserve data without hiding drift.
+
+     - Parameters:
+       - grouped: Raw grouped Search results keyed by module abbreviation.
+       - moduleOrder: Android-ordered selected modules used for the search request.
+     - Returns: Module names to render for grouped Search summaries and rows.
+     - Side effects: none.
+     - Failure modes: Missing selected modules are omitted from the ordered prefix when the grouped
+       response has no entry for them.
+     */
+    nonisolated private static func orderedGroupedModuleNames(
+        _ grouped: [String: [SearchIndexService.IndexSearchResult]],
+        moduleOrder: [String]
+    ) -> [String] {
+        let groupedNames = Set(grouped.keys)
+        var orderedNames = moduleOrder.filter { groupedNames.contains($0) }
+        let remainingNames = groupedNames.subtracting(orderedNames).sorted()
+        orderedNames.append(contentsOf: remainingNames)
+        return orderedNames
     }
 
     /**

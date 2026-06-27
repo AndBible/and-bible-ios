@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import BibleCore
 @testable import BibleUI
 
@@ -378,10 +379,399 @@ extension AndBibleTests {
         XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("MEMORIZATION_INDICATORS"))
     }
 
+    /**
+     Verifies the iOS color editor exposes Android's durable color rows by scope.
+
+     Android's root global color activity inflates the `workspace_color` row, but the commit path
+     writes workspace color only from a `SettingsLevel.WORKSPACE` bundle into workspace metadata.
+     iOS must therefore avoid giving true global settings an active-workspace side effect while
+     still exposing the row from workspace-scoped text options and hiding it for windows.
+
+     Failure meaning:
+     - true global settings can mutate workspace metadata
+     - workspace settings can no longer edit Android's action-bar color
+     - window settings expose a workspace-owned row
+     */
+    func testColorSettingsVisibleAndroidKeysMatchAndroidDurableScopeRules() {
+        let expectedWorkspaceKeys = [
+            "workspace_color",
+            "text_color_day",
+            "background_color_day",
+            "noise_day",
+            "text_color_night",
+            "background_color_night",
+            "noise_night",
+        ]
+        XCTAssertEqual(
+            ColorSettingsView.visibleAndroidKeys(scope: .global),
+            [
+                "text_color_day",
+                "background_color_day",
+                "noise_day",
+                "text_color_night",
+                "background_color_night",
+                "noise_night",
+            ]
+        )
+        XCTAssertEqual(
+            ColorSettingsView.visibleAndroidKeys(scope: .workspace),
+            expectedWorkspaceKeys
+        )
+        XCTAssertEqual(
+            ColorSettingsView.visibleAndroidKeys(scope: .window),
+            [
+                "text_color_day",
+                "background_color_day",
+                "noise_day",
+                "text_color_night",
+                "background_color_night",
+                "noise_night",
+            ]
+        )
+    }
+
+    /**
+     Verifies color reset only resets workspace metadata when the caller owns a workspace binding.
+
+     Android resets `WorkspaceSettings.workspaceColor` from workspace-level Text Options, but root
+     global and window routes must not overwrite workspace metadata. This test exercises the shared
+     reset helper with and without a workspace binding so reset behavior follows the same ownership
+     contract as row visibility.
+     */
+    func testColorSettingsResetOnlyMutatesWorkspaceColorForWorkspaceOwnedScope() {
+        var settings = TextDisplaySettings.appDefaults
+        settings.dayTextColor = Int(Int32(bitPattern: 0xFF123456))
+        settings.dayBackground = Int(Int32(bitPattern: 0xFF654321))
+        settings.dayNoise = 42
+        settings.nightTextColor = Int(Int32(bitPattern: 0xFFABCDEF))
+        settings.nightBackground = Int(Int32(bitPattern: 0xFF0F0F0F))
+        settings.nightNoise = 73
+        var workspaceColor: Int? = Int(Int32(bitPattern: 0xFF336699))
+
+        let settingsBinding = Binding<TextDisplaySettings>(
+            get: { settings },
+            set: { settings = $0 }
+        )
+        let workspaceColorBinding = Binding<Int?>(
+            get: { workspaceColor },
+            set: { workspaceColor = $0 }
+        )
+
+        ColorSettingsView.resetThemeColorsToDefaults(
+            settings: settingsBinding,
+            workspaceColor: workspaceColorBinding
+        )
+        XCTAssertEqual(settings.dayTextColor, -16777216)
+        XCTAssertEqual(settings.dayBackground, -1)
+        XCTAssertEqual(settings.dayNoise, 0)
+        XCTAssertEqual(settings.nightTextColor, -1)
+        XCTAssertEqual(settings.nightBackground, -16777216)
+        XCTAssertEqual(settings.nightNoise, 0)
+        XCTAssertEqual(workspaceColor, Workspace.defaultWorkspaceColor)
+
+        workspaceColor = Int(Int32(bitPattern: 0xFF223344))
+        ColorSettingsView.resetThemeColorsToDefaults(
+            settings: settingsBinding,
+            workspaceColor: nil
+        )
+        XCTAssertEqual(workspaceColor, Int(Int32(bitPattern: 0xFF223344)))
+    }
+
+    /**
+     Protects Android's workspace-color application contract for reader chrome.
+
+     Android stores `workspace_color` with workspace metadata and applies it to action-bar chrome
+     in day mode. It does not replace the reader content background. Night mode uses black toolbar
+     chrome while tinting the drawer/home affordance with the workspace color, and monochrome mode
+     forces black-on-white day chrome.
+
+     Failure meaning:
+     - iOS can persist workspace color without changing the visible toolbar, or it can drift into
+       applying workspace color to reader content instead of Android's action-bar surface.
+     */
+    func testReaderToolbarChromeUsesAndroidWorkspaceColorContract() {
+        var settings = TextDisplaySettings.appDefaults
+        let dayBackground = Int(Int32(bitPattern: 0xFFFAF4E8))
+        let dayTextColor = Int(Int32(bitPattern: 0xFF17130F))
+        let workspaceColor = Int(Int32(bitPattern: 0xFF336699))
+        settings.dayBackground = dayBackground
+        settings.dayTextColor = dayTextColor
+
+        let dayPalette = ReaderThemeSurfacePalette(
+            settings: settings,
+            nightMode: false,
+            workspaceColor: workspaceColor,
+            monochromeMode: false
+        )
+        XCTAssertEqual(dayPalette.backgroundColorInt, dayBackground)
+        XCTAssertEqual(dayPalette.foregroundColorInt, dayTextColor)
+        XCTAssertEqual(dayPalette.toolbarBackgroundColorInt, workspaceColor)
+        XCTAssertEqual(dayPalette.toolbarForegroundColorInt, -1)
+        XCTAssertEqual(dayPalette.navigationDrawerColorInt, -1)
+
+        let nightPalette = ReaderThemeSurfacePalette(
+            settings: settings,
+            nightMode: true,
+            workspaceColor: workspaceColor,
+            monochromeMode: false
+        )
+        XCTAssertEqual(nightPalette.toolbarBackgroundColorInt, -16777216)
+        XCTAssertEqual(nightPalette.toolbarForegroundColorInt, -1)
+        XCTAssertEqual(nightPalette.navigationDrawerColorInt, workspaceColor)
+
+        let fallbackPalette = ReaderThemeSurfacePalette(
+            settings: settings,
+            nightMode: false,
+            workspaceColor: nil,
+            monochromeMode: false
+        )
+        XCTAssertEqual(fallbackPalette.toolbarBackgroundColorInt, Workspace.defaultWorkspaceColor)
+
+        let monochromePalette = ReaderThemeSurfacePalette(
+            settings: settings,
+            nightMode: false,
+            workspaceColor: workspaceColor,
+            monochromeMode: true
+        )
+        XCTAssertEqual(monochromePalette.toolbarBackgroundColorInt, -1)
+        XCTAssertEqual(monochromePalette.toolbarForegroundColorInt, -16777216)
+        XCTAssertEqual(monochromePalette.navigationDrawerColorInt, -16777216)
+    }
+
+    /**
+     Protects the reader chrome state boundary for Android workspace color.
+
+     Android persists workspace color as `WorkspaceSettings.workspaceColor`, outside the
+     `TextDisplaySettings` value that drives page content colors. The SwiftUI reader therefore
+     needs a separate chrome-color state value instead of relying on text-display state changes to
+     invalidate the toolbar after a workspace-color edit.
+
+     Failure meaning:
+     - workspace color edits can persist without repainting the native toolbar
+     - active-window workspace color can be ignored in favor of an unrelated fallback workspace
+     - legacy nil values no longer use Android's `#ff444444` default
+     */
+    func testReaderWorkspaceChromeColorResolvesFromWorkspaceMetadata() {
+        let activeWorkspace = Workspace(name: "Active")
+        activeWorkspace.workspaceColor = Int(Int32(bitPattern: 0xFF224466))
+
+        let windowWorkspace = Workspace(name: "Window")
+        windowWorkspace.workspaceColor = Int(Int32(bitPattern: 0xFF336699))
+        let activeWindow = Window()
+        activeWindow.workspace = windowWorkspace
+
+        XCTAssertEqual(
+            ReaderWorkspaceChromeColor.resolved(
+                activeWindow: activeWindow,
+                activeWorkspace: activeWorkspace
+            ),
+            windowWorkspace.workspaceColor
+        )
+        XCTAssertEqual(
+            ReaderWorkspaceChromeColor.resolved(
+                activeWindow: nil,
+                activeWorkspace: activeWorkspace
+            ),
+            activeWorkspace.workspaceColor
+        )
+
+        activeWorkspace.workspaceColor = nil
+        XCTAssertEqual(
+            ReaderWorkspaceChromeColor.resolved(
+                activeWindow: nil,
+                activeWorkspace: activeWorkspace
+            ),
+            Workspace.defaultWorkspaceColor
+        )
+    }
+
+    /**
+     Verifies iOS normalizes background-noise edits to Android's seekbar range.
+
+     Android `noise_day` and `noise_night` use a `SeekBarPreference` with max 100 and default 0.
+     This protects iOS from persisting out-of-range slider values into the shared
+     `TextDisplaySettings` sync/reader contract, including non-finite edits that fall back to a
+     previously restored out-of-range value.
+     */
+    func testColorSettingsNoiseValuesNormalizeToAndroidSeekbarRange() {
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(-4.6, fallback: 12), 0)
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(44.5, fallback: 12), 45)
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(120.2, fallback: 12), 100)
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(Double.nan, fallback: 12), 12)
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(Double.nan, fallback: -7), 0)
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(Double.nan, fallback: 120), 100)
+    }
+
     func testTextDisplaySliderIntegerRoundsSteppedFloatingPointValues() {
-        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(639.999999999, fallback: 600), 640)
-        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(640.000000001, fallback: 600), 640)
-        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(.nan, fallback: 600), 600)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(259.999999999, fallback: 170), 260)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(260.000000001, fallback: 170), 260)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(.nan, fallback: 170), 170)
+    }
+
+    /**
+     Protects the numeric defaults and ranges used by Android text-display widgets.
+
+     Android seeds text-display settings from `WorkspaceEntities.TextDisplaySettings.default`, and
+     the font, margin, top-margin, and line-spacing dialogs constrain their seekbars in
+     `FontSizeWidget.kt`, `MarginSizeWidget.kt`, and `LineSpacing.kt`. A failure here means iOS can
+     display or persist old platform-shaped defaults or unsupported slider values instead of the
+     Android baseline used by inheritance, sync, and reset behavior.
+     */
+    func testTextDisplayNumericDefaultsAndRangesMirrorAndroidWidgets() {
+        XCTAssertEqual(TextDisplaySettings.appDefaults.fontSize, 16)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.lineSpacing, 16)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.marginLeft, 3)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.marginRight, 3)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.maxWidth, 170)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.topMargin, 0)
+
+        XCTAssertEqual(TextDisplaySettingsView.androidFontSizeRange, 1...60)
+        XCTAssertEqual(TextDisplaySettingsView.androidMarginRange, 0...30)
+        XCTAssertEqual(TextDisplaySettingsView.androidMaxTextWidthRange, 0...500)
+        XCTAssertEqual(TextDisplaySettingsView.androidTopMarginRange, 0...60)
+        XCTAssertEqual(TextDisplaySettingsView.androidLineSpacingRange, 10...30)
+        XCTAssertEqual(TextDisplaySettingsView.androidNumericSliderStep, 1)
+    }
+
+    /**
+     Verifies the iOS font-family editor uses Android's fixed widget list instead of the iOS font
+     catalog.
+
+     Android `FontSizeWidget.kt` appends this standard family list after any add-on fonts and writes
+     the selected `realFontFamily` string directly into text-display settings. iOS does not currently
+     have Android add-on font files, so the standard families are the parity floor and must not be
+     replaced by `UIFontPickerViewController` choices.
+     */
+    func testTextDisplayFontFamilyOptionsMirrorAndroidWidgetList() {
+        let options = TextDisplaySettingsView.androidFontFamilyOptions()
+
+        XCTAssertEqual(
+            options.map(\.value),
+            [
+                "sans-serif-thin",
+                "sans-serif-light",
+                "sans-serif",
+                "sans-serif-medium",
+                "sans-serif-black",
+                "sans-serif-condensed-light",
+                "sans-serif-condensed",
+                "sans-serif-condensed-medium",
+                "sans-serif-condensed",
+                "serif",
+                "monospace",
+                "serif-monospace",
+                "casual",
+                "cursive",
+                "sans-serif-smallcaps",
+            ]
+        )
+        XCTAssertEqual(options[0].label, "Sans serif thin")
+        XCTAssertEqual(options[7].label, "Sans serif condensed medium")
+        XCTAssertEqual(options.last?.label, "Sans serif smallcaps")
+    }
+
+    /**
+     Protects Android AlertDialog editor behavior for high-risk text-display fields.
+
+     Android's font-size, font-family, top-margin, line-spacing, and margin widgets mutate local
+     widget state while the dialog is open. OK commits the field, Cancel discards it, and Reset
+     clears scope-specific overrides while global settings fall back to concrete defaults.
+     */
+    func testTextDisplayPreferenceEditorDraftStagesCommitsAndResetsLikeAndroid() {
+        var stored = TextDisplaySettings()
+        stored.fontSize = 16
+        stored.fontFamily = "sans-serif"
+        stored.lineSpacing = 16
+        stored.topMargin = 0
+        stored.marginLeft = 3
+        stored.marginRight = 3
+        stored.maxWidth = 170
+
+        var draft = TextDisplayPreferenceEditorDraft(settings: stored)
+        draft.fontSize = 26
+        draft.fontFamily = "serif"
+        draft.lineSpacing = 18
+        draft.topMargin = 12
+        draft.marginLeft = 4
+        draft.marginRight = 5
+        draft.maxWidth = 260
+
+        XCTAssertEqual(stored.fontSize, 16)
+        XCTAssertEqual(stored.fontFamily, "sans-serif")
+        XCTAssertEqual(stored.lineSpacing, 16)
+        XCTAssertEqual(stored.topMargin, 0)
+        XCTAssertEqual(stored.marginLeft, 3)
+        XCTAssertEqual(stored.marginRight, 3)
+        XCTAssertEqual(stored.maxWidth, 170)
+
+        draft.commit(.fontSize, scope: .global, to: &stored)
+        XCTAssertEqual(stored.fontSize, 26)
+        XCTAssertEqual(stored.fontFamily, "sans-serif")
+
+        draft.commit(.fontFamily, scope: .global, to: &stored)
+        XCTAssertEqual(stored.fontFamily, "serif")
+
+        draft.commit(.margins, scope: .global, to: &stored)
+        XCTAssertEqual(stored.marginLeft, 4)
+        XCTAssertEqual(stored.marginRight, 5)
+        XCTAssertEqual(stored.maxWidth, 260)
+
+        draft.commit(.topMargin, scope: .global, to: &stored)
+        XCTAssertEqual(stored.topMargin, 12)
+
+        draft.commit(.lineSpacing, scope: .global, to: &stored)
+        XCTAssertEqual(stored.lineSpacing, 18)
+
+        draft.reset(.fontFamily, scope: .window)
+        draft.commit(.fontFamily, scope: .window, to: &stored)
+        XCTAssertNil(stored.fontFamily)
+
+        draft.reset(.margins, scope: .workspace)
+        draft.commit(.margins, scope: .workspace, to: &stored)
+        XCTAssertNil(stored.marginLeft)
+        XCTAssertNil(stored.marginRight)
+        XCTAssertNil(stored.maxWidth)
+
+        draft.reset(.fontSize, scope: .global)
+        draft.commit(.fontSize, scope: .global, to: &stored)
+        XCTAssertEqual(stored.fontSize, 16)
+
+        draft.reset(.margins, scope: .global)
+        draft.commit(.margins, scope: .global, to: &stored)
+        XCTAssertEqual(stored.marginLeft, 3)
+        XCTAssertEqual(stored.marginRight, 3)
+        XCTAssertEqual(stored.maxWidth, 170)
+
+        draft.reset(.topMargin, scope: .global)
+        draft.commit(.topMargin, scope: .global, to: &stored)
+        XCTAssertEqual(stored.topMargin, 0)
+
+        draft.reset(.lineSpacing, scope: .global)
+        draft.commit(.lineSpacing, scope: .global, to: &stored)
+        XCTAssertEqual(stored.lineSpacing, 16)
+    }
+
+    /**
+     Guards issue #248 against reintroducing iOS-native editor presentation.
+
+     The text-display row UI is intentionally SwiftUI, but editor presentation must mirror Android's
+     in-place `AlertDialog` widgets. A failure here means the route drifted back to a UIKit font
+     picker or SwiftUI sheet/Form editor with iOS chrome.
+     */
+    func testTextDisplayPreferenceEditorsAvoidNativeIOSPickerAndSheetRoutes() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Settings/TextDisplaySettingsView.swift"
+        )
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertFalse(source.contains("UIFontPickerViewController"))
+        XCTAssertFalse(source.contains(".sheet(item: $activePreferenceEditor)"))
+        XCTAssertFalse(source.contains(".sheet(isPresented: $showFontPicker)"))
+        XCTAssertTrue(source.contains("textDisplayPreferenceEditorOverlay"))
     }
 
     /**

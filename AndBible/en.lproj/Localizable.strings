@@ -29,6 +29,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "New window";
 "clear" = "Clear";
 "reset" = "Reset";
 "retry" = "Retry";
@@ -256,6 +257,9 @@
 "night_theme" = "Night Theme";
 "text_color" = "Text Color";
 "background" = "Background";
+"color_workspace" = "Workspace color";
+"prefs_noise_title" = "Background noise";
+"prefs_noise_summary" = "Adding some noise to background might make it more comfortable to eyes.";
 "reset_to_defaults" = "Reset to Defaults";
 
 /* Dictionaries */
@@ -640,6 +644,9 @@
 "hide_bible_reference_overlay_title" = "Hide Bible reference overlay";
 "hide_window_buttons_summary" = "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them.";
 "hide_window_buttons_title" = "Hide window buttons";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Font size multiplier";
 "prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
 "prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
@@ -724,3 +731,48 @@
 
 "help_workspaces_title" = "Workspaces";
 "reading_plans_plural" = "Reading Plans";
+
+/* Android window popup menu parity */
+"windowMaximise" = "Maximise";
+"windowMinimise" = "Minimise";
+"change_to_normal" = "Change to normal window";
+"move_window" = "Move to";
+"move_window_to_position2" = "Position %1$d (%2$@:%3$@)";
+"window_pin_mode" = "Pin";
+"windowSynchronise" = "Synchronise";
+"window_disable_sync" = "Disable synchronize";
+"sync_group_n" = "Group %d";
+"text_options_window_menutitle" = "Text options";
+"prefs_text_colors_menutitle" = "Color settings";
+"prefs_section_title_title" = "Section titles";
+"prefs_show_strongs_title" = "Strong's numbers";
+"prefs_show_verseno_title" = "Chapter & verse numbers";
+"copy_settings" = "Copy settings to";
+"copy_settings_to_workspace" = "Workspace";
+"copy_settings_to_window" = "Window %1$d (%2$@:%3$@)";
+"copy_settings_to_global" = "Global defaults";
+"copyReference" = "Copy link to clipboard";
+"reference_copied_to_clipboard" = "Reference copied to clipboard";
+"add_ellipsis" = "%@...";
+"copy_settings_title" = "Which settings do you want to copy?";
+"select_all" = "Select all";
+"select_none" = "Select none";
+"font" = "Font";
+"margin_size" = "Margin size";
+"top_margin" = "Top margin";
+"footnotes_inline" = "Inline footnotes";
+"expand_cross_references" = "Expand cross references";
+"cross_references" = "Cross references";
+"verse_per_line" = "Verse per line";
+"show_bookmarks" = "Show bookmarks";
+"hide_labels" = "Hide labels";
+"my_notes" = "My notes";
+"page_number" = "Page number";
+"infinite_scroll" = "Infinite scroll";
+"non_strongs_word_italic" = "Italicize added words";
+"mark_as_read_button" = "Mark as read button";
+"title_scroll_button" = "Title scroll button";
+"memorization_indicators" = "Memorization indicators";
+"ai_document_markers" = "AI document markers";
+"page_scroll_amount" = "Page scroll amount";
+"ordinals" = "Ordinals";

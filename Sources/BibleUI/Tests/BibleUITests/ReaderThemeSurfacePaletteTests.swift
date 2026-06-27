@@ -45,4 +45,5 @@ final class ReaderThemeSurfacePaletteTests: XCTestCase {
         XCTAssertEqual(nightPalette.backgroundColorInt, nightBackground)
         XCTAssertEqual(nightPalette.foregroundColorInt, nightTextColor)
     }
+
 }

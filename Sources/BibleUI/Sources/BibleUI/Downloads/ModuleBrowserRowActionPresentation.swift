@@ -4,6 +4,120 @@ import SwiftUI
 import SwordKit
 
 /**
+ Android-compatible presentation contract for the Downloads status slot.
+
+ Android keeps row action behavior separate from the status icon: `NOT_INSTALLED` rows are
+ installable when tapped, but `DocumentListItem.updateControlState` clears the status icon rather
+ than showing an update affordance. iOS uses this value to keep the SwiftUI row controls and tests
+ anchored to that platform contract instead of coupling tests to private view internals.
+
+ Side effects:
+ - none; the value is a pure projection of `ModuleBrowserDownloadStatus`
+
+ Failure modes:
+ - none; unknown states are not representable by `ModuleBrowserDownloadStatus`
+ */
+struct ModuleBrowserStatusSlotPresentation: Equatable {
+    /**
+     Canonical status-slot branch used by the SwiftUI row.
+
+     Cases intentionally mirror Android's row rendering branches. `emptyInstallableSlot` represents
+     Android `NOT_INSTALLED`, where the row remains installable through the row action but the status
+     icon drawable is `null`.
+     */
+    enum Kind: Equatable {
+        /// Android `INSTALLED`, shown as a completed status icon.
+        case installed
+
+        /// Android `BEING_INSTALLED`, shown with progress and a cancel affordance.
+        case progress(progressPercent: Int)
+
+        /// Android `ERROR_DOWNLOADING`, shown with a warning and retry affordance.
+        case retryError
+
+        /// Android `UPGRADE_AVAILABLE`, shown with the update arrow affordance.
+        case update
+
+        /// Non-installable metadata row.
+        case unavailable
+
+        /// Android `NOT_INSTALLED`, which has no status icon in the trailing slot.
+        case emptyInstallableSlot
+    }
+
+    /// Canonical Android row-rendering branch for the status slot.
+    let kind: Kind
+
+    /**
+     Creates a status-slot presentation from the Android-equivalent download status.
+
+     - Parameter status: Resolved row status from `ModuleBrowserView.displayStatus`.
+     - Returns: A presentation value for the row's status slot.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    init(status: ModuleBrowserDownloadStatus) {
+        switch status {
+        case .installed:
+            kind = .installed
+        case .beingInstalled(let progressPercent):
+            kind = .progress(progressPercent: progressPercent)
+        case .errorDownloading:
+            kind = .retryError
+        case .updateAvailable:
+            kind = .update
+        case .unavailable:
+            kind = .unavailable
+        case .installable:
+            kind = .emptyInstallableSlot
+        }
+    }
+
+    /**
+     System image used for standalone status-icon states.
+
+     Composite branches that render progress/cancel controls return `nil`. Android
+     `NOT_INSTALLED` also returns `nil` because that branch intentionally clears the status icon.
+
+     - Returns: SF Symbol name for standalone icon-backed states, otherwise `nil`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var statusIconSystemName: String? {
+        switch kind {
+        case .installed:
+            return "checkmark.circle.fill"
+        case .progress:
+            return nil
+        case .retryError:
+            return "exclamationmark.triangle.fill"
+        case .update:
+            return "arrow.up.circle.fill"
+        case .unavailable:
+            return "lock.slash"
+        case .emptyInstallableSlot:
+            return nil
+        }
+    }
+
+    /**
+     Whether the status slot itself exposes an action control.
+
+     - Returns: `true` for retry, update, and cancel controls; `false` for passive or empty slots.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var isActionControl: Bool {
+        switch kind {
+        case .progress, .retryError, .update:
+            return true
+        case .installed, .unavailable, .emptyInstallableSlot:
+            return false
+        }
+    }
+}
+
+/**
  Details payload for Android's Downloads row About action.
 
  Android expands SWORD metadata for the selected row and displays its about/copyright/version

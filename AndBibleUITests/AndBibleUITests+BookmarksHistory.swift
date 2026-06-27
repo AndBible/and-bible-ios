@@ -6,11 +6,124 @@ import UIKit
 #endif
 
 extension AndBibleUITests {
+    /**
+     Verifies Bookmarks opens from the drawer as an app-owned reader destination.
+     *
+     * Android launches Bookmarks as an app activity from the drawer, so iOS should not expose the
+     * route through `activeReaderSheet` or sheet-only Done chrome when the drawer action is used.
+     *
+     * - Side effects:
+     *   - opens the reader drawer and activates Bookmarks
+     * - Failure modes:
+     *   - fails if Bookmarks does not appear or if the route regresses to sheet presentation
+     */
     func testBookmarksScreenOpensFromReaderMenu() {
         let app = makeApp()
         app.launch()
 
         XCTAssertTrue(openBookmarkList(in: app).exists)
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=bookmarks", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer Bookmarks should use reader destination back chrome, not iOS sheet Done chrome."
+        )
+    }
+
+    /**
+     Verifies StudyPads opens from the drawer and selecting a row opens the StudyPad document.
+     *
+     * Android launches `ManageLabels` in `Mode.STUDYPAD` from the drawer, so iOS should expose the
+     * StudyPads selector as a reader-owned destination instead of the legacy modal sheet route.
+     * Android then opens the selected StudyPad through `studyPadSelected`, so the regression also
+     * proves a seeded row exits the destination and renders the corresponding StudyPad document.
+     *
+     * - Side effects:
+     *   - opens the reader drawer and activates StudyPads
+     *   - selects the seeded StudyPad row
+     * - Failure modes:
+     *   - fails if StudyPads does not appear, if the route regresses to a sheet/modal, or if sheet
+     *     Done chrome is visible on the drawer-owned screen
+     *   - fails if selecting the row does not open the matching StudyPad document
+     */
+    func testStudyPadsScreenOpensFromReaderMenu() {
+        let app = makeApp()
+        app.launch()
+
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenStudyPadsAction",
+            destinationIdentifier: "labelManagerScreen",
+            readinessIdentifiers: ["labelManagerAddButton", "labelManagerStateExport"],
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=studyPads", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer StudyPads should use reader destination back chrome, not iOS sheet Done chrome."
+        )
+        waitForLabelManagerState(containing: labelManagerRowStateToken("UI Test Seed"), in: app, timeout: 10)
+        tapElementReliably(labelRow(named: "UI Test Seed", in: app), timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=none", in: app, timeout: 10)
+        waitForStudyPadPresentation(in: app, timeout: 20)
+        XCTAssertEqual(requireElement("readerStudyPadTitle", in: app, timeout: 10).label, "UI Test Seed")
+    }
+
+    /**
+     Verifies the drawer My Notes/My Documents action opens Android's app-owned document manager.
+     *
+     * Android's drawer `myDocumentsButton` launches `MyDocumentsActivity`, then
+     * `MyDocumentPagesActivity`; selecting a page returns to the reader and opens that generated
+     * general-book document. iOS should therefore present a reader destination for the document
+     * manager instead of directly loading the current-passage My Notes pseudo-document.
+     *
+     * - Side effects:
+     *   - opens the reader drawer and activates My Documents
+     *   - selects the seeded document and its first page
+     * - Failure modes:
+     *   - fails if the drawer action regresses to sheet/modal presentation, skips the document
+     *     manager, or does not load the selected My Documents page in the reader
+     */
+    func testMyDocumentsScreenOpensFromReaderMenuAndOpensPage() {
+        let app = makeApp()
+        app.launch()
+
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenMyNotesAction",
+            destinationIdentifier: "myDocumentsListScreen",
+            readinessIdentifiers: ["myDocumentsListStateExport"],
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=myDocuments", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer My Documents should use reader destination back chrome, not iOS sheet Done chrome."
+        )
+        waitForMyDocumentsListState(containing: "total=1", in: app, timeout: 10)
+        waitForMyDocumentsListState(containing: myDocumentsRowStateToken("UITESTDOC"), in: app, timeout: 10)
+
+        tapElementReliably(
+            requireElement("myDocumentsDocumentRow::UITESTDOC", in: app, timeout: 10),
+            timeout: 10
+        )
+        waitForMyDocumentPagesState(containing: "document=UITESTDOC", in: app, timeout: 10)
+        waitForMyDocumentPagesState(containing: myDocumentsRowStateToken("intro"), in: app, timeout: 10)
+        tapElementReliably(
+            requireElement("myDocumentsPageRow::UITESTDOC::intro", in: app, timeout: 10),
+            timeout: 10
+        )
+
+        waitForReaderRenderedContentState(containing: "readerDestination=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(
+            containing: "category=general_book;module=UITESTDOC;book=UI Test Document;chapter=none;key=intro",
+            in: app,
+            timeout: 20
+        )
     }
 
     /**
@@ -55,12 +168,13 @@ extension AndBibleUITests {
      Verifies that bookmark navigation from a third window updates only that pane's rendered content.
      *
      * - Side effects:
-     *   - launches the seeded bookmark-navigation fixture on the reader shell
-     *   - creates two additional windows, activates the third one, opens the bookmark list from
-     *     that pane, and selects the seeded `Exodus 2:1` row
+     *   - launches the seeded bookmark-navigation-three-windows fixture with three visible reader
+     *     windows
+     *   - activates the third window, opens the bookmark list from that pane, and selects the
+     *     seeded `Exodus 2:1` row
      *   - switches back to the first window to confirm its rendered content stayed on `Genesis 1`
      * - Failure modes:
-     *   - fails if the extra windows cannot be created or activated
+     *   - fails if the seeded third window cannot be activated
      *   - fails if the third window does not render `Exodus 2`
      *   - fails if the first window's rendered content also changes away from `Genesis 1`
      */
@@ -74,9 +188,7 @@ extension AndBibleUITests {
             timeout: 20
         )
 
-        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
-        addWindowTab(expectingOrder: 2, in: app, timeout: 15)
-
+        tapWindowTab(2, in: app, timeout: 10)
         waitForReaderRenderedContentState(
             containing: "windowOrder=2;category=bible;module=KJV;book=Genesis;chapter=1",
             in: app,
@@ -104,8 +216,8 @@ extension AndBibleUITests {
      mutating tab chrome.
      *
      * - Side effects:
-     *   - launches the baseline reader shell, creates two additional windows, and activates the
-     *     third one
+     *   - launches the commentary-module-three-windows fixture with three visible reader windows
+     *     and activates the third one
      *   - switches that third pane into commentary and then back into Bible using the real toolbar
      *     document controls and, when needed, the Android-parity quick selector or full module
      *     picker
@@ -125,9 +237,6 @@ extension AndBibleUITests {
             timeout: 20
         )
 
-        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
-        addWindowTab(expectingOrder: 2, in: app, timeout: 15)
-
         tapWindowTab(2, in: app, timeout: 10)
         waitForReaderRenderedContentState(
             containing: "windowOrder=2;category=bible",
@@ -138,19 +247,16 @@ extension AndBibleUITests {
         tapElementReliably(requireElement("readerCommentaryToolbarButton", in: app, timeout: 10), timeout: 10)
         if waitForAnyElement(["readerCommentaryQuickSelector"], in: app, timeout: 3) != nil {
             let quickSelector = requireElement("readerCommentaryQuickSelector", in: app, timeout: 10)
-            let commentaryQuickRow = requireElement("readerCommentaryQuickSelectorRow_UITestComm", in: app, timeout: 10)
+            let commentaryQuickRow = requireQuickSelectorRow(
+                "readerCommentaryQuickSelectorRow_000UITestComm",
+                in: quickSelector,
+                app: app,
+                timeout: 10
+            )
             XCTAssertEqual(
                 commentaryQuickRow.value as? String,
                 "available",
-                "UITestComm quick-selector row must be selectable when switching from Bible."
-            )
-            for _ in 0..<8 where !isElementVisible(commentaryQuickRow, within: quickSelector) {
-                quickSelector.swipeUp()
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            }
-            XCTAssertTrue(
-                isElementVisible(commentaryQuickRow, within: quickSelector),
-                "Expected quick selector to scroll until UITestComm is visible."
+                "000UITestComm quick-selector row must be selectable when switching from Bible."
             )
             tapElementReliably(commentaryQuickRow, timeout: 10)
         } else if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
@@ -165,19 +271,16 @@ extension AndBibleUITests {
         tapElementReliably(requireElement("readerBibleToolbarButton", in: app, timeout: 10), timeout: 10)
         if waitForAnyElement(["readerBibleQuickSelector"], in: app, timeout: 3) != nil {
             let quickSelector = requireElement("readerBibleQuickSelector", in: app, timeout: 10)
-            let kjvQuickRow = requireElement("readerBibleQuickSelectorRow_KJV", in: app, timeout: 10)
+            let kjvQuickRow = requireQuickSelectorRow(
+                "readerBibleQuickSelectorRow_KJV",
+                in: quickSelector,
+                app: app,
+                timeout: 10
+            )
             XCTAssertEqual(
                 kjvQuickRow.value as? String,
                 "available",
                 "KJV quick-selector row must remain selectable when returning from commentary."
-            )
-            for _ in 0..<8 where !isElementVisible(kjvQuickRow, within: quickSelector) {
-                quickSelector.swipeUp()
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            }
-            XCTAssertTrue(
-                isElementVisible(kjvQuickRow, within: quickSelector),
-                "Expected quick selector to scroll until KJV is visible."
             )
             tapElementReliably(kjvQuickRow, timeout: 10)
         } else if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
@@ -205,8 +308,8 @@ extension AndBibleUITests {
      Verifies that the reader Strong's quick toggle is scoped to the active window only.
      *
      * - Side effects:
-     *   - launches the baseline reader shell, creates two additional windows, and activates the
-     *     third one
+     *   - launches the baseline fixture with three visible reader windows and activates the third
+     *     one
      *   - toggles Strong's on in the third window, confirms the first window stays off, then
      *     toggles Strong's on in the first window and confirms the third window preserves its own
      *     state
@@ -226,9 +329,6 @@ extension AndBibleUITests {
             timeout: 20
         )
         waitForReaderRenderedContentState(containing: "strongsMode=0", in: app, timeout: 20)
-
-        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
-        addWindowTab(expectingOrder: 2, in: app, timeout: 15)
 
         tapWindowTab(2, in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "windowOrder=2", in: app, timeout: 20)
@@ -745,4 +845,66 @@ extension AndBibleUITests {
      *   - fails if the about action is missing from the reader menu
      *   - fails if the about screen does not render after navigation completes
      */
+
+    /**
+     Finds a row in the Android-style quick selector, scrolling until SwiftUI materializes it.
+
+     The quick selector intentionally uses a bounded `ScrollView` with a lazy row stack so local
+     simulators with many installed modules do not grow the popup offscreen. XCTest cannot resolve
+     lazy rows before they enter that viewport, so callers must search by scrolling instead of
+     requiring the row before it exists.
+
+     - Parameters:
+       - identifier: Accessibility identifier for the desired quick-selector row.
+       - quickSelector: Scroll view that owns the quick-selector rows.
+       - app: Application under test, used to resolve row candidates after each scroll.
+       - timeout: Maximum search time before failing the test.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Returns: Visible quick-selector row element.
+     - Side effects: Scrolls the quick selector downward while searching.
+     - Failure modes: Fails the XCTest when the row never appears or remains outside the visible
+       quick-selector viewport.
+     */
+    func requireQuickSelectorRow(
+        _ identifier: String,
+        in quickSelector: XCUIElement,
+        app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastCandidate: XCUIElement?
+
+        repeat {
+            if let candidate = heuristicElementCandidates(for: identifier, in: app)
+                .first(where: { $0.exists }) {
+                lastCandidate = candidate
+                if isElementVisible(candidate, within: quickSelector) {
+                    return candidate
+                }
+            }
+
+            quickSelector.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        if let lastCandidate {
+            XCTAssertTrue(
+                isElementVisible(lastCandidate, within: quickSelector),
+                "Expected quick selector to scroll until '\(identifier)' is visible.",
+                file: file,
+                line: line
+            )
+            return lastCandidate
+        }
+
+        XCTFail(
+            "Expected quick selector row '\(identifier)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return app.buttons[identifier].firstMatch
+    }
 }

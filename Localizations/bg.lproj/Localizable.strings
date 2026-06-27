@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "Нов прозорец";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";
@@ -443,6 +444,9 @@
 "hide_bible_reference_overlay_title" = "Скриване на наслагването с библейска препратка";
 "hide_window_buttons_summary" = "Бутоните на прозореца, показвани вдясно на изгледите на Библията, са скрити. Лентата за навигация между прозорците в долната част продължава да се показва и можете да отворите изскачащото меню на прозореца с продължително натискане.";
 "hide_window_buttons_title" = "Скриване на бутоните на прозореца";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Множител за размер на шрифта";
 "prefs_bible_view_swipe_mode_summary" = "Плъзгането наляво / надясно може да се използва за преминаване към следваща страница / глава.";
 "prefs_bible_view_swipe_mode_title" = "Действие при плъзгане наляво / надясно";

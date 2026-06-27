@@ -47,21 +47,6 @@ struct BibleReaderActiveSheetContent: View {
 
     var body: some View {
         switch sheet {
-        case .bookmarks:
-            NavigationStack {
-                BookmarkListView(
-                    onNavigate: { book, chapter in
-                        onDismiss()
-                        controller?.navigateTo(book: book, chapter: chapter)
-                    },
-                    onOpenStudyPad: { labelId in
-                        controller?.loadStudyPadDocument(labelId: labelId)
-                    },
-                    bibleOrdinalResolver: { book, ordinal in
-                        controller?.bookmarkListVerseReference(book: book, ordinal: ordinal)
-                    }
-                )
-            }
         case .history:
             NavigationStack {
                 HistoryView(
@@ -72,15 +57,6 @@ struct BibleReaderActiveSheetContent: View {
                     onDismiss()
                     _ = controller?.navigateToRef(key)
                 }
-            }
-        case .readingPlans:
-            NavigationStack {
-                ReadingPlanListView()
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done"), action: onDismiss)
-                        }
-                    }
             }
         case .readingProgress:
             NavigationStack {

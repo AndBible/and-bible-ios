@@ -35,10 +35,13 @@ private enum ToolCommand: String {
 /// Deterministic fixture scenarios used by the UI automation suite.
 private enum FixtureScenario: String, CaseIterable {
     case baseline = "baseline"
+    case baselineThreeWindows = "baseline-three-windows"
     case commentaryModule = "commentary-module"
+    case commentaryModuleThreeWindows = "commentary-module-three-windows"
     case searchIndexed = "search-indexed"
     case searchMultiTranslation = "search-multi-translation"
     case bookmarkNavigation = "bookmark-navigation"
+    case bookmarkNavigationThreeWindows = "bookmark-navigation-three-windows"
     case bookmarkMultiRow = "bookmark-multirow"
     case bookmarkFilter = "bookmark-filter"
     case bookmarkRowLabel = "bookmark-row-label"
@@ -47,6 +50,7 @@ private enum FixtureScenario: String, CaseIterable {
     case historySingle = "history-single"
     case historyMultiRow = "history-multirow"
     case myNotesSingle = "my-notes-single"
+    case myDocumentsSingle = "my-documents-single"
     case syncNextCloud = "sync-nextcloud"
     case syncNextCloudBookmarksEnabled = "sync-nextcloud-bookmarks-enabled"
     case displayColorsCustom = "display-colors-custom"
@@ -285,8 +289,10 @@ private struct FixtureTool {
         let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
         let candidates = [
             swordURL.appendingPathComponent("mods.d/modules-conf.cache", isDirectory: false),
+            swordURL.appendingPathComponent("mods.d/000uitestcomm.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/uitestcomm.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/uitestweb.conf", isDirectory: false),
+            swordURL.appendingPathComponent("modules/comments/rawcom/000uitestcomm", isDirectory: true),
             swordURL.appendingPathComponent("modules/comments/rawcom/uitestcomm", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/rawtext/uitestweb", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/ztext/uitestweb", isDirectory: true),
@@ -395,7 +401,12 @@ private final class FixtureContext {
         switch scenario {
         case .baseline:
             break
+        case .baselineThreeWindows:
+            try ensureVisibleBibleWindowCount(3, baseline: baseline)
         case .commentaryModule:
+            try seedUITestCommentaryModule()
+        case .commentaryModuleThreeWindows:
+            try ensureVisibleBibleWindowCount(3, baseline: baseline)
             try seedUITestCommentaryModule()
         case .searchIndexed:
             try seedBundledSearchIndex()
@@ -403,6 +414,9 @@ private final class FixtureContext {
             try seedUITestBibleModule()
             try seedMultiTranslationSearchIndex()
         case .bookmarkNavigation:
+            try seedBookmarkNavigation()
+        case .bookmarkNavigationThreeWindows:
+            try ensureVisibleBibleWindowCount(3, baseline: baseline)
             try seedBookmarkNavigation()
         case .bookmarkMultiRow:
             try seedBookmarkMultiRow()
@@ -420,6 +434,8 @@ private final class FixtureContext {
             seedHistoryMultiRow(window: baseline.window)
         case .myNotesSingle:
             try seedMyNotesSingle()
+        case .myDocumentsSingle:
+            try seedMyDocumentsSingle()
         case .syncNextCloud:
             seedSyncNextCloud(enabledCategories: [])
         case .syncNextCloudBookmarksEnabled:
@@ -848,7 +864,7 @@ private final class FixtureContext {
         let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
         let modsDURL = swordURL.appendingPathComponent("mods.d", isDirectory: true)
         let dataURL = swordURL.appendingPathComponent(
-            "modules/comments/rawcom/uitestcomm",
+            "modules/comments/rawcom/000uitestcomm",
             isDirectory: true
         )
         try fileManager.createDirectory(at: modsDURL, withIntermediateDirectories: true)
@@ -856,9 +872,9 @@ private final class FixtureContext {
         try removeCachedSwordModuleConfig(in: modsDURL)
 
         let conf = """
-        [UITestComm]
+        [000UITestComm]
         Description=UI Test Commentary
-        DataPath=./modules/comments/rawcom/uitestcomm/
+        DataPath=./modules/comments/rawcom/000uitestcomm/
         ModDrv=RawCom
         SourceType=OSIS
         Encoding=UTF-8
@@ -867,7 +883,7 @@ private final class FixtureContext {
         About=Deterministic empty commentary module for iOS UI automation.
         """
         try conf.write(
-            to: modsDURL.appendingPathComponent("uitestcomm.conf", isDirectory: false),
+            to: modsDURL.appendingPathComponent("000uitestcomm.conf", isDirectory: false),
             atomically: true,
             encoding: .utf8
         )
@@ -1039,6 +1055,74 @@ private final class FixtureContext {
     }
 
     /**
+     Ensures a fixture workspace starts with the requested number of visible Bible panes.
+
+     Third-pane UI tests validate pane-local behavior after the app has already entered
+     multi-window mode. Android no longer exposes the add-window footer button in that mode, so
+     those tests seed the workspace shape directly instead of requiring an iOS-only repeated add
+     affordance.
+
+     - Parameters:
+       - count: Number of visible Bible windows the fixture should expose.
+       - baseline: Baseline workspace graph returned by `ensureBaseline()`.
+     - Side effects: Inserts missing windows, assigns unique sequential order numbers to every
+       persisted workspace window, normalizes the requested visible windows to KJV Genesis 1,
+       minimizes extra windows, and saves the SwiftData context.
+     - Failure modes: Rethrows SwiftData save failures.
+     */
+    private func ensureVisibleBibleWindowCount(_ count: Int, baseline: BaselineState) throws {
+        guard count > 0 else { return }
+
+        var windows = workspaceStore.windows(workspaceId: baseline.workspace.id)
+        while windows.count < count {
+            let window = workspaceStore.addWindow(
+                to: baseline.workspace,
+                document: baseline.pageManager.bibleDocument ?? "KJV",
+                category: "bible"
+            )
+            windows.append(window)
+        }
+
+        windows = windows.sorted {
+            if $0.orderNumber != $1.orderNumber {
+                return $0.orderNumber < $1.orderNumber
+            }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+
+        for (order, window) in windows.enumerated() {
+            window.orderNumber = order
+            guard order < count else {
+                window.layoutState = "minimized"
+                continue
+            }
+
+            window.layoutState = "split"
+            window.isLinksWindow = false
+            window.layoutWeight = 1.0
+
+            let pageManager: PageManager
+            if let existingPageManager = window.pageManager {
+                pageManager = existingPageManager
+            } else {
+                let createdPageManager = PageManager(id: window.id, currentCategoryName: "bible")
+                createdPageManager.window = window
+                modelContext.insert(createdPageManager)
+                pageManager = createdPageManager
+            }
+
+            pageManager.currentCategoryName = "bible"
+            pageManager.bibleDocument = pageManager.bibleDocument ?? baseline.pageManager.bibleDocument ?? "KJV"
+            pageManager.bibleVersification = pageManager.bibleVersification ?? "KJVA"
+            pageManager.bibleBibleBook = 0
+            pageManager.bibleChapterNo = 1
+            pageManager.bibleVerseNo = 1
+        }
+
+        try modelContext.save()
+    }
+
+    /**
      Seeds one bookmark that should navigate from Genesis 1 to Exodus 2.
      */
     private func seedBookmarkNavigation() throws {
@@ -1191,6 +1275,53 @@ private final class FixtureContext {
             createdAt: seededDate(offset: 20)
         )
         bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "UI_Test_My_Notes_Note")
+    }
+
+    /**
+     Seeds one My Document with a single Markdown page for drawer routing coverage.
+     *
+     * Android's drawer opens `MyDocumentsActivity`, then a page selector. The seeded graph uses the
+     * same SwiftData model and stable initials/page key as synced or user-created documents so UI
+     * tests can prove row selection reaches the reader's My Documents page loader.
+     *
+     * - Throws: `FixtureToolError.usage` if the deterministic UUID literals are malformed.
+     */
+    private func seedMyDocumentsSingle() throws {
+        guard let documentId = UUID(uuidString: "44444444-4444-4444-4444-444444444444"),
+              let pageId = UUID(uuidString: "55555555-5555-5555-5555-555555555555") else {
+            throw FixtureToolError.usage("Invalid deterministic My Documents fixture UUID.")
+        }
+
+        let createdAt = seededDate(offset: 20)
+        let document = MyDocument(
+            id: documentId,
+            name: "UI Test Document",
+            documentDescription: "Seeded My Documents entry",
+            initials: "UITESTDOC",
+            orderNumber: 0,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        let page = MyDocumentPage(
+            id: pageId,
+            title: "Intro",
+            pageKey: "intro",
+            contentType: .markdown,
+            orderNumber: 0,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        let content = MyDocumentPageContent(
+            pageId: pageId,
+            content: "# UI Test My Document\n\nSeeded body for drawer routing coverage."
+        )
+
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
+        modelContext.insert(document)
+        modelContext.insert(page)
+        modelContext.insert(content)
     }
 
     /**

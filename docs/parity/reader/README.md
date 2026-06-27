@@ -7,6 +7,9 @@ It covers the main reading experience, including the reader shell, toolbar chrom
 The durable decision behind the current document/modal routing posture is
 recorded in
 [ADR 0002](../../adr/0002-route-reader-document-modals-through-shared-document-pipeline.md).
+The current reader presentation ownership matrix applies
+[ADR 0006](../../adr/0006-modal-presentation-ownership-for-android-parity.md)
+to every reader sheet, modal, destination, and transient dialog route.
 Use the files in this directory for current status, validation evidence, and
 links to implementation issues rather than duplicating the full decision
 rationale.
@@ -19,12 +22,14 @@ is useful, but the surrounding notes are where the intent and the remaining roug
 1. [contract.md](contract.md): reader behaviors that intentionally mirror Android
 2. [dispositions.md](dispositions.md): explicit iOS adaptations for those behaviors
 3. [verification-matrix.md](verification-matrix.md): current status by contract area
-4. [document-chooser-matrix.md](document-chooser-matrix.md): Android `ChooseDocument`
+4. [modal-ownership-matrix.md](modal-ownership-matrix.md): ADR 0006 ownership
+   classification for reader sheets, modals, destinations, and transient dialogs
+5. [document-chooser-matrix.md](document-chooser-matrix.md): Android `ChooseDocument`
    alignment and known chooser gaps
-5. [text-display-options-contract.md](text-display-options-contract.md): Android All
+6. [text-display-options-contract.md](text-display-options-contract.md): Android All
    Text Options inventory, iOS routing scope, and row dispositions
-6. [regression-report.md](regression-report.md): focused validation evidence
-7. [guardrails.md](guardrails.md): maintenance rules for high-risk reader changes
+7. [regression-report.md](regression-report.md): focused validation evidence
+8. [guardrails.md](guardrails.md): maintenance rules for high-risk reader changes
 
 Helpful companion docs:
 

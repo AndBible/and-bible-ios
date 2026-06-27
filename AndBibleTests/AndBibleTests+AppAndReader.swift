@@ -267,6 +267,103 @@ extension AndBibleTests {
         XCTAssertEqual(resolved.dayTextColor, TextDisplaySettings.appDefaults.dayTextColor)
     }
 
+    /**
+     Protects the extracted SWORD setup boundary for installed-module catalog and active-module
+     resolution.
+
+     The controller currently configures SWORD, splits installed modules by Android document
+     category, chooses active module handles, and builds the active Bible book list in one large
+     method. This test defines the collaborator contract before extraction: requested modules must
+     be resolved through the shared `SwordManager`, commentaries keep the existing first-installed
+     fallback, optional auxiliary modules remain explicit, and Bible books must come from the active
+     module instead of a static fallback while a SWORD Bible is installed. A failure means the
+     extraction changed the reader's module inventory or versification source.
+     */
+    func testReaderSwordCoordinatorBuildsCatalogSelectionsAndBookList() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        try seedBibleAliasModule(named: "WEB", description: "World English Bible", in: modulePath)
+        try seedEmptyRawCommentaryModule(named: "UITestComm", in: modulePath)
+        try seedEmptyRawDictionaryModule(named: "UITestDict", in: modulePath)
+        try seedEmptyRawGeneralBookModule(named: "UITestGB", in: modulePath)
+        try seedEmptyRawMapModule(named: "UITestMap", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+
+        let state = BibleReaderSwordCoordinator().configure(
+            manager: manager,
+            selection: BibleReaderSwordSelection(
+                activeModuleName: "WEB",
+                activeCommentaryModuleName: nil,
+                activeDictionaryModuleName: "UITestDict",
+                activeGeneralBookModuleName: "UITestGB",
+                activeMapModuleName: "UITestMap"
+            ),
+            displaySettings: .appDefaults
+        )
+
+        XCTAssertEqual(Set(state.installedBibleModules.map(\.name)), Set(["KJV", "WEB"]))
+        XCTAssertEqual(state.installedCommentaryModules.map(\.name), ["UITestComm"])
+        XCTAssertEqual(state.installedDictionaryModules.map(\.name), ["UITestDict"])
+        XCTAssertEqual(state.installedGeneralBookModules.map(\.name), ["UITestGB"])
+        XCTAssertEqual(state.installedMapModules.map(\.name), ["UITestMap"])
+        XCTAssertEqual(state.activeModuleName, "WEB")
+        XCTAssertEqual(state.activeModule?.info.name, "WEB")
+        XCTAssertEqual(state.activeCommentaryModuleName, "UITestComm")
+        XCTAssertEqual(state.activeDictionaryModuleName, "UITestDict")
+        XCTAssertEqual(state.activeGeneralBookModuleName, "UITestGB")
+        XCTAssertEqual(state.activeMapModuleName, "UITestMap")
+        XCTAssertEqual(state.moduleBookList.count, 66)
+        XCTAssertEqual(state.moduleBookList.first?.osisId, "Gen")
+    }
+
+    /**
+     Protects the SWORD global option mapping used by reader rendering.
+
+     Android applies reader display settings through JSword filters; iOS mirrors those options with
+     SWORD global options. The setup collaborator must keep the always-on heading/red-letter base
+     configuration and the setting-driven Strong's, morphology, footnote, and cross-reference
+     toggles together so future controller refactors cannot silently stop applying display changes
+     to the SWORD manager.
+     */
+    func testReaderSwordCoordinatorAppliesBaseAndDisplayGlobalOptions() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        var settings = TextDisplaySettings()
+        settings.strongsMode = 1
+        settings.showMorphology = true
+        settings.showFootNotes = true
+        settings.showXrefs = true
+
+        _ = BibleReaderSwordCoordinator().configure(
+            manager: manager,
+            selection: BibleReaderSwordSelection(
+                activeModuleName: "KJV",
+                activeCommentaryModuleName: nil,
+                activeDictionaryModuleName: nil,
+                activeGeneralBookModuleName: nil,
+                activeMapModuleName: nil
+            ),
+            displaySettings: settings
+        )
+
+        XCTAssertTrue(manager.isGlobalOptionEnabled(.headings))
+        XCTAssertTrue(manager.isGlobalOptionEnabled(.redLetterWords))
+        XCTAssertTrue(manager.isGlobalOptionEnabled(.strongsNumbers))
+        XCTAssertTrue(manager.isGlobalOptionEnabled(.morphology))
+        XCTAssertTrue(manager.isGlobalOptionEnabled(.footnotes))
+        XCTAssertTrue(manager.isGlobalOptionEnabled(.crossReferences))
+
+        settings.strongsMode = 0
+        settings.showMorphology = false
+        settings.showFootNotes = false
+        settings.showXrefs = false
+        BibleReaderSwordCoordinator().applyDisplayOptions(to: manager, settings: settings)
+
+        XCTAssertFalse(manager.isGlobalOptionEnabled(.strongsNumbers))
+        XCTAssertFalse(manager.isGlobalOptionEnabled(.morphology))
+        XCTAssertFalse(manager.isGlobalOptionEnabled(.footnotes))
+        XCTAssertFalse(manager.isGlobalOptionEnabled(.crossReferences))
+    }
+
     func testTextDisplaySettingsChangedFieldsOnlyClearMatchingDirtyOverrides() {
         var previousGlobal = TextDisplaySettings()
         previousGlobal.fontSize = 18
@@ -370,6 +467,8 @@ extension AndBibleTests {
             strongsEnabled: true,
             isBibleActive: true,
             isCommentaryActive: false,
+            searchEnabled: true,
+            speakEnabled: true,
             moduleActionsEnabled: true,
             onShowSearch: {},
             onShowSpeak: {},
@@ -1016,6 +1115,117 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Guards Android `ChooseDocument` document-type parity beyond normal installed SWORD rows.
+
+     Android's chooser includes visible `FakeBookFactory` pseudo-documents, hides add-ons from
+     "All types", and exposes add-ons only through the Add-ons document-type filter. The language
+     filter also preserves AND_BIBLE rows, matching `DocumentSelectionBase.filterDocuments`.
+     */
+    func testBibleReaderModulePickerRowsIncludeAndroidPseudoDocumentsAndAddonFilter() {
+        let modules = [
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en"),
+            ModuleInfo(name: "MHC", description: "Matthew Henry", category: .commentary, language: "en"),
+            ModuleInfo(name: "BookA", description: "General reference book", category: .generalBook, language: "fr"),
+            ModuleInfo(name: "AddonFonts", description: "Font package", category: .addon, language: "zz"),
+            ModuleInfo(name: "Devotion", description: "Daily devotional", category: .dailyDevotion, language: "en")
+        ]
+
+        XCTAssertEqual(
+            BibleReaderModulePicker.filteredRows(
+                modules,
+                selectedFilter: .all,
+                selectedLanguage: "",
+                searchText: ""
+            ).map(\.id),
+            [
+                "module:KJV",
+                "module:MHC",
+                "module:BookA",
+                "pseudo:compare",
+                "pseudo:myNotes",
+                "pseudo:studyPads"
+            ]
+        )
+        XCTAssertEqual(
+            BibleReaderModulePicker.filteredRows(
+                modules,
+                selectedFilter: .category(.commentary),
+                selectedLanguage: "",
+                searchText: ""
+            ).map(\.id),
+            ["module:MHC", "pseudo:compare", "pseudo:myNotes"]
+        )
+        XCTAssertEqual(
+            BibleReaderModulePicker.filteredRows(
+                modules,
+                selectedFilter: .category(.generalBook),
+                selectedLanguage: "",
+                searchText: ""
+            ).map(\.id),
+            ["module:BookA", "pseudo:studyPads"]
+        )
+        XCTAssertEqual(
+            BibleReaderModulePicker.filteredRows(
+                modules,
+                selectedFilter: .addons,
+                selectedLanguage: "en",
+                searchText: ""
+            ).map(\.id),
+            ["module:AddonFonts"]
+        )
+        XCTAssertTrue(
+            BibleReaderModulePicker.filteredRows(
+                modules,
+                selectedFilter: .category(.bible),
+                selectedLanguage: "",
+                searchText: "notes"
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            BibleReaderModulePicker.filteredRows(
+                modules,
+                selectedFilter: .all,
+                selectedLanguage: "",
+                searchText: "notes"
+            ).map(\.id),
+            ["pseudo:myNotes"]
+        )
+    }
+
+    /**
+     Verifies the picker exposes Android document management actions without inventing unlock.
+
+     Android shows About, Delete, and Delete Index for installed documents. iOS must reuse the real
+     module management services for those actions, while continuing to hide Unlock until there is a
+     cipher-key coordinator that can actually persist and apply encrypted module keys.
+     */
+    func testBibleReaderModulePickerRowActionsUseAndroidDocumentManagementContract() {
+        let plainModule = ModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en"
+        )
+        let lockedModule = ModuleInfo(
+            name: "LOCKED",
+            description: "Locked Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: false
+        )
+
+        XCTAssertEqual(
+            BibleReaderModulePicker.rowActions(for: plainModule),
+            [.about, .uninstall, .deleteIndex]
+        )
+        XCTAssertEqual(
+            BibleReaderModulePicker.rowActions(for: lockedModule),
+            [.about, .uninstall, .deleteIndex]
+        )
+    }
+
     func testBibleReaderModulePickerMapsAndroidDocumentTypeCategories() {
         XCTAssertEqual(BibleReaderModulePicker.initialCategoryFilter(for: .bible), .bible)
         XCTAssertEqual(BibleReaderModulePicker.initialCategoryFilter(for: .commentary), .commentary)
@@ -1033,6 +1243,89 @@ extension AndBibleTests {
         XCTAssertNil(BibleReaderModulePicker.documentCategory(for: .dailyDevotion))
         XCTAssertNil(BibleReaderModulePicker.documentCategory(for: .glossary))
         XCTAssertNil(BibleReaderModulePicker.documentCategory(for: .unknown))
+    }
+
+    /**
+     Guards Android current-document parity for full module-picker map selections.
+
+     Android routes map rows through `setCurrentDocument(book)` just like other document rows. The
+     full iOS picker must therefore call the controller's map document switch instead of splitting
+     map module and category updates across separate mutations.
+     */
+    func testBibleReaderModulePickerRoutesMapsThroughDocumentSwitch() throws {
+        let source = try bibleUISource(named: "BibleReaderModulePicker.swift")
+        let selectionSource = try extractFunction(named: "select", from: source)
+
+        XCTAssertTrue(selectionSource.contains("case .map:"))
+        XCTAssertTrue(selectionSource.contains("controller.switchMapDocument(to: module.name)"))
+        XCTAssertFalse(selectionSource.contains("controller.switchMapModule(to: module.name)"))
+        XCTAssertFalse(selectionSource.contains("controller.switchCategory(to: .map)"))
+    }
+
+    /**
+     Guards Android `FakeBookFactory.pseudoDocuments` routing for the full document chooser.
+
+     Android exposes My Notes, Journal/StudyPads, and Compare from `ChooseDocument`; it does not
+     expose the hidden Memorize document or the transient Multi document from that picker path.
+     */
+    func testBibleReaderModulePickerPseudoDocumentsRouteThroughAndroidEquivalents() throws {
+        let source = try bibleUISource(named: "BibleReaderModulePicker.swift")
+
+        XCTAssertTrue(source.contains("case .myNotes:"))
+        XCTAssertTrue(source.contains("controller.loadMyNotesDocument()"))
+        XCTAssertTrue(source.contains("case .studyPads:"))
+        XCTAssertTrue(source.contains("dismissAndPresentAuxiliaryBrowser(onOpenStudyPadSelector)"))
+        XCTAssertTrue(source.contains("case .compare:"))
+        XCTAssertTrue(source.contains("controller.loadCompareDocument()"))
+        XCTAssertFalse(source.contains("loadMultiReferenceDocument"))
+        XCTAssertFalse(source.contains("loadMemorizeDocument"))
+    }
+
+    /**
+     Guards Android `ChooseDocument` routes against regressing to the iOS sheet host.
+
+     Android opens both the all-types chooser and category-scoped chooser as an app-owned
+     full-screen activity. The iOS coordinator state is private, so this source-level contract
+     checks the presentation boundary directly: document chooser routes must be filtered into a
+     full-screen cover, the generic reader-modal sheet must receive only non-chooser routes, and
+     the chooser view itself must not carry medium/large sheet detents.
+     */
+    func testBibleReaderDocumentChooserRoutesUseFullScreenCoverInsteadOfSheetDetents() throws {
+        let readerSource = try bibleUISource(named: "BibleReaderView.swift")
+        let pickerSource = try bibleUISource(named: "BibleReaderModulePicker.swift")
+
+        XCTAssertTrue(readerSource.contains("var isDocumentChooserRoute: Bool"))
+        XCTAssertTrue(readerSource.contains("case .modulePicker, .chooseDocument:"))
+        XCTAssertTrue(readerSource.contains(".sheet(item: readerSheetModalBinding)"))
+        XCTAssertTrue(readerSource.contains(".fullScreenCover(item: readerDocumentChooserModalBinding)"))
+        XCTAssertFalse(readerSource.contains(".sheet(item: $activeReaderModal)"))
+        XCTAssertFalse(pickerSource.contains(".presentationDetents([.medium, .large])"))
+    }
+
+    /**
+     Guards Android `DocumentSelectionBase` visual parity for the full document chooser.
+
+     Android renders `ChooseDocument` with an app-owned toolbar, inline language/search/type filters,
+     a visible document count, and `document_list_item` rows. iOS must not regress to a native
+     `NavigationStack`/`List`/`.searchable` sheet because that preserves iOS chrome instead of the
+     shared AndBible document-management surface.
+     */
+    func testBibleReaderDocumentChooserUsesAndroidDocumentSelectionLayout() throws {
+        let pickerSource = try bibleUISource(named: "BibleReaderModulePicker.swift")
+
+        XCTAssertTrue(pickerSource.contains("private var androidDocumentChooserScreen"))
+        XCTAssertTrue(pickerSource.contains("private var androidTopAppBar"))
+        XCTAssertTrue(pickerSource.contains("private func androidFilterBar(visibleDocumentCount: Int)"))
+        XCTAssertTrue(pickerSource.contains("private func androidDocumentRow(_ row: DocumentChooserRow)"))
+        XCTAssertTrue(pickerSource.contains("private func androidLanguageFilterMenu()"))
+        XCTAssertTrue(pickerSource.contains("private func androidSearchFilterField()"))
+        XCTAssertTrue(pickerSource.contains("private func androidDocumentTypeFilterMenu(visibleDocumentCount: Int)"))
+        XCTAssertTrue(pickerSource.contains("private var androidChooserOverflowMenu"))
+        XCTAssertTrue(pickerSource.contains("String(localized: \"document\", defaultValue: \"Document\")"))
+        XCTAssertTrue(pickerSource.contains(".toolbar(.hidden, for: .navigationBar)"))
+        XCTAssertFalse(pickerSource.contains("NavigationStack {\n            List {"))
+        XCTAssertFalse(pickerSource.contains(".searchable(text: $searchText"))
+        XCTAssertFalse(pickerSource.contains("Section(String(localized: \"document_filter_results"))
     }
 
     /**
@@ -1409,6 +1702,39 @@ extension AndBibleTests {
     }
 
     /**
+     Protects Android's atomic current-document switch behavior for map selections.
+
+     Android routes maps through the same current-document transition as other chooser rows. The
+     iOS controller must therefore persist the selected map/category and clear stale map keys
+     together so map selection cannot leave mixed pane state behind.
+     */
+    @MainActor
+    func testMapDocumentSwitchPersistsModuleCategoryAndClearsKeyTogether() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        try seedEmptyRawMapModule(named: "UITestMap", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.mapKey = "stale-key"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.switchMapDocument(to: "UITestMap")
+
+        XCTAssertEqual(controller.currentCategory, .map)
+        XCTAssertEqual(controller.activeMapModuleName, "UITestMap")
+        XCTAssertNil(controller.currentMapKey)
+        XCTAssertEqual(pageManager.mapDocument, "UITestMap")
+        XCTAssertNil(pageManager.mapKey)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.map.pageManagerKey)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /**
      Protects Android's atomic current-document switch behavior for Bible quick selections.
 
      Android `MainBibleActivity.menuForDocs` delegates selected Bible rows to
@@ -1493,6 +1819,129 @@ extension AndBibleTests {
         XCTAssertEqual(pageManager.bibleDocument, baselineBibleDocument)
         XCTAssertEqual(pageManager.currentCategoryName, baselineCategoryName)
         XCTAssertEqual(persistCount, 0)
+    }
+
+    /**
+     Protects the extracted document-switch category guard used by Android-style current-document
+     changes.
+
+     A Bible document switch must not accept a commentary module because that would persist a Bible
+     page identity with non-Bible initials. The controller's public API logs the failure; this
+     collaborator-level contract keeps the rule isolated from logging and WebView reload concerns.
+     */
+    func testReaderModuleSwitchCoordinatorRejectsMismatchedDocumentCategory() {
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+
+        let result = coordinator.documentSwitchPlan(
+            moduleName: "MHC",
+            moduleCategory: .commentary,
+            targetCategory: .bible
+        )
+
+        XCTAssertEqual(
+            result,
+            .failure(.categoryMismatch(moduleName: "MHC", expected: .bible, actual: .commentary))
+        )
+    }
+
+    /**
+     Protects Android's atomic dictionary document switch persistence contract.
+
+     Selecting a dictionary from the commentary/document chooser updates the visible category and
+     selected dictionary together while clearing a stale dictionary key. A failure here means the
+     controller could again split module selection from category persistence.
+     */
+    func testReaderModuleSwitchCoordinatorPersistsDictionaryDocumentAndClearsStaleKey() throws {
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+        let pageManager = PageManager(currentCategoryName: DocumentCategory.bible.pageManagerKey)
+        pageManager.dictionaryDocument = "OldDict"
+        pageManager.dictionaryKey = "stale-key"
+
+        let plan = try coordinator.documentSwitchPlan(
+            moduleName: "BDBT",
+            moduleCategory: .dictionary,
+            targetCategory: .dictionary
+        ).get()
+
+        plan.apply(to: pageManager)
+
+        XCTAssertEqual(plan.category, .dictionary)
+        XCTAssertTrue(plan.updatesVisibleCategory)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.dictionary.pageManagerKey)
+        XCTAssertEqual(pageManager.dictionaryDocument, "BDBT")
+        XCTAssertNil(pageManager.dictionaryKey)
+    }
+
+    /**
+     Protects Android's atomic map document switch persistence contract.
+
+     Selecting a map from the document chooser updates the visible category and selected map
+     together while clearing stale map entry state. A failure here means map selection can again
+     split module selection from category persistence.
+     */
+    func testReaderModuleSwitchCoordinatorPersistsMapDocumentAndClearsStaleKey() throws {
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+        let pageManager = PageManager(currentCategoryName: DocumentCategory.bible.pageManagerKey)
+        pageManager.mapDocument = "OldMap"
+        pageManager.mapKey = "stale-key"
+
+        let plan = try coordinator.documentSwitchPlan(
+            moduleName: "BibleMap",
+            moduleCategory: .map,
+            targetCategory: .map
+        ).get()
+
+        plan.apply(to: pageManager)
+
+        XCTAssertEqual(plan.category, .map)
+        XCTAssertTrue(plan.updatesVisibleCategory)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.map.pageManagerKey)
+        XCTAssertEqual(pageManager.mapDocument, "BibleMap")
+        XCTAssertNil(pageManager.mapKey)
+    }
+
+    /**
+     Protects module-only switching as separate from visible category switching.
+
+     Direct module-switch paths can update the selected module for an inactive category. That must
+     remain separate from full current-document chooser paths, which update the selected module and
+     visible category together.
+     */
+    func testReaderModuleSwitchCoordinatorModuleOnlyPlanDoesNotChangeVisibleCategory() {
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+        let pageManager = PageManager(currentCategoryName: DocumentCategory.bible.pageManagerKey)
+        pageManager.mapDocument = "OldMap"
+        pageManager.mapKey = "stale-map-key"
+
+        let plan = coordinator.moduleOnlySwitchPlan(
+            moduleName: "BibleMap",
+            targetCategory: .map
+        )
+
+        plan.apply(to: pageManager)
+
+        XCTAssertEqual(plan.category, .map)
+        XCTAssertFalse(plan.updatesVisibleCategory)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+        XCTAssertEqual(pageManager.mapDocument, "BibleMap")
+        XCTAssertNil(pageManager.mapKey)
+    }
+
+    /**
+     Protects category-only reload decisions from being hidden inside controller code.
+
+     Switching to the same category should persist the category but not request a WebView reload;
+     switching to a different category should request one. The controller remains responsible for
+     checking client readiness before actually reloading.
+     */
+    func testReaderModuleSwitchCoordinatorCategoryPlanRequestsReloadOnlyWhenCategoryChanges() {
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+
+        let unchanged = coordinator.categorySwitchPlan(from: .bible, to: .bible)
+        let changed = coordinator.categorySwitchPlan(from: .bible, to: .commentary)
+
+        XCTAssertFalse(unchanged.shouldReloadContent)
+        XCTAssertTrue(changed.shouldReloadContent)
     }
 
     /**
@@ -1796,7 +2245,10 @@ extension AndBibleTests {
 
         let source = try String(contentsOf: readerViewURL, encoding: .utf8)
         guard let drawerStart = source.range(of: "private var bookChooserDrawerContent"),
-              let nextSection = source.range(of: "/// Search sheet", range: drawerStart.upperBound..<source.endIndex) else {
+              let nextSection = source.range(
+                of: "private var searchSheetContent",
+                range: drawerStart.upperBound..<source.endIndex
+              ) else {
             return XCTFail("Could not locate book chooser drawer content in BibleReaderView.swift")
         }
 
