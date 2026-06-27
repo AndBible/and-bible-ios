@@ -1356,25 +1356,14 @@ public struct ImportExportView: View {
      Builds the user-visible completion summary for Android module backup restore.
 
      - Parameter report: Restore report from `AndroidModuleBackupService`.
-     - Returns: Concise status message listing installed modules and skipped unsupported content.
+     - Returns: Android's generic module-install success message. The report remains an input so the
+       restore caller keeps the service contract explicit even though Android does not enumerate
+       restored module names in the success surface.
      - Side effects: none.
-     - Failure modes: Empty module names produce a generic success message, though the service
-       normally rejects archives without supported SWORD modules.
+     - Failure modes: Missing localization falls back to Android's English success string.
      */
     private func androidModuleBackupRestoreStatusMessage(for report: AndroidModuleBackupRestoreReport) -> String {
-        let modules = report.installedModuleNames.isEmpty
-            ? String(localized: "android_module_backup_modules_unknown", defaultValue: "modules")
-            : report.installedModuleNames.joined(separator: ", ")
-        if report.skippedUnsupportedEntryPaths.isEmpty {
-            return String(
-                localized: "android_module_backup_restored_summary",
-                defaultValue: "Restored Android module backup: \(modules)"
-            )
-        }
-        return String(
-            localized: "android_module_backup_restored_with_skips_summary",
-            defaultValue: "Restored Android module backup: \(modules). Skipped \(report.skippedUnsupportedEntryPaths.count) Android-only files."
-        )
+        AndroidModuleBackupPresentation.localizedRestoreSuccessMessage(for: report)
     }
 
     /**

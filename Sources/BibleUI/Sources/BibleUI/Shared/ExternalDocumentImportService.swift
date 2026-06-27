@@ -547,7 +547,7 @@ public enum ExternalDocumentImportResult: Equatable, Sendable {
     /// A TTF font installed successfully; associated value is the installed font name.
     case installedFont(name: String)
 
-    /// An Android module backup restored successfully; associated values describe restored modules.
+    /// An Android module backup restored successfully; associated values preserve restore details.
     case installedAndroidModuleBackup(moduleNames: [String], installedEntryCount: Int)
 
     /// The file extension is not handled by iOS' implemented document installer path.
@@ -581,20 +581,8 @@ public enum ExternalDocumentImportResult: Equatable, Sendable {
                 format: String(localized: "installed_font_%@", defaultValue: "Installed font: %@"),
                 name
             )
-        case .installedAndroidModuleBackup(let moduleNames, let installedEntryCount):
-            let summary = moduleNames.isEmpty
-                ? String(
-                    format: String(localized: "installed_module_files_%d", defaultValue: "%d module files"),
-                    installedEntryCount
-                )
-                : moduleNames.joined(separator: ", ")
-            return String(
-                format: String(
-                    localized: "installed_android_module_backup_%@",
-                    defaultValue: "Installed modules: %@"
-                ),
-                summary
-            )
+        case .installedAndroidModuleBackup:
+            return AndroidModuleBackupPresentation.localizedInstallSuccessMessage
         case .unsupportedFormat(let fileExtension):
             return String(
                 format: String(

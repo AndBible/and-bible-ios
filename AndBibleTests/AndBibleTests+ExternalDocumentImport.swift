@@ -231,10 +231,13 @@ extension AndBibleTests {
      Android's install activity accepts document/module backup ZIPs through the same external-open
      surface as SWORD ZIPs, but the backup payload contains `AndBibleBackupManifest.json` and should
      be restored through the Android module-backup service so manifest validation, unsupported
-     Android-only entries, cache invalidation, and overwrite handling remain centralized.
+     Android-only entries, cache invalidation, and overwrite handling remain centralized. Android's
+     success surface is the generic InstallZip success toast, so feedback must not enumerate every
+     module from a large backup.
 
      Failure means `.abmd.zip` files can be routed into the plain SWORD ZIP installer, producing
-     misleading decompression errors and bypassing Android backup semantics.
+     misleading decompression errors and bypassing Android backup semantics, or iOS has drifted back
+     to a blocking module-list presentation that Android does not show.
      */
     func testExternalDocumentImportAndroidModuleBackupUsesBackupInstaller() {
         let probe = ExternalDocumentImportProbe()
@@ -247,11 +250,37 @@ extension AndBibleTests {
             result,
             .installedAndroidModuleBackup(moduleNames: ["ESV2001", "ESV2011"], installedEntryCount: 14)
         )
-        XCTAssertEqual(result.feedbackMessage, "Installed modules: ESV2001, ESV2011")
+        XCTAssertEqual(result.feedbackMessage, "Module was installed successfully")
+        XCTAssertFalse(result.feedbackMessage.contains("ESV2001"))
         XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [url])
         XCTAssertEqual(probe.snapshot().moduleURLs, [])
         XCTAssertEqual(probe.snapshot().epubURLs, [])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
+    }
+
+    /**
+     Android module-backup success presentation follows InstallZip instead of listing modules.
+
+     Android's `InstallZip` posts the generic `install_zip_successfull` toast after a successful
+     module or document backup install. The iOS restore report can contain many module names and
+     skipped Android-only entries, but the completion copy must remain generic so large Android
+     backups do not produce a blocking, scroll-sized module list.
+
+     Failure means the Settings restore path can drift from Android's visible behavior even when
+     the underlying restore report is correct.
+     */
+    func testAndroidModuleBackupPresentationUsesGenericInstallSuccessCopy() {
+        let report = AndroidModuleBackupRestoreReport(
+            installedModuleNames: ["BDBT", "HebrewGreek", "StrongsHebrew"],
+            installedEntryCount: 124,
+            skippedUnsupportedEntryPaths: ["mybible/example.SQLite3"]
+        )
+
+        let message = AndroidModuleBackupPresentation.localizedRestoreSuccessMessage(for: report)
+
+        XCTAssertEqual(message, "Module was installed successfully")
+        XCTAssertFalse(message.contains("BDBT"))
+        XCTAssertFalse(message.contains("mybible"))
     }
 
     /**
