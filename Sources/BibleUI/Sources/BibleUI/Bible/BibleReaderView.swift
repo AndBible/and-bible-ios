@@ -91,9 +91,7 @@ struct ReaderWindowControlsAvoidanceMetrics {
 public struct BibleReaderView: View {
     /// Top-level sheets launched from the reader shell or its global shortcuts.
     enum ReaderSheet: String, Identifiable {
-        case bookmarks
         case history
-        case readingPlans
         case readingProgress
         case readingProgressSettings
         case chapterReadHistory
@@ -106,6 +104,14 @@ public struct BibleReaderView: View {
     /// Reader-stack destinations opened from global reader actions.
     enum ReaderDestination: String, Identifiable, Hashable {
         case search
+        /// Drawer-owned bookmark list destination that avoids legacy sheet chrome.
+        case bookmarks
+        /// Drawer-owned StudyPads selector that opens the selected StudyPad document.
+        case studyPads
+        /// Drawer-owned My Documents selector that opens the selected document page.
+        case myDocuments
+        /// Drawer-owned reading-plan list destination that avoids legacy sheet chrome.
+        case readingPlans
         case settings
         case downloads
         case globalTextOptions
@@ -168,7 +174,6 @@ public struct BibleReaderView: View {
         case epubBrowser
         case epubSearch
         case labelManager
-        case studyPadSelector
         case chooseDocument
         case help
 
@@ -1183,6 +1188,78 @@ public struct BibleReaderView: View {
         switch destination {
         case .search:
             searchSheetContent
+        case .bookmarks:
+            BookmarkListView(
+                onNavigate: { book, chapter in
+                    panePresentationController?.navigateTo(book: book, chapter: chapter)
+                    activeReaderDestination = nil
+                },
+                onOpenStudyPad: { labelId in
+                    panePresentationController?.loadStudyPadDocument(labelId: labelId)
+                    activeReaderDestination = nil
+                },
+                bibleOrdinalResolver: { book, ordinal in
+                    panePresentationController?.bookmarkListVerseReference(book: book, ordinal: ordinal)
+                },
+                showsDismissButton: false
+            )
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                readerDestinationBackToolbarItem
+            }
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .studyPads:
+            LabelManagerView(
+                onOpenStudyPad: { labelId in
+                    panePresentationController?.loadStudyPadDocument(labelId: labelId)
+                    activeReaderDestination = nil
+                },
+                navigationTitle: String(localized: "studypads"),
+                opensStudyPadOnRowTap: true
+            )
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                readerDestinationBackToolbarItem
+            }
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .myDocuments:
+            MyDocumentsListView { bookInitials, pageKey in
+                if panePresentationController?.loadMyDocumentPage(bookInitials: bookInitials, pageKey: pageKey) == true {
+                    activeReaderDestination = nil
+                }
+            }
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                readerDestinationBackToolbarItem
+            }
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .readingPlans:
+            ReadingPlanListView()
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                readerDestinationBackToolbarItem
+            }
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
         case .settings:
             SettingsView(
                 nightMode: $nightMode,
@@ -1275,6 +1352,32 @@ public struct BibleReaderView: View {
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
+        }
+    }
+
+    /**
+     Builds the app-owned reader-destination back action used by Android-parity drawer screens.
+
+     Android launches Bookmarks, StudyPads, My Documents, and Reading Plans as app routes with
+     app-bar back navigation rather than sheet Done chrome. This toolbar item gives those iOS
+     destinations the same explicit escape hatch while keeping the route on the reader navigation
+     stack.
+
+     - Outputs: A navigation-leading toolbar item with a stable UI-test identifier.
+     - Side effects: Tapping the button clears `activeReaderDestination` and returns to the reader.
+     - Failure modes: No throwing failure path; the button is inert only if SwiftUI does not render
+       the hosting navigation toolbar.
+     */
+    @ToolbarContentBuilder
+    private var readerDestinationBackToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            Button {
+                activeReaderDestination = nil
+            } label: {
+                Image(systemName: "arrow.left")
+            }
+            .accessibilityLabel(String(localized: "back", defaultValue: "Back"))
+            .accessibilityIdentifier("readerDestinationBackButton")
         }
     }
 
@@ -1383,7 +1486,7 @@ public struct BibleReaderView: View {
         BibleReaderKeyboardShortcuts(
             onSearch: { presentSearch(from: windowManager.activeWindow?.id) },
             onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
-            onOpenBookmarks: { presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id) },
+            onOpenBookmarks: { presentReaderDestination(.bookmarks, from: windowManager.activeWindow?.id) },
             onNavigatePrevious: { navigatePreviousIfReaderCanHostNavigate(focusedController) },
             onNavigateNext: { navigateNextIfReaderCanHostNavigate(focusedController) },
             onCloseClientModal: { _ = closeFocusedWebModalIfNeeded() },
@@ -1712,6 +1815,8 @@ public struct BibleReaderView: View {
         switch previousDestination {
         case .search:
             searchInitialQuery = ""
+        case .bookmarks, .studyPads, .myDocuments, .readingPlans:
+            break
         case .settings:
             reloadBehaviorPreferences()
         case .downloads:
@@ -1780,6 +1885,25 @@ public struct BibleReaderView: View {
     /// Presents a follow-up reader destination after another flow already captured the pane target.
     private func presentReaderDestinationPreservingPane(_ destination: ReaderDestination) {
         activeReaderDestination = destination
+    }
+
+    /**
+     Moves the document chooser's StudyPads action onto the reader destination stack.
+
+     Android treats StudyPads as an app-owned `ManageLabels` route rather than a nested chooser
+     sheet. The chooser has already captured the pane target, so this closes the active chooser
+     modal and pushes the existing `.studyPads` destination without changing pane ownership.
+
+     Side effects:
+     - clears `activeReaderModal`
+     - sets `activeReaderDestination` to `.studyPads`
+
+     Failure modes:
+     - if no pane controller is available, the destination renders its normal preparation fallback
+     */
+    private func presentStudyPadsDestinationPreservingPane() {
+        activeReaderModal = nil
+        presentReaderDestinationPreservingPane(.studyPads)
     }
 
     /**
@@ -2142,7 +2266,7 @@ public struct BibleReaderView: View {
                     onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
                     onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
                     onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) },
-                    onOpenStudyPadSelector: { presentReaderModalPreservingPane(.studyPadSelector) }
+                    onOpenStudyPadSelector: presentStudyPadsDestinationPreservingPane
                 )
             } else {
                 readerPanePreparationContent
@@ -2231,18 +2355,6 @@ public struct BibleReaderView: View {
                         }
                     }
             }
-        case .studyPadSelector:
-            NavigationStack {
-                LabelManagerView(onOpenStudyPad: { labelId in
-                    dismissReaderModal()
-                    panePresentationController?.loadStudyPadDocument(labelId: labelId)
-                })
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(String(localized: "done"), action: dismissReaderModal)
-                    }
-                }
-            }
         case .chooseDocument:
             if let controller = panePresentationController {
                 BibleReaderModulePicker(
@@ -2254,7 +2366,7 @@ public struct BibleReaderView: View {
                     onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
                     onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
                     onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) },
-                    onOpenStudyPadSelector: { presentReaderModalPreservingPane(.studyPadSelector) }
+                    onOpenStudyPadSelector: presentStudyPadsDestinationPreservingPane
                 )
             } else {
                 readerPanePreparationContent
@@ -2536,11 +2648,11 @@ public struct BibleReaderView: View {
             case .labelManager:
                 presentReaderModal(.labelManager)
             case .bookmarks:
-                presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.bookmarks, from: windowManager.activeWindow?.id)
             case .history:
                 presentReaderSheet(.history, from: windowManager.activeWindow?.id)
             case .readingPlans:
-                presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.readingPlans, from: windowManager.activeWindow?.id)
             case .settings:
                 presentSettings(from: windowManager.activeWindow?.id)
             case .textOptions:
@@ -2565,7 +2677,7 @@ public struct BibleReaderView: View {
 
     /** Opens Bookmarks from the reader shell. */
     private func openBookmarksFromReaderAction() {
-        presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id)
+        presentReaderDestination(.bookmarks, from: windowManager.activeWindow?.id)
     }
 
     /** Opens History from the reader shell. */
@@ -2575,7 +2687,7 @@ public struct BibleReaderView: View {
 
     /** Opens Reading Plans from the reader shell. */
     private func openReadingPlansFromReaderAction() {
-        presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
+        presentReaderDestination(.readingPlans, from: windowManager.activeWindow?.id)
     }
 
     /** Opens Settings from the reader shell. */
@@ -2616,7 +2728,7 @@ public struct BibleReaderView: View {
             speakService: speakService,
             onShowBookChooser: { presentBookChooser(from: window.id) },
             onShowSearch: { presentSearch(from: window.id) },
-            onShowBookmarks: { presentReaderSheet(.bookmarks, from: window.id) },
+            onShowBookmarks: { presentReaderDestination(.bookmarks, from: window.id) },
             onShowSettings: { presentSettings(from: window.id) },
             onShowWindowTextOptions: { presentWindowTextOptions(from: window.id) },
             onShowWindowColorSettings: { presentWindowColorSettings(from: window.id) },
@@ -2645,7 +2757,7 @@ public struct BibleReaderView: View {
             onShowCompare: {
                 (windowManager.controllers[window.id] as? BibleReaderController)?.loadCompareDocument()
             },
-            onShowReadingPlans: { presentReaderSheet(.readingPlans, from: window.id) },
+            onShowReadingPlans: { presentReaderDestination(.readingPlans, from: window.id) },
             onShowReadingProgress: { tab in
                 readingProgressInitialTab = ReadingProgressTab(androidTab: tab)
                 presentReaderSheet(.readingProgress, from: window.id)
@@ -3099,20 +3211,19 @@ public struct BibleReaderView: View {
             }
         case .bookmarks:
             dismissReaderNavigationDrawerAndPerform {
-                presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.bookmarks, from: windowManager.activeWindow?.id)
             }
         case .studyPads:
             dismissReaderNavigationDrawerAndPerform {
-                presentReaderModal(.studyPadSelector, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.studyPads, from: windowManager.activeWindow?.id)
             }
         case .myNotes:
             dismissReaderNavigationDrawerAndPerform {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                panePresentationController?.loadMyNotesDocument()
+                presentReaderDestination(.myDocuments, from: windowManager.activeWindow?.id)
             }
         case .readingPlans:
             dismissReaderNavigationDrawerAndPerform {
-                presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.readingPlans, from: windowManager.activeWindow?.id)
             }
         case .history:
             dismissReaderNavigationDrawerAndPerform {

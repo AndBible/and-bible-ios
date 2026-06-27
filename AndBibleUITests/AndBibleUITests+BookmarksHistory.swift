@@ -6,11 +6,124 @@ import UIKit
 #endif
 
 extension AndBibleUITests {
+    /**
+     Verifies Bookmarks opens from the drawer as an app-owned reader destination.
+     *
+     * Android launches Bookmarks as an app activity from the drawer, so iOS should not expose the
+     * route through `activeReaderSheet` or sheet-only Done chrome when the drawer action is used.
+     *
+     * - Side effects:
+     *   - opens the reader drawer and activates Bookmarks
+     * - Failure modes:
+     *   - fails if Bookmarks does not appear or if the route regresses to sheet presentation
+     */
     func testBookmarksScreenOpensFromReaderMenu() {
         let app = makeApp()
         app.launch()
 
         XCTAssertTrue(openBookmarkList(in: app).exists)
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=bookmarks", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer Bookmarks should use reader destination back chrome, not iOS sheet Done chrome."
+        )
+    }
+
+    /**
+     Verifies StudyPads opens from the drawer and selecting a row opens the StudyPad document.
+     *
+     * Android launches `ManageLabels` in `Mode.STUDYPAD` from the drawer, so iOS should expose the
+     * StudyPads selector as a reader-owned destination instead of the legacy modal sheet route.
+     * Android then opens the selected StudyPad through `studyPadSelected`, so the regression also
+     * proves a seeded row exits the destination and renders the corresponding StudyPad document.
+     *
+     * - Side effects:
+     *   - opens the reader drawer and activates StudyPads
+     *   - selects the seeded StudyPad row
+     * - Failure modes:
+     *   - fails if StudyPads does not appear, if the route regresses to a sheet/modal, or if sheet
+     *     Done chrome is visible on the drawer-owned screen
+     *   - fails if selecting the row does not open the matching StudyPad document
+     */
+    func testStudyPadsScreenOpensFromReaderMenu() {
+        let app = makeApp()
+        app.launch()
+
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenStudyPadsAction",
+            destinationIdentifier: "labelManagerScreen",
+            readinessIdentifiers: ["labelManagerAddButton", "labelManagerStateExport"],
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=studyPads", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer StudyPads should use reader destination back chrome, not iOS sheet Done chrome."
+        )
+        waitForLabelManagerState(containing: labelManagerRowStateToken("UI Test Seed"), in: app, timeout: 10)
+        tapElementReliably(labelRow(named: "UI Test Seed", in: app), timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=none", in: app, timeout: 10)
+        waitForStudyPadPresentation(in: app, timeout: 20)
+        XCTAssertEqual(requireElement("readerStudyPadTitle", in: app, timeout: 10).label, "UI Test Seed")
+    }
+
+    /**
+     Verifies the drawer My Notes/My Documents action opens Android's app-owned document manager.
+     *
+     * Android's drawer `myDocumentsButton` launches `MyDocumentsActivity`, then
+     * `MyDocumentPagesActivity`; selecting a page returns to the reader and opens that generated
+     * general-book document. iOS should therefore present a reader destination for the document
+     * manager instead of directly loading the current-passage My Notes pseudo-document.
+     *
+     * - Side effects:
+     *   - opens the reader drawer and activates My Documents
+     *   - selects the seeded document and its first page
+     * - Failure modes:
+     *   - fails if the drawer action regresses to sheet/modal presentation, skips the document
+     *     manager, or does not load the selected My Documents page in the reader
+     */
+    func testMyDocumentsScreenOpensFromReaderMenuAndOpensPage() {
+        let app = makeApp()
+        app.launch()
+
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenMyNotesAction",
+            destinationIdentifier: "myDocumentsListScreen",
+            readinessIdentifiers: ["myDocumentsListStateExport"],
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=myDocuments", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer My Documents should use reader destination back chrome, not iOS sheet Done chrome."
+        )
+        waitForMyDocumentsListState(containing: "total=1", in: app, timeout: 10)
+        waitForMyDocumentsListState(containing: myDocumentsRowStateToken("UITESTDOC"), in: app, timeout: 10)
+
+        tapElementReliably(
+            requireElement("myDocumentsDocumentRow::UITESTDOC", in: app, timeout: 10),
+            timeout: 10
+        )
+        waitForMyDocumentPagesState(containing: "document=UITESTDOC", in: app, timeout: 10)
+        waitForMyDocumentPagesState(containing: myDocumentsRowStateToken("intro"), in: app, timeout: 10)
+        tapElementReliably(
+            requireElement("myDocumentsPageRow::UITESTDOC::intro", in: app, timeout: 10),
+            timeout: 10
+        )
+
+        waitForReaderRenderedContentState(containing: "readerDestination=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(
+            containing: "category=general_book;module=UITESTDOC;book=UI Test Document;chapter=none;key=intro",
+            in: app,
+            timeout: 20
+        )
     }
 
     /**

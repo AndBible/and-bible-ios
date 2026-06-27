@@ -248,6 +248,57 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies My Notes requests made before the Vue client is ready replay after client-ready.
+
+     Android's `ChooseDocument` can select the My Notes fake document while the reader surface is
+     still bootstrapping. iOS must preserve that visible document intent instead of dropping the tap
+     at `clientReady == false`, then emit the same notes payload and pending row jump once Vue is
+     able to receive bridge events.
+     */
+    @MainActor
+    func testReaderMyNotesDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bookmarkService = bookmarkService
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: startOrdinal,
+            endOrdinal: startOrdinal,
+            wholeVerse: true
+        )
+        bookmark.book = "Genesis"
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Replay note")
+
+        controller.loadMyNotesDocument(jumpToOrdinal: 1)
+
+        XCTAssertFalse(recordedScripts().contains { $0.contains("emit('add_documents'") })
+        XCTAssertTrue(controller.myNotesAccessibilityState.contains("myNotesVisible=true"))
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "notes")
+        let bookmarks = try XCTUnwrap(payload["bookmarks"] as? [[String: Any]])
+        let bookmarkObject = try XCTUnwrap(bookmarks.first)
+        XCTAssertEqual(bookmarkObject["notes"] as? String, "Replay note")
+
+        let setupPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(setupPayload["jumpToOrdinal"] as? Int, 1)
+    }
+
+    /**
      Verifies native reader label assignment refreshes generic bookmarks as well as Bible
      bookmarks.
 

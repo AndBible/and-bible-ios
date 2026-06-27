@@ -800,7 +800,8 @@ extension AndBibleUITests {
      * - Side effects:
      *   - spawns one host-side child process from the XCTest runner
      *   - passes through the test-runner environment so Xcode tool lookup and fixture overrides
-     *     match the parent test process
+     *     use a simulator-capable Xcode, preferring explicit test overrides, the selected
+     *     `xcode-select` developer directory, and only then an inherited `DEVELOPER_DIR`
      *   - drains stdout and stderr while the child runs so pipe buffers cannot stall the child
      *   - terminates the child process when it exceeds the timeout budget
      * - Failure modes:
@@ -849,25 +850,7 @@ extension AndBibleUITests {
         }
         argv[cArguments.count] = nil
 
-        var childEnvironment = ProcessInfo.processInfo.environment
-        if childEnvironment["DEVELOPER_DIR"]?.isEmpty != false {
-            if let sdkRoot = childEnvironment["MD_APPLE_SDK_ROOT"], !sdkRoot.isEmpty {
-                let developerDir = URL(fileURLWithPath: sdkRoot)
-                    .appendingPathComponent("Contents", isDirectory: true)
-                    .appendingPathComponent("Developer", isDirectory: true)
-                    .path
-                if FileManager.default.fileExists(atPath: developerDir) {
-                    childEnvironment["DEVELOPER_DIR"] = developerDir
-                }
-            }
-        }
-        if childEnvironment["DEVELOPER_DIR"]?.isEmpty != false,
-           FileManager.default.fileExists(atPath: "/Applications/Xcode.app/Contents/Developer") {
-            childEnvironment["DEVELOPER_DIR"] = "/Applications/Xcode.app/Contents/Developer"
-        }
-        if childEnvironment["PATH"]?.isEmpty != false {
-            childEnvironment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
-        }
+        let childEnvironment = hostProcessEnvironment(from: ProcessInfo.processInfo.environment)
 
         let environmentStrings = childEnvironment
             .map { "\($0.key)=\($0.value)" }
@@ -931,6 +914,201 @@ extension AndBibleUITests {
             return (-3, stdout, stderr.isEmpty ? "Process terminated by signal \(terminatingSignal)." : stderr)
         }
         return (-4, stdout, stderr)
+    }
+
+    /**
+     Builds the macOS environment used for host-side subprocesses launched by UI tests.
+     *
+     * - Parameters:
+     *   - environment: Raw environment visible to the XCTest host process.
+     *   - selectedDeveloperDir: Optional test override for the selected Xcode developer directory.
+     * - Returns: A subprocess environment with simulator-capable Xcode tooling and macOS user
+     *   directory values restored for `xcrun`, `simctl`, and fixture tools.
+     * - Side effects: None.
+     * - Failure modes: Falls back to inherited values when explicit host overrides are absent.
+     */
+    func hostProcessEnvironment(
+        from environment: [String: String],
+        selectedDeveloperDir: String? = nil
+    ) -> [String: String] {
+        var childEnvironment = environment
+        let resolvedDeveloperDir = selectedDeveloperDir
+            ?? selectedDeveloperDirForHostProcess(environment: childEnvironment)
+        if let resolvedDeveloperDir {
+            childEnvironment["DEVELOPER_DIR"] = resolvedDeveloperDir
+            childEnvironment["UITEST_DEVELOPER_DIR"] = resolvedDeveloperDir
+        }
+        applyHostUserDirectoryOverrides(to: &childEnvironment)
+        if childEnvironment["PATH"]?.isEmpty != false {
+            childEnvironment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        }
+        return childEnvironment
+    }
+
+    /**
+     Restores macOS user-directory values for host tools spawned from an XCTest environment.
+     *
+     * - Parameter environment: Environment dictionary to update in place.
+     * - Side effects: Rewrites `HOME`, `TMPDIR`, user identity, and CoreFoundation user-home values
+     *   from `UITEST_HOST_*` variables supplied by the CI wrapper.
+     * - Failure modes: Leaves existing values unchanged when no host override is available.
+     */
+    func applyHostUserDirectoryOverrides(to environment: inout [String: String]) {
+        let variablePairs = [
+            ("UITEST_HOST_HOME", "HOME"),
+            ("UITEST_HOST_TMPDIR", "TMPDIR"),
+            ("UITEST_HOST_USER", "USER"),
+            ("UITEST_HOST_LOGNAME", "LOGNAME"),
+            ("UITEST_HOST_CF_USER_TEXT_ENCODING", "__CF_USER_TEXT_ENCODING"),
+        ]
+        for (sourceKey, targetKey) in variablePairs {
+            if let value = environment[sourceKey], !value.isEmpty {
+                environment[targetKey] = value
+            }
+        }
+        if let home = environment["UITEST_HOST_HOME"], !home.isEmpty {
+            environment["CFFIXED_USER_HOME"] = home
+        }
+    }
+
+    /**
+     Selects the Xcode developer directory that host-side UI-test subprocesses should inherit.
+     *
+     * - Parameters:
+     *   - environment: Environment visible to the XCTest host process. Explicit
+     *     `UITEST_DEVELOPER_DIR` and CI `MD_APPLE_SDK_ROOT` values are treated as operator
+     *     overrides; an inherited `DEVELOPER_DIR` is treated as a fallback because CI can preserve
+     *     a stale value inside the XCTest host even after `xcodebuild` uses the selected Xcode.
+     * - Returns: A developer directory that contains simulator tooling, or `nil` when none of the
+     *   configured candidates can safely run CoreSimulator commands.
+     * - Side effects: Reads host toolchain selection with `xcode-select` when explicit environment
+     *   overrides do not already provide a simulator-capable developer directory.
+     * - Failure modes: Ignores empty paths, command-line-tools directories without `simctl`, and
+     *   nonexistent Xcode bundles so a bad candidate cannot poison every fixture subprocess.
+     */
+    func selectedDeveloperDirForHostProcess(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        selectedDeveloperDirForHostProcess(
+            environment: environment,
+            xcodeSelectDeveloperDir: selectedDeveloperDirFromXcodeSelect,
+            fileExists: { FileManager.default.fileExists(atPath: $0) }
+        )
+    }
+
+    /**
+     Selects a simulator-capable developer directory from injectable host-tool candidates.
+     *
+     * - Parameters:
+     *   - environment: Environment dictionary to inspect for explicit and inherited Xcode paths.
+     *   - xcodeSelectDeveloperDir: Reader for the host's selected Xcode developer directory.
+     *   - fileExists: Filesystem predicate used to validate candidate directories and `simctl`.
+     * - Returns: The first simulator-capable candidate in Android-independent CI precedence order,
+     *   or `nil` when no candidate is usable.
+     * - Side effects: none except the injected `xcodeSelectDeveloperDir` and `fileExists` calls.
+     * - Failure modes: Invalid candidates are skipped without throwing so host fixture work can
+     *   fall back to a later valid Xcode path.
+     */
+    func selectedDeveloperDirForHostProcess(
+        environment: [String: String],
+        xcodeSelectDeveloperDir: () -> String?,
+        fileExists: (String) -> Bool
+    ) -> String? {
+        let sdkDeveloperDir = environment["MD_APPLE_SDK_ROOT"].flatMap { sdkRoot -> String? in
+            let trimmedRoot = sdkRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedRoot.isEmpty else {
+                return nil
+            }
+            return URL(fileURLWithPath: trimmedRoot)
+                .appendingPathComponent("Contents", isDirectory: true)
+                .appendingPathComponent("Developer", isDirectory: true)
+                .path
+        }
+
+        for candidate in [environment["UITEST_DEVELOPER_DIR"], sdkDeveloperDir] {
+            guard let candidate else { continue }
+            let developerDir = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard developerDirSupportsSimulatorTools(developerDir, fileExists: fileExists) else {
+                continue
+            }
+            return developerDir
+        }
+
+        if let xcodeSelectCandidate = xcodeSelectDeveloperDir() {
+            let developerDir = xcodeSelectCandidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if developerDirSupportsSimulatorTools(developerDir, fileExists: fileExists) {
+                return developerDir
+            }
+        }
+
+        for candidate in [environment["DEVELOPER_DIR"], "/Applications/Xcode.app/Contents/Developer"] {
+            guard let candidate else { continue }
+            let developerDir = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard developerDirSupportsSimulatorTools(developerDir, fileExists: fileExists) else {
+                continue
+            }
+            return developerDir
+        }
+        return nil
+    }
+
+    /**
+     Reads the host machine's selected Xcode developer directory from `xcode-select` state.
+     *
+     * - Returns: The trimmed selected developer directory, or `nil` when the selection symlink is
+     *   missing or empty.
+     * - Side effects:
+     *   - reads `/var/db/xcode_select_link`, the macOS symlink updated by `xcode-select -s`
+     *   - avoids invoking `/usr/bin/xcode-select -p` because that command honors a stale
+     *     `DEVELOPER_DIR` inherited by the XCTest host
+     * - Failure modes: Returns `nil` when the symlink cannot be read or reports no usable path;
+     *   callers remain responsible for validating that the returned directory contains simulator
+     *   tools.
+     */
+    func selectedDeveloperDirFromXcodeSelect() -> String? {
+        guard let selectedPath = try? FileManager.default.destinationOfSymbolicLink(
+            atPath: "/var/db/xcode_select_link"
+        ) else {
+            return nil
+        }
+        let trimmedPath = selectedPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else {
+            return nil
+        }
+        if trimmedPath.hasSuffix(".app") {
+            return URL(fileURLWithPath: trimmedPath)
+                .appendingPathComponent("Contents", isDirectory: true)
+                .appendingPathComponent("Developer", isDirectory: true)
+                .path
+        }
+        return trimmedPath
+    }
+
+    /**
+     Validates that a developer directory can run simulator host tools.
+     *
+     * - Parameters:
+     *   - developerDir: Candidate `Contents/Developer` path.
+     *   - fileExists: Filesystem predicate, injectable for deterministic precedence tests.
+     * - Returns: `true` only when the directory exists and contains `usr/bin/simctl`.
+     * - Side effects: none beyond filesystem existence checks performed by `fileExists`.
+     * - Failure modes: Returns `false` for empty paths, command-line-tools directories, and stale
+     *   Xcode paths that no longer provide simulator tooling.
+     */
+    func developerDirSupportsSimulatorTools(
+        _ developerDir: String,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> Bool {
+        let trimmedDeveloperDir = developerDir.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDeveloperDir.isEmpty, fileExists(trimmedDeveloperDir) else {
+            return false
+        }
+        let simctlPath = URL(fileURLWithPath: trimmedDeveloperDir)
+            .appendingPathComponent("usr", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("simctl", isDirectory: false)
+            .path
+        return fileExists(simctlPath)
     }
 
     /**

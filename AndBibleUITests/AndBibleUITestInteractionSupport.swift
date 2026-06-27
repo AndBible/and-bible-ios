@@ -545,6 +545,7 @@ extension AndBibleUITests {
         line: UInt = #line
     ) -> XCUIElement {
         let candidates = [
+            app.textFields["bookmarkListSearchField"].firstMatch,
             app.searchFields["Search bookmarks"].firstMatch,
             app.textFields["Search bookmarks"].firstMatch,
         ]
@@ -865,15 +866,40 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens the My Notes document through the production reader navigation drawer.
+     Opens the current-passage My Notes pseudo-document through the production Choose Document flow.
+     *
+     * Android exposes My Notes in `ChooseDocument` as a `FakeBookFactory` pseudo-document while the
+     * drawer My Documents row launches the app-owned My Documents manager. This helper intentionally
+     * follows the chooser pseudo-document route so My Notes lifecycle tests do not preserve the old
+     * iOS drawer deviation.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the chooser row and visible My Notes document.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+	     * - Side effects:
+	     *   - opens the reader drawer, launches Choose Document, filters the Android-style chooser to
+	     *     the `FakeBookFactory` `My Note` initials, selects that row, and waits for the
+	     *     WebView-owned My Notes document to render
+	     * - Failure modes:
+	     *   - records an XCTest failure if the chooser, pseudo-document row, or My Notes state never
+	     *     becomes visible
      */
-    func openMyNotesFromReader(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 20,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        tapReaderAction("readerOpenMyNotesAction", in: app, timeout: timeout, file: file, line: line)
+	    func openMyNotesFromReader(
+	        in app: XCUIApplication,
+	        timeout: TimeInterval = 20,
+	        file: StaticString = #filePath,
+	        line: UInt = #line
+	    ) {
+	        tapReaderAction("readerChooseDocumentAction", in: app, timeout: timeout, file: file, line: line)
+	        _ = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
+	        let searchField = requireElement("modulePickerSearchField", in: app, timeout: timeout, file: file, line: line)
+	        replaceText(in: searchField, with: "My Note", placeholderHints: ["Search"])
+	        tapElementReliably(
+	            requireElement("modulePickerPseudoRow::myNotes", in: app, timeout: timeout, file: file, line: line),
+	            timeout: timeout
+	        )
         waitForMyNotesPresentation(in: app, timeout: timeout, file: file, line: line)
         waitForVisibleMyNotesState(
             containing: "myNotesVisible=true",
@@ -1395,17 +1421,31 @@ extension AndBibleUITests {
     }
 
     /**
-     Dismisses the bookmark list sheet if the StudyPad handoff leaves it visible over the reader.
+     Dismisses the bookmark list surface if the StudyPad handoff leaves it visible over the reader.
+
+     - Parameters:
+       - app: Running application that may still show the bookmark list.
+       - timeout: Maximum number of seconds to spend on the close attempt.
+     - Side effects:
+       - taps the sheet Done button or destination back button when either is visible
+     - Failure modes:
+       - returns without failing when the bookmark list is not visible
      */
     func dismissBookmarkListIfVisible(
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
-        let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
-        guard doneButton.exists || doneButton.waitForExistence(timeout: min(timeout, 2)) else {
+        guard bookmarkListSurfaceIsVisible(in: app) else {
             return
         }
-        tapElementReliably(doneButton, timeout: timeout)
+        let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
+        if tapElementIfPossible(doneButton, timeout: min(timeout, 2)) {
+            _ = waitForBookmarkListDismissal(in: app, timeout: timeout)
+            return
+        }
+
+        let backButton = app.navigationBars.buttons.element(boundBy: 0)
+        _ = tapElementIfPossible(backButton, timeout: min(timeout, 2))
         _ = waitForBookmarkListDismissal(in: app, timeout: timeout)
     }
 

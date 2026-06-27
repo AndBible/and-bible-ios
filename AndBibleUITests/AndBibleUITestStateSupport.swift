@@ -765,6 +765,44 @@ extension AndBibleUITests {
     }
 
     /**
+     Reads the current exported My Documents list state without broad list queries.
+
+     - Parameter app: Running application whose reader destination may expose My Documents state.
+     - Returns: Compact state string from the hidden export or screen fallback, if present.
+     - Side effects: none.
+     - Failure modes: Returns `nil` when the destination is not visible or has not exported state.
+     */
+    func resolvedMyDocumentsListStateValue(in app: XCUIApplication) -> String? {
+        if let value = semanticStateExportValue("myDocumentsListStateExport", in: app) {
+            return value
+        }
+        if let screen = resolvedElement("myDocumentsListScreen", in: app),
+           let value = screen.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /**
+     Reads the current exported My Document pages state without broad list queries.
+
+     - Parameter app: Running application whose reader destination may expose page-list state.
+     - Returns: Compact state string from the hidden export or screen fallback, if present.
+     - Side effects: none.
+     - Failure modes: Returns `nil` when the destination is not visible or has not exported state.
+     */
+    func resolvedMyDocumentPagesStateValue(in app: XCUIApplication) -> String? {
+        if let value = semanticStateExportValue("myDocumentPagesStateExport", in: app) {
+            return value
+        }
+        if let screen = resolvedElement("myDocumentPagesScreen", in: app),
+           let value = screen.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /**
      Waits for a lightweight exported semantic state value instead of re-querying full XCUI surfaces.
      *
      * - Parameters:

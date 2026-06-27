@@ -1220,6 +1220,8 @@ extension AndBibleUITests {
             "readingPlanListStateExport",
             "availablePlansStateExport",
             "labelManagerStateExport",
+            "myDocumentsListStateExport",
+            "myDocumentPagesStateExport",
             "syncSettingsState":
             return true
         default:

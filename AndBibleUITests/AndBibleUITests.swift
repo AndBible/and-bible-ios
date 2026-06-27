@@ -117,4 +117,134 @@ final class AndBibleUITests: XCTestCase {
             )
         }
     }
+
+    /**
+     Protects host-side `xcrun simctl` calls from inheriting simulator/XCTest user-directory values.
+     *
+     * Setup:
+     * - starts from an environment with explicit CI host user-directory overrides
+     * - includes stale XCTest-style home values that should not reach host subprocesses
+     *
+     * Expected result:
+     * - subprocesses inherit the selected Xcode developer directory
+     * - `HOME`, `TMPDIR`, user identity, and CoreFoundation user-home values match the host runner
+     *
+     * Failure meaning:
+     * - UI-test fixture bootstrapping can fail before product behavior runs because `xcrun` cannot
+     *   resolve macOS user directories or CoreSimulator preferences from the XCTest process context
+     *
+     * Side effects: None.
+     */
+    func testHostProcessEnvironmentRestoresMacOSUserDirectories() {
+        let environment = [
+            "DEVELOPER_DIR": "/Applications/Xcode_16.4.app/Contents/Developer",
+            "PATH": "",
+            "HOME": "/var/empty",
+            "TMPDIR": "/var/folders/zz/zyxvpxvq6csfxvn_n00001ym0000gn/T/",
+            "CFFIXED_USER_HOME": "/var/folders/zz/zyxvpxvq6csfxvn_n00001ym0000gn/",
+            "UITEST_HOST_HOME": "/Users/runner",
+            "UITEST_HOST_TMPDIR": "/var/folders/ci/T/",
+            "UITEST_HOST_USER": "runner",
+            "UITEST_HOST_LOGNAME": "runner",
+            "UITEST_HOST_CF_USER_TEXT_ENCODING": "501:0:0",
+        ]
+
+        let sanitizedEnvironment = hostProcessEnvironment(
+            from: environment,
+            selectedDeveloperDir: "/Applications/Xcode_26.3.app/Contents/Developer"
+        )
+
+        XCTAssertEqual(
+            sanitizedEnvironment["DEVELOPER_DIR"],
+            "/Applications/Xcode_26.3.app/Contents/Developer"
+        )
+        XCTAssertEqual(
+            sanitizedEnvironment["UITEST_DEVELOPER_DIR"],
+            sanitizedEnvironment["DEVELOPER_DIR"]
+        )
+        XCTAssertEqual(sanitizedEnvironment["HOME"], "/Users/runner")
+        XCTAssertEqual(sanitizedEnvironment["CFFIXED_USER_HOME"], "/Users/runner")
+        XCTAssertEqual(sanitizedEnvironment["TMPDIR"], "/var/folders/ci/T/")
+        XCTAssertEqual(sanitizedEnvironment["USER"], "runner")
+        XCTAssertEqual(sanitizedEnvironment["LOGNAME"], "runner")
+        XCTAssertEqual(sanitizedEnvironment["__CF_USER_TEXT_ENCODING"], "501:0:0")
+        XCTAssertEqual(sanitizedEnvironment["PATH"], "/usr/bin:/bin:/usr/sbin:/sbin")
+    }
+
+    /**
+     Protects CI host subprocesses from inheriting a stale Xcode path from the XCTest host.
+     *
+     * Setup:
+     * - models a runner where `DEVELOPER_DIR` still points at an older Xcode while
+     *   `/usr/bin/xcode-select -p` points at the Xcode selected by the workflow
+     * - stubs filesystem checks so both Xcode bundles appear to exist and contain `simctl`
+     *
+     * Expected result:
+     * - host-process tool selection uses the selected Xcode instead of the stale inherited
+     *   `DEVELOPER_DIR`
+     *
+     * Failure meaning:
+     * - CI fixture bootstrap can run `xcrun simctl` against the wrong Xcode, causing slow
+     *   fallback launches and misleading UI assertion failures before product behavior runs
+     *
+     * Side effects:
+     * - none; this test injects all host-tool state instead of reading the real machine
+     */
+    func testHostProcessDeveloperDirSelectionPrefersSelectedXcodeOverInheritedDeveloperDir() {
+        let staleDeveloperDir = "/Applications/Xcode_16.4.app/Contents/Developer"
+        let selectedDeveloperDir = "/Applications/Xcode_26.3.app/Contents/Developer"
+        let existingPaths = Set([
+            staleDeveloperDir,
+            "\(staleDeveloperDir)/usr/bin/simctl",
+            selectedDeveloperDir,
+            "\(selectedDeveloperDir)/usr/bin/simctl",
+        ])
+
+        let resolvedDeveloperDir = selectedDeveloperDirForHostProcess(
+            environment: [
+                "DEVELOPER_DIR": staleDeveloperDir,
+            ],
+            xcodeSelectDeveloperDir: { selectedDeveloperDir },
+            fileExists: { existingPaths.contains($0) }
+        )
+
+        XCTAssertEqual(resolvedDeveloperDir, selectedDeveloperDir)
+    }
+
+    /**
+     Protects local and CI host-tool selection when `xcode-select` points at CommandLineTools.
+     *
+     * Setup:
+     * - models a host where `/var/db/xcode_select_link` resolves to CommandLineTools, which does
+     *   not include CoreSimulator's `simctl`
+     * - stubs the default Xcode app as the only simulator-capable candidate
+     *
+     * Expected result:
+     * - host-process tool selection skips the command-line-tools directory and falls back to a
+     *   full Xcode developer directory
+     *
+     * Failure meaning:
+     * - local UI-test fixture subprocesses can fail before app behavior is exercised whenever the
+     *   developer has CommandLineTools selected globally
+     *
+     * Side effects:
+     * - none; all filesystem and toolchain state is injected
+     */
+    func testHostProcessDeveloperDirSelectionSkipsCommandLineToolsWithoutSimulatorTools() {
+        let commandLineToolsDir = "/Library/Developer/CommandLineTools"
+        let defaultDeveloperDir = "/Applications/Xcode.app/Contents/Developer"
+        let existingPaths = Set([
+            commandLineToolsDir,
+            defaultDeveloperDir,
+            "\(defaultDeveloperDir)/usr/bin/simctl",
+        ])
+
+        let resolvedDeveloperDir = selectedDeveloperDirForHostProcess(
+            environment: [:],
+            xcodeSelectDeveloperDir: { commandLineToolsDir },
+            fileExists: { existingPaths.contains($0) }
+        )
+
+        XCTAssertEqual(resolvedDeveloperDir, defaultDeveloperDir)
+    }
 }

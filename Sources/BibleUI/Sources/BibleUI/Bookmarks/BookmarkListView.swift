@@ -107,6 +107,9 @@ public struct BookmarkListView: View {
     /// Optional SWORD-backed resolver for Bible bookmark ordinals.
     var bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)?
 
+    /// Whether the list should expose sheet-style explicit dismiss chrome.
+    private let showsDismissButton: Bool
+
     /**
      Creates the bookmark list view.
 
@@ -115,15 +118,19 @@ public struct BookmarkListView: View {
        - onOpenStudyPad: Callback invoked when the user wants to open a selected label's study pad.
        - bibleOrdinalResolver: Optional resolver that maps `(bookName, ordinal)` to a concrete
          chapter/verse using the active Bible versification.
+       - showsDismissButton: Whether to show the sheet-style Done button; app-owned destination
+         routes rely on navigation-stack back chrome instead.
      */
     public init(
         onNavigate: ((String, Int) -> Void)? = nil,
         onOpenStudyPad: ((UUID) -> Void)? = nil,
-        bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil
+        bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
+        showsDismissButton: Bool = true
     ) {
         self.onNavigate = onNavigate
         self.onOpenStudyPad = onOpenStudyPad
         self.bibleOrdinalResolver = bibleOrdinalResolver
+        self.showsDismissButton = showsDismissButton
     }
 
     /**
@@ -199,15 +206,16 @@ public struct BookmarkListView: View {
         .overlay(alignment: .topLeading) {
             bookmarkListStateExport
         }
-        .searchable(text: $searchText, prompt: String(localized: "search_bookmarks"))
         .navigationTitle(String(localized: "bookmarks"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "done")) { dismiss() }
-                    .accessibilityIdentifier("bookmarkListDoneButton")
+            if showsDismissButton {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "done")) { dismiss() }
+                        .accessibilityIdentifier("bookmarkListDoneButton")
+                }
             }
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 12) {
@@ -250,6 +258,8 @@ public struct BookmarkListView: View {
                 labelFilterSection
             }
 
+            bookmarkSearchSection
+
             // Bookmark list
             ForEach(filteredBookmarks) { bookmark in
                 BookmarkRow(
@@ -279,6 +289,42 @@ public struct BookmarkListView: View {
                 }
             }
             .onDelete(perform: deleteBookmarks)
+        }
+    }
+
+    /**
+     Visible bookmark search control that mirrors Android's in-content bookmark search layout.
+
+     Android's `Bookmarks` activity owns an `EditText` under the label selector instead of relying
+     on action-bar search chrome. Keeping this as a normal list row makes the filter reachable when
+     the bookmark list is hosted inside the reader's app-owned destination stack, where SwiftUI's
+     navigation `.searchable` chrome is not reliably exposed.
+     */
+    private var bookmarkSearchSection: some View {
+        Section {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+
+                TextField(String(localized: "search_bookmarks"), text: $searchText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("bookmarkListSearchField")
+
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("bookmarkListClearSearchButton")
+                    .accessibilityLabel(String(localized: "clear"))
+                }
+            }
+            .accessibilityElement(children: .contain)
         }
     }
 
