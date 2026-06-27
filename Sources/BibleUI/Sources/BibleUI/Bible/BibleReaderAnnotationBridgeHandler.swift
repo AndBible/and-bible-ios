@@ -152,7 +152,11 @@ struct BibleReaderAnnotationBridgeHandler {
         addNote: Bool
     ) {
         annotationBridgeHandlerLogger.info("Add generic bookmark: \(bookInitials) ref=\(osisRef)")
-        coordinator(bridge)?.addGenericBookmark(
+        guard let coordinator = coordinator(bridge) else {
+            annotationBridgeHandlerLogger.warning("addGenericBookmark: bookmarkService is nil")
+            return
+        }
+        coordinator.addGenericBookmark(
             bookInitials: bookInitials,
             osisRef: osisRef,
             startOrdinal: startOrdinal,

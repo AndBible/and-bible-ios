@@ -3185,11 +3185,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         endOrdinal: Int,
         addNote: Bool
     ) {
-        guard let coordinator = annotationBridgeCoordinator(bridge: bridge) else {
-            logger.warning("addGenericBookmark: bookmarkService is nil")
-            return
-        }
-        coordinator.addGenericBookmark(
+        annotationBridgeHandler.addGenericBookmark(
+            bridge: bridge,
             bookInitials: bookInitials,
             osisRef: osisRef,
             startOrdinal: startOrdinal,
