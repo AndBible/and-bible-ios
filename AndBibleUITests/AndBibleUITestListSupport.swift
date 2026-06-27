@@ -205,7 +205,7 @@ extension AndBibleUITests {
        - timeout: Maximum number of seconds to spend on close attempts.
        - file: Source file used for XCTest failure attribution.
        - line: Source line used for XCTest failure attribution.
-     - Returns: `true` once the reader shell is visible and the bookmark-list sentinels disappear.
+     - Returns: `true` once the reader state export reports the shell is visible again.
      - Side effects:
        - taps the sheet `Done` button when present
        - taps the reader-destination back affordance when the bookmark list is hosted as an
@@ -264,15 +264,32 @@ extension AndBibleUITests {
         return waitForBookmarkListDismissal(in: app, timeout: 0.5)
     }
 
-    /// Waits until bookmark-list dismissal leaves the reader chrome available again.
+    /**
+     Waits until bookmark-list dismissal leaves the reader chrome available again.
+     *
+     * Reader-destination dismissal is proven by the compact reader state export reporting that
+     * reader-owned sheets and destinations are closed. SwiftUI can leave stale bookmark-list
+     * accessibility nodes queryable briefly after a navigation pop, so this helper treats the reader
+     * state export as authoritative and uses bookmark-list sentinels only as a fallback when compact
+     * reader state is unavailable.
+     *
+     * - Parameters:
+     *   - app: Running application whose bookmark list is being dismissed.
+     *   - timeout: Maximum number of seconds to wait for reader chrome to return.
+     * - Returns: `true` when the reader shell is ready, or when fallback chrome is present and the
+     *   bookmark-list surface is no longer visible.
+     * - Side effects:
+     *   - polls reader and bookmark-list accessibility state while SwiftUI transitions settle
+     * - Failure modes:
+     *   - returns `false` when neither reader state nor fallback chrome proves dismissal before timeout
+     */
     func waitForBookmarkListDismissal(
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if waitForReaderShellReady(in: app, timeout: 0),
-               !bookmarkListSurfaceIsVisible(in: app) {
+            if waitForReaderShellReady(in: app, timeout: 0) {
                 return true
             }
             if readerDocumentHeaderStateValue(in: app) != nil,
@@ -282,9 +299,11 @@ extension AndBibleUITests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
+        if waitForReaderShellReady(in: app, timeout: 0.5) {
+            return true
+        }
         let bookmarkListHidden = !bookmarkListSurfaceIsVisible(in: app)
-        return (waitForReaderShellReady(in: app, timeout: 0.5) && bookmarkListHidden)
-            || (readerDocumentHeaderStateValue(in: app) != nil && bookmarkListHidden)
+        return readerDocumentHeaderStateValue(in: app) != nil && bookmarkListHidden
     }
 
     /// Returns whether the bookmark-list surface still exposes one of its lightweight sentinels.

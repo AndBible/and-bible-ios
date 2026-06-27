@@ -106,6 +106,61 @@ extension AndBibleUITests {
     }
 
     /**
+     Opens the Downloads overflow popup and resolves one visible action row.
+     *
+     * Android exposes repository management from the Downloads overflow menu. The iOS route mirrors
+     * that with a custom SwiftUI popup, so tests must verify the popup is actually open before tapping
+     * rows instead of treating a toolbar tap as enough synchronization.
+     *
+     * - Parameters:
+     *   - itemIdentifier: Accessibility identifier of the overflow row that should become visible.
+     *   - app: Running application currently showing the Downloads screen.
+     *   - timeout: Maximum number of seconds to keep opening and polling the popup.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The resolved overflow row once it exposes a usable frame.
+     * - Side effects:
+     *   - taps the real Downloads overflow toolbar button until the requested row appears
+     * - Failure modes:
+     *   - records an XCTest failure when the toolbar button or requested row never becomes visible
+     */
+    func openDownloadsOverflowItem(
+        _ itemIdentifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let item = resolvedElement(itemIdentifier, in: app),
+               elementHasUsableFrame(item) {
+                return item
+            }
+
+            let overflowButton = unresolvedElement("moduleBrowserOverflowButton", in: app)
+            if !tapElementIfPossible(overflowButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+
+            if let item = resolvedElement(itemIdentifier, in: app),
+               elementHasUsableFrame(item) {
+                return item
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let item = unresolvedElement(itemIdentifier, in: app)
+        XCTAssertTrue(
+            elementHasUsableFrame(item),
+            "Expected Downloads overflow item '\(itemIdentifier)' to become visible within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return item
+    }
+
+    /**
      Verifies that the downloads browser can open the repository manager and dismiss the add-source
      sheet back to the repository list.
      *
@@ -124,11 +179,7 @@ extension AndBibleUITests {
 
         XCTAssertTrue(openDownloads(in: app).exists)
         tapElementReliably(
-            requireElement("moduleBrowserOverflowButton", in: app, timeout: 10),
-            timeout: 15
-        )
-        tapElementReliably(
-            requireElement("moduleBrowserRepositoriesButton", in: app, timeout: 10),
+            openDownloadsOverflowItem("moduleBrowserRepositoriesButton", in: app, timeout: 15),
             timeout: 15
         )
 
