@@ -29,8 +29,11 @@ import BibleView
  - invokes native UI callbacks supplied by the owning reader
 
  Failure modes:
- - missing stores, invalid active chapter targets, malformed JSON settings, or invalid verse ranges
-   return without side effects, matching Android's bridge guards around missing books/versifications
+ - reading-progress requests with missing stores or invalid active chapter targets return without
+   side effects, matching Android's guards around missing books/versifications
+ - malformed reading-progress settings JSON returns without persistence or bridge events
+ - memorization target persistence is skipped when no memorization store exists, while `memorize`
+   still opens the Memorize document to match Android's UI handoff after a guarded target insert
  */
 struct BibleReaderProgressBridgeCoordinator {
     /// Resolved chapter identity used by Android-compatible reading-progress persistence.
