@@ -1169,7 +1169,7 @@ extension AndBibleTests {
                 currentBook: "Genesis",
                 activeModuleName: "KJV",
                 activeModule: nil,
-                bookList: [],
+                bookCatalog: BibleReaderBookCatalog(activeModule: nil, moduleBookList: []),
                 unlabeledLabelID: Label.unlabeledId.uuidString
             ),
             currentNotesContentType: { notesContentType }
@@ -1194,7 +1194,7 @@ extension AndBibleTests {
                 currentBook: "Genesis",
                 activeModuleName: "KJV",
                 activeModule: nil,
-                bookList: [],
+                bookCatalog: BibleReaderBookCatalog(activeModule: nil, moduleBookList: []),
                 unlabeledLabelID: Label.unlabeledId.uuidString
             ),
             currentBook: "Genesis",
