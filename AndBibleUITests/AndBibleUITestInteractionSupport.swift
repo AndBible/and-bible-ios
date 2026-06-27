@@ -127,6 +127,66 @@ extension AndBibleUITests {
     }
 
     /**
+     Reveals one SwiftUI trailing swipe action by repeating the real horizontal row gesture.
+
+     XCTest's built-in `swipeLeft()` can intermittently stop short on CI-hosted SwiftUI lists even
+     though the user-visible row supports swipe actions. This helper does not invoke the action
+     directly; it retries the same trailing-swipe affordance and falls back to a precise coordinate
+     drag across the row until the real action button is exposed.
+     *
+     * - Parameters:
+     *   - actionIdentifier: Accessibility identifier of the expected swipe action button.
+     *   - row: Visible row that owns the trailing swipe action.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to keep attempting the gesture.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects: performs horizontal swipe gestures against `row` and polls the live
+     *   accessibility hierarchy for `actionIdentifier`.
+     * - Failure modes: records an XCTest failure when the action never becomes visible.
+     */
+    func revealTrailingSwipeAction(
+        _ actionIdentifier: String,
+        for row: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if waitForResolvedElementAppearance(actionIdentifier, in: app, timeout: 0.2) {
+                return
+            }
+
+            if waitForElementToBecomeHittable(row, timeout: 0.3) {
+                row.swipeLeft()
+            }
+            if waitForResolvedElementAppearance(actionIdentifier, in: app, timeout: 0.5) {
+                return
+            }
+
+            if elementHasUsableFrame(row) {
+                let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.86, dy: 0.5))
+                let finish = row.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.5))
+                start.press(forDuration: 0.05, thenDragTo: finish)
+            }
+            if waitForResolvedElementAppearance(actionIdentifier, in: app, timeout: 0.5) {
+                return
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertTrue(
+            resolvedElement(actionIdentifier, in: app) != nil,
+            "Expected trailing swipe action '\(actionIdentifier)' to appear within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Returns whether one resolved element exposes a visible leading-edge tap point within a
      container viewport.
      *
