@@ -1,23 +1,21 @@
-import XCTest
-import AVFoundation
-@testable import BibleCore
-import CLibSword
-@testable import SwordKit
+import Foundation
 import SwiftData
-import SQLite3
+import XCTest
+@testable import BibleCore
 @testable import BibleUI
 @testable import BibleView
-import struct SwiftUI.Binding
-import enum SwiftUI.ColorScheme
-import struct SwiftUI.EdgeInsets
-import struct SwiftUI.EmptyView
-#if os(iOS)
-import UIKit
-import WebKit
-import struct SwiftUI.Color
-#endif
+@testable import SwordKit
 
-extension AndBibleTests {
+/**
+ Package-lane coverage for bookmark, note, and StudyPad reader bridge contracts owned by BibleUI.
+
+ The suite exercises Android-compatible bridge payloads, label-assignment routing, StudyPad
+ action events, bookmark-list reference text, and reader accessibility snapshots without the
+ app-host XCTest bundle. It still uses the bundled SWORD fixture when payloads need real JSword
+ ordinal and verse-range behavior.
+ */
+final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
+
     /**
      Verifies that bridge hash-code normalization preserves the existing non-negative StudyPad DOM
      key contract without trapping on Swift's one unrepresentable absolute value.
@@ -164,7 +162,6 @@ extension AndBibleTests {
         XCTAssertEqual(reference, "Genesis 1:5-2:5")
     }
 
-    #if os(iOS)
     /**
      Verifies the reader WebView bridge hands label assignment to native reader-owned routing.
 
@@ -194,6 +191,22 @@ extension AndBibleTests {
         XCTAssertEqual(requestedBookmarkIds, [bookmarkId])
     }
 
+    /**
+     Verifies that a Bible bookmark update emits the typed Vue bookmark payload shape used by Android.
+     *
+     * Setup:
+     * - creates an in-memory Bible bookmark with a note
+     * - refreshes it through the reader bridge instead of calling the payload factory directly
+     *
+     * Expected result:
+     * - timestamp fields remain integer JSON values
+     * - optional Android/Vue DTO fields are present as explicit `null` values
+     * - label relationships and note content are encoded with the same keys consumed by the web client
+     *
+     * Failure meaning:
+     * - the native bookmark bridge has drifted from the Android-compatible Vue payload contract even
+     *   though storage still contains a valid bookmark.
+     */
     @MainActor
     func testReaderBookmarkBridgeUpdateEmitsTypedPayloadShape() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -405,18 +418,23 @@ extension AndBibleTests {
     @MainActor
     func testReaderStudyPadDocumentBridgeEmissionUsesJSwordCrossChapterRangePayload() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)
         let bookmarkStore = BookmarkStore(modelContext: modelContext)
         let bookmarkService = BookmarkService(store: bookmarkStore)
-        let controller = BibleReaderController(bridge: bridge)
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.bookmarkService = bookmarkService
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31))
+        let endOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2))
 
         let label = bookmarkService.createLabel(name: "Cross Chapter", color: Label.defaultColor)
         let bookmark = bookmarkService.addBibleBookmark(
             bookInitials: "KJV",
-            startOrdinal: 31,
-            endOrdinal: 42,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
             wholeVerse: true
         )
         bookmark.book = "Genesis"
@@ -436,8 +454,30 @@ extension AndBibleTests {
         XCTAssertEqual(bookmarkObject["verseRange"] as? String, "Genesis 1:31-2:2")
         XCTAssertEqual(bookmarkObject["verseRangeOnlyNumber"] as? String, "31-2")
         XCTAssertEqual(bookmarkObject["verseRangeAbbreviated"] as? String, "Gen 1:31-2:2")
+
+        let fullText = try XCTUnwrap(bookmarkObject["fullText"] as? String)
+        XCTAssertTrue(
+            fullText.contains("the heavens and the earth were finished"),
+            "Expected StudyPad bridge payload text to include Genesis 2:1 content; got: \(fullText)"
+        )
     }
 
+    /**
+     Verifies that StudyPad document bridge events retain the nested Android/Vue payload structure.
+     *
+     * Setup:
+     * - creates a label with a Bible bookmark, a generic bookmark note, and a text entry
+     * - loads the StudyPad document through the reader bridge after Vue client readiness
+     *
+     * Expected result:
+     * - the emitted journal document contains label metadata, Bible bookmarks, generic bookmarks,
+     *   bookmark-label relationships, text entries, and integer timestamp fields under their Android
+     *   bridge keys
+     *
+     * Failure meaning:
+     * - StudyPad rendering may still work locally, but the native-to-Vue contract no longer matches
+     *   the Android-compatible object graph expected by the shared web client.
+     */
     @MainActor
     func testReaderStudyPadDocumentBridgeEmissionUsesTypedNestedPayloads() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -883,47 +923,6 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies the Android note-content default for bookmark notes saved below the bridge layer.
-     Android persists `HTML` when no explicit note content type exists, so iOS service saves must
-     produce an explicit `contentType` row instead of leaving notes format implicit forever.
-     *
-     * Data dependencies:
-     * - creates one Bible bookmark and one generic bookmark in an in-memory bookmark schema
-     *
-     * Side effects:
-     * - persists notes through `BookmarkService`
-     *
-     * Failure modes:
-     * - fails if either note row omits `contentType` or stores a non-Android value
-     */
-    func testBookmarkServicePersistsDefaultHTMLContentTypeForNewBookmarkNotes() throws {
-        let container = try makeBookmarkRestoreModelContainer()
-        let modelContext = ModelContext(container)
-        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
-
-        let bibleBookmark = bookmarkService.addBibleBookmark(
-            bookInitials: "KJV",
-            startOrdinal: 1,
-            endOrdinal: 1,
-            wholeVerse: true
-        )
-        let genericBookmark = bookmarkService.addGenericBookmark(
-            bookInitials: "DICT",
-            key: "entry-key",
-            startOrdinal: 2,
-            endOrdinal: 2
-        )
-
-        bookmarkService.saveBibleBookmarkNote(bookmarkId: bibleBookmark.id, note: "Bible note")
-        bookmarkService.saveBibleBookmarkNote(bookmarkId: genericBookmark.id, note: "Generic note")
-
-        let bibleNote = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).first)
-        let genericNote = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<GenericBookmarkNotes>()).first)
-        XCTAssertEqual(bibleNote.contentType, "HTML")
-        XCTAssertEqual(genericNote.contentType, "HTML")
-    }
-
-    /**
      Verifies that the reader bridge applies Android's global `notes_content_type` preference when
      creating a new note row.
      *
@@ -1201,308 +1200,22 @@ extension AndBibleTests {
             currentNotesContentType: { notesContentType }
         )
     }
-    #endif
 
     /**
-     Verifies that deleting a label clears bookmark junction rows and primary-label references
-     before the label itself is removed.
+     Verifies that My Notes accessibility export caps detailed row and note tokens.
      *
-     * Data dependencies:
-     * - creates an in-memory bookmark schema with one shared label attached to one Bible bookmark
-     *   and one generic bookmark
+     * Setup:
+     * - creates more notes than the UI test runtime detail limit in an in-memory bookmark store
+     * - reads the controller-owned encoded accessibility state after navigating to the note chapter
      *
-     * Side effects:
-     * - persists the shared label, both bookmarks, and both bookmark-to-label junction rows
-     * - deletes the label through `BookmarkService`, which should detach every affected bookmark
-     *   relationship before saving
+     * Expected result:
+     * - the total note count reflects all notes
+     * - detailed row and note tokens are limited to `UITestRuntimeConfiguration`'s cap
      *
-     * Failure modes:
-     * - throws if the in-memory SwiftData container cannot be created or saved
-     * - fails if any relationship row or primary-label reference survives the label deletion
+     * Failure meaning:
+     * - UI tests and accessibility consumers could receive unbounded encoded state, increasing
+     *   flakiness and masking the compact-reader state contract.
      */
-    func testBookmarkServiceDeleteLabelDetachesBookmarkRelationships() throws {
-        let container = try makeBookmarkRestoreModelContainer()
-        let modelContext = ModelContext(container)
-        let bookmarkStore = BookmarkStore(modelContext: modelContext)
-        let bookmarkService = BookmarkService(store: bookmarkStore)
-
-        let label = Label(name: "Prayer")
-
-        let bibleBookmark = BibleBookmark(
-            kjvOrdinalStart: 1,
-            kjvOrdinalEnd: 1,
-            ordinalStart: 1,
-            ordinalEnd: 1,
-            v11n: "KJVA"
-        )
-        bibleBookmark.primaryLabelId = label.id
-        let bibleLink = BibleBookmarkToLabel(orderNumber: 0, indentLevel: 0, expandContent: false)
-        bibleLink.bookmark = bibleBookmark
-        bibleLink.label = label
-        bibleBookmark.bookmarkToLabels = [bibleLink]
-
-        let genericBookmark = GenericBookmark(key: "entry", bookInitials: "DICT")
-        genericBookmark.primaryLabelId = label.id
-        let genericLink = GenericBookmarkToLabel(orderNumber: 1, indentLevel: 0, expandContent: true)
-        genericLink.bookmark = genericBookmark
-        genericLink.label = label
-        genericBookmark.bookmarkToLabels = [genericLink]
-
-        modelContext.insert(label)
-        modelContext.insert(bibleBookmark)
-        modelContext.insert(bibleLink)
-        modelContext.insert(genericBookmark)
-        modelContext.insert(genericLink)
-        try modelContext.save()
-
-        bookmarkService.deleteLabel(id: label.id)
-
-        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<Label>()).isEmpty)
-
-        let reloadedBibleBookmark = try XCTUnwrap(
-            try modelContext.fetch(FetchDescriptor<BibleBookmark>()).first
-        )
-        XCTAssertNil(reloadedBibleBookmark.primaryLabelId)
-        XCTAssertTrue(reloadedBibleBookmark.bookmarkToLabels?.isEmpty ?? true)
-        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<BibleBookmarkToLabel>()).isEmpty)
-
-        let reloadedGenericBookmark = try XCTUnwrap(
-            try modelContext.fetch(FetchDescriptor<GenericBookmark>()).first
-        )
-        XCTAssertNil(reloadedGenericBookmark.primaryLabelId)
-        XCTAssertTrue(reloadedGenericBookmark.bookmarkToLabels?.isEmpty ?? true)
-        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<GenericBookmarkToLabel>()).isEmpty)
-    }
-
-    /**
-     Verifies that paragraph-break Bible bookmarks are persisted with the reserved system label.
-     *
-     * Data dependencies:
-     * - creates an in-memory bookmark schema without pre-existing system labels
-     *
-     * Side effects:
-     * - creates system labels and one Bible bookmark through `BookmarkService`
-     *
-     * Failure modes:
-     * - throws if the in-memory SwiftData container cannot be created or queried
-     * - fails if the bookmark is not linked to the paragraph-break label as its primary style label
-     */
-    func testBookmarkServiceCreatesParagraphBreakBibleBookmark() throws {
-        let container = try makeBookmarkRestoreModelContainer()
-        let modelContext = ModelContext(container)
-        let bookmarkStore = BookmarkStore(modelContext: modelContext)
-        let bookmarkService = BookmarkService(store: bookmarkStore)
-
-        let bookmark = bookmarkService.addParagraphBreakBibleBookmark(
-            bookInitials: "KJV",
-            startOrdinal: 1,
-            endOrdinal: 1,
-            book: "Genesis"
-        )
-
-        let paragraphLabel = try XCTUnwrap(bookmarkService.label(id: Label.paragraphBreakLabelId))
-        let reloadedBookmark = try XCTUnwrap(bookmarkService.bibleBookmark(id: bookmark.id))
-        let link = try XCTUnwrap(
-            bookmarkService.bibleBookmarkToLabel(
-                bookmarkId: bookmark.id,
-                labelId: Label.paragraphBreakLabelId
-            )
-        )
-
-        XCTAssertEqual(paragraphLabel.name, Label.paragraphBreakLabelName)
-        XCTAssertEqual(reloadedBookmark.book, "Genesis")
-        XCTAssertFalse(reloadedBookmark.wholeVerse)
-        XCTAssertEqual(reloadedBookmark.primaryLabelId, Label.paragraphBreakLabelId)
-        XCTAssertEqual(link.bookmark?.id, bookmark.id)
-        XCTAssertEqual(link.label?.id, Label.paragraphBreakLabelId)
-        XCTAssertEqual(reloadedBookmark.bookmarkToLabels?.count, 1)
-        XCTAssertEqual(reloadedBookmark.bookmarkToLabels?.first?.label?.id, Label.paragraphBreakLabelId)
-    }
-
-    /**
-     Verifies that paragraph-break generic bookmarks use the same reserved label contract.
-     *
-     * Data dependencies:
-     * - creates an in-memory bookmark schema without pre-existing system labels
-     *
-     * Side effects:
-     * - creates system labels and one generic bookmark through `BookmarkService`
-     *
-     * Failure modes:
-     * - throws if the in-memory SwiftData container cannot be created or queried
-     * - fails if the generic bookmark does not carry the paragraph-break label relationship
-     */
-    func testBookmarkServiceCreatesParagraphBreakGenericBookmark() throws {
-        let container = try makeBookmarkRestoreModelContainer()
-        let modelContext = ModelContext(container)
-        let bookmarkStore = BookmarkStore(modelContext: modelContext)
-        let bookmarkService = BookmarkService(store: bookmarkStore)
-
-        let bookmark = bookmarkService.addParagraphBreakGenericBookmark(
-            bookInitials: "DICT",
-            key: "entry-key",
-            startOrdinal: 7,
-            endOrdinal: 9
-        )
-
-        let reloadedBookmark = try XCTUnwrap(bookmarkService.genericBookmark(id: bookmark.id))
-        let link = try XCTUnwrap(
-            bookmarkService.genericBookmarkToLabel(
-                bookmarkId: bookmark.id,
-                labelId: Label.paragraphBreakLabelId
-            )
-        )
-
-        XCTAssertEqual(reloadedBookmark.bookInitials, "DICT")
-        XCTAssertEqual(reloadedBookmark.key, "entry-key")
-        XCTAssertEqual(reloadedBookmark.ordinalStart, 7)
-        XCTAssertEqual(reloadedBookmark.ordinalEnd, 9)
-        XCTAssertFalse(reloadedBookmark.wholeVerse)
-        XCTAssertEqual(reloadedBookmark.primaryLabelId, Label.paragraphBreakLabelId)
-        XCTAssertEqual(link.bookmark?.id, bookmark.id)
-        XCTAssertEqual(link.label?.id, Label.paragraphBreakLabelId)
-        XCTAssertEqual(reloadedBookmark.bookmarkToLabels?.count, 1)
-        XCTAssertEqual(reloadedBookmark.bookmarkToLabels?.first?.label?.id, Label.paragraphBreakLabelId)
-    }
-
-    /**
-     Verifies that clearing a Bible bookmark note removes the persisted note row as well as the
-     in-memory relationship.
-     *
-     * Data dependencies:
-     * - creates an in-memory bookmark schema with one Bible bookmark and no pre-existing note row
-     *
-     * Side effects:
-     * - writes one note through `BookmarkService`
-     * - clears that note through `BookmarkService`, which should now save the context and delete
-     *   the detached `BibleBookmarkNotes` row
-     *
-     * Failure modes:
-     * - throws if the in-memory SwiftData container cannot be created or queried
-     * - fails if the bookmark still resolves a note relationship or if orphaned note rows remain
-     */
-    func testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow() throws {
-        let container = try makeBookmarkRestoreModelContainer()
-        let modelContext = ModelContext(container)
-        let bookmarkStore = BookmarkStore(modelContext: modelContext)
-        let bookmarkService = BookmarkService(store: bookmarkStore)
-
-        let bookmark = BibleBookmark(
-            kjvOrdinalStart: 1,
-            kjvOrdinalEnd: 1,
-            ordinalStart: 1,
-            ordinalEnd: 1,
-            v11n: "KJVA"
-        )
-        modelContext.insert(bookmark)
-        try modelContext.save()
-
-        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Seeded note")
-
-        XCTAssertEqual(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).count, 1)
-
-        let freshDeleteService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
-        freshDeleteService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: nil)
-
-        let reloadedBookmark = try XCTUnwrap(
-            try modelContext.fetch(FetchDescriptor<BibleBookmark>()).first
-        )
-        XCTAssertNil(reloadedBookmark.notes)
-        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).isEmpty)
-    }
-
-    /**
-     Verifies that saving a second Bible bookmark note replaces the persisted note text instead of
-     creating a duplicate detached note row.
-     *
-     * Data dependencies:
-     * - creates one in-memory Bible bookmark and no pre-existing note row
-     *
-     * Side effects:
-     * - writes an initial note through `BookmarkService`
-     * - writes a replacement note through a fresh `BookmarkService` instance bound to the same
-     *   SwiftData context
-     *
-     * Failure modes:
-     * - throws if the in-memory SwiftData container cannot be created or queried
-     * - fails if the reloaded note text is not updated or if multiple detached note rows exist
-     */
-    func testBookmarkServiceUpdatingBibleBookmarkNoteReusesPersistedNoteRow() throws {
-        let container = try makeBookmarkRestoreModelContainer()
-        let modelContext = ModelContext(container)
-        let bookmarkStore = BookmarkStore(modelContext: modelContext)
-        let bookmarkService = BookmarkService(store: bookmarkStore)
-
-        let bookmark = BibleBookmark(
-            kjvOrdinalStart: 1,
-            kjvOrdinalEnd: 1,
-            ordinalStart: 1,
-            ordinalEnd: 1,
-            v11n: "KJVA"
-        )
-        modelContext.insert(bookmark)
-        try modelContext.save()
-
-        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Seeded note")
-        let replacementService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
-        replacementService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Updated note")
-
-        let reloadedBookmark = try XCTUnwrap(
-            try modelContext.fetch(FetchDescriptor<BibleBookmark>()).first
-        )
-        XCTAssertEqual(reloadedBookmark.notes?.notes, "Updated note")
-        XCTAssertEqual(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).count, 1)
-    }
-
-    /**
-     Verifies that the My Notes rebuild query stops returning a bookmark after its note is deleted
-     in the same live SwiftData context.
-     *
-     * Data dependencies:
-     * - creates one in-memory `Genesis 1:1` Bible bookmark with a persisted note
-     *
-     * Side effects:
-     * - loads the note-bearing bookmark through the same `bookmarks(for:endOrdinal:book:)` query
-     *   that `BibleReaderController.loadMyNotesDocument()` uses
-     * - clears the note through `BookmarkService`
-     * - rebuilds the same bookmark query in the same context after deletion
-     *
-     * Failure modes:
-     * - throws if the in-memory SwiftData container cannot be created or queried
-     * - fails if the rebuild query still returns a note-bearing bookmark after deletion
-     */
-    func testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery() throws {
-        let container = try makeBookmarkRestoreModelContainer()
-        let modelContext = ModelContext(container)
-        let bookmarkStore = BookmarkStore(modelContext: modelContext)
-        let bookmarkService = BookmarkService(store: bookmarkStore)
-
-        let bookmark = BibleBookmark(
-            kjvOrdinalStart: 1,
-            kjvOrdinalEnd: 1,
-            ordinalStart: 1,
-            ordinalEnd: 1,
-            v11n: "KJVA"
-        )
-        bookmark.book = "Genesis"
-        modelContext.insert(bookmark)
-        try modelContext.save()
-
-        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Seeded note")
-
-        let initialMyNotesBookmarks = bookmarkService
-            .bookmarks(for: 1, endOrdinal: 40, book: "Genesis")
-            .filter { $0.notes != nil && !($0.notes?.notes.isEmpty ?? true) }
-        XCTAssertEqual(initialMyNotesBookmarks.map(\.id), [bookmark.id])
-
-        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: nil)
-
-        let rebuiltMyNotesBookmarks = bookmarkService
-            .bookmarks(for: 1, endOrdinal: 40, book: "Genesis")
-            .filter { $0.notes != nil && !($0.notes?.notes.isEmpty ?? true) }
-        XCTAssertTrue(rebuiltMyNotesBookmarks.isEmpty)
-    }
-
     func testMyNotesAccessibilityStateCapsDetailedRowAndNoteTokens() throws {
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -1614,46 +1327,68 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies that creating and editing one StudyPad entry persists its text payload in the backing
-     SwiftData rows.
-     *
-     * Data dependencies:
-     * - creates an in-memory bookmark schema with one real user label and no pre-existing StudyPad
-     *   entries
-     *
-     * Side effects:
-     * - creates one StudyPad entry after order `-1`
-     * - updates the detached StudyPad text payload through a fresh `BookmarkService`
-     *
-     * Failure modes:
-     * - throws if the in-memory SwiftData container cannot be created or queried
-     * - fails if the created entry is missing, if its order number is wrong, or if the persisted
-     *   text row does not contain the updated payload
+     Creates an in-memory bookmark schema for BibleUI reader bridge tests.
+
+     The helper intentionally mirrors the BibleCore package bookmark fixture because these tests
+     exercise BibleUI payload projection while still needing realistic SwiftData bookmark graphs.
+     Keeping the fixture local avoids adding a test-target dependency from BibleUI tests to
+     BibleCore tests, which SwiftPM does not support.
+
+     - Returns: A transient bookmark `ModelContainer`.
+     - Side effects: Allocates in-memory SwiftData storage for the current test only.
+     - Failure modes: Throws if SwiftData cannot initialize the model container.
      */
-    func testBookmarkServiceCreateAndUpdateStudyPadEntryPersistsText() throws {
-        let container = try makeBookmarkRestoreModelContainer()
-        let modelContext = ModelContext(container)
-        let bookmarkStore = BookmarkStore(modelContext: modelContext)
-        let bookmarkService = BookmarkService(store: bookmarkStore)
-
-        let label = bookmarkService.createLabel(name: "UI Test Seed", color: Label.defaultColor)
-        let creation = try XCTUnwrap(
-            bookmarkService.createStudyPadEntry(labelId: label.id, afterOrderNumber: -1)
-        )
-        XCTAssertEqual(creation.0.orderNumber, 0)
-        XCTAssertEqual(creation.0.contentType, "HTML")
-
-        let updateService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
-        updateService.updateStudyPadTextEntryText(id: creation.0.id, text: "Updated StudyPad note")
-        try modelContext.save()
-
-        let entries = try modelContext.fetch(FetchDescriptor<StudyPadTextEntry>())
-        XCTAssertEqual(entries.count, 1)
-        XCTAssertEqual(entries.first?.label?.id, label.id)
-
-        let texts = try modelContext.fetch(FetchDescriptor<StudyPadTextEntryText>())
-        XCTAssertEqual(texts.count, 1)
-        XCTAssertEqual(texts.first?.text, "Updated StudyPad note")
+    private func makeBookmarkRestoreModelContainer() throws -> ModelContainer {
+        let schema = Schema([
+            BibleBookmark.self,
+            BibleBookmarkNotes.self,
+            BibleBookmarkToLabel.self,
+            GenericBookmark.self,
+            GenericBookmarkNotes.self,
+            GenericBookmarkToLabel.self,
+            Label.self,
+            StudyPadTextEntry.self,
+            StudyPadTextEntryText.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        return try ModelContainer(for: schema, configurations: [configuration])
     }
 
+    /**
+     Asserts that a bridge payload contains an integer timestamp field.
+
+     Bookmark bridge payloads include millisecond timestamps whose exact values vary by runtime.
+     The helper preserves the Android payload-shape contract without making migrated tests depend
+     on wall-clock values.
+
+     - Parameters:
+      - field: JSON key expected to contain an integer value.
+       - json: Raw bridge payload JSON.
+       - file: XCTest source file used for failure reporting.
+       - line: XCTest source line used for failure reporting.
+     - Side effects: Records an XCTest failure if the field is absent or non-integer.
+     - Failure modes: Fails the current test through `XCTAssertNotNil`.
+     */
+    private func assertBridgeJSONIntegerField(
+        _ field: String,
+        in json: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let escapedField = NSRegularExpression.escapedPattern(for: field)
+        let integerPattern = #"""# + escapedField + #""\s*:\s*\d+(?=[,}])"#
+        let decimalPattern = #"""# + escapedField + #""\s*:\s*\d+\.\d+"#
+        XCTAssertNotNil(
+            json.range(of: integerPattern, options: .regularExpression),
+            "Expected \(field) to be emitted as an integer JSON number in \(json)",
+            file: file,
+            line: line
+        )
+        XCTAssertNil(
+            json.range(of: decimalPattern, options: .regularExpression),
+            "Expected \(field) to avoid decimal JSON encoding in \(json)",
+            file: file,
+            line: line
+        )
+    }
 }
