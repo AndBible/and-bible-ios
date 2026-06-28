@@ -56,17 +56,34 @@ xcodebuild -project AndBible.xcodeproj -scheme AndBible \
 xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   -destination 'platform=iOS Simulator,name=iPhone 17' test
 
-# Focused test run
+# App-host unit sentinel run
+xcodebuild -project AndBible.xcodeproj -scheme AndBibleUnitTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
+
+# Focused app-host or UI workflow run
+xcodebuild -project AndBible.xcodeproj -scheme AndBibleUnitTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  test -only-testing:AndBibleTests/AndBibleTests/testApplicationDelegateSceneConfigurationUsesWindowSceneDelegate
+
 xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
-  test -only-testing:AndBibleUITests/AndBibleUITests/testExample
+  test -only-testing:AndBibleUITests/AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults
 ```
 
-### Swift Package Validation
+### Package Test Targets
 
 ```bash
-swift build
-swift test
+xcodebuild -project AndBible.xcodeproj -scheme SwordKitTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
+
+xcodebuild -project AndBible.xcodeproj -scheme BibleCoreTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
+
+xcodebuild -project AndBible.xcodeproj -scheme BibleViewTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
+
+xcodebuild -project AndBible.xcodeproj -scheme BibleUITests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
 ### Vue.js Development
@@ -93,14 +110,17 @@ python3 scripts/check_repo_standards.py docblocks --all-files
 
 ### SwiftUI / App / Integration Changes
 
-- Prefer targeted `xcodebuild test` runs
+- Put new package-owned tests in the lowest package test target that owns the behavior after imports are minimized
+- Prefer targeted package-scheme `xcodebuild test` runs for package logic, reader/controller contracts, bridge DTOs, SwiftData services, and Android parity helpers
+- Use `AndBibleUnitTests` / `AndBibleTests` only for behavior that genuinely requires the app host, app delegate, scene wiring, or installed app bundle
+- Use `AndBibleUITests` only for true end-to-end workflows that require a launched app
 - Use `-only-testing:` whenever practical
 - If you changed shared reader coordination, UI harnesses, or scheme-level behavior, run a broader shared-scheme test pass
 
 ### Package-Only Logic Changes
 
-- `swift test` is useful for package targets
-- Still use `xcodebuild` if the change touches app wiring, SwiftUI behavior, environment injection, or UI harnesses
+- Use the package simulator schemes (`SwordKitTests`, `BibleCoreTests`, `BibleViewTests`, `BibleUITests`) as the canonical package validation path
+- Whole-package `swift build` / `swift test` is currently a host-compile optimization only; do not use it as a replacement for package simulator schemes or app-target validation
 
 ### Vue.js / WebView Changes
 
@@ -117,7 +137,8 @@ If frontend assets changed, rebuild before app validation.
 ## Build and Test Expectations
 
 - `xcodebuild` is the authoritative validation path for app behavior
-- `swift build` and `swift test` are supplemental, not replacements for app-target validation
+- Package-owned tests should run in app-host-free package schemes before falling back to the shared app scheme
+- Whole-package `swift build` and `swift test` are supplemental host-compile checks, not replacements for package simulator schemes or app-target validation
 - `project.yml` may lag the live Xcode project; trust the checked-in `AndBible.xcodeproj` and shared scheme first
 - Use a dedicated `-derivedDataPath` plus `clean test` when UI tests look stale
 

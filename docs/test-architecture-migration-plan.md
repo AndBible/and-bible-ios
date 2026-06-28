@@ -1,6 +1,6 @@
 # Test Architecture Migration Plan - Colocate Tests in Package Targets
 
-Status: in progress (Phase 3 BibleUI package lane started)
+Status: in progress (Phase 4 app-host retirement and CI/docs alignment started)
 Owner: TBD
 Last updated: 2026-06-28
 
@@ -173,7 +173,8 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - Gate per batch: moved batch green in new target; equal count removed from app bundle; app build still green.
 
 ### Phase 4 - Retire scaffolding & lock structure
-- Delete near-empty `AndBibleTests` extensions and `AndBibleTestSupport`; keep only app-host tests.
+- Delete near-empty `AndBibleTests` extensions and `AndBibleTestSupport`; keep only app-host tests. The app-host bundle now contains only the scene-configuration sentinel.
+- Narrow the old simulator unit-test CI job to the app-host scene-configuration sentinel using the dedicated `AndBibleUnitTests` scheme, while keeping `Unit Tests (Simulator)` as an aggregate required gate that fails when any package-test lane fails. Package-owned coverage is enforced by the app-host-free `SwordKitTests`, `BibleCoreTests`, `BibleViewTests`, and `BibleUITests` package lanes.
 - Simplify CI: replace `ios-simulator-unit-tests` app-build path with app-host-free package-test lanes. Baseline is per-target simulator schemes; macOS `swift test` is an optimization only for targets proven to compile under SwiftPM. Reassess shard planner, timings file, build-product-reuse experiment.
 - Trim `AndBibleUITests` to an explicit smoke set (target <=15 journeys); demote/convert the rest.
 - Update `CLAUDE.md` + `.github/copilot-instructions.md`: replace "swift test is supplemental" with the actual placement rule - *new tests go in the lowest package test target that owns the behavior after imports are minimized; app-host only for true app-delegate/scene/bootstrap behavior.*

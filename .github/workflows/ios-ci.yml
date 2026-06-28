@@ -1162,19 +1162,49 @@ jobs:
 
   ios-simulator-unit-tests:
     name: Unit Tests (Simulator)
+    if: ${{ always() }}
     runs-on: ${{ needs.repo-standards.outputs.required_checks_only == 'true' && 'ubuntu-latest' || 'macos-15' }}
     needs:
       - repo-standards
       - localization-guardrails
+      - ios-swordkit-package-tests
+      - ios-biblecore-package-tests
+      - ios-bibleview-package-tests
+      - ios-bibleui-package-tests
     timeout-minutes: 60
     env:
       DERIVED_DATA_PATH: .derivedData
       BUILD_XCRESULT_BUNDLE_PATH: .artifacts/AndBibleBuild-unit.xcresult
       TEST_XCRESULT_BUNDLE_PATH: .artifacts/AndBibleTests-unit.xcresult
       TEST_SELECTION_ARGS: |-
-        -skip-testing:AndBibleUITests
-        -skip-testing:AndBibleTests/AndBibleTests/testBridgeBindsWeakWebViewReferenceFromLifecycleCallbacks
+        -only-testing:AndBibleTests/AndBibleTests/testApplicationDelegateSceneConfigurationUsesWindowSceneDelegate
     steps:
+      - name: Verify package-test gate results
+        run: |
+          set -euo pipefail
+
+          failed=0
+          for result_pair in \
+            "repo-standards:${{ needs.repo-standards.result }}" \
+            "localization-guardrails:${{ needs.localization-guardrails.result }}" \
+            "ios-swordkit-package-tests:${{ needs.ios-swordkit-package-tests.result }}" \
+            "ios-biblecore-package-tests:${{ needs.ios-biblecore-package-tests.result }}" \
+            "ios-bibleview-package-tests:${{ needs.ios-bibleview-package-tests.result }}" \
+            "ios-bibleui-package-tests:${{ needs.ios-bibleui-package-tests.result }}"
+          do
+            job_name="${result_pair%%:*}"
+            job_result="${result_pair#*:}"
+            echo "${job_name}: ${job_result}"
+            if [[ "${job_result}" != "success" ]]; then
+              failed=1
+            fi
+          done
+
+          if [[ "${failed}" -ne 0 ]]; then
+            echo "One or more package or prerequisite checks failed; keeping Unit Tests as the aggregate required gate."
+            exit 1
+          fi
+
       - name: Required-checks-only pass
         if: needs.repo-standards.outputs.required_checks_only == 'true'
         run: echo "Required-checks-only change set; simulator unit tests are not required."
@@ -1255,7 +1285,7 @@ jobs:
         run: >-
           python3 -u scripts/resolve_ios_simulator_destination.py
           --project AndBible.xcodeproj
-          --scheme AndBible
+          --scheme AndBibleUnitTests
           --create-dedicated-device
           --device-name-prefix "AndBible CI Unit"
 
@@ -1266,13 +1296,13 @@ jobs:
           --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
           --timeout-seconds 300
 
-      - name: Build for testing
+      - name: Build app-host sentinel test bundle
         if: needs.repo-standards.outputs.required_checks_only != 'true'
         run: |
           mkdir -p .artifacts
           python3 -u scripts/run_xcodebuild_with_test_selection.py \
             --project AndBible.xcodeproj \
-            --scheme AndBible \
+            --scheme AndBibleUnitTests \
             --configuration Debug \
             --destination "${{ steps.simulator.outputs.destination }}" \
             --derived-data-path "${DERIVED_DATA_PATH}" \
@@ -1280,13 +1310,13 @@ jobs:
             --code-signing-allowed NO \
             --action build-for-testing
 
-      - name: Run selected simulator tests without rebuilding
+      - name: Run app-host sentinel test without rebuilding
         if: needs.repo-standards.outputs.required_checks_only != 'true'
         timeout-minutes: 10
         run: |
           python3 -u scripts/run_xcodebuild_with_test_selection.py \
             --project AndBible.xcodeproj \
-            --scheme AndBible \
+            --scheme AndBibleUnitTests \
             --configuration Debug \
             --destination "${{ steps.simulator.outputs.destination }}" \
             --derived-data-path "${DERIVED_DATA_PATH}" \
