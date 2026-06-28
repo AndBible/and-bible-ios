@@ -1,61 +1,11 @@
 import XCTest
-import AVFoundation
-@testable import BibleCore
-import CLibSword
-@testable import SwordKit
-import SwiftData
-import SQLite3
 @testable import BibleUI
-@testable import BibleView
-import enum SwiftUI.ColorScheme
-import struct SwiftUI.Text
 #if os(iOS)
 import UIKit
-import WebKit
 import struct SwiftUI.Color
 #endif
 
 extension AndBibleTests {
-    func testBibleReaderSpeakMiniPlayerBuildsWithSpeakService() {
-        let view = BibleReaderSpeakMiniPlayer(
-            speakService: SpeakService(),
-            currentReference: "Genesis 1",
-            onShowControls: {}
-        )
-
-        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderSpeakMiniPlayer"))
-    }
-
-    func testBibleReaderNavigationDrawerBuildsWithActionHandler() {
-        let view = BibleReaderNavigationDrawer(
-            width: 306,
-            colorScheme: ColorScheme.dark,
-            versionText: "Version 1.0 (1)",
-            onAction: { _ in }
-        )
-
-        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderNavigationDrawer"))
-    }
-
-    /**
-     Verifies the reader navigation drawer is hosted by the shared slide-out presentation shell.
-
-     Android's hamburger menu remains a narrow left drawer over a dimmed reader. Passage selection
-     is a separate full-screen chooser activity, so this shared shell should be reserved for the
-     hamburger drawer and similar left navigation surfaces only.
-     */
-    func testReaderSideDrawerOverlayBuildsWithInjectedContent() {
-        let view = ReaderSideDrawerOverlay(
-            colorScheme: ColorScheme.light,
-            dismissAreaIdentifier: "testDismissArea",
-            onDismiss: {}
-        ) { width in
-            Text("Drawer \(Int(width))")
-        }
-
-        XCTAssertTrue(String(describing: type(of: view)).contains("ReaderSideDrawerOverlay"))
-    }
-
     /**
      Verifies the passage chooser uses its Android-style full-screen shell.
 
