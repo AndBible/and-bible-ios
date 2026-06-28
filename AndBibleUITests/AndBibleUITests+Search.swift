@@ -227,11 +227,60 @@ extension AndBibleUITests {
             waitForReaderShellReady(in: app, timeout: 20),
             "Expected reader shell to remain alive after pane-menu Close."
         )
-        waitForElementExistence("windowTabButton::1", in: app, shouldExist: false, timeout: 10)
+        waitForClosedWindowOrder(1, in: app, timeout: 15)
         let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
         XCTAssertFalse(finalState.contains("windowOrder=none"), "Expected an active reader window after Close; state=\(finalState)")
         XCTAssertTrue(requireElement("windowPaneMenuButton::0", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("windowTabAddButton", in: app, timeout: 10).exists)
+    }
+
+    /**
+     Waits until the reader's live footer model no longer contains a closed window order.
+
+     The tab bar is backed by `WindowManager.allWindows`, which the compact reader state exposes as
+     `windowTabOrders`. Watching that model keeps the assertion tied to the close transaction itself
+     instead of a stale accessibility snapshot from the removed SwiftUI button.
+     *
+     * - Parameters:
+     *   - order: Window order that should be removed from the footer model.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for SwiftData deletion and SwiftUI reconciliation.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects: polls the compact reader state export.
+     * - Failure modes: records an XCTest failure when the closed order remains present or the
+     *   reader loses its active-window state.
+     */
+    private func waitForClosedWindowOrder(
+        _ order: Int,
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastState = readerRenderedContentStateValue(in: app) ?? "nil"
+        var lastOrders = windowTabOrdersFromReaderState(in: app)
+        repeat {
+            lastState = readerRenderedContentStateValue(in: app) ?? "nil"
+            lastOrders = windowTabOrdersFromReaderState(in: app)
+            if let lastOrders,
+               !lastOrders.contains(order),
+               !lastState.contains("windowOrder=none") {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let failureMessage = """
+            Expected window order \(order) to be removed within \(timeout) seconds; \
+            orders=\(String(describing: lastOrders)), state=\(lastState)
+            """
+        XCTFail(
+            failureMessage,
+            file: file,
+            line: line
+        )
     }
 
     /**
@@ -288,9 +337,10 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to search while scrolling.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
-     * - Returns: The first matching row with a usable frame, or the unresolved query after failure.
+     * - Returns: The first matching row that XCTest reports as hittable, or the unresolved query
+     *   after failure.
      * - Side effects: swipes the `windowPaneMenu` popup surface upward while re-querying rows.
-     * - Failure modes: records an XCTest failure when the row never materializes.
+     * - Failure modes: records an XCTest failure when the row never becomes hittable.
      */
     private func requirePaneMenuItem(
         _ identifier: String,
@@ -302,7 +352,9 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if let item = resolvedPaneMenuItem(identifier, in: app) {
-                return item
+                if waitForElementToBecomeHittable(item, timeout: 0.2) {
+                    return item
+                }
             }
 
             if let menuSurface = resolvedPaneMenuSurface(in: app) {
@@ -315,8 +367,8 @@ extension AndBibleUITests {
             ? app.buttons[identifier].firstMatch
             : unresolvedElement(identifier, in: app)
         XCTAssertTrue(
-            item.exists,
-            "Expected pane menu item '\(identifier)' to become visible within \(timeout) seconds.",
+            item.exists && item.isHittable,
+            "Expected pane menu item '\(identifier)' to become hittable within \(timeout) seconds.",
             file: file,
             line: line
         )
