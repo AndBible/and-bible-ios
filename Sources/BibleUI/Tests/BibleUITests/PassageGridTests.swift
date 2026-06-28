@@ -3,7 +3,14 @@ import XCTest
 @testable import BibleUI
 @testable import SwordKit
 
-extension AndBibleTests {
+/**
+ BibleUI passage chooser and grid parity coverage for Android navigation behavior.
+
+ These tests assert package-level chooser state, layout, palette, progress, and source guardrails
+ without app bootstrap. Failures indicate iOS passage navigation has drifted from Android's
+ `GridChoosePassage*` contracts or from the shared reading/memorization progress semantics.
+ */
+final class PassageGridTests: XCTestCase {
     /**
      Verifies the chooser option state machine mirrors Android's overflow-menu behavior.
 
@@ -86,15 +93,9 @@ extension AndBibleTests {
      menu rows: `on` when checked and `off` when unchecked.
      */
     func testPassageChooserMenuRowsExposeCheckedStateAccessibilityValue() throws {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let repoRoot = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = repoRoot.appendingPathComponent(
-            "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift"
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift"
         )
-
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
         XCTAssertTrue(source.contains(".accessibilityValue(isChecked(entry.option) ? \"on\" : \"off\")"))
     }
@@ -175,15 +176,9 @@ extension AndBibleTests {
      switch inside the options popup or modeled it as a persisted preference.
      */
     func testPassageChooserExposesDeuterocanonicalActionOutsideOverflow() throws {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let repoRoot = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = repoRoot.appendingPathComponent(
-            "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift"
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift"
         )
-
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
         XCTAssertTrue(source.contains("@State private var bookScope = PassageBookScriptureScope.scripture"))
         XCTAssertTrue(source.contains("PassageBookScriptureScope.books(from: books, scope: bookScope)"))
@@ -462,10 +457,6 @@ extension AndBibleTests {
      each Android-style chooser grid should use it only for leading and trailing padding.
      */
     func testPassageGridViewsApplyHorizontalOnlyOuterPadding() throws {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let repoRoot = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
         let relativePaths = [
             "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift",
             "Sources/BibleUI/Sources/BibleUI/Navigation/ChapterChooserView.swift",
@@ -473,8 +464,7 @@ extension AndBibleTests {
         ]
 
         for relativePath in relativePaths {
-            let sourceURL = repoRoot.appendingPathComponent(relativePath)
-            let source = try String(contentsOf: sourceURL, encoding: .utf8)
+            let source = try BibleUITestSourceLocator.source(at: relativePath)
 
             XCTAssertTrue(
                 source.contains(".padding(.horizontal, PassageGridMetrics.horizontalPadding)"),
@@ -515,15 +505,9 @@ extension AndBibleTests {
      so iOS must render that app bar explicitly inside `BookChooserView`.
      */
     func testPassageChooserOwnsExplicitAndroidAppBar() throws {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let repoRoot = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let chooserViewURL = repoRoot.appendingPathComponent(
-            "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift"
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift"
         )
-
-        let source = try String(contentsOf: chooserViewURL, encoding: .utf8)
 
         XCTAssertTrue(source.contains("PassageChooserAppBar("))
         XCTAssertTrue(source.contains(".toolbar(.hidden, for: .navigationBar)"))
@@ -622,14 +606,9 @@ extension AndBibleTests {
      filter/map intermediates before building the chapter set.
      */
     func testPassageGridBookProgressUsesSinglePassReadingChapterAggregation() throws {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let repoRoot = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = repoRoot.appendingPathComponent(
-            "Sources/BibleUI/Sources/BibleUI/Navigation/PassageGrid.swift"
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Navigation/PassageGrid.swift"
         )
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
         let bookProgressStart = try XCTUnwrap(source.range(of: "static func bookProgress("))
         let bookProgressEnd = try XCTUnwrap(
             source.range(of: "static func chapterProgress(", range: bookProgressStart.upperBound..<source.endIndex)

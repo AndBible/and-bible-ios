@@ -1,5 +1,4 @@
 import XCTest
-import Foundation
 import SwiftUI
 @testable import BibleCore
 @testable import BibleUI
@@ -768,10 +767,9 @@ final class SettingsIconsTests: XCTestCase {
      picker or SwiftUI sheet/Form editor with iOS chrome.
      */
     func testTextDisplayPreferenceEditorsAvoidNativeIOSPickerAndSheetRoutes() throws {
-        let sourceRelativePath = "Sources/BibleUI/Sources/BibleUI/Settings/TextDisplaySettingsView.swift"
-        let repoRoot = try Self.repositoryRoot(containing: sourceRelativePath)
-        let sourceURL = repoRoot.appendingPathComponent(sourceRelativePath)
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Settings/TextDisplaySettingsView.swift"
+        )
 
         XCTAssertFalse(source.contains("UIFontPickerViewController"))
         XCTAssertFalse(source.contains(".sheet(item: $activePreferenceEditor)"))
@@ -830,38 +828,4 @@ final class SettingsIconsTests: XCTestCase {
         )
     }
 
-    /**
-     Finds the repository root from this test source file by walking upward until a known
-     repo-relative source path exists.
-
-     - Parameter relativePath: A source-controlled path expected to exist below the repository root.
-     - Parameter filePath: The current test file path. Defaults to Swift's compile-time `#filePath`.
-     - Returns: The directory URL that contains `relativePath`.
-     - Throws: An `NSError` when the test is compiled from an unexpected checkout layout.
-
-     This keeps source-scan tests deterministic after migration from `AndBibleTests/` to nested
-     package test directories, without hard-coding a fixed number of parent components.
-     */
-    private static func repositoryRoot(containing relativePath: String, from filePath: String = #filePath) throws -> URL {
-        var directory = URL(fileURLWithPath: filePath).deletingLastPathComponent()
-        while true {
-            let candidate = directory.appendingPathComponent(relativePath)
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                return directory
-            }
-
-            let parent = directory.deletingLastPathComponent()
-            if parent.path == directory.path {
-                throw NSError(
-                    domain: "SettingsIconsTests",
-                    code: 1,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "Unable to locate repository root containing \(relativePath) from \(filePath)"
-                    ]
-                )
-            }
-            directory = parent
-        }
-    }
 }
