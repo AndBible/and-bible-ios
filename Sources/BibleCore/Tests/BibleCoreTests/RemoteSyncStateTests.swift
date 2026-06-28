@@ -1,22 +1,14 @@
-import XCTest
-import AVFoundation
-@testable import BibleCore
-import CLibSword
-@testable import SwordKit
+import Foundation
 import SwiftData
-import SQLite3
-@testable import BibleUI
-@testable import BibleView
-import struct SwiftUI.Binding
-import enum SwiftUI.ColorScheme
-import struct SwiftUI.EdgeInsets
-import struct SwiftUI.EmptyView
-#if os(iOS)
-import UIKit
-import WebKit
-import struct SwiftUI.Color
-#endif
+import XCTest
+@testable import BibleCore
 
+/**
+ Localized startup error used to verify CloudKit container recovery messaging.
+
+ The error is intentionally small and deterministic so tests can assert that recovery reports the
+ original CloudKit failure while still falling back to the local SwiftData container.
+ */
 private enum TestStartupContainerError: LocalizedError {
     case cloudKitModelRejected
 
@@ -25,7 +17,26 @@ private enum TestStartupContainerError: LocalizedError {
     }
 }
 
-extension AndBibleTests {
+/**
+ BibleCore remote-sync state and bootstrap tests migrated out of the app-host bundle.
+
+ This suite protects sync settings persistence, iCloud startup recovery, WebDAV configuration,
+ Android-compatible folder bootstrap state, patch discovery, and archive staging. It intentionally
+ owns only BibleCore behavior; UIKit, BibleUI, BibleView, SWORD, and WebView imports from the old
+ shared `AndBibleTests` class are not required for these contracts.
+ */
+final class RemoteSyncStateTests: XCTestCase {
+    /**
+     Clears the shared URL protocol handler after WebDAV configuration tests.
+
+     - Side effects: Resets the process-global `MockURLProtocol.requestHandler` fixture.
+     - Failure modes: none.
+     */
+    override func tearDown() {
+        MockURLProtocol.requestHandler = nil
+        super.tearDown()
+    }
+
     /**
      Verifies the synced SwiftData schema itself satisfies CloudKit startup validation.
 
@@ -419,7 +430,7 @@ extension AndBibleTests {
                 httpVersion: nil,
                 headerFields: nil
             )!
-            return (response, Self.sampleWebDAVMultiStatusXML.data(using: .utf8)!)
+            return (response, sampleWebDAVMultiStatusXML.data(using: .utf8)!)
         }
 
         let client = try configuration.makeWebDAVClient(
@@ -447,7 +458,7 @@ extension AndBibleTests {
                 httpVersion: nil,
                 headerFields: nil
             )!
-            return (response, Self.sampleWebDAVMultiStatusXML.data(using: .utf8)!)
+            return (response, sampleWebDAVMultiStatusXML.data(using: .utf8)!)
         }
 
         let client = try configuration.makeWebDAVClient(
@@ -621,7 +632,7 @@ extension AndBibleTests {
             for: .bookmarks
         )
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setKnownResponse(
             true,
             forSyncFolderID: "/org.andbible.ios-sync-bookmarks",
@@ -669,7 +680,7 @@ extension AndBibleTests {
             for: .bookmarks
         )
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setKnownResponse(
             true,
             forSyncFolderID: "/org.andbible.ios-sync-bookmarks",
@@ -718,7 +729,7 @@ extension AndBibleTests {
     func testRemoteSyncBootstrapCoordinatorRequiresRemoteAdoptionWhenNamedFolderExists() async throws {
         let settingsStore = try makeInMemorySettingsStore()
         let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setListFilesResult([
             RemoteSyncFile(
                 id: "/org.andbible.ios-sync-bookmarks",
@@ -763,7 +774,7 @@ extension AndBibleTests {
             for: .bookmarks
         )
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setKnownResponse(false, forSyncFolderID: "/stale-bookmarks", secretFileName: "stale-secret")
         await adapter.setListFilesResult([])
 
@@ -791,7 +802,7 @@ extension AndBibleTests {
     func testRemoteSyncBootstrapCoordinatorAdoptRemoteFolderPersistsMarkerAndDeviceFolder() async throws {
         let settingsStore = try makeInMemorySettingsStore()
         let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setMakeKnownResponse("device-known-ios-device-secret")
         await adapter.enqueueCreateFolderResult(
             RemoteSyncFile(
@@ -830,7 +841,7 @@ extension AndBibleTests {
     func testRemoteSyncBootstrapCoordinatorCreateRemoteFolderCanReplaceExistingRemoteFolder() async throws {
         let settingsStore = try makeInMemorySettingsStore()
         let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setMakeKnownResponse("device-known-ios-device-secret")
         await adapter.enqueueCreateFolderResult(
             RemoteSyncFile(
@@ -938,7 +949,7 @@ extension AndBibleTests {
     }
 
     func testRemoteSyncPatchDiscoveryFindsInitialBackup() async throws {
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.enqueueListFilesResult([
             RemoteSyncFile(
                 id: "/org.andbible.ios-sync-bookmarks/initial.sqlite3.gz",
@@ -967,7 +978,7 @@ extension AndBibleTests {
             for: .bookmarks
         )
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.enqueueListFilesResult([
             RemoteSyncFile(
                 id: "/org.andbible.ios-sync-bookmarks/device-a",
@@ -1050,7 +1061,7 @@ extension AndBibleTests {
 
     func testRemoteSyncPatchDiscoveryThrowsWhenPatchSequenceHasGap() async throws {
         let statusStore = RemoteSyncPatchStatusStore(settingsStore: try makeInMemorySettingsStore())
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.enqueueListFilesResult([
             RemoteSyncFile(
                 id: "/org.andbible.ios-sync-bookmarks/device-a",
@@ -1088,7 +1099,7 @@ extension AndBibleTests {
 
     func testRemoteSyncPatchDiscoveryThrowsWhenRemotePatchNeedsNewerSchema() async throws {
         let statusStore = RemoteSyncPatchStatusStore(settingsStore: try makeInMemorySettingsStore())
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.enqueueListFilesResult([
             RemoteSyncFile(
                 id: "/org.andbible.ios-sync-bookmarks/device-a",
@@ -1125,7 +1136,7 @@ extension AndBibleTests {
     }
 
     func testRemoteSyncArchiveStagingDownloadsInitialBackupAndExtractsSQLiteFile() async throws {
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         let initialDatabaseURL = try makeTemporarySQLiteDatabase(userVersion: 3)
         defer { try? FileManager.default.removeItem(at: initialDatabaseURL) }
         let initialArchiveData = try RemoteSyncArchiveStagingService.gzip(Data(contentsOf: initialDatabaseURL))
@@ -1157,7 +1168,7 @@ extension AndBibleTests {
     }
 
     func testRemoteSyncArchiveStagingRejectsInitialBackupWithNewerSchemaVersion() async throws {
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         let initialDatabaseURL = try makeTemporarySQLiteDatabase(userVersion: 7)
         defer { try? FileManager.default.removeItem(at: initialDatabaseURL) }
         let initialArchiveData = try RemoteSyncArchiveStagingService.gzip(Data(contentsOf: initialDatabaseURL))
@@ -1186,7 +1197,7 @@ extension AndBibleTests {
     }
 
     func testRemoteSyncArchiveStagingDownloadsPatchArchivesInSuppliedOrder() async throws {
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         let firstArchive = Data("first-archive".utf8)
         let secondArchive = Data("second-archive".utf8)
         await adapter.setDownloadData(firstArchive, forID: "/org.andbible.ios-sync-bookmarks/device-b/1.1.sqlite3.gz")
@@ -1235,6 +1246,4 @@ extension AndBibleTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: stagedArchives[0].archiveFileURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: stagedArchives[1].archiveFileURL.path))
     }
-
-    /// Verifies that synchronization stops at the Android adopt-vs-create branch when a same-named remote folder exists.
 }
