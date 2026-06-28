@@ -1,23 +1,30 @@
+import Foundation
 import XCTest
-import AVFoundation
-@testable import BibleCore
-import CLibSword
 @testable import SwordKit
-import SwiftData
-import SQLite3
-@testable import BibleUI
-@testable import BibleView
-import struct SwiftUI.Binding
-import enum SwiftUI.ColorScheme
-import struct SwiftUI.EdgeInsets
-import struct SwiftUI.EmptyView
-#if os(iOS)
-import UIKit
-import WebKit
-import struct SwiftUI.Color
-#endif
 
-extension AndBibleTests {
+/**
+ App-host-free package coverage for Android-parity custom repository source management.
+
+ `RepositorySourceManager` is owned by SwordKit because it reads and mutates SWORD
+ `InstallMgr.conf` rows plus the iOS sidecar metadata needed to model Android/MyBible repository
+ sources. These tests run in the SwordKit package lane with a local mocked URL session so manifest
+ parsing, sidecar repair, default-source protection, and reset behavior stay independent of the app
+ target and UI helpers.
+ */
+final class RepositorySourceManagerTests: XCTestCase {
+    override func tearDown() {
+        RepositorySourceManagerMockURLProtocol.requestHandler = nil
+        super.tearDown()
+    }
+
+    /**
+     Verifies an Android-style SWORD HTTPS manifest becomes a persisted `InstallMgr.conf` source.
+
+     The mocked manifest supplies host, catalog, package, and manifest URL metadata. The expected
+     result is that `RepositorySourceManager` writes a SWORD-compatible HTTP source while preserving
+     package metadata for later Downloads installs. A failure means custom SWORD repositories can be
+     accepted by the UI but not survive reload through SwordKit.
+     */
     func testRepositorySourceManagerAddsSwordHTTPSManifestSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -36,7 +43,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -49,7 +56,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
@@ -93,7 +100,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -106,7 +113,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
@@ -149,7 +156,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -162,7 +169,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
@@ -180,6 +187,13 @@ extension AndBibleTests {
         XCTAssertEqual(record["packageDirectory"] as? String, "/sword/packages")
     }
 
+    /**
+     Ensures untrusted manifest metadata cannot downgrade the persisted manifest URL.
+
+     The request URL is HTTPS, but the manifest body advertises an HTTP `manifestUrl`. The expected
+     result is that iOS stores the validated HTTPS URL that the user supplied. A failure means sidecar
+     metadata can retain insecure Android/SWORD repository URLs after validation.
+     */
     func testRepositorySourceManagerIgnoresNonHTTPSSwordManifestURLMetadata() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -198,7 +212,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -211,7 +225,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
@@ -231,6 +245,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies legacy `InstallMgr.conf`-only custom SWORD rows are backfilled into sidecar metadata.
+
+     The setup appends a custom HTTP source with no JSON sidecar. Loading sources should synthesize
+     Android-compatible repository type, package, manifest, and source URL metadata and persist that
+     repair. A failure means older custom repositories remain partially modeled after upgrade.
+     */
     func testRepositorySourceManagerBackfillsSourceOnlyCustomSwordMetadata() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -270,6 +291,13 @@ extension AndBibleTests {
         XCTAssertEqual(record["sourceURL"] as? String, "https://legacy.example/catalog")
     }
 
+    /**
+     Protects unreadable sidecar data from destructive repair attempts.
+
+     The setup has a valid legacy SWORD row plus malformed sidecar JSON. The expected result is that
+     load-time metadata is repaired in memory while the unreadable sidecar bytes are left untouched.
+     A failure means a bad sidecar can be silently overwritten during a read-only source load.
+     */
     func testRepositorySourceManagerDoesNotOverwriteUnreadableSidecarDuringBackfill() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -381,6 +409,13 @@ extension AndBibleTests {
         XCTAssertNil(source.packageDirectory)
     }
 
+    /**
+     Verifies an Android/MyBible manifest is stored only in the sidecar repository list.
+
+     MyBible repositories are not SWORD install-manager sources, so adding one should persist sidecar
+     metadata without projecting an `HTTPSource` row into `InstallMgr.conf`. A failure means MyBible
+     repository setup can pollute SWORD config or disappear from custom repository reloads.
+     */
     func testRepositorySourceManagerAddsMyBibleManifestSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -405,7 +440,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://mybible.example/manifest.json")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -418,7 +453,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://mybible.example/manifest.json")
@@ -446,6 +481,13 @@ extension AndBibleTests {
         XCTAssertFalse(manager.loadSources().contains { $0.name == "Example MyBible" })
     }
 
+    /**
+     Ensures MyBible sidecar repositories remain available when SWORD config cannot be read.
+
+     The setup makes `InstallMgr.conf` a directory and provides both MyBible and SWORD sidecar rows.
+     The expected result is that only the sidecar-only MyBible repository is loaded. A failure means
+     SWORD config failures can hide Android MyBible repositories or expose unusable SWORD rows.
+     */
     func testRepositorySourceManagerLoadsMyBibleSidecarWhenSwordConfigUnreadable() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -494,6 +536,13 @@ extension AndBibleTests {
         XCTAssertEqual(source.manifestURL?.absoluteString, "https://mybible.example/manifest.json")
     }
 
+    /**
+     Verifies invalid sidecar repository rows are ignored while valid MyBible rows still load.
+
+     The fixture includes a path-traversal name, an HTTP manifest URL, and one valid HTTPS MyBible
+     repository. The expected result is that only the safe repository is returned. A failure means
+     stale or malicious sidecar rows can leak into Downloads source lists.
+     */
     func testRepositorySourceManagerDropsInvalidSidecarRecords() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -550,6 +599,13 @@ extension AndBibleTests {
         XCTAssertEqual(sources.first?.manifestURL?.absoluteString, "https://mybible.example/manifest.json")
     }
 
+    /**
+     Protects SWORD sidecar repair when persisted manifest metadata is not HTTPS.
+
+     The SWORD config row is valid, but its sidecar manifest URL is HTTP. Loading should repair the
+     source to the HTTPS catalog URL and persist the repaired manifest metadata. A failure means
+     repository reload can keep insecure stale URLs even after the SWORD source row is safe.
+     */
     func testRepositorySourceManagerRepairsSwordSidecarWithNonHTTPSManifestURL() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -605,6 +661,14 @@ extension AndBibleTests {
         XCTAssertEqual(repositories.compactMap { $0["manifestURL"] as? String }, ["https://sword.example/sword"])
     }
 
+    /**
+     Verifies MyBible add and replace operations work through sidecar storage without readable SWORD config.
+
+     The setup makes `InstallMgr.conf` unreadable, adds a MyBible source, then replaces it with a
+     different manifest. The expected result is an ordered sidecar replacement with no dependency on
+     SWORD config writes. A failure means MyBible repository management is coupled to SWORD-only
+     storage.
+     */
     func testRepositorySourceManagerAddsAndReplacesMyBibleWhenSwordConfigUnreadable() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -620,7 +684,7 @@ extension AndBibleTests {
             "initial.example": "Initial MyBible",
             "updated.example": "Updated MyBible"
         ]
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let host = try XCTUnwrap(request.url?.host)
             let fileName = try XCTUnwrap(manifestNamesByHost[host])
             let manifestData = """
@@ -642,7 +706,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let added = try await manager.addCustomSource(from: "https://initial.example/manifest.json")
@@ -660,6 +724,14 @@ extension AndBibleTests {
         XCTAssertEqual(sources.first?.manifestURL?.absoluteString, "https://updated.example/manifest.json")
     }
 
+    /**
+     Ensures deleting a sidecar-only MyBible repository succeeds when SWORD config is unreadable.
+
+     The fixture includes one MyBible and one SWORD sidecar row while `InstallMgr.conf` is a
+     directory. Deleting the MyBible row should update only sidecar metadata and leave SWORD deletion
+     rejected because config cannot be read. A failure means sidecar-only repositories inherit SWORD
+     config failure behavior.
+     */
     func testRepositorySourceManagerDeletesMyBibleSidecarWhenSwordConfigUnreadable() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -717,6 +789,13 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Verifies replacing a MyBible repository preserves its position in Android-style source ordering.
+
+     The setup adds first/middle/last MyBible repositories and replaces the middle one. The expected
+     result is that both load order and persisted sidecar order keep the replacement in the middle.
+     A failure means source replacement can reorder Downloads repositories unexpectedly.
+     */
     func testRepositorySourceManagerPreservesMyBibleOrderWhenReplacingSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -730,7 +809,7 @@ extension AndBibleTests {
             "middle-updated.example": "Middle Updated MyBible"
         ]
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let host = try XCTUnwrap(request.url?.host)
             let fileName = try XCTUnwrap(manifestNamesByHost[host])
             let manifestData = """
@@ -752,7 +831,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         _ = try await manager.addCustomSource(from: "https://first.example/manifest.json")
@@ -780,6 +859,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Ensures MyBible manifests cannot create repositories whose names collide with defaults.
+
+     The mocked MyBible manifest uses `AndBible`, a built-in source name. The expected result is a
+     duplicate-source error before any source is persisted. A failure means custom MyBible manifests
+     can shadow Android/default repository entries.
+     */
     func testRepositorySourceManagerRejectsDuplicateMyBibleRepositoryName() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -795,7 +881,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -807,7 +893,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -820,6 +906,13 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Verifies structurally invalid MyBible manifests are rejected without persisting source rows.
+
+     The mocked manifest omits the required modules array. The expected result is an invalid-manifest
+     error and no source with that name after reload. A failure means incomplete Android/MyBible
+     repository metadata can enter the source list.
+     */
     func testRepositorySourceManagerRejectsInvalidMyBibleManifest() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -834,7 +927,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -846,7 +939,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -859,6 +952,13 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Ensures unsupported manifest types fail explicitly and do not fall through to SWORD/MyBible handling.
+
+     The fixture serves a manifest with an unknown type. The expected result is an
+     `unsupportedRepositoryType` error containing that type. A failure means new or malformed manifest
+     types can be silently interpreted as a supported repository family.
+     */
     func testRepositorySourceManagerRejectsUnsupportedManifestType() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -872,7 +972,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -884,7 +984,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -897,13 +997,20 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Verifies direct SWORD catalog URLs fall back to Android-compatible package and source metadata.
+
+     The manifest URL returns 404 while catalog/package probes succeed. The expected result is a
+     generated source name, preserved host including port, catalog path, package path, and source URL.
+     A failure means users cannot add repositories that expose a JSword catalog without a manifest.
+     */
     func testRepositorySourceManagerAddsDirectSwordCatalogFallbackSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let path = request.url?.path ?? ""
             let statusCode: Int
             let data: Data
@@ -931,7 +1038,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://custom.example:8443/sword")
@@ -949,6 +1056,13 @@ extension AndBibleTests {
         XCTAssertTrue(config.contains("HTTPSource=\(registration.source.name)|custom.example:8443|/sword"))
     }
 
+    /**
+     Ensures SWORD manifests cannot replace built-in repository names.
+
+     The mocked SWORD manifest uses the default `AndBible` name. The expected result is a duplicate
+     source error and no custom source write. A failure means custom manifests can shadow protected
+     default repository rows.
+     */
     func testRepositorySourceManagerRejectsDuplicateDefaultRepositoryName() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -965,7 +1079,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -977,7 +1091,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -990,6 +1104,14 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Verifies stale SWORD sidecar metadata does not block a new validated source with the same name.
+
+     The fixture has a sidecar-only SWORD row that is not present in `InstallMgr.conf`, then adds a
+     validated manifest with the same name. The expected result is that the new validated metadata
+     replaces the orphaned sidecar record. A failure means stale sidecars can prevent legitimate
+     repository re-adds.
+     */
     func testRepositorySourceManagerIgnoresOrphanedSwordSidecarForDuplicateNames() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1028,7 +1150,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -1040,7 +1162,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://visible.example/manifest.json")
@@ -1059,6 +1181,13 @@ extension AndBibleTests {
         XCTAssertEqual(repositories.compactMap { $0["host"] as? String }, ["visible.example"])
     }
 
+    /**
+     Protects repository source persistence from manifest names that contain path separators.
+
+     The mocked SWORD manifest uses `../custom`. The expected result is an invalid-manifest error,
+     no config write, and no loaded source. A failure means repository names can escape their intended
+     config/sidecar namespace.
+     */
     func testRepositorySourceManagerRejectsManifestSourceNamesWithPathSeparators() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1075,7 +1204,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -1087,7 +1216,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -1108,6 +1237,13 @@ extension AndBibleTests {
         XCTAssertFalse(sourcesAfterFailure.contains { $0.name == "../custom" })
     }
 
+    /**
+     Verifies delete semantics protect built-in sources while removing true custom SWORD rows.
+
+     The setup adds one custom config row alongside defaults. Deleting `AndBible` should fail with a
+     protected-default error, while deleting the custom row should remove it and preserve defaults.
+     A failure means reset/delete UI can mutate Android default repository sources.
+     */
     func testRepositorySourceManagerProtectsDefaultsAndDeletesCustomSources() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1160,6 +1296,13 @@ extension AndBibleTests {
         XCTAssertEqual(step.packageDirectory, "/packages")
     }
 
+    /**
+     Ensures reset-to-defaults removes custom SWORD rows, restores built-ins, and emits change notification.
+
+     The setup appends a custom source then observes `sourcesDidChangeNotification`. The expected
+     result is that reset posts the notification, removes the custom source, and leaves only default
+     sources. A failure means Downloads repository reset can leave stale rows or fail to refresh UI.
+     */
     func testRepositorySourceManagerResetToDefaultsRemovesCustomSourcesAndRestoresDefaults() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1195,6 +1338,13 @@ extension AndBibleTests {
         XCTAssertTrue(restoredSources.allSatisfy(manager.isDefaultSource))
     }
 
+    /**
+     Verifies reset-to-defaults reports a write failure when default config cannot be recreated.
+
+     The manager points at a missing base path that cannot produce a new `InstallMgr.conf`. The
+     expected result is a `configWriteFailed` error with the recreation message. A failure means the
+     reset UI cannot distinguish successful reset from failed default-source recreation.
+     */
     func testRepositorySourceManagerResetToDefaultsReportsRecreationFailure() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1212,6 +1362,13 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Verifies replacing a custom SWORD source removes the old row and persists the validated replacement.
+
+     The setup writes `Old Repo`, then replaces it with a validated manifest for `New Repo`. The
+     expected result is that only the new source remains after reload. A failure means custom source
+     replacement can duplicate or leave stale SWORD rows.
+     */
     func testRepositorySourceManagerReplacesCustomSourceInPlace() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1234,7 +1391,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -1246,7 +1403,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.replaceCustomSource(
@@ -1261,6 +1418,13 @@ extension AndBibleTests {
         XCTAssertFalse(sourceNames.contains("Old Repo"))
     }
 
+    /**
+     Ensures replacing a missing custom source fails before any network validation or config mutation.
+
+     The request handler intentionally fails the test if invoked. The expected result is a
+     `sourceNotFound` error and unchanged config bytes. A failure means replacement can validate or
+     write a new repository when the user-selected source no longer exists.
+     */
     func testRepositorySourceManagerRejectsReplacingMissingCustomSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1271,7 +1435,7 @@ extension AndBibleTests {
         let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
         let initialConfig = try String(contentsOf: configURL, encoding: .utf8)
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTFail("Replacing a missing source should fail before validating the replacement URL.")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -1284,7 +1448,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -1302,4 +1466,55 @@ extension AndBibleTests {
         XCTAssertFalse(manager.loadSources().contains { $0.name == "New Repo" })
     }
 
+    /**
+     Creates an ephemeral URL session that routes repository manifest validation through the local
+     URLProtocol fixture.
+
+     - Returns: A `URLSession` whose network requests are handled entirely in-process.
+     - Side effects: none beyond allocating an ephemeral session.
+     - Failure modes: test requests fail fast if `RepositorySourceManagerMockURLProtocol` has no
+       handler installed for the current test.
+     */
+    private static func makeMockedURLSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RepositorySourceManagerMockURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+}
+
+/**
+ URLProtocol fixture used by repository-source manager tests to replace network access.
+
+ Each test installs a `requestHandler` that validates the expected URL and returns an HTTP response
+ plus data. `tearDown` clears the handler to prevent cross-test leakage; a missing handler is a test
+ setup failure because repository validation should never reach the real network in this package
+ lane.
+ */
+private final class RepositorySourceManagerMockURLProtocol: URLProtocol {
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let requestHandler = Self.requestHandler else {
+            fatalError("RepositorySourceManagerMockURLProtocol.requestHandler must be set before use")
+        }
+
+        do {
+            let (response, data) = try requestHandler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
