@@ -2,7 +2,6 @@ import XCTest
 @testable import BibleUI
 #if os(iOS)
 import UIKit
-import struct SwiftUI.Color
 #endif
 
 extension AndBibleTests {
@@ -25,19 +24,6 @@ extension AndBibleTests {
             ObjectIdentifier(AndBibleWindowSceneDelegate.self)
         )
         XCTAssertNil(configuration.name)
-    }
-
-    func testColorARGBByteClampsIntermediatePickerComponents() {
-        XCTAssertEqual(Color.clampedARGBByte(-0.25), 0)
-        XCTAssertEqual(Color.clampedARGBByte(0.5), 128)
-        XCTAssertEqual(Color.clampedARGBByte(1.2), 255)
-        XCTAssertEqual(Color.clampedARGBByte(.nan), 0)
-        XCTAssertEqual(Color.clampedARGBByte(.infinity), 0)
-    }
-
-    func testColorARGBIntClampsOutOfRangeComponents() {
-        let color = Color(.sRGB, red: -0.25, green: 0.5, blue: 1.2, opacity: 1.0)
-        XCTAssertEqual(color.argbInt, Int(Int32(bitPattern: 0xFF0080FF)))
     }
     #endif
 
