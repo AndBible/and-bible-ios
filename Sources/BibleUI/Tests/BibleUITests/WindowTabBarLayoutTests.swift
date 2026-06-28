@@ -1,7 +1,9 @@
 import XCTest
 @testable import BibleUI
 
-extension AndBibleTests {
+/// Verifies the bottom reader window-strip layout contracts that mirror Android's compact
+/// multi-window footer behavior without requiring the app-host XCTest bundle.
+final class WindowTabBarLayoutTests: XCTestCase {
     /**
      Protects Android-style compact bottom window buttons on phone-width readers.
 
