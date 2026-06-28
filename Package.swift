@@ -100,7 +100,7 @@ let package = Package(
         ),
         .testTarget(
             name: "BibleUITests",
-            dependencies: ["BibleUI", "BibleCore"],
+            dependencies: ["BibleUI", "BibleCore", "SwordKit"],
             path: "Sources/BibleUI/Tests/BibleUITests"
         ),
         .executableTarget(

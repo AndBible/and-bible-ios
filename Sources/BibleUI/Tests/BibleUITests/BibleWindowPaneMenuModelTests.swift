@@ -76,7 +76,7 @@ final class BibleWindowPaneMenuModelTests: XCTestCase {
      A synchronized window shows Disable synchronize, then Group 1 through Group 6 except the
      currently selected group. Group selection is one-based in the UI and zero-based in the action.
      */
-    func testSynchronizedWindowSubmenuShowsDisableAndSkipsCurrentGroup() {
+    func testSynchronizedWindowSubmenuShowsDisableAndSkipsCurrentGroup() throws {
         let model = BibleWindowPaneMenuModel(snapshot: .fixture(
             isSynchronized: true,
             syncGroup: 2

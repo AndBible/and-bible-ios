@@ -1,8 +1,8 @@
 # Test Architecture Migration Plan - Colocate Tests in Package Targets
 
-Status: in progress (Phase 2 BibleCore package lane started)
+Status: in progress (Phase 3 BibleUI package lane started)
 Owner: TBD
-Last updated: 2026-06-27
+Last updated: 2026-06-28
 
 ## Why (adversarial review summary)
 
@@ -132,6 +132,8 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 
 ### Phase 3 - BibleUI bulk (largest; 3-4 sub-batch PRs by theme)
 - **Per batch, first re-minimize imports** (drop UI imports inherited only from shared support) and re-confirm destination - many `+RemoteSync*` / `+Bridge*` tests should drop to BibleCoreTests/BibleViewTests and run in the package-test lane rather than BibleUITests. Under option (b), that still means per-target simulator schemes; under option (a), eligible targets may use macOS `swift test`.
+- `AndBibleTests+BookCatalog` has moved to `BibleUITests` as the first Phase 3 slice because it exercises BibleUI reader catalog behavior without app bootstrap. Its direct `SwordKit` types are now an explicit `BibleUITests` dependency.
+- CI now includes an app-host-free `ios-bibleui-package-tests` simulator job so moved BibleUI tests remain enforced outside the app-target bundle.
 - Batches for the genuinely BibleUI-behavior remainder: ReaderNavigation, Bookmarks/Strongs, Window/Settings, view-model parts of `+AppAndReader`.
 - **Split `+AppAndReader` deliberately**: `sceneConfiguration` test stays app-hosted; `testContentViewDoesNotContainLegacyRootSidebarShell` becomes a repo-standards guardrail or stays app-hosted (decide explicitly - do not move to BibleUITests); the other ~78 funcs go to BibleUITests.
 - Run BibleUITests via `xcodebuild test -scheme BibleUITests -destination 'platform=iOS Simulator,...'` against the **committed package test scheme from Phase 0** (no app host).
