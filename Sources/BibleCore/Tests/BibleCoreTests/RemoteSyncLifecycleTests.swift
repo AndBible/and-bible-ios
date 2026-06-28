@@ -1,29 +1,21 @@
-import XCTest
-import AVFoundation
-@testable import BibleCore
-import CLibSword
-@testable import SwordKit
+import Foundation
 import SwiftData
-import SQLite3
-@testable import BibleUI
-@testable import BibleView
-import struct SwiftUI.Binding
-import enum SwiftUI.ColorScheme
-import struct SwiftUI.EdgeInsets
-import struct SwiftUI.EmptyView
-#if os(iOS)
-import UIKit
-import WebKit
-import struct SwiftUI.Color
-#endif
+import XCTest
+@testable import BibleCore
 
-extension AndBibleTests {
+/**
+ Package-level remote-sync lifecycle tests.
+
+ The suite keeps synchronization, lifecycle scheduling, and WebDAV configuration coverage in
+ `BibleCoreTests` so these contracts run without the app-host XCTest bundle or simulator UI harness.
+ */
+final class RemoteSyncLifecycleTests: XCTestCase {
     func testRemoteSyncSynchronizationServiceReturnsRemoteAdoptionDecision() async throws {
         let container = try makeReadingPlanRestoreModelContainer()
         let modelContext = ModelContext(container)
         let settingsStore = SettingsStore(modelContext: modelContext)
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setListFilesResult([
             RemoteSyncFile(
                 id: "/org.andbible.ios-sync-readingplans",
@@ -115,7 +107,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             .init(
                 tableName: "ReadingPlan",
-                entityID1: .blob(uuidBlob(planID)),
+                entityID1: .blob(readingPlanUUIDBlob(planID)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -126,7 +118,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             .init(
                 tableName: "ReadingPlanStatus",
-                entityID1: .blob(uuidBlob(baselineStatusID)),
+                entityID1: .blob(readingPlanUUIDBlob(baselineStatusID)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -155,7 +147,7 @@ extension AndBibleTests {
             logEntries: [
                 .init(
                     tableName: "ReadingPlan",
-                    entityID1: .blob(uuidBlob(planID)),
+                    entityID1: .blob(readingPlanUUIDBlob(planID)),
                     entityID2: .text(""),
                     type: .upsert,
                     lastUpdated: 2_000,
@@ -163,7 +155,7 @@ extension AndBibleTests {
                 ),
                 .init(
                     tableName: "ReadingPlanStatus",
-                    entityID1: .blob(uuidBlob(patchStatusID)),
+                    entityID1: .blob(readingPlanUUIDBlob(patchStatusID)),
                     entityID2: .text(""),
                     type: .upsert,
                     lastUpdated: 2_000,
@@ -183,7 +175,7 @@ extension AndBibleTests {
             mimeType: "application/gzip"
         )
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setKnownResponse(
             true,
             forSyncFolderID: syncFolderID,
@@ -319,7 +311,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             .init(
                 tableName: "ReadingPlan",
-                entityID1: .blob(uuidBlob(planID)),
+                entityID1: .blob(readingPlanUUIDBlob(planID)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -330,7 +322,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             .init(
                 tableName: "ReadingPlanStatus",
-                entityID1: .blob(uuidBlob(baselineStatusID)),
+                entityID1: .blob(readingPlanUUIDBlob(baselineStatusID)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -349,7 +341,7 @@ extension AndBibleTests {
         dayTwo.isCompleted = true
         try modelContext.save()
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setKnownResponse(
             true,
             forSyncFolderID: syncFolderID,
@@ -422,7 +414,7 @@ extension AndBibleTests {
         XCTAssertEqual(uploadedFiles.count, 1)
         XCTAssertEqual(
             uploadedFiles[0],
-            MockRemoteSyncUploadedFile(
+            RemoteSyncMockUploadedFile(
                 name: "1.1.sqlite3.gz",
                 parentID: deviceFolderID,
                 contentType: NextCloudSyncAdapter.gzipMimeType,
@@ -512,7 +504,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             .init(
                 tableName: "ReadingPlan",
-                entityID1: .blob(uuidBlob(planID)),
+                entityID1: .blob(readingPlanUUIDBlob(planID)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -523,7 +515,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             .init(
                 tableName: "ReadingPlanStatus",
-                entityID1: .blob(uuidBlob(baselineStatusID)),
+                entityID1: .blob(readingPlanUUIDBlob(baselineStatusID)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -552,7 +544,7 @@ extension AndBibleTests {
             logEntries: [
                 .init(
                     tableName: "ReadingPlan",
-                    entityID1: .blob(uuidBlob(planID)),
+                    entityID1: .blob(readingPlanUUIDBlob(planID)),
                     entityID2: .text(""),
                     type: .upsert,
                     lastUpdated: 2_000,
@@ -560,7 +552,7 @@ extension AndBibleTests {
                 ),
                 .init(
                     tableName: "ReadingPlanStatus",
-                    entityID1: .blob(uuidBlob(patchStatusID)),
+                    entityID1: .blob(readingPlanUUIDBlob(patchStatusID)),
                     entityID2: .text(""),
                     type: .upsert,
                     lastUpdated: 2_000,
@@ -588,7 +580,7 @@ extension AndBibleTests {
             mimeType: "application/gzip"
         )
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setKnownResponse(
             true,
             forSyncFolderID: syncFolderID,
@@ -713,7 +705,7 @@ extension AndBibleTests {
 
         let syncFolderID = "/org.andbible.ios-sync-readingplans"
         let deviceFolderID = "\(syncFolderID)/ios-device"
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setMakeKnownResponse("device-known-ios-device-secret")
         await adapter.enqueueCreateFolderResult(
             RemoteSyncFile(
@@ -859,7 +851,7 @@ extension AndBibleTests {
             mimeType: "application/gzip"
         )
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setMakeKnownResponse("device-known-ios-device-secret")
         await adapter.enqueueCreateFolderResult(
             RemoteSyncFile(
@@ -1017,7 +1009,7 @@ extension AndBibleTests {
             logEntries: [
                 .init(
                     tableName: "ReadingPlan",
-                    entityID1: .blob(uuidBlob(initialPlanID)),
+                    entityID1: .blob(readingPlanUUIDBlob(initialPlanID)),
                     entityID2: .text(""),
                     type: .upsert,
                     lastUpdated: 2_000,
@@ -1025,7 +1017,7 @@ extension AndBibleTests {
                 ),
                 .init(
                     tableName: "ReadingPlanStatus",
-                    entityID1: .blob(uuidBlob(remotePatchStatusID)),
+                    entityID1: .blob(readingPlanUUIDBlob(remotePatchStatusID)),
                     entityID2: .text(""),
                     type: .upsert,
                     lastUpdated: 2_000,
@@ -1061,7 +1053,7 @@ extension AndBibleTests {
             mimeType: "application/gzip"
         )
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setMakeKnownResponse("device-known-ios-device-secret")
         await adapter.enqueueCreateFolderResult(localDeviceFolder)
         await adapter.enqueueListFilesResult([initialFile])
@@ -1167,7 +1159,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             RemoteSyncLogEntry(
                 tableName: "ReadingPlan",
-                entityID1: .blob(uuidBlob(plan.id)),
+                entityID1: .blob(readingPlanUUIDBlob(plan.id)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -1186,18 +1178,18 @@ extension AndBibleTests {
         let planKey = logEntryStore.key(
             for: .readingPlans,
             tableName: "ReadingPlan",
-            entityID1: .blob(uuidBlob(plan.id)),
+            entityID1: .blob(readingPlanUUIDBlob(plan.id)),
             entityID2: .text("")
         )
         let persistedFingerprint = fingerprintStore.fingerprint(
             for: .readingPlans,
             tableName: "ReadingPlan",
-            entityID1: .blob(uuidBlob(plan.id)),
+            entityID1: .blob(readingPlanUUIDBlob(plan.id)),
             entityID2: .text("")
         )
         XCTAssertEqual(persistedFingerprint, currentSnapshot.fingerprintsByKey[planKey])
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         let service = RemoteSyncReadingPlanPatchUploadService(
             adapter: adapter,
             nowProvider: { 2_000 }
@@ -1237,7 +1229,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             RemoteSyncLogEntry(
                 tableName: "ReadingPlan",
-                entityID1: .blob(uuidBlob(plan.id)),
+                entityID1: .blob(readingPlanUUIDBlob(plan.id)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -1256,7 +1248,7 @@ extension AndBibleTests {
         dayOne.completedDate = Date(timeIntervalSince1970: 1_735_689_700)
         try modelContext.save()
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.enqueueUploadResult(
             RemoteSyncFile(
                 id: "/org.andbible.ios-sync-readingplans/ios-device/1.1.sqlite3.gz",
@@ -1379,7 +1371,7 @@ extension AndBibleTests {
             logEntries: [
                 .init(
                     tableName: "ReadingPlan",
-                    entityID1: .blob(uuidBlob(planID)),
+                    entityID1: .blob(readingPlanUUIDBlob(planID)),
                     entityID2: .text(""),
                     type: .upsert,
                     lastUpdated: 1_500,
@@ -1414,7 +1406,7 @@ extension AndBibleTests {
         modelContext.delete(plans[0])
         try modelContext.save()
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.enqueueUploadResult(
             RemoteSyncFile(
                 id: "/org.andbible.ios-sync-readingplans/ios-device/1.1.sqlite3.gz",
@@ -1856,6 +1848,7 @@ extension AndBibleTests {
         XCTAssertEqual(remoteSettingsStore.globalLastSynchronized, 166_000)
     }
 
+#if os(iOS)
     @MainActor
     func testRemoteSyncBackgroundRefreshCoordinatorSchedulesUsingStoredInterval() throws {
         let container = try makeInMemorySettingsContainer()
@@ -2007,5 +2000,6 @@ extension AndBibleTests {
 
         XCTAssertEqual(task.completions, [false])
     }
+#endif
 
 }
