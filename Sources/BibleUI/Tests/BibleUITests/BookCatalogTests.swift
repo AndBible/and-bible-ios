@@ -1,10 +1,17 @@
-// AndBibleTests+BookCatalog.swift -- Reader book catalog parity tests
+// BookCatalogTests.swift -- Reader book catalog parity tests
 
 import XCTest
 @testable import BibleUI
 import SwordKit
 
-extension AndBibleTests {
+/**
+ BibleUI reader book-catalog parity coverage for fallback and module-provided metadata.
+
+ These tests keep catalog behavior in the app-host-free `BibleUITests` package lane because the
+ contract belongs to the BibleUI reader model, not app bootstrap. Failures indicate iOS has drifted
+ from Android/JSword-compatible startup placeholders or active-module book ordering semantics.
+ */
+final class BookCatalogTests: XCTestCase {
     /**
      Protects the no-module compatibility catalog used before any SWORD Bible is available.
 
