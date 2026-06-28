@@ -1,12 +1,42 @@
 import XCTest
 import CLibSword
 @testable import BibleCore
-@testable import BibleUI
 @testable import SwordKit
 import SwiftData
 import SQLite3
 
-extension AndBibleTests {
+/// SQLite destructor sentinel used by package fixture writers to make SQLite copy bound bytes/text.
+private let androidDatabaseBackupTestSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+/**
+ Package-level Android database backup restore, import, export, and validation tests.
+
+ These tests protect Android `.abdb.zip` behavior through BibleCore services without launching the
+ app-host test bundle. Presentation-only backup copy belongs in `BibleUITests`; this suite owns the
+ archive formats, SQLite schemas, category apply semantics, version gates, and cleanup contracts.
+ */
+final class AndroidDatabaseBackupTests: XCTestCase {
+    private var temporaryPaths: [String] = []
+
+    /**
+     Removes temporary Android backup archives and repository fixtures created by each test.
+
+     The app-host test suite previously shared cleanup state through `AndBibleTests`; after moving
+     this behavior into the package target, the migrated suite owns its file cleanup explicitly so
+     package execution remains isolated and repeatable.
+
+     - Side effects: Deletes paths recorded in `temporaryPaths` and clears the list after each test.
+     - Failure modes: Individual cleanup failures are ignored because failed deletion should not mask
+       the test assertion that already completed.
+     */
+    override func tearDown() {
+        for path in temporaryPaths {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        temporaryPaths.removeAll()
+        super.tearDown()
+    }
+
     /**
      Verifies the iOS JSword KJVA compatibility contract used by Android backup progress rows.
 
@@ -45,15 +75,10 @@ extension AndBibleTests {
      The passage chooser progress bars resolve KJVA ranges for many visible cells. The values must
      still match Android/JSword exactly, but lookup should not repeatedly walk the full KJVA table
      while SwiftUI renders book, chapter, and verse grids.
-     */
+    */
     func testJSwordKJVAVersificationUsesPrecomputedOrdinalIndexForProgressRendering() throws {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let repoRoot = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = repoRoot.appendingPathComponent(
-            "Sources/BibleCore/Sources/BibleCore/Services/JSwordKJVAVersification.swift"
-        )
+        let relativePath = "Sources/BibleCore/Sources/BibleCore/Services/JSwordKJVAVersification.swift"
+        let sourceURL = try repositoryRoot(containing: relativePath).appendingPathComponent(relativePath)
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
         let ordinalFunctionStart = try XCTUnwrap(source.range(of: "public static func verseOrdinal("))
         let ordinalFunctionEnd = try XCTUnwrap(
@@ -304,27 +329,6 @@ extension AndBibleTests {
         XCTAssertNil(wrongTypeArchive.manifest)
         XCTAssertEqual(wrongTypeArchive.sections.map(\.category), [.bookmarks])
         XCTAssertFalse(wrongTypeArchive.sections[0].declaredInManifest)
-    }
-
-    /**
-     Verifies Backup & Restore reset success copy names the category that was reset.
-     *
-     Setup:
-     - reads the BibleUI presentation labels for Android reset categories
-
-     Expected result:
-     - repository reset feedback includes repository wording
-     - repository reset feedback does not claim that only "Database" was reset
-
-     Failure meaning:
-     - the user-visible reset result would be misleading for non-database categories such as
-       Repositories, Application Preferences, My Documents, or Progress.
-     */
-    func testAndroidBackupResetSuccessMessageNamesSelectedCategory() {
-        let message = AndroidBackupResetCategory.repositories.localizedBackupResetSuccessMessage
-
-        XCTAssertTrue(message.localizedCaseInsensitiveContains("repositories"))
-        XCTAssertFalse(message.localizedCaseInsensitiveContains("database has been reset"))
     }
 
     /**
@@ -2506,8 +2510,43 @@ extension AndBibleTests {
         let baseURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("android-backup-repositories-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
-        temporarySwordModulePaths.append(baseURL.path)
+        temporaryPaths.append(baseURL.path)
         return baseURL
+    }
+
+    /**
+     Finds the repository root containing a source-controlled path used by source-string guardrails.
+
+     Package tests live several directories below the repository root, and their exact depth changes
+     when app-host tests migrate into package targets. Walking upward keeps the guardrail stable
+     without hard-coding a target-specific number of parent directories.
+
+     - Parameter relativePath: Repo-relative path that must exist under the root.
+     - Parameter filePath: Starting test file path for the upward search.
+     - Returns: Directory URL for the repository root.
+     - Side effects: Performs read-only filesystem existence checks.
+     - Failure modes: Throws when no parent directory contains `relativePath`.
+     */
+    private func repositoryRoot(containing relativePath: String, from filePath: String = #filePath) throws -> URL {
+        var directory = URL(fileURLWithPath: filePath).deletingLastPathComponent()
+        while true {
+            if FileManager.default.fileExists(atPath: directory.appendingPathComponent(relativePath).path) {
+                return directory
+            }
+
+            let parent = directory.deletingLastPathComponent()
+            if parent.path == directory.path {
+                throw NSError(
+                    domain: "AndroidDatabaseBackupTests",
+                    code: 1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Unable to locate repository root containing \(relativePath) from \(filePath)"
+                    ]
+                )
+            }
+            directory = parent
+        }
     }
 
     /**
@@ -2525,6 +2564,47 @@ extension AndBibleTests {
         guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
             throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
         }
+    }
+
+    /**
+     Binds a UUID using Android's 16-byte SQLite blob representation.
+
+     - Parameters:
+       - uuid: UUID value to bind.
+       - statement: SQLite statement receiving the value.
+       - index: One-based parameter index.
+     - Side effects: Mutates the prepared SQLite statement binding state.
+     - Failure modes: This helper cannot fail; SQLite reports binding/step failures later.
+     */
+    private func bindUUIDBlob(_ uuid: UUID, to statement: OpaquePointer?, index: Int32) {
+        let blob = RemoteSyncBookmarkSnapshotService.uuidBlob(uuid)
+        _ = blob.withUnsafeBytes { bytes in
+            sqlite3_bind_blob(
+                statement,
+                index,
+                bytes.baseAddress,
+                Int32(blob.count),
+                androidDatabaseBackupTestSQLiteTransient
+            )
+        }
+    }
+
+    /**
+     Binds optional text into a SQLite fixture statement.
+
+     - Parameters:
+       - value: Optional string to bind, or nil for SQLite NULL.
+       - statement: SQLite statement receiving the value.
+       - index: One-based parameter index.
+     - Side effects: Mutates the prepared SQLite statement binding state.
+     - Failure modes: This helper cannot fail; SQLite reports binding/step failures later.
+     */
+    private func bindOptionalText(_ value: String?, to statement: OpaquePointer?, index: Int32) {
+        guard let value else {
+            sqlite3_bind_null(statement, index)
+            return
+        }
+        sqlite3_bind_text(statement, index, value, -1, androidDatabaseBackupTestSQLiteTransient)
     }
 
     /**
@@ -3258,7 +3338,7 @@ extension AndBibleTests {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("android-backup-\(UUID().uuidString)\(suffix)")
         try archiveData.write(to: url)
-        temporarySwordModulePaths.append(url.path)
+        temporaryPaths.append(url.path)
         return url
     }
 
@@ -3283,7 +3363,7 @@ extension AndBibleTests {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("android-backup-sparse-\(UUID().uuidString).abdb.zip")
         FileManager.default.createFile(atPath: url.path, contents: nil)
-        temporarySwordModulePaths.append(url.path)
+        temporaryPaths.append(url.path)
 
         let handle = try FileHandle(forWritingTo: url)
         defer {

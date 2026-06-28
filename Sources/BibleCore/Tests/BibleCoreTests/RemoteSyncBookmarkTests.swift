@@ -1,23 +1,15 @@
-import XCTest
-import AVFoundation
-@testable import BibleCore
-import CLibSword
-@testable import SwordKit
+import Foundation
 import SwiftData
-import SQLite3
-@testable import BibleUI
-@testable import BibleView
-import struct SwiftUI.Binding
-import enum SwiftUI.ColorScheme
-import struct SwiftUI.EdgeInsets
-import struct SwiftUI.EmptyView
-#if os(iOS)
-import UIKit
-import WebKit
-import struct SwiftUI.Color
-#endif
+import XCTest
+@testable import BibleCore
 
-extension AndBibleTests {
+/**
+ Package-level remote-sync bookmark restore, patch, and upload contract tests.
+
+ These tests protect Android-compatible bookmark backup databases and sparse patch semantics without
+ launching the iOS app target or depending on the app-host test bundle.
+ */
+final class RemoteSyncBookmarkTests: XCTestCase {
     func testRemoteSyncBookmarkPlaybackSettingsStorePersistsAndClearsEntries() throws {
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -677,7 +669,7 @@ extension AndBibleTests {
         logEntryStore.replaceEntries([
             RemoteSyncLogEntry(
                 tableName: "Label",
-                entityID1: .blob(uuidBlob(remoteUserLabelID)),
+                entityID1: .blob(bookmarkUUIDBlob(remoteUserLabelID)),
                 entityID2: .null(),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -685,7 +677,7 @@ extension AndBibleTests {
             ),
             RemoteSyncLogEntry(
                 tableName: "BibleBookmark",
-                entityID1: .blob(uuidBlob(bibleBookmarkID)),
+                entityID1: .blob(bookmarkUUIDBlob(bibleBookmarkID)),
                 entityID2: .null(),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -693,7 +685,7 @@ extension AndBibleTests {
             ),
             RemoteSyncLogEntry(
                 tableName: "BibleBookmarkNotes",
-                entityID1: .blob(uuidBlob(bibleBookmarkID)),
+                entityID1: .blob(bookmarkUUIDBlob(bibleBookmarkID)),
                 entityID2: .null(),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -701,7 +693,7 @@ extension AndBibleTests {
             ),
             RemoteSyncLogEntry(
                 tableName: "GenericBookmark",
-                entityID1: .blob(uuidBlob(genericBookmarkID)),
+                entityID1: .blob(bookmarkUUIDBlob(genericBookmarkID)),
                 entityID2: .null(),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -709,7 +701,7 @@ extension AndBibleTests {
             ),
             RemoteSyncLogEntry(
                 tableName: "StudyPadTextEntryText",
-                entityID1: .blob(uuidBlob(studyPadEntryID)),
+                entityID1: .blob(bookmarkUUIDBlob(studyPadEntryID)),
                 entityID2: .null(),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -764,13 +756,13 @@ extension AndBibleTests {
                 .init(entryID: studyPadEntryID, text: "Patched study text")
             ],
             logEntries: [
-                .init(tableName: "Label", entityID1: .blob(uuidBlob(remoteUserLabelID)), entityID2: .null(), type: .upsert, lastUpdated: 2_000, sourceDevice: "android-a"),
-                .init(tableName: "BibleBookmark", entityID1: .blob(uuidBlob(bibleBookmarkID)), entityID2: .null(), type: .upsert, lastUpdated: 2_100, sourceDevice: "android-a"),
-                .init(tableName: "BibleBookmarkNotes", entityID1: .blob(uuidBlob(bibleBookmarkID)), entityID2: .null(), type: .upsert, lastUpdated: 2_200, sourceDevice: "android-a"),
-                .init(tableName: "BibleBookmarkToLabel", entityID1: .blob(uuidBlob(bibleBookmarkID)), entityID2: .blob(uuidBlob(remoteSpeakID)), type: .upsert, lastUpdated: 2_300, sourceDevice: "android-a"),
-                .init(tableName: "GenericBookmark", entityID1: .blob(uuidBlob(genericBookmarkID)), entityID2: .null(), type: .upsert, lastUpdated: 2_400, sourceDevice: "android-a"),
-                .init(tableName: "StudyPadTextEntry", entityID1: .blob(uuidBlob(studyPadEntryID)), entityID2: .null(), type: .upsert, lastUpdated: 2_450, sourceDevice: "android-a"),
-                .init(tableName: "StudyPadTextEntryText", entityID1: .blob(uuidBlob(studyPadEntryID)), entityID2: .null(), type: .upsert, lastUpdated: 2_500, sourceDevice: "android-a"),
+                .init(tableName: "Label", entityID1: .blob(bookmarkUUIDBlob(remoteUserLabelID)), entityID2: .null(), type: .upsert, lastUpdated: 2_000, sourceDevice: "android-a"),
+                .init(tableName: "BibleBookmark", entityID1: .blob(bookmarkUUIDBlob(bibleBookmarkID)), entityID2: .null(), type: .upsert, lastUpdated: 2_100, sourceDevice: "android-a"),
+                .init(tableName: "BibleBookmarkNotes", entityID1: .blob(bookmarkUUIDBlob(bibleBookmarkID)), entityID2: .null(), type: .upsert, lastUpdated: 2_200, sourceDevice: "android-a"),
+                .init(tableName: "BibleBookmarkToLabel", entityID1: .blob(bookmarkUUIDBlob(bibleBookmarkID)), entityID2: .blob(bookmarkUUIDBlob(remoteSpeakID)), type: .upsert, lastUpdated: 2_300, sourceDevice: "android-a"),
+                .init(tableName: "GenericBookmark", entityID1: .blob(bookmarkUUIDBlob(genericBookmarkID)), entityID2: .null(), type: .upsert, lastUpdated: 2_400, sourceDevice: "android-a"),
+                .init(tableName: "StudyPadTextEntry", entityID1: .blob(bookmarkUUIDBlob(studyPadEntryID)), entityID2: .null(), type: .upsert, lastUpdated: 2_450, sourceDevice: "android-a"),
+                .init(tableName: "StudyPadTextEntryText", entityID1: .blob(bookmarkUUIDBlob(studyPadEntryID)), entityID2: .null(), type: .upsert, lastUpdated: 2_500, sourceDevice: "android-a"),
             ]
         )
         defer { try? FileManager.default.removeItem(at: patchDatabaseURL) }
@@ -845,7 +837,7 @@ extension AndBibleTests {
             logEntryStore.entry(
                 for: .bookmarks,
                 tableName: "Label",
-                entityID1: .blob(uuidBlob(remoteUserLabelID)),
+                entityID1: .blob(bookmarkUUIDBlob(remoteUserLabelID)),
                 entityID2: .null()
             )?.lastUpdated,
             2_000
@@ -916,10 +908,10 @@ extension AndBibleTests {
         let patchDatabaseURL = try makeAndroidBookmarksDatabase(
             labels: [],
             logEntries: [
-                .init(tableName: "BibleBookmarkNotes", entityID1: .blob(uuidBlob(bibleBookmarkID)), entityID2: .null(), type: .delete, lastUpdated: 2_000, sourceDevice: "android-b"),
-                .init(tableName: "BibleBookmarkToLabel", entityID1: .blob(uuidBlob(bibleBookmarkID)), entityID2: .blob(uuidBlob(remoteUserLabelID)), type: .delete, lastUpdated: 2_100, sourceDevice: "android-b"),
-                .init(tableName: "GenericBookmarkNotes", entityID1: .blob(uuidBlob(genericBookmarkID)), entityID2: .null(), type: .delete, lastUpdated: 2_200, sourceDevice: "android-b"),
-                .init(tableName: "GenericBookmarkToLabel", entityID1: .blob(uuidBlob(genericBookmarkID)), entityID2: .blob(uuidBlob(remoteUserLabelID)), type: .delete, lastUpdated: 2_300, sourceDevice: "android-b"),
+                .init(tableName: "BibleBookmarkNotes", entityID1: .blob(bookmarkUUIDBlob(bibleBookmarkID)), entityID2: .null(), type: .delete, lastUpdated: 2_000, sourceDevice: "android-b"),
+                .init(tableName: "BibleBookmarkToLabel", entityID1: .blob(bookmarkUUIDBlob(bibleBookmarkID)), entityID2: .blob(bookmarkUUIDBlob(remoteUserLabelID)), type: .delete, lastUpdated: 2_100, sourceDevice: "android-b"),
+                .init(tableName: "GenericBookmarkNotes", entityID1: .blob(bookmarkUUIDBlob(genericBookmarkID)), entityID2: .null(), type: .delete, lastUpdated: 2_200, sourceDevice: "android-b"),
+                .init(tableName: "GenericBookmarkToLabel", entityID1: .blob(bookmarkUUIDBlob(genericBookmarkID)), entityID2: .blob(bookmarkUUIDBlob(remoteUserLabelID)), type: .delete, lastUpdated: 2_300, sourceDevice: "android-b"),
             ]
         )
         defer { try? FileManager.default.removeItem(at: patchDatabaseURL) }
@@ -996,7 +988,7 @@ extension AndBibleTests {
         logEntryStore.replaceEntries([
             .init(
                 tableName: "BibleBookmarkNotes",
-                entityID1: .blob(uuidBlob(bibleBookmarkID)),
+                entityID1: .blob(bookmarkUUIDBlob(bibleBookmarkID)),
                 entityID2: .null(),
                 type: .upsert,
                 lastUpdated: 5_000,
@@ -1010,7 +1002,7 @@ extension AndBibleTests {
                 .init(bookmarkID: bibleBookmarkID, notes: "Older remote note")
             ],
             logEntries: [
-                .init(tableName: "BibleBookmarkNotes", entityID1: .blob(uuidBlob(bibleBookmarkID)), entityID2: .null(), type: .upsert, lastUpdated: 4_000, sourceDevice: "android-c")
+                .init(tableName: "BibleBookmarkNotes", entityID1: .blob(bookmarkUUIDBlob(bibleBookmarkID)), entityID2: .null(), type: .upsert, lastUpdated: 4_000, sourceDevice: "android-c")
             ]
         )
         defer { try? FileManager.default.removeItem(at: patchDatabaseURL) }
@@ -1041,7 +1033,7 @@ extension AndBibleTests {
             logEntryStore.entry(
                 for: .bookmarks,
                 tableName: "BibleBookmarkNotes",
-                entityID1: .blob(uuidBlob(bibleBookmarkID)),
+                entityID1: .blob(bookmarkUUIDBlob(bibleBookmarkID)),
                 entityID2: .null()
             )?.lastUpdated,
             5_000
@@ -1097,7 +1089,7 @@ extension AndBibleTests {
         let patchDatabaseURL = try makeAndroidBookmarksDatabase(
             labels: [],
             logEntries: [
-                .init(tableName: "Label", entityID1: .blob(uuidBlob(remoteUserLabelID)), entityID2: .null(), type: .delete, lastUpdated: 2_000, sourceDevice: "android-d")
+                .init(tableName: "Label", entityID1: .blob(bookmarkUUIDBlob(remoteUserLabelID)), entityID2: .null(), type: .delete, lastUpdated: 2_000, sourceDevice: "android-d")
             ]
         )
         defer { try? FileManager.default.removeItem(at: patchDatabaseURL) }
@@ -1238,7 +1230,7 @@ extension AndBibleTests {
         let localLabelNames = Set(try modelContext.fetch(FetchDescriptor<Label>()).map(\.name))
 
         let syncFolderID = "/org.andbible.ios-sync-bookmarks"
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.enqueueUploadResult(
             RemoteSyncFile(
                 id: "\(syncFolderID)/initial.sqlite3.gz",
@@ -1348,7 +1340,7 @@ extension AndBibleTests {
             logEntries: [
                 .init(
                     tableName: "Label",
-                    entityID1: .blob(uuidBlob(remoteLabelID)),
+                    entityID1: .blob(bookmarkUUIDBlob(remoteLabelID)),
                     entityID2: .null(),
                     type: .upsert,
                     lastUpdated: 1_500,
@@ -1356,7 +1348,7 @@ extension AndBibleTests {
                 ),
                 .init(
                     tableName: "BibleBookmark",
-                    entityID1: .blob(uuidBlob(bookmarkID)),
+                    entityID1: .blob(bookmarkUUIDBlob(bookmarkID)),
                     entityID2: .null(),
                     type: .upsert,
                     lastUpdated: 1_500,
@@ -1391,7 +1383,7 @@ extension AndBibleTests {
         modelContext.delete(bookmarks[0])
         try modelContext.save()
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.enqueueUploadResult(
             RemoteSyncFile(
                 id: "/org.andbible.ios-sync-bookmarks/ios-device/1.1.sqlite3.gz",
@@ -1477,7 +1469,7 @@ extension AndBibleTests {
             logEntries: [
                 .init(
                     tableName: "Label",
-                    entityID1: .blob(uuidBlob(remoteLabelID)),
+                    entityID1: .blob(bookmarkUUIDBlob(remoteLabelID)),
                     entityID2: .null(),
                     type: .upsert,
                     lastUpdated: 1_000,
@@ -1485,7 +1477,7 @@ extension AndBibleTests {
                 ),
                 .init(
                     tableName: "BibleBookmark",
-                    entityID1: .blob(uuidBlob(bookmarkID)),
+                    entityID1: .blob(bookmarkUUIDBlob(bookmarkID)),
                     entityID2: .null(),
                     type: .upsert,
                     lastUpdated: 1_000,
@@ -1493,7 +1485,7 @@ extension AndBibleTests {
                 ),
                 .init(
                     tableName: "BibleBookmarkNotes",
-                    entityID1: .blob(uuidBlob(bookmarkID)),
+                    entityID1: .blob(bookmarkUUIDBlob(bookmarkID)),
                     entityID2: .null(),
                     type: .upsert,
                     lastUpdated: 1_000,
@@ -1529,7 +1521,7 @@ extension AndBibleTests {
         bookmark.notes?.notes = "Updated note"
         try modelContext.save()
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.enqueueUploadResult(
             RemoteSyncFile(
                 id: "/org.andbible.ios-sync-bookmarks/ios-device/1.1.sqlite3.gz",
@@ -1654,7 +1646,7 @@ extension AndBibleTests {
             logEntries: [
                 .init(
                     tableName: "Label",
-                    entityID1: .blob(uuidBlob(remoteLabelID)),
+                    entityID1: .blob(bookmarkUUIDBlob(remoteLabelID)),
                     entityID2: .null(),
                     type: .upsert,
                     lastUpdated: 1_000,
@@ -1687,7 +1679,7 @@ extension AndBibleTests {
         label.name = "Prayer synced"
         try modelContext.save()
 
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = RemoteSyncMockAdapter()
         await adapter.setKnownResponse(
             true,
             forSyncFolderID: syncFolderID,

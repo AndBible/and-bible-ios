@@ -15,7 +15,7 @@
  * If not, see http://www.gnu.org/licenses/.
  */
 
-import {computed, nextTick, ref, Ref, watch} from "vue";
+import {computed, nextTick, onScopeDispose, ref, Ref, watch} from "vue";
 import {setupEventBusListener} from "@/eventbus";
 import {isInViewport, setupWindowEventListener} from "@/utils";
 import {AppSettings, CalculatedConfig, Config} from "@/composables/config";
@@ -56,14 +56,26 @@ export function useScroll(
     const {highlightOrdinal, resetHighlights} = highlight;
     const currentScrollAnimation = ref<number | null>(null);
     const isScrolling = computed(() => currentScrollAnimation.value != null)
+    const stopScrollingOnTouchStart = () => stopScrolling();
+    let touchScrollCancellationIsRegistered = false;
+
+    function setTouchScrollCancellationEnabled(enabled: boolean) {
+        if (typeof document === "undefined") {
+            return;
+        }
+        if (enabled && !touchScrollCancellationIsRegistered) {
+            document.addEventListener("touchstart", stopScrollingOnTouchStart);
+            touchScrollCancellationIsRegistered = true;
+        } else if (!enabled && touchScrollCancellationIsRegistered) {
+            document.removeEventListener("touchstart", stopScrollingOnTouchStart);
+            touchScrollCancellationIsRegistered = false;
+        }
+    }
 
     watch(isScrolling, v => {
-        if (v) {
-            document.addEventListener("touchstart", () => stopScrolling())
-        } else {
-            document.removeEventListener("touchstart", () => stopScrolling())
-        }
+        setTouchScrollCancellationEnabled(v);
     }, {flush: 'sync'});
+    onScopeDispose(() => setTouchScrollCancellationEnabled(false));
 
     function setToolbarOffset(
         topOffset: number,

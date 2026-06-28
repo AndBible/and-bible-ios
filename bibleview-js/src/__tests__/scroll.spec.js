@@ -78,4 +78,43 @@ describe("scroll composable", () => {
 
         expect(scrollTo).toHaveBeenCalledWith(0, 620);
     });
+
+    /**
+     * Protects scroll lifecycle cleanup when a component unmounts or jsdom tears down.
+     *
+     * The touch-start cancellation listener must be registered with a stable callback and removed
+     * during scope disposal. Otherwise Vitest can report late `document is not defined` errors, and
+     * the real web view can leak stale touch handlers across reader document lifetimes.
+     */
+    it("removes touch cancellation listener with the registered callback", () => {
+        const addListener = vi.spyOn(document, "addEventListener");
+        const removeListener = vi.spyOn(document, "removeEventListener");
+        vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
+        vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+        vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+        const wrapper = mount(defineComponent({
+            setup() {
+                const scroll = useScroll(
+                    {},
+                    {disableAnimations: false, topOffset: 0, bottomOffset: 0, imeOpen: false},
+                    ref({topOffset: 30}),
+                    {highlightOrdinal: vi.fn(), resetHighlights: vi.fn()},
+                    ref(Promise.resolve()),
+                    ref(0)
+                );
+                return {doScrolling: scroll.doScrolling};
+            },
+            template: "<div />",
+        }));
+
+        wrapper.vm.doScrolling(200, 100);
+
+        const touchStartAdd = addListener.mock.calls.find(([event]) => event === "touchstart");
+        expect(touchStartAdd).toBeTruthy();
+
+        wrapper.unmount();
+
+        expect(removeListener).toHaveBeenCalledWith("touchstart", touchStartAdd[1]);
+    });
 });
