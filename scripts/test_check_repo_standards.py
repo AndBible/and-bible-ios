@@ -11,7 +11,11 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from check_repo_standards import find_multiline_slash_docblocks, validate_commit_message
+from check_repo_standards import (
+    find_legacy_root_sidebar_shell,
+    find_multiline_slash_docblocks,
+    validate_commit_message,
+)
 
 
 class RepoStandardsTests(unittest.TestCase):
@@ -129,6 +133,64 @@ class RepoStandardsTests(unittest.TestCase):
             ]
         )
         self.assertEqual(find_multiline_slash_docblocks(text), [1, 5])
+
+    def test_find_legacy_root_sidebar_shell_flags_colocated_sidebar_identifiers(self) -> None:
+        text = "\n".join(
+            [
+                "struct ContentView: View {",
+                "    var body: some View {",
+                "        NavigationSplitView {",
+                "            contentTabBible",
+                "            contentSettingsLink",
+                "        } detail: {",
+                "            BibleReaderView()",
+                "        }",
+                "    }",
+                "}",
+            ]
+        )
+        self.assertEqual(find_legacy_root_sidebar_shell(text), [3])
+
+    def test_find_legacy_root_sidebar_shell_flags_long_colocated_sidebar_block(self) -> None:
+        text = "\n".join(
+            [
+                "NavigationSplitView {",
+                "    contentTabBible",
+                "    let filler = \"" + ("x" * 2_000) + "\"",
+                "    contentSettingsLink",
+                "} detail: {",
+                "    BibleReaderView()",
+                "}",
+            ]
+        )
+        self.assertEqual(find_legacy_root_sidebar_shell(text), [1])
+
+    def test_find_legacy_root_sidebar_shell_allows_separate_navigation_regions(self) -> None:
+        text = "\n".join(
+            [
+                "NavigationSplitView {",
+                "    contentTabBible",
+                "}",
+                "NavigationSplitView {",
+                "    contentSettingsLink",
+                "}",
+            ]
+        )
+        self.assertEqual(find_legacy_root_sidebar_shell(text), [])
+
+    def test_find_legacy_root_sidebar_shell_ignores_comments_and_strings(self) -> None:
+        text = "\n".join(
+            [
+                "NavigationSplitView {",
+                "    contentTabBible",
+                "    // contentSettingsLink",
+                "    Text(\"contentSettingsLink\")",
+                "} detail: {",
+                "    BibleReaderView()",
+                "}",
+            ]
+        )
+        self.assertEqual(find_legacy_root_sidebar_shell(text), [])
 
 
 if __name__ == "__main__":

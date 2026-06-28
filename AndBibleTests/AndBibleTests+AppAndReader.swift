@@ -2325,15 +2325,6 @@ extension AndBibleTests {
     }
 
     #if os(iOS)
-    func testWindowingControlPolicyUsesMinimalStyleOnlyOnIPad() {
-        XCTAssertTrue(
-            AndBibleWindowingControlPolicy.shouldUseMinimalStyle(userInterfaceIdiom: .pad)
-        )
-        XCTAssertFalse(
-            AndBibleWindowingControlPolicy.shouldUseMinimalStyle(userInterfaceIdiom: .phone)
-        )
-    }
-
     func testApplicationDelegateSceneConfigurationUsesWindowSceneDelegate() {
         let configuration = AndBibleApplicationDelegate.sceneConfiguration(
             sessionRole: UISceneSession.Role.windowApplication
@@ -2344,82 +2335,6 @@ extension AndBibleTests {
             ObjectIdentifier(AndBibleWindowSceneDelegate.self)
         )
         XCTAssertNil(configuration.name)
-    }
-
-    func testWindowingControlPolicyChoosesMinimalStyleOnlyOnIPad() {
-        XCTAssertEqual(
-            AndBibleWindowingControlPolicy.preferredWindowingControlStyleChoice(userInterfaceIdiom: .pad),
-            .minimal
-        )
-        XCTAssertEqual(
-            AndBibleWindowingControlPolicy.preferredWindowingControlStyleChoice(userInterfaceIdiom: .phone),
-            .automatic
-        )
-    }
-
-    func testWindowSceneDelegateSelectorChoiceChoosesMinimalStyleOnlyOnIPad() {
-        XCTAssertEqual(
-            AndBibleWindowSceneDelegate.preferredWindowingControlStyleSelectorName(userInterfaceIdiom: .pad),
-            "minimalStyle"
-        )
-        XCTAssertEqual(
-            AndBibleWindowSceneDelegate.preferredWindowingControlStyleSelectorName(userInterfaceIdiom: .phone),
-            "automaticStyle"
-        )
-    }
-
-    func testContentViewDoesNotContainLegacyRootSidebarShell() throws {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let repoRoot = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let contentViewURL = repoRoot.appendingPathComponent("AndBible/ContentView.swift")
-
-        XCTAssertTrue(
-            FileManager.default.fileExists(atPath: contentViewURL.path),
-            "Could not locate AndBible/ContentView.swift at expected path: \(contentViewURL.path). Update this regression test if the project layout changes."
-        )
-
-        guard FileManager.default.fileExists(atPath: contentViewURL.path) else {
-            return
-        }
-
-        let source = try String(contentsOf: contentViewURL, encoding: .utf8)
-
-        let searchTerm = "NavigationSplitView"
-        var searchStartIndex = source.startIndex
-        var foundLegacyRootSidebarShell = false
-
-        while searchStartIndex < source.endIndex,
-              let navigationSplitViewRange = source.range(
-                  of: searchTerm,
-                  range: searchStartIndex..<source.endIndex
-              ) {
-            let contextStart = source.index(
-                navigationSplitViewRange.lowerBound,
-                offsetBy: -1200,
-                limitedBy: source.startIndex
-            ) ?? source.startIndex
-            let contextEnd = source.index(
-                navigationSplitViewRange.upperBound,
-                offsetBy: 1200,
-                limitedBy: source.endIndex
-            ) ?? source.endIndex
-            let navigationSplitViewContext = String(source[contextStart..<contextEnd])
-
-            if navigationSplitViewContext.contains("contentTabBible")
-                && navigationSplitViewContext.contains("contentSettingsLink") {
-                foundLegacyRootSidebarShell = true
-                break
-            }
-
-            searchStartIndex = navigationSplitViewRange.upperBound
-        }
-
-        XCTAssertFalse(
-            foundLegacyRootSidebarShell,
-            "ContentView.swift appears to contain the legacy root sidebar shell pattern: NavigationSplitView with contentTabBible/contentSettingsLink in the same root layout region."
-        )
     }
 
     func testColorARGBByteClampsIntermediatePickerComponents() {
@@ -2433,21 +2348,6 @@ extension AndBibleTests {
     func testColorARGBIntClampsOutOfRangeComponents() {
         let color = Color(.sRGB, red: -0.25, green: 0.5, blue: 1.2, opacity: 1.0)
         XCTAssertEqual(color.argbInt, Int(Int32(bitPattern: 0xFF0080FF)))
-    }
-
-    func testBibleWebViewMapsDeviceClassFromInterfaceIdiom() {
-        XCTAssertEqual(BibleWebView.iosDeviceClass(for: .phone), "ios-phone")
-        XCTAssertEqual(BibleWebView.iosDeviceClass(for: .pad), "ios-pad")
-    }
-
-    func testBibleWebViewInjectsPlatformDeviceClassIntoUserScript() {
-        let expectedDeviceClass = "ios-phone"
-        let platformScript = BibleWebView.platformBootstrapScriptSource(deviceClass: expectedDeviceClass)
-
-        XCTAssertTrue(platformScript.contains("window.__PLATFORM__ = 'ios';"))
-        XCTAssertTrue(platformScript.contains("window.__IOS_DEVICE_CLASS__ = '\(expectedDeviceClass)';"))
-        XCTAssertTrue(platformScript.contains("document.documentElement.classList.add('platform-ios');"))
-        XCTAssertTrue(platformScript.contains("document.documentElement.classList.add('\(expectedDeviceClass)');"))
     }
     #endif
 

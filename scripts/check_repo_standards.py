@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Repo standards guardrails for commit messages and Swift docblock style.
+Repo standards guardrails for commit messages, Swift docblock style, and static source contracts.
 
 Checks:
 1. Commit messages in the selected rev range must follow the locked commit-message standard.
 2. Swift files in the selected scope must not contain multi-line `///` docblocks.
+3. Static source guards prevent known app-structure regressions from reappearing.
 
 The docblock checker supports both incremental and full-repo scans. CI now uses the full-repo
 mode because the tracked Swift baseline has been normalized to the locked `/** */` standard.
@@ -51,6 +52,13 @@ class CommitIssue:
 
 @dataclass(frozen=True)
 class DocblockIssue:
+    path: str
+    line: int
+    message: str
+
+
+@dataclass(frozen=True)
+class SourceGuardIssue:
     path: str
     line: int
     message: str
@@ -190,11 +198,158 @@ def validate_docblock_file(path: Path, repo_root: Path) -> list[DocblockIssue]:
     ]
 
 
+def _mask_swift_comments_and_strings(text: str) -> str:
+    """Return Swift-like source with comments and strings blanked while preserving positions.
+
+    The static source guards only need coarse structural matching. Masking comments and strings keeps
+    sentinel identifiers and braces in prose or literals from changing guard results while preserving
+    line numbers for diagnostics.
+    """
+    masked = list(text)
+    index = 0
+
+    while index < len(text):
+        if text.startswith("//", index):
+            end = text.find("\n", index)
+            if end == -1:
+                end = len(text)
+            for position in range(index, end):
+                masked[position] = " "
+            index = end
+            continue
+
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            end = len(text) if end == -1 else end + 2
+            for position in range(index, end):
+                if masked[position] != "\n":
+                    masked[position] = " "
+            index = end
+            continue
+
+        if text.startswith('"""', index):
+            end = text.find('"""', index + 3)
+            end = len(text) if end == -1 else end + 3
+            for position in range(index, end):
+                if masked[position] != "\n":
+                    masked[position] = " "
+            index = end
+            continue
+
+        if text[index] == '"':
+            position = index
+            escaped = False
+            while position < len(text):
+                current = text[position]
+                if current != "\n":
+                    masked[position] = " "
+                if current == '"' and position != index and not escaped:
+                    position += 1
+                    break
+                escaped = (current == "\\" and not escaped)
+                if current != "\\":
+                    escaped = False
+                position += 1
+            index = position
+            continue
+
+        index += 1
+
+    return "".join(masked)
+
+
+def _matching_brace_end(text: str, open_brace_index: int) -> int:
+    """Return the exclusive end offset of a brace-delimited block.
+
+    Inputs are expected to already have comments and strings masked so brace counting follows source
+    structure instead of prose. If a block is incomplete, the function returns the end of the text so
+    the guard still reports a conservative result.
+    """
+    depth = 0
+    for index in range(open_brace_index, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return len(text)
+
+
+def find_legacy_root_sidebar_shell(text: str) -> list[int]:
+    """Return line numbers where the legacy root sidebar shell appears in ContentView source.
+
+    The guard scans each `NavigationSplitView` block because the regression pattern is structural:
+    the legacy root shell colocated Bible and Settings sidebar identifiers in the same root layout
+    region. The returned line numbers point reviewers at the triggering `NavigationSplitView`.
+    """
+    masked_source = _mask_swift_comments_and_strings(text)
+    issues: list[int] = []
+    search_term = "NavigationSplitView"
+    search_start = 0
+
+    while search_start < len(masked_source):
+        navigation_index = masked_source.find(search_term, search_start)
+        if navigation_index == -1:
+            break
+
+        block_start = masked_source.find("{", navigation_index)
+        if block_start == -1:
+            break
+
+        block_end = _matching_brace_end(masked_source, block_start)
+        navigation_block = masked_source[block_start:block_end]
+
+        if "contentTabBible" in navigation_block and "contentSettingsLink" in navigation_block:
+            issues.append(text.count("\n", 0, navigation_index) + 1)
+
+        search_start = navigation_index + len(search_term)
+
+    return issues
+
+
+def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
+    """Validate static source contracts that should run outside XCTest.
+
+    The current guard keeps the `ContentView` legacy root sidebar regression out of the app-host
+    bundle. It reports a missing file as a failure so project-layout moves must deliberately update
+    the guard instead of silently dropping coverage.
+    """
+    content_view_path = repo_root / "AndBible/ContentView.swift"
+    relative_path = "AndBible/ContentView.swift"
+
+    if not content_view_path.exists():
+        return [
+            SourceGuardIssue(
+                path=relative_path,
+                line=1,
+                message=(
+                    "Could not locate AndBible/ContentView.swift. Update the static source guard "
+                    "if the project layout changes."
+                ),
+            )
+        ]
+
+    source = content_view_path.read_text(encoding="utf-8")
+    return [
+        SourceGuardIssue(
+            path=relative_path,
+            line=line,
+            message=(
+                "ContentView.swift appears to contain the legacy root sidebar shell pattern: "
+                "NavigationSplitView with contentTabBible/contentSettingsLink in the same root "
+                "layout region."
+            ),
+        )
+        for line in find_legacy_root_sidebar_shell(source)
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=["commits", "docblocks", "all"],
+        choices=["commits", "docblocks", "source-guards", "all"],
         help="Which guardrail set to run.",
     )
     parser.add_argument("--repo-root", type=Path, default=default_repo_root())
@@ -213,6 +368,7 @@ def main(argv: list[str] | None = None) -> int:
 
     commit_issues: list[CommitIssue] = []
     docblock_issues: list[DocblockIssue] = []
+    source_guard_issues: list[SourceGuardIssue] = []
 
     if args.command in {"commits", "all"}:
         for sha in commit_shas_in_range(repo_root, rev_range):
@@ -222,6 +378,9 @@ def main(argv: list[str] | None = None) -> int:
         for path in changed_swift_files(repo_root, rev_range, args.all_files):
             if path.exists():
                 docblock_issues.extend(validate_docblock_file(path, repo_root))
+
+    if args.command in {"source-guards", "all"}:
+        source_guard_issues.extend(validate_source_guards(repo_root))
 
     if commit_issues:
         print("Commit message violations:")
@@ -233,7 +392,12 @@ def main(argv: list[str] | None = None) -> int:
         for issue in docblock_issues:
             print(f"- {issue.path}:{issue.line}: {issue.message}")
 
-    if commit_issues or docblock_issues:
+    if source_guard_issues:
+        print("Static source guard violations:")
+        for issue in source_guard_issues:
+            print(f"- {issue.path}:{issue.line}: {issue.message}")
+
+    if commit_issues or docblock_issues or source_guard_issues:
         return 1
 
     if args.command in {"commits", "all"}:
@@ -244,6 +408,9 @@ def main(argv: list[str] | None = None) -> int:
         checked_files = len(changed_swift_files(repo_root, rev_range, args.all_files))
         scope = "all tracked Swift files" if args.all_files else "changed Swift file(s)"
         print(f"Swift docblock style guardrails passed for {checked_files} {scope}.")
+
+    if args.command in {"source-guards", "all"}:
+        print("Static source guardrails passed.")
 
     return 0
 
