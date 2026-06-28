@@ -16,7 +16,6 @@
 		A1B2C3D4E5F60718293A4B5C /* AndBibleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5E /* AndBibleUITests.swift */; };
 		8A7E540F7B4E4D0C9E1A2B3C /* WorkspaceSyncRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */; };
 		D10500000000000000000002 /* RemoteSyncMyDocumentRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10500000000000000000001 /* RemoteSyncMyDocumentRestoreTests.swift */; };
-		D13300000000000000000002 /* DefaultDocumentDownloadPlannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D13300000000000000000001 /* DefaultDocumentDownloadPlannerTests.swift */; };
 		D13400000000000000000002 /* AndBibleTests+Downloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = D13400000000000000000001 /* AndBibleTests+Downloads.swift */; };
 		64688F48FF7396937F81D0B5 /* SwordSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CA144AB77AEE518F1465DCC /* SwordSetup.swift */; };
 		793CB31DA9E0B8F6F4AC7677 /* AndBibleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1FB2406B7E9DD316E296F7 /* AndBibleApp.swift */; };
@@ -89,7 +88,6 @@
 		8174AF1F3D15BAFB4EB66A1E /* AndBible.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AndBible.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSyncRestoreTests.swift; sourceTree = "<group>"; };
 		D10500000000000000000001 /* RemoteSyncMyDocumentRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSyncMyDocumentRestoreTests.swift; sourceTree = "<group>"; };
-		D13300000000000000000001 /* DefaultDocumentDownloadPlannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultDocumentDownloadPlannerTests.swift; sourceTree = "<group>"; };
 		A15000000000000000000001 /* AndBibleTests+AndroidDatabaseBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+AndroidDatabaseBackup.swift"; sourceTree = "<group>"; };
 		A15100000000000000000001 /* AndBibleTests+AndroidModuleBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+AndroidModuleBackup.swift"; sourceTree = "<group>"; };
 		B18500000000000000000001 /* AndBibleTests+ExternalDocumentImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+ExternalDocumentImport.swift"; sourceTree = "<group>"; };
@@ -273,7 +271,6 @@
 				DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */,
 				9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */,
 				D10500000000000000000001 /* RemoteSyncMyDocumentRestoreTests.swift */,
-				D13300000000000000000001 /* DefaultDocumentDownloadPlannerTests.swift */,
 				A279E3BCEE4A2AEC1F495246 /* AndBibleTestSupport.swift */,
 				A15000000000000000000001 /* AndBibleTests+AndroidDatabaseBackup.swift */,
 				A15100000000000000000001 /* AndBibleTests+AndroidModuleBackup.swift */,
@@ -502,7 +499,6 @@
 				605562C8D06E0B4B1A1C232B /* AndBibleTests.swift in Sources */,
 				8A7E540F7B4E4D0C9E1A2B3C /* WorkspaceSyncRestoreTests.swift in Sources */,
 				D10500000000000000000002 /* RemoteSyncMyDocumentRestoreTests.swift in Sources */,
-				D13300000000000000000002 /* DefaultDocumentDownloadPlannerTests.swift in Sources */,
 				B69113624461C63AB21F4144 /* AndBibleTestSupport.swift in Sources */,
 				34F21932E6E652AD0A369D9C /* AndBibleTests+AppAndReader.swift in Sources */,
 				FBE587F989B0D3A1B1A283EF /* AndBibleTests+StrongsAndDictionary.swift in Sources */,
