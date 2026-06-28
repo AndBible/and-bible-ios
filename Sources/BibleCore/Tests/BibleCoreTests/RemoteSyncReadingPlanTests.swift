@@ -1,23 +1,16 @@
 import XCTest
-import AVFoundation
 @testable import BibleCore
-import CLibSword
-@testable import SwordKit
 import SwiftData
-import SQLite3
-@testable import BibleUI
-@testable import BibleView
-import struct SwiftUI.Binding
-import enum SwiftUI.ColorScheme
-import struct SwiftUI.EdgeInsets
-import struct SwiftUI.EmptyView
-#if os(iOS)
-import UIKit
-import WebKit
-import struct SwiftUI.Color
-#endif
 
-extension AndBibleTests {
+/**
+ Package-level reading-plan sync tests migrated from the app-host bundle.
+
+ The suite validates Android-compatible reading-plan status persistence, snapshot restore,
+ patch replay, and initial backup upload through BibleCore services only. It intentionally avoids
+ BibleUI, BibleView, and app bootstrap dependencies so the migration preserves coverage while moving
+ the behavior into the app-host-free package lane.
+ */
+final class RemoteSyncReadingPlanTests: XCTestCase {
     func testRemoteSyncReadingPlanStatusStorePersistsAndClearsStatuses() throws {
         let container = try makeReadingPlanRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -525,7 +518,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             .init(
                 tableName: "ReadingPlan",
-                entityID1: .blob(uuidBlob(planID)),
+                entityID1: .blob(readingPlanUUIDBlob(planID)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -536,7 +529,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             .init(
                 tableName: "ReadingPlanStatus",
-                entityID1: .blob(uuidBlob(baselineStatusID)),
+                entityID1: .blob(readingPlanUUIDBlob(baselineStatusID)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -565,7 +558,7 @@ extension AndBibleTests {
             logEntries: [
                 .init(
                     tableName: "ReadingPlan",
-                    entityID1: .blob(uuidBlob(planID)),
+                    entityID1: .blob(readingPlanUUIDBlob(planID)),
                     entityID2: .text(""),
                     type: .upsert,
                     lastUpdated: 2_000,
@@ -573,7 +566,7 @@ extension AndBibleTests {
                 ),
                 .init(
                     tableName: "ReadingPlanStatus",
-                    entityID1: .blob(uuidBlob(patchStatusID)),
+                    entityID1: .blob(readingPlanUUIDBlob(patchStatusID)),
                     entityID2: .text(""),
                     type: .upsert,
                     lastUpdated: 2_000,
@@ -675,7 +668,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             .init(
                 tableName: "ReadingPlanStatus",
-                entityID1: .blob(uuidBlob(statusID)),
+                entityID1: .blob(readingPlanUUIDBlob(statusID)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 1_000,
@@ -690,7 +683,7 @@ extension AndBibleTests {
             logEntries: [
                 .init(
                     tableName: "ReadingPlanStatus",
-                    entityID1: .blob(uuidBlob(statusID)),
+                    entityID1: .blob(readingPlanUUIDBlob(statusID)),
                     entityID2: .text(""),
                     type: .delete,
                     lastUpdated: 2_000,
@@ -746,7 +739,7 @@ extension AndBibleTests {
         logEntryStore.addEntry(
             .init(
                 tableName: "ReadingPlan",
-                entityID1: .blob(uuidBlob(planID)),
+                entityID1: .blob(readingPlanUUIDBlob(planID)),
                 entityID2: .text(""),
                 type: .upsert,
                 lastUpdated: 5_000,
@@ -768,7 +761,7 @@ extension AndBibleTests {
             logEntries: [
                 .init(
                     tableName: "ReadingPlan",
-                    entityID1: .blob(uuidBlob(planID)),
+                    entityID1: .blob(readingPlanUUIDBlob(planID)),
                     entityID2: .text(""),
                     type: .upsert,
                     lastUpdated: 4_000,
@@ -826,7 +819,7 @@ extension AndBibleTests {
         try modelContext.save()
 
         let syncFolderID = "/org.andbible.ios-sync-readingplans"
-        let adapter = MockRemoteSyncAdapter()
+        let adapter = ReadingPlanMockRemoteSyncAdapter()
         await adapter.enqueueUploadResult(
             RemoteSyncFile(
                 id: "\(syncFolderID)/initial.sqlite3.gz",

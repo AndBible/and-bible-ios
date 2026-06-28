@@ -1,481 +1,29 @@
-import XCTest
 import CLibSword
-@testable import BibleCore
+import Foundation
 import SQLite3
+import XCTest
 @testable import SwordKit
-@testable import BibleUI
 
-private let searchIndexFixtureSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+/**
+ App-host-free package coverage for SWORD/MyBible repository download and install behavior.
 
-extension AndBibleTests {
-    func testModuleBrowserRowActionConfirmationUsesFriendlyModuleDescription() {
-        let module = RemoteModuleInfo(
-            name: "KJV",
-            description: "King James Version",
-            category: .bible,
-            language: "en",
-            sourceName: "CrossWire"
-        )
-
-        let uninstall = ModuleBrowserRowActionConfirmation(kind: .uninstall, module: module)
-        let deleteIndex = ModuleBrowserRowActionConfirmation(kind: .deleteIndex, module: module)
-
-        XCTAssertEqual(uninstall.message, "Remove King James Version from this device?")
-        XCTAssertEqual(deleteIndex.message, "Delete the search index for King James Version?")
+ These tests protect Android-compatible repository refresh, MyBible package installs, local ZIP
+ imports, package-directory fallback, rollback, and cancellation contracts in the SwordKit package
+ lane. Failures indicate storage/install drift, not app bootstrap or SwiftUI presentation issues.
+ */
+final class ModuleRepositoryDownloadTests: XCTestCase {
+    override func tearDown() {
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil
+        super.tearDown()
     }
 
     /**
-     Verifies Downloads status-slot icons preserve Android's NOT_INSTALLED versus UPGRADE_AVAILABLE
-     distinction.
+     Verifies MyBible HTTPS manifests refresh into installable Android-compatible catalog rows.
 
-     Android `DocumentListItem.updateControlState` clears the status icon for
-     `DocumentInstallStatus.NOT_INSTALLED` and only shows `ic_arrow_upward_amber_24dp` for
-     `UPGRADE_AVAILABLE`. A failure means iOS is visually reporting ordinary installable modules as
-     updates even though row taps should still install them.
+     Android exposes MyBible manifest entries as downloadable Bible documents. The repository must
+     trim language metadata, upgrade legacy HTTP package URLs to HTTPS, and ignore unsupported URL
+     schemes so Downloads sees only rows it can install safely.
      */
-    func testModuleBrowserStatusSlotPresentationKeepsInstallableDistinctFromUpdate() {
-        XCTAssertEqual(
-            ModuleBrowserStatusSlotPresentation(status: .installable).statusIconSystemName,
-            nil
-        )
-        XCTAssertFalse(ModuleBrowserStatusSlotPresentation(status: .installable).isActionControl)
-        XCTAssertEqual(
-            ModuleBrowserStatusSlotPresentation(status: .updateAvailable).statusIconSystemName,
-            "arrow.up.circle.fill"
-        )
-        XCTAssertTrue(ModuleBrowserStatusSlotPresentation(status: .updateAvailable).isActionControl)
-    }
-
-    func testSearchIndexDeleteIndexAwaitsQueuedMutation() async throws {
-        let databaseURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("search-index-\(UUID().uuidString).sqlite")
-        defer { try? FileManager.default.removeItem(at: databaseURL) }
-
-        let service = SearchIndexService(databasePath: databaseURL.path)
-        let queuedMutationStarted = expectation(description: "queued fixture mutation started")
-        let releaseQueuedMutation = DispatchSemaphore(value: 0)
-
-        let fixtureTask = Task {
-            try await service.performIndexMutationForTesting { db in
-                queuedMutationStarted.fulfill()
-                releaseQueuedMutation.wait()
-                try self.seedSearchIndexFixture(moduleName: "KJV", db: db)
-            }
-        }
-
-        await fulfillment(of: [queuedMutationStarted], timeout: 1.0)
-        let deleteTask = Task {
-            await service.deleteIndex(for: "KJV")
-        }
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            releaseQueuedMutation.signal()
-        }
-        try await fixtureTask.value
-        await deleteTask.value
-
-        let deletedCounts = try searchIndexFixtureCounts(moduleName: "KJV", databaseURL: databaseURL)
-        XCTAssertEqual(deletedCounts.rows, 0)
-        XCTAssertEqual(deletedCounts.metadata, 0)
-    }
-
-    func testModuleBrowserDownloadActivityDrivesAndroidProgressAndErrorStatus() {
-        let modules = [
-            RemoteModuleInfo(
-                name: "KJV",
-                description: "King James Version",
-                category: .bible,
-                language: "en",
-                sourceName: "CrossWire",
-                version: "1.0"
-            ),
-            RemoteModuleInfo(
-                name: "WEB",
-                description: "World English Bible",
-                category: .bible,
-                language: "en",
-                sourceName: "CrossWire",
-                version: "2.0"
-            ),
-            RemoteModuleInfo(
-                name: "REC",
-                description: "Recommended Bible",
-                category: .bible,
-                language: "en",
-                sourceName: "CrossWire",
-                version: "1.0"
-            ),
-            RemoteModuleInfo(
-                name: "WARN",
-                description: "Active warning module",
-                category: .bible,
-                language: "en",
-                sourceName: "CrossWire",
-                version: "1.0"
-            ),
-            RemoteModuleInfo(
-                name: "FAIL",
-                description: "Failed module",
-                category: .bible,
-                language: "en",
-                sourceName: "CrossWire",
-                version: "1.0"
-            )
-        ]
-        let installed = [
-            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en", version: "1.0"),
-            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en", version: "1.0")
-        ]
-        let recommended = ModuleDownloadConfiguration(
-            bibles: ["en": ["REC::CrossWire"]]
-        )
-        let activities: [String: ModuleBrowserDownloadActivity] = [
-            "WARN": .inProgress(0.37),
-            "FAIL": .failed("testdict.idx download failed (HTTP 500)")
-        ]
-
-        let filtered = ModuleBrowserView.filteredDownloadModules(
-            modules,
-            selectedCategory: nil,
-            selectedLanguage: "en",
-            searchText: "",
-            installedModules: installed,
-            downloadActivities: activities,
-            recommendedDocuments: recommended,
-            badDocuments: nil
-        )
-
-        XCTAssertEqual(filtered.map(\.name), ["WARN", "WEB", "KJV", "REC", "FAIL"])
-        XCTAssertEqual(
-            ModuleBrowserView.displayStatus(
-                for: modules[3],
-                installedModules: installed,
-                downloadActivities: activities
-            ),
-            .beingInstalled(progressPercent: 37)
-        )
-        XCTAssertEqual(
-            ModuleBrowserView.displayStatus(
-                for: modules[4],
-                installedModules: installed,
-                downloadActivities: activities
-            ),
-            .errorDownloading(message: "testdict.idx download failed (HTTP 500)")
-        )
-    }
-
-    func testModuleBrowserAutoRefreshesOnlyMissingOrStaleCatalogs() throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let source = SourceConfig(
-            name: "TestRepo",
-            type: "HTTP",
-            host: "example.test",
-            catalogPath: "/raw"
-        )
-        let repository = ModuleRepository(
-            basePath: tempDir.path,
-            swordPath: swordDir.path,
-            session: makeModuleRepositoryDownloadMockSession()
-        )
-
-        XCTAssertFalse(
-            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [], repository: repository),
-            "Downloads should not start a refresh loop when no repository sources are configured."
-        )
-        XCTAssertTrue(
-            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [source], repository: repository),
-            "Missing source cache should refresh after the sheet opens, matching Android's first-load behavior."
-        )
-
-        try writeModuleRepositoryCatalogCache(sourceName: source.name, timestamp: Date(), under: tempDir)
-        XCTAssertFalse(
-            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [source], repository: repository),
-            "Recent source cache should open from cache without immediately refreshing."
-        )
-
-        try writeModuleRepositoryCatalogCache(
-            sourceName: source.name,
-            timestamp: Date(timeIntervalSinceNow: -(ModuleBrowserView.downloadCatalogStaleInterval + 1)),
-            under: tempDir
-        )
-        XCTAssertTrue(
-            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [source], repository: repository),
-            "Stale source cache should refresh after the cached list has been restored."
-        )
-    }
-
-    /**
-     Verifies normal Downloads opens with Android's default document-type filter.
-
-     Android persists the selected document filter and uses index 0 (`All types`) for a fresh
-     Downloads browser. iOS previously defaulted to Bibles, hiding commentaries, dictionaries, books,
-     and maps until the user changed filters.
-     */
-    func testModuleBrowserInitialCategoryDefaultsToAndroidAllTypes() {
-        XCTAssertNil(
-            ModuleBrowserView.initialSelectedCategory(
-                initialSearchText: "",
-                defaultDownloadMode: .disabled
-            )
-        )
-        XCTAssertNil(
-            ModuleBrowserView.initialSelectedCategory(
-                initialSearchText: "KJV",
-                defaultDownloadMode: .disabled
-            )
-        )
-        XCTAssertNil(
-            ModuleBrowserView.initialSelectedCategory(
-                initialSearchText: "",
-                defaultDownloadMode: .englishStartup
-            )
-        )
-        XCTAssertEqual(
-            ModuleBrowserView.initialSelectedCategory(
-                initialSearchText: "",
-                defaultDownloadMode: .disabled,
-                storedFilterIndex: 2
-            ),
-            .commentary
-        )
-        XCTAssertNil(
-            ModuleBrowserView.initialSelectedCategory(
-                initialSearchText: "KJV",
-                defaultDownloadMode: .disabled,
-                storedFilterIndex: 2
-            )
-        )
-        XCTAssertNil(
-            ModuleBrowserView.initialSelectedCategory(
-                initialSearchText: "",
-                defaultDownloadMode: .englishStartup,
-                storedFilterIndex: 2
-            )
-        )
-        XCTAssertEqual(ModuleBrowserView.androidFilterIndex(for: .commentary), 2)
-        XCTAssertEqual(ModuleBrowserView.category(forAndroidFilterIndex: 6), .addon)
-        XCTAssertNil(ModuleBrowserView.category(forAndroidFilterIndex: 99))
-    }
-
-    /**
-     Verifies Downloads default language selection follows Android's priority order.
-
-     Android `DocumentSelectionBase.defaultLanguage` first reuses a valid sticky language, then the
-     device language when that language has Bible rows, then an installed Bible language, then English
-     or the first available language. iOS should not preserve its own all-language default when Android
-     would select a concrete language.
-     */
-    func testModuleBrowserDefaultLanguageMatchesAndroidPriority() {
-        let englishBible = RemoteModuleInfo(
-            name: "KJV",
-            description: "King James Version",
-            category: .bible,
-            language: "en",
-            sourceName: "CrossWire"
-        )
-        let frenchBible = RemoteModuleInfo(
-            name: "LSG",
-            description: "Louis Segond",
-            category: .bible,
-            language: "fr",
-            sourceName: "CrossWire"
-        )
-        let germanCommentary = RemoteModuleInfo(
-            name: "GERCOM",
-            description: "German Commentary",
-            category: .commentary,
-            language: "de",
-            sourceName: "CrossWire"
-        )
-
-        XCTAssertEqual(
-            ModuleBrowserView.defaultLanguageCode(
-                availableModules: [englishBible, frenchBible],
-                installedModules: [],
-                availableLanguages: ["en", "fr"],
-                localeLanguageCode: "en",
-                stickyLanguageCode: "fr"
-            ),
-            "fr"
-        )
-        XCTAssertEqual(
-            ModuleBrowserView.defaultLanguageCode(
-                availableModules: [englishBible, frenchBible],
-                installedModules: [],
-                availableLanguages: ["en", "fr"],
-                localeLanguageCode: "fr",
-                stickyLanguageCode: nil
-            ),
-            "fr"
-        )
-        XCTAssertEqual(
-            ModuleBrowserView.defaultLanguageCode(
-                availableModules: [germanCommentary],
-                installedModules: [
-                    ModuleInfo(
-                        name: "GER",
-                        description: "German Bible",
-                        category: .bible,
-                        language: "de"
-                    )
-                ],
-                availableLanguages: ["de", "fr"],
-                localeLanguageCode: "fr",
-                stickyLanguageCode: nil
-            ),
-            "de"
-        )
-        XCTAssertEqual(
-            ModuleBrowserView.defaultLanguageCode(
-                availableModules: [germanCommentary],
-                installedModules: [],
-                availableLanguages: ["de", "en"],
-                localeLanguageCode: "fr",
-                stickyLanguageCode: nil
-            ),
-            "en"
-        )
-        XCTAssertEqual(
-            ModuleBrowserView.defaultLanguageCode(
-                availableModules: [germanCommentary],
-                installedModules: [],
-                availableLanguages: ["de"],
-                localeLanguageCode: "fr",
-                stickyLanguageCode: nil
-            ),
-            "de"
-        )
-    }
-
-    /**
-     Verifies Android sticky-language state only records explicit user language choices.
-
-     Android stores `DocumentSelectionBase.lastSelectedLanguage` from the language item-click handler.
-     Its default-language routine updates the spinner text but does not make the computed default
-     sticky. iOS must preserve that distinction so a device/default language does not override future
-     default-language resolution as if the user had selected it.
-     */
-    func testModuleBrowserStickyLanguageRecordsOnlyExplicitSelection() {
-        ModuleBrowserView.resetExplicitSelectedLanguageForTesting()
-        defer { ModuleBrowserView.resetExplicitSelectedLanguageForTesting() }
-
-        _ = ModuleBrowserView.defaultLanguageCode(
-            availableModules: [
-                RemoteModuleInfo(
-                    name: "GER",
-                    description: "German Bible",
-                    category: .bible,
-                    language: "de",
-                    sourceName: "CrossWire"
-                )
-            ],
-            installedModules: [],
-            availableLanguages: ["de"],
-            localeLanguageCode: "de",
-            stickyLanguageCode: ModuleBrowserView.explicitSelectedLanguageForTesting()
-        )
-
-        XCTAssertNil(ModuleBrowserView.explicitSelectedLanguageForTesting())
-
-        ModuleBrowserView.rememberExplicitSelectedLanguage("")
-        XCTAssertNil(ModuleBrowserView.explicitSelectedLanguageForTesting())
-
-        ModuleBrowserView.rememberExplicitSelectedLanguage("fr")
-        XCTAssertEqual(ModuleBrowserView.explicitSelectedLanguageForTesting(), "fr")
-    }
-
-    /**
-     Verifies iOS picker cancellation is ignored like Android's Install ZIP cancel path.
-
-     Android returns from the Install ZIP activity without showing a download error when the user
-     backs out. SwiftUI reports the same user action as a file-importer failure, so iOS must classify
-     the Cocoa cancellation code separately from real importer failures.
-     */
-    func testModuleBrowserInstallZipCancellationMatchesAndroidNoErrorBehavior() {
-        XCTAssertTrue(
-            ModuleBrowserView.isFileImporterCancellation(
-                NSError(domain: NSCocoaErrorDomain, code: CocoaError.userCancelled.rawValue)
-            )
-        )
-        XCTAssertFalse(
-            ModuleBrowserView.isFileImporterCancellation(
-                NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileNoSuchFile.rawValue)
-            )
-        )
-        XCTAssertFalse(
-            ModuleBrowserView.isFileImporterCancellation(
-                NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
-            )
-        )
-    }
-
-    /**
-     Verifies refresh errors do not erase prior install/import errors.
-
-     Android tracks document install errors and metadata/repository errors independently. The
-     Downloads overflow should keep earlier install failures visible after a later catalog refresh
-     while still de-duplicating repeated repository errors.
-     */
-    func testModuleBrowserDownloadErrorsMergeRefreshFailures() {
-        XCTAssertEqual(
-            ModuleBrowserView.mergedDownloadErrors(
-                existing: [" Install failed ", "Metadata failed"],
-                refreshErrors: ["Repo failed", "", "Install failed", " Repo failed "]
-            ),
-            ["Install failed", "Metadata failed", "Repo failed"]
-        )
-    }
-
-    /**
-     Verifies install failures reuse the localized download-failure prefix.
-
-     Android surfaces install failures through the same Download errors affordance as repository
-     failures. iOS should keep that shared error contract and avoid introducing hard-coded English
-     prefixes inside the overflow dialog.
-     */
-    func testModuleBrowserDownloadFailureMessageUsesLocalizedPrefix() {
-        let prefix = String(localized: "error_download_failed", defaultValue: "Download failed")
-
-        XCTAssertEqual(
-            ModuleBrowserView.downloadFailureMessage("Network unavailable"),
-            "\(prefix): Network unavailable"
-        )
-        XCTAssertEqual(
-            ModuleBrowserView.downloadFailureMessage(moduleName: "KJV", message: "Network unavailable"),
-            "\(prefix): KJV: Network unavailable"
-        )
-    }
-
-    /**
-     Verifies Downloads failure fallbacks use stable localization keys.
-
-     Android routes repository, install, and uninstall failures through user-visible Downloads
-     surfaces. iOS should keep the same behavior without hard-coded English fallback messages.
-     */
-    func testModuleBrowserFailureFallbackMessagesUseLocalization() {
-        XCTAssertEqual(
-            ModuleBrowserView.noRepositorySourcesConfiguredMessage(),
-            String(localized: "no_sources_configured", defaultValue: "No repository sources configured.")
-        )
-        XCTAssertEqual(
-            ModuleBrowserView.moduleUnavailableForInstallationMessage(moduleName: "KJV"),
-            String(localized: "module_unavailable_for_installation \("KJV")")
-        )
-        XCTAssertEqual(
-            ModuleBrowserView.moduleSourceNotFoundMessage(moduleName: "KJV"),
-            String(localized: "module_source_not_found \("KJV")")
-        )
-        XCTAssertEqual(
-            ModuleBrowserView.uninstallFailureMessage("Disk locked"),
-            String(localized: "uninstall_failed \("Disk locked")")
-        )
-    }
-
     func testModuleRepositoryRefreshesMyBibleCatalogFromManifest() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -619,188 +167,6 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies restored Android custom-driver modules are visible through `SwordManager`.
-
-     Android's installed-book registry includes `MyBibleDictionary` books such as BDBT. The iOS
-     inventory must expose the same row from `mods.d` plus `module.SQLite3` even though libsword does
-     not return a `SwordModule` handle for that driver.
-
-     - Setup: Writes a BDBT-style config and readable payload into a temporary SWORD tree.
-     - Expected result: `installedModules()` returns BDBT as a dictionary with Strong's features.
-     - Failure meaning: Settings, reader document pickers, or Downloads installed state can hide
-       restored Android dictionaries.
-     */
-    func testSwordManagerInstalledModulesIncludesRestoredAndroidMyBibleDictionary() throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
-        let modsDir = swordDir.appendingPathComponent("mods.d", isDirectory: true)
-        let moduleDir = swordDir
-            .appendingPathComponent("modules/texts/MyBible/BDBT", isDirectory: true)
-        try FileManager.default.createDirectory(at: modsDir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: moduleDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        try """
-        [BDBT]
-        Description=Brown-Driver-Briggs' Hebrew Definitions / Thayer's Greek Definitions
-        Category=Unknown
-        DataPath=./modules/texts/MyBible/BDBT/
-        ModDrv=MyBibleDictionary
-        Lang=en
-        Feature=GreekDef
-        Feature=HebrewDef
-        """.write(
-            to: modsDir.appendingPathComponent("bdbt.conf"),
-            atomically: true,
-            encoding: .utf8
-        )
-        try Data().write(to: moduleDir.appendingPathComponent("module.SQLite3"))
-
-        let manager = try XCTUnwrap(SwordManager(modulePath: swordDir.path))
-        let bdbt = try XCTUnwrap(manager.installedModules().first { $0.name == "BDBT" })
-
-        XCTAssertEqual(bdbt.category, .dictionary)
-        XCTAssertEqual(bdbt.language, "en")
-        XCTAssertTrue(bdbt.features.contains(.greekDef))
-        XCTAssertTrue(bdbt.features.contains(.hebrewDef))
-        XCTAssertTrue(manager.installedModules(category: .dictionary).contains { $0.name == "BDBT" })
-    }
-
-    /**
-     Verifies Android custom-driver configs cannot expose payloads outside the SWORD root.
-
-     Android backup metadata should describe restored module files under the local module tree. iOS
-     must not accept an absolute or escaped `DataPath` just because a readable SQLite file happens to
-     exist elsewhere on the device.
-
-     - Setup: Writes a `MyBibleDictionary` config whose `DataPath` points to a readable external
-       directory containing `module.SQLite3`.
-     - Expected result: `installedModules()` ignores the row.
-     - Failure meaning: Restored Android metadata can make unrelated files appear as installed
-       modules and mask import/layout bugs.
-     */
-    func testSwordManagerInstalledModulesRejectsCustomPayloadOutsideSwordRoot() throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
-        let modsDir = swordDir.appendingPathComponent("mods.d", isDirectory: true)
-        let externalModuleDir = tempDir
-            .appendingPathComponent("outside", isDirectory: true)
-            .appendingPathComponent("BDBT", isDirectory: true)
-        try FileManager.default.createDirectory(at: modsDir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: externalModuleDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        try """
-        [BDBT]
-        Description=Brown-Driver-Briggs' Hebrew Definitions / Thayer's Greek Definitions
-        Category=Unknown
-        DataPath=\(externalModuleDir.path)
-        ModDrv=MyBibleDictionary
-        Lang=en
-        """.write(
-            to: modsDir.appendingPathComponent("bdbt.conf"),
-            atomically: true,
-            encoding: .utf8
-        )
-        try Data().write(to: externalModuleDir.appendingPathComponent("module.SQLite3"))
-
-        let manager = try XCTUnwrap(SwordManager(modulePath: swordDir.path))
-
-        XCTAssertFalse(manager.installedModules().contains { $0.name == "BDBT" })
-    }
-
-    /**
-     Verifies iOS sidecar-installed MyBible packages participate in shared installed inventory.
-
-     Android exposes downloaded MyBible packages through `Books.installed().books`. iOS stores those
-     packages under `sword/mybible`, but the visible installed inventory must still come from
-     `SwordManager.installedModules()` instead of a Downloads-only append.
-
-     - Setup: Writes sidecar metadata and a readable extracted SQLite package payload.
-     - Expected result: `installedModules()` includes the MyBible row and `moduleCount` agrees.
-     - Failure meaning: MyBible package installs are visible in Downloads but missing elsewhere.
-     */
-    func testSwordManagerInstalledModulesIncludesMyBiblePackageSidecarModules() throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
-        let moduleDir = swordDir
-            .appendingPathComponent("mybible", isDirectory: true)
-            .appendingPathComponent("MyBible-finrk_SQLite3", isDirectory: true)
-        try FileManager.default.createDirectory(at: moduleDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let metadata = InstalledMyBibleModule(
-            name: "MyBible-finrk_SQLite3",
-            description: "Finnish RK",
-            category: ModuleCategory.bible.rawValue,
-            language: "fi",
-            version: "2026-06-27",
-            sourceName: "Example MyBible",
-            packageFileName: "finrk.SQLite3.zip",
-            downloadURL: "https://example.test/finrk.SQLite3.zip",
-            installedAt: Date(timeIntervalSince1970: 0)
-        )
-        try JSONEncoder().encode(metadata).write(
-            to: moduleDir.appendingPathComponent("module.json"),
-            options: .atomic
-        )
-        try Data().write(to: moduleDir.appendingPathComponent("finrk.SQLite3"))
-
-        let manager = try XCTUnwrap(SwordManager(modulePath: swordDir.path))
-        let modules = manager.installedModules()
-        let finrk = try XCTUnwrap(modules.first { $0.name == "MyBible-finrk_SQLite3" })
-
-        XCTAssertEqual(finrk.description, "Finnish RK")
-        XCTAssertEqual(finrk.category, .bible)
-        XCTAssertEqual(finrk.language, "fi")
-        XCTAssertEqual(manager.moduleCount, modules.count)
-    }
-
-    /**
-     Verifies stale MyBible sidecar metadata does not create an installed module.
-
-     Android only adds a MyBible book when its SQLite file can be read. iOS should therefore ignore
-     `module.json` sidecars that no longer have a payload.
-
-     - Setup: Writes sidecar metadata without an extracted `.SQLite3`/`.mybible` file.
-     - Expected result: `installedModules()` skips the stale row.
-     - Failure meaning: UI surfaces can advertise an unusable MyBible module.
-     */
-    func testSwordManagerInstalledModulesSkipsMyBiblePackageSidecarWithoutPayload() throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
-        let moduleDir = swordDir
-            .appendingPathComponent("mybible", isDirectory: true)
-            .appendingPathComponent("MyBible-finrk_SQLite3", isDirectory: true)
-        try FileManager.default.createDirectory(at: moduleDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let metadata = InstalledMyBibleModule(
-            name: "MyBible-finrk_SQLite3",
-            description: "Finnish RK",
-            category: ModuleCategory.bible.rawValue,
-            language: "fi",
-            version: "2026-06-27",
-            sourceName: "Example MyBible",
-            packageFileName: "finrk.SQLite3.zip",
-            downloadURL: "https://example.test/finrk.SQLite3.zip",
-            installedAt: Date(timeIntervalSince1970: 0)
-        )
-        try JSONEncoder().encode(metadata).write(
-            to: moduleDir.appendingPathComponent("module.json"),
-            options: .atomic
-        )
-
-        let manager = try XCTUnwrap(SwordManager(modulePath: swordDir.path))
-
-        XCTAssertFalse(manager.installedModules().contains { $0.name == "MyBible-finrk_SQLite3" })
-    }
-
-    /**
      Verifies that MyBible package installs and uninstalls publish installed-module mutations.
 
      Setup:
@@ -927,20 +293,20 @@ extension AndBibleTests {
         let installedDatabaseURL = moduleDir.appendingPathComponent("finrk.SQLite3")
         XCTAssertTrue(FileManager.default.fileExists(atPath: installedDatabaseURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: moduleDir.appendingPathComponent("module.json").path))
-        do {
-            let reader = try XCTUnwrap(MyBibleReader(filePath: installedDatabaseURL.path))
-            XCTAssertTrue(reader.isBible)
-            XCTAssertEqual(reader.moduleDescription, "Finnish RK")
-            XCTAssertEqual(reader.language, "fi")
-            XCTAssertEqual(reader.getVerse(book: 10, chapter: 1, verse: 1), "Alussa loi Jumala")
-        }
-
+        try assertMyBibleFixtureDatabase(at: installedDatabaseURL, expectedDescription: "Finnish RK", expectedLanguage: "fi")
         try repository.uninstallModule(named: "MyBible-finrk_SQLite3")
         XCTAssertFalse(FileManager.default.fileExists(atPath: moduleDir.path))
         XCTAssertTrue(repository.loadInstalledMyBibleModules().isEmpty)
         await fulfillment(of: [notificationExpectation], timeout: 0.2)
     }
 
+    /**
+     Verifies MyBible package installation accepts deflated ZIP entries.
+
+     Android MyBible package mirrors commonly serve compressed SQLite payloads. The install path must
+     inflate those entries and publish the same sidecar/payload layout as stored packages without
+     depending only on uncompressed ZIP fixtures.
+     */
     func testModuleRepositoryInstallsDeflatedMyBiblePackage() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1037,8 +403,7 @@ extension AndBibleTests {
             .appendingPathComponent("mybible", isDirectory: true)
             .appendingPathComponent("MyBible-finrk_SQLite3", isDirectory: true)
         let installedDatabaseURL = moduleDir.appendingPathComponent("finrk.SQLite3")
-        let reader = try XCTUnwrap(MyBibleReader(filePath: installedDatabaseURL.path))
-        XCTAssertEqual(reader.getVerse(book: 10, chapter: 1, verse: 1), "Alussa loi Jumala")
+        try assertMyBibleFixtureDatabase(at: installedDatabaseURL, expectedDescription: "Finnish RK", expectedLanguage: "fi")
     }
 
     /**
@@ -1162,6 +527,13 @@ extension AndBibleTests {
         wait(for: [notificationExpectation], timeout: 0.2)
     }
 
+    /**
+     Verifies failed fresh downloads do not publish an installed-module marker.
+
+     Android only makes a module visible after all required data files are available. If one required
+     file fails, iOS must throw an actionable error, remove staged data, and avoid writing the `.conf`
+     file that would make the incomplete module appear installed.
+     */
     func testModuleRepositoryDownloadFailsWithoutInstalledMarkerWhenRequiredFileFails() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1253,6 +625,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies failed updates preserve the previously installed module atomically.
+
+     Android update failures leave the old document usable. The repository should stage replacement
+     data separately and keep the old data files plus `.conf` marker when a required update file
+     fails.
+     */
     func testModuleRepositoryFailedUpdatePreservesExistingInstalledFiles() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1364,6 +743,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies single-testament zText installs succeed when the optional testament group is absent.
+
+     Android treats missing optional OT/NT groups as absent testament data, not as a fatal install
+     error, when the other testament group is complete. The request sequence and published files must
+     follow that contract.
+     */
     func testModuleRepositoryInstallsSingleTestamentModuleWhenOptionalGroupIsMissing() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1470,6 +856,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies chapter-block compressed commentaries request and publish commentary file extensions.
+
+     Android derives zCom data filenames from commentary block type. A chapter-block commentary must
+     fetch `.czs/.czz/.czv` data instead of Bible `.bzs/.bzz/.bzv` files and publish the module only
+     after the commentary group is staged.
+     */
     func testModuleRepositoryInstallsChapterBlockCompressedCommentary() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1572,6 +965,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies package-backed repositories fall back to module ZIP downloads when raw files are absent.
+
+     Android repositories can serve modules as package ZIPs even when individual data paths return
+     404. iOS must attempt the package URL and stage the package contents through the same installed
+     marker path.
+     */
     func testModuleRepositoryFallsBackToPackageZipWhenRawDataFilesAreUnavailable() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1688,6 +1088,12 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies built-in repositories use Android's default package directory for ZIP fallback.
+
+     STEP and similar repositories publish package ZIPs outside the catalog directory. The repository
+     must use Android's configured package directory before deriving catalog-relative guesses.
+     */
     func testModuleRepositoryUsesAndroidDefaultPackageDirectoryForPackageFallback() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1781,6 +1187,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies custom repository package-directory metadata wins over fallback heuristics.
+
+     Android stores one package directory for a repository. When custom metadata exists, iOS must use
+     that durable directory and avoid probing alternative catalog-relative paths that Android would not
+     request.
+     */
     func testModuleRepositoryUsesPersistedCustomPackageDirectoryBeforeHeuristics() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -2053,6 +1466,12 @@ extension AndBibleTests {
         XCTAssertFalse(requestedPaths.contains("/catalog/packages/rawzip/CUSTOM.zip"))
     }
 
+    /**
+     Verifies cancellation during download stops before requesting later files or publishing markers.
+
+     Android cancellation leaves no partially installed module. Cancelling after initial progress must
+     halt the request stream, remove staged files, and avoid writing the `.conf` marker.
+     */
     func testModuleRepositoryCancellationStopsBeforeInstalledMarker() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -2157,6 +1576,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies final-progress cancellation still stops before publish.
+
+     A cancellation delivered after the last data file but before publication must still prevent the
+     installed marker and staged directory from becoming visible, matching Android's all-or-nothing
+     install lifecycle.
+     */
     func testModuleRepositoryCancellationAfterFinalFileStopsBeforePublish() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -2558,76 +1984,6 @@ extension AndBibleTests {
         data.append(UInt8((value >> 24) & 0xff))
     }
 
-    private func writeModuleRepositoryCatalogCache(sourceName: String, timestamp: Date, under baseDir: URL) throws {
-        let cacheDir = baseDir.appendingPathComponent("catalog-cache", isDirectory: true)
-        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        let json = """
-        {
-          "timestamp": \(timestamp.timeIntervalSinceReferenceDate),
-          "modules": []
-        }
-        """
-        try Data(json.utf8).write(to: cacheDir.appendingPathComponent("\(sourceName).json"))
-    }
-
-    private func seedSearchIndexFixture(moduleName: String, databaseURL: URL) throws {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
-            throw SearchIndexFixtureError.openFailed
-        }
-        defer { sqlite3_close(db) }
-
-        try seedSearchIndexFixture(moduleName: moduleName, db: db)
-    }
-
-    private func seedSearchIndexFixture(moduleName: String, db: OpaquePointer?) throws {
-        let escapedModuleName = moduleName.replacingOccurrences(of: "'", with: "''")
-        let sql = """
-        INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
-        VALUES ('Genesis 1:1', 'created', '\(escapedModuleName)', 0);
-        INSERT INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
-        VALUES ('\(escapedModuleName)', 1, datetime('now'), \(SearchIndexService.currentSchemaVersion));
-        """
-        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
-            throw SearchIndexFixtureError.writeFailed
-        }
-    }
-
-    private func searchIndexFixtureCounts(moduleName: String, databaseURL: URL) throws -> (rows: Int, metadata: Int) {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            throw SearchIndexFixtureError.openFailed
-        }
-        defer { sqlite3_close(db) }
-
-        return (
-            rows: try searchIndexFixtureCount(
-                db: db,
-                sql: "SELECT COUNT(*) FROM verse_fts WHERE module_name = ?",
-                moduleName: moduleName
-            ),
-            metadata: try searchIndexFixtureCount(
-                db: db,
-                sql: "SELECT COUNT(*) FROM indexed_modules WHERE module_name = ?",
-                moduleName: moduleName
-            )
-        )
-    }
-
-    private func searchIndexFixtureCount(db: OpaquePointer?, sql: String, moduleName: String) throws -> Int {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw SearchIndexFixtureError.readFailed
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, moduleName, -1, searchIndexFixtureSQLiteTransient)
-        guard sqlite3_step(stmt) == SQLITE_ROW else {
-            throw SearchIndexFixtureError.readFailed
-        }
-        return Int(sqlite3_column_int(stmt, 0))
-    }
-
     private func makeMyBibleFixtureDatabase(at databaseURL: URL) throws {
         var db: OpaquePointer?
         guard sqlite3_open_v2(
@@ -2653,23 +2009,85 @@ extension AndBibleTests {
             throw MyBibleFixtureError.writeFailed
         }
     }
+
+/**
+ Verifies an installed MyBible fixture remained a readable SQLite Bible payload.
+
+ This keeps the repository install test owned by SwordKit while still proving the extracted file
+ retains the Android/MyBible schema and verse data that higher layers will later consume.
+ */
+private func assertMyBibleFixtureDatabase(
+    at databaseURL: URL,
+    expectedDescription: String,
+    expectedLanguage: String
+) throws {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        throw MyBibleFixtureError.openFailed
+    }
+    defer { sqlite3_close(db) }
+
+    XCTAssertEqual(
+        try myBibleFixtureTextValue(db: db, sql: "SELECT value FROM info WHERE name = 'description'"),
+        expectedDescription
+    )
+    XCTAssertEqual(
+        try myBibleFixtureTextValue(db: db, sql: "SELECT value FROM info WHERE name = 'language'"),
+        expectedLanguage
+    )
+    XCTAssertEqual(
+        try myBibleFixtureTextValue(
+            db: db,
+            sql: "SELECT text FROM verses WHERE book_number = 10 AND chapter = 1 AND verse = 1"
+        ),
+        "Alussa loi Jumala"
+    )
+}
+
+/**
+ Reads one text column from a MyBible SQLite fixture.
+
+ - Parameters:
+   - db: Open SQLite handle.
+   - sql: Query returning one text column.
+ - Returns: The first row's text value.
+ - Side effects: Prepares and finalizes one SQLite statement.
+ */
+private func myBibleFixtureTextValue(db: OpaquePointer?, sql: String) throws -> String {
+    var stmt: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+        throw MyBibleFixtureError.readFailed
+    }
+    defer { sqlite3_finalize(stmt) }
+
+    guard sqlite3_step(stmt) == SQLITE_ROW,
+          let text = sqlite3_column_text(stmt, 0) else {
+        throw MyBibleFixtureError.readFailed
+    }
+    return String(cString: text)
+}
+
 }
 
 private enum ModuleRepositoryDownloadTestError: Error {
     case compressionFailed
 }
 
-private enum SearchIndexFixtureError: Error {
+
+private enum MyBibleFixtureError: Error {
     case openFailed
     case readFailed
     case writeFailed
 }
 
-private enum MyBibleFixtureError: Error {
-    case openFailed
-    case writeFailed
-}
 
+/**
+ URL protocol test double for module repository download and manifest requests.
+
+ Tests set `requestHandler` to return deterministic HTTP responses for catalog, package, and raw
+ module-data URLs. Leaving the handler unset is a test setup failure because no network access is
+ expected in this package lane.
+ */
 private final class ModuleRepositoryDownloadMockURLProtocol: URLProtocol {
     static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 

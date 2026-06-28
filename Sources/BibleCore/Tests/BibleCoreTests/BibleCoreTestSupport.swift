@@ -1,4 +1,5 @@
 import AVFoundation
+import CLibSword
 import Foundation
 import SwiftData
 @testable import BibleCore
@@ -89,6 +90,35 @@ func makeInMemorySettingsContainer() throws -> ModelContainer {
     let schema = Schema([Setting.self])
     let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
     return try ModelContainer(for: schema, configurations: [configuration])
+}
+
+/**
+ Decompresses gzip bytes produced by remote-sync archive services for fixture inspection.
+
+ - Parameter data: Gzip-compressed archive bytes.
+ - Returns: Decompressed archive payload.
+ - Side effects: Allocates and frees one CLibSword gzip output buffer.
+ - Failure modes: Throws `RemoteSyncArchiveStagingError.decompressionFailed` when decompression
+   fails or the input buffer is empty.
+ */
+func gunzipTestData(_ data: Data) throws -> Data {
+    try data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Data in
+        guard let baseAddress = ptr.baseAddress else {
+            throw RemoteSyncArchiveStagingError.decompressionFailed
+        }
+
+        var outputLength: UInt = 0
+        guard let output = gunzip_data(
+            baseAddress.assumingMemoryBound(to: UInt8.self),
+            UInt(data.count),
+            &outputLength
+        ) else {
+            throw RemoteSyncArchiveStagingError.decompressionFailed
+        }
+
+        defer { gunzip_free(output) }
+        return Data(bytes: output, count: Int(outputLength))
+    }
 }
 
 /**

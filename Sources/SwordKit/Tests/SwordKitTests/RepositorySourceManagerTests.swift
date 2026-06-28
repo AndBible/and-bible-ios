@@ -1,719 +1,30 @@
+import Foundation
 import XCTest
-import AVFoundation
-@testable import BibleCore
-import CLibSword
 @testable import SwordKit
-import SwiftData
-import SQLite3
-@testable import BibleUI
-@testable import BibleView
-import struct SwiftUI.Binding
-import enum SwiftUI.ColorScheme
-import struct SwiftUI.EdgeInsets
-import struct SwiftUI.EmptyView
-#if os(iOS)
-import UIKit
-import WebKit
-import struct SwiftUI.Color
-#endif
 
-extension AndBibleTests {
-    /**
-     Verifies workspace settings clear an auto-assign primary label when no auto-assigned labels remain.
-     */
-    func testWorkspaceSettingsClearsAutoAssignPrimaryLabelWhenAutoAssignLabelsAreEmpty() {
-        let orphanPrimaryLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000001")!
+/**
+ App-host-free package coverage for Android-parity custom repository source management.
 
-        let settings = WorkspaceSettings(
-            autoAssignLabels: [],
-            autoAssignPrimaryLabel: orphanPrimaryLabelID
-        )
-
-        XCTAssertTrue(settings.autoAssignLabels.isEmpty)
-        XCTAssertNil(settings.autoAssignPrimaryLabel)
+ `RepositorySourceManager` is owned by SwordKit because it reads and mutates SWORD
+ `InstallMgr.conf` rows plus the iOS sidecar metadata needed to model Android/MyBible repository
+ sources. These tests run in the SwordKit package lane with a local mocked URL session so manifest
+ parsing, sidecar repair, default-source protection, and reset behavior stay independent of the app
+ target and UI helpers.
+ */
+final class RepositorySourceManagerTests: XCTestCase {
+    override func tearDown() {
+        RepositorySourceManagerMockURLProtocol.requestHandler = nil
+        super.tearDown()
     }
 
     /**
-     Verifies workspace settings repair an orphan primary label to the deterministic first assigned label.
+     Verifies an Android-style SWORD HTTPS manifest becomes a persisted `InstallMgr.conf` source.
+
+     The mocked manifest supplies host, catalog, package, and manifest URL metadata. The expected
+     result is that `RepositorySourceManager` writes a SWORD-compatible HTTP source while preserving
+     package metadata for later Downloads installs. A failure means custom SWORD repositories can be
+     accepted by the UI but not survive reload through SwordKit.
      */
-    func testWorkspaceSettingsRepairsOrphanAutoAssignPrimaryLabelToFirstAssignedLabel() {
-        let firstAssignedLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000002")!
-        let secondAssignedLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000003")!
-        let orphanPrimaryLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000004")!
-
-        let settings = WorkspaceSettings(
-            autoAssignLabels: [secondAssignedLabelID, firstAssignedLabelID],
-            autoAssignPrimaryLabel: orphanPrimaryLabelID
-        )
-
-        XCTAssertEqual(settings.autoAssignLabels, [firstAssignedLabelID, secondAssignedLabelID])
-        XCTAssertEqual(settings.autoAssignPrimaryLabel, firstAssignedLabelID)
-    }
-
-    /**
-     Verifies workspace settings keep an auto-assign primary label that is still assigned.
-     */
-    func testWorkspaceSettingsPreservesAssignedAutoAssignPrimaryLabel() {
-        let firstAssignedLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000005")!
-        let primaryLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000006")!
-
-        let settings = WorkspaceSettings(
-            autoAssignLabels: [firstAssignedLabelID, primaryLabelID],
-            autoAssignPrimaryLabel: primaryLabelID
-        )
-
-        XCTAssertEqual(settings.autoAssignLabels, [firstAssignedLabelID, primaryLabelID])
-        XCTAssertEqual(settings.autoAssignPrimaryLabel, primaryLabelID)
-    }
-
-    func testBookmarkStoreBibleBookmarksCanFilterByLabel() throws {
-        let schema = Schema([
-            BibleBookmark.self,
-            BibleBookmarkNotes.self,
-            BibleBookmarkToLabel.self,
-            GenericBookmark.self,
-            GenericBookmarkNotes.self,
-            GenericBookmarkToLabel.self,
-            Label.self,
-            StudyPadTextEntry.self,
-            StudyPadTextEntryText.self,
-        ])
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-        let container = try ModelContainer(for: schema, configurations: [configuration])
-        let store = BookmarkStore(modelContext: ModelContext(container))
-
-        let matchingLabel = Label(name: "Matching")
-        let otherLabel = Label(name: "Other")
-        store.insert(matchingLabel)
-        store.insert(otherLabel)
-
-        let matchingBookmark = BibleBookmark(kjvOrdinalStart: 1, kjvOrdinalEnd: 1)
-        matchingBookmark.book = "Genesis"
-        store.insert(matchingBookmark)
-
-        let otherBookmark = BibleBookmark(kjvOrdinalStart: 2, kjvOrdinalEnd: 2)
-        otherBookmark.book = "Genesis"
-        store.insert(otherBookmark)
-
-        let matchingJunction = BibleBookmarkToLabel()
-        matchingJunction.bookmark = matchingBookmark
-        matchingJunction.label = matchingLabel
-        store.insert(matchingJunction)
-
-        let otherJunction = BibleBookmarkToLabel()
-        otherJunction.bookmark = otherBookmark
-        otherJunction.label = otherLabel
-        store.insert(otherJunction)
-
-        let filtered = store.bibleBookmarks(labelId: matchingLabel.id)
-
-        XCTAssertEqual(filtered.map(\.id), [matchingBookmark.id])
-    }
-
-    func testWorkspaceStoreCreateRenameCloneAndDeleteRoundTripsWorkspaceGraph() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let store = WorkspaceStore(modelContext: context)
-
-        let source = store.createWorkspace(name: "Original")
-        let later = store.createWorkspace(name: "Later")
-        XCTAssertEqual(store.workspaces().map(\.name), ["Original", "Later"])
-
-        let sourcePrimaryWindow = try XCTUnwrap((source.windows ?? []).first)
-        store.addHistoryItem(to: sourcePrimaryWindow, document: "KJV", key: "Gen.1.1")
-        let secondaryWindow = store.addWindow(to: source, document: "KJV", category: "bible")
-        store.addHistoryItem(to: secondaryWindow, document: "KJV", key: "Gen.1.2")
-
-        store.renameWorkspace(source, to: "Renamed")
-        XCTAssertEqual(source.name, "Renamed")
-
-        let clone = store.cloneWorkspace(source, newName: "Clone")
-
-        XCTAssertEqual(store.workspaces().map(\.name), ["Renamed", "Clone", "Later"])
-        XCTAssertEqual(clone.orderNumber, source.orderNumber + 1)
-        XCTAssertEqual(later.orderNumber, 2)
-        XCTAssertEqual(clone.windows?.count, source.windows?.count)
-
-        let clonedWindows = (clone.windows ?? []).sorted { $0.orderNumber < $1.orderNumber }
-        let sourceWindows = (source.windows ?? []).sorted { $0.orderNumber < $1.orderNumber }
-        XCTAssertEqual(clonedWindows.count, sourceWindows.count)
-        XCTAssertTrue(Set(clonedWindows.map(\.id)).isDisjoint(with: Set(sourceWindows.map(\.id))))
-        XCTAssertEqual(clonedWindows.compactMap(\.pageManager).count, sourceWindows.compactMap(\.pageManager).count)
-        XCTAssertEqual(clonedWindows.reduce(into: 0) { $0 += $1.historyItems?.count ?? 0 },
-                       sourceWindows.reduce(into: 0) { $0 += $1.historyItems?.count ?? 0 })
-
-        store.delete(clone)
-
-        XCTAssertNil(store.workspace(id: clone.id))
-        XCTAssertEqual(store.workspaces().map(\.name), ["Renamed", "Later"])
-    }
-
-    func testWorkspaceStoreCreateWorkspaceInheritsWorkspaceScopedDefaultsWithoutCloningGraph() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let store = WorkspaceStore(modelContext: context)
-
-        let source = store.createWorkspace(name: "Source")
-        var workspaceDisplaySettings = TextDisplaySettings()
-        workspaceDisplaySettings.fontSize = 19
-        workspaceDisplaySettings.fontFamily = "serif"
-        workspaceDisplaySettings.lineSpacing = 18
-        workspaceDisplaySettings.strongsMode = 2
-        workspaceDisplaySettings.dayTextColor = Int(Int32(bitPattern: 0xFF112233))
-        workspaceDisplaySettings.dayBackground = Int(Int32(bitPattern: 0xFFFAF4E8))
-        workspaceDisplaySettings.dayNoise = 7
-        workspaceDisplaySettings.nightTextColor = Int(Int32(bitPattern: 0xFFF1E7D0))
-        workspaceDisplaySettings.nightBackground = Int(Int32(bitPattern: 0xFF101820))
-        workspaceDisplaySettings.nightNoise = 5
-        source.textDisplaySettings = workspaceDisplaySettings
-
-        let recentLabelID = UUID()
-        let autoAssignLabelID = UUID()
-        let studyPadLabelID = UUID()
-        source.workspaceSettings = WorkspaceSettings(
-            enableTiltToScroll: true,
-            enableReverseSplitMode: true,
-            autoPin: true,
-            recentLabels: [RecentLabel(labelId: recentLabelID)],
-            autoAssignLabels: [autoAssignLabelID],
-            autoAssignPrimaryLabel: autoAssignLabelID,
-            studyPadCursors: [studyPadLabelID: 3],
-            hideCompareDocuments: ["KJV"],
-            limitAmbiguousModalSize: true
-        )
-        source.workspaceColor = Int(Int32(bitPattern: 0xFF335577))
-        source.unPinnedWeight = 0.75
-
-        let sourcePrimaryWindow = try XCTUnwrap((source.windows ?? []).first)
-        var windowDisplaySettings = TextDisplaySettings()
-        windowDisplaySettings.fontSize = 24
-        sourcePrimaryWindow.pageManager?.textDisplaySettings = windowDisplaySettings
-        store.addHistoryItem(to: sourcePrimaryWindow, document: "KJV", key: "Gen.1.1")
-        _ = store.addWindow(to: source, document: "KJV", category: "bible")
-
-        let created = store.createWorkspace(name: "Inherited", inheritingDefaultsFrom: source)
-
-        XCTAssertEqual(created.textDisplaySettings, source.textDisplaySettings?.clearingThemeColors())
-        XCTAssertNil(created.textDisplaySettings?.dayTextColor)
-        XCTAssertNil(created.textDisplaySettings?.dayBackground)
-        XCTAssertNil(created.textDisplaySettings?.dayNoise)
-        XCTAssertNil(created.textDisplaySettings?.nightTextColor)
-        XCTAssertNil(created.textDisplaySettings?.nightBackground)
-        XCTAssertNil(created.textDisplaySettings?.nightNoise)
-        XCTAssertEqual(created.workspaceColor, source.workspaceColor)
-        XCTAssertEqual(created.workspaceSettings?.enableTiltToScroll, true)
-        XCTAssertEqual(created.workspaceSettings?.enableReverseSplitMode, true)
-        XCTAssertEqual(created.workspaceSettings?.autoPin, true)
-        XCTAssertEqual(created.workspaceSettings?.recentLabels.count, 1)
-        XCTAssertEqual(created.workspaceSettings?.recentLabels.first?.labelId, recentLabelID)
-        XCTAssertEqual(created.workspaceSettings?.autoAssignLabels.count, 1)
-        XCTAssertEqual(created.workspaceSettings?.autoAssignLabels.first, autoAssignLabelID)
-        XCTAssertEqual(created.workspaceSettings?.autoAssignPrimaryLabel, autoAssignLabelID)
-        XCTAssertEqual(created.workspaceSettings?.studyPadCursors.count, 1)
-        XCTAssertEqual(created.workspaceSettings?.studyPadCursors[studyPadLabelID], 3)
-        XCTAssertEqual(created.workspaceSettings?.hideCompareDocuments, ["KJV"])
-        XCTAssertEqual(created.workspaceSettings?.limitAmbiguousModalSize, true)
-        XCTAssertNil(created.unPinnedWeight)
-
-        let createdWindows = created.windows ?? []
-        XCTAssertEqual(createdWindows.count, 1)
-        let createdWindow = try XCTUnwrap(createdWindows.first)
-        XCTAssertTrue(createdWindow.historyItems?.isEmpty ?? true)
-        XCTAssertEqual(createdWindow.pageManager?.currentCategoryName, "bible")
-        XCTAssertNil(createdWindow.pageManager?.textDisplaySettings)
-    }
-
-    /**
-     Verifies local iOS workspace creation uses Android's default workspace color.
-
-     Android stores the durable workspace accent in `WorkspaceSettings.workspaceColor` and falls
-     back to `#ff444444` for newly created workspaces and selector rendering. This regression test
-     protects the iOS creation path from returning to a nil color that makes the selector indicator
-     disappear and diverges from Android's color settings behavior.
-     */
-    func testWorkspaceStoreCreateWorkspaceUsesAndroidDefaultWorkspaceColor() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let store = WorkspaceStore(modelContext: context)
-
-        let workspace = store.createWorkspace(name: "Default Color")
-
-        XCTAssertEqual(Workspace.defaultWorkspaceColor, Int(Int32(bitPattern: 0xFF444444)))
-        XCTAssertEqual(workspace.workspaceColor, Workspace.defaultWorkspaceColor)
-    }
-
-    func testWindowManagerMarksVisibleWindowPendingUntilControllerRegisters() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "Controller Readiness")
-        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
-
-        windowManager.setActiveWorkspace(workspace)
-
-        XCTAssertEqual(windowManager.controllerPendingWindowIds, Set([firstWindow.id]))
-        XCTAssertTrue(windowManager.isControllerRegistrationPending(for: firstWindow.id))
-        XCTAssertTrue(windowManager.hasPendingVisibleControllerRegistration)
-
-        windowManager.registerController(NSObject(), for: firstWindow.id)
-
-        XCTAssertFalse(windowManager.isControllerRegistrationPending(for: firstWindow.id))
-        XCTAssertFalse(windowManager.hasPendingVisibleControllerRegistration)
-    }
-
-    func testWindowManagerMarksNewWindowPendingWithoutReopeningRegisteredPanes() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "New Window Readiness")
-        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
-        windowManager.setActiveWorkspace(workspace)
-        windowManager.registerController(NSObject(), for: firstWindow.id)
-
-        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
-
-        XCTAssertFalse(windowManager.isControllerRegistrationPending(for: firstWindow.id))
-        XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
-        XCTAssertEqual(windowManager.controllerPendingWindowIds, Set([secondWindow.id]))
-
-        windowManager.registerController(NSObject(), for: secondWindow.id)
-
-        XCTAssertFalse(windowManager.hasPendingVisibleControllerRegistration)
-    }
-
-    func testWindowManagerAddWindowExitsMaximizedStateSoNewPaneCanRegister() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "Maximized Add")
-        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
-        windowManager.setActiveWorkspace(workspace)
-        windowManager.registerController(NSObject(), for: firstWindow.id)
-        windowManager.maximizeWindow(firstWindow)
-
-        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
-
-        XCTAssertNil(workspace.maximizedWindowId)
-        XCTAssertEqual(windowManager.activeWindow?.id, secondWindow.id)
-        XCTAssertTrue(windowManager.visibleWindows.contains(where: { $0.id == secondWindow.id }))
-        XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
-        XCTAssertTrue(windowManager.hasPendingVisibleControllerRegistration)
-    }
-
-    func testWindowManagerReadinessIgnoresHiddenWindowsUntilRestored() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "Hidden Readiness")
-        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
-        windowManager.setActiveWorkspace(workspace)
-        windowManager.registerController(NSObject(), for: firstWindow.id)
-        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
-        XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
-
-        windowManager.minimizeWindow(secondWindow)
-
-        XCTAssertFalse(windowManager.isControllerRegistrationPending(for: secondWindow.id))
-        XCTAssertFalse(windowManager.hasPendingVisibleControllerRegistration)
-
-        windowManager.restoreWindow(secondWindow)
-
-        XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
-        XCTAssertTrue(windowManager.hasPendingVisibleControllerRegistration)
-    }
-
-    func testWindowManagerRoutesNormalWindowsThroughPrimaryLinksWindowAtEnd() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "Links")
-        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
-        windowManager.setActiveWorkspace(workspace)
-        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
-        windowManager.activeWindow = firstWindow
-
-        let firstLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
-
-        XCTAssertTrue(firstLinksWindow.isLinksWindow)
-        XCTAssertTrue(firstLinksWindow.isPinMode)
-        XCTAssertFalse(firstLinksWindow.isSynchronized)
-        XCTAssertEqual(workspace.primaryTargetLinksWindowId, firstLinksWindow.id)
-        XCTAssertNil(firstWindow.targetLinksWindowId)
-        XCTAssertEqual(
-            windowManager.visibleWindows.map(\.id),
-            [firstWindow.id, secondWindow.id, firstLinksWindow.id]
-        )
-
-        windowManager.activeWindow = secondWindow
-        let secondLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: secondWindow))
-
-        XCTAssertEqual(secondLinksWindow.id, firstLinksWindow.id)
-        XCTAssertNil(secondWindow.targetLinksWindowId)
-        XCTAssertEqual(
-            windowManager.visibleWindows.map(\.id),
-            [firstWindow.id, secondWindow.id, firstLinksWindow.id]
-        )
-    }
-
-    func testWindowManagerRepairsStalePrimaryLinksWindowToExistingLinksWindow() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "Stale Links")
-        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
-        windowManager.setActiveWorkspace(workspace)
-        let originalLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
-        workspace.primaryTargetLinksWindowId = UUID()
-
-        let repairedLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
-
-        XCTAssertEqual(repairedLinksWindow.id, originalLinksWindow.id)
-        XCTAssertTrue(repairedLinksWindow.isLinksWindow)
-        XCTAssertEqual(workspace.primaryTargetLinksWindowId, repairedLinksWindow.id)
-    }
-
-    func testWindowManagerRestoresMinimizedPrimaryLinksWindowAndFocusesIt() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "Restore Links")
-        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
-        windowManager.setActiveWorkspace(workspace)
-        let linksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
-        windowManager.minimizeWindow(linksWindow)
-        windowManager.activeWindow = firstWindow
-
-        let restoredLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
-
-        XCTAssertEqual(restoredLinksWindow.id, linksWindow.id)
-        XCTAssertEqual(restoredLinksWindow.layoutState, "split")
-        XCTAssertEqual(windowManager.activeWindow?.id, linksWindow.id)
-        XCTAssertTrue(windowManager.visibleWindows.contains(where: { $0.id == linksWindow.id }))
-    }
-
-    func testWindowManagerDisplaysPinnedWindowsBeforeUnpinnedWindows() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "Pinned Order")
-        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
-        windowManager.setActiveWorkspace(workspace)
-        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
-        firstWindow.isPinMode = false
-        firstWindow.orderNumber = 0
-        secondWindow.isPinMode = true
-        secondWindow.orderNumber = 1
-
-        windowManager.refreshWindows()
-
-        XCTAssertEqual(windowManager.visibleWindows.map(\.id), [secondWindow.id, firstWindow.id])
-    }
-
-    func testWindowManagerGivesLinksWindowsTheirOwnChainedTarget() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "Nested Links")
-        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
-        windowManager.setActiveWorkspace(workspace)
-        let primaryLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
-
-        let nestedLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: primaryLinksWindow))
-
-        XCTAssertNotEqual(nestedLinksWindow.id, primaryLinksWindow.id)
-        XCTAssertTrue(nestedLinksWindow.isLinksWindow)
-        XCTAssertEqual(workspace.primaryTargetLinksWindowId, primaryLinksWindow.id)
-        XCTAssertEqual(primaryLinksWindow.targetLinksWindowId, nestedLinksWindow.id)
-        XCTAssertEqual(
-            windowManager.visibleWindows.map(\.id),
-            [firstWindow.id, primaryLinksWindow.id, nestedLinksWindow.id]
-        )
-    }
-
-    /**
-     Protects Android's synchronized-window old-key comparison.
-
-     Android updates the inactive window's Bible key before deciding whether to post a secondary
-     scroll, then skips the scroll when the target key was already equal to the source key. The setup
-     creates two synchronized panes in the same group, first with the target one verse behind and then
-     with the target at the source verse. The expected result is that only the stale target is returned
-     for secondary scrolling; a failure means iOS can keep injecting redundant scroll commands that
-     let synced panes alternate focus and walk back to an older visible position.
-     */
-    func testWindowManagerSkipsSynchronizedTargetAlreadyAtSourceVerse() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "Synchronized Target Freshness")
-        let sourceWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
-        windowManager.setActiveWorkspace(workspace)
-        let targetWindow = try XCTUnwrap(windowManager.addWindow(from: sourceWindow))
-        sourceWindow.isSynchronized = true
-        sourceWindow.syncGroup = 0
-        targetWindow.isSynchronized = true
-        targetWindow.syncGroup = 0
-        sourceWindow.pageManager?.bibleBibleBook = 0
-        sourceWindow.pageManager?.bibleChapterNo = 1
-        sourceWindow.pageManager?.bibleVerseNo = 5
-        targetWindow.pageManager?.bibleBibleBook = 0
-        targetWindow.pageManager?.bibleChapterNo = 1
-        targetWindow.pageManager?.bibleVerseNo = 4
-
-        XCTAssertEqual(
-            windowManager.synchronizedVerseUpdateTargets(for: sourceWindow).map(\.id),
-            [targetWindow.id]
-        )
-
-        targetWindow.pageManager?.bibleVerseNo = 5
-
-        XCTAssertTrue(windowManager.synchronizedVerseUpdateTargets(for: sourceWindow).isEmpty)
-    }
-
-    func testWorkspaceSelectionServicePersistsSelectedWorkspace() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let settingsStore = SettingsStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let selectionService = WorkspaceSelectionService(
-            workspaceStore: workspaceStore,
-            settingsStore: settingsStore,
-            windowManager: windowManager
-        )
-
-        let first = workspaceStore.createWorkspace(name: "First")
-        let second = workspaceStore.createWorkspace(name: "Second")
-
-        selectionService.activate(first)
-        XCTAssertEqual(settingsStore.activeWorkspaceId, first.id)
-        XCTAssertEqual(windowManager.activeWorkspace?.id, first.id)
-
-        selectionService.activate(second)
-
-        XCTAssertEqual(settingsStore.activeWorkspaceId, second.id)
-        XCTAssertEqual(windowManager.activeWorkspace?.id, second.id)
-        XCTAssertEqual(windowManager.visibleWindows.first?.workspace?.id, second.id)
-    }
-
-    func testWorkspaceSelectionServiceRepairsActiveWorkspaceBeforeDelete() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let settingsStore = SettingsStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let selectionService = WorkspaceSelectionService(
-            workspaceStore: workspaceStore,
-            settingsStore: settingsStore,
-            windowManager: windowManager
-        )
-
-        let first = workspaceStore.createWorkspace(name: "First")
-        let second = workspaceStore.createWorkspace(name: "Second")
-        selectionService.activate(first)
-
-        XCTAssertTrue(selectionService.deleteWorkspace(first))
-
-        XCTAssertNil(workspaceStore.workspace(id: first.id))
-        XCTAssertEqual(settingsStore.activeWorkspaceId, second.id)
-        XCTAssertEqual(windowManager.activeWorkspace?.id, second.id)
-        XCTAssertEqual(windowManager.visibleWindows.first?.workspace?.id, second.id)
-    }
-
-    func testWorkspaceSelectionServiceKeepsActiveWorkspaceWhenDeletingInactiveWorkspace() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let settingsStore = SettingsStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let selectionService = WorkspaceSelectionService(
-            workspaceStore: workspaceStore,
-            settingsStore: settingsStore,
-            windowManager: windowManager
-        )
-
-        let first = workspaceStore.createWorkspace(name: "First")
-        let second = workspaceStore.createWorkspace(name: "Second")
-        let third = workspaceStore.createWorkspace(name: "Third")
-        selectionService.activate(second)
-
-        XCTAssertTrue(selectionService.deleteWorkspace(first))
-
-        XCTAssertNil(workspaceStore.workspace(id: first.id))
-        XCTAssertEqual(Set(workspaceStore.workspaces().map(\.id)), Set([second.id, third.id]))
-        XCTAssertEqual(settingsStore.activeWorkspaceId, second.id)
-        XCTAssertEqual(windowManager.activeWorkspace?.id, second.id)
-    }
-
-    func testWorkspaceSelectionServiceBatchDeleteRepairsActiveWorkspaceToSurvivor() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let settingsStore = SettingsStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let selectionService = WorkspaceSelectionService(
-            workspaceStore: workspaceStore,
-            settingsStore: settingsStore,
-            windowManager: windowManager
-        )
-
-        let first = workspaceStore.createWorkspace(name: "First")
-        let second = workspaceStore.createWorkspace(name: "Second")
-        let third = workspaceStore.createWorkspace(name: "Third")
-        selectionService.activate(first)
-
-        XCTAssertTrue(selectionService.deleteWorkspaces([first, second]))
-
-        XCTAssertNil(workspaceStore.workspace(id: first.id))
-        XCTAssertNil(workspaceStore.workspace(id: second.id))
-        XCTAssertEqual(workspaceStore.workspaces().map(\.id), [third.id])
-        XCTAssertEqual(settingsStore.activeWorkspaceId, third.id)
-        XCTAssertEqual(windowManager.activeWorkspace?.id, third.id)
-        XCTAssertEqual(windowManager.visibleWindows.first?.workspace?.id, third.id)
-    }
-
-    func testWorkspaceSelectionServicePreservesFinalWorkspaceOnDelete() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let settingsStore = SettingsStore(modelContext: context)
-        let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let selectionService = WorkspaceSelectionService(
-            workspaceStore: workspaceStore,
-            settingsStore: settingsStore,
-            windowManager: windowManager
-        )
-
-        let only = workspaceStore.createWorkspace(name: "Only")
-        selectionService.activate(only)
-
-        XCTAssertFalse(selectionService.deleteWorkspace(only))
-
-        XCTAssertNotNil(workspaceStore.workspace(id: only.id))
-        XCTAssertEqual(settingsStore.activeWorkspaceId, only.id)
-        XCTAssertEqual(windowManager.activeWorkspace?.id, only.id)
-    }
-
-    func testSettingsStoreGlobalTextDisplayPropagationClearsMatchingWorkspaceAndWindowOverrides() throws {
-        let container = try makeWorkspaceModelContainer()
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        let settingsStore = SettingsStore(modelContext: context)
-
-        var previousGlobal = TextDisplaySettings.appDefaults
-        previousGlobal.fontSize = 18
-        previousGlobal.showVerseNumbers = true
-        previousGlobal.lineSpacing = 10
-        settingsStore.setGlobalTextDisplaySettings(previousGlobal)
-
-        let workspace = workspaceStore.createWorkspace(name: "Propagation")
-        var workspaceSettings = TextDisplaySettings()
-        workspaceSettings.fontSize = 20
-        workspaceSettings.showVerseNumbers = false
-        workspace.textDisplaySettings = workspaceSettings
-
-        let window = try XCTUnwrap((workspace.windows ?? []).first)
-        var windowSettings = TextDisplaySettings()
-        windowSettings.fontSize = 20
-        windowSettings.showVerseNumbers = false
-        windowSettings.lineSpacing = 10
-        window.pageManager?.textDisplaySettings = windowSettings
-        try context.save()
-
-        var currentGlobal = previousGlobal
-        currentGlobal.fontSize = 20
-        currentGlobal.showVerseNumbers = false
-        settingsStore.setGlobalTextDisplaySettings(currentGlobal)
-
-        XCTAssertNil(workspace.textDisplaySettings?.fontSize)
-        XCTAssertNil(workspace.textDisplaySettings?.showVerseNumbers)
-        XCTAssertNil(window.pageManager?.textDisplaySettings?.fontSize)
-        XCTAssertNil(window.pageManager?.textDisplaySettings?.showVerseNumbers)
-        XCTAssertEqual(window.pageManager?.textDisplaySettings?.lineSpacing, 10)
-    }
-
-    /**
-     Protects Android workspace text-display dirty-field propagation.
-
-     Android's `TextDisplaySettings.kt` saves workspace edits to `WindowRepository.textDisplaySettings`
-     and then calls `updateWindowTextDisplaySettingsValues`, which clears only child window fields
-     that now equal the workspace value for fields changed by the workspace edit. Differing window
-     overrides and unchanged matching values remain window-owned.
-
-     Expected result:
-     - workspace-scoped persisted settings keep changed values and drop redundant global values
-     - window overrides equal to the new workspace values are cleared for changed fields
-     - window overrides that intentionally differ from the workspace stay present
-     - unchanged window values are not cleared just because they match a parent value
-
-     Failure meaning:
-     - iOS can regress from Android's workspace inheritance semantics by pinning stale window values
-       or erasing intentional per-window overrides after a workspace text-options edit.
-     */
-    func testWorkspaceTextDisplayPropagationClearsOnlyDirtyMatchingWindowOverrides() {
-        var globalSettings = TextDisplaySettings.appDefaults
-        globalSettings.fontSize = 18
-        globalSettings.showVerseNumbers = true
-        globalSettings.showFootNotes = false
-        globalSettings.lineSpacing = 10
-
-        let existingWorkspaceSettings = TextDisplaySettings()
-        let previousWorkspaceSettings = TextDisplaySettings.fullyResolved(
-            window: nil,
-            workspace: existingWorkspaceSettings,
-            global: globalSettings
-        )
-
-        var workspaceEditorSettings = previousWorkspaceSettings
-        workspaceEditorSettings.fontSize = 20
-        workspaceEditorSettings.showVerseNumbers = false
-        workspaceEditorSettings.showFootNotes = true
-
-        let persistedWorkspaceSettings = WorkspaceTextDisplaySettingsPropagation.workspaceScopedSettings(
-            editorSettings: workspaceEditorSettings,
-            previousResolvedSettings: previousWorkspaceSettings,
-            existingWorkspaceSettings: existingWorkspaceSettings,
-            globalSettings: globalSettings
-        )
-
-        XCTAssertEqual(persistedWorkspaceSettings.fontSize, 20)
-        XCTAssertEqual(persistedWorkspaceSettings.showVerseNumbers, false)
-        XCTAssertEqual(persistedWorkspaceSettings.showFootNotes, true)
-        XCTAssertNil(persistedWorkspaceSettings.lineSpacing)
-
-        let currentWorkspaceParentSettings = TextDisplaySettings.fullyResolved(
-            window: nil,
-            workspace: persistedWorkspaceSettings,
-            global: globalSettings
-        )
-        var windowSettings = TextDisplaySettings()
-        windowSettings.fontSize = 20
-        windowSettings.showVerseNumbers = false
-        windowSettings.showFootNotes = false
-        windowSettings.lineSpacing = 10
-
-        let propagatedWindowSettings = WorkspaceTextDisplaySettingsPropagation.windowSettingsAfterWorkspaceChange(
-            windowSettings,
-            currentWorkspaceParentSettings: currentWorkspaceParentSettings,
-            previousWorkspaceSettings: previousWorkspaceSettings,
-            currentWorkspaceEditorSettings: workspaceEditorSettings
-        )
-
-        XCTAssertNil(propagatedWindowSettings.fontSize)
-        XCTAssertNil(propagatedWindowSettings.showVerseNumbers)
-        XCTAssertEqual(propagatedWindowSettings.showFootNotes, false)
-        XCTAssertEqual(propagatedWindowSettings.lineSpacing, 10)
-    }
-
     func testRepositorySourceManagerAddsSwordHTTPSManifestSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -732,7 +43,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -745,7 +56,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
@@ -789,7 +100,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -802,7 +113,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
@@ -845,7 +156,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -858,7 +169,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
@@ -876,6 +187,13 @@ extension AndBibleTests {
         XCTAssertEqual(record["packageDirectory"] as? String, "/sword/packages")
     }
 
+    /**
+     Ensures untrusted manifest metadata cannot downgrade the persisted manifest URL.
+
+     The request URL is HTTPS, but the manifest body advertises an HTTP `manifestUrl`. The expected
+     result is that iOS stores the validated HTTPS URL that the user supplied. A failure means sidecar
+     metadata can retain insecure Android/SWORD repository URLs after validation.
+     */
     func testRepositorySourceManagerIgnoresNonHTTPSSwordManifestURLMetadata() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -894,7 +212,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -907,7 +225,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
@@ -927,6 +245,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies legacy `InstallMgr.conf`-only custom SWORD rows are backfilled into sidecar metadata.
+
+     The setup appends a custom HTTP source with no JSON sidecar. Loading sources should synthesize
+     Android-compatible repository type, package, manifest, and source URL metadata and persist that
+     repair. A failure means older custom repositories remain partially modeled after upgrade.
+     */
     func testRepositorySourceManagerBackfillsSourceOnlyCustomSwordMetadata() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -966,6 +291,13 @@ extension AndBibleTests {
         XCTAssertEqual(record["sourceURL"] as? String, "https://legacy.example/catalog")
     }
 
+    /**
+     Protects unreadable sidecar data from destructive repair attempts.
+
+     The setup has a valid legacy SWORD row plus malformed sidecar JSON. The expected result is that
+     load-time metadata is repaired in memory while the unreadable sidecar bytes are left untouched.
+     A failure means a bad sidecar can be silently overwritten during a read-only source load.
+     */
     func testRepositorySourceManagerDoesNotOverwriteUnreadableSidecarDuringBackfill() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1077,6 +409,13 @@ extension AndBibleTests {
         XCTAssertNil(source.packageDirectory)
     }
 
+    /**
+     Verifies an Android/MyBible manifest is stored only in the sidecar repository list.
+
+     MyBible repositories are not SWORD install-manager sources, so adding one should persist sidecar
+     metadata without projecting an `HTTPSource` row into `InstallMgr.conf`. A failure means MyBible
+     repository setup can pollute SWORD config or disappear from custom repository reloads.
+     */
     func testRepositorySourceManagerAddsMyBibleManifestSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1101,7 +440,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://mybible.example/manifest.json")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -1114,7 +453,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://mybible.example/manifest.json")
@@ -1142,6 +481,13 @@ extension AndBibleTests {
         XCTAssertFalse(manager.loadSources().contains { $0.name == "Example MyBible" })
     }
 
+    /**
+     Ensures MyBible sidecar repositories remain available when SWORD config cannot be read.
+
+     The setup makes `InstallMgr.conf` a directory and provides both MyBible and SWORD sidecar rows.
+     The expected result is that only the sidecar-only MyBible repository is loaded. A failure means
+     SWORD config failures can hide Android MyBible repositories or expose unusable SWORD rows.
+     */
     func testRepositorySourceManagerLoadsMyBibleSidecarWhenSwordConfigUnreadable() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1190,6 +536,13 @@ extension AndBibleTests {
         XCTAssertEqual(source.manifestURL?.absoluteString, "https://mybible.example/manifest.json")
     }
 
+    /**
+     Verifies invalid sidecar repository rows are ignored while valid MyBible rows still load.
+
+     The fixture includes a path-traversal name, an HTTP manifest URL, and one valid HTTPS MyBible
+     repository. The expected result is that only the safe repository is returned. A failure means
+     stale or malicious sidecar rows can leak into Downloads source lists.
+     */
     func testRepositorySourceManagerDropsInvalidSidecarRecords() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1246,6 +599,13 @@ extension AndBibleTests {
         XCTAssertEqual(sources.first?.manifestURL?.absoluteString, "https://mybible.example/manifest.json")
     }
 
+    /**
+     Protects SWORD sidecar repair when persisted manifest metadata is not HTTPS.
+
+     The SWORD config row is valid, but its sidecar manifest URL is HTTP. Loading should repair the
+     source to the HTTPS catalog URL and persist the repaired manifest metadata. A failure means
+     repository reload can keep insecure stale URLs even after the SWORD source row is safe.
+     */
     func testRepositorySourceManagerRepairsSwordSidecarWithNonHTTPSManifestURL() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1301,6 +661,14 @@ extension AndBibleTests {
         XCTAssertEqual(repositories.compactMap { $0["manifestURL"] as? String }, ["https://sword.example/sword"])
     }
 
+    /**
+     Verifies MyBible add and replace operations work through sidecar storage without readable SWORD config.
+
+     The setup makes `InstallMgr.conf` unreadable, adds a MyBible source, then replaces it with a
+     different manifest. The expected result is an ordered sidecar replacement with no dependency on
+     SWORD config writes. A failure means MyBible repository management is coupled to SWORD-only
+     storage.
+     */
     func testRepositorySourceManagerAddsAndReplacesMyBibleWhenSwordConfigUnreadable() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1316,7 +684,7 @@ extension AndBibleTests {
             "initial.example": "Initial MyBible",
             "updated.example": "Updated MyBible"
         ]
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let host = try XCTUnwrap(request.url?.host)
             let fileName = try XCTUnwrap(manifestNamesByHost[host])
             let manifestData = """
@@ -1338,7 +706,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let added = try await manager.addCustomSource(from: "https://initial.example/manifest.json")
@@ -1356,6 +724,14 @@ extension AndBibleTests {
         XCTAssertEqual(sources.first?.manifestURL?.absoluteString, "https://updated.example/manifest.json")
     }
 
+    /**
+     Ensures deleting a sidecar-only MyBible repository succeeds when SWORD config is unreadable.
+
+     The fixture includes one MyBible and one SWORD sidecar row while `InstallMgr.conf` is a
+     directory. Deleting the MyBible row should update only sidecar metadata and leave SWORD deletion
+     rejected because config cannot be read. A failure means sidecar-only repositories inherit SWORD
+     config failure behavior.
+     */
     func testRepositorySourceManagerDeletesMyBibleSidecarWhenSwordConfigUnreadable() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1413,6 +789,13 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Verifies replacing a MyBible repository preserves its position in Android-style source ordering.
+
+     The setup adds first/middle/last MyBible repositories and replaces the middle one. The expected
+     result is that both load order and persisted sidecar order keep the replacement in the middle.
+     A failure means source replacement can reorder Downloads repositories unexpectedly.
+     */
     func testRepositorySourceManagerPreservesMyBibleOrderWhenReplacingSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1426,7 +809,7 @@ extension AndBibleTests {
             "middle-updated.example": "Middle Updated MyBible"
         ]
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let host = try XCTUnwrap(request.url?.host)
             let fileName = try XCTUnwrap(manifestNamesByHost[host])
             let manifestData = """
@@ -1448,7 +831,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         _ = try await manager.addCustomSource(from: "https://first.example/manifest.json")
@@ -1476,6 +859,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Ensures MyBible manifests cannot create repositories whose names collide with defaults.
+
+     The mocked MyBible manifest uses `AndBible`, a built-in source name. The expected result is a
+     duplicate-source error before any source is persisted. A failure means custom MyBible manifests
+     can shadow Android/default repository entries.
+     */
     func testRepositorySourceManagerRejectsDuplicateMyBibleRepositoryName() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1491,7 +881,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -1503,7 +893,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -1516,6 +906,13 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Verifies structurally invalid MyBible manifests are rejected without persisting source rows.
+
+     The mocked manifest omits the required modules array. The expected result is an invalid-manifest
+     error and no source with that name after reload. A failure means incomplete Android/MyBible
+     repository metadata can enter the source list.
+     */
     func testRepositorySourceManagerRejectsInvalidMyBibleManifest() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1530,7 +927,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -1542,7 +939,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -1555,6 +952,13 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Ensures unsupported manifest types fail explicitly and do not fall through to SWORD/MyBible handling.
+
+     The fixture serves a manifest with an unknown type. The expected result is an
+     `unsupportedRepositoryType` error containing that type. A failure means new or malformed manifest
+     types can be silently interpreted as a supported repository family.
+     */
     func testRepositorySourceManagerRejectsUnsupportedManifestType() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1568,7 +972,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -1580,7 +984,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -1593,13 +997,20 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Verifies direct SWORD catalog URLs fall back to Android-compatible package and source metadata.
+
+     The manifest URL returns 404 while catalog/package probes succeed. The expected result is a
+     generated source name, preserved host including port, catalog path, package path, and source URL.
+     A failure means users cannot add repositories that expose a JSword catalog without a manifest.
+     */
     func testRepositorySourceManagerAddsDirectSwordCatalogFallbackSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let path = request.url?.path ?? ""
             let statusCode: Int
             let data: Data
@@ -1627,7 +1038,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://custom.example:8443/sword")
@@ -1645,6 +1056,13 @@ extension AndBibleTests {
         XCTAssertTrue(config.contains("HTTPSource=\(registration.source.name)|custom.example:8443|/sword"))
     }
 
+    /**
+     Ensures SWORD manifests cannot replace built-in repository names.
+
+     The mocked SWORD manifest uses the default `AndBible` name. The expected result is a duplicate
+     source error and no custom source write. A failure means custom manifests can shadow protected
+     default repository rows.
+     */
     func testRepositorySourceManagerRejectsDuplicateDefaultRepositoryName() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1661,7 +1079,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -1673,7 +1091,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -1686,6 +1104,14 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Verifies stale SWORD sidecar metadata does not block a new validated source with the same name.
+
+     The fixture has a sidecar-only SWORD row that is not present in `InstallMgr.conf`, then adds a
+     validated manifest with the same name. The expected result is that the new validated metadata
+     replaces the orphaned sidecar record. A failure means stale sidecars can prevent legitimate
+     repository re-adds.
+     */
     func testRepositorySourceManagerIgnoresOrphanedSwordSidecarForDuplicateNames() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1724,7 +1150,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -1736,7 +1162,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.addCustomSource(from: "https://visible.example/manifest.json")
@@ -1755,6 +1181,13 @@ extension AndBibleTests {
         XCTAssertEqual(repositories.compactMap { $0["host"] as? String }, ["visible.example"])
     }
 
+    /**
+     Protects repository source persistence from manifest names that contain path separators.
+
+     The mocked SWORD manifest uses `../custom`. The expected result is an invalid-manifest error,
+     no config write, and no loaded source. A failure means repository names can escape their intended
+     config/sidecar namespace.
+     */
     func testRepositorySourceManagerRejectsManifestSourceNamesWithPathSeparators() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1771,7 +1204,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -1783,7 +1216,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -1804,6 +1237,13 @@ extension AndBibleTests {
         XCTAssertFalse(sourcesAfterFailure.contains { $0.name == "../custom" })
     }
 
+    /**
+     Verifies delete semantics protect built-in sources while removing true custom SWORD rows.
+
+     The setup adds one custom config row alongside defaults. Deleting `AndBible` should fail with a
+     protected-default error, while deleting the custom row should remove it and preserve defaults.
+     A failure means reset/delete UI can mutate Android default repository sources.
+     */
     func testRepositorySourceManagerProtectsDefaultsAndDeletesCustomSources() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1856,6 +1296,13 @@ extension AndBibleTests {
         XCTAssertEqual(step.packageDirectory, "/packages")
     }
 
+    /**
+     Ensures reset-to-defaults removes custom SWORD rows, restores built-ins, and emits change notification.
+
+     The setup appends a custom source then observes `sourcesDidChangeNotification`. The expected
+     result is that reset posts the notification, removes the custom source, and leaves only default
+     sources. A failure means Downloads repository reset can leave stale rows or fail to refresh UI.
+     */
     func testRepositorySourceManagerResetToDefaultsRemovesCustomSourcesAndRestoresDefaults() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1891,6 +1338,13 @@ extension AndBibleTests {
         XCTAssertTrue(restoredSources.allSatisfy(manager.isDefaultSource))
     }
 
+    /**
+     Verifies reset-to-defaults reports a write failure when default config cannot be recreated.
+
+     The manager points at a missing base path that cannot produce a new `InstallMgr.conf`. The
+     expected result is a `configWriteFailed` error with the recreation message. A failure means the
+     reset UI cannot distinguish successful reset from failed default-source recreation.
+     */
     func testRepositorySourceManagerResetToDefaultsReportsRecreationFailure() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1908,6 +1362,13 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Verifies replacing a custom SWORD source removes the old row and persists the validated replacement.
+
+     The setup writes `Old Repo`, then replaces it with a validated manifest for `New Repo`. The
+     expected result is that only the new source remains after reload. A failure means custom source
+     replacement can duplicate or leave stale SWORD rows.
+     */
     func testRepositorySourceManagerReplacesCustomSourceInPlace() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1930,7 +1391,7 @@ extension AndBibleTests {
         }
         """.data(using: .utf8)!
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -1942,7 +1403,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         let registration = try await manager.replaceCustomSource(
@@ -1957,6 +1418,13 @@ extension AndBibleTests {
         XCTAssertFalse(sourceNames.contains("Old Repo"))
     }
 
+    /**
+     Ensures replacing a missing custom source fails before any network validation or config mutation.
+
+     The request handler intentionally fails the test if invoked. The expected result is a
+     `sourceNotFound` error and unchanged config bytes. A failure means replacement can validate or
+     write a new repository when the user-selected source no longer exists.
+     */
     func testRepositorySourceManagerRejectsReplacingMissingCustomSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1967,7 +1435,7 @@ extension AndBibleTests {
         let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
         let initialConfig = try String(contentsOf: configURL, encoding: .utf8)
 
-        MockURLProtocol.requestHandler = { request in
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
             XCTFail("Replacing a missing source should fail before validating the replacement URL.")
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -1980,7 +1448,7 @@ extension AndBibleTests {
 
         let manager = RepositorySourceManager(
             basePath: tempDir.path,
-            session: makeMockedURLSession()
+            session: Self.makeMockedURLSession()
         )
 
         do {
@@ -1998,4 +1466,55 @@ extension AndBibleTests {
         XCTAssertFalse(manager.loadSources().contains { $0.name == "New Repo" })
     }
 
+    /**
+     Creates an ephemeral URL session that routes repository manifest validation through the local
+     URLProtocol fixture.
+
+     - Returns: A `URLSession` whose network requests are handled entirely in-process.
+     - Side effects: none beyond allocating an ephemeral session.
+     - Failure modes: test requests fail fast if `RepositorySourceManagerMockURLProtocol` has no
+       handler installed for the current test.
+     */
+    private static func makeMockedURLSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RepositorySourceManagerMockURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+}
+
+/**
+ URLProtocol fixture used by repository-source manager tests to replace network access.
+
+ Each test installs a `requestHandler` that validates the expected URL and returns an HTTP response
+ plus data. `tearDown` clears the handler to prevent cross-test leakage; a missing handler is a test
+ setup failure because repository validation should never reach the real network in this package
+ lane.
+ */
+private final class RepositorySourceManagerMockURLProtocol: URLProtocol {
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let requestHandler = Self.requestHandler else {
+            fatalError("RepositorySourceManagerMockURLProtocol.requestHandler must be set before use")
+        }
+
+        do {
+            let (response, data) = try requestHandler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

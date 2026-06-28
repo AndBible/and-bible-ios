@@ -161,6 +161,7 @@ skipping entries or treating a partial archive as a valid empty backup.
 - [Android database backup service](../../Sources/BibleCore/Sources/BibleCore/Services/AndroidDatabaseBackupService.swift)
 - [Android database backup import sheet](../../Sources/BibleUI/Sources/BibleUI/Settings/AndroidDatabaseBackupImportSheet.swift)
 - [Android Backup & Restore workflow](../../Sources/BibleUI/Sources/BibleUI/Settings/ImportExportView.swift)
-- [Android database backup tests](../../AndBibleTests/AndBibleTests+AndroidDatabaseBackup.swift)
+- [Android database backup core tests](../../Sources/BibleCore/Tests/BibleCoreTests/AndroidDatabaseBackupTests.swift)
+- [Android database backup presentation tests](../../Sources/BibleUI/Tests/BibleUITests/AndroidDatabaseBackupPresentationTests.swift)
 - #150
 - #153
