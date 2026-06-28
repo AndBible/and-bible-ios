@@ -123,6 +123,7 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 ### Phase 2 - BibleCore logic tests
 - Move the cleanest BibleCore-only files first, preserving app-host-free package execution after each slice.
   - `AndBibleTests+AndroidModuleBackup` has moved to `BibleCoreTests` as the first Phase 2 slice because it only needed local temporary-file cleanup after leaving `AndBibleTests`.
+  - `AndBibleTests+AndroidDatabaseBackup` has been split by owning module: Android `.abdb.zip` archive, restore/import/export, version-gate, and preserved-database contracts moved to `BibleCoreTests`, while the reset-success presentation copy assertion moved to `BibleUITests`.
   - `RemoteSyncMyDocumentRestoreTests` has moved to `BibleCoreTests` as the second Phase 2 slice because it is already a standalone `XCTestCase`; its direct `CLibSword` import is now an explicit `BibleCoreTests` dependency.
   - `WorkspaceSyncRestoreTests` has moved to `BibleCoreTests` as the third Phase 2 slice after confirming its SQLite/gzip fixture ownership stays local to the package target.
 - Add CI coverage using the chosen Phase 0 mechanism:
