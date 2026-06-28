@@ -1,24 +1,20 @@
 import XCTest
-import AVFoundation
-@testable import BibleCore
-import CLibSword
-@testable import SwordKit
-import SwiftData
-import SQLite3
 @testable import BibleUI
 @testable import BibleView
-import struct SwiftUI.Binding
-import enum SwiftUI.ColorScheme
-import struct SwiftUI.EdgeInsets
-import struct SwiftUI.EmptyView
+
 #if os(iOS)
 import UIKit
 import WebKit
-import struct SwiftUI.Color
-#endif
 
-extension AndBibleTests {
-    #if os(iOS)
+/**
+ BibleUI and BibleView bridge behavior that requires iOS WebKit/UIKit types.
+
+ These tests protect bridge lifecycle, native user-interaction reporting, JavaScript emission,
+ and reader modal-key routing contracts without booting the app host. They remain in the iOS-only
+ package test lane because the behavior under test depends on `WKWebView`, UIKit gesture
+ recognizers, and the reader bridge router.
+ */
+final class BridgeIOSTests: XCTestCase {
     @MainActor
     func testBridgeBindsWeakWebViewReferenceFromLifecycleCallbacks() {
         let bridge = BibleBridge()
@@ -193,6 +189,5 @@ extension AndBibleTests {
         router.requestToggleFullScreen()
         XCTAssertEqual(fullscreenToggleCount, 1)
     }
-    #endif
-
 }
+#endif
