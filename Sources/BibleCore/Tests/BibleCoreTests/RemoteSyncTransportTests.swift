@@ -1,27 +1,65 @@
 import XCTest
-import AVFoundation
 @testable import BibleCore
-import CLibSword
-@testable import SwordKit
-import SwiftData
-import SQLite3
-@testable import BibleUI
-@testable import BibleView
-import struct SwiftUI.Binding
-import enum SwiftUI.ColorScheme
-import struct SwiftUI.EdgeInsets
-import struct SwiftUI.EmptyView
-#if os(iOS)
-import UIKit
-import WebKit
-import struct SwiftUI.Color
-#endif
 
-extension AndBibleTests {
+/**
+ BibleCore WebDAV and Nextcloud transport tests migrated out of the app-host bundle.
+
+ The suite verifies remote-sync request construction, WebDAV multistatus parsing, configured
+ Nextcloud folder bootstrapping, incremental SEARCH listing, and Android-compatible sync-folder
+ marker handling. It intentionally owns only BibleCore transport behavior; UI, SWORD, SwiftData,
+ and WebView imports from the old `AndBibleTests` support class are not needed here.
+ */
+final class RemoteSyncTransportTests: XCTestCase {
+    /**
+     Clears the URL protocol handler so each async transport test owns its mocked request path.
+
+     - Side effects: Resets the process-global `MockURLProtocol.requestHandler` fixture.
+     - Failure modes: none.
+     */
+    override func tearDown() {
+        MockURLProtocol.requestHandler = nil
+        super.tearDown()
+    }
+
+    func testWebDAVPropfindBuildsAuthenticatedRequestAndParsesMultiStatus() async throws {
+        let expectedAuth = "Basic \(Data("alice:secret".utf8).base64EncodedString())"
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "PROPFIND")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), expectedAuth)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Depth"), "1")
+            XCTAssertEqual(request.url?.absoluteString, "https://example.com/remote.php/dav/files/alice/sync")
+
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 207,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, sampleWebDAVMultiStatusXML.data(using: .utf8)!)
+        }
+
+        let client = WebDAVClient(
+            baseURL: URL(string: "https://example.com/remote.php/dav/files/alice")!,
+            username: "alice",
+            password: "secret",
+            session: makeMockedURLSession()
+        )
+        let files = try await client.propfind(path: "sync", depth: 1)
+
+        XCTAssertEqual(files.count, 2)
+        XCTAssertEqual(files[0].path, "/remote.php/dav/files/alice/sync/")
+        XCTAssertTrue(files[0].isDirectory)
+        XCTAssertEqual(files[0].displayName, "sync")
+        XCTAssertEqual(files[1].path, "/remote.php/dav/files/alice/sync/1.1.sqlite3.gz")
+        XCTAssertFalse(files[1].isDirectory)
+        XCTAssertEqual(files[1].contentLength, 12345)
+        XCTAssertEqual(files[1].contentType, "application/gzip")
+    }
+
     func testWebDAVSearchBuildsSearchRequestBody() async throws {
         let modifiedAfter = Date(timeIntervalSince1970: 1_730_000_000)
 
-        MockURLProtocol.requestHandler = { [self] request in
+        MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "SEARCH")
             XCTAssertEqual(request.url?.absoluteString, "https://example.com/remote.php/dav/files/alice/sync/bookmarks")
 
@@ -37,7 +75,7 @@ extension AndBibleTests {
                 httpVersion: nil,
                 headerFields: nil
             )!
-            return (response, Self.sampleWebDAVMultiStatusXML.data(using: .utf8)!)
+            return (response, sampleWebDAVMultiStatusXML.data(using: .utf8)!)
         }
 
         let client = WebDAVClient(
@@ -79,7 +117,7 @@ extension AndBibleTests {
 
     func testNextCloudSyncAdapterCreatesConfiguredBaseFolderBeforeListing() async throws {
         let requestLog = RequestLog()
-        let listingXML = Self.webDAVMultiStatusXML(
+        let listingXML = webDAVMultiStatusXML(
             folderPath: "/remote.php/dav/files/alice/AndBible/Sync/",
             fileName: "1.1.sqlite3.gz"
         )
@@ -161,7 +199,7 @@ extension AndBibleTests {
                 payload = Data()
             case ("PROPFIND", "/remote.php/dav/files/alice/AndBible/Sync"):
                 statusCode = 207
-                payload = Data(Self.webDAVMultiStatusXML(
+                payload = Data(webDAVMultiStatusXML(
                     folderPath: "/remote.php/dav/files/alice/AndBible/Sync/",
                     fileName: "2.1.sqlite3.gz"
                 ).utf8)
@@ -215,7 +253,7 @@ extension AndBibleTests {
             )!
             return (
                 response,
-                Data(Self.webDAVMultiStatusXML(
+                Data(webDAVMultiStatusXML(
                     folderPath: "/remote.php/dav/files/alice/sync/",
                     fileName: "3.1.sqlite3.gz"
                 ).utf8)
@@ -241,7 +279,7 @@ extension AndBibleTests {
     }
 
     func testNextCloudSyncAdapterMakeSyncFolderKnownUploadsAndroidStyleMarker() async throws {
-        MockURLProtocol.requestHandler = { [self] request in
+        MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "PUT")
             XCTAssertTrue(
                 try XCTUnwrap(request.url?.path)
