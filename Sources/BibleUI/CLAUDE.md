@@ -49,7 +49,7 @@ transition to Bible content. Must look/function as a real calculator.
 
 ## Testing
 ```bash
-swift test --filter BibleUITests
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -project AndBible.xcodeproj -scheme BibleUITests -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17'
 ```
 
 ## Reference (Android equivalents)
