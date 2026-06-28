@@ -48,6 +48,42 @@ func bridgeEmissionPayload(
 }
 
 /**
+ Decodes the latest reader `set_config` bridge payload into a JSON object.
+
+ Reader configuration tests use this helper to assert the native-to-Vue configuration contract
+ without depending on WebKit. The payload is extracted from the recorded JavaScript emissions and
+ parsed as the same JSON object Vue receives.
+
+ - Parameters:
+   - scripts: Recorded JavaScript evaluations from `makeRecordingBridge`.
+   - file: XCTest source location used when reporting extraction or parse failures.
+   - line: XCTest source location used when reporting extraction or parse failures.
+ - Returns: The decoded top-level `set_config` JSON object.
+ - Side effects: none.
+ - Failure modes: Throws XCTest unwrap/JSON errors when no emission exists, the wrapper is malformed,
+   the payload is not UTF-8 JSON, or the payload is not an object.
+ */
+func setConfigPayload(
+    from scripts: [String],
+    file: StaticString = #filePath,
+    line: UInt = #line
+) throws -> [String: Any] {
+    let json = try bridgeEmissionPayloadJSON(from: scripts, event: "set_config", file: file, line: line)
+    let data = try XCTUnwrap(
+        json.data(using: .utf8),
+        "Expected UTF-8 JSON payload",
+        file: file,
+        line: line
+    )
+    return try XCTUnwrap(
+        JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? [String: Any],
+        "Expected object JSON payload",
+        file: file,
+        line: line
+    )
+}
+
+/**
  Extracts the payload argument from a recorded `try { void bibleView.emit(...) } catch` wrapper.
 
  Production bridge emissions normally pass JSON, but this helper intentionally treats the payload as
@@ -89,4 +125,40 @@ func bridgeEmissionPayloadJSON(
         line: line
     )
     return String(script[start..<end])
+}
+
+/**
+ Encodes a bridge DTO and decodes it back to a JSON dictionary for schema assertions.
+
+ - Parameter value: Encodable bridge payload to inspect.
+ - Returns: A string-keyed JSON object produced by the same `JSONEncoder` path used by bridge DTOs.
+ - Side effects: none.
+ - Failure modes: Throws encoding, decoding, or XCTest unwrap errors if the value does not produce
+   a top-level JSON object.
+ */
+func bridgeJSONObject<T: Encodable>(_ value: T) throws -> [String: Any] {
+    let data = try JSONEncoder().encode(value)
+    return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+}
+
+/**
+ Asserts that a bridge JSON object exposes exactly the expected key set.
+
+ The helper intentionally ignores ordering because JSON dictionaries are unordered, but it fails on
+ both missing and extra keys so TypeScript/Vue bridge schema drift is visible in package tests.
+
+ - Parameters:
+   - object: JSON dictionary decoded from a bridge DTO.
+   - expected: Required key names.
+ - Side effects: Emits XCTest failures when the key set differs.
+ - Failure modes: none beyond XCTest assertion reporting.
+ */
+func assertJSONKeys(_ object: [String: Any], _ expected: [String], file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertEqual(
+        Set(object.keys),
+        Set(expected),
+        "Unexpected keys. Missing: \(Set(expected).subtracting(object.keys)); extra: \(Set(object.keys).subtracting(expected))",
+        file: file,
+        line: line
+    )
 }
