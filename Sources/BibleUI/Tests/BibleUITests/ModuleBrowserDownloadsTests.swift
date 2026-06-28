@@ -1,0 +1,527 @@
+import Foundation
+import XCTest
+@testable import BibleUI
+@testable import SwordKit
+
+/**
+ App-host-free package coverage for Downloads browser presentation and Android filter behavior.
+
+ These tests exercise `ModuleBrowserView` row messages, status projection, language/category
+ defaults, auto-refresh decisions, and localized error copy without booting the app. Failures mean
+ the Downloads screen can drift from Android behavior even when repository installs still work.
+ */
+final class ModuleBrowserDownloadsTests: XCTestCase {
+    override func tearDown() {
+        ModuleBrowserDownloadMockURLProtocol.requestHandler = nil
+        super.tearDown()
+    }
+
+    /**
+     Verifies destructive Downloads row confirmations use module descriptions instead of initials.
+
+     Android confirms removal/index deletion with the visible document name. The iOS row model must
+     use the friendly description so uninstall and delete-index prompts do not regress to terse module
+     codes when a catalog row includes richer metadata.
+     */
+    func testModuleBrowserRowActionConfirmationUsesFriendlyModuleDescription() {
+        let module = RemoteModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            sourceName: "CrossWire"
+        )
+
+        let uninstall = ModuleBrowserRowActionConfirmation(kind: .uninstall, module: module)
+        let deleteIndex = ModuleBrowserRowActionConfirmation(kind: .deleteIndex, module: module)
+
+        XCTAssertEqual(uninstall.message, "Remove King James Version from this device?")
+        XCTAssertEqual(deleteIndex.message, "Delete the search index for King James Version?")
+    }
+
+    /**
+     Verifies Downloads status-slot icons preserve Android's NOT_INSTALLED versus UPGRADE_AVAILABLE
+     distinction.
+
+     Android `DocumentListItem.updateControlState` clears the status icon for
+     `DocumentInstallStatus.NOT_INSTALLED` and only shows `ic_arrow_upward_amber_24dp` for
+     `UPGRADE_AVAILABLE`. A failure means iOS is visually reporting ordinary installable modules as
+     updates even though row taps should still install them.
+     */
+    func testModuleBrowserStatusSlotPresentationKeepsInstallableDistinctFromUpdate() {
+        XCTAssertEqual(
+            ModuleBrowserStatusSlotPresentation(status: .installable).statusIconSystemName,
+            nil
+        )
+        XCTAssertFalse(ModuleBrowserStatusSlotPresentation(status: .installable).isActionControl)
+        XCTAssertEqual(
+            ModuleBrowserStatusSlotPresentation(status: .updateAvailable).statusIconSystemName,
+            "arrow.up.circle.fill"
+        )
+        XCTAssertTrue(ModuleBrowserStatusSlotPresentation(status: .updateAvailable).isActionControl)
+    }
+
+    /**
+     Verifies active and failed Downloads activity drives Android-style status ordering.
+
+     Android promotes active installs and update rows while preserving visible failure state. iOS must
+     keep in-progress percentages and failure messages tied to row status instead of flattening those
+     rows into ordinary installable documents.
+     */
+    func testModuleBrowserDownloadActivityDrivesAndroidProgressAndErrorStatus() {
+        let modules = [
+            RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "WEB",
+                description: "World English Bible",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "2.0"
+            ),
+            RemoteModuleInfo(
+                name: "REC",
+                description: "Recommended Bible",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "WARN",
+                description: "Active warning module",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "FAIL",
+                description: "Failed module",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            )
+        ]
+        let installed = [
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en", version: "1.0"),
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en", version: "1.0")
+        ]
+        let recommended = ModuleDownloadConfiguration(
+            bibles: ["en": ["REC::CrossWire"]]
+        )
+        let activities: [String: ModuleBrowserDownloadActivity] = [
+            "WARN": .inProgress(0.37),
+            "FAIL": .failed("testdict.idx download failed (HTTP 500)")
+        ]
+
+        let filtered = ModuleBrowserView.filteredDownloadModules(
+            modules,
+            selectedCategory: nil,
+            selectedLanguage: "en",
+            searchText: "",
+            installedModules: installed,
+            downloadActivities: activities,
+            recommendedDocuments: recommended,
+            badDocuments: nil
+        )
+
+        XCTAssertEqual(filtered.map(\.name), ["WARN", "WEB", "KJV", "REC", "FAIL"])
+        XCTAssertEqual(
+            ModuleBrowserView.displayStatus(
+                for: modules[3],
+                installedModules: installed,
+                downloadActivities: activities
+            ),
+            .beingInstalled(progressPercent: 37)
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.displayStatus(
+                for: modules[4],
+                installedModules: installed,
+                downloadActivities: activities
+            ),
+            .errorDownloading(message: "testdict.idx download failed (HTTP 500)")
+        )
+    }
+
+    /**
+     Verifies Downloads only auto-refreshes missing or stale repository catalogs.
+
+     Android loads cached metadata first and refreshes when a source has no usable cache or the cache
+     is stale. The iOS predicate must avoid refresh loops for empty source lists or fresh caches.
+     */
+    func testModuleBrowserAutoRefreshesOnlyMissingOrStaleCatalogs() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "TestRepo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw"
+        )
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        XCTAssertFalse(
+            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [], repository: repository),
+            "Downloads should not start a refresh loop when no repository sources are configured."
+        )
+        XCTAssertTrue(
+            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [source], repository: repository),
+            "Missing source cache should refresh after the sheet opens, matching Android's first-load behavior."
+        )
+
+        try writeModuleRepositoryCatalogCache(sourceName: source.name, timestamp: Date(), under: tempDir)
+        XCTAssertFalse(
+            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [source], repository: repository),
+            "Recent source cache should open from cache without immediately refreshing."
+        )
+
+        try writeModuleRepositoryCatalogCache(
+            sourceName: source.name,
+            timestamp: Date(timeIntervalSinceNow: -(ModuleBrowserView.downloadCatalogStaleInterval + 1)),
+            under: tempDir
+        )
+        XCTAssertTrue(
+            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [source], repository: repository),
+            "Stale source cache should refresh after the cached list has been restored."
+        )
+    }
+
+    /**
+     Verifies normal Downloads opens with Android's default document-type filter.
+
+     Android persists the selected document filter and uses index 0 (`All types`) for a fresh
+     Downloads browser. iOS previously defaulted to Bibles, hiding commentaries, dictionaries, books,
+     and maps until the user changed filters.
+     */
+    func testModuleBrowserInitialCategoryDefaultsToAndroidAllTypes() {
+        XCTAssertNil(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "",
+                defaultDownloadMode: .disabled
+            )
+        )
+        XCTAssertNil(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "KJV",
+                defaultDownloadMode: .disabled
+            )
+        )
+        XCTAssertNil(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "",
+                defaultDownloadMode: .englishStartup
+            )
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "",
+                defaultDownloadMode: .disabled,
+                storedFilterIndex: 2
+            ),
+            .commentary
+        )
+        XCTAssertNil(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "KJV",
+                defaultDownloadMode: .disabled,
+                storedFilterIndex: 2
+            )
+        )
+        XCTAssertNil(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "",
+                defaultDownloadMode: .englishStartup,
+                storedFilterIndex: 2
+            )
+        )
+        XCTAssertEqual(ModuleBrowserView.androidFilterIndex(for: .commentary), 2)
+        XCTAssertEqual(ModuleBrowserView.category(forAndroidFilterIndex: 6), .addon)
+        XCTAssertNil(ModuleBrowserView.category(forAndroidFilterIndex: 99))
+    }
+
+    /**
+     Verifies Downloads default language selection follows Android's priority order.
+
+     Android `DocumentSelectionBase.defaultLanguage` first reuses a valid sticky language, then the
+     device language when that language has Bible rows, then an installed Bible language, then English
+     or the first available language. iOS should not preserve its own all-language default when Android
+     would select a concrete language.
+     */
+    func testModuleBrowserDefaultLanguageMatchesAndroidPriority() {
+        let englishBible = RemoteModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            sourceName: "CrossWire"
+        )
+        let frenchBible = RemoteModuleInfo(
+            name: "LSG",
+            description: "Louis Segond",
+            category: .bible,
+            language: "fr",
+            sourceName: "CrossWire"
+        )
+        let germanCommentary = RemoteModuleInfo(
+            name: "GERCOM",
+            description: "German Commentary",
+            category: .commentary,
+            language: "de",
+            sourceName: "CrossWire"
+        )
+
+        XCTAssertEqual(
+            ModuleBrowserView.defaultLanguageCode(
+                availableModules: [englishBible, frenchBible],
+                installedModules: [],
+                availableLanguages: ["en", "fr"],
+                localeLanguageCode: "en",
+                stickyLanguageCode: "fr"
+            ),
+            "fr"
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.defaultLanguageCode(
+                availableModules: [englishBible, frenchBible],
+                installedModules: [],
+                availableLanguages: ["en", "fr"],
+                localeLanguageCode: "fr",
+                stickyLanguageCode: nil
+            ),
+            "fr"
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.defaultLanguageCode(
+                availableModules: [germanCommentary],
+                installedModules: [
+                    ModuleInfo(
+                        name: "GER",
+                        description: "German Bible",
+                        category: .bible,
+                        language: "de"
+                    )
+                ],
+                availableLanguages: ["de", "fr"],
+                localeLanguageCode: "fr",
+                stickyLanguageCode: nil
+            ),
+            "de"
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.defaultLanguageCode(
+                availableModules: [germanCommentary],
+                installedModules: [],
+                availableLanguages: ["de", "en"],
+                localeLanguageCode: "fr",
+                stickyLanguageCode: nil
+            ),
+            "en"
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.defaultLanguageCode(
+                availableModules: [germanCommentary],
+                installedModules: [],
+                availableLanguages: ["de"],
+                localeLanguageCode: "fr",
+                stickyLanguageCode: nil
+            ),
+            "de"
+        )
+    }
+
+    /**
+     Verifies Android sticky-language state only records explicit user language choices.
+
+     Android stores `DocumentSelectionBase.lastSelectedLanguage` from the language item-click handler.
+     Its default-language routine updates the spinner text but does not make the computed default
+     sticky. iOS must preserve that distinction so a device/default language does not override future
+     default-language resolution as if the user had selected it.
+     */
+    func testModuleBrowserStickyLanguageRecordsOnlyExplicitSelection() {
+        ModuleBrowserView.resetExplicitSelectedLanguageForTesting()
+        defer { ModuleBrowserView.resetExplicitSelectedLanguageForTesting() }
+
+        _ = ModuleBrowserView.defaultLanguageCode(
+            availableModules: [
+                RemoteModuleInfo(
+                    name: "GER",
+                    description: "German Bible",
+                    category: .bible,
+                    language: "de",
+                    sourceName: "CrossWire"
+                )
+            ],
+            installedModules: [],
+            availableLanguages: ["de"],
+            localeLanguageCode: "de",
+            stickyLanguageCode: ModuleBrowserView.explicitSelectedLanguageForTesting()
+        )
+
+        XCTAssertNil(ModuleBrowserView.explicitSelectedLanguageForTesting())
+
+        ModuleBrowserView.rememberExplicitSelectedLanguage("")
+        XCTAssertNil(ModuleBrowserView.explicitSelectedLanguageForTesting())
+
+        ModuleBrowserView.rememberExplicitSelectedLanguage("fr")
+        XCTAssertEqual(ModuleBrowserView.explicitSelectedLanguageForTesting(), "fr")
+    }
+
+    /**
+     Verifies iOS picker cancellation is ignored like Android's Install ZIP cancel path.
+
+     Android returns from the Install ZIP activity without showing a download error when the user
+     backs out. SwiftUI reports the same user action as a file-importer failure, so iOS must classify
+     the Cocoa cancellation code separately from real importer failures.
+     */
+    func testModuleBrowserInstallZipCancellationMatchesAndroidNoErrorBehavior() {
+        XCTAssertTrue(
+            ModuleBrowserView.isFileImporterCancellation(
+                NSError(domain: NSCocoaErrorDomain, code: CocoaError.userCancelled.rawValue)
+            )
+        )
+        XCTAssertFalse(
+            ModuleBrowserView.isFileImporterCancellation(
+                NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileNoSuchFile.rawValue)
+            )
+        )
+        XCTAssertFalse(
+            ModuleBrowserView.isFileImporterCancellation(
+                NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+            )
+        )
+    }
+
+    /**
+     Verifies refresh errors do not erase prior install/import errors.
+
+     Android tracks document install errors and metadata/repository errors independently. The
+     Downloads overflow should keep earlier install failures visible after a later catalog refresh
+     while still de-duplicating repeated repository errors.
+     */
+    func testModuleBrowserDownloadErrorsMergeRefreshFailures() {
+        XCTAssertEqual(
+            ModuleBrowserView.mergedDownloadErrors(
+                existing: [" Install failed ", "Metadata failed"],
+                refreshErrors: ["Repo failed", "", "Install failed", " Repo failed "]
+            ),
+            ["Install failed", "Metadata failed", "Repo failed"]
+        )
+    }
+
+    /**
+     Verifies install failures reuse the localized download-failure prefix.
+
+     Android surfaces install failures through the same Download errors affordance as repository
+     failures. iOS should keep that shared error contract and avoid introducing hard-coded English
+     prefixes inside the overflow dialog.
+     */
+    func testModuleBrowserDownloadFailureMessageUsesLocalizedPrefix() {
+        let prefix = String(localized: "error_download_failed", defaultValue: "Download failed")
+
+        XCTAssertEqual(
+            ModuleBrowserView.downloadFailureMessage("Network unavailable"),
+            "\(prefix): Network unavailable"
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.downloadFailureMessage(moduleName: "KJV", message: "Network unavailable"),
+            "\(prefix): KJV: Network unavailable"
+        )
+    }
+
+    /**
+     Verifies Downloads failure fallbacks use stable localization keys.
+
+     Android routes repository, install, and uninstall failures through user-visible Downloads
+     surfaces. iOS should keep the same behavior without hard-coded English fallback messages.
+     */
+    func testModuleBrowserFailureFallbackMessagesUseLocalization() {
+        XCTAssertEqual(
+            ModuleBrowserView.noRepositorySourcesConfiguredMessage(),
+            String(localized: "no_sources_configured", defaultValue: "No repository sources configured.")
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.moduleUnavailableForInstallationMessage(moduleName: "KJV"),
+            String(localized: "module_unavailable_for_installation \("KJV")")
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.moduleSourceNotFoundMessage(moduleName: "KJV"),
+            String(localized: "module_source_not_found \("KJV")")
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.uninstallFailureMessage("Disk locked"),
+            String(localized: "uninstall_failed \("Disk locked")")
+        )
+    }
+
+    private func makeModuleRepositoryDownloadMockSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ModuleBrowserDownloadMockURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    private func writeModuleRepositoryCatalogCache(sourceName: String, timestamp: Date, under baseDir: URL) throws {
+        let cacheDir = baseDir.appendingPathComponent("catalog-cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let json = """
+        {
+          "timestamp": \(timestamp.timeIntervalSinceReferenceDate),
+          "modules": []
+        }
+        """
+        try Data(json.utf8).write(to: cacheDir.appendingPathComponent("\(sourceName).json"))
+    }
+
+}
+
+/**
+ URL protocol test double for Downloads browser catalog-refresh predicates.
+
+ Tests install a request handler before creating a `URLSession`, allowing repository cache checks
+ to run without network I/O while still constructing a real `ModuleRepository`.
+ */
+private final class ModuleBrowserDownloadMockURLProtocol: URLProtocol {
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.requestHandler else {
+            fatalError("ModuleBrowserDownloadMockURLProtocol.requestHandler must be set before use")
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
