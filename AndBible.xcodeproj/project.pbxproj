@@ -44,7 +44,6 @@
 		B18500000000000000000002 /* AndBibleTests+ExternalDocumentImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B18500000000000000000001 /* AndBibleTests+ExternalDocumentImport.swift */; };
 		B20600000000000000000002 /* AndBibleTests+PassageGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20600000000000000000001 /* AndBibleTests+PassageGrid.swift */; };
 		B22900000000000000000002 /* AndBibleTests+WindowTabBarLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22900000000000000000001 /* AndBibleTests+WindowTabBarLayout.swift */; };
-		B23100000000000000000002 /* AndBibleTests+WindowPaneMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = B23100000000000000000001 /* AndBibleTests+WindowPaneMenu.swift */; };
 		7878413CFC8EEC15FAD39267 /* AndBibleUITestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D5002E961A06DB9393E326 /* AndBibleUITestSupport.swift */; };
 		A2EEBFCC9A28E42778471552 /* AndBibleUITests+Search.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5CED694021FF0C2B594EB6 /* AndBibleUITests+Search.swift */; };
 		8736B1F0D4ED3F4C47BD692A /* AndBibleUITests+PlansDownloadsWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B1FF7DFF60A342B10407D17 /* AndBibleUITests+PlansDownloadsWorkspace.swift */; };
@@ -86,7 +85,6 @@
 		B18500000000000000000001 /* AndBibleTests+ExternalDocumentImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+ExternalDocumentImport.swift"; sourceTree = "<group>"; };
 		B20600000000000000000001 /* AndBibleTests+PassageGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+PassageGrid.swift"; sourceTree = "<group>"; };
 		B22900000000000000000001 /* AndBibleTests+WindowTabBarLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+WindowTabBarLayout.swift"; sourceTree = "<group>"; };
-		B23100000000000000000001 /* AndBibleTests+WindowPaneMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+WindowPaneMenu.swift"; sourceTree = "<group>"; };
 		AB1FB2406B7E9DD316E296F7 /* AndBibleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleApp.swift; sourceTree = "<group>"; };
 		DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleTests.swift; sourceTree = "<group>"; };
 		CA1C01A1D3E74B1F00A1C001 /* CalculatorIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = CalculatorIcon.png; sourceTree = "<group>"; };
@@ -266,7 +264,6 @@
 				B18500000000000000000001 /* AndBibleTests+ExternalDocumentImport.swift */,
 				B20600000000000000000001 /* AndBibleTests+PassageGrid.swift */,
 				B22900000000000000000001 /* AndBibleTests+WindowTabBarLayout.swift */,
-				B23100000000000000000001 /* AndBibleTests+WindowPaneMenu.swift */,
 				F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */,
 				753C59196517046968D24B93 /* AndBibleTests+StrongsAndDictionary.swift */,
 				E5DF9348CDC2BD0D53181B56 /* AndBibleTests+BridgeAndProgress.swift */,
@@ -504,7 +501,6 @@
 				B18500000000000000000002 /* AndBibleTests+ExternalDocumentImport.swift in Sources */,
 				B20600000000000000000002 /* AndBibleTests+PassageGrid.swift in Sources */,
 				B22900000000000000000002 /* AndBibleTests+WindowTabBarLayout.swift in Sources */,
-				B23100000000000000000002 /* AndBibleTests+WindowPaneMenu.swift in Sources */,
 				F89C2FD58B1DFD132EEC5839 /* AndBibleTests+BridgeIOS.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
