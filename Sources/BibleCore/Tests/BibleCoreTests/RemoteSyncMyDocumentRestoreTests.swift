@@ -8,6 +8,16 @@ import SwiftData
 
 private let myDocumentRestoreSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
+/**
+ Android-compatible My Documents restore, patch replay, and upload coverage for BibleCore.
+
+ The suite builds Android-shaped SQLite and gzip fixtures in the process temporary directory,
+ restores them into in-memory SwiftData containers, and verifies that BibleCore preserves
+ Android backup contracts without needing the app-host test target.
+
+ Side effects are limited to temporary fixture files and in-memory SwiftData stores created
+ per test; failures indicate Android backup parity or local My Documents data-safety drift.
+ */
 final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
     /**
      Verifies local My Documents insertion keeps Android bridge initials unique after
