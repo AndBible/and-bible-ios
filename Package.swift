@@ -51,7 +51,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SwordKitTests",
-            dependencies: ["SwordKit"],
+            dependencies: ["SwordKit", "CLibSword"],
             path: "Sources/SwordKit/Tests/SwordKitTests"
         ),
 
