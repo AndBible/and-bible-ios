@@ -1,4 +1,3 @@
-import CLibSword
 import Foundation
 import SQLite3
 import SwiftData
@@ -393,35 +392,6 @@ struct ReadingPlanMockRemoteSyncUploadedFile: Equatable {
     let parentID: String
     let contentType: String
     let data: Data
-}
-
-/**
- Decompresses gzip bytes produced by remote-sync archive services for fixture inspection.
-
- - Parameter data: Gzip-compressed archive bytes.
- - Returns: Decompressed archive payload.
- - Side effects: Allocates and frees one CLibSword gzip output buffer.
- - Failure modes: Throws `RemoteSyncArchiveStagingError.decompressionFailed` when decompression
-   fails or the input buffer is empty.
- */
-func gunzipTestData(_ data: Data) throws -> Data {
-    try data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Data in
-        guard let baseAddress = ptr.baseAddress else {
-            throw RemoteSyncArchiveStagingError.decompressionFailed
-        }
-
-        var outputLength: UInt = 0
-        guard let output = gunzip_data(
-            baseAddress.assumingMemoryBound(to: UInt8.self),
-            UInt(data.count),
-            &outputLength
-        ) else {
-            throw RemoteSyncArchiveStagingError.decompressionFailed
-        }
-
-        defer { gunzip_free(output) }
-        return Data(bytes: output, count: Int(outputLength))
-    }
 }
 
 /**
