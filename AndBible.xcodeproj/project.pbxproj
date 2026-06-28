@@ -14,7 +14,6 @@
 		43956CB017A08C141BDA48A8 /* BibleCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3C9AB5341FEDFFF29A3ADAD5 /* BibleCore */; };
 		605562C8D06E0B4B1A1C232B /* AndBibleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */; };
 		A1B2C3D4E5F60718293A4B5C /* AndBibleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5E /* AndBibleUITests.swift */; };
-		8A7E540F7B4E4D0C9E1A2B3C /* WorkspaceSyncRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */; };
 		D13400000000000000000002 /* AndBibleTests+Downloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = D13400000000000000000001 /* AndBibleTests+Downloads.swift */; };
 		64688F48FF7396937F81D0B5 /* SwordSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CA144AB77AEE518F1465DCC /* SwordSetup.swift */; };
 		793CB31DA9E0B8F6F4AC7677 /* AndBibleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1FB2406B7E9DD316E296F7 /* AndBibleApp.swift */; };
@@ -84,7 +83,6 @@
 		A1B2C3D4E5F60718293A4B5D /* AndBibleUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AndBibleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D4E5F60718293A4B5E /* AndBibleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITests.swift; sourceTree = "<group>"; };
 		8174AF1F3D15BAFB4EB66A1E /* AndBible.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AndBible.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSyncRestoreTests.swift; sourceTree = "<group>"; };
 		A15000000000000000000001 /* AndBibleTests+AndroidDatabaseBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+AndroidDatabaseBackup.swift"; sourceTree = "<group>"; };
 		B18500000000000000000001 /* AndBibleTests+ExternalDocumentImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+ExternalDocumentImport.swift"; sourceTree = "<group>"; };
 		B20600000000000000000001 /* AndBibleTests+PassageGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+PassageGrid.swift"; sourceTree = "<group>"; };
@@ -265,7 +263,6 @@
 			isa = PBXGroup;
 			children = (
 				DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */,
-				9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */,
 				A279E3BCEE4A2AEC1F495246 /* AndBibleTestSupport.swift */,
 				A15000000000000000000001 /* AndBibleTests+AndroidDatabaseBackup.swift */,
 				B18500000000000000000001 /* AndBibleTests+ExternalDocumentImport.swift */,
@@ -491,7 +488,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				605562C8D06E0B4B1A1C232B /* AndBibleTests.swift in Sources */,
-				8A7E540F7B4E4D0C9E1A2B3C /* WorkspaceSyncRestoreTests.swift in Sources */,
 				B69113624461C63AB21F4144 /* AndBibleTestSupport.swift in Sources */,
 				34F21932E6E652AD0A369D9C /* AndBibleTests+AppAndReader.swift in Sources */,
 				FBE587F989B0D3A1B1A283EF /* AndBibleTests+StrongsAndDictionary.swift in Sources */,
