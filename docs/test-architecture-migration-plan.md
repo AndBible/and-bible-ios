@@ -167,6 +167,7 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - Current `+AppAndReader` remainder: the app-hosted scene-configuration sentinel only.
 - **Split `+AppAndReader` deliberately**: `sceneConfiguration` test stays app-hosted; the `ContentView` legacy root-sidebar source scan is now a repo-standards `source-guards` check; any future package-owned tests should move to the lowest owning package target instead of returning to the app-host bundle.
 - `AndBibleTests+ReaderNavigation` bridge/payload slice has moved to `BibleUITests` because compare payloads, reader document JSON factories, auxiliary fallback documents, and rendered-content tokens are BibleUI reader/bridge contracts that do not require app bootstrap.
+- `AndBibleTests+ReaderNavigation` reader interaction-policy slice has moved to `BibleUITests` because double-tap fullscreen gating, horizontal swipe mapping, and auto-fullscreen threshold logic are BibleUI policy/controller contracts with injected settings, not app bootstrap behavior.
 - Run BibleUITests via `xcodebuild test -scheme BibleUITests -destination 'platform=iOS Simulator,...'` against the **committed package test scheme from Phase 0** (no app host).
 - Gate per batch: moved batch green in new target; equal count removed from app bundle; app build still green.
 
