@@ -154,6 +154,233 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
+     Verifies Downloads filtering and sort order match Android's document browser rules.
+
+     Android keeps active warnings first, then updates, installed rows, recommended rows, copyright
+     placeholder rows, and finally other matching documents while hiding hard-hidden bad documents.
+     iOS must keep that same ordering contract across Bible rows, add-ons, pseudo rows, version
+     comparisons, and install-size formatting without app-host state.
+     */
+    func testModuleBrowserFiltersAndSortsAndroidDownloadRows() {
+        let modules = [
+            RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0",
+                installSizeBytes: 1_260_000
+            ),
+            RemoteModuleInfo(
+                name: "WEB",
+                description: "World English Bible",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "2.0"
+            ),
+            RemoteModuleInfo(
+                name: "REC",
+                description: "Recommended Bible",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "WARN",
+                description: "Known warning module",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "HIDE",
+                description: "Hidden module",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "MHC",
+                description: "Matthew Henry",
+                category: .commentary,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "ADDON",
+                description: "Add-on font pack",
+                category: .addon,
+                language: "zxx",
+                sourceName: "AndBible",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "PSEUDO",
+                description: "Unavailable translation",
+                category: .bible,
+                language: "en",
+                sourceName: "Not Available",
+                availability: .unavailable,
+                unavailableReason: "Unavailable",
+                version: "0.0"
+            )
+        ]
+        let installed = [
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en", version: "1.0"),
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en", version: "1.0")
+        ]
+        let recommended = ModuleDownloadConfiguration(
+            bibles: ["en": ["REC::CrossWire"]]
+        )
+        let bad = ModuleDownloadConfiguration(
+            bibles: ["en": ["WARN::CrossWire::1.0::W", "HIDE::CrossWire::1.0::H"]]
+        )
+
+        let filtered = ModuleBrowserView.filteredDownloadModules(
+            modules,
+            selectedCategory: nil,
+            selectedLanguage: "en",
+            searchText: "",
+            installedModules: installed,
+            downloadActivities: ["WARN": .inProgress(0.25)],
+            recommendedDocuments: recommended,
+            badDocuments: bad
+        )
+
+        XCTAssertEqual(filtered.map(\.name), ["WARN", "WEB", "KJV", "REC", "PSEUDO", "MHC"])
+        let addonFiltered = ModuleBrowserView.filteredDownloadModules(
+            modules,
+            selectedCategory: .addon,
+            selectedLanguage: "en",
+            searchText: "",
+            installedModules: installed,
+            downloadActivities: [:],
+            recommendedDocuments: recommended,
+            badDocuments: bad
+        )
+        XCTAssertEqual(addonFiltered.map(\.name), ["ADDON"])
+        XCTAssertEqual(
+            ModuleBrowserView.displayStatus(
+                for: modules[1],
+                installedModules: installed,
+                downloadActivities: [:]
+            ),
+            .updateAvailable
+        )
+        XCTAssertEqual(ModuleBrowserView.installSizeText(for: modules[0].installSizeBytes), "1.3 MB")
+        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.10", installedVersion: "1.9"))
+        XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.0", installedVersion: "1.0"))
+        XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "", installedVersion: "1.0"))
+        XCTAssertNil(ModuleBrowserView.installSizeText(for: 0))
+        XCTAssertNil(ModuleBrowserView.installSizeText(for: -1))
+    }
+
+    /**
+     Verifies failed source refreshes keep Android-visible cached rows for those sources only.
+
+     Android restores usable cached catalog rows when a repository refresh fails, but it does not
+     reintroduce rows from unrelated sources or duplicate rows already refreshed successfully. A
+     failure here means Downloads can either hide still-installable cached documents or leak stale
+     rows from sources that refreshed cleanly.
+     */
+    func testModuleBrowserMergesCachedCatalogRowsForFailedSources() {
+        let refreshedModules = [
+            RemoteModuleInfo(
+                name: "ASV",
+                description: "American Standard Version",
+                category: .bible,
+                language: "en",
+                sourceName: "AndBible"
+            ),
+            RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire"
+            )
+        ]
+        let cachedModules = [
+            RemoteModuleInfo(
+                name: "ASV",
+                description: "American Standard Version",
+                category: .bible,
+                language: "en",
+                sourceName: "AndBible"
+            ),
+            RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire"
+            ),
+            RemoteModuleInfo(
+                name: "MHC",
+                description: "Matthew Henry",
+                category: .commentary,
+                language: "en",
+                sourceName: "CrossWire"
+            ),
+            RemoteModuleInfo(
+                name: "WEB",
+                description: "World English Bible",
+                category: .bible,
+                language: "en",
+                sourceName: "CustomSource"
+            )
+        ]
+
+        let merged = ModuleBrowserView.modulesByAddingCachedCatalogsForFailedSources(
+            refreshedModules: refreshedModules,
+            cachedModules: cachedModules,
+            failedSourceNames: ["CrossWire"]
+        )
+
+        XCTAssertEqual(merged.map(\.id), ["AndBible:ASV", "CrossWire:KJV", "CrossWire:MHC"])
+    }
+
+    /**
+     Verifies startup default downloads only run after a catalog contains installable rows.
+
+     Android avoids starting the default-document flow when the startup catalog is empty or only
+     contains copyright placeholder rows. iOS must preserve that guard so unavailable pseudo modules
+     do not satisfy the startup-download precondition.
+     */
+    func testModuleBrowserStartupDefaultsRequireInstallableCatalogRows() {
+        let unavailableModules = [
+            RemoteModuleInfo(
+                name: "PSEUDO",
+                description: "Unavailable translation",
+                category: .bible,
+                language: "en",
+                sourceName: "Not Available",
+                availability: .unavailable,
+                unavailableReason: "Unavailable"
+            )
+        ]
+        let installableModules = [
+            RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire"
+            )
+        ]
+
+        XCTAssertFalse(ModuleBrowserView.startupDefaultCatalogHasInstallableRows([]))
+        XCTAssertFalse(ModuleBrowserView.startupDefaultCatalogHasInstallableRows(unavailableModules))
+        XCTAssertTrue(ModuleBrowserView.startupDefaultCatalogHasInstallableRows(installableModules))
+    }
+
+    /**
      Verifies Downloads only auto-refreshes missing or stale repository catalogs.
 
      Android loads cached metadata first and refreshes when a source has no usable cache or the cache

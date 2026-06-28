@@ -108,6 +108,13 @@ final class SwordManagerTests: XCTestCase {
         }
     }
 
+    /**
+     Verifies recommended-document refresh failures preserve the last valid Android metadata cache.
+
+     Downloads and startup default-module selection rely on this cache when GitHub-hosted metadata is
+     malformed or temporarily unavailable. A failure means a transient server problem can erase the
+     Android-compatible recommendation state even though the prior cache is still valid.
+     */
     func testRecommendedDocumentRefreshPreservesCachedMetadataAfterFailures() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
