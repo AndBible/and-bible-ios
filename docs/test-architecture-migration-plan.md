@@ -136,6 +136,7 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - CI now includes an app-host-free `ios-bibleui-package-tests` simulator job so moved BibleUI tests remain enforced outside the app-target bundle.
 - `AndBibleTests+WindowPaneMenu` has been retired from the app-host bundle because equivalent Android-parity coverage already lives in `BibleWindowPaneMenuModelTests` under the `BibleUITests` package target.
 - `AndBibleTests+WindowTabBarLayout` has moved to `BibleUITests` because it exercises pure BibleUI footer layout constants and Android-parity layout decisions without app bootstrap.
+- `AndBibleTests+SettingsIcons` has moved to `BibleUITests` because it exercises BibleUI settings catalogs, text-display editor state, and reader chrome palette contracts without app bootstrap.
 - Batches for the genuinely BibleUI-behavior remainder: ReaderNavigation, Bookmarks/Strongs, Window/Settings, view-model parts of `+AppAndReader`.
 - **Split `+AppAndReader` deliberately**: `sceneConfiguration` test stays app-hosted; `testContentViewDoesNotContainLegacyRootSidebarShell` becomes a repo-standards guardrail or stays app-hosted (decide explicitly - do not move to BibleUITests); the other ~78 funcs go to BibleUITests.
 - Run BibleUITests via `xcodebuild test -scheme BibleUITests -destination 'platform=iOS Simulator,...'` against the **committed package test scheme from Phase 0** (no app host).
