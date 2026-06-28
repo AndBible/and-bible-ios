@@ -1,9 +1,18 @@
 import XCTest
+import Foundation
 import SwiftUI
 @testable import BibleCore
 @testable import BibleUI
 
-extension AndBibleTests {
+/**
+ BibleUI settings icon and text-display presentation parity coverage.
+
+ These tests live in the app-host-free `BibleUITests` package lane because they assert package
+ presentation catalogs, editor state, and reader chrome palette contracts rather than app delegate
+ bootstrap. Failures mean iOS has drifted from Android settings metadata, durable scope ownership,
+ or text-display widget behavior.
+ */
+final class SettingsIconsTests: XCTestCase {
     func testApplicationPreferenceIconsComeFromAndroidSettingsXml() {
         XCTAssertEqual(
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "navigate_to_verse_pref")?.androidDrawableName,
@@ -759,13 +768,9 @@ extension AndBibleTests {
      picker or SwiftUI sheet/Form editor with iOS chrome.
      */
     func testTextDisplayPreferenceEditorsAvoidNativeIOSPickerAndSheetRoutes() throws {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let repoRoot = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = repoRoot.appendingPathComponent(
-            "Sources/BibleUI/Sources/BibleUI/Settings/TextDisplaySettingsView.swift"
-        )
+        let sourceRelativePath = "Sources/BibleUI/Sources/BibleUI/Settings/TextDisplaySettingsView.swift"
+        let repoRoot = try Self.repositoryRoot(containing: sourceRelativePath)
+        let sourceURL = repoRoot.appendingPathComponent(sourceRelativePath)
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
         XCTAssertFalse(source.contains("UIFontPickerViewController"))
@@ -823,5 +828,40 @@ extension AndBibleTests {
                 "PAGE_BUTTONS",
             ]
         )
+    }
+
+    /**
+     Finds the repository root from this test source file by walking upward until a known
+     repo-relative source path exists.
+
+     - Parameter relativePath: A source-controlled path expected to exist below the repository root.
+     - Parameter filePath: The current test file path. Defaults to Swift's compile-time `#filePath`.
+     - Returns: The directory URL that contains `relativePath`.
+     - Throws: An `NSError` when the test is compiled from an unexpected checkout layout.
+
+     This keeps source-scan tests deterministic after migration from `AndBibleTests/` to nested
+     package test directories, without hard-coding a fixed number of parent components.
+     */
+    private static func repositoryRoot(containing relativePath: String, from filePath: String = #filePath) throws -> URL {
+        var directory = URL(fileURLWithPath: filePath).deletingLastPathComponent()
+        while true {
+            let candidate = directory.appendingPathComponent(relativePath)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return directory
+            }
+
+            let parent = directory.deletingLastPathComponent()
+            if parent.path == directory.path {
+                throw NSError(
+                    domain: "SettingsIconsTests",
+                    code: 1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Unable to locate repository root containing \(relativePath) from \(filePath)"
+                    ]
+                )
+            }
+            directory = parent
+        }
     }
 }
