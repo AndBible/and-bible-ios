@@ -1,21 +1,9 @@
 import XCTest
-import AVFoundation
 @testable import BibleCore
-import CLibSword
 @testable import SwordKit
-import SwiftData
 import SQLite3
 @testable import BibleUI
 @testable import BibleView
-import struct SwiftUI.Binding
-import enum SwiftUI.ColorScheme
-import struct SwiftUI.EdgeInsets
-import struct SwiftUI.EmptyView
-#if os(iOS)
-import UIKit
-import WebKit
-import struct SwiftUI.Color
-#endif
 
 /// SQLite destructor marker used by the temporary MyBible dictionary fixtures in this file.
 private let myBibleDictionaryFixtureSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -59,7 +47,15 @@ private final class SwordConcurrencyFailureRecorder: @unchecked Sendable {
     }
 }
 
-extension AndBibleTests {
+/**
+ BibleUI Strongs, dictionary, and search parity coverage.
+
+ These tests protect Android-aligned Strong's query normalization, SWORD-backed search/indexing,
+ dictionary rendering, restored MyBible dictionary handling, and related reader document builders.
+ They run in the app-host-free BibleUI package lane while still using temporary bundled SWORD
+ fixtures through `BibleUISwordFixtureTestCase`.
+ */
+final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     func testCSVSetEncodingAndDecodingRoundTrip() {
         let encoded = AppPreferenceRegistry.encodeCSVSet(["  KJV  ", "", "ESV", "KJV", "  "])
         XCTAssertEqual(encoded, "ESV,KJV,KJV")
@@ -212,15 +208,9 @@ extension AndBibleTests {
      - Side effects: Reads `SearchView.swift` from the checked-out source tree.
      */
     func testSearchCriteriaScreenUsesAndroidFormStructure() throws {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let repoRoot = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let searchViewURL = repoRoot.appendingPathComponent(
-            "Sources/BibleUI/Sources/BibleUI/Search/SearchView.swift"
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Search/SearchView.swift"
         )
-
-        let source = try String(contentsOf: searchViewURL, encoding: .utf8)
 
         XCTAssertTrue(source.contains("private var searchCriteriaForm"))
         XCTAssertTrue(source.contains("private var searchSubmitButton"))

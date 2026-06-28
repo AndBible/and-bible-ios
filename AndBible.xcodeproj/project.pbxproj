@@ -28,7 +28,6 @@
 		5126013EC1173F5B6609881C /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 451FFBBE453EACF1547FF4B6 /* Localizable.strings */; };
 		B69113624461C63AB21F4144 /* AndBibleTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A279E3BCEE4A2AEC1F495246 /* AndBibleTestSupport.swift */; };
 		34F21932E6E652AD0A369D9C /* AndBibleTests+AppAndReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */; };
-		FBE587F989B0D3A1B1A283EF /* AndBibleTests+StrongsAndDictionary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 753C59196517046968D24B93 /* AndBibleTests+StrongsAndDictionary.swift */; };
 		AFD079CE86282D6B4341904C /* AndBibleTests+BridgeAndProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DF9348CDC2BD0D53181B56 /* AndBibleTests+BridgeAndProgress.swift */; };
 		7DEA38853208672406B7FCDA /* AndBibleTests+ReaderNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 069F1737655720623BBF1459 /* AndBibleTests+ReaderNavigation.swift */; };
 		E9FA86A2D5CC0A4A4E80DA43 /* AndBibleTests+WorkspaceAndRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBD8E8244D3217EB4FF6EFDA /* AndBibleTests+WorkspaceAndRepository.swift */; };
@@ -134,7 +133,6 @@
 		F25455B6A3C4498DA7EC3907 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh-Hant; path = zh-Hant.lproj/Localizable.strings; sourceTree = "<group>"; };
 		A279E3BCEE4A2AEC1F495246 /* AndBibleTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleTestSupport.swift; sourceTree = "<group>"; };
 		F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+AppAndReader.swift"; sourceTree = "<group>"; };
-		753C59196517046968D24B93 /* AndBibleTests+StrongsAndDictionary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+StrongsAndDictionary.swift"; sourceTree = "<group>"; };
 		E5DF9348CDC2BD0D53181B56 /* AndBibleTests+BridgeAndProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+BridgeAndProgress.swift"; sourceTree = "<group>"; };
 		069F1737655720623BBF1459 /* AndBibleTests+ReaderNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+ReaderNavigation.swift"; sourceTree = "<group>"; };
 		CBD8E8244D3217EB4FF6EFDA /* AndBibleTests+WorkspaceAndRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+WorkspaceAndRepository.swift"; sourceTree = "<group>"; };
@@ -257,7 +255,6 @@
 				A15000000000000000000001 /* AndBibleTests+AndroidDatabaseBackup.swift */,
 				B18500000000000000000001 /* AndBibleTests+ExternalDocumentImport.swift */,
 				F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */,
-				753C59196517046968D24B93 /* AndBibleTests+StrongsAndDictionary.swift */,
 				E5DF9348CDC2BD0D53181B56 /* AndBibleTests+BridgeAndProgress.swift */,
 				069F1737655720623BBF1459 /* AndBibleTests+ReaderNavigation.swift */,
 				CBD8E8244D3217EB4FF6EFDA /* AndBibleTests+WorkspaceAndRepository.swift */,
@@ -475,7 +472,6 @@
 				605562C8D06E0B4B1A1C232B /* AndBibleTests.swift in Sources */,
 				B69113624461C63AB21F4144 /* AndBibleTestSupport.swift in Sources */,
 				34F21932E6E652AD0A369D9C /* AndBibleTests+AppAndReader.swift in Sources */,
-				FBE587F989B0D3A1B1A283EF /* AndBibleTests+StrongsAndDictionary.swift in Sources */,
 				AFD079CE86282D6B4341904C /* AndBibleTests+BridgeAndProgress.swift in Sources */,
 				7DEA38853208672406B7FCDA /* AndBibleTests+ReaderNavigation.swift in Sources */,
 				E9FA86A2D5CC0A4A4E80DA43 /* AndBibleTests+WorkspaceAndRepository.swift in Sources */,
