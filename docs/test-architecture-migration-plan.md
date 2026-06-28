@@ -140,6 +140,7 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - `AndBibleTests+PassageGrid` has moved to `BibleUITests` because it exercises BibleUI passage chooser layout, palette, progress, and Android source guardrails without app bootstrap.
 - `AndBibleTests+StrongsAndDictionary` has moved to `BibleUITests` because it exercises BibleUI Strong's, dictionary, search, and Android restored-MyBible dictionary contracts without app bootstrap.
 - `AndBibleTests+BridgeIOS` has been split by owning module: WebKit/UIKit bridge lifecycle and emission contracts moved to `BibleViewTests`, while BibleUI reader modal-key routing remains in `BibleUITests`.
+- `AndBibleTests+BridgeAndProgress` has been split by owning module: raw bridge dispatch moved to `BibleViewTests`, speech/progress stores moved to `BibleCoreTests`, and reader memorization/reading-progress bridge integration moved to `BibleUITests`.
 - Batches for the genuinely BibleUI-behavior remainder: ReaderNavigation, Bookmarks/Strongs, Window/Settings, view-model parts of `+AppAndReader`.
 - **Split `+AppAndReader` deliberately**: `sceneConfiguration` test stays app-hosted; `testContentViewDoesNotContainLegacyRootSidebarShell` becomes a repo-standards guardrail or stays app-hosted (decide explicitly - do not move to BibleUITests); the other ~78 funcs go to BibleUITests.
 - Run BibleUITests via `xcodebuild test -scheme BibleUITests -destination 'platform=iOS Simulator,...'` against the **committed package test scheme from Phase 0** (no app host).
