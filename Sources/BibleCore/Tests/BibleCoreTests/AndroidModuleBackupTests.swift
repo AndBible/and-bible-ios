@@ -2,7 +2,35 @@ import XCTest
 @testable import BibleCore
 import SwordKit
 
-extension AndBibleTests {
+/**
+ Verifies Android-compatible module backup import/export behavior in the BibleCore package target.
+
+ The suite builds in-memory ZIP archives and temporary SWORD module roots to exercise
+ `AndroidModuleBackupService` without the app host. Failures indicate Android module backup
+ parity regressions, unsafe file overwrite behavior, or broken iOS/Android round-trip export
+ compatibility. Temporary files are registered in `temporaryFilePaths` and removed after each
+ test to keep package-test runs deterministic.
+ */
+final class AndroidModuleBackupTests: XCTestCase {
+    private var temporaryFilePaths: [String] = []
+
+    /**
+     Removes temporary SWORD roots and archive files created by each test.
+
+     The cleanup mirrors the former app-host `AndBibleTests` teardown dependency locally so this
+     package suite does not retain UI-heavy app test support. Cleanup failures are ignored because
+     failed assertions should report the behavior regression while temporary-directory cleanup is
+     best-effort after test completion.
+     */
+    override func tearDown() {
+        let fileManager = FileManager.default
+        for path in temporaryFilePaths {
+            try? fileManager.removeItem(atPath: path)
+        }
+        temporaryFilePaths.removeAll()
+        super.tearDown()
+    }
+
     /**
      Verifies that Android module backups are recognized by the `.abmd.zip` suffix and rejected
      when their manifest declares the database-backup type.
@@ -161,7 +189,7 @@ extension AndBibleTests {
      - restore writes the config and RawLD4 payload files into the module root
 
      Failure meaning:
-     - iOS rejects valid Android production module backups with “references missing data path”
+     - iOS rejects valid Android production module backups with "references missing data path"
        even though Android and SWORD store RawLD4 data as file-stem payloads.
      */
     func testAndroidModuleBackupRestoresRawLD4FileStemModuleFromFileURL() throws {
@@ -480,7 +508,7 @@ extension AndBibleTests {
             at: root.appendingPathComponent("mods.d", isDirectory: true),
             withIntermediateDirectories: true
         )
-        temporarySwordModulePaths.append(root.path)
+        temporaryFilePaths.append(root.path)
         return root
     }
 
@@ -516,7 +544,7 @@ extension AndBibleTests {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("android-module-backup-\(UUID().uuidString).abmd.zip")
         try archiveData.write(to: url)
-        temporarySwordModulePaths.append(url.path)
+        temporaryFilePaths.append(url.path)
         return url
     }
 

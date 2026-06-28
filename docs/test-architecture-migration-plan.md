@@ -1,6 +1,6 @@
 # Test Architecture Migration Plan - Colocate Tests in Package Targets
 
-Status: in progress (Phase 1 pilot started)
+Status: in progress (Phase 2 BibleCore package lane started)
 Owner: TBD
 Last updated: 2026-06-27
 
@@ -121,7 +121,9 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - Gate: chosen command succeeds; identical count/results; app target is not built for the package-test run; keep original until CI proves the new copy green, then delete original in same PR.
 
 ### Phase 2 - BibleCore logic tests
-- Move the 3 BibleCore-only files; same conversion.
+- Move the cleanest BibleCore-only files first, preserving app-host-free package execution after each slice.
+  - `AndBibleTests+AndroidModuleBackup` has moved to `BibleCoreTests` as the first Phase 2 slice because it only needed local temporary-file cleanup after leaving `AndBibleTests`.
+  - `RemoteSyncMyDocumentRestoreTests` and `WorkspaceSyncRestoreTests` are standalone BibleCore tests but carry large SQLite/gzip fixture blocks; move them in follow-up slices after confirming direct `CLibSword` imports and fixture ownership stay local to the package target.
 - Add CI coverage using the chosen Phase 0 mechanism:
   - **Recommended option (b):** per-target simulator scheme job(s) for `SwordKitTests` and `BibleCoreTests`, with no app host.
   - **Optional option (a):** macOS `swift test` job only after the whole-package SwiftPM graph compiles under full Xcode.

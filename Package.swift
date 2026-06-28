@@ -69,7 +69,7 @@ let package = Package(
         ),
         .testTarget(
             name: "BibleCoreTests",
-            dependencies: ["BibleCore"],
+            dependencies: ["BibleCore", "SwordKit"],
             path: "Sources/BibleCore/Tests/BibleCoreTests"
         ),
 
