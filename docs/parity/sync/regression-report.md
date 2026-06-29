@@ -81,11 +81,9 @@ Verification matrix:
 ### UI
 
 - `AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus`
-- `AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState`
 - `AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen`
 - `AndBibleUITests/testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow`
 - `AndBibleUITests/testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath`
-- `AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection`
 - `AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen`
 - `BibleUITests/SettingsIconsTests/testApplicationPreferenceFeatureShortcutsExposeAndroidRows`
 - `BibleUITests/SettingsIconsTests/testApplicationPreferenceFeatureShortcutsFollowRuntimeAvailability`

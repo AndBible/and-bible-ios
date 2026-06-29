@@ -331,51 +331,19 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that disabling one seeded NextCloud sync category updates the exported Sync screen
-     state.
+     Verifies disabling a seeded NextCloud category mutates state and persists across reopen.
      *
      * - Side effects:
      *   - launches the app on the reader shell with persisted NextCloud settings and bookmarks
      *     already enabled through host-side fixture seeding
-     *   - opens Sync Settings from the reader action and toggles the production bookmarks switch
-     *     off
-     * - Failure modes:
-     *   - fails if the production bookmarks toggle never appears for the seeded category state
-     *   - fails if the Sync screen state does not start with `backend=NEXT_CLOUD;enabled=bookmarks`
-     *   - fails if disabling the category does not update the exported Sync screen state to
-     *     `backend=NEXT_CLOUD;enabled=none`
-     */
-    func testSyncSettingsCategoryToggleMutatesExportedState() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openSyncSettingsFromReaderAction(in: app)
-        let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        assertSyncState(
-            syncState.value as? String,
-            backend: "NEXT_CLOUD",
-            enabled: "bookmarks"
-        )
-
-        toggleSyncCategory(
-            "syncCategoryToggle::bookmarks",
-            in: app,
-            expectedTokens: ["backend": "NEXT_CLOUD", "enabled": "none"]
-        )
-    }
-
-    /**
-     Verifies that disabling a seeded NextCloud sync category persists across a direct dismiss and
-     reopen of Sync Settings.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell with persisted NextCloud settings and bookmarks
-     *     already enabled through host-side fixture seeding
-     *   - disables the bookmarks category through the production toggle
+     *   - disables the bookmarks category through the production toggle and observes the immediate
+     *     exported `enabled=none` state
      *   - dismisses the Sync screen, reopens it from the reader action, and rehydrates from
      *     persisted settings state
      * - Failure modes:
      *   - fails if the seeded Sync screen does not start with `backend=NEXT_CLOUD;enabled=bookmarks`
+     *   - fails if disabling the category does not update the exported Sync screen state to
+     *     `backend=NEXT_CLOUD;enabled=none`
      *   - fails if the direct dismiss or reopen controls never appear
      *   - fails if reopening the sheet does not preserve the exported `enabled=none` state token
      */
@@ -409,52 +377,18 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that switching the active sync backend swaps the visible Sync section and exported
-     backend state.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell with persisted NextCloud settings from host-side
-     *     fixture seeding
-     *   - opens Sync Settings from the reader action and switches the production picker from
-     *     NextCloud to iCloud
-     * - Failure modes:
-     *   - fails if the seeded NextCloud field or the iCloud enable toggle never appears
-     *   - fails if the exported Sync screen state does not move from `backend=NEXT_CLOUD;enabled=none`
-     *     to `backend=ICLOUD;enabled=none`
-     */
-    func testSyncSettingsBackendSwitchMutatesVisibleSection() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openSyncSettingsFromReaderAction(in: app)
-        let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        assertSyncState(
-            syncState.value as? String,
-            backend: "NEXT_CLOUD",
-            enabled: "none"
-        )
-        XCTAssertTrue(requireElement("syncNextCloudServerURLField", in: app, timeout: 10).exists)
-
-        tapSyncBackend("ICLOUD", in: app)
-        waitForSyncState(
-            ["backend": "ICLOUD", "enabled": "none"],
-            in: app,
-            timeout: 10
-        )
-        XCTAssertTrue(requireElement("syncICloudEnabledToggle", in: app, timeout: 10).exists)
-    }
-
-    /**
-     Verifies that switching the active sync backend persists across a direct dismiss and reopen of
-     Sync Settings.
+     Verifies switching the active sync backend swaps visible sections and persists across reopen.
      *
      * - Side effects:
      *   - launches the app on the reader shell and opens Sync Settings with its persisted backend
-     *   - switches the backend from NextCloud to iCloud through the production picker
+     *   - switches the backend from NextCloud to iCloud through the production picker and observes
+     *     the immediate iCloud section
      *   - dismisses and reopens Sync Settings from the reader action so the sheet rehydrates from
      *     persisted settings state
      * - Failure modes:
      *   - fails if the seeded Sync screen does not start in the NextCloud branch
+     *   - fails if the exported Sync screen state does not move from `backend=NEXT_CLOUD;enabled=none`
+     *     to `backend=ICLOUD;enabled=none`
      *   - fails if the dismiss or reopen controls never appear
      *   - fails if reopening the sheet does not preserve the exported `backend=ICLOUD;enabled=none`
      *     state token or the iCloud section
