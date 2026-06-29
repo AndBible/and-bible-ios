@@ -14,19 +14,25 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that Backup & Restore exposes Android BackupActivity's primary workflow choices.
+     Verifies Android BackupActivity workflow rows plus iOS database-backup destination handling.
+     *
+     * Package tests own the backup archive, reset, and restore persistence contracts. This UI smoke
+     * keeps the user-visible workflow live: Backup & Restore exposes Android's Database/Documents
+     * targets, hides unsupported Application/APK and legacy JSON/CSV paths, asks for the Android
+     * "Backup to where?" decision before export, clears that pending destination on Cancel, and does
+     * not report success when the iOS share sheet is closed without selecting a destination.
      *
      * - Side effects:
      *   - launches the app and opens the reader administration Backup & Restore route
-     *   - reads Android-derived radio rows and reset actions through accessibility identifiers
+     *   - triggers Android-compatible `.abdb.zip` database backup generation twice in one route
+     *   - cancels the app-owned destination dialog once and the system share sheet once
      * - Failure modes:
-     *   - fails if iOS exposes platform-specific JSON/CSV import/export semantics
-     *   - fails if actionable Database/Documents backup, Restore/Import, or reset sections
-     *     disappear from the user-visible workflow
-     *   - fails if iOS exposes Android's Application/APK backup row even though that target cannot
-     *     be implemented on iOS
+     *   - fails if Android-compatible workflow rows disappear or unsupported legacy rows return
+     *   - fails if iOS bypasses Android's destination choice and jumps directly to the share sheet
+     *   - fails if destination Cancel leaves a stale generated archive pending
+     *   - fails if dismissing the share sheet reports a completed backup
      */
-    func testSettingsBackupRestoreShowsAndroidBackupActivityWorkflow() {
+    func testSettingsBackupRestoreDatabaseWorkflowDestinationAndShareCancel() {
         let app = makeApp()
         app.launch()
 
@@ -43,28 +49,6 @@ extension AndBibleUITests {
         XCTAssertTrue(requireReachableBackupRestoreButton("backupWorkflowReset.bookmarksButton", in: app, timeout: 10).exists)
         XCTAssertFalse(app.buttons["importExportLegacyFullBackupButton"].exists)
         XCTAssertFalse(app.buttons["backupWorkflowLegacyImportButton"].exists)
-    }
-
-    /**
-     Verifies that Android Database backup presents the backup destination choice before export.
-     *
-     * - Side effects:
-     *   - launches the app and opens Backup & Restore
-     *   - triggers Android-compatible `.abdb.zip` database backup generation
-     *   - presents the Android-derived "Backup to where?" decision instead of jumping directly to
-     *     the iOS share sheet
-     *   - cancels the destination choice and verifies the prepared payload is released
-     * - Failure modes:
-     *   - fails if the Database backup target is missing
-     *   - fails if iOS bypasses Android's destination choice and restores the old share-first flow
-     *   - fails if cancel leaves a stale generated archive pending in the screen state
-     */
-    func testSettingsBackupRestoreDatabaseBackupPresentsDestinationChoice() {
-        let app = makeApp()
-        app.launch()
-
-        let importExportScreen = openImportExport(in: app)
-        XCTAssertTrue(importExportScreen.exists)
 
         let databaseTarget = requireElement("backupWorkflowTarget.databaseButton", in: app, timeout: 10)
         tapElementReliably(databaseTarget, timeout: 10)
@@ -81,58 +65,22 @@ extension AndBibleUITests {
             "iOS backup destination copy must not advertise Google Drive as the native backup target."
         )
 
-        let cancelDeadline = Date().addingTimeInterval(10)
-        var cancelButton: XCUIElement?
-        repeat {
-            cancelButton = firstExistingElement(
-                [
-                    app.buttons["backupDestinationCancelButton"].firstMatch,
-                    app.sheets.buttons["Cancel"].firstMatch,
-                    app.alerts.buttons["Cancel"].firstMatch,
-                    app.buttons["Cancel"].firstMatch,
-                ],
-                timeout: 0
-            )
-            if cancelButton != nil {
-                break
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < cancelDeadline
-        XCTAssertNotNil(cancelButton, "Expected Backup destination dialog to expose a cancel action.")
-        guard let cancelButton else {
+        let destinationCancelButton = firstExistingElement(
+            [
+                app.buttons["backupDestinationCancelButton"].firstMatch,
+                app.sheets.buttons["Cancel"].firstMatch,
+                app.alerts.buttons["Cancel"].firstMatch,
+                app.buttons["Cancel"].firstMatch,
+            ],
+            timeout: 10
+        )
+        XCTAssertNotNil(destinationCancelButton, "Expected Backup destination dialog to expose a cancel action.")
+        guard let destinationCancelButton else {
             return
         }
-        tapElementReliably(cancelButton, timeout: 10)
+        tapElementReliably(destinationCancelButton, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "idle", in: app, timeout: 10)
-    }
 
-    /**
-     Verifies that cancelling iOS's Share destination does not report a completed backup.
-     *
-     * Android's BackupActivity first asks whether the user wants Phone storage or Share. iOS mirrors
-     * that visible decision, but the native share sheet exposes a stronger completion contract than
-     * Android intents: closing the sheet means the user did not choose a destination. This regression
-     * protects the user-facing result message so Backup & Restore only reports success after the share
-     * destination actually accepts the archive.
-     *
-     * - Side effects:
-     *   - launches the app, opens Backup & Restore, and generates a temporary Android database backup
-     *   - presents the system share sheet and dismisses it without choosing a destination
-     * - Failure modes:
-     *   - fails if dismissing the share sheet surfaces the Android database export success message
-     *   - fails if the share sheet cannot be dismissed by one of the system close/cancel controls
-     */
-    func testSettingsBackupRestoreShareCancelDoesNotReportBackupSuccess() {
-        let app = makeApp()
-        app.launch()
-
-        let importExportScreen = openImportExport(in: app)
-        XCTAssertTrue(importExportScreen.exists)
-
-        let databaseTarget = requireElement("backupWorkflowTarget.databaseButton", in: app, timeout: 10)
-        tapElementReliably(databaseTarget, timeout: 10)
-
-        let databaseBackupButton = requireElement("backupWorkflowBackupButton", in: app, timeout: 10)
         tapElementReliably(databaseBackupButton, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "backupDestinationPresented", in: app, timeout: 20)
 
