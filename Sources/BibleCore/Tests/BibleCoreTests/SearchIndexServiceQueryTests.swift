@@ -110,9 +110,9 @@ final class SearchIndexServiceQueryTests: XCTestCase {
     /**
      Verifies multi-translation Search returns per-module buckets used for grouped totals.
 
-     Android displays grouped totals after selecting additional translations. The remaining UI
-     smoke still proves the picker presentation, while this package test proves the indexed backing
-     service returns the per-module counts that the UI summarizes.
+     Android displays grouped totals after selecting additional translations. BibleUI package tests
+     own picker ordering, commit, and visible summary formatting; this Core package test owns the
+     indexed backing service buckets that the UI summarizes.
      */
     func testIndexedSearchMultipleReturnsPerModuleBucketsForGroupedTotals() async throws {
         let databaseURL = FileManager.default.temporaryDirectory

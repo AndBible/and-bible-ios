@@ -373,13 +373,45 @@ public struct SearchView: View {
        `search_translations` fallback instead of a malformed empty button.
      */
     private var selectedTranslationSummaryLabel: String {
-        let orderedModules = Self.androidOrderedSelectedSearchModuleNames(
+        Self.androidSelectedTranslationSummaryLabel(
             selectedModuleNames: selectedModules,
             primaryModuleName: swordModule?.info.name,
-            installedModules: installedBibleModules
+            installedModules: installedBibleModules,
+            fallbackLabel: String(localized: "search_translations", defaultValue: "Translations")
+        )
+    }
+
+    /**
+     Builds the Android Search selected-translation summary label.
+
+     Android shows the committed translation abbreviations as a comma-separated list after moving
+     the active document to the front. This helper keeps the visible button label aligned with the
+     same ordering helper used by search execution and grouped result summaries.
+
+     - Parameters:
+       - selectedModuleNames: Committed Search module abbreviations.
+       - primaryModuleName: Current reader/search module abbreviation, preferred first.
+       - installedModules: Installed Bible modules used to derive Android dialog order.
+       - fallbackLabel: Localized label shown when no module can be resolved.
+     - Returns: Ordered abbreviations such as `KJV, UITESTWEB`, or `fallbackLabel` for an empty
+       effective selection.
+     - Side effects: none.
+     - Failure modes: Empty selection and missing primary module metadata return the supplied
+       fallback instead of a malformed empty label.
+     */
+    nonisolated static func androidSelectedTranslationSummaryLabel(
+        selectedModuleNames: Set<String>,
+        primaryModuleName: String?,
+        installedModules: [ModuleInfo],
+        fallbackLabel: String
+    ) -> String {
+        let orderedModules = androidOrderedSelectedSearchModuleNames(
+            selectedModuleNames: selectedModuleNames,
+            primaryModuleName: primaryModuleName,
+            installedModules: installedModules
         )
         guard !orderedModules.isEmpty else {
-            return String(localized: "search_translations", defaultValue: "Translations")
+            return fallbackLabel
         }
         return orderedModules.joined(separator: ", ")
     }

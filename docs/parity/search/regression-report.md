@@ -44,10 +44,12 @@ Verification matrix:
 - `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchWordModesMatchAndroidSearchContracts`
 - `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchScopeFiltersMatchAndroidSearchContracts`
 - `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchMultipleReturnsPerModuleBucketsForGroupedTotals`
+- `BibleUITests/StrongsAndDictionaryTests/testSearchTranslationSelectionKeepsPrimaryFirstAfterAndroidSortedCommit`
+- `BibleUITests/StrongsAndDictionaryTests/testSearchTranslationEmptyDialogConfirmationPreservesPreviousSelection`
+- `BibleUITests/StrongsAndDictionaryTests/testSearchTranslationSummaryUsesAndroidPrimaryFirstAbbreviationList`
 
 ### UI
 
-- `AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals`
 - `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
 
 ## Expected Assertions Covered
@@ -57,6 +59,8 @@ Verification matrix:
 - Search opens as an Android-style reader destination, not an iOS sheet
 - seeded query survives hydration into the visible Search screen
 - indexed text results are emitted in canonical verse order for broad queries through package tests
+- the retained visible Search workflow also commits a second translation and selects a grouped
+  result without launching a second app session
 
 ### Search options
 
@@ -70,10 +74,11 @@ Verification matrix:
 ### Multi-translation grouped results
 
 - selecting a second translation from the Search translation picker reruns the active query
+- the visible selected-translation summary preserves Android's primary-first abbreviation list
 - grouped Search state reports the selected translation set
 - grouped Search state reports a combined total plus per-translation counts
 - the regression fixture returns more hits only when both KJV and UITESTWEB participate
-- selecting a grouped UITESTWEB result navigates the reader away from its original passage
+- selecting a grouped result navigates the reader away from its original passage
 
 ### Strong's behavior
 

@@ -49,16 +49,13 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
         }
 
         self.assertTrue(search_entries, "Expected manifest entries for Search UI tests.")
+        self.assertIn(
+            "AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState",
+            search_entries,
+        )
         self.assertEqual(
-            {
-                "AndBibleUITests/AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals":
-                    "search-multi-translation"
-            },
-            {
-                test_identifier: scenario
-                for test_identifier, scenario in search_entries.items()
-                if scenario == "search-multi-translation"
-            },
+            "search-multi-translation",
+            search_entries["AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState"],
         )
         for test_identifier, scenario in search_entries.items():
             self.assertIn(
@@ -219,7 +216,7 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
         self.assertRegex(
             search_source,
             re.compile(
-                r"search-indexed.*search-multi-translation.*state=needsIndex",
+                r"search-multi-translation.*state=needsIndex",
                 re.IGNORECASE | re.DOTALL,
             ),
         )

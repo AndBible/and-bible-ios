@@ -155,6 +155,47 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies Search's visible translation summary uses Android's primary-first abbreviation list.
+
+     Android presents the committed translation selection as a comma-separated abbreviation list
+     after preserving the active document first. This package-level assertion replaces the former
+     full-app Search UI smoke assertion for the visible `KJV, UITESTWEB` label.
+
+     - Setup: Selects KJV and UITESTWEB while installed module metadata is intentionally unsorted.
+     - Expected result: The primary KJV abbreviation is first and empty selections use the localized
+       fallback label.
+     - Failure meaning: Search can drift back to an iOS count/generic label or unstable module
+       order even though the picker commit itself succeeds.
+     - Side effects: none.
+     */
+    func testSearchTranslationSummaryUsesAndroidPrimaryFirstAbbreviationList() {
+        let modules = [
+            ModuleInfo(name: "UITESTWEB", description: "World English Bible", category: .bible, language: "en"),
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en"),
+            ModuleInfo(name: "ASV", description: "American Standard Version", category: .bible, language: "en"),
+        ]
+
+        XCTAssertEqual(
+            SearchView.androidSelectedTranslationSummaryLabel(
+                selectedModuleNames: ["UITESTWEB", "KJV"],
+                primaryModuleName: "KJV",
+                installedModules: modules,
+                fallbackLabel: "Translations"
+            ),
+            "KJV, UITESTWEB"
+        )
+        XCTAssertEqual(
+            SearchView.androidSelectedTranslationSummaryLabel(
+                selectedModuleNames: [],
+                primaryModuleName: nil,
+                installedModules: modules,
+                fallbackLabel: "Translations"
+            ),
+            "Translations"
+        )
+    }
+
+    /**
      Verifies Search translation picker row labels expose index readiness like Android.
 
      Android appends the localized `search_index_not_created` status to unindexed modules inside
@@ -530,16 +571,15 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies UI-test seeded Search fixtures satisfy the app's index-readiness checks.
+     Verifies seeded Search index metadata satisfies the app's index-readiness checks.
 
-     The fixture tool writes deterministic `search-indexed` and `search-multi-translation`
-     metadata directly into `search_indexes.sqlite` before the app launches. SearchView decides
-     whether to prompt `state=needsIndex` through `SearchIndexService.hasIndex` and
-     `hasStrongsIndex`, so this test anchors that fixture schema to the same app-side readiness
-     contract instead of only checking that rows exist.
+     UI fixtures write deterministic metadata directly into `search_indexes.sqlite` before the app
+     launches. SearchView decides whether to prompt `state=needsIndex` through
+     `SearchIndexService.hasIndex` and `hasStrongsIndex`, so this test anchors that schema to the
+     same app-side readiness contract instead of only checking that rows exist.
 
      - Setup: Creates an isolated SQLite search-index database with KJV text/Strong's rows and
-       UITESTWEB text rows matching the seeded fixture shape.
+       UITESTWEB text rows matching the multi-module fixture shape.
      - Expected result: KJV and UITESTWEB do not need indexing, and KJV is Strong's-ready.
      - Failure meaning: Normal Search UI tests can fall back to runtime index creation despite the
        fixture claiming to be preseeded.

@@ -410,83 +410,13 @@ extension AndBibleUITests {
     /**
      Search fixture contract for normal UI workflows.
 
-     `scripts/ui_test_fixture_manifest.json` maps these Search tests to the `search-indexed` or
-     `search-multi-translation` scenarios. Those scenarios seed `search_indexes.sqlite` before app
-     launch, so the app should detect the selected modules as already indexed. Normal Search tests
-     must not enter `state=needsIndex`; runtime index-creation coverage belongs in a separate test
-     and fixture path so it cannot hide seeded-fixture regressions.
+     `scripts/ui_test_fixture_manifest.json` maps retained Search UI tests to the
+     `search-multi-translation` scenario. That scenario seeds `search_indexes.sqlite` and the
+     deterministic UITESTWEB module before app launch, so the app should detect selected modules as
+     already indexed. Normal Search tests must not enter `state=needsIndex`; runtime index-creation
+     coverage belongs in a separate test and fixture path so it cannot hide seeded-fixture
+     regressions.
      */
-
-    /**
-     Verifies that committing a second Search translation reruns the query and reports grouped totals.
-     Package tests own picker ordering and empty-commit behavior; this retained UI smoke proves the
-     live picker can commit a second module and drive grouped results back into reader navigation.
-     *
-     * - Side effects:
-     *   - launches Search with deterministic KJV and UITESTWEB index rows for `earth`
-     *   - uses the seeded startup reader reference `Genesis 1:1` as the before-navigation value
-     *   - opens the real translation picker, selects UITESTWEB, and commits with OK
-     *   - verifies the visible selected-translation summary matches Android's abbreviation list
-     *   - waits for the active query to rerun and export grouped per-translation counts
-     * - Failure modes:
-     *   - fails if the translation picker is not reachable from Search options
-     *   - fails if selecting a second translation does not rerun the active query with KJV first
-     *   - fails if the selected-translation button collapses Android's abbreviation list into a
-     *     generic iOS count label
-     *   - fails if grouped totals collapse to single-translation results
-     */
-    func testSearchMultiTranslationSelectionUpdatesGroupedTotals() {
-        let app = makeApp(searchQuery: "earth")
-        app.launch()
-
-        let initialReference = "Genesis 1:1"
-
-        _ = openSearch(in: app)
-        waitForSearchState(containing: "query=earth", in: app, timeout: 20)
-        waitForSearchSelectedModules(
-            in: app,
-            timeout: 20,
-            description: "exactly KJV"
-        ) { modules in
-            modules == Set(["KJV"])
-        }
-        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
-
-        tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
-        tapSearchTranslationOK(in: app, timeout: 10)
-
-        waitForSearchSelectedModules(
-            in: app,
-            timeout: 20,
-            description: "more than one module including UITESTWEB"
-        ) { modules in
-            modules.count > 1 && modules.contains("UITESTWEB")
-        }
-        waitForSearchState(containing: "selectedModuleOrder=KJV,UITESTWEB", in: app, timeout: 20)
-        XCTAssertTrue(
-            app.staticTexts["KJV, UITESTWEB"].waitForExistence(timeout: 5),
-            "Expected the Search translation button to show Android's selected abbreviation list."
-        )
-        waitForSearchState(containing: "groupedTotal=3", in: app, timeout: 20)
-        waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
-        waitForSearchState(containing: "UITESTWEB:2", in: app, timeout: 20)
-        waitForSearchResultCount(atLeast: 3, in: app, timeout: 20)
-
-        let groupedResult = requireElement("searchResultRow::John_3_16", in: app, timeout: 20)
-        tapElementReliably(groupedResult, timeout: 10)
-
-        let updatedReference = waitForReaderReferenceValueToChange(
-            from: initialReference,
-            in: app,
-            timeout: 20
-        )
-        XCTAssertNotEqual(
-            updatedReference,
-            initialReference,
-            "Expected selecting a grouped Search result to move the reader away from '\(initialReference)'."
-        )
-    }
 
     /**
      Verifies Search opens as an integrated reader destination, mutates active-query state, and
@@ -497,20 +427,23 @@ extension AndBibleUITests {
      * Search must open as an Android-style reader destination rather than an iOS sheet, preserve
      * the launch-seeded query, expose tappable scope and word-mode rows, update exported state, and
      * rerender the seeded result list after each option change. The same live Search route then
-     * enters a deterministic bundled query and selects a result so reader-navigation handoff remains
-     * covered without a second cold app launch.
+     * enters a deterministic bundled query, commits a second translation through the live picker,
+     * verifies grouped totals, and selects a result so reader-navigation handoff remains covered
+     * without a second cold app launch.
      *
      * - Side effects:
      *   - launches the app directly into Search with the initial query `earth void`
      *   - opens Search through the reader entry and verifies destination/no-sheet chrome
      *   - switches Search scope between NT and OT
      *   - switches Search word mode from all words to phrase and then to any word
-     *   - enters a deterministic bundled query and taps the first returned result row
+     *   - enters a deterministic bundled query, selects UITESTWEB, and taps a grouped result row
      * - Failure modes:
      *   - fails if Search regresses to sheet/modal presentation or drops the launch-seeded query
      *   - fails if visible Search option controls are not accessible
      *   - fails if scope or word-mode changes do not update the Search state export
      *   - fails if the visible seeded result list does not rerender after option changes
+     *   - fails if the translation picker cannot commit a second module with KJV first
+     *   - fails if grouped totals collapse to single-translation results
      *   - fails if selecting the final result row does not navigate the reader to the selected
      *     passage
      */
@@ -555,14 +488,42 @@ extension AndBibleUITests {
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
         let searchField = requireSearchInput(in: app, timeout: 10)
-        replaceText(in: searchField, with: "noah", placeholderHints: ["Search Bible text", "Search Bible", "Search"])
+        replaceText(in: searchField, with: "earth", placeholderHints: ["Search Bible text", "Search Bible", "Search"])
         dismissSearchFieldFocusIfNeeded(in: app)
-        waitForSearchQuery("noah", in: app, timeout: 20)
+        waitForSearchQuery("earth", in: app, timeout: 20)
 
-        let noahResultIdentifier = "searchResultRow::Genesis_6_8"
-        waitForSearchResultRow(noahResultIdentifier, in: app, shouldExist: true, timeout: 20)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "exactly KJV before multi-translation commit"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
+        tapSearchTranslationOK(in: app, timeout: 10)
+
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "more than one module including UITESTWEB"
+        ) { modules in
+            modules.count > 1 && modules.contains("UITESTWEB")
+        }
+        waitForSearchState(containing: "selectedModuleOrder=KJV,UITESTWEB", in: app, timeout: 20)
+        XCTAssertTrue(
+            app.staticTexts["KJV, UITESTWEB"].waitForExistence(timeout: 5),
+            "Expected the Search translation button to show Android's selected abbreviation list."
+        )
+        waitForSearchState(containing: "groupedTotal=2", in: app, timeout: 20)
+        waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
+        waitForSearchState(containing: "UITESTWEB:1", in: app, timeout: 20)
+        waitForSearchResultCount(atLeast: 2, in: app, timeout: 20)
+
+        let groupedResultIdentifier = "searchResultRow::Genesis_1_2"
+        waitForSearchResultRow(groupedResultIdentifier, in: app, shouldExist: true, timeout: 20)
         let updatedReference = tapSearchResultRowAndWaitForReaderReferenceChange(
-            noahResultIdentifier,
+            groupedResultIdentifier,
             from: initialReference,
             in: app,
             timeout: 20
@@ -573,8 +534,8 @@ extension AndBibleUITests {
             "Expected selecting a Search result to move the reader away from '\(initialReference)'."
         )
         XCTAssertTrue(
-            updatedReference.localizedCaseInsensitiveContains("Genesis 6:8"),
-            "Expected selecting the Search result to navigate to Genesis 6:8, but saw '\(updatedReference)'."
+            updatedReference.localizedCaseInsensitiveContains("Genesis 1:2"),
+            "Expected selecting the Search result to navigate to Genesis 1:2, but saw '\(updatedReference)'."
         )
     }
 
