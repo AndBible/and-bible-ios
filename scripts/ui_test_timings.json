@@ -2,7 +2,6 @@
   "AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu": 156.711,
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsOpensReaderTextDisplaySurface": 169.228,
   "AndBibleUITests/AndBibleUITests/testApplicationPreferencesGlobalTextOptionsOpenGlobalScope": 182.92,
-  "AndBibleUITests/AndBibleUITests/testApplicationPreferencesRenderAndroidListPreferenceRowsWithoutInlineValues": 277.272,
   "AndBibleUITests/AndBibleUITests/testBookmarkListFilterAndSearchResetAcrossReopen": 241.637,
   "AndBibleUITests/AndBibleUITests/testBookmarkListLabelAssignmentCreatesAndAssignsNewLabel": 184.811,
   "AndBibleUITests/AndBibleUITests/testBookmarkListLabelAssignmentRemovalHidesBookmarkUnderFilter": 102.568,

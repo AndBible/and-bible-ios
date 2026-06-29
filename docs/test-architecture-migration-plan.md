@@ -59,7 +59,7 @@ Current progress as of 2026-06-28:
 |---|---|
 | App-host unit tests | 1 func; only the scene-configuration sentinel remains |
 | Package tests | 680 funcs across SwordKit, BibleCore, BibleView, and BibleUI package lanes |
-| UI tests | 60 funcs after demoting duplicate seeded-index, Strong's Search data-contract, BookmarkList projection, Sync category-row catalog coverage, and Settings feature-shortcut route metadata |
+| UI tests | 59 funcs after demoting duplicate seeded-index, Strong's Search data-contract, BookmarkList projection, Sync category-row catalog coverage, Settings feature-shortcut route metadata, and Settings `ListPreference` row presentation |
 
 ## Destination mapping
 
@@ -186,6 +186,7 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - Search UI trim has started: duplicate seeded-index and Strong's Search data-contract assertions moved out of `AndBibleUITests` into app-host-free package coverage. Scope and word-mode UI tests intentionally remain because they prove the visible controls rerun the active query; package coverage now backs the indexed result semantics beneath those controls.
 - BookmarkList projection trim moved sort/search/label-filter state contracts into `BookmarkListProjectionTests`; row navigation, row deletion, StudyPad handoff, label assignment, generic bookmark, and My Notes workflows remain visible app UI tests. Sync category-row catalog coverage now lives in `SettingsIconsTests`, while backend/category persistence and invalid-URL workflows remain visible app UI tests.
 - Settings feature shortcut trim moved Settings-root Sync and Reading Progress route metadata into `ApplicationSettingsPresentation` and `SettingsIconsTests`; the Settings-root destination smoke test remains visible UI coverage, while Sync Settings behavioral workflows continue to exercise direct reader-action entry points.
+- Settings `ListPreference` trim moved compact menu-row metadata and the no-inline-`Picker` renderer guard into `ApplicationSettingsPresentation`/`SettingsIconsTests`; the Settings-root destination smoke test remains as the live navigation workflow.
 - Simplify CI: replace `ios-simulator-unit-tests` app-build path with app-host-free package-test lanes. Baseline is per-target simulator schemes; macOS `swift test` is an optimization only for targets proven to compile under SwiftPM. The optional build-product-reuse experiment is retired; reassess the shard planner and timings file as UI coverage continues moving into package lanes.
 - Trim `AndBibleUITests` to an explicit smoke set (target <=15 journeys); demote/convert the rest.
 - Update `CLAUDE.md` + `.github/copilot-instructions.md`: replace "swift test is supplemental" with the actual placement rule - *new tests go in the lowest package test target that owns the behavior after imports are minimized; app-host only for true app-delegate/scene/bootstrap behavior.*
