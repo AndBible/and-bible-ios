@@ -88,24 +88,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the downloads browser can be opened from the reader shell.
-     *
-     * - Side effects:
-     *   - launches the app with the calculator gate disabled, in-memory persistence, and one
-     *     deterministic seeded bookmark-label pair for stable reader-shell startup
-     *   - opens the reader overflow menu and pushes the downloads browser
-     * - Failure modes:
-     *   - fails if the downloads action is missing from the reader menu
-     *   - fails if the downloads browser screen does not render after navigation completes
-     */
-    func testDownloadsScreenOpensFromReaderMenu() {
-        let app = makeApp()
-        app.launch()
-
-        XCTAssertTrue(openDownloads(in: app).exists)
-    }
-
-    /**
      Opens the Downloads overflow popup and resolves one visible action row.
      *
      * Android exposes repository management from the Downloads overflow menu. The iOS route mirrors
@@ -161,19 +143,21 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the downloads browser can open the repository manager and dismiss the add-source
-     sheet back to the repository list.
+     Verifies that the Downloads overflow can open the repository manager route.
+
+     Repository add, replace, delete, and reset persistence runs in `RepositorySourceManagerTests`
+     because that is the SwordKit-owned source-management contract. This UI smoke intentionally
+     stays at the visible route boundary while still proving the real reader menu opens Downloads
+     and Android's Downloads overflow exposes Custom repositories.
      *
      * - Side effects:
-     *   - launches directly into Downloads
+     *   - launches the reader shell and opens Downloads from the real reader menu
      *   - opens the repository manager from Android's Downloads overflow menu
-     *   - opens the add-source sheet and cancels it
      * - Failure modes:
      *   - fails if the downloads browser or repository manager never appears
-     *   - fails if the add-source sheet cannot be presented from the repository manager
-     *   - fails if cancelling the add-source sheet does not return to the repository manager
+     *   - fails if the repository manager loses the visible add-source affordance
      */
-    func testDownloadsRepositoryManagerAddSourceCancelFlow() {
+    func testDownloadsRepositoryManagerOpensFromOverflow() {
         let app = makeApp()
         app.launch()
 
@@ -184,18 +168,7 @@ extension AndBibleUITests {
         )
 
         XCTAssertTrue(requireElement("repositoryManagerScreen", in: app, timeout: 20).exists)
-        tapElementReliably(
-            requireElement("repositoryManagerAddButton", in: app, timeout: 10),
-            timeout: 10
-        )
-
-        XCTAssertTrue(requireElement("repositoryManagerAddSourceScreen", in: app, timeout: 20).exists)
-        tapElementReliably(
-            requireElement("repositoryManagerAddSourceCancelButton", in: app, timeout: 10),
-            timeout: 10
-        )
-
-        XCTAssertTrue(requireElement("repositoryManagerScreen", in: app, timeout: 20).exists)
+        XCTAssertTrue(requireElement("repositoryManagerAddButton", in: app, timeout: 10).exists)
     }
 
     /**

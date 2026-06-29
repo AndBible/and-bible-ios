@@ -77,7 +77,7 @@ Related domain references:
 ### UI
 
 - `AndBibleUITests/testSettingsScreenShowsPrimaryNavigationRows`
-- `AndBibleUITests/testDownloadsScreenOpensFromReaderMenu`
+- `AndBibleUITests/testDownloadsRepositoryManagerOpensFromOverflow`
 - `AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow`
 - `AndBibleUITests/testBookmarksScreenOpensFromReaderMenu`
 - `AndBibleUITests/testAboutScreenOpensFromReaderMenu`
