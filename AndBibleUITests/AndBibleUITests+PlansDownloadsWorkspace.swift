@@ -7,19 +7,28 @@ import UIKit
 
 extension AndBibleUITests {
     /**
-     Verifies the drawer Reading Plan route opens as an app-owned destination and can advance a day.
+     Verifies the drawer Reading Plan route can start, advance, delete, and import plans.
      *
-     * Android opens reading plans through app-owned activities, not a platform sheet. This workflow
-     * protects the presentation route before exercising the existing plan-start and progress path.
+     * Android opens reading plans through app-owned activities, not a platform sheet. Package tests
+     * own algorithmic plan generation, imported-plan parsing, and persistence contracts; this smoke
+     * keeps one visible route through the production reader menu and user controls.
      *
      * - Side effects:
-     *   - opens Reading Plans from the drawer
-     *   - starts the first available plan and marks the first day read
+     *   - launches the reader shell with empty reading-plan state
+     *   - opens Reading Plans from the drawer and verifies Android-style destination chrome
+     *   - starts the first Android-parity built-in template and marks the first day read
+     *   - returns to the plan list, deletes the active plan, then opens the import picker path
      * - Failure modes:
      *   - fails if Reading Plans regresses to sheet presentation
-     *   - fails if the plan cannot be started or advanced through the visible controls
+     *   - fails if the list state does not publish the expected active-plan counts
+     *   - fails if the built-in template cannot be started from the picker
+     *   - fails if the daily reading route cannot advance through the visible controls
+     *   - fails if the row-level delete action is missing or does not remove the active plan
+     *   - fails if the custom import affordance does not request file-picker presentation
      */
-    func testReadingPlansStartPlanAndAdvanceDay() {
+    func testReadingPlansRouteStartAdvanceDeleteAndImportAffordanceFlow() {
+        let builtInPlanCode = "y1ot1nt1_OTthenNT"
+        let builtInPlanToken = readingPlanStateToken(builtInPlanCode)
         let app = makeApp()
         app.launch()
 
@@ -30,42 +39,6 @@ extension AndBibleUITests {
             app.navigationBars.buttons["Done"].firstMatch.exists,
             "Drawer Reading Plan should use reader destination back chrome, not iOS sheet Done chrome."
         )
-        tapElementReliably(requireElement("readingPlanStartButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("availablePlansScreen", in: app, timeout: 10).exists)
-        tapElementReliably(requireElement("readingPlanTemplateButton", in: app, timeout: 15), timeout: 10)
-        tapElementReliably(requireElement("readingPlanActivePlanLink", in: app, timeout: 15), timeout: 10)
-        let currentDay = requireElement("dailyReadingCurrentDayLabel", in: app, timeout: 15)
-        XCTAssertEqual(currentDay.value as? String, "1")
-
-        tapElementReliably(
-            requireElement("dailyReadingMarkAsReadButton", in: app, timeout: 10),
-            timeout: 10
-        )
-
-        waitForElementValue("dailyReadingCurrentDayLabel", toEqual: "2", in: app, timeout: 20)
-    }
-
-    /**
-     Verifies the visible reading-plan list can start and delete a built-in plan and reach the
-     custom import path from the available-plan picker.
-     *
-     * - Side effects:
-     *   - launches the reader shell with empty reading-plan state
-     *   - opens the real Reading Plans list, starts the first Android-parity built-in template,
-     *     deletes it from the active-plan row swipe action, then opens the import picker path
-     * - Failure modes:
-     *   - fails if the list state does not publish the expected active-plan counts
-     *   - fails if the built-in template cannot be started from the picker
-     *   - fails if the row-level delete action is missing or does not remove the active plan
-     *   - fails if the custom import affordance does not request file-picker presentation
-     */
-    func testReadingPlanListStartDeleteAndImportAffordanceFlow() {
-        let builtInPlanCode = "y1ot1nt1_OTthenNT"
-        let builtInPlanToken = readingPlanStateToken(builtInPlanCode)
-        let app = makeApp()
-        app.launch()
-
-        _ = openReadingPlans(in: app, timeout: 20)
         waitForReadingPlanListState(containing: "active=0", in: app, timeout: 10)
 
         tapElementReliably(requireElement("readingPlanStartButton", in: app, timeout: 10), timeout: 10)
@@ -74,6 +47,26 @@ extension AndBibleUITests {
 
         tapElementReliably(requireElement("readingPlanTemplateButton", in: app, timeout: 15), timeout: 10)
         waitForReadingPlanListState(containing: "active=1", in: app, timeout: 15)
+        waitForReadingPlanListState(containing: builtInPlanToken, in: app, timeout: 10)
+
+        tapElementReliably(requireElement("readingPlanActivePlanLink", in: app, timeout: 15), timeout: 10)
+        let currentDay = requireElement("dailyReadingCurrentDayLabel", in: app, timeout: 15)
+        XCTAssertEqual(currentDay.value as? String, "1")
+
+        tapElementReliably(
+            requireElement("dailyReadingMarkAsReadButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        waitForElementValue("dailyReadingCurrentDayLabel", toEqual: "2", in: app, timeout: 20)
+
+        let dailyReadingBackButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(
+            dailyReadingBackButton.waitForExistence(timeout: 10),
+            "Expected Daily Reading to expose NavigationStack back chrome to the Reading Plans list."
+        )
+        tapElementReliably(dailyReadingBackButton, timeout: 10)
+        XCTAssertTrue(requireElement("readingPlanListScreen", in: app, timeout: 20).exists)
+        waitForReadingPlanListState(containing: "active=1", in: app, timeout: 10)
         waitForReadingPlanListState(containing: builtInPlanToken, in: app, timeout: 10)
 
         let activePlan = requireElement("readingPlanActivePlanLink", in: app, timeout: 10)

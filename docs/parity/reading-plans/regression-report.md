@@ -55,8 +55,7 @@ Verification matrix:
 
 ### UI
 
-- `AndBibleUITests/testReadingPlanListStartDeleteAndImportAffordanceFlow`
-- `AndBibleUITests/testReadingPlansStartPlanAndAdvanceDay`
+- `AndBibleUITests/testReadingPlansRouteStartAdvanceDeleteAndImportAffordanceFlow`
 
 ## Expected Assertions Covered
 

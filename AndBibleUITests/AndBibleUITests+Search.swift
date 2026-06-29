@@ -411,39 +411,21 @@ extension AndBibleUITests {
      */
 
     /**
-     Verifies that Search preserves a seeded initial query typed through the real UI.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell with the initial query `earth` queued for Search
-     *   - opens Search from the toolbar and waits for the Search destination to settle
-     * - Failure modes:
-     *   - fails if the Search screen never appears
-     *   - fails if the seeded query is dropped before the Search screen reaches its settled state
-     */
-    func testSearchDirectLaunchRetainsSeededQuery() {
-        let app = makeApp(searchQuery: "earth")
-        app.launch()
-
-        _ = openSearch(in: app)
-        waitForSearchQuery("earth", in: app, timeout: 20)
-        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
-    }
-
-    /**
-     Verifies Search opens as an integrated reader destination instead of an iOS sheet.
+     Verifies Search opens as an integrated reader destination and preserves a seeded query.
      *
      * Android Search is a full activity with toolbar navigation, not a bottom/large iOS sheet with a
-     * `Done` affordance. This test protects that presentation contract separately from Search's
-     * query behavior so future visual parity work does not accidentally reintroduce sheet chrome.
+     * `Done` affordance. Package tests own indexed query semantics; this smoke keeps the visible
+     * route alive and proves a launch-seeded query reaches the real Search screen/results surface.
      *
      * - Setup: Launches the standard seeded Search fixture and opens Search through the reader entry.
      * - Expected result: The reader state reports `readerDestination=search`, and no navigation-bar
-     *   `Done` button is exposed by the Search surface.
+     *   `Done` button is exposed by the Search surface. The seeded query remains visible and returns
+     *   the deterministic fixture row.
      * - Failure meaning: Search has drifted back to sheet/modal presentation instead of Android's
-     *   destination-style surface.
+     *   destination-style surface, or the visible Search route dropped its launch-seeded query.
      * - Side effects: Presents Search from the reader shell.
      */
-    func testSearchPresentsAsReaderDestinationInsteadOfSheet() {
+    func testSearchEntryRouteRetainsSeededQuery() {
         let app = makeApp(searchQuery: "earth")
         app.launch()
 
@@ -453,6 +435,8 @@ extension AndBibleUITests {
             app.navigationBars.buttons["Done"].firstMatch.exists,
             "Search should not expose iOS sheet-style Done chrome when opened from the reader."
         )
+        waitForSearchQuery("earth", in: app, timeout: 20)
+        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
     }
 
     /**

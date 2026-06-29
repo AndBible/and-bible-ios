@@ -47,7 +47,7 @@ Verification matrix:
 
 ### UI
 
-- `AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery`
+- `AndBibleUITests/testSearchEntryRouteRetainsSeededQuery`
 - `AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals`
 - `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
 - `AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference`
