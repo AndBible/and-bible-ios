@@ -58,8 +58,8 @@ Current progress as of 2026-06-28:
 | Lane | Current state |
 |---|---|
 | App-host unit tests | 1 func; only the scene-configuration sentinel remains |
-| Package tests | 677 funcs across SwordKit, BibleCore, BibleView, and BibleUI package lanes |
-| UI tests | 66 funcs after demoting duplicate seeded-index and Strong's Search data-contract coverage |
+| Package tests | 680 funcs across SwordKit, BibleCore, BibleView, and BibleUI package lanes |
+| UI tests | 62 funcs after demoting duplicate seeded-index, Strong's Search data-contract, BookmarkList projection, and Sync category-row catalog coverage |
 
 ## Destination mapping
 
@@ -184,6 +184,7 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - Delete near-empty `AndBibleTests` extensions and `AndBibleTestSupport`; keep only app-host tests. The app-host bundle now contains only the scene-configuration sentinel.
 - Narrow the old simulator unit-test CI job to the app-host scene-configuration sentinel using the dedicated `AndBibleUnitTests` scheme, while keeping `Unit Tests (Simulator)` as an aggregate required gate that fails when any package-test lane fails. Package-owned coverage is enforced by the app-host-free `SwordKitTests`, `BibleCoreTests`, `BibleViewTests`, and `BibleUITests` package lanes.
 - Search UI trim has started: duplicate seeded-index and Strong's Search data-contract assertions moved out of `AndBibleUITests` into app-host-free package coverage. Scope and word-mode UI tests intentionally remain because they prove the visible controls rerun the active query; package coverage now backs the indexed result semantics beneath those controls.
+- BookmarkList projection trim moved sort/search/label-filter state contracts into `BookmarkListProjectionTests`; row navigation, row deletion, StudyPad handoff, label assignment, generic bookmark, and My Notes workflows remain visible app UI tests. Sync category-row catalog coverage now lives in `SettingsIconsTests`, while backend/category persistence and invalid-URL workflows remain visible app UI tests.
 - Simplify CI: replace `ios-simulator-unit-tests` app-build path with app-host-free package-test lanes. Baseline is per-target simulator schemes; macOS `swift test` is an optimization only for targets proven to compile under SwiftPM. Reassess shard planner, timings file, build-product-reuse experiment.
 - Trim `AndBibleUITests` to an explicit smoke set (target <=15 journeys); demote/convert the rest.
 - Update `CLAUDE.md` + `.github/copilot-instructions.md`: replace "swift test is supplemental" with the actual placement rule - *new tests go in the lowest package test target that owns the behavior after imports are minimized; app-host only for true app-delegate/scene/bootstrap behavior.*

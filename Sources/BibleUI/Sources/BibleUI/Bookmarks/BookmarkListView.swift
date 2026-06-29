@@ -137,35 +137,12 @@ public struct BookmarkListView: View {
      Bookmarks after note suppression, label filtering, text filtering, and sort application.
      */
     private var filteredBookmarks: [BookmarkListItem] {
-        var result = bookmarkListItems
-
-        // Filter by label
-        if let labelId = selectedLabelId {
-            result = result.filter { $0.labels.contains { $0.id == labelId } }
-        }
-
-        // Filter by search text
-        if !searchText.isEmpty {
-            result = result.filter { $0.searchableText.localizedCaseInsensitiveContains(searchText) }
-        }
-
-        // Sort
-        switch sortOrder {
-        case .bibleOrder:
-            result.sort { Self.compareBookmarkListItems($0, $1, by: \.documentSortKey, ascending: true) }
-        case .bibleOrderDesc:
-            result.sort { Self.compareBookmarkListItems($0, $1, by: \.documentSortKey, ascending: false) }
-        case .createdAt:
-            result.sort { Self.compareBookmarkListItems($0, $1, by: \.createdAt, ascending: true) }
-        case .createdAtDesc:
-            result.sort { Self.compareBookmarkListItems($0, $1, by: \.createdAt, ascending: false) }
-        case .lastUpdated:
-            result.sort { Self.compareBookmarkListItems($0, $1, by: \.lastUpdatedOn, ascending: false) }
-        case .orderNumber:
-            result.sort { Self.compareBookmarkListItems($0, $1, by: \.documentSortKey, ascending: true) }
-        }
-
-        return result
+        BookmarkListProjection.filteredItems(
+            bookmarkListItems,
+            selectedLabelId: selectedLabelId,
+            searchText: searchText,
+            sortOrder: sortOrder
+        )
     }
 
     /// Bookmark rows that belong in the native bookmark browser before label/search filtering.
@@ -330,20 +307,15 @@ public struct BookmarkListView: View {
 
     /// Stable bookmark-list state exported for UI automation, including route presentation flags.
     private var bookmarkListAccessibilityValue: String {
-        let baseState = [
-            "count=\(filteredBookmarks.count)",
-            "selectedLabel=\(bookmarkListSelectedLabelAccessibilityToken)",
-            "query=\(bookmarkListAccessibilitySegment(searchText))",
-            "labelAssignment=\(bookmarkListIsAssigningLabels ? "true" : "false")",
-        ].joined(separator: ";")
-        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
-            return baseState
-        }
-
-        let rowTokens = filteredBookmarks.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit).map {
-            "|\($0.accessibilitySegment)|"
-        }.joined(separator: ",")
-        return "\(baseState);rows=\(rowTokens)"
+        BookmarkListProjection.accessibilityValue(
+            for: filteredBookmarks,
+            selectedLabelId: selectedLabelId,
+            labels: labels,
+            searchText: searchText,
+            isAssigningLabels: bookmarkListIsAssigningLabels,
+            includeRowTokens: UITestRuntimeConfiguration.enablesDetailedAccessibilityExports,
+            rowTokenLimit: UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit
+        )
     }
 
     /// Whether the bookmark-list route is currently showing label assignment.
@@ -370,12 +342,10 @@ public struct BookmarkListView: View {
 
     /// Stable token for the currently selected bookmark label filter.
     private var bookmarkListSelectedLabelAccessibilityToken: String {
-        guard let labelId = selectedLabelId,
-              let label = labels.first(where: { $0.id == labelId })
-        else {
-            return "all"
-        }
-        return bookmarkListAccessibilitySegment(label.name)
+        BookmarkListProjection.selectedLabelToken(
+            selectedLabelId: selectedLabelId,
+            labels: labels
+        )
     }
 
     /// Sort-order menu shown in the navigation bar.
@@ -543,8 +513,138 @@ public struct BookmarkListView: View {
         return "\(module): \(key)"
     }
 
-    /// Compares two rows by a primary key and uses reference/id tiebreakers for deterministic UI order.
-    private static func compareBookmarkListItems<Value: Comparable>(
+}
+
+/**
+ Pure BookmarkList filtering, sorting, and accessibility-state projection.
+
+ `BookmarkListView` owns SwiftUI rendering and navigation. This helper owns the data projection
+ that Android parity depends on: label filtering, in-content search, sort order, and the compact
+ state exported for UI automation. Keeping it separate lets package tests protect the contract
+ without launching the app.
+ */
+enum BookmarkListProjection {
+    /**
+     Applies the same filter and sort pipeline used by the visible bookmark list.
+
+     - Parameters:
+       - items: Normalized bookmark rows before UI filtering.
+       - selectedLabelId: Optional selected label chip.
+       - searchText: Current in-content search query.
+       - sortOrder: Active Android-compatible bookmark sort order.
+     - Returns: Rows in the order the bookmark list should render.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    static func filteredItems(
+        _ items: [BookmarkListItem],
+        selectedLabelId: UUID?,
+        searchText: String,
+        sortOrder: BookmarkSortOrder
+    ) -> [BookmarkListItem] {
+        var result = items
+
+        if let selectedLabelId {
+            result = result.filter { $0.labels.contains { $0.id == selectedLabelId } }
+        }
+
+        if !searchText.isEmpty {
+            result = result.filter { $0.searchableText.localizedCaseInsensitiveContains(searchText) }
+        }
+
+        switch sortOrder {
+        case .bibleOrder:
+            result.sort { compareItems($0, $1, by: \.documentSortKey, ascending: true) }
+        case .bibleOrderDesc:
+            result.sort { compareItems($0, $1, by: \.documentSortKey, ascending: false) }
+        case .createdAt:
+            result.sort { compareItems($0, $1, by: \.createdAt, ascending: true) }
+        case .createdAtDesc:
+            result.sort { compareItems($0, $1, by: \.createdAt, ascending: false) }
+        case .lastUpdated:
+            result.sort { compareItems($0, $1, by: \.lastUpdatedOn, ascending: false) }
+        case .orderNumber:
+            result.sort { compareItems($0, $1, by: \.documentSortKey, ascending: true) }
+        }
+
+        return result
+    }
+
+    /**
+     Builds the compact accessibility state exported by the visible bookmark list.
+
+     - Parameters:
+       - items: Already-filtered rows in render order.
+       - selectedLabelId: Optional selected label chip.
+       - labels: All labels available to the bookmark list.
+       - searchText: Current in-content search query.
+       - isAssigningLabels: Whether the label-assignment destination is active.
+       - includeRowTokens: Whether detailed row tokens should be appended.
+       - rowTokenLimit: Maximum number of row tokens to include when enabled.
+     - Returns: A stable semicolon-delimited state string consumed by tests.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    static func accessibilityValue(
+        for items: [BookmarkListItem],
+        selectedLabelId: UUID?,
+        labels: [BibleCore.Label],
+        searchText: String,
+        isAssigningLabels: Bool,
+        includeRowTokens: Bool,
+        rowTokenLimit: Int
+    ) -> String {
+        let baseState = [
+            "count=\(items.count)",
+            "selectedLabel=\(selectedLabelToken(selectedLabelId: selectedLabelId, labels: labels))",
+            "query=\(bookmarkListAccessibilitySegment(searchText))",
+            "labelAssignment=\(isAssigningLabels ? "true" : "false")",
+        ].joined(separator: ";")
+        guard includeRowTokens else {
+            return baseState
+        }
+
+        let rowTokens = items.prefix(rowTokenLimit).map {
+            "|\($0.accessibilitySegment)|"
+        }.joined(separator: ",")
+        return "\(baseState);rows=\(rowTokens)"
+    }
+
+    /**
+     Resolves the selected label token used by BookmarkList state export.
+
+     - Parameters:
+       - selectedLabelId: Optional selected label chip.
+       - labels: All labels available to the bookmark list.
+     - Returns: `all` when no selected label exists, otherwise the sanitized label name.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    static func selectedLabelToken(
+        selectedLabelId: UUID?,
+        labels: [BibleCore.Label]
+    ) -> String {
+        guard let selectedLabelId,
+              let label = labels.first(where: { $0.id == selectedLabelId })
+        else {
+            return "all"
+        }
+        return bookmarkListAccessibilitySegment(label.name)
+    }
+
+    /**
+     Compares two projected rows by one primary key and stable deterministic tiebreakers.
+
+     - Parameters:
+       - lhs: Left-hand bookmark row.
+       - rhs: Right-hand bookmark row.
+       - keyPath: Comparable row property to use as the primary sort key.
+       - ascending: Whether the primary key should sort ascending or descending.
+     - Returns: `true` when `lhs` should appear before `rhs`.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func compareItems<Value: Comparable>(
         _ lhs: BookmarkListItem,
         _ rhs: BookmarkListItem,
         by keyPath: KeyPath<BookmarkListItem, Value>,
@@ -573,7 +673,7 @@ extension UUID: @retroactive Identifiable {
 // MARK: - Bookmark List Item
 
 /// Normalized row data for Bible and generic bookmarks shown in `BookmarkListView`.
-private struct BookmarkListItem: Identifiable {
+struct BookmarkListItem: Identifiable {
     /// Original SwiftData model backing the row.
     enum Source {
         case bible(BibleBookmark)

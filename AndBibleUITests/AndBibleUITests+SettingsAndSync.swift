@@ -559,36 +559,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the Sync category section exports Android's runtime-visible row set.
-     *
-     * Android declares Reading Plans in XML but hides it at runtime, while AI Settings and Reading
-     * Progress remain visible. iOS mirrors that by exporting active rows for implemented
-     * categories and deferred rows for the unimplemented AI/progress engines.
-     *
-     * - Side effects:
-     *   - launches Sync Settings with deterministic NextCloud settings
-     *   - reads the production Sync Settings accessibility state probe
-     * - Failure modes:
-     *   - fails if Reading Plans is reintroduced to the visible row set
-     *   - fails if AI Settings or Reading Progress stop being disclosed as deferred rows
-     */
-    func testSyncSettingsCategoryRowsMatchAndroidRuntimeVisibility() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openSyncSettingsFromReaderAction(in: app)
-        waitForSyncState(
-            [
-                "backend": "NEXT_CLOUD",
-                "visible": "bookmarks,workspaces,mydocuments,ai_settings,progress",
-                "deferred": "ai_settings,progress",
-            ],
-            in: app,
-            timeout: 10
-        )
-    }
-
-    /**
      Verifies that disabling one seeded NextCloud sync category updates the exported Sync screen
      state.
      *

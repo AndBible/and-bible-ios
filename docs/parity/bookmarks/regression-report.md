@@ -43,9 +43,6 @@ Verification matrix:
 
 - `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
 - `AndBibleUITests/testBookmarkRowDeletePreservesOtherRowsAcrossReopen`
-- `AndBibleUITests/testBookmarkListSortMenuReordersRows`
-- `AndBibleUITests/testBookmarkListSearchNarrowsAndClearsVisibleRows`
-- `AndBibleUITests/testBookmarkListLabelFilterNarrowsAndClearsVisibleRows`
 - `AndBibleUITests/testGenericBookmarkVisibleWorkflowAssignsLabelFromBookmarkList`
 - `AndBibleUITests/testLabelAssignmentTogglesFavouriteAndAssignment`
 - `AndBibleUITests/testBookmarkListLabelAssignmentCreatesAndAssignsNewLabel`
@@ -54,6 +51,12 @@ Verification matrix:
 - `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
 - `AndBibleUITests/testStudyPadCreateTextEntryPersistsAcrossReopen`
 - `AndBibleUITests/testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow`
+
+### Package UI Projection
+
+- `BibleUITests/BookmarkListProjectionTests/testBookmarkListProjectionSortsCreatedDateAndBibleOrderLikeAndroid`
+- `BibleUITests/BookmarkListProjectionTests/testBookmarkListProjectionSearchNarrowsAndClearsRows`
+- `BibleUITests/BookmarkListProjectionTests/testBookmarkListProjectionLabelFilterNarrowsAndClearsRows`
 
 ## Expected Assertions Covered
 
