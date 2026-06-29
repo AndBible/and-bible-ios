@@ -7,21 +7,23 @@ import UIKit
 
 extension AndBibleUITests {
     /**
-     Verifies that Settings opens as a reader navigation destination and exposes Android-parity
-     application-preference shortcuts.
+     Verifies Settings opens as a reader destination and routes Android's global text-options row.
+     *
+     * Package tests own the full Application Preferences row catalog. This UI smoke keeps the live
+     * route contract: Settings is pushed from the reader action surface, its key shortcuts are
+     * exposed, and the Global text options row opens root-scoped Text Display settings rather than
+     * workspace/window options.
      *
      * - Side effects:
-     *   - launches the app with the calculator gate disabled, in-memory persistence, and one
-     *     deterministic seeded bookmark-label pair for stable reader-shell startup
-     *   - pushes Settings from the reader action surface and samples the exported reader/settings
-     *     accessibility state
+     *   - launches the app with deterministic in-memory persistence
+     *   - pushes Settings from the reader action surface
+     *   - activates the production Global text options row
      * - Failure modes:
-     *   - fails if settings cannot be reached from the reader shell
-     *   - fails if Settings is still presented as a reader sheet rather than a navigation
-     *     destination
-     *   - fails if the feature shortcuts or reader-admin-flow contract are absent
+     *   - fails if Settings still presents as a sheet instead of a reader destination
+     *   - fails if the Android shortcut rows disappear from the Settings state
+     *   - fails if Global text options opens any scope other than `global`
      */
-    func testSettingsScreenShowsApplicationPreferenceShortcuts() {
+    func testSettingsApplicationShortcutsOpenGlobalTextOptions() {
         let app = makeApp()
         app.launch()
 
@@ -29,46 +31,60 @@ extension AndBibleUITests {
         XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
         waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=settings", in: app, timeout: 10)
+        waitForSettingsState(containing: "settingsGlobalTextOptionsLink", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsSyncLink", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsReadingProgressLink", in: app, timeout: 10)
         waitForSettingsState(containing: "adminFlows=readerActions", in: app, timeout: 10)
+
+        tapSettingsElement("settingsGlobalTextOptionsLink", in: app, timeout: 20)
+        XCTAssertTrue(requireElement("textDisplaySettingsScreen", in: app, timeout: 20).exists)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
+        XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
+        XCTAssertFalse(unresolvedElement("textDisplayOpenGlobalSettingsButton", in: app).exists)
     }
 
     /**
-     Verifies that Android's main reader All Text Options action opens workspace text-display
-     settings instead of the left-drawer Application Preferences destination.
+     Verifies Android's reader All Text Options route and font-family editor presentation.
+     *
+     Package tests own text-display row order, row visibility, editor state semantics, and Android
+     value normalization. This UI smoke keeps the production route live: the reader action opens
+     workspace-scoped Text Display settings and the font-family editor is the in-place
+     Android-style dialog rather than native iOS picker or sheet chrome.
      *
      * - Side effects:
      *   - launches the reader shell with deterministic in-memory data
      *   - opens the real overflow menu action identified by Android's All Text Options row
-     *   - pushes the native workspace-scoped Text Display settings destination
+     *   - opens the font-family editor overlay
      * - Failure modes:
      *   - fails if the overflow action is routed to global Application Preferences
      *   - fails if the overflow action is routed to window-scoped Text Display settings
-     *   - fails if the Text Display settings screen never becomes ready
+     *   - fails if the editor route regresses to native iOS picker/sheet presentation
      */
-    func testAllTextOptionsOpensReaderTextDisplaySurface() {
+    func testAllTextOptionsWorkspaceRouteAndFontEditor() {
         let app = makeApp()
         app.launch()
 
-        openReaderActionDestination(
-            actionIdentifier: "readerOpenTextOptionsAction",
-            destinationIdentifier: "textDisplaySettingsScreen",
-            readinessIdentifiers: [
-                "textDisplayFontFamilyButton",
-                "textDisplayJustifyTextToggleButton",
-            ],
-            in: app,
-            timeout: 20
-        )
-
-        XCTAssertTrue(requireElement("textDisplaySettingsScreen", in: app, timeout: 10).exists)
+        let textDisplayScreen = openAllTextOptions(in: app)
+        XCTAssertTrue(textDisplayScreen.exists)
         waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=textOptions", in: app, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
         XCTAssertFalse(
             unresolvedElement("settingsForm", in: app).exists,
             "Expected All Text Options to open the Text Display destination, not Application Preferences."
+        )
+
+        XCTAssertFalse(
+            unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists,
+            "Workspace text options must not show Android's window-only workspace parent link."
+        )
+
+        let fontFamilyButton = requireReachableTextDisplayButton("textDisplayFontFamilyButton", in: app, timeout: 10)
+        tapElementReliably(fontFamilyButton, timeout: 10)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "preferenceEditor=fontFamily", in: app, timeout: 10)
+        XCTAssertTrue(
+            app.otherElements["textDisplayPreferenceEditorOverlay"].waitForExistence(timeout: 10),
+            "Expected the Android-style text display editor overlay to be visible."
         )
     }
 
@@ -97,7 +113,6 @@ extension AndBibleUITests {
             unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists,
             "Workspace text options must not show Android's window-only workspace parent link."
         )
-
         let globalLink = requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10)
         tapElementReliably(globalLink, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
@@ -383,37 +398,6 @@ extension AndBibleUITests {
             app.buttons["windowPaneMenu"].firstMatch,
         ]
         return candidates.first(where: { elementHasUsableFrame($0) })
-    }
-
-    /**
-     Verifies Android's Application Preferences Global text options route.
-
-     The Android root Settings screen exposes `global_text_display_settings` under Look & feel.
-     iOS mirrors that shortcut, and opening it must show global scope with no parent links.
-     *
-     * - Side effects:
-     *   - launches the app and opens Application Preferences from reader actions
-     *   - activates the Global text options row
-     * - Failure modes:
-     *   - fails if the global settings shortcut is metadata-only and not user-navigable
-     *   - fails if Application Preferences opens workspace/window text options instead of global
-     *   - fails if global scope exposes parent links
-     */
-    func testApplicationPreferencesGlobalTextOptionsOpenGlobalScope() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openSettingsDestination(
-            linkIdentifier: "settingsGlobalTextOptionsLink",
-            destinationIdentifier: "textDisplaySettingsScreen",
-            readinessIdentifiers: ["textDisplayFontFamilyButton"],
-            in: app,
-            destinationTimeout: 20
-        )
-
-        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
-        XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
-        XCTAssertFalse(unresolvedElement("textDisplayOpenGlobalSettingsButton", in: app).exists)
     }
 
     /**

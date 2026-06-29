@@ -1,7 +1,6 @@
 {
   "AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu": 156.711,
-  "AndBibleUITests/AndBibleUITests/testAllTextOptionsOpensReaderTextDisplaySurface": 169.228,
-  "AndBibleUITests/AndBibleUITests/testApplicationPreferencesGlobalTextOptionsOpenGlobalScope": 182.92,
+  "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": 134.92,
   "AndBibleUITests/AndBibleUITests/testBookmarkListFilterAndSearchResetAcrossReopen": 241.637,
   "AndBibleUITests/AndBibleUITests/testBookmarkListOpensLabelAssignmentForSeededBookmark": 96.149,
   "AndBibleUITests/AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel": 88.247,
@@ -25,8 +24,7 @@
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreRestoreImportPresentsTargetSpecificPickers": 170.238,
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreShareCancelDoesNotReportBackupSuccess": 191.801,
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreShowsAndroidBackupActivityWorkflow": 116.081,
-  "AndBibleUITests/AndBibleUITests/testSettingsColorsLinkOpensColorEditor": 114.946,
-  "AndBibleUITests/AndBibleUITests/testSettingsScreenShowsApplicationPreferenceShortcuts": 123.513,
+  "AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions": 137.43,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow": 145.63,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection": 119.883,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen": 142.957,
@@ -34,12 +32,10 @@
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState": 110.332,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath": 84.062,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus": 151.4,
-  "AndBibleUITests/AndBibleUITests/testTextDisplayFontFamilyButtonPresentsAndroidDialog": 139.231,
-  "AndBibleUITests/AndBibleUITests/testTextDisplayJustifyToggleMutatesControlState": 158.857,
   "AndBibleUITests/AndBibleUITests/testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms": 0.874,
   "AndBibleUITests/AndBibleUITests/testThirdWindowBookmarkNavigationUpdatesOnlyTargetPaneContent": 122.35,
   "AndBibleUITests/AndBibleUITests/testThirdWindowDocumentSwitchUpdatesOnlyTargetPaneContent": 113.258,
   "AndBibleUITests/AndBibleUITests/testThirdWindowStrongsToggleAffectsOnlyActiveWindow": 165.597,
-  "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow": 163.951,
-  "AndBibleUITests/AndBibleUITests/testWorkspaceTextOptionsParentLinkOpensGlobalScope": 125.15
+  "AndBibleUITests/AndBibleUITests/testWorkspaceTextOptionsParentLinkOpensGlobalScope": 120.96,
+  "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow": 163.951
 }

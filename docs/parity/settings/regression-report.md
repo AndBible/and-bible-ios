@@ -52,7 +52,7 @@ xcodebuild test \
   -scheme AndBible \
   -destination 'id=98C37D62-54A5-4C52-846B-B0801AEAD2CB' \
   -derivedDataPath /private/tmp/and-bible-ios-155-derived-data \
-  -only-testing:AndBibleUITests/AndBibleUITests/testSettingsScreenShowsApplicationPreferenceShortcuts
+  -only-testing:AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions
 ```
 
 ```bash
