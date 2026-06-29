@@ -82,7 +82,7 @@ Related domain references:
 - `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
 - `AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions`
 - `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
-- `AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference`
+- `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
 - `BibleUITests/HistoryListPresentationTests`
 
 ## What This Validation Actually Covers

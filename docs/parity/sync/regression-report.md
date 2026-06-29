@@ -80,7 +80,6 @@ Verification matrix:
 - `RemoteSyncMyDocumentRestoreTests/testRemoteSyncSynchronizationServiceUploadsLocalMyDocumentChangesWhenNoRemotePatchesExist`
 ### UI
 
-- `AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus`
 - `AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen`
 - `AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow`
 - `BibleUITests/SettingsIconsTests/testApplicationPreferenceFeatureShortcutsExposeAndroidRows`

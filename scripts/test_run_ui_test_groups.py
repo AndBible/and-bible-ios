@@ -55,33 +55,33 @@ class FixtureManifestTests(unittest.TestCase):
     def test_group_selection_args_by_fixture_preserves_selection_order_within_scenarios(self) -> None:
         selection_args = [
             "-only-testing:AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference",
-            "-only-testing:AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference",
             "-only-testing:AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser",
+            "-only-testing:AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState",
         ]
         manifest = {
-            "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": "bookmark-navigation",
-            "AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference": "history-single",
+            "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": "bookmark-filter",
             "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": "my-notes-single",
+            "AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState": "search-indexed",
         }
         self.assertEqual(
             group_selection_args_by_fixture(selection_args, manifest),
             [
                 (
-                    "bookmark-navigation",
+                    "bookmark-filter",
                     [
                         "-only-testing:AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference"
-                    ],
-                ),
-                (
-                    "history-single",
-                    [
-                        "-only-testing:AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference"
                     ],
                 ),
                 (
                     "my-notes-single",
                     [
                         "-only-testing:AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser"
+                    ],
+                ),
+                (
+                    "search-indexed",
+                    [
+                        "-only-testing:AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState"
                     ],
                 ),
             ],

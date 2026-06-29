@@ -146,53 +146,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the Settings Label Manager route opens the native manager screen.
-     *
-     * Label creation, edit-save, and delete persistence now run in `LabelManagerMutationTests`
-     * because they are package-owned SwiftData contracts. This UI smoke intentionally stays small
-     * and protects only the live app route and readiness probes.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell and opens the label manager through Settings
-     * - Failure modes:
-     *   - fails if the Settings route cannot reach `LabelManagerView` or if the screen loses its
-     *     app-visible readiness/export identifiers
-     */
-    func testLabelManagerScreenOpensFromSettings() {
-        let app = makeApp()
-        app.launch()
-
-        XCTAssertTrue(openLabelManager(in: app).exists)
-        _ = requireElement("labelManagerAddButton", in: app, timeout: 10)
-        _ = requireElement("labelManagerStateExport", in: app, timeout: 10)
-    }
-
-    /**
-     Verifies that invalid NextCloud server input surfaces the expected validation status.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell and opens Sync Settings from the reader action
-     *   - enters one invalid server URL and commits the inline credential edit through the
-     *     Android-equivalent keyboard commit action
-     * - Failure modes:
-     *   - fails if the Sync Settings sheet never appears
-     *   - fails if the NextCloud server field is missing
-     *   - fails if the exported connection-test state never reaches `failureInvalidURL`
-     */
-    func testSyncSettingsNextCloudInvalidURLShowsValidationStatus() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openSyncSettingsFromReaderAction(in: app)
-        let serverField = requireElement("syncNextCloudServerURLField", in: app, timeout: 10)
-
-        replaceText(in: serverField, with: "not-a-url")
-        let commitButton = requireElement("syncNextCloudServerURLCommitButton", in: app, timeout: 5)
-        tapElementReliably(commitButton, timeout: 2)
-        waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
-    }
-
-    /**
      Verifies that the visible My Documents adopt-versus-create confirmation can drive the
      create-new branch.
      *
@@ -250,11 +203,13 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies category disabling and backend switching mutate state and persist across reopen.
+     Verifies NextCloud invalid URL validation, category disabling, and backend switching.
      *
      * - Side effects:
      *   - launches the app on the reader shell with persisted NextCloud settings and bookmarks
      *     already enabled through host-side fixture seeding
+     *   - enters one invalid server URL and commits the inline credential edit through the
+     *     Android-equivalent keyboard commit action
      *   - disables the bookmarks category through the production toggle and observes the immediate
      *     exported `enabled=none` state
      *   - dismisses the Sync screen, reopens it from the reader action, and rehydrates from
@@ -263,6 +218,8 @@ extension AndBibleUITests {
      *     reopens again so the iCloud section is rehydrated from persisted settings
      * - Failure modes:
      *   - fails if the seeded Sync screen does not start with `backend=NEXT_CLOUD;enabled=bookmarks`
+     *   - fails if the NextCloud server field is missing or if the exported connection-test state
+     *     never reaches `failureInvalidURL`
      *   - fails if disabling the category does not update the exported Sync screen state to
      *     `backend=NEXT_CLOUD;enabled=none`
      *   - fails if the direct dismiss or reopen controls never appear
@@ -281,6 +238,12 @@ extension AndBibleUITests {
             backend: "NEXT_CLOUD",
             enabled: "bookmarks"
         )
+
+        let serverField = requireElement("syncNextCloudServerURLField", in: app, timeout: 10)
+        replaceText(in: serverField, with: "not-a-url")
+        let commitButton = requireElement("syncNextCloudServerURLCommitButton", in: app, timeout: 5)
+        tapElementReliably(commitButton, timeout: 2)
+        waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
 
         toggleSyncCategory(
             "syncCategoryToggle::bookmarks",

@@ -103,27 +103,29 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Bookmarks opens from the drawer as an app-owned reader destination, label assignment
-     is reachable from a seeded row, and selecting another row navigates the reader.
+     Verifies History and Bookmarks visible navigation routes from one seeded reader workflow.
      *
-     * Android launches Bookmarks from the drawer as an app-owned destination, then returns to the
-     * reader when the user selects a row. This workflow keeps the route/no-sheet parity assertions
-     * with the live selection behavior so the UI suite does not spend a separate cold app launch on
-     * route ownership alone.
+     * Android launches History and Bookmarks as app-owned destinations, then returns to the reader
+     * when the user selects a row. This workflow keeps both live route/no-sheet contracts with the
+     * selection behavior so the UI suite does not spend separate cold app launches on route
+     * ownership alone.
      *
      * - Side effects:
-     *   - launches the reader shell with labeled `Genesis 1:1` and `Exodus 2:1` bookmarks while
-     *     the reader itself stays on `Genesis 1`
+     *   - launches the reader shell with labeled `Genesis 1:1` and `Exodus 2:1` bookmarks, plus
+     *     a persisted `Exodus 2:1` history row, while the reader itself stays on `Genesis 1`
+     *   - opens History from the reader menu and selects the seeded row
      *   - opens the bookmark list from the actual reader overflow menu
      *   - opens Label Assignment for the seeded Genesis bookmark, verifies assignment state, and
      *     returns to the bookmark list
      *   - taps the seeded bookmark row and waits for the visible reader reference to reach
-     *     `Exodus 2`
+     *     `Genesis 1`
      * - Failure modes:
+     *   - fails if the history route regresses or selecting the seeded row does not navigate the
+     *     reader to `Exodus 2`
      *   - fails if the bookmark list route regresses to sheet presentation
      *   - fails if the bookmark list, label-assignment screen, or seeded bookmark rows never appear
      *   - fails if Label Assignment cannot dismiss back to the bookmark list
-     *   - fails if tapping the seeded bookmark row does not drive the reader to `Exodus 2`
+     *   - fails if tapping the seeded bookmark row does not drive the reader back to `Genesis 1`
      *
      * Label creation, favourite toggles, Bible label removal, and generic bookmark assignment are
      * covered by `LabelAssignmentMutationTests` in the app-host-free package lane.
@@ -136,6 +138,18 @@ extension AndBibleUITests {
         XCTAssertTrue(
             initialReference.localizedCaseInsensitiveContains("Genesis 1"),
             "Expected the seeded bookmark-navigation scenario to start on Genesis 1, but saw '\(initialReference)'."
+        )
+
+        XCTAssertTrue(openHistory(in: app).exists)
+        tapElementReliably(requireHistoryRow(containing: "Exodus 2", in: app, timeout: 10), timeout: 10)
+        let historyReference = waitForReaderReferenceValueToChange(
+            from: initialReference,
+            in: app,
+            timeout: 20
+        )
+        XCTAssertTrue(
+            historyReference.localizedCaseInsensitiveContains("Exodus 2"),
+            "Expected selecting the seeded history row to navigate to Exodus 2, but saw '\(historyReference)'."
         )
 
         XCTAssertTrue(openBookmarkList(in: app).exists)
@@ -155,16 +169,16 @@ extension AndBibleUITests {
         XCTAssertEqual(seedRow.value as? String, "assigned,notFavourite")
         dismissLabelAssignmentToBookmarkList(in: app, timeout: 20)
 
-        let bookmarkRow = requireBookmarkRow("Exodus_2_1", in: app, timeout: 10)
+        let bookmarkRow = requireBookmarkRow("Genesis_1_1", in: app, timeout: 10)
         tapElementReliably(bookmarkRow, timeout: 10)
         let updatedReference = waitForReaderReferenceValueToChange(
-            from: initialReference,
+            from: historyReference,
             in: app,
             timeout: 20
         )
         XCTAssertTrue(
-            updatedReference.localizedCaseInsensitiveContains("Exodus 2"),
-            "Expected selecting the seeded bookmark to navigate to Exodus 2, but saw '\(updatedReference)'."
+            updatedReference.localizedCaseInsensitiveContains("Genesis 1"),
+            "Expected selecting the seeded bookmark to navigate to Genesis 1, but saw '\(updatedReference)'."
         )
     }
 
@@ -412,42 +426,6 @@ extension AndBibleUITests {
         openMyNotesFromReader(in: app)
         waitForVisibleMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
         waitForVisibleMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
-    }
-
-    /**
-     Verifies that selecting a seeded history row jumps the active reader to that prior location.
-     *
-     * - Side effects:
-     *   - launches the app with one deterministic persisted history row while staying on the real
-     *     reader shell
-     *   - opens History from the reader menu
-     *   - selects the seeded history row and waits for the visible reader reference to change
-     *     from `Genesis 1` to `Exodus 2`
-     * - Failure modes:
-     *   - fails if the reader shell or seeded history row never appears
-     *   - fails if selecting the history row does not update the reader reference to `Exodus 2`
-     */
-    func testHistorySelectionNavigatesReaderToSeededReference() {
-        let app = makeApp()
-        app.launch()
-
-        let initialReference = requireReaderReferenceValue(in: app, timeout: 20)
-        XCTAssertTrue(
-            initialReference.localizedCaseInsensitiveContains("Genesis 1"),
-            "Expected the seeded history scenario to start on Genesis 1, but saw '\(initialReference)'."
-        )
-
-        XCTAssertTrue(openHistory(in: app).exists)
-        tapElementReliably(requireHistoryRow(containing: "Exodus 2", in: app, timeout: 10), timeout: 10)
-        let updatedReference = waitForReaderReferenceValueToChange(
-            from: initialReference,
-            in: app,
-            timeout: 20
-        )
-        XCTAssertTrue(
-            updatedReference.localizedCaseInsensitiveContains("Exodus 2"),
-            "Expected selecting the seeded history row to navigate to Exodus 2, but saw '\(updatedReference)'."
-        )
     }
 
     /**

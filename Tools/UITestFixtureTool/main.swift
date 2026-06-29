@@ -47,7 +47,6 @@ private enum FixtureScenario: String, CaseIterable {
     case bookmarkRowLabel = "bookmark-row-label"
     case bookmarkGenericVisible = "bookmark-generic-visible"
     case bookmarkStudyPad = "bookmark-studypad"
-    case historySingle = "history-single"
     case historyMultiRow = "history-multirow"
     case myNotesSingle = "my-notes-single"
     case myDocumentsSingle = "my-documents-single"
@@ -422,14 +421,13 @@ private final class FixtureContext {
             try seedBookmarkMultiRow()
         case .bookmarkFilter:
             try seedBookmarkFilter()
+            seedHistorySingle(window: baseline.window)
         case .bookmarkRowLabel:
             try seedBookmarkRowLabel()
         case .bookmarkGenericVisible:
             seedBookmarkGenericVisible()
         case .bookmarkStudyPad:
             try seedBookmarkStudyPad()
-        case .historySingle:
-            seedHistorySingle(window: baseline.window)
         case .historyMultiRow:
             seedHistoryMultiRow(window: baseline.window)
         case .myNotesSingle:

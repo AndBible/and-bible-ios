@@ -7,20 +7,22 @@ import UIKit
 
 extension AndBibleUITests {
     /**
-     Verifies reader menu About still opens and Settings routes Android's global text-options row.
+     Verifies reader menu About still opens and Settings routes Android shortcut rows.
      *
      * Package tests own the full Application Preferences row catalog. This UI smoke keeps the live
-     * route contract: About remains reachable from the reader menu, Settings is pushed from the
-     * reader action surface, its key shortcuts are exposed, and the Global text options row opens
-     * root-scoped Text Display settings rather than workspace/window options.
+     * route contract: About and Label Settings remain reachable from the reader menu, Settings is
+     * pushed from the reader action surface, and the Global text options row opens root-scoped Text
+     * Display settings rather than workspace/window options.
      *
      * - Side effects:
      *   - launches the app with deterministic in-memory persistence
      *   - opens and dismisses About from the reader menu
+     *   - opens and dismisses Label Manager from the reader menu's Label Settings action
      *   - pushes Settings from the reader action surface
      *   - activates the production Global text options row
      * - Failure modes:
      *   - fails if About no longer opens from the reader menu or cannot return to the reader shell
+     *   - fails if Label Settings cannot reach `LabelManagerView` readiness exports
      *   - fails if Settings still presents as a sheet instead of a reader destination
      *   - fails if the Android shortcut rows disappear from the Settings state
      *   - fails if Global text options opens any scope other than `global`
@@ -36,6 +38,26 @@ extension AndBibleUITests {
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
             "Expected About dismissal to return to the reader shell."
+        )
+
+        XCTAssertTrue(openLabelManager(in: app).exists)
+        _ = requireElement("labelManagerAddButton", in: app, timeout: 10)
+        _ = requireElement("labelManagerStateExport", in: app, timeout: 10)
+        let labelManagerDoneButton = firstExistingElement(
+            [
+                app.navigationBars.buttons["Done"].firstMatch,
+                app.buttons["Done"].firstMatch,
+            ],
+            timeout: 10
+        )
+        XCTAssertNotNil(labelManagerDoneButton, "Expected Label Manager to expose a Done action.")
+        guard let labelManagerDoneButton else {
+            return
+        }
+        tapElementReliably(labelManagerDoneButton, timeout: 10)
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected Label Manager dismissal to return to the reader shell."
         )
 
         openSettings(in: app)

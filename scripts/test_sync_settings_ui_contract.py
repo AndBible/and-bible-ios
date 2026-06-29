@@ -27,7 +27,7 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
             REPO_ROOT / "AndBibleUITests" / "AndBibleUITests+SettingsAndSync.swift"
         ).read_text()
         test_start = source.index(
-            "func testSyncSettingsNextCloudInvalidURLShowsValidationStatus()"
+            "func testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen()"
         )
         test_end = source.index("/**", test_start)
         test_body = source[test_start:test_end]
