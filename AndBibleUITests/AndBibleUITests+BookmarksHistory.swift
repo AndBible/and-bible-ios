@@ -103,8 +103,8 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Bookmarks opens from the drawer as an app-owned reader destination and that selecting
-     a seeded bookmark row dismisses the list and navigates the reader to that bookmark's chapter.
+     Verifies Bookmarks opens from the drawer as an app-owned reader destination, label assignment
+     is reachable from a seeded row, and selecting another row navigates the reader.
      *
      * Android launches Bookmarks from the drawer as an app-owned destination, then returns to the
      * reader when the user selects a row. This workflow keeps the route/no-sheet parity assertions
@@ -112,15 +112,21 @@ extension AndBibleUITests {
      * route ownership alone.
      *
      * - Side effects:
-     *   - launches the reader shell with one deterministic `Exodus 2:1` bookmark while the reader
-     *     itself stays on `Genesis 1`
+     *   - launches the reader shell with labeled `Genesis 1:1` and `Exodus 2:1` bookmarks while
+     *     the reader itself stays on `Genesis 1`
      *   - opens the bookmark list from the actual reader overflow menu
+     *   - opens Label Assignment for the seeded Genesis bookmark, verifies assignment state, and
+     *     returns to the bookmark list
      *   - taps the seeded bookmark row and waits for the visible reader reference to reach
      *     `Exodus 2`
      * - Failure modes:
      *   - fails if the bookmark list route regresses to sheet presentation
-     *   - fails if the bookmark list or seeded bookmark row never appears
+     *   - fails if the bookmark list, label-assignment screen, or seeded bookmark rows never appear
+     *   - fails if Label Assignment cannot dismiss back to the bookmark list
      *   - fails if tapping the seeded bookmark row does not drive the reader to `Exodus 2`
+     *
+     * Label creation, favourite toggles, Bible label removal, and generic bookmark assignment are
+     * covered by `LabelAssignmentMutationTests` in the app-host-free package lane.
      */
     func testBookmarkSelectionNavigatesReaderToSeededReference() {
         let app = makeApp()
@@ -139,6 +145,16 @@ extension AndBibleUITests {
             app.navigationBars.buttons["Done"].firstMatch.exists,
             "Drawer Bookmarks should use reader destination back chrome, not iOS sheet Done chrome."
         )
+
+        tapElementReliably(
+            requireElement("bookmarkListEditLabelsButton::Genesis_1_1", in: app, timeout: 10),
+            timeout: 10
+        )
+        XCTAssertTrue(requireElement("labelAssignmentScreen", in: app, timeout: 10).exists)
+        let seedRow = requireElement("labelAssignmentRow::UI_Test_Seed", in: app, timeout: 10)
+        XCTAssertEqual(seedRow.value as? String, "assigned,notFavourite")
+        dismissLabelAssignmentToBookmarkList(in: app, timeout: 20)
+
         let bookmarkRow = requireBookmarkRow("Exodus_2_1", in: app, timeout: 10)
         tapElementReliably(bookmarkRow, timeout: 10)
         let updatedReference = waitForReaderReferenceValueToChange(
@@ -432,32 +448,6 @@ extension AndBibleUITests {
             updatedReference.localizedCaseInsensitiveContains("Exodus 2"),
             "Expected selecting the seeded history row to navigate to Exodus 2, but saw '\(updatedReference)'."
         )
-    }
-
-    /**
-     Verifies that label assignment can be reached from the real bookmark-list path.
-     *
-     * - Side effects:
-     *   - launches the reader shell with one deterministic bookmark and seed label preloaded
-     *   - opens the bookmark list from the reader overflow menu
-     *   - opens label assignment from the seeded bookmark row and reads the seeded assignment state
-     * - Failure modes:
-     *   - fails if the bookmark list cannot be reached from the reader menu
-     *   - fails if the seeded bookmark row or inline edit-labels action is missing
-     *   - fails if the label-assignment screen never appears or the seeded row state is not loaded
-     *
-     * Label creation, favourite toggles, Bible label removal, and generic bookmark assignment are
-     * covered by `LabelAssignmentMutationTests` in the app-host-free package lane.
-     */
-    func testBookmarkListOpensLabelAssignmentForSeededBookmark() {
-        let app = makeApp()
-        app.launch()
-
-        let labelAssignmentScreen = openLabelAssignmentFromBookmarkList(in: app)
-        XCTAssertTrue(labelAssignmentScreen.exists)
-
-        let seedRow = requireElement("labelAssignmentRow::UI_Test_Seed", in: app, timeout: 10)
-        XCTAssertEqual(seedRow.value as? String, "assigned,notFavourite")
     }
 
     /**

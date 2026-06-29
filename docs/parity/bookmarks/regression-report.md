@@ -42,7 +42,6 @@ Verification matrix:
 ### UI
 
 - `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
-- `AndBibleUITests/testBookmarkListOpensLabelAssignmentForSeededBookmark`
 - `AndBibleUITests/testLabelManagerScreenOpensFromSettings`
 - `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
 - `AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser`

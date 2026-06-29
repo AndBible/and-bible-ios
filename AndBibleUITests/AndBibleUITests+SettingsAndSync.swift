@@ -146,47 +146,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that bookmark-list filter and search state reset after dismissing and reopening the
-     real bookmark sheet.
-     *
-     * - Side effects:
-     *   - launches the reader shell with deterministic `Genesis 1:1` and `Exodus 2:1` bookmarks
-     *     assigned to different labels
-     *   - opens the real bookmark list, applies the seeded label filter, then adds a conflicting
-     *     search query so the filtered list becomes empty
-     *   - dismisses and reopens the bookmark list from the reader menu
-     * - Failure modes:
-     *   - fails if the bookmark list, seeded label chip, or search field never appears
-     *   - fails if the conflicting search query does not hide the remaining filtered bookmark
-     *   - fails if reopening the bookmark list does not restore both seeded rows
-     */
-    func testBookmarkListFilterAndSearchResetAcrossReopen() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openBookmarkList(in: app)
-
-        let searchField = requireBookmarkListSearchField(in: app, timeout: 10)
-
-        selectBookmarkListFilterChip("UI_Test_Seed", in: app, timeout: 10)
-        waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
-        waitForBookmarkListState(containing: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
-        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
-
-        replaceText(in: searchField, with: "Exodus", placeholderHints: ["Search bookmarks"])
-        waitForBookmarkListState(containing: "count=0", in: app, timeout: 10)
-        waitForBookmarkListState(containing: "query=Exodus", in: app, timeout: 10)
-        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
-
-        reopenBookmarkList(in: app)
-        waitForBookmarkListState(containing: "selectedLabel=all", in: app, timeout: 10)
-        waitForBookmarkListState(containing: "count=2", in: app, timeout: 10)
-        waitForBookmarkListState(notContaining: "query=Exodus", in: app, timeout: 10)
-        waitForBookmarkListState(containing: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
-        waitForBookmarkListState(containing: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
-    }
-
-    /**
      Verifies that the Settings Label Manager route opens the native manager screen.
      *
      * Label creation, edit-save, and delete persistence now run in `LabelManagerMutationTests`

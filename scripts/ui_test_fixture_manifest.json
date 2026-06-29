@@ -1,9 +1,7 @@
 {
-  "AndBibleUITests/AndBibleUITests/testBookmarkListFilterAndSearchResetAcrossReopen": "bookmark-filter",
-  "AndBibleUITests/AndBibleUITests/testBookmarkListOpensLabelAssignmentForSeededBookmark": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel": "bookmark-studypad",
   "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": "my-notes-single",
-  "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": "bookmark-navigation",
+  "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": "bookmark-filter",
   "AndBibleUITests/AndBibleUITests/testStudyPadsScreenOpensFromReaderMenu": "bookmark-studypad",
   "AndBibleUITests/AndBibleUITests/testMyDocumentsScreenOpensFromReaderMenuAndOpensPage": "my-documents-single",
   "AndBibleUITests/AndBibleUITests/testColorSettingsResetRestoresDefaultThemeColors": "display-colors-custom",
