@@ -123,6 +123,9 @@ Related domain references:
   button, experimental feature, and active-window state fields
 - active windows with multiple visible panes emit `hasActiveIndicator: true`; inactive panes emit
   both `activeWindow: false` and `hasActiveIndicator: false`
+- package-level active-pane isolation coverage proves captured pane routing, bookmark navigation,
+  document switching, and Strong's-mode mutations update the captured pane without mutating a
+  sibling pane
 
 ### Fullscreen and swipe behavior
 
@@ -224,6 +227,7 @@ Taken together, this gives the reader domain current regression evidence for:
 - workspace selector create handoff
 - payload-level restore/highlight behavior
 - payload-level config/appSettings propagation into the embedded document client
+- active-pane bookmark, document-switch, and Strong's-mode isolation
 - double-tap fullscreen preference gating
 - bridge-driven compare document-pipeline payload construction
 - Strong's / dictionary document-pipeline routing

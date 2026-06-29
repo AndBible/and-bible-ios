@@ -444,10 +444,12 @@ public struct BibleReaderView: View {
     */
     private var panePresentationController: BibleReaderController? {
         _ = windowManager.controllerVersion
-        if let panePresentationTargetWindowId {
-            return controller(for: panePresentationTargetWindowId)
-        }
-        return focusedController
+        return BibleReaderPanePresentationTarget.controller(
+            targetWindowId: panePresentationTargetWindowId,
+            controllers: windowManager.controllers,
+            activeWindow: windowManager.activeWindow,
+            as: BibleReaderController.self
+        )
     }
 
     /**
@@ -483,15 +485,19 @@ public struct BibleReaderView: View {
 
     /// Captures the window that should own the next pane-scoped presentation.
     private func setPanePresentationTarget(_ windowId: UUID?) {
-        panePresentationTargetWindowId = windowId ?? windowManager.activeWindow?.id
+        panePresentationTargetWindowId = BibleReaderPanePresentationTarget.capturedWindowId(
+            requested: windowId,
+            activeWindow: windowManager.activeWindow
+        )
     }
 
     /// Window captured for the currently presented pane-scoped destination, if it is still loaded.
     private var panePresentationTargetWindow: Window? {
-        guard let panePresentationTargetWindowId else {
-            return windowManager.activeWindow
-        }
-        return windowManager.allWindows.first { $0.id == panePresentationTargetWindowId }
+        BibleReaderPanePresentationTarget.window(
+            targetWindowId: panePresentationTargetWindowId,
+            allWindows: windowManager.allWindows,
+            activeWindow: windowManager.activeWindow
+        )
     }
 
     /// Android-style window-level All Text Options navigation title for the captured pane.
@@ -3645,8 +3651,7 @@ public struct BibleReaderView: View {
         for window: Window?,
         previousResolvedSettings: TextDisplaySettings
     ) {
-        guard let window,
-              let pageManager = window.pageManager else {
+        guard let window else {
             syncActiveDisplaySettings()
             reloadBehaviorPreferences()
             return
@@ -3657,19 +3662,16 @@ public struct BibleReaderView: View {
             workspace: window.workspace?.textDisplaySettings ?? windowManager.activeWorkspace?.textDisplaySettings,
             global: globalDisplaySettings
         )
-        let hadWindowThemeColors = pageManager.textDisplaySettings?.hasThemeColorOverrides ?? false
-        let changedThemeColors = Self.themeColorsDiffer(windowSettings, previousResolvedSettings)
-        let shouldPersistThemeColors = hadWindowThemeColors || changedThemeColors
-        var windowScopedSettings = windowSettings
-        if !shouldPersistThemeColors {
-            windowScopedSettings.clearThemeColors()
+        guard BibleReaderWindowDisplaySettingsMutation.persist(
+            editorSettings: windowSettings,
+            for: window,
+            parentSettings: parentSettings,
+            previousResolvedSettings: previousResolvedSettings
+        ) else {
+            syncActiveDisplaySettings()
+            reloadBehaviorPreferences()
+            return
         }
-        _ = windowScopedSettings.clearRedundantOverrides(matching: parentSettings)
-        if shouldPersistThemeColors {
-            windowScopedSettings.restoreThemeColors(from: windowSettings)
-        }
-
-        pageManager.textDisplaySettings = windowScopedSettings
         try? modelContext.save()
 
         let resolvedSettings = resolvedDisplaySettings(for: window)
@@ -3894,28 +3896,6 @@ public struct BibleReaderView: View {
             for: panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace
         )
         windowDisplaySettings = resolvedDisplaySettings(for: panePresentationTargetWindow ?? windowManager.activeWindow)
-    }
-
-    /**
-     Compares the day/night theme color tuple between two display settings values.
-
-     - Parameters:
-       - lhs: First display settings value.
-       - rhs: Second display settings value.
-     - Returns: `true` when any theme color or noise field differs.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private static func themeColorsDiffer(
-        _ lhs: TextDisplaySettings,
-        _ rhs: TextDisplaySettings
-    ) -> Bool {
-        lhs.dayTextColor != rhs.dayTextColor ||
-            lhs.dayBackground != rhs.dayBackground ||
-            lhs.dayNoise != rhs.dayNoise ||
-            lhs.nightTextColor != rhs.nightTextColor ||
-            lhs.nightBackground != rhs.nightBackground ||
-            lhs.nightNoise != rhs.nightNoise
     }
 
     /// Refreshes each visible reader pane using that pane's own resolved display settings.
