@@ -41,11 +41,13 @@ Verification matrix:
 - `AndBibleTests/testStrongsSearchFindAllOccurrencesSupportsIntermediateZeroTrimVariant`
 - `AndBibleTests/testSearchIndexFindsCanonicalStrongsTokens`
 - `AndBibleTests/testSearchIndexReturnsTextHitsInCanonicalEntryOrder`
+- `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchWordModesMatchAndroidSearchContracts`
+- `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchScopeFiltersMatchAndroidSearchContracts`
+- `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchMultipleReturnsPerModuleBucketsForGroupedTotals`
 
 ### UI
 
 - `AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery`
-- `AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults`
 - `AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals`
 - `AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults`
 - `AndBibleUITests/testSearchWordModeChangeRerunsQueryAndUpdatesResults`
@@ -56,16 +58,16 @@ Verification matrix:
 ### Direct-launch search harness
 
 - seeded query survives hydration into the visible Search screen
-- the harness can build a disposable index against bundled modules
-- the ready state reports non-zero bundled results for deterministic queries
-- indexed text results are emitted in canonical verse order for broad queries
+- indexed text results are emitted in canonical verse order for broad queries through package tests
 
 ### Search options
 
-- switching scope from whole Bible -> OT -> NT reruns the same query
-- OT scope correctly reduces `jesus` to zero bundled hits
-- switching word mode from all-words -> phrase -> any-word reruns the same query
-- phrase mode correctly reduces `earth void` to zero bundled hits
+- OT, NT, and current-book filters constrain indexed search result sets
+- switching scope from whole Bible -> OT -> NT reruns the same query through the UI controls
+- all-words requires every query term
+- switching word mode from all-words -> phrase -> any-word reruns the same query through the UI controls
+- phrase mode correctly reduces non-adjacent `earth void` to zero hits
+- any-word mode restores rows that contain either query term
 
 ### Multi-translation grouped results
 

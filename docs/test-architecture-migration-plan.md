@@ -53,6 +53,14 @@ AndBibleTests/                         <- ONLY app-host unit tests (AppDelegate/
 AndBibleUITests/                       <- ONLY true end-to-end journeys, trimmed to a small smoke set
 ```
 
+Current progress as of 2026-06-28:
+
+| Lane | Current state |
+|---|---|
+| App-host unit tests | 1 func; only the scene-configuration sentinel remains |
+| Package tests | 677 funcs across SwordKit, BibleCore, BibleView, and BibleUI package lanes |
+| UI tests | 66 funcs after demoting duplicate seeded-index and Strong's Search data-contract coverage |
+
 ## Destination mapping
 
 **Classify by behavior under test, NOT by today's imports.** The current files
@@ -175,6 +183,7 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 ### Phase 4 - Retire scaffolding & lock structure
 - Delete near-empty `AndBibleTests` extensions and `AndBibleTestSupport`; keep only app-host tests. The app-host bundle now contains only the scene-configuration sentinel.
 - Narrow the old simulator unit-test CI job to the app-host scene-configuration sentinel using the dedicated `AndBibleUnitTests` scheme, while keeping `Unit Tests (Simulator)` as an aggregate required gate that fails when any package-test lane fails. Package-owned coverage is enforced by the app-host-free `SwordKitTests`, `BibleCoreTests`, `BibleViewTests`, and `BibleUITests` package lanes.
+- Search UI trim has started: duplicate seeded-index and Strong's Search data-contract assertions moved out of `AndBibleUITests` into app-host-free package coverage. Scope and word-mode UI tests intentionally remain because they prove the visible controls rerun the active query; package coverage now backs the indexed result semantics beneath those controls.
 - Simplify CI: replace `ios-simulator-unit-tests` app-build path with app-host-free package-test lanes. Baseline is per-target simulator schemes; macOS `swift test` is an optimization only for targets proven to compile under SwiftPM. Reassess shard planner, timings file, build-product-reuse experiment.
 - Trim `AndBibleUITests` to an explicit smoke set (target <=15 journeys); demote/convert the rest.
 - Update `CLAUDE.md` + `.github/copilot-instructions.md`: replace "swift test is supplemental" with the actual placement rule - *new tests go in the lowest package test target that owns the behavior after imports are minimized; app-host only for true app-delegate/scene/bootstrap behavior.*

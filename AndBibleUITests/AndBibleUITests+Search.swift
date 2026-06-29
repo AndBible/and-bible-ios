@@ -523,25 +523,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that Search can query the seeded bundled index and return bundled results.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell with the initial query `earth` queued for Search
-     *   - opens Search from the toolbar and waits for the seeded bundled index to become ready
-     * - Failure modes:
-     *   - fails if the Search screen never reaches the ready state
-     *   - fails if the seeded bundled result set still returns zero hits
-     */
-    func testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults() {
-        let app = makeApp(searchQuery: "earth")
-        app.launch()
-
-        _ = openSearch(in: app)
-        waitForSearchState(containing: "query=earth", in: app, timeout: 20)
-        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
-    }
-
-    /**
      Reveals and validates one Settings `ListPreference` row after the Android-style conversion.
      *
      * - Parameters:
@@ -851,26 +832,6 @@ extension AndBibleUITests {
             updatedReference.localizedCaseInsensitiveContains("Genesis 6:8"),
             "Expected selecting the Search result to navigate to Genesis 6:8, but saw '\(updatedReference)'."
         )
-    }
-
-    /**
-     Verifies that a bundled Strong's query reaches the indexed lexical-token path and returns hits.
-     *
-     * - Side effects:
-     *   - launches the app directly into Search with one deterministic Strong's query
-     *   - uses the seeded `search-indexed` fixture so normal Search coverage does not create an
-     *     index at runtime
-     * - Failure modes:
-     *   - fails if Search never reaches the ready state for the seeded Strong's query
-     *   - fails if the bundled Strong's-capable Bible still reports zero indexed lexical matches
-     */
-    func testSearchDirectLaunchStrongsQueryReturnsBundledResults() {
-        let app = makeApp(searchQuery: "H00430")
-        app.launch()
-
-        _ = openSearch(in: app)
-        waitForSearchState(containing: "query=H00430", in: app, timeout: 20)
-        waitForSearchResultCount(atLeast: 1, in: app, timeout: 20)
     }
 
     /**

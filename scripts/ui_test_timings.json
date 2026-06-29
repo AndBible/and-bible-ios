@@ -29,8 +29,6 @@
   "AndBibleUITests/AndBibleUITests/testReadingPlanListStartDeleteAndImportAffordanceFlow": 135.301,
   "AndBibleUITests/AndBibleUITests/testReadingPlansStartPlanAndAdvanceDay": 134.859,
   "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery": 94.054,
-  "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchStrongsQueryReturnsBundledResults": 93.984,
-  "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults": 100.089,
   "AndBibleUITests/AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals": 176.783,
   "AndBibleUITests/AndBibleUITests/testSearchPresentsAsReaderDestinationInsteadOfSheet": 87.628,
   "AndBibleUITests/AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference": 174.437,

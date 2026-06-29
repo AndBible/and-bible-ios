@@ -26,8 +26,6 @@
   "AndBibleUITests/AndBibleUITests/testLabelManagerCreateRenameDeleteFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingPlanListStartDeleteAndImportAffordanceFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingPlansStartPlanAndAdvanceDay": "baseline",
-  "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchStrongsQueryReturnsBundledResults": "search-indexed",
-  "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals": "search-multi-translation",
   "AndBibleUITests/AndBibleUITests/testSearchPresentsAsReaderDestinationInsteadOfSheet": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery": "search-indexed",
