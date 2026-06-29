@@ -265,7 +265,7 @@ final class BibleReaderModulePickerTests: XCTestCase {
         let source = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
         )
-        let selectionSource = try extractFunction(named: "select", from: source)
+        let selectionSource = try BibleUITestSourceLocator.extractFunction(named: "select", from: source)
 
         XCTAssertTrue(selectionSource.contains("case .map:"))
         XCTAssertTrue(selectionSource.contains("controller.switchMapDocument(to: module.name)"))
@@ -347,47 +347,4 @@ final class BibleReaderModulePickerTests: XCTestCase {
         XCTAssertFalse(pickerSource.contains("Section(String(localized: \"document_filter_results"))
     }
 
-    /**
-     Extracts one Swift function body from a source file for a focused source-contract assertion.
-
-     The scanner balances braces after the named function declaration instead of checking arbitrary
-     file-wide fragments, which keeps the tests tied to the specific behavior boundary they protect.
-     */
-    private func extractFunction(named functionName: String, from source: String) throws -> String {
-        guard let functionRange = source.range(of: "func \(functionName)") else {
-            throw NSError(
-                domain: "BibleReaderModulePickerTests",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Function \(functionName) not found"]
-            )
-        }
-        guard let openingBrace = source[functionRange.lowerBound...].firstIndex(of: "{") else {
-            throw NSError(
-                domain: "BibleReaderModulePickerTests",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "Function \(functionName) has no body"]
-            )
-        }
-
-        var depth = 0
-        var current = openingBrace
-        while current < source.endIndex {
-            let character = source[current]
-            if character == "{" {
-                depth += 1
-            } else if character == "}" {
-                depth -= 1
-                if depth == 0 {
-                    return String(source[functionRange.lowerBound...current])
-                }
-            }
-            current = source.index(after: current)
-        }
-
-        throw NSError(
-            domain: "BibleReaderModulePickerTests",
-            code: 3,
-            userInfo: [NSLocalizedDescriptionKey: "Function \(functionName) body was not balanced"]
-        )
-    }
 }
