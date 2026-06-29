@@ -579,57 +579,40 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that changing Search scope reruns the current query and updates the result set.
+     Verifies Search option controls mutate the visible active-query state.
+     *
+     * Exact Android search semantics for scope filters and word modes are covered in
+     * `SearchIndexServiceQueryTests`. This UI smoke stays focused on the live Search surface:
+     * the real scope and word-mode radio rows must be tappable, update exported state, and rerender
+     * the seeded result list after each option change.
      *
      * - Side effects:
-     *   - launches the app directly into Search with the initial query `jesus`
-     *   - switches Search scope from whole Bible to the Old Testament and then to the New
-     *     Testament
-     *   - waits for Search to rerun after each scope change and inspects the exported Search
-     *     state
+     *   - launches the app directly into Search with the initial query `earth void`
+     *   - switches Search scope between NT and OT
+     *   - switches Search word mode from all words to phrase and then to any word
      * - Failure modes:
-     *   - fails if the visible `OT` or `NT` Search scope buttons are not accessible
-     *   - fails if the Old Testament scope does not reduce the `jesus` query to zero hits
-     *   - fails if the New Testament scope does not restore non-zero bundled hits
+     *   - fails if visible Search option controls are not accessible
+     *   - fails if scope or word-mode changes do not update the Search state export
+     *   - fails if the visible seeded result list does not rerender after option changes
      */
-    func testSearchScopeChangeRerunsQueryAndUpdatesResults() {
-        let app = makeApp(searchQuery: "jesus")
+    func testSearchOptionControlsMutateVisibleState() {
+        let app = makeApp(searchQuery: "earth void")
         app.launch()
 
         _ = openSearch(in: app)
-        waitForSearchResultRow("searchResultRow::Matthew_1_1", in: app, shouldExist: true, timeout: 20)
+        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
-        tapSearchScope(.oldTestament, in: app)
-        waitForSearchState(containing: "scope=oldTestament", in: app, timeout: 20)
+        tapSearchScope(.newTestament, in: app)
+        waitForSearchState(containing: "scope=newTestament", in: app, timeout: 20)
         waitForSearchResultRow(
-            "searchResultRow::Matthew_1_1",
+            "searchResultRow::Genesis_1_2",
             in: app,
             shouldExist: false,
             timeout: 20
         )
 
-        tapSearchScope(.newTestament, in: app)
-        waitForSearchState(containing: "scope=newTestament", in: app, timeout: 20)
-        waitForSearchResultRow("searchResultRow::Matthew_1_1", in: app, shouldExist: true, timeout: 20)
-    }
-
-    /**
-     Verifies that changing Search word mode reruns the current query and updates the result set.
-     *
-     * - Side effects:
-     *   - launches the app directly into Search with the initial query `earth void`
-     *   - switches Search word mode from all words to phrase and then to any word
-     *   - waits for Search to rerun after each mode change and inspects the exported Search state
-     * - Failure modes:
-     *   - fails if the visible `Phrase` or `Any Word` Search mode buttons are not accessible
-     *   - fails if phrase mode does not reduce the `earth void` query to zero hits
-     *   - fails if any-word mode does not restore non-zero bundled hits
-     */
-    func testSearchWordModeChangeRerunsQueryAndUpdatesResults() {
-        let app = makeApp(searchQuery: "earth void")
-        app.launch()
-
-        _ = openSearch(in: app)
+        tapSearchScope(.oldTestament, in: app)
+        waitForSearchState(containing: "scope=oldTestament", in: app, timeout: 20)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
         tapSearchWordMode("Phrase", in: app, timeout: 10)

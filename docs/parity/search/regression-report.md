@@ -49,8 +49,7 @@ Verification matrix:
 
 - `AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery`
 - `AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals`
-- `AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults`
-- `AndBibleUITests/testSearchWordModeChangeRerunsQueryAndUpdatesResults`
+- `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
 - `AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference`
 
 ## Expected Assertions Covered
@@ -63,9 +62,9 @@ Verification matrix:
 ### Search options
 
 - OT, NT, and current-book filters constrain indexed search result sets
-- switching scope from whole Bible -> OT -> NT reruns the same query through the UI controls
+- switching scope through the visible UI controls mutates Search state and rerenders the active query
 - all-words requires every query term
-- switching word mode from all-words -> phrase -> any-word reruns the same query through the UI controls
+- switching word mode through the visible UI controls mutates Search state and rerenders the active query
 - phrase mode correctly reduces non-adjacent `earth void` to zero hits
 - any-word mode restores rows that contain either query term
 
@@ -98,14 +97,13 @@ canonical-token coverage for the H00430/H0430 KJV path.
 - unit: `6` tests, `0` failures
 - UI: `6` tests, `0` failures
 - focused unit subset runtime: about `32s` end-to-end, with `20s` of test execution
-- focused Search UI subset runtime: about `507s` end-to-end, including fixture resets and simulator execution
+- focused Search UI subset runtime: about `507s` end-to-end before the scope/word-mode UI workflows were combined; current focused runtime is tracked in `scripts/ui_test_timings.json`
 
 This gives the search domain current regression evidence for:
 
 - index lifecycle readiness
 - query retention
-- scope mutation
-- word-mode mutation
+- scope and word-mode mutation
 - multi-translation grouped totals
 - grouped-result navigation
 - Strong's normalization/indexed lexical-token hit search

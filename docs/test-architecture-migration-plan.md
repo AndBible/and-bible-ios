@@ -53,13 +53,13 @@ AndBibleTests/                         <- ONLY app-host unit tests (AppDelegate/
 AndBibleUITests/                       <- ONLY true end-to-end journeys, trimmed to a small smoke set
 ```
 
-Current progress as of 2026-06-28:
+Current progress as of 2026-06-29:
 
 | Lane | Current state |
 |---|---|
 | App-host unit tests | 1 func; only the scene-configuration sentinel remains |
 | Package tests | 698 funcs across SwordKit, BibleCore, BibleView, and BibleUI package lanes |
-| UI tests | 50 funcs after demoting duplicate seeded-index, Strong's Search data-contract, BookmarkList projection/delete persistence, label-assignment mutation persistence, StudyPad mutation persistence, My Notes mutation persistence, Sync category-row catalog coverage, Settings feature-shortcut route metadata, Settings `ListPreference` row presentation, History clear/delete persistence, and duplicate Downloads route coverage |
+| UI tests | 49 funcs after demoting duplicate seeded-index, Strong's Search data-contract, Search scope/word-mode duplicate launches, BookmarkList projection/delete persistence, label-assignment mutation persistence, StudyPad mutation persistence, My Notes mutation persistence, Sync category-row catalog coverage, Settings feature-shortcut route metadata, Settings `ListPreference` row presentation, History clear/delete persistence, and duplicate Downloads route coverage |
 
 ## Destination mapping
 
@@ -183,7 +183,7 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 ### Phase 4 - Retire scaffolding & lock structure
 - Delete near-empty `AndBibleTests` extensions and `AndBibleTestSupport`; keep only app-host tests. The app-host bundle now contains only the scene-configuration sentinel.
 - Narrow the old simulator unit-test CI job to the app-host scene-configuration sentinel using the dedicated `AndBibleUnitTests` scheme, while keeping `Unit Tests (Simulator)` as an aggregate required gate that fails when any package-test lane fails. Package-owned coverage is enforced by the app-host-free `SwordKitTests`, `BibleCoreTests`, `BibleViewTests`, and `BibleUITests` package lanes.
-- Search UI trim has started: duplicate seeded-index and Strong's Search data-contract assertions moved out of `AndBibleUITests` into app-host-free package coverage. Scope and word-mode UI tests intentionally remain because they prove the visible controls rerun the active query; package coverage now backs the indexed result semantics beneath those controls.
+- Search UI trim has started: duplicate seeded-index and Strong's Search data-contract assertions moved out of `AndBibleUITests` into app-host-free package coverage. Scope and word-mode result semantics live in `SearchIndexServiceQueryTests`; one combined UI smoke intentionally remains because it proves the visible Android-form controls mutate state and rerender the active query surface.
 - Bookmark/My Notes/StudyPad trim moved BookmarkList sort/search/label-filter state contracts, destructive row persistence, generic row label filtering, label-assignment create/toggle/favourite persistence, Label Manager create/edit/delete persistence, StudyPad mutation persistence, and My Notes mutation persistence into package tests. Row navigation, StudyPad handoff, label-assignment routing, the Settings Label Manager route, and the My Notes pseudo-document route remain visible app UI smokes. Downloads source-management persistence remains in SwordKit package tests, while one visible route smoke still proves the reader menu opens Downloads and Android's Downloads overflow reaches the repository manager. Sync category-row catalog coverage now lives in `SettingsIconsTests`, while backend/category persistence and invalid-URL workflows remain visible app UI tests.
 - Settings feature shortcut trim moved Settings-root Sync and Reading Progress route metadata into `ApplicationSettingsPresentation` and `SettingsIconsTests`; the Settings-root destination smoke test remains visible UI coverage, while Sync Settings behavioral workflows continue to exercise direct reader-action entry points.
 - Settings `ListPreference` trim moved compact menu-row metadata and the no-inline-`Picker` renderer guard into `ApplicationSettingsPresentation`/`SettingsIconsTests`; the Settings-root destination smoke test remains as the live navigation workflow.
