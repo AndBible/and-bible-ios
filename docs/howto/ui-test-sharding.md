@@ -41,10 +41,10 @@ current evidence.
 Current local planner output for the checked-in suite is:
 
 ```text
-Shard 1/4: 16 tests, estimated 2155.494s
-Shard 2/4: 15 tests, estimated 2178.825s
-Shard 3/4: 16 tests, estimated 2159.131s
-Shard 4/4: 15 tests, estimated 2176.686s
+Shard 1/4: 15 tests, estimated 2079.601s
+Shard 2/4: 15 tests, estimated 2026.841s
+Shard 3/4: 15 tests, estimated 2030.745s
+Shard 4/4: 15 tests, estimated 2081.076s
 ```
 
 The current timing manifest was regenerated from successful CI run
@@ -100,7 +100,7 @@ Preferred order:
 
 Why this matters:
 
-- a full serial local UI run covers the same 62 UI tests, but its wall-clock
+- a full serial local UI run covers the same 60 UI tests, but its wall-clock
   runtime is not comparable to CI because CI runs shards in parallel
 - a targeted subset can prove a specific fix, but it does not prove the shard
   or full-suite shape is clean

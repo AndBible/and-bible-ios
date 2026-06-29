@@ -52,15 +52,23 @@ xcodebuild test \
   -scheme AndBible \
   -destination 'id=98C37D62-54A5-4C52-846B-B0801AEAD2CB' \
   -derivedDataPath /private/tmp/and-bible-ios-155-derived-data \
-  -only-testing:AndBibleUITests/AndBibleUITests/testSettingsScreenShowsApplicationPreferenceShortcuts \
-  -only-testing:AndBibleUITests/AndBibleUITests/testSettingsReadingProgressLinkOpensReadingProgressSettings
+  -only-testing:AndBibleUITests/AndBibleUITests/testSettingsScreenShowsApplicationPreferenceShortcuts
+```
+
+```bash
+xcodebuild test \
+  -project AndBible.xcodeproj \
+  -scheme BibleUITests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -only-testing:BibleUITests/SettingsIconsTests/testApplicationPreferenceFeatureShortcutsExposeAndroidRows \
+  -only-testing:BibleUITests/SettingsIconsTests/testApplicationPreferenceFeatureShortcutsFollowRuntimeAvailability
 ```
 
 Results:
 
 - Simulator build: `PASS` (`** BUILD SUCCEEDED **`)
 - Focused unit tests: `PASS` (`Executed 3 tests, with 0 failures`)
-- Focused UI tests: `PASS` (`Executed 2 tests, with 0 failures`)
+- Focused UI/package tests: `PASS`
 
 Evidence:
 

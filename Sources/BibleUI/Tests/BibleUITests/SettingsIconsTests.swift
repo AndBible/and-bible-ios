@@ -53,6 +53,47 @@ final class SettingsIconsTests: XCTestCase {
         )
     }
 
+    func testApplicationPreferenceFeatureShortcutsExposeAndroidRows() {
+        let sync = ApplicationSettingsPresentation.syncSettingsShortcut
+        XCTAssertEqual(sync.identifier, "settingsSyncLink")
+        XCTAssertEqual(sync.androidKey, "sync_settings_shortcut")
+        XCTAssertEqual(sync.titleLocalizationKey, "cloud_sync_title")
+        XCTAssertEqual(sync.titleDefault, "Device synchronization")
+        XCTAssertEqual(sync.summaryLocalizationKey, "icloud_sync_description")
+        XCTAssertTrue(sync.keywords.contains("sync_settings_shortcut"))
+        XCTAssertEqual(sync.icon?.androidDrawableName, "ic_syncdb_24dp")
+        XCTAssertEqual(sync.searchEntry.identifier, sync.identifier)
+
+        let readingProgress = ApplicationSettingsPresentation.readingProgressSettingsShortcut
+        XCTAssertEqual(readingProgress.identifier, "settingsReadingProgressLink")
+        XCTAssertEqual(readingProgress.androidKey, "reading_progress_settings_shortcut")
+        XCTAssertEqual(readingProgress.titleLocalizationKey, "reading_progress_settings")
+        XCTAssertEqual(readingProgress.titleDefault, "Reading Progress Settings")
+        XCTAssertEqual(readingProgress.summaryLocalizationKey, "reading_progress_settings_summary")
+        XCTAssertTrue(readingProgress.keywords.contains("reading_progress_settings_shortcut"))
+        XCTAssertEqual(readingProgress.icon?.androidDrawableName, "ic_baseline_check_circle_24")
+        XCTAssertEqual(readingProgress.searchEntry.identifier, readingProgress.identifier)
+    }
+
+    func testApplicationPreferenceFeatureShortcutsFollowRuntimeAvailability() {
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.featureShortcuts(canOpenReadingProgressSettings: false),
+            [.syncSettings]
+        )
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.featureShortcuts(canOpenReadingProgressSettings: true),
+            [.syncSettings, .readingProgressSettings]
+        )
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.primaryLinkIdentifiers(canOpenReadingProgressSettings: false),
+            ["settingsGlobalTextOptionsLink", "settingsSyncLink"]
+        )
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.primaryLinkIdentifiers(canOpenReadingProgressSettings: true),
+            ["settingsGlobalTextOptionsLink", "settingsSyncLink", "settingsReadingProgressLink"]
+        )
+    }
+
     func testSyncSettingsIconsComeFromAndroidSyncSettingsXml() {
         XCTAssertEqual(
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "sync_bookmarks")?.androidDrawableName,

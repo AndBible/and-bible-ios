@@ -80,7 +80,6 @@ Verification matrix:
 - `RemoteSyncMyDocumentRestoreTests/testRemoteSyncSynchronizationServiceUploadsLocalMyDocumentChangesWhenNoRemotePatchesExist`
 ### UI
 
-- `AndBibleUITests/testSettingsSyncLinkOpensSyncSettings`
 - `AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus`
 - `AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState`
 - `AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen`
@@ -88,6 +87,8 @@ Verification matrix:
 - `AndBibleUITests/testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath`
 - `AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection`
 - `AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen`
+- `BibleUITests/SettingsIconsTests/testApplicationPreferenceFeatureShortcutsExposeAndroidRows`
+- `BibleUITests/SettingsIconsTests/testApplicationPreferenceFeatureShortcutsFollowRuntimeAvailability`
 
 ### Package UI Presentation
 

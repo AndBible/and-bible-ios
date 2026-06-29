@@ -1671,11 +1671,12 @@ public struct SettingsView: View {
     @ViewBuilder
     private var featuresSettingsSection: some View {
         settingsPreferenceSection(String(localized: "features", defaultValue: "Features")) {
-            let syncEntry = syncSettingsSearchEntry
+            let syncShortcut = ApplicationSettingsPresentation.syncSettingsShortcut
+            let syncEntry = syncShortcut.searchEntry
             if settingsSearchMatchesEntry(syncEntry) {
                 settingsNavigationLink(
                     title: syncEntry.title,
-                    androidKey: "sync_settings_shortcut",
+                    androidKey: syncShortcut.androidKey,
                     summary: syncEntry.summary,
                     accessibilityIdentifier: syncEntry.identifier
                 ) {
@@ -1683,13 +1684,15 @@ public struct SettingsView: View {
                 }
             }
 
+            let readingProgressShortcut = ApplicationSettingsPresentation.readingProgressSettingsShortcut
+            let readingProgressEntry = readingProgressShortcut.searchEntry
             if canOpenReadingProgressSettings,
-               settingsSearchMatchesEntry(readingProgressSettingsSearchEntry) {
+               settingsSearchMatchesEntry(readingProgressEntry) {
                 settingsNavigationLink(
-                    title: readingProgressSettingsSearchEntry.title,
-                    androidKey: "reading_progress_settings_shortcut",
-                    summary: readingProgressSettingsSearchEntry.summary,
-                    accessibilityIdentifier: readingProgressSettingsSearchEntry.identifier
+                    title: readingProgressEntry.title,
+                    androidKey: readingProgressShortcut.androidKey,
+                    summary: readingProgressEntry.summary,
+                    accessibilityIdentifier: readingProgressEntry.identifier
                 ) {
                     ReadingProgressSettingsView(controller: readingProgressController)
                         .accessibilityIdentifier("readingProgressSettingsScreen")
@@ -1708,36 +1711,11 @@ public struct SettingsView: View {
         readingProgressController != nil
     }
 
-    /// Search entry for the sync feature shortcut.
-    private var syncSettingsSearchEntry: AndBibleSettingsSearchEntry {
-        AndBibleSettingsSearchEntry(
-            identifier: "settingsSyncLink",
-            title: String(localized: "cloud_sync_title", defaultValue: "Device synchronization"),
-            summary: String(localized: "icloud_sync_description"),
-            keywords: ["features", "sync", "icloud", "cloud", "sync_settings_shortcut"]
-        )
-    }
-
-    /// Search entry for the reading-progress feature shortcut.
-    private var readingProgressSettingsSearchEntry: AndBibleSettingsSearchEntry {
-        AndBibleSettingsSearchEntry(
-            identifier: "settingsReadingProgressLink",
-            title: String(localized: "reading_progress_settings", defaultValue: "Reading Progress Settings"),
-            summary: String(
-                localized: "reading_progress_settings_summary",
-                defaultValue: "Configure automatic reading and memorization progress tracking."
-            ),
-            keywords: ["features", "reading", "progress", "memorization", "reading_progress_settings_shortcut"]
-        )
-    }
-
     /// Search entries for feature shortcuts that can be opened from Application preferences.
     private var featuresSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
-        var entries = [syncSettingsSearchEntry]
-        if canOpenReadingProgressSettings {
-            entries.append(readingProgressSettingsSearchEntry)
-        }
-        return entries
+        ApplicationSettingsPresentation
+            .featureShortcuts(canOpenReadingProgressSettings: canOpenReadingProgressSettings)
+            .map(\.searchEntry)
     }
 
     /// Search entries for module-backed dictionary preference rows currently visible on this device.
@@ -2460,10 +2438,8 @@ public struct SettingsView: View {
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return ""
         }
-        var primaryLinks = ["settingsGlobalTextOptionsLink", "settingsSyncLink"]
-        if canOpenReadingProgressSettings {
-            primaryLinks.append("settingsReadingProgressLink")
-        }
+        let primaryLinks = ApplicationSettingsPresentation
+            .primaryLinkIdentifiers(canOpenReadingProgressSettings: canOpenReadingProgressSettings)
         let searchToken = isSettingsSearchActive ? "active" : "inactive"
         return "primaryLinks=\(primaryLinks.joined(separator: ","));adminFlows=readerActions;search=\(searchToken)"
     }

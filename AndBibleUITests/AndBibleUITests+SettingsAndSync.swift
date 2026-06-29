@@ -403,47 +403,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the sync settings screen can be opened from Settings.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell and opens Settings
-     *   - opens Sync Settings from the settings screen
-     * - Failure modes:
-     *   - fails if the Settings sync link is missing or never becomes hittable
-     *   - fails if the sync settings screen does not render after navigation completes
-     */
-    func testSettingsSyncLinkOpensSyncSettings() {
-        let app = makeApp()
-        app.launch()
-
-        XCTAssertTrue(openSyncSettings(in: app).exists)
-    }
-
-    /**
-     Verifies that Reading Progress settings are exposed from the Android-parity Settings features section.
-
-     - Side effects:
-     *   - launches the app on the reader shell and opens Settings
-     *   - opens Reading Progress Settings from the settings screen
-     - Failure modes:
-     *   - fails if the Settings reading-progress shortcut is missing or never becomes hittable
-     *   - fails if the Reading Progress settings screen does not render after navigation completes
-     */
-    func testSettingsReadingProgressLinkOpensReadingProgressSettings() {
-        let app = makeApp()
-        app.launch()
-
-        XCTAssertTrue(
-            openSettingsDestination(
-                linkIdentifier: "settingsReadingProgressLink",
-                destinationIdentifier: "readingProgressSettingsScreen",
-                in: app,
-                destinationTimeout: 20
-            ).exists
-        )
-    }
-
-    /**
      Verifies that invalid NextCloud server input surfaces the expected validation status.
      *
      * - Side effects:

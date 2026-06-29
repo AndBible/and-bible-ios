@@ -31,7 +31,7 @@ Evidence captured during review:
 ### Findings (most to least severe)
 - **F1** Package-logic tests misfiled into the app-target bundle (root cause of "slow"). 26 of 27 `AndBibleTests/` files import only package modules. Genuinely app/source-aware tests are a small minority and live inside `+AppAndReader.swift` (80 funcs total): `AndBibleApplicationDelegate.sceneConfiguration` (line 2328) and `testContentViewDoesNotContainLegacyRootSidebarShell` (line 2361, reads `AndBible/ContentView.swift` from disk). The other ~78 funcs in that file are BibleUI logic.
 - **F2** "God partial class": 633 tests on a single `AndBibleTests: XCTestCase` split across 27 `extension AndBibleTests` files (largest 4,168 lines), sharing setUp/tearDown state - ordering coupling, no per-file parallelism, merge-conflict magnet. Same pattern in `AndBibleUITests` (~11,700 lines of `...Support.swift` behind 68 tests).
-- **F3** UI tests are full-app E2E doing unit/integration work (e.g. `testSettingsReadingProgressLinkOpensReadingProgressSettings` = 317s to assert one navigation). Launch+seed dominates wall-clock.
+- **F3** UI tests are full-app E2E doing unit/integration work (for example, a single settings navigation check measured 317s to assert one route). Launch+seed dominates wall-clock.
 - **F4** Scattered layout: app-target bundle vs package targets vs host-side fixture tool, with no single "where does my test go" rule.
 - **F5** CI is largely flake-mitigation scaffolding (dynamic shard planner, build-product reuse experiment, duplicated retry-upload steps, 90-min UI timeout, 8+ python tests about the harness itself).
 - **F6** `CLAUDE.md` + `.github/copilot-instructions.md` steer contributors toward the slow app-target lane ("`swift test` is supplemental").
@@ -59,7 +59,7 @@ Current progress as of 2026-06-28:
 |---|---|
 | App-host unit tests | 1 func; only the scene-configuration sentinel remains |
 | Package tests | 680 funcs across SwordKit, BibleCore, BibleView, and BibleUI package lanes |
-| UI tests | 62 funcs after demoting duplicate seeded-index, Strong's Search data-contract, BookmarkList projection, and Sync category-row catalog coverage |
+| UI tests | 60 funcs after demoting duplicate seeded-index, Strong's Search data-contract, BookmarkList projection, Sync category-row catalog coverage, and Settings feature-shortcut route metadata |
 
 ## Destination mapping
 
@@ -185,6 +185,7 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - Narrow the old simulator unit-test CI job to the app-host scene-configuration sentinel using the dedicated `AndBibleUnitTests` scheme, while keeping `Unit Tests (Simulator)` as an aggregate required gate that fails when any package-test lane fails. Package-owned coverage is enforced by the app-host-free `SwordKitTests`, `BibleCoreTests`, `BibleViewTests`, and `BibleUITests` package lanes.
 - Search UI trim has started: duplicate seeded-index and Strong's Search data-contract assertions moved out of `AndBibleUITests` into app-host-free package coverage. Scope and word-mode UI tests intentionally remain because they prove the visible controls rerun the active query; package coverage now backs the indexed result semantics beneath those controls.
 - BookmarkList projection trim moved sort/search/label-filter state contracts into `BookmarkListProjectionTests`; row navigation, row deletion, StudyPad handoff, label assignment, generic bookmark, and My Notes workflows remain visible app UI tests. Sync category-row catalog coverage now lives in `SettingsIconsTests`, while backend/category persistence and invalid-URL workflows remain visible app UI tests.
+- Settings feature shortcut trim moved Settings-root Sync and Reading Progress route metadata into `ApplicationSettingsPresentation` and `SettingsIconsTests`; the Settings-root destination smoke test remains visible UI coverage, while Sync Settings behavioral workflows continue to exercise direct reader-action entry points.
 - Simplify CI: replace `ios-simulator-unit-tests` app-build path with app-host-free package-test lanes. Baseline is per-target simulator schemes; macOS `swift test` is an optimization only for targets proven to compile under SwiftPM. The optional build-product-reuse experiment is retired; reassess the shard planner and timings file as UI coverage continues moving into package lanes.
 - Trim `AndBibleUITests` to an explicit smoke set (target <=15 journeys); demote/convert the rest.
 - Update `CLAUDE.md` + `.github/copilot-instructions.md`: replace "swift test is supplemental" with the actual placement rule - *new tests go in the lowest package test target that owns the behavior after imports are minimized; app-host only for true app-delegate/scene/bootstrap behavior.*
