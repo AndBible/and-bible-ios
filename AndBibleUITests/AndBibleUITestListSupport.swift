@@ -118,20 +118,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens Label Assignment from the bookmark list.
-     *
-     * - Parameter app: Running application under test.
-     * - Returns: The root accessibility-identified Label Assignment screen element.
-     * - Side effects:
-     *   - opens the bookmark list and taps the seeded bookmark's edit-labels affordance
-     * - Failure modes:
-     *   - fails when the Label Assignment screen never appears
-     */
-    func openLabelAssignment(in app: XCUIApplication) -> XCUIElement {
-        return openLabelAssignmentFromBookmarkList(in: app)
-    }
-
-    /**
      Opens Label Assignment from the actual bookmark-list flow.
      *
      * - Parameter app: Running application under test.

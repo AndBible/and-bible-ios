@@ -447,18 +447,19 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that label assignment can be reached from the real bookmark-list path and still
-     toggle the seeded label state.
+     Verifies that label assignment can be reached from the real bookmark-list path.
      *
      * - Side effects:
      *   - launches the reader shell with one deterministic bookmark and seed label preloaded
      *   - opens the bookmark list from the reader overflow menu
-     *   - opens label assignment from the seeded bookmark row and toggles favourite plus assignment
+     *   - opens label assignment from the seeded bookmark row and reads the seeded assignment state
      * - Failure modes:
      *   - fails if the bookmark list cannot be reached from the reader menu
      *   - fails if the seeded bookmark row or inline edit-labels action is missing
-     *   - fails if the label-assignment screen never appears or the seeded row state does not
-     *     update after the toggles
+     *   - fails if the label-assignment screen never appears or the seeded row state is not loaded
+     *
+     * Label creation, favourite toggles, Bible label removal, and generic bookmark assignment are
+     * covered by `LabelAssignmentMutationTests` in the app-host-free package lane.
      */
     func testBookmarkListOpensLabelAssignmentForSeededBookmark() {
         let app = makeApp()
@@ -467,85 +468,9 @@ extension AndBibleUITests {
         let labelAssignmentScreen = openLabelAssignmentFromBookmarkList(in: app)
         XCTAssertTrue(labelAssignmentScreen.exists)
 
-        assertSeedLabelAssignmentCanToggle(in: app)
-    }
-
-    /**
-     Verifies that generic bookmarks are visible from the real bookmark-list path and can be
-     assigned to a label through the same row affordance as Bible bookmarks.
-     *
-     * - Side effects:
-     *   - launches the reader shell with one deterministic generic bookmark and one user label
-     *   - opens the bookmark list from the reader overflow menu
-     *   - confirms the generic bookmark is visible but not included under the unassigned label
-     *     filter
-     *   - assigns that label through Label Assignment and verifies the filtered bookmark list
-     *     includes the generic row after returning
-     * - Failure modes:
-     *   - fails if the generic bookmark is not visible in the bookmark list
-     *   - fails if the label-assignment sheet cannot load the generic bookmark
-     *   - fails if the generic label mutation is not reflected by bookmark-list filtering
-     */
-    func testGenericBookmarkVisibleWorkflowAssignsLabelFromBookmarkList() {
-        let app = makeApp()
-        let genericBookmarkSegment = "UITESTDICT_Entry_1"
-        app.launch()
-
-        _ = openBookmarkList(in: app)
-        waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
-        waitForBookmarkListState(
-            containing: bookmarkListRowStateToken(genericBookmarkSegment),
-            in: app,
-            timeout: 10
-        )
-
-        selectBookmarkListFilterChip("UI_Test_Seed", in: app, timeout: 10)
-        waitForBookmarkListState(containing: "count=0", in: app, timeout: 10)
-        waitForBookmarkListState(
-            notContaining: bookmarkListRowStateToken(genericBookmarkSegment),
-            in: app,
-            timeout: 10
-        )
-
-        selectBookmarkListFilterChip("all", in: app, timeout: 10)
-        tapElementReliably(
-            requireElement("bookmarkListEditLabelsButton::\(genericBookmarkSegment)", in: app, timeout: 10),
-            timeout: 10
-        )
-        XCTAssertTrue(requireElement("labelAssignmentScreen", in: app, timeout: 10).exists)
-
         let seedRow = requireElement("labelAssignmentRow::UI_Test_Seed", in: app, timeout: 10)
-        XCTAssertEqual(seedRow.value as? String, "unassigned,notFavourite")
-        requireElement("labelAssignmentToggleButton::UI_Test_Seed", in: app, timeout: 10).tap()
-
-        waitForElementValue(
-            "labelAssignmentRow::UI_Test_Seed",
-            toEqual: "assigned,notFavourite",
-            in: app,
-            timeout: 10
-        )
-
-        dismissLabelAssignmentToBookmarkList(in: app)
-        selectBookmarkListFilterChip("UI_Test_Seed", in: app, timeout: 10)
-        waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
-        waitForBookmarkListState(
-            containing: bookmarkListRowStateToken(genericBookmarkSegment),
-            in: app,
-            timeout: 10
-        )
+        XCTAssertEqual(seedRow.value as? String, "assigned,notFavourite")
     }
-
-    /**
-     Verifies that the about screen can be opened from the reader shell.
-     *
-     * - Side effects:
-     *   - launches the app with the calculator gate disabled, in-memory persistence, and one
-     *     deterministic seeded bookmark-label pair for stable reader-shell startup
-     *   - opens the reader overflow menu and pushes the about screen
-     * - Failure modes:
-     *   - fails if the about action is missing from the reader menu
-     *   - fails if the about screen does not render after navigation completes
-     */
 
     /**
      Finds a row in the Android-style quick selector, scrolling until SwiftUI materializes it.

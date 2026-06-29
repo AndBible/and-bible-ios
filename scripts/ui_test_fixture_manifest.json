@@ -1,9 +1,6 @@
 {
   "AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu": "baseline",
   "AndBibleUITests/AndBibleUITests/testBookmarkListFilterAndSearchResetAcrossReopen": "bookmark-filter",
-  "AndBibleUITests/AndBibleUITests/testGenericBookmarkVisibleWorkflowAssignsLabelFromBookmarkList": "bookmark-generic-visible",
-  "AndBibleUITests/AndBibleUITests/testBookmarkListLabelAssignmentCreatesAndAssignsNewLabel": "bookmark-row-label",
-  "AndBibleUITests/AndBibleUITests/testBookmarkListLabelAssignmentRemovalHidesBookmarkUnderFilter": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testBookmarkListOpensLabelAssignmentForSeededBookmark": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel": "bookmark-studypad",
   "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": "my-notes-single",
@@ -15,7 +12,6 @@
   "AndBibleUITests/AndBibleUITests/testDownloadsRepositoryManagerAddSourceCancelFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testDownloadsScreenOpensFromReaderMenu": "baseline",
   "AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference": "history-single",
-  "AndBibleUITests/AndBibleUITests/testLabelAssignmentTogglesFavouriteAndAssignment": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testLabelManagerCreateRenameDeleteFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingPlanListStartDeleteAndImportAffordanceFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingPlansStartPlanAndAdvanceDay": "baseline",
