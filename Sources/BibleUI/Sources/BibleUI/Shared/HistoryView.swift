@@ -55,8 +55,7 @@ public struct HistoryView: View {
 
     /// Filter history to the active window only.
     private var history: [HistoryItem] {
-        guard let windowId = windowManager.activeWindow?.id else { return allHistory }
-        return allHistory.filter { $0.window?.id == windowId }
+        HistoryListPresentation.visibleItems(allHistory, activeWindowID: windowManager.activeWindow?.id)
     }
 
     /**
@@ -137,12 +136,7 @@ public struct HistoryView: View {
      Formats a stored OSIS-like history key such as `Gen.1.1` into a user-visible `Book Chapter` label.
      */
     private func formatKey(_ key: String) -> String {
-        let parts = key.split(separator: ".")
-        guard parts.count >= 2 else { return key }
-        let osisId = String(parts[0])
-        let chapter = String(parts[1])
-        let bookName = bookNameResolver?(osisId) ?? BibleReaderController.bookName(forOsisId: osisId) ?? osisId
-        return "\(bookName) \(chapter)"
+        HistoryListPresentation.formattedKey(key, bookNameResolver: bookNameResolver)
     }
 
     /**
@@ -162,7 +156,7 @@ public struct HistoryView: View {
      * - Failure modes: This helper cannot fail.
      */
     private func historyRowIdentifier(for item: HistoryItem) -> String {
-        "historyRow::\(sanitizedHistoryKey(for: item))"
+        HistoryListPresentation.rowIdentifier(for: item)
     }
 
     /**
@@ -174,35 +168,15 @@ public struct HistoryView: View {
      * - Failure modes: This helper cannot fail.
      */
     private func historyDeleteButtonIdentifier(for item: HistoryItem) -> String {
-        "historyDeleteButton::\(sanitizedHistoryKey(for: item))"
+        HistoryListPresentation.deleteButtonIdentifier(for: item)
     }
 
     /// Stable History screen state exported for UI automation.
     private var historyAccessibilityValue: String {
-        let baseState = "count=\(history.count)"
-        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
-            return baseState
-        }
-
-        let rowTokens = history.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit).map {
-            "|\(sanitizedHistoryKey(for: $0))|"
-        }.joined(separator: ",")
-        return "\(baseState);rows=\(rowTokens)"
-    }
-
-    /**
-     Sanitizes one stored history key for reuse in accessibility identifiers.
-     *
-     * - Parameter item: History row whose stored key should be transformed into an identifier-safe token.
-     * - Returns: Key token containing only ASCII letters, digits, and underscores.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func sanitizedHistoryKey(for item: HistoryItem) -> String {
-        item.key.replacingOccurrences(
-            of: #"[^A-Za-z0-9]+"#,
-            with: "_",
-            options: .regularExpression
+        HistoryListPresentation.accessibilityValue(
+            for: history,
+            includeRowTokens: UITestRuntimeConfiguration.enablesDetailedAccessibilityExports,
+            rowTokenLimit: UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit
         )
     }
 
@@ -234,21 +208,23 @@ public struct HistoryView: View {
      *     built-in actions
      */
     private func deleteItems(matchingKey key: String) {
-        for item in history where item.key == key {
-            modelContext.delete(item)
-        }
-        try? modelContext.save()
+        try? HistoryListPresentation.deleteVisibleItems(
+            matchingKey: key,
+            from: allHistory,
+            activeWindowID: windowManager.activeWindow?.id,
+            in: modelContext
+        )
     }
 
     /**
      Deletes every currently visible history row for the active window scope.
      */
     private func clearHistory() {
-        let visibleHistory = history
-        for item in visibleHistory {
-            modelContext.delete(item)
-        }
-        try? modelContext.save()
+        try? HistoryListPresentation.clearVisibleItems(
+            from: allHistory,
+            activeWindowID: windowManager.activeWindow?.id,
+            in: modelContext
+        )
     }
 
 }

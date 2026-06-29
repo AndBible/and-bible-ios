@@ -58,8 +58,8 @@ Current progress as of 2026-06-28:
 | Lane | Current state |
 |---|---|
 | App-host unit tests | 1 func; only the scene-configuration sentinel remains |
-| Package tests | 680 funcs across SwordKit, BibleCore, BibleView, and BibleUI package lanes |
-| UI tests | 59 funcs after demoting duplicate seeded-index, Strong's Search data-contract, BookmarkList projection, Sync category-row catalog coverage, Settings feature-shortcut route metadata, and Settings `ListPreference` row presentation |
+| Package tests | 690 funcs across SwordKit, BibleCore, BibleView, and BibleUI package lanes |
+| UI tests | 57 funcs after demoting duplicate seeded-index, Strong's Search data-contract, BookmarkList projection, Sync category-row catalog coverage, Settings feature-shortcut route metadata, Settings `ListPreference` row presentation, and History clear/delete persistence |
 
 ## Destination mapping
 

@@ -14,8 +14,6 @@
   "AndBibleUITests/AndBibleUITests/testDownloadsRepositoryManagerAddSourceCancelFlow": 278.752,
   "AndBibleUITests/AndBibleUITests/testDownloadsScreenOpensFromReaderMenu": 202.713,
   "AndBibleUITests/AndBibleUITests/testGenericBookmarkVisibleWorkflowAssignsLabelFromBookmarkList": 141.934,
-  "AndBibleUITests/AndBibleUITests/testHistoryClearRemovesSeededRowAcrossReopen": 251.895,
-  "AndBibleUITests/AndBibleUITests/testHistoryRowDeletePreservesOtherRowsAcrossReopen": 130.92,
   "AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference": 225.147,
   "AndBibleUITests/AndBibleUITests/testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen": 6.194,
   "AndBibleUITests/AndBibleUITests/testLabelAssignmentTogglesFavouriteAndAssignment": 113.702,

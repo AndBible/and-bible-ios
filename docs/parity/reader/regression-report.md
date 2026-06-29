@@ -83,8 +83,7 @@ Related domain references:
 - `AndBibleUITests/testAboutScreenOpensFromReaderMenu`
 - `AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference`
 - `AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference`
-- `AndBibleUITests/testHistoryClearRemovesSeededRowAcrossReopen`
-- `AndBibleUITests/testHistoryRowDeletePreservesOtherRowsAcrossReopen`
+- `BibleUITests/HistoryListPresentationTests`
 
 ## What This Validation Actually Covers
 

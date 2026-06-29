@@ -41,10 +41,10 @@ current evidence.
 Current local planner output for the checked-in suite is:
 
 ```text
-Shard 1/4: 14 tests, estimated 1978.097s
-Shard 2/4: 15 tests, estimated 2009.034s
-Shard 3/4: 15 tests, estimated 1979.228s
-Shard 4/4: 15 tests, estimated 1974.632s
+Shard 1/4: 14 tests, estimated 1900.485s
+Shard 2/4: 14 tests, estimated 1896.758s
+Shard 3/4: 15 tests, estimated 1865.702s
+Shard 4/4: 14 tests, estimated 1895.231s
 ```
 
 The current timing manifest was regenerated from successful CI run

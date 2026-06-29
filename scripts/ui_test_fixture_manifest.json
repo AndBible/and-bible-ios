@@ -16,8 +16,6 @@
   "AndBibleUITests/AndBibleUITests/testColorSettingsResetRestoresDefaultThemeColors": "display-colors-custom",
   "AndBibleUITests/AndBibleUITests/testDownloadsRepositoryManagerAddSourceCancelFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testDownloadsScreenOpensFromReaderMenu": "baseline",
-  "AndBibleUITests/AndBibleUITests/testHistoryClearRemovesSeededRowAcrossReopen": "history-multirow",
-  "AndBibleUITests/AndBibleUITests/testHistoryRowDeletePreservesOtherRowsAcrossReopen": "history-multirow",
   "AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference": "history-single",
   "AndBibleUITests/AndBibleUITests/testLabelAssignmentTogglesFavouriteAndAssignment": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testLabelManagerCreateRenameDeleteFlow": "baseline",
