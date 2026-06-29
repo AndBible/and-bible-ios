@@ -246,57 +246,25 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that labels can be created, renamed, and deleted from the label manager.
+     Verifies that the Settings Label Manager route opens the native manager screen.
+     *
+     * Label creation, edit-save, and delete persistence now run in `LabelManagerMutationTests`
+     * because they are package-owned SwiftData contracts. This UI smoke intentionally stays small
+     * and protects only the live app route and readiness probes.
      *
      * - Side effects:
      *   - launches the app on the reader shell and opens the label manager through Settings
-     *   - creates one new label, renames it through the edit sheet, and deletes it via swipe
-     *     actions
      * - Failure modes:
-     *   - fails if the create alert, edit sheet, or delete swipe action cannot be reached through
-     *     the label manager UI
-     *   - fails if the created or renamed label row never appears, or if the deleted row remains
-     *     visible after deletion
+     *   - fails if the Settings route cannot reach `LabelManagerView` or if the screen loses its
+     *     app-visible readiness/export identifiers
      */
-    func testLabelManagerCreateRenameDeleteFlow() {
+    func testLabelManagerScreenOpensFromSettings() {
         let app = makeApp()
-        let originalName = "L1"
-        let renamedName = "L2"
         app.launch()
 
         XCTAssertTrue(openLabelManager(in: app).exists)
-
-        tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
-        let newLabelNameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        guard typePromptText(
-            originalName,
-            into: newLabelNameField,
-            in: app,
-            timeout: 15,
-            accessibilityIdentifier: "labelManagerNewLabelNameField"
-        ) else {
-            return
-        }
-        tapLabelCreationPromptCreateButton(in: app, timeout: 10)
-        waitForLabelManagerState(containing: labelManagerRowStateToken(originalName), in: app, timeout: 10)
-
-        let createdRow = requireLabelRow(named: originalName, in: app, timeout: 10)
-        tapElementReliably(createdRow, timeout: 10)
-        _ = requireElement("labelEditScreen", in: app, timeout: 10)
-        replaceKnownText(
-            in: requireElement("labelEditNameField", in: app, timeout: 10),
-            existingCharacterCount: originalName.count,
-            with: renamedName,
-            app: app
-        )
-        tapElementReliably(requireElement("labelEditDoneButton", in: app, timeout: 10), timeout: 10)
-
-        waitForLabelManagerState(notContaining: labelManagerRowStateToken(originalName), in: app, timeout: 10)
-        waitForLabelManagerState(containing: labelManagerRowStateToken(renamedName), in: app, timeout: 10)
-        let renamedRowToDelete = requireLabelRow(named: renamedName, in: app, timeout: 10)
-        revealTrailingSwipeAction("labelManagerDeleteAction", for: renamedRowToDelete, in: app, timeout: 10)
-        tapElementReliably(requireElement("labelManagerDeleteAction", in: app, timeout: 10), timeout: 10)
-        waitForLabelManagerState(notContaining: labelManagerRowStateToken(renamedName), in: app, timeout: 10)
+        _ = requireElement("labelManagerAddButton", in: app, timeout: 10)
+        _ = requireElement("labelManagerStateExport", in: app, timeout: 10)
     }
 
     /**

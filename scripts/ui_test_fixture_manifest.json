@@ -12,7 +12,7 @@
   "AndBibleUITests/AndBibleUITests/testDownloadsRepositoryManagerAddSourceCancelFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testDownloadsScreenOpensFromReaderMenu": "baseline",
   "AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference": "history-single",
-  "AndBibleUITests/AndBibleUITests/testLabelManagerCreateRenameDeleteFlow": "baseline",
+  "AndBibleUITests/AndBibleUITests/testLabelManagerScreenOpensFromSettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingPlanListStartDeleteAndImportAffordanceFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingPlansStartPlanAndAdvanceDay": "baseline",
   "AndBibleUITests/AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals": "search-multi-translation",

@@ -43,7 +43,7 @@ Verification matrix:
 
 - `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
 - `AndBibleUITests/testBookmarkListOpensLabelAssignmentForSeededBookmark`
-- `AndBibleUITests/testLabelManagerCreateRenameDeleteFlow`
+- `AndBibleUITests/testLabelManagerScreenOpensFromSettings`
 - `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
 - `AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser`
 
@@ -58,6 +58,8 @@ Verification matrix:
 - `BibleUITests/LabelAssignmentMutationTests/testLabelAssignmentMutationTogglesBibleAssignmentAndFavourite`
 - `BibleUITests/LabelAssignmentMutationTests/testLabelAssignmentMutationCreatesAndReusesBibleLabelAssignment`
 - `BibleUITests/LabelAssignmentMutationTests/testLabelAssignmentMutationTogglesGenericBookmarkAssignment`
+- `BibleUITests/LabelManagerMutationTests/testLabelManagerMutationCreatesAndPersistsEditedLabel`
+- `BibleUITests/LabelManagerMutationTests/testLabelManagerMutationDeletesLabelAndDetachesBookmarks`
 
 ## Expected Assertions Covered
 

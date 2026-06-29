@@ -12,7 +12,7 @@
   "AndBibleUITests/AndBibleUITests/testDownloadsScreenOpensFromReaderMenu": 202.713,
   "AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference": 225.147,
   "AndBibleUITests/AndBibleUITests/testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen": 6.194,
-  "AndBibleUITests/AndBibleUITests/testLabelManagerCreateRenameDeleteFlow": 185.684,
+  "AndBibleUITests/AndBibleUITests/testLabelManagerScreenOpensFromSettings": 101.8,
   "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": 93.771,
   "AndBibleUITests/AndBibleUITests/testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink": 135.787,
   "AndBibleUITests/AndBibleUITests/testReadingPlanListStartDeleteAndImportAffordanceFlow": 135.301,
