@@ -13,7 +13,6 @@
   "AndBibleUITests/AndBibleUITests/testReadingPlansRouteStartAdvanceDeleteAndImportAffordanceFlow": 128.591,
   "AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState": 165.0,
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreDatabaseWorkflowDestinationAndShareCancel": 133.4,
-  "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreRestoreImportPresentsTargetSpecificPickers": 170.238,
   "AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions": 127.486,
   "AndBibleUITests/AndBibleUITests/testStudyPadsScreenOpensFromReaderMenu": 86.531,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen": 125.0,

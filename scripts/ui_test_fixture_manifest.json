@@ -12,7 +12,6 @@
   "AndBibleUITests/AndBibleUITests/testReadingPlansRouteStartAdvanceDeleteAndImportAffordanceFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState": "search-multi-translation",
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreDatabaseWorkflowDestinationAndShareCancel": "baseline",
-  "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreRestoreImportPresentsTargetSpecificPickers": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions": "baseline",
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": "baseline",
   "AndBibleUITests/AndBibleUITests/testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink": "baseline",

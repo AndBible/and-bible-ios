@@ -156,42 +156,36 @@ public struct ImportExportView: View {
     public init() {}
 
     /**
+     Current presentation snapshot for UI automation and picker routing.
+
+     The value encodes which modal surface the screen is actively driving and which restore/import
+     target owns the shared file picker. It has no side effects; SwiftUI state mutation remains in
+     the view event handlers.
+     */
+    private var presentationState: ImportExportPresentationState {
+        ImportExportPresentationState(
+            backupDestinationPresented: showBackupDestinationDialog,
+            backupFileExporterPresented: showBackupFileExporter,
+            shareSheetPresented: showExportSheet,
+            restoreImportPickerPresented: showRestoreImportPicker,
+            restoreImportPickerTarget: restoreImportPickerTarget,
+            restoreTarget: restoreTarget.wrappedValue,
+            androidModuleBackupExportPresented: showAndroidModuleBackupExportSheet,
+            androidBackupImportPresented: androidBackupArchive != nil,
+            resetInProgress: isResettingBackupCategory,
+            backupPayloadPending: pendingBackupExport != nil
+        )
+    }
+
+    /**
      Current accessibility-visible presentation state for UI automation.
 
-     The value encodes which modal surface the screen is actively driving so UI tests can assert
-     workflow transitions without depending on private UIKit or SwiftUI picker hierarchy details.
+     - Returns: A stable sentinel for the foremost Backup & Restore presentation surface.
+     - Side effects: none.
+     - Failure modes: none; inactive state returns `idle`.
      */
     private var accessibilityState: String {
-        if showBackupDestinationDialog {
-            return "backupDestinationPresented"
-        }
-        if showBackupFileExporter {
-            return "fileExporterPresented"
-        }
-        if showExportSheet {
-            return "shareSheetPresented"
-        }
-        if showRestoreImportPicker {
-            switch restoreImportPickerTarget ?? restoreTarget.wrappedValue {
-            case .database:
-                return "databaseRestorePickerPresented"
-            case .documents:
-                return "documentsRestorePickerPresented"
-            }
-        }
-        if showAndroidModuleBackupExportSheet {
-            return "androidModuleBackupExportPresented"
-        }
-        if androidBackupArchive != nil {
-            return "androidBackupImportPresented"
-        }
-        if isResettingBackupCategory {
-            return "resetInProgress"
-        }
-        if pendingBackupExport != nil {
-            return "backupPayloadPending"
-        }
-        return "idle"
+        presentationState.accessibilityValue
     }
 
     /**
@@ -278,12 +272,7 @@ public struct ImportExportView: View {
        the platform before the result callback arrives.
      */
     private var restoreImportPickerContentTypes: [UTType] {
-        switch restoreImportPickerTarget ?? restoreTarget.wrappedValue {
-        case .database:
-            return [.zip, .data]
-        case .documents:
-            return ExternalDocumentImportService.supportedContentTypes
-        }
+        presentationState.restoreImportPickerContentTypes
     }
 
     /**

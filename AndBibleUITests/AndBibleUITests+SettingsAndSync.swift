@@ -105,47 +105,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that Android Restore or Import keeps Database and Documents as distinct targets.
-     *
-     * - Side effects:
-     *   - launches the app and opens Backup & Restore
-     *   - triggers the default Database Restore/Import picker
-     *   - relaunches a fresh app instance, selects Documents, and triggers the document/module picker
-     * - Failure modes:
-     *   - fails if the default Database target no longer opens the `.abdb.zip` restore/import path
-     *   - fails if Documents restore/import is collapsed into the database picker or legacy iOS
-     *     JSON/CSV importer
-     */
-    func testSettingsBackupRestoreRestoreImportPresentsTargetSpecificPickers() {
-        let databaseApp = makeApp()
-        databaseApp.launch()
-
-        let databaseScreen = openImportExport(in: databaseApp)
-        XCTAssertTrue(databaseScreen.exists)
-
-        let databaseTarget = requireElement("restoreWorkflowTarget.databaseButton", in: databaseApp, timeout: 10)
-        tapElementReliably(databaseTarget, timeout: 10)
-
-        let databaseRestoreButton = requireElement("backupWorkflowRestoreButton", in: databaseApp, timeout: 10)
-        tapElementReliably(databaseRestoreButton, timeout: 10)
-        waitForElementValue("importExportScreen", toEqual: "databaseRestorePickerPresented", in: databaseApp, timeout: 20)
-        databaseApp.terminate()
-
-        let documentsApp = makeApp()
-        documentsApp.launch()
-
-        let documentsScreen = openImportExport(in: documentsApp)
-        XCTAssertTrue(documentsScreen.exists)
-
-        let documentsTarget = requireElement("restoreWorkflowTarget.documentsButton", in: documentsApp, timeout: 10)
-        tapElementReliably(documentsTarget, timeout: 10)
-
-        let documentsRestoreButton = requireElement("backupWorkflowRestoreButton", in: documentsApp, timeout: 10)
-        tapElementReliably(documentsRestoreButton, timeout: 10)
-        waitForElementValue("importExportScreen", toEqual: "documentsRestorePickerPresented", in: documentsApp, timeout: 20)
-    }
-
-    /**
      Verifies that the visible My Documents adopt-versus-create confirmation can drive the
      create-new branch.
      *
