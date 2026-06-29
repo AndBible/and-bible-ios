@@ -1,4 +1,5 @@
 import XCTest
+import SwiftData
 @testable import BibleCore
 @testable import BibleUI
 
@@ -161,6 +162,132 @@ final class BookmarkListProjectionTests: XCTestCase {
         XCTAssertEqual(cleared.map(\.reference), ["Genesis 1:1", "Exodus 2:1"])
     }
 
+    /**
+     Verifies generic bookmark rows participate in the same label-filter projection as Bible rows.
+
+     Setup:
+     - builds one generic bookmark assigned to the selected label and one unassigned generic row
+
+     Expected result:
+     - the selected label exposes only the assigned generic row
+     - detailed state export uses the generic module/key token consumed by UI smoke tests
+
+     Failure meaning:
+     - generic bookmarks can disappear from Android-compatible filtered bookmark lists, or the
+       visible workflow can keep passing while package-level list projection has drifted.
+     */
+    func testBookmarkListProjectionFiltersGenericBookmarksByAssignedLabel() {
+        let seedLabel = Label(name: "UI Test Seed")
+        let assigned = genericItem(module: "UITESTDICT", key: "Entry 1", labels: [seedLabel])
+        let unassigned = genericItem(module: "UITESTDICT", key: "Entry 2")
+
+        let filtered = BookmarkListProjection.filteredItems(
+            [assigned, unassigned],
+            selectedLabelId: seedLabel.id,
+            searchText: "",
+            sortOrder: .bibleOrder
+        )
+
+        XCTAssertEqual(filtered.map(\.reference), ["UITESTDICT: Entry 1"])
+        XCTAssertEqual(
+            BookmarkListProjection.accessibilityValue(
+                for: filtered,
+                selectedLabelId: seedLabel.id,
+                labels: [seedLabel],
+                searchText: "",
+                isAssigningLabels: false,
+                includeRowTokens: true,
+                rowTokenLimit: 10
+            ),
+            "count=1;selectedLabel=UI_Test_Seed;query=;labelAssignment=false;rows=|UITESTDICT_Entry_1|"
+        )
+    }
+
+    /**
+     Verifies deleting one projected Bible bookmark row persists without removing sibling rows.
+
+     Setup:
+     - persists two Bible bookmarks into an in-memory SwiftData context
+     - deletes only the projected Exodus row through `BookmarkListMutation`
+
+     Expected result:
+     - one row is reported deleted
+     - the Matthew row remains after fetching from SwiftData again
+
+     Failure meaning:
+     - BookmarkList row deletion can remove too much data or fail to survive reopening the list.
+     */
+    func testBookmarkListMutationDeletesOnlySelectedBibleBookmarkAndPersists() throws {
+        let container = try makeBookmarkListModelContainer()
+        let modelContext = ModelContext(container)
+        let exodus = persistedBibleBookmark(
+            id: UUID(uuidString: "20000000-0000-0000-0000-000000000001")!,
+            book: "Exodus",
+            ordinal: 81
+        )
+        let matthew = persistedBibleBookmark(
+            id: UUID(uuidString: "20000000-0000-0000-0000-000000000002")!,
+            book: "Matthew",
+            ordinal: 1_000
+        )
+        modelContext.insert(exodus)
+        modelContext.insert(matthew)
+        try modelContext.save()
+
+        let deletedCount = try BookmarkListMutation.deleteItems(
+            [BookmarkListItem(bibleBookmark: exodus)],
+            in: modelContext
+        )
+
+        XCTAssertEqual(deletedCount, 1)
+        XCTAssertEqual(try modelContext.fetch(FetchDescriptor<BibleBookmark>()).compactMap(\.book).sorted(), ["Matthew"])
+    }
+
+    /**
+     Verifies deleting a generic bookmark row persists without touching Bible bookmarks.
+
+     Setup:
+     - persists one Bible bookmark and one generic bookmark into the same context
+     - deletes only the generic projection row
+
+     Expected result:
+     - the generic bookmark is gone after refetch
+     - the Bible bookmark remains intact
+
+     Failure meaning:
+     - generic bookmark deletion can be coupled to Bible bookmark rows or fail to save.
+     */
+    func testBookmarkListMutationDeletesGenericBookmarkWithoutRemovingBibleRows() throws {
+        let container = try makeBookmarkListModelContainer()
+        let modelContext = ModelContext(container)
+        let bibleBookmark = persistedBibleBookmark(
+            id: UUID(uuidString: "20000000-0000-0000-0000-000000000011")!,
+            book: "Genesis",
+            ordinal: 1
+        )
+        let genericBookmark = GenericBookmark(
+            id: UUID(uuidString: "20000000-0000-0000-0000-000000000012")!,
+            key: "Entry 1",
+            bookInitials: "UITESTDICT",
+            createdAt: Date(timeIntervalSince1970: 2),
+            ordinalStart: 2,
+            ordinalEnd: 2,
+            lastUpdatedOn: Date(timeIntervalSince1970: 2)
+        )
+        modelContext.insert(bibleBookmark)
+        modelContext.insert(genericBookmark)
+        try modelContext.save()
+
+        let deletedCount = try BookmarkListMutation.deleteItems(
+            [BookmarkListItem(genericBookmark: genericBookmark)],
+            in: modelContext
+        )
+
+        XCTAssertEqual(deletedCount, 1)
+        XCTAssertEqual(try modelContext.fetch(FetchDescriptor<BibleBookmark>()).compactMap(\.book), ["Genesis"])
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<GenericBookmark>()).isEmpty)
+    }
+
     private func bibleItem(
         reference: String,
         ordinal: Int,
@@ -202,5 +329,66 @@ final class BookmarkListProjectionTests: XCTestCase {
             }
             return BookmarkListVerseReference(chapter: chapter, verse: verse)
         }
+    }
+
+    /**
+     Builds a generic bookmark projection row with optional label assignments.
+
+     - Parameters:
+       - module: Generic document initials.
+       - key: Generic document key.
+       - labels: Labels that should appear assigned to the row.
+     - Returns: A normalized generic bookmark list item.
+     - Side effects: assigns unsaved label relationship objects to the bookmark.
+     - Failure modes: This helper cannot fail.
+     */
+    private func genericItem(
+        module: String,
+        key: String,
+        labels: [Label] = []
+    ) -> BookmarkListItem {
+        let bookmark = GenericBookmark(
+            key: key,
+            bookInitials: module,
+            createdAt: Date(timeIntervalSince1970: 100),
+            ordinalStart: 1,
+            ordinalEnd: 1,
+            lastUpdatedOn: Date(timeIntervalSince1970: 100)
+        )
+        if !labels.isEmpty {
+            bookmark.bookmarkToLabels = labels.map { label in
+                let link = GenericBookmarkToLabel()
+                link.bookmark = bookmark
+                link.label = label
+                return link
+            }
+        }
+        return BookmarkListItem(genericBookmark: bookmark)
+    }
+
+    /**
+     Builds a persisted Bible bookmark fixture.
+
+     - Parameters:
+       - id: Stable identifier for assertions.
+       - book: Display book name stored on the bookmark.
+       - ordinal: Source and KJVA ordinal for the one-verse fixture.
+     - Returns: A `BibleBookmark` ready for insertion into a test model context.
+     - Side effects: assigns the bookmark book name.
+     - Failure modes: This helper cannot fail.
+     */
+    private func persistedBibleBookmark(id: UUID, book: String, ordinal: Int) -> BibleBookmark {
+        let bookmark = BibleBookmark(
+            id: id,
+            kjvOrdinalStart: ordinal,
+            kjvOrdinalEnd: ordinal,
+            ordinalStart: ordinal,
+            ordinalEnd: ordinal,
+            v11n: "KJVA",
+            createdAt: Date(timeIntervalSince1970: TimeInterval(ordinal)),
+            lastUpdatedOn: Date(timeIntervalSince1970: TimeInterval(ordinal))
+        )
+        bookmark.book = book
+        return bookmark
     }
 }

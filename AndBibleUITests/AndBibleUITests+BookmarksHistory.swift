@@ -361,42 +361,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that deleting one bookmark row from the real bookmark list leaves other bookmarks
-     intact across reopen.
-     *
-     * - Side effects:
-     *   - launches the reader shell with deterministic `Exodus 2:1` and `Matthew 3:1` bookmarks
-     *   - opens the real bookmark list from the reader overflow menu
-     *   - deletes only the Exodus row through the row-level swipe action, dismisses the screen,
-     *     and reopens the list to confirm the Matthew row persists
-     * - Failure modes:
-     *   - fails if the bookmark list or either seeded bookmark row never appears
-     *   - fails if the row-level delete action is missing for the Exodus bookmark
-     *   - fails if deleting the Exodus row also removes the Matthew row or if the Exodus row
-     *     returns after reopening the bookmark list
-     */
-    func testBookmarkRowDeletePreservesOtherRowsAcrossReopen() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openBookmarkList(in: app)
-        let exodusRow = requireBookmarkRow("Exodus_2_1", in: app, timeout: 10)
-        _ = requireBookmarkRow("Matthew_3_1", in: app, timeout: 10)
-
-        exodusRow.swipeLeft()
-        requireElement("bookmarkListDeleteButton::Exodus_2_1", in: app, timeout: 10).tap()
-
-        waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
-        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
-        waitForBookmarkListState(containing: bookmarkListRowStateToken("Matthew_3_1"), in: app, timeout: 10)
-
-        reopenBookmarkList(in: app)
-        waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
-        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
-        waitForBookmarkListState(containing: bookmarkListRowStateToken("Matthew_3_1"), in: app, timeout: 10)
-    }
-
-    /**
      Verifies that selecting a seeded bookmark label filter exposes the StudyPad handoff and opens
      the matching StudyPad document in the reader shell.
      *
@@ -421,108 +385,29 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that adding a text entry inside the visible StudyPad document persists after the
-     StudyPad is rebuilt from storage.
+     Verifies the Android My Notes pseudo-document opens through Choose Document.
      *
-     * - Side effects:
-     *   - launches the reader shell with one deterministic label-backed StudyPad fixture
-     *   - opens StudyPad from the production bookmark-list label handoff
-     *   - taps the visible web StudyPad add-note control and applies deterministic text through the
-     *     gated UI-test edit bridge
-     *   - returns to Bible, reopens StudyPad from the same handoff, and verifies the created text
-     *     entry is still present in the rebuilt document state
-     * - Failure modes:
-     *   - fails if the StudyPad handoff, visible add-note control, mutation export, or persisted
-     *     rebuild never reaches the expected state
-     */
-    func testStudyPadCreateTextEntryPersistsAcrossReopen() {
-        let app = makeApp()
-        let createdNoteText = "UI Test StudyPad Created Note"
-        let createdNoteToken = "UI Test StudyPad Created Note"
-        app.launchEnvironment["UITEST_STUDYPAD_CREATED_NOTE_TEXT"] = createdNoteText
-        app.launchArguments += ["-UITEST_STUDYPAD_CREATED_NOTE_TEXT", createdNoteText]
-        app.launch()
-
-        _ = openBookmarkList(in: app)
-        openSeedStudyPadFromBookmarkList(in: app)
-        waitForStudyPadPresentation(in: app, timeout: 20)
-        waitForVisibleStudyPadState(containing: "studyPadTextEntryCount=1", in: app, timeout: 20)
-
-        tapElementReliably(
-            requireStudyPadWebControl(named: "Add StudyPad note after last entry for UI Test Seed", in: app, timeout: 20),
-            timeout: 10
-        )
-        waitForVisibleStudyPadState(containing: "studyPadTextEntryCount=2", in: app, timeout: 20)
-        waitForVisibleStudyPadState(containing: createdNoteToken, in: app, timeout: 20)
-        dismissStudyPadEditor(in: app, timeout: 15)
-
-        returnFromStudyPadIfVisible(in: app, timeout: 20)
-
-        _ = openBookmarkList(in: app)
-        openSeedStudyPadFromBookmarkList(in: app)
-        waitForStudyPadPresentation(in: app, timeout: 20)
-        waitForVisibleStudyPadState(containing: "studyPadTextEntryCount=2", in: app, timeout: 20)
-        waitForVisibleStudyPadState(containing: createdNoteToken, in: app, timeout: 20)
-    }
-
-    /**
-     Verifies that the visible My Notes document can update and delete a note-backed bookmark.
+     * Android exposes My Notes as a `FakeBookFactory` pseudo-document in the document chooser,
+     * while the drawer action opens the My Documents manager. This visible smoke keeps that route
+     * wired without replaying note edit/delete persistence that package tests already cover.
      *
      * - Side effects:
      *   - launches the reader shell with one deterministic Genesis note fixture
-     *   - opens My Notes through the production reader navigation drawer
-     *   - opens the visible note editor, appends through the gated UI-test bridge path, returns to
-     *     Bible when needed, and reopens My Notes to verify the persisted note is rebuilt
-     *   - deletes the visible My Notes row and verifies the rebuilt document stays empty
+     *   - opens Choose Document, selects the My Notes pseudo-document, and waits for the embedded
+     *     My Notes document state to render
      * - Failure modes:
-     *   - fails if the My Notes action, visible note editor, delete action, or persistence export
-     *     never reaches the expected state
+     *   - fails if the chooser route, pseudo-document row, or initial My Notes document state is
+     *     unavailable from the production reader path
      */
-    func testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow() {
+    func testMyNotesPseudoDocumentOpensFromChooser() {
         let app = makeApp()
-        let referenceLabel = "Genesis 1:1"
         let rowToken = "Genesis_1_1"
         let originalNote = "UI_Test_My_Notes_Note"
-        let updatedNoteMarker = "updated"
-        app.launchEnvironment["UITEST_MY_NOTES_APPEND_TEXT"] = " \(updatedNoteMarker)"
-        app.launchArguments += ["-UITEST_MY_NOTES_APPEND_TEXT", " \(updatedNoteMarker)"]
         app.launch()
-
-        let openNoteEditorLabel = "Open My Notes note editor for \(referenceLabel)"
-        let actionsLabel = "My Notes actions for \(referenceLabel)"
-        let deleteLabel = "Delete My Notes note for \(referenceLabel)"
 
         openMyNotesFromReader(in: app)
         waitForVisibleMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
         waitForVisibleMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
-
-        openVisibleMyNotesEditor(
-            actionsLabel: actionsLabel,
-            editorLabel: openNoteEditorLabel,
-            orPersistedMarker: updatedNoteMarker,
-            in: app,
-            timeout: 20
-        )
-        waitForVisibleMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
-        dismissMyNotesEditor(in: app, timeout: 15)
-        waitForVisibleMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)
-
-        returnFromMyNotesIfVisible(in: app, timeout: 20)
-
-        openMyNotesFromReader(in: app)
-        waitForVisibleMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
-        waitForVisibleMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
-
-        tapElementReliably(requireMyNotesWebControl(named: actionsLabel, in: app, timeout: 15), timeout: 10)
-        tapElementReliably(requireMyNotesWebControl(named: deleteLabel, in: app, timeout: 15), timeout: 10)
-        tapElementReliably(requireMyNotesWebControl(named: "Yes", in: app, timeout: 10), timeout: 10)
-        waitForVisibleMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
-        waitForVisibleMyNotesState(notContaining: "|\(rowToken)|", in: app, timeout: 20)
-
-        returnFromMyNotesIfVisible(in: app, timeout: 20)
-        openMyNotesFromReader(in: app)
-        waitForVisibleMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
-        waitForVisibleMyNotesState(notContaining: updatedNoteMarker, in: app, timeout: 20)
     }
 
     /**

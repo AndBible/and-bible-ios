@@ -10,9 +10,9 @@ Regression verification for the current bookmark parity surface, covering:
 - generic bookmark visibility plus label assignment from the native bookmark list
 - label assignment and label-manager mutation flows
 - StudyPad handoff from a real bookmark workflow
-- StudyPad text-entry creation from the visible StudyPad document with persisted rebuild evidence
-- visible My Notes note update/delete from the production reader path
-- service-layer My Notes/note-row persistence semantics
+- StudyPad text-entry persistence through package-level service and bridge contracts
+- My Notes pseudo-document routing from the production reader path
+- service-layer My Notes/note-row persistence semantics and bookmark-list destructive mutation
 - local Android bookmark reference comparison
 
 Contract reference:
@@ -42,28 +42,29 @@ Verification matrix:
 ### UI
 
 - `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
-- `AndBibleUITests/testBookmarkRowDeletePreservesOtherRowsAcrossReopen`
 - `AndBibleUITests/testGenericBookmarkVisibleWorkflowAssignsLabelFromBookmarkList`
 - `AndBibleUITests/testLabelAssignmentTogglesFavouriteAndAssignment`
 - `AndBibleUITests/testBookmarkListLabelAssignmentCreatesAndAssignsNewLabel`
 - `AndBibleUITests/testBookmarkListLabelAssignmentRemovalHidesBookmarkUnderFilter`
 - `AndBibleUITests/testLabelManagerCreateRenameDeleteFlow`
 - `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
-- `AndBibleUITests/testStudyPadCreateTextEntryPersistsAcrossReopen`
-- `AndBibleUITests/testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow`
+- `AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser`
 
-### Package UI Projection
+### Package UI Projection and Mutation
 
 - `BibleUITests/BookmarkListProjectionTests/testBookmarkListProjectionSortsCreatedDateAndBibleOrderLikeAndroid`
 - `BibleUITests/BookmarkListProjectionTests/testBookmarkListProjectionSearchNarrowsAndClearsRows`
 - `BibleUITests/BookmarkListProjectionTests/testBookmarkListProjectionLabelFilterNarrowsAndClearsRows`
+- `BibleUITests/BookmarkListProjectionTests/testBookmarkListProjectionFiltersGenericBookmarksByAssignedLabel`
+- `BibleUITests/BookmarkListProjectionTests/testBookmarkListMutationDeletesOnlySelectedBibleBookmarkAndPersists`
+- `BibleUITests/BookmarkListProjectionTests/testBookmarkListMutationDeletesGenericBookmarkWithoutRemovingBibleRows`
 
 ## Expected Assertions Covered
 
 ### Bookmark list
 
 - selecting a seeded bookmark navigates the reader to the bookmarked reference
-- deleting one bookmark preserves the other seeded row across reopen
+- deleting one projected Bible or generic bookmark row persists without removing sibling rows
 - changing sort order reorders the visible rows
 - text search narrows and then clears back to the full seeded list
 - label filtering narrows and then clears back to the full seeded list
@@ -81,12 +82,9 @@ Verification matrix:
 ### StudyPad and My Notes
 
 - opening StudyPad from a selected bookmark label reaches the embedded StudyPad document path
-- adding a StudyPad text entry from the visible document updates the visible state export and
-  remains present after returning to Bible and reopening the StudyPad from storage
 - opening My Notes from the reader reaches the embedded My Notes document path
-- editing a visible My Notes note persists through the bridge and is present after rebuilding
-  the document
-- deleting the visible My Notes note-backed row removes it from the rebuilt document
+- StudyPad create/update/delete/reorder behavior is package-gated through service and bridge tests
+- My Notes note create/update/delete persistence is package-gated through service and bridge tests
 
 ### Service-layer persistence
 

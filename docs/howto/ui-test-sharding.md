@@ -31,7 +31,7 @@ Important nuance:
   data from multiplying macOS runner setup work
 - with the current manifest, target duration, and cap, the planner emits four
   balanced shards
-- without the cap, the current manifest would emit fifteen shards
+- without the cap, the current manifest would emit twelve shards
 
 It is better to describe the current system as "planner-capable with a minimum
 of two shards and a maximum of four shards" unless the timing manifest is being
@@ -41,14 +41,15 @@ current evidence.
 Current local planner output for the checked-in suite is:
 
 ```text
-Shard 1/4: 14 tests, estimated 1900.485s
-Shard 2/4: 14 tests, estimated 1896.758s
-Shard 3/4: 15 tests, estimated 1865.702s
-Shard 4/4: 14 tests, estimated 1895.231s
+Shard 1/4: 14 tests, estimated 1782.578s
+Shard 2/4: 14 tests, estimated 1743.700s
+Shard 3/4: 13 tests, estimated 1743.904s
+Shard 4/4: 14 tests, estimated 1746.836s
 ```
 
 The current timing manifest was regenerated from successful CI run
-`27824737059` on June 19, 2026.
+`27824737059` on June 19, 2026, and updated with focused local bookmark/My Notes
+timings on June 28, 2026.
 
 ## How CI Actually Executes
 
@@ -100,7 +101,7 @@ Preferred order:
 
 Why this matters:
 
-- a full serial local UI run covers the same 60 UI tests, but its wall-clock
+- a full serial local UI run covers the same 55 UI tests, but its wall-clock
   runtime is not comparable to CI because CI runs shards in parallel
 - a targeted subset can prove a specific fix, but it does not prove the shard
   or full-suite shape is clean

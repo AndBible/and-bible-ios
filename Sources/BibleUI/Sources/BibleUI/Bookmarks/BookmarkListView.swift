@@ -424,10 +424,7 @@ public struct BookmarkListView: View {
      */
     private func deleteBookmarks(at offsets: IndexSet) {
         let toDelete = offsets.map { filteredBookmarks[$0] }
-        for bookmark in toDelete {
-            deleteBookmarkWithoutSaving(bookmark)
-        }
-        try? modelContext.save()
+        try? BookmarkListMutation.deleteItems(toDelete, in: modelContext)
     }
 
     /**
@@ -441,18 +438,7 @@ public struct BookmarkListView: View {
        - silently discards save failures because the list has no retry UI for destructive actions
      */
     private func deleteBookmark(_ bookmark: BookmarkListItem) {
-        deleteBookmarkWithoutSaving(bookmark)
-        try? modelContext.save()
-    }
-
-    /// Deletes one bookmark row from SwiftData without saving the context.
-    private func deleteBookmarkWithoutSaving(_ bookmark: BookmarkListItem) {
-        switch bookmark.source {
-        case .bible(let bibleBookmark):
-            modelContext.delete(bibleBookmark)
-        case .generic(let genericBookmark):
-            modelContext.delete(genericBookmark)
-        }
+        try? BookmarkListMutation.deleteItems([bookmark], in: modelContext)
     }
 
     /**
@@ -659,6 +645,54 @@ enum BookmarkListProjection {
             return lhs.reference < rhs.reference
         }
         return ascending ? lhsValue < rhsValue : lhsValue > rhsValue
+    }
+}
+
+/**
+ Persists destructive BookmarkList row actions outside the SwiftUI view boundary.
+
+ `BookmarkListView` owns rendering, swipe actions, and context menus. This helper owns the
+ side-effecting mutation contract used by those gestures so package tests can verify destructive
+ persistence without launching the full app and reopening the list.
+
+ Inputs:
+ - normalized `BookmarkListItem` rows whose source models belong to the supplied `ModelContext`
+ - the `ModelContext` that should persist the deletion
+
+ Outputs:
+ - the number of rows deleted
+
+ Side effects:
+ - deletes backing `BibleBookmark` and `GenericBookmark` models from SwiftData
+ - saves the context once after every requested row has been marked for deletion
+
+ Failure modes:
+ - rethrows SwiftData save failures to package tests; the visible UI intentionally discards errors
+   because destructive row gestures do not expose a retry surface
+ */
+enum BookmarkListMutation {
+    /**
+     Deletes the backing models for the supplied bookmark-list rows and saves the context once.
+
+     - Parameters:
+       - items: Normalized bookmark rows selected by the visible list.
+       - modelContext: SwiftData context that owns each row's backing model.
+     - Returns: Number of rows marked for deletion before the save.
+     - Side effects: Deletes backing bookmark models from SwiftData and saves the context.
+     - Throws: Any SwiftData save error produced after deleting the requested rows.
+     */
+    @discardableResult
+    static func deleteItems(_ items: [BookmarkListItem], in modelContext: ModelContext) throws -> Int {
+        for item in items {
+            switch item.source {
+            case .bible(let bibleBookmark):
+                modelContext.delete(bibleBookmark)
+            case .generic(let genericBookmark):
+                modelContext.delete(genericBookmark)
+            }
+        }
+        try modelContext.save()
+        return items.count
     }
 }
 
