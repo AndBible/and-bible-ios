@@ -1044,7 +1044,9 @@ public struct SearchView: View {
      without using an iOS sheet or committing row taps directly to Search state.
 
      - Parameter modules: Installed Bible modules available for selection.
-     - Returns: Centered modal dialog containing title, selectable rows, and dialog actions.
+     - Returns: Centered modal dialog containing title, selectable rows, and dialog actions. The
+       scroll view owns the picker-list accessibility identifier so UI automation addresses the
+       clipped viewport rather than the lazy content stack.
      - Side effects: Row and Select all/none actions mutate only `pendingTranslationSelection`; OK
        may commit to `selectedModules` through `commitTranslationPickerSelection()`.
      - Failure modes: Missing index-service state is treated as unknown and therefore does not add
@@ -1072,9 +1074,9 @@ public struct SearchView: View {
                             .padding(.leading, 22)
                     }
                 }
-                .accessibilityIdentifier("searchTranslationPickerList")
             }
             .frame(maxHeight: 420)
+            .accessibilityIdentifier("searchTranslationPickerList")
 
             Divider()
                 .background(dialogSecondaryText.opacity(0.25))

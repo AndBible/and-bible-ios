@@ -43,7 +43,7 @@ Android references:
 | `ReaderSheet.readingProgress` | Reader sheet for reading-progress status | `Android app-owned` | Reading-progress activity/settings surfaces | Adapted app-owned route; progress sync/status details remain in the sync and reading-progress docs. |
 | `ReaderSheet.readingProgressSettings` | Reader sheet for reading-progress settings | `Android app-owned` | `ReadingProgressSettingsActivity` | Adapted app-owned settings route. |
 | `ReaderSheet.chapterReadHistory` | Reader sheet for chapter read history | `Android app-owned` | Reading-progress/history support surfaces | Adapted app-owned route. Keep pane-target capture intact. |
-| `ReaderSheet.workspaces` | `WorkspaceSelectorView` in a reader sheet | `Android app-owned` | `WorkspaceSelectorActivity` | Adapted reader shell route with UI coverage for create and switch. |
+| `ReaderSheet.workspaces` | `WorkspaceSelectorView` in a reader sheet | `Android app-owned` | `WorkspaceSelectorActivity` | Adapted reader shell route with UI coverage for create; durable switching behavior is package-covered. |
 | `ReaderSheet.about` | About surface in a reader sheet | `Android app-owned` | Android app information/help menu surface | Acceptable app-owned informational route; verify labels/actions when touched. |
 
 ## Reader Destination Routes

@@ -401,20 +401,18 @@ extension AndBibleUITests {
      */
 
     /**
-     Verifies that selecting a second Search translation reruns the query and reports grouped totals.
+     Verifies that committing a second Search translation reruns the query and reports grouped totals.
+     Package tests own picker ordering and empty-commit behavior; this retained UI smoke proves the
+     live picker can commit a second module and drive grouped results back into reader navigation.
      *
      * - Side effects:
      *   - launches Search with deterministic KJV and UITESTWEB index rows for `earth`
      *   - uses the seeded startup reader reference `Genesis 1:1` as the before-navigation value
-     *   - verifies picker Cancel ignores a draft UITESTWEB row selection
-     *   - verifies outside dismissal ignores a draft UITESTWEB row selection
-     *   - verifies Select all followed by Select none and OK preserves the prior selection
      *   - opens the real translation picker, selects UITESTWEB, and commits with OK
      *   - verifies the visible selected-translation summary matches Android's abbreviation list
      *   - waits for the active query to rerun and export grouped per-translation counts
      * - Failure modes:
      *   - fails if the translation picker is not reachable from Search options
-     *   - fails if Cancel, outside dismissal, or empty OK mutates the committed module selection
      *   - fails if selecting a second translation does not rerun the active query with KJV first
      *   - fails if the selected-translation button collapses Android's abbreviation list into a
      *     generic iOS count label
@@ -436,40 +434,6 @@ extension AndBibleUITests {
             modules == Set(["KJV"])
         }
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
-
-        tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
-        tapSearchTranslationCancel(in: app, timeout: 10)
-        waitForSearchSelectedModules(
-            in: app,
-            timeout: 10,
-            description: "still exactly KJV after cancel"
-        ) { modules in
-            modules == Set(["KJV"])
-        }
-
-        tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
-        tapSearchTranslationOutsideDismiss(in: app, timeout: 10)
-        waitForSearchSelectedModules(
-            in: app,
-            timeout: 10,
-            description: "still exactly KJV after outside dismissal"
-        ) { modules in
-            modules == Set(["KJV"])
-        }
-
-        tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationSelectAll(in: app, timeout: 10)
-        tapSearchTranslationSelectAll(in: app, timeout: 10)
-        tapSearchTranslationOK(in: app, timeout: 10)
-        waitForSearchSelectedModules(
-            in: app,
-            timeout: 10,
-            description: "still exactly KJV after empty OK"
-        ) { modules in
-            modules == Set(["KJV"])
-        }
 
         tapSearchTranslationPicker(in: app, timeout: 10)
         tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)

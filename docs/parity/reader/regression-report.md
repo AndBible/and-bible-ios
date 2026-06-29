@@ -9,7 +9,7 @@ This is the current validation snapshot for the reader surface. It covers:
 - reader shell routing across the Android-style drawer and overflow split
 - reader integration with search result selection
 - history jump-back, clear, and single-row delete flows
-- workspace selector create/switch flow from the reader shell
+- workspace selector create flow from the reader shell, with switching persistence covered in package tests
 - restored-position highlight behavior in the emitted reader payload
 - reader config/appSettings payload construction for embedded-client display and active-window state
 - double-tap fullscreen preference gating
@@ -78,7 +78,7 @@ Related domain references:
 
 - `AndBibleUITests/testSettingsScreenShowsPrimaryNavigationRows`
 - `AndBibleUITests/testDownloadsRepositoryManagerOpensFromOverflow`
-- `AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow`
+- `AndBibleUITests/testWorkspaceSelectorCreateFlowReturnsToReaderShell`
 - `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
 - `AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions`
 - `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
@@ -106,7 +106,7 @@ Related domain references:
 
 ### Workspaces
 
-- workspace creation and switching remain driven through the reader-owned workspace selector and return control to the reader shell
+- workspace creation remains driven through the reader-owned workspace selector and returns control to the reader shell; switching persistence remains covered at the package layer
 
 ### Restore / highlight behavior
 
@@ -221,7 +221,7 @@ Taken together, this gives the reader domain current regression evidence for:
 - reader shell routing across the drawer/overflow split
 - search-to-reader navigation handoff
 - history navigation and destructive persistence
-- workspace selector create/switch handoff
+- workspace selector create handoff
 - payload-level restore/highlight behavior
 - payload-level config/appSettings propagation into the embedded document client
 - double-tap fullscreen preference gating

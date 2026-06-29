@@ -89,7 +89,8 @@ add focused coverage rather than relying on the current subset alone.
 
 ## Potential Improvements
 
-- add focused regression coverage for multi-translation selection and grouped result totals
+- keep multi-translation selection split between package-level ordering/empty-commit coverage and a
+  focused UI commit/grouped-results smoke
 - add a tighter guardrail around search option-to-query rerun wiring
 - add a machine-readable snapshot of supported search scopes and word modes if the option surface
   expands materially

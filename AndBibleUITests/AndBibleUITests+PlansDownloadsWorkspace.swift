@@ -174,20 +174,18 @@ extension AndBibleUITests {
      * - Side effects:
      *   - launches the app on the reader shell and opens the workspace selector from the reader
      *     menu
-     *   - creates one workspace, verifies it becomes active, then switches back to the original
-     *     active workspace
+     *   - creates one workspace from the selector-owned prompt and verifies the reader shell is
+     *     restored after creation
      * - Failure modes:
      *   - fails if the workspace selector never appears
-     *   - fails if the create alert, workspace rows, or active-workspace state do not update as
-     *     expected
+     *   - fails if the create alert or reader-shell return does not complete as expected
      */
-    func testWorkspaceSelectorCreateAndSwitchFlow() {
+    func testWorkspaceSelectorCreateFlowReturnsToReaderShell() {
         let app = makeApp()
         let createdName = "W1"
         app.launch()
 
         XCTAssertTrue(openWorkspaceSelector(in: app).exists)
-        let originalActiveWorkspaceName = requireActiveWorkspaceRow(in: app, timeout: 10).label
 
         _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
         let workspaceNameField = requireWorkspaceNamePromptField(in: app, timeout: 10)
@@ -203,24 +201,6 @@ extension AndBibleUITests {
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
             "Expected creating a workspace to return to the reader shell."
-        )
-
-        _ = openWorkspaceSelector(in: app)
-        _ = requireWorkspaceRow(named: createdName, in: app, timeout: 15)
-        XCTAssertEqual(
-            requireActiveWorkspaceRow(in: app, timeout: 10).label,
-            createdName,
-            "Expected the new workspace to become active after creation."
-        )
-
-        tapElementReliably(
-            requireWorkspaceRow(named: originalActiveWorkspaceName, in: app, timeout: 10),
-            timeout: 10
-        )
-        dismissWorkspaceSelectorIfStillPresented(in: app, timeout: 20)
-        XCTAssertTrue(
-            waitForReaderShellReady(in: app, timeout: 20),
-            "Expected switching workspaces to return to the reader shell."
         )
     }
 

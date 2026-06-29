@@ -845,6 +845,11 @@ extension AndBibleUITests {
      *   - taps the matching translation row
      * - Failure modes:
      *   - fails when the picker does not expose the requested row
+     *
+     * SwiftUI may materialize lazy-list rows outside the dialog's clipped viewport. Those rows
+     * expose usable frames, but XCTest correctly reports them as non-hittable. This helper waits
+     * for the requested row to become hittable before tapping so it cannot fall back to stale
+     * offscreen coordinates that hit the overlay chrome instead of the row.
      */
     func tapSearchTranslationRow(
         moduleName: String,
@@ -859,21 +864,30 @@ extension AndBibleUITests {
                 searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
                 timeout: 0
             ) {
-                let expectedValue = expectedSearchTranslationRowValue(afterTapping: row)
-                if waitForElementToBecomeHittable(row, timeout: 1),
-                   elementHasUsableFrame(row) {
-                    row.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
-                } else {
-                    tapElementReliably(row, timeout: 1)
+                if waitForElementToBecomeHittable(row, timeout: 0.5) {
+                    let expectedValue = expectedSearchTranslationRowValue(afterTapping: row)
+                    row.tap()
+                    waitForSearchTranslationRowMutation(
+                        identifier: identifier,
+                        moduleName: moduleName,
+                        expectedValue: expectedValue,
+                        in: app,
+                        timeout: min(3, timeout)
+                    )
+                    return
                 }
-                waitForSearchTranslationRowMutation(
-                    identifier: identifier,
-                    moduleName: moduleName,
-                    expectedValue: expectedValue,
-                    in: app,
-                    timeout: min(3, timeout)
-                )
-                return
+
+                if let pickerList = firstExistingElement(searchTranslationPickerListCandidates(in: app), timeout: 0.1),
+                   pickerList.exists {
+                    if elementHasUsableFrame(row),
+                       row.frame.midY < app.frame.midY {
+                        pickerList.swipeDown()
+                    } else {
+                        pickerList.swipeUp()
+                    }
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                continue
             }
 
             if let pickerList = firstExistingElement(searchTranslationPickerListCandidates(in: app), timeout: 0.1),

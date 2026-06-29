@@ -7,6 +7,10 @@
   "AndBibleUITests/AndBibleUITests/testColorSettingsResetRestoresDefaultThemeColors": "display-colors-custom",
   "AndBibleUITests/AndBibleUITests/testDownloadsRepositoryManagerOpensFromOverflow": "baseline",
   "AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference": "history-single",
+  "AndBibleUITests/AndBibleUITests/testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen": "none",
+  "AndBibleUITests/AndBibleUITests/testHostProcessDeveloperDirSelectionPrefersSelectedXcodeOverInheritedDeveloperDir": "none",
+  "AndBibleUITests/AndBibleUITests/testHostProcessDeveloperDirSelectionSkipsCommandLineToolsWithoutSimulatorTools": "none",
+  "AndBibleUITests/AndBibleUITests/testHostProcessEnvironmentRestoresMacOSUserDirectories": "none",
   "AndBibleUITests/AndBibleUITests/testLabelManagerScreenOpensFromSettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingPlansRouteStartAdvanceDeleteAndImportAffordanceFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals": "search-multi-translation",
@@ -20,8 +24,9 @@
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow": "none",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus": "sync-nextcloud",
+  "AndBibleUITests/AndBibleUITests/testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms": "none",
   "AndBibleUITests/AndBibleUITests/testThirdWindowBookmarkNavigationUpdatesOnlyTargetPaneContent": "bookmark-navigation-three-windows",
   "AndBibleUITests/AndBibleUITests/testThirdWindowDocumentSwitchUpdatesOnlyTargetPaneContent": "commentary-module-three-windows",
   "AndBibleUITests/AndBibleUITests/testThirdWindowStrongsToggleAffectsOnlyActiveWindow": "baseline-three-windows",
-  "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow": "baseline"
+  "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateFlowReturnsToReaderShell": "baseline"
 }
