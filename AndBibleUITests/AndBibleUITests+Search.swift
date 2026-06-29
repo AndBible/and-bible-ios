@@ -133,21 +133,25 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Android's per-window Text Options route and parent-link ladder.
+     Verifies Android's per-window Text Options route, parent-link ladder, and pane Close action.
 
-     Android's pane/window menu opens window-scoped text options. That screen shows both parent
-     links; the workspace link then opens workspace-scoped settings with only the global parent
-     link visible.
+     Android's pane/window menu owns both per-window Text Options and Close. These are distinct
+     commands, but both require the same setup: create a second reader pane, open that pane's
+     hamburger menu, and exercise a pane-scoped command. Keeping them in one workflow removes a
+     duplicate cold launch while preserving the visible window-scope route and delete transaction.
      *
      * - Side effects:
      *   - launches the app, creates a second reader window through the tab bar, and opens the
      *     active pane hamburger menu
      *   - activates the pane-level All text options command
      *   - taps the workspace parent link from the window-scoped Text Display screen
+     *   - exits the Text Options route, reopens the same pane menu, and activates Close
      * - Failure modes:
      *   - fails if pane All text options routes to workspace/global scope
      *   - fails if window scope lacks either Android parent link
      *   - fails if the workspace parent link does not navigate to `scope=workspace`
+     *   - fails if pane-menu Close terminates the app, leaves the deleted tab visible, or removes
+     *     the remaining pane menu/add-window affordances
      */
     func testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink() {
         let app = makeApp()
@@ -169,30 +173,21 @@ extension AndBibleUITests {
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
         XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
         XCTAssertTrue(requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10).exists)
-    }
 
-    /**
-     Verifies that closing a pane from Android's pane hamburger menu leaves the reader alive.
-
-     The close action removes the active SwiftData `Window` and its cascaded `PageManager`. The
-     reader must detach that window from visible SwiftUI state before deleting it so the split view
-     never re-renders a pane backed by invalidated model objects.
-     *
-     - Side effects:
-     *   - launches the app, creates a second reader window through the tab bar, and opens the
-     *     active pane hamburger menu
-     *   - activates the pane-level Close command
-     * - Failure modes:
-     *   - fails if the pane menu close action terminates the app
-     *   - fails if the closed window tab remains visible after the close transaction settles
-     *   - fails if the remaining one-window pane loses Android's pane hamburger affordance
-     *   - fails if the remaining one-window footer cannot create another window
-     */
-    func testPaneMenuCloseWindowKeepsReaderAlive() {
-        let app = makeApp()
-        app.launch()
-
-        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
+        let nestedTextOptionsBackButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(
+            nestedTextOptionsBackButton.waitForExistence(timeout: 10),
+            "Expected workspace Text Options to expose NavigationStack back chrome."
+        )
+        tapElementReliably(nestedTextOptionsBackButton, timeout: 10)
+        if !waitForReaderShellReady(in: app, timeout: 5) {
+            waitForElementValue("textDisplaySettingsScreen", toContain: "scope=window", in: app, timeout: 10)
+            tapElementReliably(requireElement("readerDestinationBackButton", in: app, timeout: 10), timeout: 10)
+            XCTAssertTrue(
+                waitForReaderShellReady(in: app, timeout: 20),
+                "Expected Text Options back navigation to return to the reader shell before closing the pane."
+            )
+        }
         openPaneMenu(requireElement("windowPaneMenuButton::1", in: app, timeout: 10), in: app, timeout: 10)
         tapElementReliably(
             requirePaneMenuItem("windowPaneMenuItem::close", in: app, timeout: 12),
