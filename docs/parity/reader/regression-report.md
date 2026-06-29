@@ -80,7 +80,7 @@ Related domain references:
 - `AndBibleUITests/testDownloadsRepositoryManagerOpensFromOverflow`
 - `AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow`
 - `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
-- `AndBibleUITests/testAboutScreenOpensFromReaderMenu`
+- `AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions`
 - `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
 - `AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference`
 - `BibleUITests/HistoryListPresentationTests`

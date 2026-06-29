@@ -6,13 +6,6 @@ import UIKit
 #endif
 
 extension AndBibleUITests {
-    func testAboutScreenOpensFromReaderMenu() {
-        let app = makeApp()
-        app.launch()
-
-        openAboutFromReaderMenu(in: app)
-    }
-
     /**
      Verifies Android BackupActivity workflow rows plus iOS database-backup destination handling.
      *

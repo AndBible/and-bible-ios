@@ -7,18 +7,20 @@ import UIKit
 
 extension AndBibleUITests {
     /**
-     Verifies Settings opens as a reader destination and routes Android's global text-options row.
+     Verifies reader menu About still opens and Settings routes Android's global text-options row.
      *
      * Package tests own the full Application Preferences row catalog. This UI smoke keeps the live
-     * route contract: Settings is pushed from the reader action surface, its key shortcuts are
-     * exposed, and the Global text options row opens root-scoped Text Display settings rather than
-     * workspace/window options.
+     * route contract: About remains reachable from the reader menu, Settings is pushed from the
+     * reader action surface, its key shortcuts are exposed, and the Global text options row opens
+     * root-scoped Text Display settings rather than workspace/window options.
      *
      * - Side effects:
      *   - launches the app with deterministic in-memory persistence
+     *   - opens and dismisses About from the reader menu
      *   - pushes Settings from the reader action surface
      *   - activates the production Global text options row
      * - Failure modes:
+     *   - fails if About no longer opens from the reader menu or cannot return to the reader shell
      *   - fails if Settings still presents as a sheet instead of a reader destination
      *   - fails if the Android shortcut rows disappear from the Settings state
      *   - fails if Global text options opens any scope other than `global`
@@ -26,6 +28,15 @@ extension AndBibleUITests {
     func testSettingsApplicationShortcutsOpenGlobalTextOptions() {
         let app = makeApp()
         app.launch()
+
+        openAboutFromReaderMenu(in: app)
+        let aboutSheet = requireElement("aboutSheetScreen", in: app, timeout: 10)
+        tapElementReliably(requireElement("aboutDoneButton", in: app, timeout: 10), timeout: 10)
+        waitForElementToDisappear(aboutSheet, timeout: 10)
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected About dismissal to return to the reader shell."
+        )
 
         openSettings(in: app)
         XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)

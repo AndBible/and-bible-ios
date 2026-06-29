@@ -1,5 +1,4 @@
 {
-  "AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu": "baseline",
   "AndBibleUITests/AndBibleUITests/testBookmarkListFilterAndSearchResetAcrossReopen": "bookmark-filter",
   "AndBibleUITests/AndBibleUITests/testBookmarkListOpensLabelAssignmentForSeededBookmark": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel": "bookmark-studypad",

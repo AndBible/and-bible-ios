@@ -128,7 +128,7 @@ class BuildXcodebuildCommandTests(unittest.TestCase):
             derived_data_path=None,
             result_bundle_path=".artifacts/AndBibleTests-ui-reuse.xcresult",
             code_signing_allowed="NO",
-            selection_args_text="-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
+            selection_args_text="-only-testing:AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions",
             action="test-without-building",
             xctestrun_path=".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
         )
@@ -144,7 +144,7 @@ class BuildXcodebuildCommandTests(unittest.TestCase):
                 "-resultBundlePath",
                 ".artifacts/AndBibleTests-ui-reuse.xcresult",
                 "CODE_SIGNING_ALLOWED=NO",
-                "-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
+                "-only-testing:AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions",
                 "test-without-building",
             ],
         )
@@ -258,7 +258,7 @@ class XctestrunEnvironmentTests(unittest.TestCase):
 
     def test_selection_requests_ui_tests_for_only_testing_ui_target(self) -> None:
         selection = """
-        -only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu
+        -only-testing:AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions
         -skip-testing:AndBibleTests/AndBibleTests/testSlowUnit
         """
 
@@ -629,7 +629,7 @@ class MainTests(unittest.TestCase):
                 "id=DEVICE",
                 "--result-bundle-path",
                 ".artifacts/AndBibleTests-ui-reuse.xcresult",
-                "--test-selection-args=-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
+                "--test-selection-args=-only-testing:AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions",
                 "--action",
                 "test-without-building",
             ]
@@ -646,7 +646,7 @@ class MainTests(unittest.TestCase):
                 "-resultBundlePath",
                 ".artifacts/AndBibleTests-ui-reuse.xcresult",
                 "CODE_SIGNING_ALLOWED=NO",
-                "-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
+                "-only-testing:AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions",
                 "test-without-building",
             ],
             check=True,
