@@ -234,77 +234,22 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the visible adopt-versus-create confirmation can drive the create-new branch.
+     Verifies that the visible My Documents adopt-versus-create confirmation can drive the
+     create-new branch.
      *
      * - Side effects:
      *   - launches Sync Settings with deterministic NextCloud settings and a UI-test remote
-     *     backend that reports one existing same-named bookmark sync folder
-     *   - enables bookmark sync through the production category row
+     *     backend that reports one existing same-named My Documents sync folder
+     *   - scrolls to and enables My Documents sync through the production category row
      *   - chooses "Copy from this device to Cloud" in the adopt-versus-create prompt and confirms
      *     the destructive reset-cloud branch
      * - Failure modes:
      *   - fails if the first adopt/create prompt never appears
      *   - fails if the create-new choice does not surface the reset-cloud confirmation
      *   - fails if confirming the reset-cloud branch does not complete synchronization with the
-     *     bookmarks category enabled
+     *     My Documents category enabled
      */
-    func testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow() {
-        let app = makeApp(remoteSyncBootstrapScenario: "adopt-existing")
-        app.launch()
-
-        _ = openSyncSettingsFromReaderAction(in: app)
-        waitForSyncState(["backend": "NEXT_CLOUD", "enabled": "none"], in: app, timeout: 10)
-
-        toggleSyncCategory(
-            "syncCategoryToggle::bookmarks",
-            in: app,
-            expectedTokens: [
-                "backend": "NEXT_CLOUD",
-                "enabled": "bookmarks",
-                "bootstrapPrompt": "adoptOrCreate:bookmarks",
-            ],
-            timeout: 15
-        )
-
-        let createFromDeviceButton = app.alerts.firstMatch.buttons["Copy from this device to Cloud"].firstMatch
-        XCTAssertTrue(
-            createFromDeviceButton.waitForExistence(timeout: 10),
-            "Expected the adopt-versus-create alert to expose the create-new choice."
-        )
-        tapElementReliably(createFromDeviceButton, timeout: 10)
-
-        waitForSyncState(["pendingConfirmation": "resetCloud:bookmarks"], in: app, timeout: 10)
-        tapAlertButton("OK", in: app, timeout: 10)
-
-        waitForSyncState(
-            [
-                "backend": "NEXT_CLOUD",
-                "enabled": "bookmarks",
-                "bootstrapPrompt": "none",
-                "pendingConfirmation": "none",
-                "lastConfirmation": "resetCloud:bookmarks",
-            ],
-            in: app,
-            timeout: 20
-        )
-    }
-
-    /**
-     Verifies that the My Documents category row is exposed and starts the same manual
-     synchronization path as existing supported categories.
-     *
-     * - Side effects:
-     *   - launches Sync Settings with deterministic NextCloud settings and a UI-test remote
-     *     backend that reports one existing same-named My Documents sync folder
-     *   - scrolls to and enables the production My Documents category row
-     *   - leaves synchronization at the visible adopt-versus-create prompt, proving the category
-     *     entered the manual remote-sync branch without requiring live credentials
-     * - Failure modes:
-     *   - fails if the My Documents category row is missing from Sync Settings
-     *   - fails if enabling the row does not persist `enabled=mydocuments`
-     *   - fails if enabling the row does not surface the My Documents adopt/create prompt
-     */
-    func testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath() {
+    func testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow() {
         let app = makeApp(remoteSyncBootstrapScenario: "adopt-existing")
         app.launch()
 
@@ -321,10 +266,32 @@ extension AndBibleUITests {
             ],
             timeout: 15
         )
+
+        let createFromDeviceButton = app.alerts.firstMatch.buttons["Copy from this device to Cloud"].firstMatch
+        XCTAssertTrue(
+            createFromDeviceButton.waitForExistence(timeout: 10),
+            "Expected the adopt-versus-create alert to expose the create-new choice."
+        )
+        tapElementReliably(createFromDeviceButton, timeout: 10)
+
+        waitForSyncState(["pendingConfirmation": "resetCloud:mydocuments"], in: app, timeout: 10)
+        tapAlertButton("OK", in: app, timeout: 10)
+
+        waitForSyncState(
+            [
+                "backend": "NEXT_CLOUD",
+                "enabled": "mydocuments",
+                "bootstrapPrompt": "none",
+                "pendingConfirmation": "none",
+                "lastConfirmation": "resetCloud:mydocuments",
+            ],
+            in: app,
+            timeout: 20
+        )
     }
 
     /**
-     Verifies disabling a seeded NextCloud category mutates state and persists across reopen.
+     Verifies category disabling and backend switching mutate state and persist across reopen.
      *
      * - Side effects:
      *   - launches the app on the reader shell with persisted NextCloud settings and bookmarks
@@ -333,14 +300,18 @@ extension AndBibleUITests {
      *     exported `enabled=none` state
      *   - dismisses the Sync screen, reopens it from the reader action, and rehydrates from
      *     persisted settings state
+     *   - switches from NextCloud to iCloud through the production backend picker, dismisses, and
+     *     reopens again so the iCloud section is rehydrated from persisted settings
      * - Failure modes:
      *   - fails if the seeded Sync screen does not start with `backend=NEXT_CLOUD;enabled=bookmarks`
      *   - fails if disabling the category does not update the exported Sync screen state to
      *     `backend=NEXT_CLOUD;enabled=none`
      *   - fails if the direct dismiss or reopen controls never appear
      *   - fails if reopening the sheet does not preserve the exported `enabled=none` state token
+     *   - fails if switching backend does not expose the iCloud section immediately and after
+     *     direct reopen
      */
-    func testSyncSettingsCategoryDisablePersistsAcrossDirectReopen() {
+    func testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen() {
         let app = makeApp()
         app.launch()
 
@@ -364,36 +335,6 @@ extension AndBibleUITests {
         let reopenedSyncState = requireElement("syncSettingsState", in: app, timeout: 10)
         assertSyncState(
             reopenedSyncState.value as? String,
-            backend: "NEXT_CLOUD",
-            enabled: "none"
-        )
-    }
-
-    /**
-     Verifies switching the active sync backend swaps visible sections and persists across reopen.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell and opens Sync Settings with its persisted backend
-     *   - switches the backend from NextCloud to iCloud through the production picker and observes
-     *     the immediate iCloud section
-     *   - dismisses and reopens Sync Settings from the reader action so the sheet rehydrates from
-     *     persisted settings state
-     * - Failure modes:
-     *   - fails if the seeded Sync screen does not start in the NextCloud branch
-     *   - fails if the exported Sync screen state does not move from `backend=NEXT_CLOUD;enabled=none`
-     *     to `backend=ICLOUD;enabled=none`
-     *   - fails if the dismiss or reopen controls never appear
-     *   - fails if reopening the sheet does not preserve the exported `backend=ICLOUD;enabled=none`
-     *     state token or the iCloud section
-     */
-    func testSyncSettingsBackendSwitchPersistsAcrossDirectReopen() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openSyncSettingsFromReaderAction(in: app)
-        let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        assertSyncState(
-            syncState.value as? String,
             backend: "NEXT_CLOUD",
             enabled: "none"
         )
