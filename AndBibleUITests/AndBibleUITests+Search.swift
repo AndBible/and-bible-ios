@@ -44,20 +44,25 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Android's reader All Text Options route and font-family editor presentation.
+     Verifies Android's reader All Text Options route, workspace parent link, and font-family
+     editor presentation.
      *
      Package tests own text-display row order, row visibility, editor state semantics, and Android
      value normalization. This UI smoke keeps the production route live: the reader action opens
-     workspace-scoped Text Display settings and the font-family editor is the in-place
-     Android-style dialog rather than native iOS picker or sheet chrome.
+     workspace-scoped Text Display settings, the workspace scope exposes only the global parent
+     link, and the font-family editor is the in-place Android-style dialog rather than native iOS
+     picker or sheet chrome.
      *
      * - Side effects:
      *   - launches the reader shell with deterministic in-memory data
      *   - opens the real overflow menu action identified by Android's All Text Options row
+     *   - taps the Global text options parent link inside Text Display settings
      *   - opens the font-family editor overlay
      * - Failure modes:
      *   - fails if the overflow action is routed to global Application Preferences
      *   - fails if the overflow action is routed to window-scoped Text Display settings
+     *   - fails if the workspace parent link is missing or if global scope still exposes parent
+     *     links
      *   - fails if the editor route regresses to native iOS picker/sheet presentation
      */
     func testAllTextOptionsWorkspaceRouteAndFontEditor() {
@@ -79,6 +84,12 @@ extension AndBibleUITests {
             "Workspace text options must not show Android's window-only workspace parent link."
         )
 
+        let globalLink = requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10)
+        tapElementReliably(globalLink, timeout: 10)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
+        XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
+        XCTAssertFalse(unresolvedElement("textDisplayOpenGlobalSettingsButton", in: app).exists)
+
         let fontFamilyButton = requireReachableTextDisplayButton("textDisplayFontFamilyButton", in: app, timeout: 10)
         tapElementReliably(fontFamilyButton, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "preferenceEditor=fontFamily", in: app, timeout: 10)
@@ -86,38 +97,6 @@ extension AndBibleUITests {
             app.otherElements["textDisplayPreferenceEditorOverlay"].waitForExistence(timeout: 10),
             "Expected the Android-style text display editor overlay to be visible."
         )
-    }
-
-    /**
-     Verifies Android's workspace parent-link behavior from the reader All Text Options route.
-
-     Android shows only the global parent link from workspace-scoped text-display settings. Tapping
-     that link opens global text options, where the parent-link category is hidden because global is
-     the root scope.
-     *
-     * - Side effects:
-     *   - launches the app and opens the production reader All Text Options route
-     *   - taps the Global text options parent link inside Text Display settings
-     * - Failure modes:
-     *   - fails if workspace scope exposes the window-only workspace parent link
-     *   - fails if the global parent link is missing or does not open `scope=global`
-     *   - fails if global scope still exposes parent links
-     */
-    func testWorkspaceTextOptionsParentLinkOpensGlobalScope() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openAllTextOptions(in: app)
-        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
-        XCTAssertFalse(
-            unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists,
-            "Workspace text options must not show Android's window-only workspace parent link."
-        )
-        let globalLink = requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10)
-        tapElementReliably(globalLink, timeout: 10)
-        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
-        XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
-        XCTAssertFalse(unresolvedElement("textDisplayOpenGlobalSettingsButton", in: app).exists)
     }
 
     /**

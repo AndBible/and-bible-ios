@@ -19,7 +19,6 @@
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreRestoreImportPresentsTargetSpecificPickers": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions": "baseline",
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": "baseline",
-  "AndBibleUITests/AndBibleUITests/testWorkspaceTextOptionsParentLinkOpensGlobalScope": "baseline",
   "AndBibleUITests/AndBibleUITests/testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink": "baseline",
   "AndBibleUITests/AndBibleUITests/testPaneMenuCloseWindowKeepsReaderAlive": "baseline",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow": "none",

@@ -1,6 +1,6 @@
 {
   "AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu": 156.711,
-  "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": 134.92,
+  "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": 118.209,
   "AndBibleUITests/AndBibleUITests/testBookmarkListFilterAndSearchResetAcrossReopen": 241.637,
   "AndBibleUITests/AndBibleUITests/testBookmarkListOpensLabelAssignmentForSeededBookmark": 96.149,
   "AndBibleUITests/AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel": 88.247,
@@ -28,6 +28,5 @@
   "AndBibleUITests/AndBibleUITests/testThirdWindowBookmarkNavigationUpdatesOnlyTargetPaneContent": 122.35,
   "AndBibleUITests/AndBibleUITests/testThirdWindowDocumentSwitchUpdatesOnlyTargetPaneContent": 113.258,
   "AndBibleUITests/AndBibleUITests/testThirdWindowStrongsToggleAffectsOnlyActiveWindow": 165.597,
-  "AndBibleUITests/AndBibleUITests/testWorkspaceTextOptionsParentLinkOpensGlobalScope": 120.96,
   "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow": 163.951
 }
