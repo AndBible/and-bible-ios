@@ -79,9 +79,9 @@ Related domain references:
 - `AndBibleUITests/testSettingsScreenShowsPrimaryNavigationRows`
 - `AndBibleUITests/testDownloadsRepositoryManagerOpensFromOverflow`
 - `AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow`
-- `AndBibleUITests/testBookmarksScreenOpensFromReaderMenu`
+- `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
 - `AndBibleUITests/testAboutScreenOpensFromReaderMenu`
-- `AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference`
+- `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
 - `AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference`
 - `BibleUITests/HistoryListPresentationTests`
 

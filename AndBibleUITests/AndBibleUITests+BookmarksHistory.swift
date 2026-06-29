@@ -7,30 +7,6 @@ import UIKit
 
 extension AndBibleUITests {
     /**
-     Verifies Bookmarks opens from the drawer as an app-owned reader destination.
-     *
-     * Android launches Bookmarks as an app activity from the drawer, so iOS should not expose the
-     * route through `activeReaderSheet` or sheet-only Done chrome when the drawer action is used.
-     *
-     * - Side effects:
-     *   - opens the reader drawer and activates Bookmarks
-     * - Failure modes:
-     *   - fails if Bookmarks does not appear or if the route regresses to sheet presentation
-     */
-    func testBookmarksScreenOpensFromReaderMenu() {
-        let app = makeApp()
-        app.launch()
-
-        XCTAssertTrue(openBookmarkList(in: app).exists)
-        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
-        waitForReaderRenderedContentState(containing: "readerDestination=bookmarks", in: app, timeout: 10)
-        XCTAssertFalse(
-            app.navigationBars.buttons["Done"].firstMatch.exists,
-            "Drawer Bookmarks should use reader destination back chrome, not iOS sheet Done chrome."
-        )
-    }
-
-    /**
      Verifies StudyPads opens from the drawer and selecting a row opens the StudyPad document.
      *
      * Android launches `ManageLabels` in `Mode.STUDYPAD` from the drawer, so iOS should expose the
@@ -127,8 +103,13 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that selecting a seeded bookmark row dismisses the list and navigates the reader to
-     that bookmark's chapter.
+     Verifies Bookmarks opens from the drawer as an app-owned reader destination and that selecting
+     a seeded bookmark row dismisses the list and navigates the reader to that bookmark's chapter.
+     *
+     * Android launches Bookmarks from the drawer as an app-owned destination, then returns to the
+     * reader when the user selects a row. This workflow keeps the route/no-sheet parity assertions
+     * with the live selection behavior so the UI suite does not spend a separate cold app launch on
+     * route ownership alone.
      *
      * - Side effects:
      *   - launches the reader shell with one deterministic `Exodus 2:1` bookmark while the reader
@@ -137,6 +118,7 @@ extension AndBibleUITests {
      *   - taps the seeded bookmark row and waits for the visible reader reference to reach
      *     `Exodus 2`
      * - Failure modes:
+     *   - fails if the bookmark list route regresses to sheet presentation
      *   - fails if the bookmark list or seeded bookmark row never appears
      *   - fails if tapping the seeded bookmark row does not drive the reader to `Exodus 2`
      */
@@ -150,7 +132,13 @@ extension AndBibleUITests {
             "Expected the seeded bookmark-navigation scenario to start on Genesis 1, but saw '\(initialReference)'."
         )
 
-        _ = openBookmarkList(in: app)
+        XCTAssertTrue(openBookmarkList(in: app).exists)
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=bookmarks", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer Bookmarks should use reader destination back chrome, not iOS sheet Done chrome."
+        )
         let bookmarkRow = requireBookmarkRow("Exodus_2_1", in: app, timeout: 10)
         tapElementReliably(bookmarkRow, timeout: 10)
         let updatedReference = waitForReaderReferenceValueToChange(

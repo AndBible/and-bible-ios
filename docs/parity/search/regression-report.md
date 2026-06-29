@@ -50,7 +50,6 @@ Verification matrix:
 - `AndBibleUITests/testSearchEntryRouteRetainsSeededQuery`
 - `AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals`
 - `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
-- `AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference`
 
 ## Expected Assertions Covered
 
@@ -86,8 +85,8 @@ Verification matrix:
 
 ### Reader integration
 
-- opening Search from the real reader shell and selecting a result moves the
-  reader away from its seeded `Genesis 1` state
+- opening Search from the real reader shell, mutating option controls, then selecting a result moves
+  the reader away from its seeded `Genesis 1` state
 
 ## Historical Result And Current Interpretation
 

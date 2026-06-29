@@ -547,26 +547,33 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Search option controls mutate the visible active-query state.
+     Verifies Search option controls mutate active-query state and result selection returns to the
+     reader.
      *
      * Exact Android search semantics for scope filters and word modes are covered in
      * `SearchIndexServiceQueryTests`. This UI smoke stays focused on the live Search surface:
      * the real scope and word-mode radio rows must be tappable, update exported state, and rerender
-     * the seeded result list after each option change.
+     * the seeded result list after each option change. The same live Search route then enters a
+     * deterministic bundled query and selects a result so reader-navigation handoff remains covered
+     * without a second cold app launch.
      *
      * - Side effects:
      *   - launches the app directly into Search with the initial query `earth void`
      *   - switches Search scope between NT and OT
      *   - switches Search word mode from all words to phrase and then to any word
+     *   - enters a deterministic bundled query and taps the first returned result row
      * - Failure modes:
      *   - fails if visible Search option controls are not accessible
      *   - fails if scope or word-mode changes do not update the Search state export
      *   - fails if the visible seeded result list does not rerender after option changes
+     *   - fails if selecting the final result row does not navigate the reader to the selected
+     *     passage
      */
     func testSearchOptionControlsMutateVisibleState() {
         let app = makeApp(searchQuery: "earth void")
         app.launch()
 
+        let initialReference = "Genesis 1:1"
         _ = openSearch(in: app)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
@@ -595,30 +602,7 @@ extension AndBibleUITests {
         tapSearchWordMode("Any Word", in: app, timeout: 10)
         waitForSearchState(containing: "wordMode=anyWord", in: app, timeout: 20)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
-    }
 
-    /**
-     Verifies that the real reader Search workflow can navigate to a bundled search hit.
-     *
-     * - Side effects:
-     *   - launches the standard reader shell without a launch-seeded Search presentation
-     *   - opens Search from the real reader toolbar, enters a deterministic bundled query, waits
-     *     for the bundled index/search pass, and taps the first returned result row
-     *   - dismisses Search through the normal result-selection flow and navigates the reader to
-     *     the selected passage
-     * - Failure modes:
-     *   - fails if Search cannot be opened from the reader toolbar
-     *   - fails if the Search field cannot receive and submit the deterministic query
-     *   - fails if bundled search results do not produce at least one tappable result row
-     *   - fails if selecting the result does not move the reader to the selected verse
-     */
-    func testSearchResultSelectionNavigatesReaderToBundledReference() {
-        let app = makeApp()
-        app.launch()
-
-        let initialReference = requireReaderReferenceValue(in: app, timeout: 15)
-
-        _ = openSearch(in: app)
         let searchField = requireSearchInput(in: app, timeout: 10)
         replaceText(in: searchField, with: "noah", placeholderHints: ["Search Bible text", "Search Bible", "Search"])
         dismissSearchFieldFocusIfNeeded(in: app)
