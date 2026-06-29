@@ -1154,7 +1154,7 @@ private final class FixtureContext {
     }
 
     /**
-     Seeds two labeled bookmark rows used by filter-reset workflows.
+     Seeds two labeled bookmark rows plus a StudyPad entry used by bookmark route workflows.
      */
     private func seedBookmarkFilter() throws {
         let uiTestLabel = ensureUserLabel(name: "UI Test Seed", color: 0xFF91A7FF)
@@ -1173,6 +1173,10 @@ private final class FixtureContext {
             note: nil,
             createdAt: seededDate(offset: 20)
         )
+        if bookmarkService.studyPadEntries(labelId: uiTestLabel.id).isEmpty,
+           let (entry, _, _, _) = bookmarkService.createStudyPadEntry(labelId: uiTestLabel.id, afterOrderNumber: -1) {
+            bookmarkService.updateStudyPadTextEntryText(id: entry.id, text: "")
+        }
     }
 
     /**

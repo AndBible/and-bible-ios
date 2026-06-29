@@ -119,6 +119,7 @@ extension AndBibleUITests {
      *     returns to the bookmark list
      *   - taps the seeded bookmark row and waits for the visible reader reference to reach
      *     `Genesis 1`
+     *   - reopens Bookmarks, selects the seeded label, and opens the matching StudyPad document
      * - Failure modes:
      *   - fails if the history route regresses or selecting the seeded row does not navigate the
      *     reader to `Exodus 2`
@@ -126,6 +127,8 @@ extension AndBibleUITests {
      *   - fails if the bookmark list, label-assignment screen, or seeded bookmark rows never appear
      *   - fails if Label Assignment cannot dismiss back to the bookmark list
      *   - fails if tapping the seeded bookmark row does not drive the reader back to `Genesis 1`
+     *   - fails if the selected-label StudyPad handoff is no longer visible or no longer opens the
+     *     matching StudyPad document
      *
      * Label creation, favourite toggles, Bible label removal, and generic bookmark assignment are
      * covered by `LabelAssignmentMutationTests` in the app-host-free package lane.
@@ -180,6 +183,12 @@ extension AndBibleUITests {
             updatedReference.localizedCaseInsensitiveContains("Genesis 1"),
             "Expected selecting the seeded bookmark to navigate to Genesis 1, but saw '\(updatedReference)'."
         )
+
+        XCTAssertTrue(openBookmarkList(in: app).exists)
+        openSeedStudyPadFromBookmarkList(in: app)
+        waitForStudyPadPresentation(in: app, timeout: 20)
+        let studyPadTitle = requireElement("readerStudyPadTitle", in: app, timeout: 10)
+        XCTAssertEqual(studyPadTitle.label, "UI Test Seed")
     }
 
     /**
@@ -376,30 +385,6 @@ extension AndBibleUITests {
         tapWindowTab(0, in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "windowOrder=0", in: app, timeout: 20)
         waitForReaderRenderedContentState(containing: "strongsMode=1", in: app, timeout: 20)
-    }
-
-    /**
-     Verifies that selecting a seeded bookmark label filter exposes the StudyPad handoff and opens
-     the matching StudyPad document in the reader shell.
-     *
-     * - Side effects:
-     *   - launches the reader shell with one deterministic `Genesis 1:1` bookmark assigned to the
-     *     seeded `UI Test Seed` label
-     *   - opens the bookmark list from the actual reader overflow menu
-     *   - selects the seeded label chip and triggers the real `Open StudyPad` action
-     * - Failure modes:
-     *   - fails if the seeded label filter or StudyPad action never appears
-     *   - fails if the reader never enters StudyPad mode for `UI Test Seed`
-     */
-    func testBookmarkListOpensStudyPadForSelectedLabel() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openBookmarkList(in: app)
-        openSeedStudyPadFromBookmarkList(in: app)
-        waitForStudyPadPresentation(in: app, timeout: 20)
-        let studyPadTitle = requireElement("readerStudyPadTitle", in: app, timeout: 10)
-        XCTAssertEqual(studyPadTitle.label, "UI Test Seed")
     }
 
     /**

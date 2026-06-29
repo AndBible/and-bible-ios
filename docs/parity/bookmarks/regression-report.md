@@ -43,7 +43,6 @@ Verification matrix:
 
 - `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
 - `AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions`
-- `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
 - `AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser`
 
 ### Package UI Projection and Mutation

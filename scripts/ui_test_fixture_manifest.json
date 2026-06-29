@@ -1,5 +1,4 @@
 {
-  "AndBibleUITests/AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel": "bookmark-studypad",
   "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": "my-notes-single",
   "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": "bookmark-filter",
   "AndBibleUITests/AndBibleUITests/testStudyPadsScreenOpensFromReaderMenu": "bookmark-studypad",

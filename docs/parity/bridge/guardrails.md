@@ -125,7 +125,7 @@ xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   CODE_SIGNING_ALLOWED=NO test \
   -only-testing:AndBibleTests/AndBibleTests/testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow \
   -only-testing:AndBibleTests/AndBibleTests/testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery \
-  -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel
+  -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference
 ```
 
 Bridge-surface changes should also run:
