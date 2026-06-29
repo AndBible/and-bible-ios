@@ -12,7 +12,6 @@
   "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": 93.771,
   "AndBibleUITests/AndBibleUITests/testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink": 135.787,
   "AndBibleUITests/AndBibleUITests/testReadingPlansRouteStartAdvanceDeleteAndImportAffordanceFlow": 128.591,
-  "AndBibleUITests/AndBibleUITests/testSearchEntryRouteRetainsSeededQuery": 99.182,
   "AndBibleUITests/AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals": 176.783,
   "AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState": 110.173,
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreDatabaseWorkflowDestinationAndShareCancel": 133.4,

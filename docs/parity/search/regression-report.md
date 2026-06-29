@@ -47,14 +47,14 @@ Verification matrix:
 
 ### UI
 
-- `AndBibleUITests/testSearchEntryRouteRetainsSeededQuery`
 - `AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals`
 - `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
 
 ## Expected Assertions Covered
 
-### Direct-launch search harness
+### Reader-owned search route
 
+- Search opens as an Android-style reader destination, not an iOS sheet
 - seeded query survives hydration into the visible Search screen
 - indexed text results are emitted in canonical verse order for broad queries through package tests
 

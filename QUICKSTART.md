@@ -41,7 +41,7 @@ xcodebuild -project AndBible.xcodeproj -scheme AndBible \
 ```bash
 xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
-  test -only-testing:AndBibleUITests/AndBibleUITests/testSearchEntryRouteRetainsSeededQuery
+  test -only-testing:AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState
 ```
 
 ## Project Structure

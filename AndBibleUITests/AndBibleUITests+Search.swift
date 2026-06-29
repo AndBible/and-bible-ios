@@ -401,35 +401,6 @@ extension AndBibleUITests {
      */
 
     /**
-     Verifies Search opens as an integrated reader destination and preserves a seeded query.
-     *
-     * Android Search is a full activity with toolbar navigation, not a bottom/large iOS sheet with a
-     * `Done` affordance. Package tests own indexed query semantics; this smoke keeps the visible
-     * route alive and proves a launch-seeded query reaches the real Search screen/results surface.
-     *
-     * - Setup: Launches the standard seeded Search fixture and opens Search through the reader entry.
-     * - Expected result: The reader state reports `readerDestination=search`, and no navigation-bar
-     *   `Done` button is exposed by the Search surface. The seeded query remains visible and returns
-     *   the deterministic fixture row.
-     * - Failure meaning: Search has drifted back to sheet/modal presentation instead of Android's
-     *   destination-style surface, or the visible Search route dropped its launch-seeded query.
-     * - Side effects: Presents Search from the reader shell.
-     */
-    func testSearchEntryRouteRetainsSeededQuery() {
-        let app = makeApp(searchQuery: "earth")
-        app.launch()
-
-        _ = openSearch(in: app)
-        waitForReaderRenderedContentState(containing: "readerDestination=search", in: app, timeout: 10)
-        XCTAssertFalse(
-            app.navigationBars.buttons["Done"].firstMatch.exists,
-            "Search should not expose iOS sheet-style Done chrome when opened from the reader."
-        )
-        waitForSearchQuery("earth", in: app, timeout: 20)
-        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
-    }
-
-    /**
      Verifies that selecting a second Search translation reruns the query and reports grouped totals.
      *
      * - Side effects:
@@ -537,22 +508,25 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Search option controls mutate active-query state and result selection returns to the
-     reader.
+     Verifies Search opens as an integrated reader destination, mutates active-query state, and
+     returns to the reader from result selection.
      *
      * Exact Android search semantics for scope filters and word modes are covered in
      * `SearchIndexServiceQueryTests`. This UI smoke stays focused on the live Search surface:
-     * the real scope and word-mode radio rows must be tappable, update exported state, and rerender
-     * the seeded result list after each option change. The same live Search route then enters a
-     * deterministic bundled query and selects a result so reader-navigation handoff remains covered
-     * without a second cold app launch.
+     * Search must open as an Android-style reader destination rather than an iOS sheet, preserve
+     * the launch-seeded query, expose tappable scope and word-mode rows, update exported state, and
+     * rerender the seeded result list after each option change. The same live Search route then
+     * enters a deterministic bundled query and selects a result so reader-navigation handoff remains
+     * covered without a second cold app launch.
      *
      * - Side effects:
      *   - launches the app directly into Search with the initial query `earth void`
+     *   - opens Search through the reader entry and verifies destination/no-sheet chrome
      *   - switches Search scope between NT and OT
      *   - switches Search word mode from all words to phrase and then to any word
      *   - enters a deterministic bundled query and taps the first returned result row
      * - Failure modes:
+     *   - fails if Search regresses to sheet/modal presentation or drops the launch-seeded query
      *   - fails if visible Search option controls are not accessible
      *   - fails if scope or word-mode changes do not update the Search state export
      *   - fails if the visible seeded result list does not rerender after option changes
@@ -565,6 +539,12 @@ extension AndBibleUITests {
 
         let initialReference = "Genesis 1:1"
         _ = openSearch(in: app)
+        waitForReaderRenderedContentState(containing: "readerDestination=search", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Search should not expose iOS sheet-style Done chrome when opened from the reader."
+        )
+        waitForSearchQuery("earth void", in: app, timeout: 20)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
         tapSearchScope(.newTestament, in: app)

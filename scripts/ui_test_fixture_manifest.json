@@ -12,7 +12,6 @@
   "AndBibleUITests/AndBibleUITests/testLabelManagerScreenOpensFromSettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingPlansRouteStartAdvanceDeleteAndImportAffordanceFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals": "search-multi-translation",
-  "AndBibleUITests/AndBibleUITests/testSearchEntryRouteRetainsSeededQuery": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreDatabaseWorkflowDestinationAndShareCancel": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreRestoreImportPresentsTargetSpecificPickers": "baseline",
