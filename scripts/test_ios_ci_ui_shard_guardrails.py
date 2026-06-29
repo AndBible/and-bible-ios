@@ -50,46 +50,6 @@ def workflow_step_run_block(workflow_text: str, step_name: str) -> str:
     raise AssertionError(f"Unable to find run block for workflow step {step_name!r}.")
 
 
-def workflow_step_block(workflow_text: str, step_name: str) -> str:
-    """Return the raw YAML block for one named GitHub Actions step."""
-    lines = workflow_text.splitlines()
-    step_pattern = re.compile(rf"^(\s*)-\s+name:\s+{re.escape(step_name)}\s*$")
-
-    for index, line in enumerate(lines):
-        step_match = step_pattern.match(line)
-        if step_match is None:
-            continue
-
-        step_indent = len(step_match.group(1))
-        step_lines = [line]
-        for step_line in lines[index + 1 :]:
-            if step_line.startswith(" " * step_indent + "- name:"):
-                break
-            step_lines.append(step_line)
-        return "\n".join(step_lines)
-
-    raise AssertionError(f"Unable to find workflow step {step_name!r}.")
-
-
-def workflow_job_block(workflow_text: str, job_name: str) -> str:
-    """Return the raw YAML block for one top-level workflow job."""
-    lines = workflow_text.splitlines()
-    job_pattern = re.compile(rf"^  {re.escape(job_name)}:\s*$")
-
-    for index, line in enumerate(lines):
-        if job_pattern.match(line) is None:
-            continue
-
-        job_lines = [line]
-        for job_line in lines[index + 1 :]:
-            if re.match(r"^  [A-Za-z0-9_-]+:\s*$", job_line):
-                break
-            job_lines.append(job_line)
-        return "\n".join(job_lines)
-
-    raise AssertionError(f"Unable to find workflow job {job_name!r}.")
-
-
 def upload_artifact_steps(workflow_text: str) -> list[tuple[int, str]]:
     """Returns every upload-artifact workflow step with its source line number."""
     upload_step_pattern = re.compile(r"^(\s*)(-\s*)?uses:\s+actions/upload-artifact@v\d+\s*$")
@@ -184,74 +144,15 @@ jobs:
             re.compile(r"--max-shard-count\s+['\"]?\$\{UI_TEST_MAX_SHARD_COUNT\}['\"]?"),
         )
 
-    def test_ios_ci_exposes_build_product_reuse_experiment_trigger(self) -> None:
-        """Protect the narrow opt-in/changed-workflow trigger for the reuse experiment."""
+    def test_ios_ci_does_not_include_retired_build_product_reuse_experiment(self) -> None:
+        """Keep the retired UI build-product reuse experiment out of the active workflow."""
         workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
-        repo_standards = workflow_job_block(workflow_text, "repo-standards")
 
-        self.assertIn("run_ui_build_product_reuse_experiment:", repo_standards)
-        self.assertIn("run_ui_build_product_reuse_experiment=false", repo_standards)
-        self.assertIn("run_ui_build_product_reuse_experiment=true", repo_standards)
-        self.assertIn(
-            "run_ui_build_product_reuse_experiment=${run_ui_build_product_reuse_experiment}",
-            repo_standards,
-        )
-        self.assertIn("ci:ui-build-reuse", workflow_text)
-
-    def test_ios_ci_has_build_product_reuse_producer_and_consumer_jobs(self) -> None:
-        """Protect the producer/consumer proof from becoming another per-shard build."""
-        workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
-        producer = workflow_job_block(workflow_text, "ios-ui-build-product-reuse-producer")
-        consumer = workflow_job_block(workflow_text, "ios-ui-build-product-reuse-consumer")
-        stage_run = workflow_step_run_block(workflow_text, "Stage reusable UI build products")
-        consumer_resolve_run = workflow_step_run_block(
-            consumer,
-            "Resolve iOS simulator destination",
-        )
-        consumer_run = workflow_step_run_block(
-            consumer,
-            "Run reused UI build products without rebuilding",
-        )
-
-        self.assertIn("needs.repo-standards.outputs.run_ui_build_product_reuse_experiment", producer)
-        self.assertIn("contains(github.event.pull_request.labels.*.name, 'ci:ui-build-reuse')", producer)
-        self.assertIn("andbible-ui-build-products-${{ github.run_id }}", producer)
-        self.assertIn(".derivedData/Build/Products", stage_run)
-        self.assertIn("*.xctestrun", stage_run)
-        self.assertNotIn("mapfile", stage_run)
-        self.assertIn(".build/debug/UITestFixtureTool", stage_run)
-        self.assertIn("tar -czf .artifacts/ui-build-product-reuse.tar.gz", stage_run)
-        self.assertIn("andbible-ui-build-products-${{ github.run_id }}", consumer)
-        self.assertIn("tar -xzf .artifacts/reuse-download/ui-build-product-reuse.tar.gz", consumer)
-        self.assertNotIn("--project", consumer_resolve_run)
-        self.assertNotIn("--scheme", consumer_resolve_run)
-        self.assertIn(
-            "-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
-            consumer,
-        )
-        self.assertIn("--xctestrun-path", consumer_run)
-        self.assertNotIn("mapfile", consumer_run)
-        self.assertIn("--action test-without-building", consumer_run)
-        self.assertNotIn("--action build-for-testing", consumer_run)
-
-    def test_ios_ci_reuse_product_upload_retry_fails_producer_when_required_artifact_is_missing(
-        self,
-    ) -> None:
-        """Protect required reusable-product uploads from becoming downstream artifact errors."""
-        workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
-        producer = workflow_job_block(workflow_text, "ios-ui-build-product-reuse-producer")
-        upload_step = workflow_step_block(producer, "Upload reusable UI build products")
-        retry_step = workflow_step_block(producer, "Retry upload reusable UI build products")
-
-        self.assertIn("id: upload_reusable_ui_build_products", upload_step)
-        self.assertIn("continue-on-error: true", upload_step)
-        self.assertIn("andbible-ui-build-products-${{ github.run_id }}", upload_step)
-        self.assertIn(
-            "if: steps.upload_reusable_ui_build_products.outcome == 'failure'",
-            retry_step,
-        )
-        self.assertIn("andbible-ui-build-products-${{ github.run_id }}", retry_step)
-        self.assertNotIn("continue-on-error", retry_step)
+        self.assertNotIn("run_ui_build_product_reuse_experiment", workflow_text)
+        self.assertNotIn("ci:ui-build-reuse", workflow_text)
+        self.assertNotIn("ios-ui-build-product-reuse-producer", workflow_text)
+        self.assertNotIn("ios-ui-build-product-reuse-consumer", workflow_text)
+        self.assertNotIn("andbible-ui-build-products", workflow_text)
 
 
 if __name__ == "__main__":

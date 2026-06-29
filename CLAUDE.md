@@ -73,13 +73,25 @@ xcodebuild -project AndBible.xcodeproj -scheme AndBible \
 
 xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   -destination 'platform=iOS Simulator,name=iPhone 17' test
+
+xcodebuild -project AndBible.xcodeproj -scheme AndBibleUnitTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
-**Package-Level Validation**
+**Package Test Targets**
 
 ```bash
-swift build
-swift test
+xcodebuild -project AndBible.xcodeproj -scheme SwordKitTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
+
+xcodebuild -project AndBible.xcodeproj -scheme BibleCoreTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
+
+xcodebuild -project AndBible.xcodeproj -scheme BibleViewTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
+
+xcodebuild -project AndBible.xcodeproj -scheme BibleUITests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
 **Vue.js Frontend**
@@ -97,7 +109,8 @@ npm run build-debug
 
 - The checked-in `AndBible.xcodeproj` and shared `AndBible.xcscheme` are the authoritative app build configuration
 - `project.yml` exists, but it can lag behind manual Xcode project changes. Validate against the real project and scheme, not just the YAML
-- `swift build` is useful for package compilation, but it does not replace `xcodebuild` for app-target behavior, scheme wiring, or XCUITest validation
+- Package-owned tests run through the app-host-free package schemes (`SwordKitTests`, `BibleCoreTests`, `BibleViewTests`, `BibleUITests`)
+- Whole-package `swift build` / `swift test` is currently a host-compile optimization only; it does not replace the package simulator schemes or app-target validation
 - If you change `bibleview-js`, rebuild the frontend bundle before app validation
 - Local secrets belong in `Config/Secrets.xcconfig.local`; do not commit real credentials
 
@@ -105,27 +118,42 @@ npm run build-debug
 
 **Run only tests relevant to the changes made.**
 
-### App / SwiftUI / Integration Changes
+### Package-Owned Logic and UI Contracts
 
-- Prefer targeted `xcodebuild test` runs against `AndBibleTests` and `AndBibleUITests`
+- Put new tests in the lowest package test target that owns the behavior after imports are minimized
+- Prefer targeted package-scheme runs for package logic, reader/controller contracts, bridge DTOs, SwiftData services, and Android parity helpers
 - Use `-only-testing:` whenever a focused subset is enough
-- The shared `AndBible` scheme includes both unit and UI test bundles
 
 Examples:
 
 ```bash
-xcodebuild -project AndBible.xcodeproj -scheme AndBible \
+xcodebuild -project AndBible.xcodeproj -scheme BibleCoreTests \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
-  test -only-testing:AndBibleTests/AndBibleTests/testStrongsQueryNormalizationHandlesLeadingZeroes
+  test -only-testing:BibleCoreTests/TextDisplaySettingsTests
 
-xcodebuild -project AndBible.xcodeproj -scheme AndBible \
+xcodebuild -project AndBible.xcodeproj -scheme BibleUITests \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
-  test -only-testing:AndBibleUITests/AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults
+  test -only-testing:BibleUITests/ReaderNavigationTests
 ```
 
-### Package-Only Logic Changes
+### App Bootstrap and XCUITest Workflows
 
-- `swift test` is useful for package targets, but still use `xcodebuild` if the change touches app wiring, SwiftUI behavior, environment injection, or UI harnesses
+- Use `AndBibleUnitTests` / `AndBibleTests` only for behavior that genuinely requires the app host, app delegate, scene wiring, or installed app bundle
+- Use `AndBibleUITests` only for true end-to-end workflows that require a launched app
+- Use `-only-testing:` whenever a focused subset is enough
+- `AndBibleUnitTests` contains only the app-host unit-test bundle; `AndBible` includes the app and XCUITest workflow bundle
+
+Examples:
+
+```bash
+xcodebuild -project AndBible.xcodeproj -scheme AndBibleUnitTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  test -only-testing:AndBibleTests/AndBibleTests/testApplicationDelegateSceneConfigurationUsesWindowSceneDelegate
+
+xcodebuild -project AndBible.xcodeproj -scheme AndBible \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  test -only-testing:AndBibleUITests/AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery
+```
 
 ### Vue.js Changes
 

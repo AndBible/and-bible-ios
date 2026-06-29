@@ -69,14 +69,15 @@ Related domain references:
 ### UI
 
 - `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
-- `AndBibleUITests/testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow`
+- `AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser`
 
 ## What This Validation Actually Covers
 
 ### Embedded note surfaces
 
 - service-layer note persistence still feeds the embedded My Notes data model
-- visible My Notes note update/delete is covered through the production reader My Notes path
+- the production reader My Notes path still opens the Android-style pseudo-document
+- note update/delete persistence is covered below the UI through package service and bridge tests
 
 ### StudyPad handoff
 

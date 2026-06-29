@@ -56,12 +56,12 @@ class FixtureManifestTests(unittest.TestCase):
         selection_args = [
             "-only-testing:AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference",
             "-only-testing:AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference",
-            "-only-testing:AndBibleUITests/AndBibleUITests/testBookmarkRowDeletePreservesOtherRowsAcrossReopen",
+            "-only-testing:AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser",
         ]
         manifest = {
             "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": "bookmark-navigation",
             "AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference": "history-single",
-            "AndBibleUITests/AndBibleUITests/testBookmarkRowDeletePreservesOtherRowsAcrossReopen": "bookmark-multirow",
+            "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": "my-notes-single",
         }
         self.assertEqual(
             group_selection_args_by_fixture(selection_args, manifest),
@@ -79,9 +79,9 @@ class FixtureManifestTests(unittest.TestCase):
                     ],
                 ),
                 (
-                    "bookmark-multirow",
+                    "my-notes-single",
                     [
-                        "-only-testing:AndBibleUITests/AndBibleUITests/testBookmarkRowDeletePreservesOtherRowsAcrossReopen"
+                        "-only-testing:AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser"
                     ],
                 ),
             ],

@@ -25,9 +25,7 @@
 		CA1C01A1D3E74B1F00A1B003 /* CalculatorIcon@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C003 /* CalculatorIcon@3x.png */; };
 		E798724B03764F55FC3187E5 /* SwordKit in Frameworks */ = {isa = PBXBuildFile; productRef = 020BEFE49A96B4F15548630F /* SwordKit */; };
 		5126013EC1173F5B6609881C /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 451FFBBE453EACF1547FF4B6 /* Localizable.strings */; };
-		B69113624461C63AB21F4144 /* AndBibleTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A279E3BCEE4A2AEC1F495246 /* AndBibleTestSupport.swift */; };
 		34F21932E6E652AD0A369D9C /* AndBibleTests+AppAndReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */; };
-		7DEA38853208672406B7FCDA /* AndBibleTests+ReaderNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 069F1737655720623BBF1459 /* AndBibleTests+ReaderNavigation.swift */; };
 		7878413CFC8EEC15FAD39267 /* AndBibleUITestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D5002E961A06DB9393E326 /* AndBibleUITestSupport.swift */; };
 		A2EEBFCC9A28E42778471552 /* AndBibleUITests+Search.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5CED694021FF0C2B594EB6 /* AndBibleUITests+Search.swift */; };
 		8736B1F0D4ED3F4C47BD692A /* AndBibleUITests+PlansDownloadsWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B1FF7DFF60A342B10407D17 /* AndBibleUITests+PlansDownloadsWorkspace.swift */; };
@@ -116,9 +114,7 @@
 		6BED42142889C17F36CB4471 /* yue */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = yue; path = yue.lproj/Localizable.strings; sourceTree = "<group>"; };
 		AEF24B385D42BE93B4B2BCC0 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh-Hans; path = zh-Hans.lproj/Localizable.strings; sourceTree = "<group>"; };
 		F25455B6A3C4498DA7EC3907 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh-Hant; path = zh-Hant.lproj/Localizable.strings; sourceTree = "<group>"; };
-		A279E3BCEE4A2AEC1F495246 /* AndBibleTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleTestSupport.swift; sourceTree = "<group>"; };
 		F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+AppAndReader.swift"; sourceTree = "<group>"; };
-		069F1737655720623BBF1459 /* AndBibleTests+ReaderNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+ReaderNavigation.swift"; sourceTree = "<group>"; };
 		90D5002E961A06DB9393E326 /* AndBibleUITestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITestSupport.swift; sourceTree = "<group>"; };
 		4C5CED694021FF0C2B594EB6 /* AndBibleUITests+Search.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleUITests+Search.swift"; sourceTree = "<group>"; };
 		6B1FF7DFF60A342B10407D17 /* AndBibleUITests+PlansDownloadsWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleUITests+PlansDownloadsWorkspace.swift"; sourceTree = "<group>"; };
@@ -225,9 +221,7 @@
 			isa = PBXGroup;
 			children = (
 				DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */,
-				A279E3BCEE4A2AEC1F495246 /* AndBibleTestSupport.swift */,
 				F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */,
-				069F1737655720623BBF1459 /* AndBibleTests+ReaderNavigation.swift */,
 			);
 			path = AndBibleTests;
 			sourceTree = "<group>";
@@ -431,9 +425,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				605562C8D06E0B4B1A1C232B /* AndBibleTests.swift in Sources */,
-				B69113624461C63AB21F4144 /* AndBibleTestSupport.swift in Sources */,
 				34F21932E6E652AD0A369D9C /* AndBibleTests+AppAndReader.swift in Sources */,
-				7DEA38853208672406B7FCDA /* AndBibleTests+ReaderNavigation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

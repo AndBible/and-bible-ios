@@ -1,8 +1,8 @@
 # Test Architecture Migration Plan - Colocate Tests in Package Targets
 
-Status: in progress (Phase 3 BibleUI package lane started)
+Status: in progress (Phase 4 app-host retirement and CI/docs alignment started)
 Owner: TBD
-Last updated: 2026-06-28
+Last updated: 2026-06-29
 
 ## Why (adversarial review summary)
 
@@ -31,7 +31,7 @@ Evidence captured during review:
 ### Findings (most to least severe)
 - **F1** Package-logic tests misfiled into the app-target bundle (root cause of "slow"). 26 of 27 `AndBibleTests/` files import only package modules. Genuinely app/source-aware tests are a small minority and live inside `+AppAndReader.swift` (80 funcs total): `AndBibleApplicationDelegate.sceneConfiguration` (line 2328) and `testContentViewDoesNotContainLegacyRootSidebarShell` (line 2361, reads `AndBible/ContentView.swift` from disk). The other ~78 funcs in that file are BibleUI logic.
 - **F2** "God partial class": 633 tests on a single `AndBibleTests: XCTestCase` split across 27 `extension AndBibleTests` files (largest 4,168 lines), sharing setUp/tearDown state - ordering coupling, no per-file parallelism, merge-conflict magnet. Same pattern in `AndBibleUITests` (~11,700 lines of `...Support.swift` behind 68 tests).
-- **F3** UI tests are full-app E2E doing unit/integration work (e.g. `testSettingsReadingProgressLinkOpensReadingProgressSettings` = 317s to assert one navigation). Launch+seed dominates wall-clock.
+- **F3** UI tests are full-app E2E doing unit/integration work (for example, a single settings navigation check measured 317s to assert one route). Launch+seed dominates wall-clock.
 - **F4** Scattered layout: app-target bundle vs package targets vs host-side fixture tool, with no single "where does my test go" rule.
 - **F5** CI is largely flake-mitigation scaffolding (dynamic shard planner, build-product reuse experiment, duplicated retry-upload steps, 90-min UI timeout, 8+ python tests about the harness itself).
 - **F6** `CLAUDE.md` + `.github/copilot-instructions.md` steer contributors toward the slow app-target lane ("`swift test` is supplemental").
@@ -52,6 +52,14 @@ Sources/
 AndBibleTests/                         <- ONLY app-host unit tests (AppDelegate/scene/bootstrap)
 AndBibleUITests/                       <- ONLY true end-to-end journeys, trimmed to a small smoke set
 ```
+
+Current progress as of 2026-06-29:
+
+| Lane | Current state |
+|---|---|
+| App-host unit tests | 1 func; only the scene-configuration sentinel remains |
+| Package tests | 698 funcs across SwordKit, BibleCore, BibleView, and BibleUI package lanes |
+| UI tests | 35 funcs after demoting duplicate seeded-index, Strong's Search data-contract, Search scope/word-mode duplicate launches, BookmarkList projection/delete persistence, label-assignment mutation persistence, StudyPad mutation persistence, My Notes mutation persistence, Sync category-row catalog coverage, Sync mutation-only duplicate launches, Settings feature-shortcut route metadata, Settings `ListPreference` row presentation, History clear/delete persistence, duplicate Downloads route coverage, duplicate Text Display/Color Settings route coverage, repeated Backup & Restore database-destination launches, duplicate Search entry/result launches, duplicate Reading Plan lifecycle launches, duplicate Bookmarks route launches, duplicate reader All Text Options launches, and duplicate reader About route launches |
 
 ## Destination mapping
 
@@ -168,12 +176,24 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - **Split `+AppAndReader` deliberately**: `sceneConfiguration` test stays app-hosted; the `ContentView` legacy root-sidebar source scan is now a repo-standards `source-guards` check; any future package-owned tests should move to the lowest owning package target instead of returning to the app-host bundle.
 - `AndBibleTests+ReaderNavigation` bridge/payload slice has moved to `BibleUITests` because compare payloads, reader document JSON factories, auxiliary fallback documents, and rendered-content tokens are BibleUI reader/bridge contracts that do not require app bootstrap.
 - `AndBibleTests+ReaderNavigation` reader interaction-policy slice has moved to `BibleUITests` because double-tap fullscreen gating, horizontal swipe mapping, and auto-fullscreen threshold logic are BibleUI policy/controller contracts with injected settings, not app bootstrap behavior.
+- The rest of `AndBibleTests+ReaderNavigation` has moved to `BibleUITests` as a larger final ReaderNavigation package slice because bridge response contracts, download/Strong's/multi-reference routing, Android `Multi` document identity, reader selection, content loading, reader config/coordinators, infinite scroll, MyDocument bridge operations, synchronized scrolling, and navigation coordinator behavior are BibleUI/BibleView package contracts with injected fixtures, not app bootstrap behavior.
 - Run BibleUITests via `xcodebuild test -scheme BibleUITests -destination 'platform=iOS Simulator,...'` against the **committed package test scheme from Phase 0** (no app host).
 - Gate per batch: moved batch green in new target; equal count removed from app bundle; app build still green.
 
 ### Phase 4 - Retire scaffolding & lock structure
-- Delete near-empty `AndBibleTests` extensions and `AndBibleTestSupport`; keep only app-host tests.
-- Simplify CI: replace `ios-simulator-unit-tests` app-build path with app-host-free package-test lanes. Baseline is per-target simulator schemes; macOS `swift test` is an optimization only for targets proven to compile under SwiftPM. Reassess shard planner, timings file, build-product-reuse experiment.
+- Delete near-empty `AndBibleTests` extensions and `AndBibleTestSupport`; keep only app-host tests. The app-host bundle now contains only the scene-configuration sentinel.
+- Narrow the old simulator unit-test CI job to the app-host scene-configuration sentinel using the dedicated `AndBibleUnitTests` scheme, while keeping `Unit Tests (Simulator)` as an aggregate required gate that fails when any package-test lane fails. Package-owned coverage is enforced by the app-host-free `SwordKitTests`, `BibleCoreTests`, `BibleViewTests`, and `BibleUITests` package lanes.
+- Search UI trim has started: duplicate seeded-index and Strong's Search data-contract assertions moved out of `AndBibleUITests` into app-host-free package coverage. Scope and word-mode result semantics live in `SearchIndexServiceQueryTests`; one combined UI smoke intentionally remains because it proves the visible Android-form controls mutate state and rerender the active query surface. The duplicate Search entry launch is now merged into the route smoke so Android destination chrome, launch-seeded query retention, and deterministic result readiness are checked in one run.
+- Search result-navigation trim merged the live reader handoff into `testSearchOptionControlsMutateVisibleState`, so the retained visible Search workflow proves option-control rerenders and final result selection without a second Search app launch.
+- Bookmark/My Notes/StudyPad trim moved BookmarkList sort/search/label-filter state contracts, destructive row persistence, generic row label filtering, label-assignment create/toggle/favourite persistence, Label Manager create/edit/delete persistence, StudyPad mutation persistence, and My Notes mutation persistence into package tests. Row navigation, StudyPad handoff, label-assignment routing, the Settings Label Manager route, and the My Notes pseudo-document route remain visible app UI smokes. Downloads source-management persistence remains in SwordKit package tests, while one visible route smoke still proves the reader menu opens Downloads and Android's Downloads overflow reaches the repository manager. Sync category-row catalog coverage now lives in `SettingsIconsTests`; standalone backend/category mutation smokes were merged into the retained direct-reopen persistence workflows, while invalid-URL and adopt/create remote-sync workflows remain visible app UI tests.
+- Bookmarks route trim merged the drawer route/no-sheet ownership smoke into `testBookmarkSelectionNavigatesReaderToSeededReference`, so one visible workflow now proves Android-style reader destination ownership and seeded-row navigation back into the reader.
+- Settings feature shortcut trim moved Settings-root Sync and Reading Progress route metadata into `ApplicationSettingsPresentation` and `SettingsIconsTests`; the Settings-root destination smoke test remains visible UI coverage, while Sync Settings behavioral workflows continue to exercise direct reader-action entry points.
+- Reader About route trim merged the standalone About reader-menu smoke into `testSettingsApplicationShortcutsOpenGlobalTextOptions`, so the retained workflow proves About is reachable and dismissible before continuing through Settings to global Text Display options.
+- Settings `ListPreference` trim moved compact menu-row metadata and the no-inline-`Picker` renderer guard into `ApplicationSettingsPresentation`/`SettingsIconsTests`; the Settings-root destination smoke test remains as the live navigation workflow.
+- Text Display/Color Settings trim moved repeated route/control assertions into a smaller retained smoke set: one Settings-root smoke now also opens global Text Display options, one reader All Text Options smoke covers workspace scope, the workspace-to-global parent link, and Android-style font-family editor presentation, while the pane/window parent-link ladder remains separate because it starts from the active window scope. Package tests continue to own Android row catalogs, scope visibility, justify/editor commit/reset semantics, and color reset ownership; the Colors reset UI smoke remains the visible route/reset workflow.
+- Backup & Restore trim merged Android workflow-row coverage, database backup destination copy/cancel, and iOS share-sheet cancel semantics into one visible UI smoke. Android backup/archive/reset/restore persistence remains in BibleCore/SwordKit package tests; the Database-vs-Documents restore/import picker smoke stays separate because it exercises distinct OS picker targets.
+- Reading Plans trim merged the drawer destination smoke, built-in plan start, daily-reading advance, active-plan deletion, and custom import affordance into one visible workflow. `ReadingPlanService` package tests continue to own algorithmic plan generation, custom-plan parsing, progress math, and Android sync/restore contracts.
+- Simplify CI: replace `ios-simulator-unit-tests` app-build path with app-host-free package-test lanes. Baseline is per-target simulator schemes; macOS `swift test` is an optimization only for targets proven to compile under SwiftPM. The optional build-product-reuse experiment is retired; reassess the shard planner and timings file as UI coverage continues moving into package lanes.
 - Trim `AndBibleUITests` to an explicit smoke set (target <=15 journeys); demote/convert the rest.
 - Update `CLAUDE.md` + `.github/copilot-instructions.md`: replace "swift test is supplemental" with the actual placement rule - *new tests go in the lowest package test target that owns the behavior after imports are minimized; app-host only for true app-delegate/scene/bootstrap behavior.*
 

@@ -17,7 +17,15 @@ import WebKit
 import struct SwiftUI.Color
 #endif
 
-extension AndBibleTests {
+/**
+ Package-level reader navigation and bridge integration tests migrated from the app-host bundle.
+
+ The suite exercises BibleUI reader controller, link-routing, multi-document, selection,
+ synchronized-scroll, and navigation-coordinator contracts using package fixtures. It intentionally
+ avoids app delegate, scene, or installed app bootstrap behavior so the coverage runs in the
+ app-host-free BibleUI package lane.
+ */
+final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
     @MainActor
     func testBridgeSendResponseEmitsCallIdResponseJavaScript() {
@@ -207,7 +215,6 @@ extension AndBibleTests {
     }
 
     func testBuildStrongsMultiDocJSONReturnsInstallFallbackWhenNoStrongsDictionaryIsInstalled() throws {
-        let bridge = BibleBridge()
         let modulePath = try makeTemporaryBundledSwordPath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let builder = BibleReaderStrongsDocumentBuilder(

@@ -41,31 +41,31 @@ Verification matrix:
 - `AndBibleTests/testStrongsSearchFindAllOccurrencesSupportsIntermediateZeroTrimVariant`
 - `AndBibleTests/testSearchIndexFindsCanonicalStrongsTokens`
 - `AndBibleTests/testSearchIndexReturnsTextHitsInCanonicalEntryOrder`
+- `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchWordModesMatchAndroidSearchContracts`
+- `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchScopeFiltersMatchAndroidSearchContracts`
+- `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchMultipleReturnsPerModuleBucketsForGroupedTotals`
 
 ### UI
 
-- `AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery`
-- `AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults`
+- `AndBibleUITests/testSearchEntryRouteRetainsSeededQuery`
 - `AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals`
-- `AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults`
-- `AndBibleUITests/testSearchWordModeChangeRerunsQueryAndUpdatesResults`
-- `AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference`
+- `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
 
 ## Expected Assertions Covered
 
 ### Direct-launch search harness
 
 - seeded query survives hydration into the visible Search screen
-- the harness can build a disposable index against bundled modules
-- the ready state reports non-zero bundled results for deterministic queries
-- indexed text results are emitted in canonical verse order for broad queries
+- indexed text results are emitted in canonical verse order for broad queries through package tests
 
 ### Search options
 
-- switching scope from whole Bible -> OT -> NT reruns the same query
-- OT scope correctly reduces `jesus` to zero bundled hits
-- switching word mode from all-words -> phrase -> any-word reruns the same query
-- phrase mode correctly reduces `earth void` to zero bundled hits
+- OT, NT, and current-book filters constrain indexed search result sets
+- switching scope through the visible UI controls mutates Search state and rerenders the active query
+- all-words requires every query term
+- switching word mode through the visible UI controls mutates Search state and rerenders the active query
+- phrase mode correctly reduces non-adjacent `earth void` to zero hits
+- any-word mode restores rows that contain either query term
 
 ### Multi-translation grouped results
 
@@ -85,8 +85,8 @@ Verification matrix:
 
 ### Reader integration
 
-- opening Search from the real reader shell and selecting a result moves the
-  reader away from its seeded `Genesis 1` state
+- opening Search from the real reader shell, mutating option controls, then selecting a result moves
+  the reader away from its seeded `Genesis 1` state
 
 ## Historical Result And Current Interpretation
 
@@ -96,14 +96,13 @@ canonical-token coverage for the H00430/H0430 KJV path.
 - unit: `6` tests, `0` failures
 - UI: `6` tests, `0` failures
 - focused unit subset runtime: about `32s` end-to-end, with `20s` of test execution
-- focused Search UI subset runtime: about `507s` end-to-end, including fixture resets and simulator execution
+- focused Search UI subset runtime: about `507s` end-to-end before the scope/word-mode UI workflows were combined; current focused runtime is tracked in `scripts/ui_test_timings.json`
 
 This gives the search domain current regression evidence for:
 
 - index lifecycle readiness
 - query retention
-- scope mutation
-- word-mode mutation
+- scope and word-mode mutation
 - multi-translation grouped totals
 - grouped-result navigation
 - Strong's normalization/indexed lexical-token hit search

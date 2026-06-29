@@ -7,113 +7,81 @@ import UIKit
 
 extension AndBibleUITests {
     /**
-     Verifies that Settings opens as a reader navigation destination and exposes Android-parity
-     application-preference shortcuts.
+     Verifies reader menu About still opens and Settings routes Android's global text-options row.
+     *
+     * Package tests own the full Application Preferences row catalog. This UI smoke keeps the live
+     * route contract: About remains reachable from the reader menu, Settings is pushed from the
+     * reader action surface, its key shortcuts are exposed, and the Global text options row opens
+     * root-scoped Text Display settings rather than workspace/window options.
      *
      * - Side effects:
-     *   - launches the app with the calculator gate disabled, in-memory persistence, and one
-     *     deterministic seeded bookmark-label pair for stable reader-shell startup
-     *   - pushes Settings from the reader action surface and samples the exported reader/settings
-     *     accessibility state
+     *   - launches the app with deterministic in-memory persistence
+     *   - opens and dismisses About from the reader menu
+     *   - pushes Settings from the reader action surface
+     *   - activates the production Global text options row
      * - Failure modes:
-     *   - fails if settings cannot be reached from the reader shell
-     *   - fails if Settings is still presented as a reader sheet rather than a navigation
-     *     destination
-     *   - fails if the feature shortcuts or reader-admin-flow contract are absent
+     *   - fails if About no longer opens from the reader menu or cannot return to the reader shell
+     *   - fails if Settings still presents as a sheet instead of a reader destination
+     *   - fails if the Android shortcut rows disappear from the Settings state
+     *   - fails if Global text options opens any scope other than `global`
      */
-    func testSettingsScreenShowsApplicationPreferenceShortcuts() {
+    func testSettingsApplicationShortcutsOpenGlobalTextOptions() {
         let app = makeApp()
         app.launch()
+
+        openAboutFromReaderMenu(in: app)
+        let aboutSheet = requireElement("aboutSheetScreen", in: app, timeout: 10)
+        tapElementReliably(requireElement("aboutDoneButton", in: app, timeout: 10), timeout: 10)
+        waitForElementToDisappear(aboutSheet, timeout: 10)
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected About dismissal to return to the reader shell."
+        )
 
         openSettings(in: app)
         XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
         waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=settings", in: app, timeout: 10)
+        waitForSettingsState(containing: "settingsGlobalTextOptionsLink", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsSyncLink", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsReadingProgressLink", in: app, timeout: 10)
         waitForSettingsState(containing: "adminFlows=readerActions", in: app, timeout: 10)
+
+        tapSettingsElement("settingsGlobalTextOptionsLink", in: app, timeout: 20)
+        XCTAssertTrue(requireElement("textDisplaySettingsScreen", in: app, timeout: 20).exists)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
+        XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
+        XCTAssertFalse(unresolvedElement("textDisplayOpenGlobalSettingsButton", in: app).exists)
     }
 
     /**
-     Verifies Android `ListPreference` parity rows stay compact on the Settings root surface.
+     Verifies Android's reader All Text Options route, workspace parent link, and font-family
+     editor presentation.
      *
-     * The regression this guards against is SwiftUI's inline `Picker` presentation, which rendered
-     * selected values such as `Chapter` and `System` as oversized blue rows in the Settings list.
-     *
-     * - Side effects:
-     *   - launches the app and opens Application Preferences from the reader action surface
-     *   - types row titles into the production Settings search field to reveal each preference row
-     * - Failure modes:
-     *   - fails if the menu-backed row identifier is missing
-     *   - fails if a selected `ListPreference` value is visible as standalone root-row text
-     */
-    func testApplicationPreferencesRenderAndroidListPreferenceRowsWithoutInlineValues() {
-        let app = makeApp()
-        app.launch()
-
-        openSettings(in: app)
-
-        assertSettingsListPreferenceMenuRow(
-            identifier: "settingsListPreferenceMenu::toolbar_button_actions",
-            searchTitle: "Action for toolbar button press",
-            inlineSelectedValue: "Press to open menu, long press for documents screen (default)",
-            in: app
-        )
-        assertSettingsListPreferenceMenuRow(
-            identifier: "settingsListPreferenceMenu::bible_view_swipe_mode",
-            searchTitle: "Action for swipe left / right gesture",
-            inlineSelectedValue: "Chapter",
-            in: app
-        )
-        assertSettingsListPreferenceMenuRow(
-            identifier: "settingsListPreferenceMenu::night_mode_pref3",
-            searchTitle: "Night mode switching",
-            inlineSelectedValue: "System",
-            in: app
-        )
-        assertSettingsListPreferenceMenuRow(
-            identifier: "settingsListPreferenceMenu::locale_pref",
-            searchTitle: "Application language",
-            inlineSelectedValue: "English",
-            in: app
-        )
-        assertSettingsListPreferenceMenuRow(
-            identifier: "settingsListPreferenceMenu::notes_content_type",
-            searchTitle: "Format for new bookmark notes",
-            inlineSelectedValue: "Rich text (HTML)",
-            in: app
-        )
-    }
-
-    /**
-     Verifies that Android's main reader All Text Options action opens workspace text-display
-     settings instead of the left-drawer Application Preferences destination.
+     Package tests own text-display row order, row visibility, editor state semantics, and Android
+     value normalization. This UI smoke keeps the production route live: the reader action opens
+     workspace-scoped Text Display settings, the workspace scope exposes only the global parent
+     link, and the font-family editor is the in-place Android-style dialog rather than native iOS
+     picker or sheet chrome.
      *
      * - Side effects:
      *   - launches the reader shell with deterministic in-memory data
      *   - opens the real overflow menu action identified by Android's All Text Options row
-     *   - pushes the native workspace-scoped Text Display settings destination
+     *   - taps the Global text options parent link inside Text Display settings
+     *   - opens the font-family editor overlay
      * - Failure modes:
      *   - fails if the overflow action is routed to global Application Preferences
      *   - fails if the overflow action is routed to window-scoped Text Display settings
-     *   - fails if the Text Display settings screen never becomes ready
+     *   - fails if the workspace parent link is missing or if global scope still exposes parent
+     *     links
+     *   - fails if the editor route regresses to native iOS picker/sheet presentation
      */
-    func testAllTextOptionsOpensReaderTextDisplaySurface() {
+    func testAllTextOptionsWorkspaceRouteAndFontEditor() {
         let app = makeApp()
         app.launch()
 
-        openReaderActionDestination(
-            actionIdentifier: "readerOpenTextOptionsAction",
-            destinationIdentifier: "textDisplaySettingsScreen",
-            readinessIdentifiers: [
-                "textDisplayFontFamilyButton",
-                "textDisplayJustifyTextToggleButton",
-            ],
-            in: app,
-            timeout: 20
-        )
-
-        XCTAssertTrue(requireElement("textDisplaySettingsScreen", in: app, timeout: 10).exists)
+        let textDisplayScreen = openAllTextOptions(in: app)
+        XCTAssertTrue(textDisplayScreen.exists)
         waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=textOptions", in: app, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
@@ -121,29 +89,7 @@ extension AndBibleUITests {
             unresolvedElement("settingsForm", in: app).exists,
             "Expected All Text Options to open the Text Display destination, not Application Preferences."
         )
-    }
 
-    /**
-     Verifies Android's workspace parent-link behavior from the reader All Text Options route.
-
-     Android shows only the global parent link from workspace-scoped text-display settings. Tapping
-     that link opens global text options, where the parent-link category is hidden because global is
-     the root scope.
-     *
-     * - Side effects:
-     *   - launches the app and opens the production reader All Text Options route
-     *   - taps the Global text options parent link inside Text Display settings
-     * - Failure modes:
-     *   - fails if workspace scope exposes the window-only workspace parent link
-     *   - fails if the global parent link is missing or does not open `scope=global`
-     *   - fails if global scope still exposes parent links
-     */
-    func testWorkspaceTextOptionsParentLinkOpensGlobalScope() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openAllTextOptions(in: app)
-        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
         XCTAssertFalse(
             unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists,
             "Workspace text options must not show Android's window-only workspace parent link."
@@ -154,6 +100,14 @@ extension AndBibleUITests {
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
         XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
         XCTAssertFalse(unresolvedElement("textDisplayOpenGlobalSettingsButton", in: app).exists)
+
+        let fontFamilyButton = requireReachableTextDisplayButton("textDisplayFontFamilyButton", in: app, timeout: 10)
+        tapElementReliably(fontFamilyButton, timeout: 10)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "preferenceEditor=fontFamily", in: app, timeout: 10)
+        XCTAssertTrue(
+            app.otherElements["textDisplayPreferenceEditorOverlay"].waitForExistence(timeout: 10),
+            "Expected the Android-style text display editor overlay to be visible."
+        )
     }
 
     /**
@@ -437,37 +391,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Android's Application Preferences Global text options route.
-
-     The Android root Settings screen exposes `global_text_display_settings` under Look & feel.
-     iOS mirrors that shortcut, and opening it must show global scope with no parent links.
-     *
-     * - Side effects:
-     *   - launches the app and opens Application Preferences from reader actions
-     *   - activates the Global text options row
-     * - Failure modes:
-     *   - fails if the global settings shortcut is metadata-only and not user-navigable
-     *   - fails if Application Preferences opens workspace/window text options instead of global
-     *   - fails if global scope exposes parent links
-     */
-    func testApplicationPreferencesGlobalTextOptionsOpenGlobalScope() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openSettingsDestination(
-            linkIdentifier: "settingsGlobalTextOptionsLink",
-            destinationIdentifier: "textDisplaySettingsScreen",
-            readinessIdentifiers: ["textDisplayFontFamilyButton"],
-            in: app,
-            destinationTimeout: 20
-        )
-
-        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
-        XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
-        XCTAssertFalse(unresolvedElement("textDisplayOpenGlobalSettingsButton", in: app).exists)
-    }
-
-    /**
      Search fixture contract for normal UI workflows.
 
      `scripts/ui_test_fixture_manifest.json` maps these Search tests to the `search-indexed` or
@@ -478,39 +401,21 @@ extension AndBibleUITests {
      */
 
     /**
-     Verifies that Search preserves a seeded initial query typed through the real UI.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell with the initial query `earth` queued for Search
-     *   - opens Search from the toolbar and waits for the Search destination to settle
-     * - Failure modes:
-     *   - fails if the Search screen never appears
-     *   - fails if the seeded query is dropped before the Search screen reaches its settled state
-     */
-    func testSearchDirectLaunchRetainsSeededQuery() {
-        let app = makeApp(searchQuery: "earth")
-        app.launch()
-
-        _ = openSearch(in: app)
-        waitForSearchQuery("earth", in: app, timeout: 20)
-        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
-    }
-
-    /**
-     Verifies Search opens as an integrated reader destination instead of an iOS sheet.
+     Verifies Search opens as an integrated reader destination and preserves a seeded query.
      *
      * Android Search is a full activity with toolbar navigation, not a bottom/large iOS sheet with a
-     * `Done` affordance. This test protects that presentation contract separately from Search's
-     * query behavior so future visual parity work does not accidentally reintroduce sheet chrome.
+     * `Done` affordance. Package tests own indexed query semantics; this smoke keeps the visible
+     * route alive and proves a launch-seeded query reaches the real Search screen/results surface.
      *
      * - Setup: Launches the standard seeded Search fixture and opens Search through the reader entry.
      * - Expected result: The reader state reports `readerDestination=search`, and no navigation-bar
-     *   `Done` button is exposed by the Search surface.
+     *   `Done` button is exposed by the Search surface. The seeded query remains visible and returns
+     *   the deterministic fixture row.
      * - Failure meaning: Search has drifted back to sheet/modal presentation instead of Android's
-     *   destination-style surface.
+     *   destination-style surface, or the visible Search route dropped its launch-seeded query.
      * - Side effects: Presents Search from the reader shell.
      */
-    func testSearchPresentsAsReaderDestinationInsteadOfSheet() {
+    func testSearchEntryRouteRetainsSeededQuery() {
         let app = makeApp(searchQuery: "earth")
         app.launch()
 
@@ -520,116 +425,8 @@ extension AndBibleUITests {
             app.navigationBars.buttons["Done"].firstMatch.exists,
             "Search should not expose iOS sheet-style Done chrome when opened from the reader."
         )
-    }
-
-    /**
-     Verifies that Search can query the seeded bundled index and return bundled results.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell with the initial query `earth` queued for Search
-     *   - opens Search from the toolbar and waits for the seeded bundled index to become ready
-     * - Failure modes:
-     *   - fails if the Search screen never reaches the ready state
-     *   - fails if the seeded bundled result set still returns zero hits
-     */
-    func testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults() {
-        let app = makeApp(searchQuery: "earth")
-        app.launch()
-
-        _ = openSearch(in: app)
-        waitForSearchState(containing: "query=earth", in: app, timeout: 20)
+        waitForSearchQuery("earth", in: app, timeout: 20)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
-    }
-
-    /**
-     Reveals and validates one Settings `ListPreference` row after the Android-style conversion.
-     *
-     * - Parameters:
-     *   - identifier: Stable menu-row accessibility identifier exposed by production Settings.
-     *   - searchTitle: English row title used to narrow Settings search in UI tests.
-     *   - inlineSelectedValue: Value that must not be visible as standalone root-list text.
-     *   - app: Running application under test.
-     * - Side effects: rewrites the Settings search query.
-     * - Failure modes: records XCTest failures for missing rows or visible inline selected values.
-     */
-    private func assertSettingsListPreferenceMenuRow(
-        identifier: String,
-        searchTitle: String,
-        inlineSelectedValue: String,
-        in app: XCUIApplication,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let settingsForm = requireElement("settingsForm", in: app, timeout: 10, file: file, line: line)
-        let searchField = requireSettingsSearchField(in: app, settingsForm: settingsForm, file: file, line: line)
-        replaceText(in: searchField, with: searchTitle, placeholderHints: ["Search"])
-
-        let row = requireElement(identifier, in: app, timeout: 10, file: file, line: line)
-        XCTAssertTrue(row.exists, "Expected compact menu row \(identifier) to exist.", file: file, line: line)
-        XCTAssertFalse(
-            isVisibleSettingsText(inlineSelectedValue, in: app, settingsForm: settingsForm),
-            "Expected '\(inlineSelectedValue)' to be hidden until the menu opens, not rendered inline in Settings.",
-            file: file,
-            line: line
-        )
-    }
-
-    /**
-     Resolves the Settings search field used to reveal offscreen Android-parity rows.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - settingsForm: Visible Settings root surface.
-     * - Returns: The search field exposed by SwiftUI's `searchable` modifier.
-     * - Side effects: scrolls upward when the search field is not initially in the hierarchy.
-     * - Failure modes: records an XCTest failure when search cannot be reached.
-     */
-    private func requireSettingsSearchField(
-        in app: XCUIApplication,
-        settingsForm: XCUIElement,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> XCUIElement {
-        let deadline = Date().addingTimeInterval(10)
-        repeat {
-            if let field = firstExistingElement(
-                settingsSearchFieldCandidates(in: app, settingsForm: settingsForm),
-                timeout: 0.2
-            ) {
-                return field
-            }
-            settingsForm.swipeDown()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        XCTFail("Expected Settings search field to exist.", file: file, line: line)
-        return app.searchFields["Search"].firstMatch
-    }
-
-    /**
-     Reports whether one visible Settings text/control still exposes stale inline picker content.
-     *
-     * - Parameters:
-     *   - text: Exact selected value that should only appear after opening a chooser menu.
-     *   - app: Running application under test.
-     *   - settingsForm: Settings root surface used as the visibility container.
-     * - Returns: `true` when the stale value is visible in the root Settings surface.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail directly.
-     */
-    private func isVisibleSettingsText(
-        _ text: String,
-        in app: XCUIApplication,
-        settingsForm: XCUIElement
-    ) -> Bool {
-        [
-            settingsForm.staticTexts[text].firstMatch,
-            settingsForm.buttons[text].firstMatch,
-            settingsForm.otherElements[text].firstMatch,
-            app.staticTexts[text].firstMatch,
-            app.buttons[text].firstMatch,
-            app.otherElements[text].firstMatch,
-        ].contains { $0.exists && isElementVisible($0, within: settingsForm) }
     }
 
     /**
@@ -740,57 +537,47 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that changing Search scope reruns the current query and updates the result set.
+     Verifies Search option controls mutate active-query state and result selection returns to the
+     reader.
+     *
+     * Exact Android search semantics for scope filters and word modes are covered in
+     * `SearchIndexServiceQueryTests`. This UI smoke stays focused on the live Search surface:
+     * the real scope and word-mode radio rows must be tappable, update exported state, and rerender
+     * the seeded result list after each option change. The same live Search route then enters a
+     * deterministic bundled query and selects a result so reader-navigation handoff remains covered
+     * without a second cold app launch.
      *
      * - Side effects:
-     *   - launches the app directly into Search with the initial query `jesus`
-     *   - switches Search scope from whole Bible to the Old Testament and then to the New
-     *     Testament
-     *   - waits for Search to rerun after each scope change and inspects the exported Search
-     *     state
+     *   - launches the app directly into Search with the initial query `earth void`
+     *   - switches Search scope between NT and OT
+     *   - switches Search word mode from all words to phrase and then to any word
+     *   - enters a deterministic bundled query and taps the first returned result row
      * - Failure modes:
-     *   - fails if the visible `OT` or `NT` Search scope buttons are not accessible
-     *   - fails if the Old Testament scope does not reduce the `jesus` query to zero hits
-     *   - fails if the New Testament scope does not restore non-zero bundled hits
+     *   - fails if visible Search option controls are not accessible
+     *   - fails if scope or word-mode changes do not update the Search state export
+     *   - fails if the visible seeded result list does not rerender after option changes
+     *   - fails if selecting the final result row does not navigate the reader to the selected
+     *     passage
      */
-    func testSearchScopeChangeRerunsQueryAndUpdatesResults() {
-        let app = makeApp(searchQuery: "jesus")
+    func testSearchOptionControlsMutateVisibleState() {
+        let app = makeApp(searchQuery: "earth void")
         app.launch()
 
+        let initialReference = "Genesis 1:1"
         _ = openSearch(in: app)
-        waitForSearchResultRow("searchResultRow::Matthew_1_1", in: app, shouldExist: true, timeout: 20)
+        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
-        tapSearchScope(.oldTestament, in: app)
-        waitForSearchState(containing: "scope=oldTestament", in: app, timeout: 20)
+        tapSearchScope(.newTestament, in: app)
+        waitForSearchState(containing: "scope=newTestament", in: app, timeout: 20)
         waitForSearchResultRow(
-            "searchResultRow::Matthew_1_1",
+            "searchResultRow::Genesis_1_2",
             in: app,
             shouldExist: false,
             timeout: 20
         )
 
-        tapSearchScope(.newTestament, in: app)
-        waitForSearchState(containing: "scope=newTestament", in: app, timeout: 20)
-        waitForSearchResultRow("searchResultRow::Matthew_1_1", in: app, shouldExist: true, timeout: 20)
-    }
-
-    /**
-     Verifies that changing Search word mode reruns the current query and updates the result set.
-     *
-     * - Side effects:
-     *   - launches the app directly into Search with the initial query `earth void`
-     *   - switches Search word mode from all words to phrase and then to any word
-     *   - waits for Search to rerun after each mode change and inspects the exported Search state
-     * - Failure modes:
-     *   - fails if the visible `Phrase` or `Any Word` Search mode buttons are not accessible
-     *   - fails if phrase mode does not reduce the `earth void` query to zero hits
-     *   - fails if any-word mode does not restore non-zero bundled hits
-     */
-    func testSearchWordModeChangeRerunsQueryAndUpdatesResults() {
-        let app = makeApp(searchQuery: "earth void")
-        app.launch()
-
-        _ = openSearch(in: app)
+        tapSearchScope(.oldTestament, in: app)
+        waitForSearchState(containing: "scope=oldTestament", in: app, timeout: 20)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
         tapSearchWordMode("Phrase", in: app, timeout: 10)
@@ -805,30 +592,7 @@ extension AndBibleUITests {
         tapSearchWordMode("Any Word", in: app, timeout: 10)
         waitForSearchState(containing: "wordMode=anyWord", in: app, timeout: 20)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
-    }
 
-    /**
-     Verifies that the real reader Search workflow can navigate to a bundled search hit.
-     *
-     * - Side effects:
-     *   - launches the standard reader shell without a launch-seeded Search presentation
-     *   - opens Search from the real reader toolbar, enters a deterministic bundled query, waits
-     *     for the bundled index/search pass, and taps the first returned result row
-     *   - dismisses Search through the normal result-selection flow and navigates the reader to
-     *     the selected passage
-     * - Failure modes:
-     *   - fails if Search cannot be opened from the reader toolbar
-     *   - fails if the Search field cannot receive and submit the deterministic query
-     *   - fails if bundled search results do not produce at least one tappable result row
-     *   - fails if selecting the result does not move the reader to the selected verse
-     */
-    func testSearchResultSelectionNavigatesReaderToBundledReference() {
-        let app = makeApp()
-        app.launch()
-
-        let initialReference = requireReaderReferenceValue(in: app, timeout: 15)
-
-        _ = openSearch(in: app)
         let searchField = requireSearchInput(in: app, timeout: 10)
         replaceText(in: searchField, with: "noah", placeholderHints: ["Search Bible text", "Search Bible", "Search"])
         dismissSearchFieldFocusIfNeeded(in: app)
@@ -851,26 +615,6 @@ extension AndBibleUITests {
             updatedReference.localizedCaseInsensitiveContains("Genesis 6:8"),
             "Expected selecting the Search result to navigate to Genesis 6:8, but saw '\(updatedReference)'."
         )
-    }
-
-    /**
-     Verifies that a bundled Strong's query reaches the indexed lexical-token path and returns hits.
-     *
-     * - Side effects:
-     *   - launches the app directly into Search with one deterministic Strong's query
-     *   - uses the seeded `search-indexed` fixture so normal Search coverage does not create an
-     *     index at runtime
-     * - Failure modes:
-     *   - fails if Search never reaches the ready state for the seeded Strong's query
-     *   - fails if the bundled Strong's-capable Bible still reports zero indexed lexical matches
-     */
-    func testSearchDirectLaunchStrongsQueryReturnsBundledResults() {
-        let app = makeApp(searchQuery: "H00430")
-        app.launch()
-
-        _ = openSearch(in: app)
-        waitForSearchState(containing: "query=H00430", in: app, timeout: 20)
-        waitForSearchResultCount(atLeast: 1, in: app, timeout: 20)
     }
 
     /**

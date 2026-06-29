@@ -891,15 +891,7 @@ public struct SettingsView: View {
             }
             if settingsSearchMatchesPreference(.toolbarButtonActions, in: behaviorSettingsSearchEntries) {
                 settingsMenuRow(
-                    preferenceKey: .toolbarButtonActions,
-                    title: String(
-                        localized: "prefs_toolbar_button_action_title",
-                        defaultValue: "Action for toolbar button press"
-                    ),
-                    summary: String(
-                        localized: "prefs_toolbar_button_action_summary",
-                        defaultValue: "Action to take when pressing/long-pressing Bible or Commentary toolbar buttons"
-                    ),
+                    preference: .toolbarButtonActions,
                     options: Self.toolbarButtonActionMenuOptions,
                     selectedValue: Self.normalizedToolbarButtonActionsMode(toolbarButtonActionsMode)
                 ) { newValue in
@@ -932,15 +924,7 @@ public struct SettingsView: View {
             }
             if settingsSearchMatchesPreference(.bibleViewSwipeMode, in: behaviorSettingsSearchEntries) {
                 settingsMenuRow(
-                    preferenceKey: .bibleViewSwipeMode,
-                    title: String(
-                        localized: "prefs_bible_view_swipe_mode_title",
-                        defaultValue: "Action for swipe left / right gesture"
-                    ),
-                    summary: String(
-                        localized: "prefs_bible_view_swipe_mode_summary",
-                        defaultValue: "Swipe left / right gesture can be used to go to next page / chapter."
-                    ),
+                    preference: .bibleViewSwipeMode,
                     options: Self.bibleViewSwipeModeMenuOptions,
                     selectedValue: Self.normalizedBibleViewSwipeMode(bibleViewSwipeMode)
                 ) { newValue in
@@ -973,12 +957,7 @@ public struct SettingsView: View {
             }
             if settingsSearchMatchesPreference(.nightModePref3, in: behaviorSettingsSearchEntries) {
                 settingsMenuRow(
-                    preferenceKey: .nightModePref3,
-                    title: String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
-                    summary: String(
-                        localized: "prefs_night_mode_summary",
-                        defaultValue: "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen."
-                    ),
+                    preference: .nightModePref3,
                     options: Self.nightModeMenuOptions,
                     selectedValue: Self.nightModePickerSelection(from: nightModeMode)
                 ) { newValue in
@@ -1258,12 +1237,7 @@ public struct SettingsView: View {
             }
             if settingsSearchMatchesPreference(.localePref, in: lookAndFeelSettingsSearchEntries) {
                 settingsMenuRow(
-                    preferenceKey: .localePref,
-                    title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
-                    summary: String(
-                        localized: "prefs_interface_locale_summary",
-                        defaultValue: "Select custom user interface language"
-                    ),
+                    preference: .localePref,
                     options: Self.localeMenuOptions,
                     selectedValue: Self.normalizedLocalePrefValue(selectedLanguage)
                 ) { newValue in
@@ -1335,15 +1309,7 @@ public struct SettingsView: View {
             }
             if settingsSearchMatchesPreference(.notesContentType, in: lookAndFeelSettingsSearchEntries) {
                 settingsMenuRow(
-                    preferenceKey: .notesContentType,
-                    title: String(
-                        localized: "prefs_notes_content_type_title",
-                        defaultValue: "Format for new bookmark notes"
-                    ),
-                    summary: String(
-                        localized: "prefs_notes_content_type_summary",
-                        defaultValue: "Text format used when creating new bookmark notes and Study Pad entries"
-                    ),
+                    preference: .notesContentType,
                     options: Self.notesContentTypeMenuOptions,
                     selectedValue: AppPreferenceValueNormalizer.notesContentType(notesContentType)
                 ) { newValue in
@@ -1671,11 +1637,12 @@ public struct SettingsView: View {
     @ViewBuilder
     private var featuresSettingsSection: some View {
         settingsPreferenceSection(String(localized: "features", defaultValue: "Features")) {
-            let syncEntry = syncSettingsSearchEntry
+            let syncShortcut = ApplicationSettingsPresentation.syncSettingsShortcut
+            let syncEntry = syncShortcut.searchEntry
             if settingsSearchMatchesEntry(syncEntry) {
                 settingsNavigationLink(
                     title: syncEntry.title,
-                    androidKey: "sync_settings_shortcut",
+                    androidKey: syncShortcut.androidKey,
                     summary: syncEntry.summary,
                     accessibilityIdentifier: syncEntry.identifier
                 ) {
@@ -1683,13 +1650,15 @@ public struct SettingsView: View {
                 }
             }
 
+            let readingProgressShortcut = ApplicationSettingsPresentation.readingProgressSettingsShortcut
+            let readingProgressEntry = readingProgressShortcut.searchEntry
             if canOpenReadingProgressSettings,
-               settingsSearchMatchesEntry(readingProgressSettingsSearchEntry) {
+               settingsSearchMatchesEntry(readingProgressEntry) {
                 settingsNavigationLink(
-                    title: readingProgressSettingsSearchEntry.title,
-                    androidKey: "reading_progress_settings_shortcut",
-                    summary: readingProgressSettingsSearchEntry.summary,
-                    accessibilityIdentifier: readingProgressSettingsSearchEntry.identifier
+                    title: readingProgressEntry.title,
+                    androidKey: readingProgressShortcut.androidKey,
+                    summary: readingProgressEntry.summary,
+                    accessibilityIdentifier: readingProgressEntry.identifier
                 ) {
                     ReadingProgressSettingsView(controller: readingProgressController)
                         .accessibilityIdentifier("readingProgressSettingsScreen")
@@ -1708,36 +1677,11 @@ public struct SettingsView: View {
         readingProgressController != nil
     }
 
-    /// Search entry for the sync feature shortcut.
-    private var syncSettingsSearchEntry: AndBibleSettingsSearchEntry {
-        AndBibleSettingsSearchEntry(
-            identifier: "settingsSyncLink",
-            title: String(localized: "cloud_sync_title", defaultValue: "Device synchronization"),
-            summary: String(localized: "icloud_sync_description"),
-            keywords: ["features", "sync", "icloud", "cloud", "sync_settings_shortcut"]
-        )
-    }
-
-    /// Search entry for the reading-progress feature shortcut.
-    private var readingProgressSettingsSearchEntry: AndBibleSettingsSearchEntry {
-        AndBibleSettingsSearchEntry(
-            identifier: "settingsReadingProgressLink",
-            title: String(localized: "reading_progress_settings", defaultValue: "Reading Progress Settings"),
-            summary: String(
-                localized: "reading_progress_settings_summary",
-                defaultValue: "Configure automatic reading and memorization progress tracking."
-            ),
-            keywords: ["features", "reading", "progress", "memorization", "reading_progress_settings_shortcut"]
-        )
-    }
-
     /// Search entries for feature shortcuts that can be opened from Application preferences.
     private var featuresSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
-        var entries = [syncSettingsSearchEntry]
-        if canOpenReadingProgressSettings {
-            entries.append(readingProgressSettingsSearchEntry)
-        }
-        return entries
+        ApplicationSettingsPresentation
+            .featureShortcuts(canOpenReadingProgressSettings: canOpenReadingProgressSettings)
+            .map(\.searchEntry)
     }
 
     /// Search entries for module-backed dictionary preference rows currently visible on this device.
@@ -1853,17 +1797,7 @@ public struct SettingsView: View {
                     defaultValue: "Switch automatically to fullscreen when scrolling text. Tip: you can always also switch to full screen by doubletapping screen."
                 )
             ),
-            preferenceSearchEntry(
-                .toolbarButtonActions,
-                title: String(
-                    localized: "prefs_toolbar_button_action_title",
-                    defaultValue: "Action for toolbar button press"
-                ),
-                summary: String(
-                    localized: "prefs_toolbar_button_action_summary",
-                    defaultValue: "Action to take when pressing/long-pressing Bible or Commentary toolbar buttons"
-                )
-            ),
+            ApplicationSettingsPresentation.ListPreference.toolbarButtonActions.searchEntry,
             preferenceSearchEntry(
                 .disableTwoStepBookmarking,
                 title: String(
@@ -1875,17 +1809,7 @@ public struct SettingsView: View {
                     defaultValue: "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu"
                 )
             ),
-            preferenceSearchEntry(
-                .bibleViewSwipeMode,
-                title: String(
-                    localized: "prefs_bible_view_swipe_mode_title",
-                    defaultValue: "Action for swipe left / right gesture"
-                ),
-                summary: String(
-                    localized: "prefs_bible_view_swipe_mode_summary",
-                    defaultValue: "Swipe left / right gesture can be used to go to next page / chapter."
-                )
-            ),
+            ApplicationSettingsPresentation.ListPreference.bibleViewSwipeMode.searchEntry,
             preferenceSearchEntry(
                 .volumeKeysScroll,
                 title: String(localized: "prefs_volume_keys_scroll_title", defaultValue: "Volume buttons scroll"),
@@ -1894,14 +1818,7 @@ public struct SettingsView: View {
                     defaultValue: "Use volume up/down to scroll Bible text"
                 )
             ),
-            preferenceSearchEntry(
-                .nightModePref3,
-                title: String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
-                summary: String(
-                    localized: "prefs_night_mode_summary",
-                    defaultValue: "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen."
-                )
-            ),
+            ApplicationSettingsPresentation.ListPreference.nightModePref3.searchEntry,
         ]
     }
 
@@ -1909,10 +1826,7 @@ public struct SettingsView: View {
     private var lookAndFeelSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
         [
             globalTextDisplaySettingsSearchEntry,
-            preferenceSearchEntry(
-                .localePref,
-                title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language")
-            ),
+            ApplicationSettingsPresentation.ListPreference.localePref.searchEntry,
             preferenceSearchEntry(
                 .monochromeMode,
                 title: String(localized: "prefs_e_ink_mode_title", defaultValue: "Black & white mode"),
@@ -1940,17 +1854,7 @@ public struct SettingsView: View {
                     defaultValue: "Requires using the edit button to edit notes in the Study Pad."
                 )
             ),
-            preferenceSearchEntry(
-                .notesContentType,
-                title: String(
-                    localized: "prefs_notes_content_type_title",
-                    defaultValue: "Format for new bookmark notes"
-                ),
-                summary: String(
-                    localized: "prefs_notes_content_type_summary",
-                    defaultValue: "Text format used when creating new bookmark notes and Study Pad entries"
-                )
-            ),
+            ApplicationSettingsPresentation.ListPreference.notesContentType.searchEntry,
             preferenceSearchEntry(
                 .fontSizeMultiplier,
                 title: String(localized: "pref_font_size_multiplier_title", defaultValue: "Font size multiplier")
@@ -2320,9 +2224,8 @@ public struct SettingsView: View {
      exposes one stable accessibility identifier so UI tests can detect accidental picker reverts.
 
      - Parameters:
-       - preferenceKey: Android parity key used for icon lookup and accessibility context.
-       - title: Primary row title.
-       - summary: Optional Android row summary.
+       - preference: Android `ListPreference` presentation contract used for icon lookup, row
+         copy, search identity, and accessibility context.
        - options: Menu options using Android-compatible persisted values.
        - selectedValue: Current normalized persisted value.
        - onSelect: Callback invoked with the selected persisted value.
@@ -2331,9 +2234,7 @@ public struct SettingsView: View {
      - Failure modes: Empty option lists render a disabled-looking row with no menu actions.
      */
     private func settingsMenuRow(
-        preferenceKey: AppPreferenceKey,
-        title: String,
-        summary: String? = nil,
+        preference: ApplicationSettingsPresentation.ListPreference,
         options: [SettingsMenuOption],
         selectedValue: String,
         onSelect: @escaping (String) -> Void
@@ -2353,9 +2254,9 @@ public struct SettingsView: View {
         } label: {
             HStack(alignment: .center, spacing: AndBibleSettingsPreferenceLayout.accessorySpacing) {
                 settingsRowLabel(
-                    preferenceKey: preferenceKey,
-                    title: title,
-                    summary: summary,
+                    preferenceKey: preference.preferenceKey,
+                    title: preference.title,
+                    summary: preference.summary,
                     isEnabled: !options.isEmpty
                 )
 
@@ -2370,7 +2271,7 @@ public struct SettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(options.isEmpty)
-        .accessibilityIdentifier("settingsListPreferenceMenu::\(preferenceKey.rawValue)")
+        .accessibilityIdentifier(preference.accessibilityIdentifier)
     }
 
     /**
@@ -2460,10 +2361,8 @@ public struct SettingsView: View {
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return ""
         }
-        var primaryLinks = ["settingsGlobalTextOptionsLink", "settingsSyncLink"]
-        if canOpenReadingProgressSettings {
-            primaryLinks.append("settingsReadingProgressLink")
-        }
+        let primaryLinks = ApplicationSettingsPresentation
+            .primaryLinkIdentifiers(canOpenReadingProgressSettings: canOpenReadingProgressSettings)
         let searchToken = isSettingsSearchActive ? "active" : "inactive"
         return "primaryLinks=\(primaryLinks.joined(separator: ","));adminFlows=readerActions;search=\(searchToken)"
     }

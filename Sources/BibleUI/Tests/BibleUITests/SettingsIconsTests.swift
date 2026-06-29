@@ -53,6 +53,129 @@ final class SettingsIconsTests: XCTestCase {
         )
     }
 
+    /**
+     Verifies Android `ListPreference` rows stay cataloged as compact menu rows.
+
+     Android renders these preferences as normal title/summary rows and opens a chooser on tap.
+     The selected value must not be promoted to standalone root-row text, which was the expensive
+     full-app UI regression previously guarded in `AndBibleUITests`.
+     */
+    func testApplicationPreferenceListPreferencesUseAndroidCompactMenuRows() {
+        let rows = ApplicationSettingsPresentation.menuBackedListPreferences
+
+        XCTAssertEqual(
+            rows,
+            [
+                .toolbarButtonActions,
+                .bibleViewSwipeMode,
+                .nightModePref3,
+                .localePref,
+                .notesContentType,
+            ]
+        )
+        XCTAssertEqual(
+            rows.map(\.preferenceKey),
+            [
+                .toolbarButtonActions,
+                .bibleViewSwipeMode,
+                .nightModePref3,
+                .localePref,
+                .notesContentType,
+            ]
+        )
+        XCTAssertEqual(
+            rows.map(\.accessibilityIdentifier),
+            [
+                "settingsListPreferenceMenu::toolbar_button_actions",
+                "settingsListPreferenceMenu::bible_view_swipe_mode",
+                "settingsListPreferenceMenu::night_mode_pref3",
+                "settingsListPreferenceMenu::locale_pref",
+                "settingsListPreferenceMenu::notes_content_type",
+            ]
+        )
+        XCTAssertEqual(
+            rows.map(\.titleDefault),
+            [
+                "Action for toolbar button press",
+                "Action for swipe left / right gesture",
+                "Night mode switching",
+                "Application language",
+                "Format for new bookmark notes",
+            ]
+        )
+        XCTAssertEqual(
+            rows.map(\.summaryDefault),
+            [
+                "Action to take when pressing/long-pressing Bible or Commentary toolbar buttons",
+                "Swipe left / right gesture can be used to go to next page / chapter.",
+                "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen.",
+                "Select custom user interface language",
+                "Text format used when creating new bookmark notes and Study Pad entries",
+            ]
+        )
+    }
+
+    /**
+     Guards against reintroducing SwiftUI inline `Picker` rows for Android `ListPreference`
+     settings.
+
+     Failure meaning:
+     - Settings root rows may again expose selected values as large inline labels instead of
+       Android-style compact title/summary rows.
+     */
+    func testApplicationPreferenceListPreferenceRendererAvoidsInlinePickerRows() throws {
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift"
+        )
+        let menuRowSource = try BibleUITestSourceLocator.extractFunction(named: "settingsMenuRow", from: source)
+
+        XCTAssertFalse(menuRowSource.contains("Picker("))
+        XCTAssertFalse(menuRowSource.contains("detail:"))
+        XCTAssertTrue(menuRowSource.contains("settingsRowLabel("))
+        XCTAssertTrue(menuRowSource.contains("preference.accessibilityIdentifier"))
+    }
+
+    func testApplicationPreferenceFeatureShortcutsExposeAndroidRows() {
+        let sync = ApplicationSettingsPresentation.syncSettingsShortcut
+        XCTAssertEqual(sync.identifier, "settingsSyncLink")
+        XCTAssertEqual(sync.androidKey, "sync_settings_shortcut")
+        XCTAssertEqual(sync.titleLocalizationKey, "cloud_sync_title")
+        XCTAssertEqual(sync.titleDefault, "Device synchronization")
+        XCTAssertEqual(sync.summaryLocalizationKey, "icloud_sync_description")
+        XCTAssertTrue(sync.keywords.contains("sync_settings_shortcut"))
+        XCTAssertEqual(sync.icon?.androidDrawableName, "ic_syncdb_24dp")
+        XCTAssertEqual(sync.searchEntry.identifier, sync.identifier)
+
+        let readingProgress = ApplicationSettingsPresentation.readingProgressSettingsShortcut
+        XCTAssertEqual(readingProgress.identifier, "settingsReadingProgressLink")
+        XCTAssertEqual(readingProgress.androidKey, "reading_progress_settings_shortcut")
+        XCTAssertEqual(readingProgress.titleLocalizationKey, "reading_progress_settings")
+        XCTAssertEqual(readingProgress.titleDefault, "Reading Progress Settings")
+        XCTAssertEqual(readingProgress.summaryLocalizationKey, "reading_progress_settings_summary")
+        XCTAssertTrue(readingProgress.keywords.contains("reading_progress_settings_shortcut"))
+        XCTAssertEqual(readingProgress.icon?.androidDrawableName, "ic_baseline_check_circle_24")
+        XCTAssertEqual(readingProgress.searchEntry.identifier, readingProgress.identifier)
+    }
+
+    func testApplicationPreferenceFeatureShortcutsFollowRuntimeAvailability() {
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.featureShortcuts(canOpenReadingProgressSettings: false),
+            [.syncSettings]
+        )
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.featureShortcuts(canOpenReadingProgressSettings: true),
+            [.syncSettings, .readingProgressSettings]
+        )
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.primaryLinkIdentifiers(canOpenReadingProgressSettings: false),
+            ["settingsGlobalTextOptionsLink", "settingsSyncLink"]
+        )
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.primaryLinkIdentifiers(canOpenReadingProgressSettings: true),
+            ["settingsGlobalTextOptionsLink", "settingsSyncLink", "settingsReadingProgressLink"]
+        )
+    }
+
     func testSyncSettingsIconsComeFromAndroidSyncSettingsXml() {
         XCTAssertEqual(
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "sync_bookmarks")?.androidDrawableName,

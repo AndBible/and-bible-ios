@@ -31,7 +31,7 @@ Important nuance:
   data from multiplying macOS runner setup work
 - with the current manifest, target duration, and cap, the planner emits four
   balanced shards
-- without the cap, the current manifest would emit fifteen shards
+- without the cap, the current manifest would emit twelve shards
 
 It is better to describe the current system as "planner-capable with a minimum
 of two shards and a maximum of four shards" unless the timing manifest is being
@@ -41,14 +41,15 @@ current evidence.
 Current local planner output for the checked-in suite is:
 
 ```text
-Shard 1/4: 16 tests, estimated 2164.671s
-Shard 2/4: 15 tests, estimated 2240.642s
-Shard 3/4: 15 tests, estimated 2249.244s
-Shard 4/4: 15 tests, estimated 2247.868s
+Shard 1/4: 14 tests, estimated 1782.578s
+Shard 2/4: 14 tests, estimated 1743.700s
+Shard 3/4: 13 tests, estimated 1743.904s
+Shard 4/4: 14 tests, estimated 1746.836s
 ```
 
 The current timing manifest was regenerated from successful CI run
-`27824737059` on June 19, 2026.
+`27824737059` on June 19, 2026, and updated with focused local bookmark/My Notes
+timings on June 28, 2026.
 
 ## How CI Actually Executes
 
@@ -76,45 +77,15 @@ That's an important distinction because of the following:
 
 ### Build-product reuse experiment
 
-Issue #199 adds a narrow CI experiment that does not replace the normal UI
-shard jobs. It runs when `.github/workflows/ios-ci.yml` changes, and it can be
-opted into on another pull request by adding the `ci:ui-build-reuse` label.
+The earlier build-product reuse experiment has been retired. The active workflow
+keeps the straightforward shard model: each UI shard builds for testing, builds
+the host-side `UITestFixtureTool`, and then runs its selected tests with
+`test-without-building`.
 
-The experiment has two jobs:
-
-1. `UI Build Product Reuse Producer`
-   - runs the normal `build-for-testing` action once
-   - builds the host-side `UITestFixtureTool`
-   - uploads `andbible-ui-build-products-${{ github.run_id }}`
-2. `UI Build Product Reuse Consumer`
-   - downloads that artifact into the same repository workspace layout
-   - extracts the reusable payload before running Xcode
-   - runs one real app-launching UI test with `test-without-building`
-   - uses the restored `.xctestrun` file directly through `-xctestrun`
-
-The reusable artifact contains one `ui-build-product-reuse.tar.gz` payload. The
-tarball is used so executable bits and symlink metadata from Xcode's build
-products survive upload and download. The tarball intentionally contains only
-the files needed for the consumer proof:
-
-- `.derivedData/Build/Products/**`
-- `.derivedData/Build/Products/*.xctestrun`
-- `.build/debug/UITestFixtureTool`
-
-The producer stages the whole `Build/Products` directory instead of cherry
-picking app and test bundles because Xcode owns the precise product graph for a
-`build-for-testing` result. The consumer extracts the tarball at the repository
-root, restoring those files under the same relative paths in the GitHub Actions
-workspace, then passes the discovered `.xctestrun` file to
-`xcodebuild test-without-building`.
-
-The experiment deliberately does not rewrite `.xctestrun` contents. GitHub's
-macOS runners check out this repository under the same workspace path shape for
-both jobs in one workflow run, so the proof should show whether Xcode's recorded
-product paths are portable across runners when the product directory is restored
-in place. If that assumption fails in CI, keep the normal per-shard
-`build-for-testing` model and use the reduced shard count from #198 instead of
-promoting path surgery into the permanent workflow.
+Do not reintroduce cross-job Xcode build-product reuse without current CI timing
+data and an explicit product decision. The app-host UI suite is shrinking as
+coverage moves into package lanes, so removing obsolete UI flows is the preferred
+way to reduce CI wall-clock time.
 
 ## Local Validation Guidance
 
@@ -130,7 +101,7 @@ Preferred order:
 
 Why this matters:
 
-- a full serial local UI run covers the same 44 UI tests, but its wall-clock
+- a full serial local UI run covers the same 55 UI tests, but its wall-clock
   runtime is not comparable to CI because CI runs shards in parallel
 - a targeted subset can prove a specific fix, but it does not prove the shard
   or full-suite shape is clean

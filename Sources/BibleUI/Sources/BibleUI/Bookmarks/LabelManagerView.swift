@@ -5,6 +5,75 @@ import SwiftData
 import BibleCore
 
 /**
+ Applies Label Manager persistence mutations without depending on SwiftUI presentation state.
+
+ The visible Label Manager keeps Android's `ManageLabels` route behavior in SwiftUI, while this
+ helper owns the underlying create, edit-save, and delete persistence contract so package tests can
+ validate it without launching the app.
+
+ Side effects:
+ - inserts labels into SwiftData and saves successful create operations
+ - saves any pending bound-label edits made by `LabelEditView`
+ - deletes labels through `BookmarkService`, preserving its relationship cleanup semantics
+
+ Failure modes:
+ - create and edit-save propagate SwiftData save errors to package tests and non-UI callers
+ - delete follows the existing `BookmarkService` behavior, where fetch/save failures are swallowed
+   by the store layer and surfaced only through final persisted state
+ */
+enum LabelManagerMutation {
+    /**
+     Creates one user label when the supplied name is non-empty.
+
+     - Parameters:
+       - name: Exact user-visible label name. Empty names are ignored to match the current Label
+         Manager alert behavior.
+       - modelContext: SwiftData context receiving the new label.
+     - Returns: The inserted label, or `nil` when `name` is empty.
+     - Side effects: Inserts a `Label` and saves `modelContext` when `name` is non-empty.
+     - Throws: SwiftData save errors after the insert.
+     */
+    @discardableResult
+    static func createLabel(named name: String, in modelContext: ModelContext) throws -> BibleCore.Label? {
+        guard !name.isEmpty else { return nil }
+        let label = BibleCore.Label(name: name)
+        modelContext.insert(label)
+        try modelContext.save()
+        return label
+    }
+
+    /**
+     Persists any pending Label Edit changes already applied to a bound `Label`.
+
+     `LabelEditView` mutates the live SwiftData model through `@Bindable`, so the only explicit
+     persistence action is saving the context after the bound fields change.
+
+     - Parameter modelContext: SwiftData context containing pending label edits.
+     - Side effects: Saves `modelContext`.
+     - Throws: SwiftData save errors.
+     */
+    static func persistLabelEdits(in modelContext: ModelContext) throws {
+        try modelContext.save()
+    }
+
+    /**
+     Deletes one label through the same service path used by bookmark and StudyPad flows.
+
+     - Parameters:
+       - label: Label that should be removed.
+       - modelContext: SwiftData context containing label and bookmark relationship records.
+     - Side effects: Removes the label, detaches bookmark-label relationships, clears matching
+       primary-label references, and saves through `BookmarkStore`.
+     - Failure modes: `BookmarkStore` swallows fetch and save errors, matching the pre-existing
+       Label Manager UI behavior.
+     */
+    static func deleteLabel(_ label: BibleCore.Label, in modelContext: ModelContext) {
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        BookmarkService(store: bookmarkStore).deleteLabel(id: label.id)
+    }
+}
+
+/**
  Manages user-created bookmark labels and launches label-specific editing flows.
 
  The screen lists all real user labels, supports creating new labels inline, presents a dedicated
@@ -357,10 +426,7 @@ public struct LabelManagerView: View {
        SwiftData's own reconciliation behavior
      */
     private func createLabel(named name: String) {
-        guard !name.isEmpty else { return }
-        let label = BibleCore.Label(name: name)
-        modelContext.insert(label)
-        try? modelContext.save()
+        _ = try? LabelManagerMutation.createLabel(named: name, in: modelContext)
     }
 
     /**
@@ -381,7 +447,7 @@ public struct LabelManagerView: View {
     private func renameLabel(_ label: BibleCore.Label, to name: String) {
         guard !name.isEmpty else { return }
         label.name = name
-        try? modelContext.save()
+        try? LabelManagerMutation.persistLabelEdits(in: modelContext)
     }
 
     /**
@@ -398,8 +464,7 @@ public struct LabelManagerView: View {
        not surface an error to the user from this view
      */
     private func deleteLabel(_ label: BibleCore.Label) {
-        let bookmarkStore = BookmarkStore(modelContext: modelContext)
-        BookmarkService(store: bookmarkStore).deleteLabel(id: label.id)
+        LabelManagerMutation.deleteLabel(label, in: modelContext)
     }
 }
 
@@ -571,6 +636,6 @@ private struct LabelEditView: View {
        directly
      */
     private func save() {
-        try? modelContext.save()
+        try? LabelManagerMutation.persistLabelEdits(in: modelContext)
     }
 }

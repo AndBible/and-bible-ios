@@ -8,6 +8,370 @@ import os.log
 private let logger = Logger(subsystem: "org.andbible", category: "LabelAssignment")
 
 /**
+ Applies label-assignment mutations for Bible and generic bookmarks without depending on SwiftUI.
+
+ The SwiftUI view owns presentation state, while this helper owns the persistence contract that
+ Android exposes through `ManageLabels.Mode.ASSIGN`: load current assignments, toggle a label,
+ toggle favourite state, and create a new label before assigning it to the active bookmark.
+
+ Side effects:
+ - fetches and mutates SwiftData bookmark, label, and junction records
+ - saves the supplied `ModelContext` after successful mutations
+
+ Failure modes:
+ - throws `LabelAssignmentMutationError.missingBookmark` when the target bookmark no longer exists
+ - propagates SwiftData save/fetch errors so callers and package tests can distinguish persistence
+   failures from presentation failures
+ */
+enum LabelAssignmentMutation {
+    /// Bookmark storage table represented by the active label-assignment screen.
+    enum BookmarkKind: Equatable {
+        /// A normal Bible verse bookmark backed by `BibleBookmarkToLabel`.
+        case bible
+
+        /// A generic document bookmark backed by `GenericBookmarkToLabel`.
+        case generic
+    }
+
+    /**
+     Current persisted assignment state for one bookmark.
+
+     `assignedLabelIds` is derived from relationship rows rather than view state so callers can
+     refresh immediately after any mutation and expose the same row accessibility value that the
+     app UI renders.
+     */
+    struct State: Equatable {
+        /// Bookmark storage table containing the target bookmark.
+        let kind: BookmarkKind
+
+        /// Label identifiers currently assigned to the target bookmark.
+        let assignedLabelIds: Set<UUID>
+    }
+
+    /**
+     Loads the current assignment state for a bookmark.
+
+     - Parameters:
+       - bookmarkId: Identifier for either a Bible or generic bookmark.
+       - modelContext: SwiftData context containing bookmark and label records.
+     - Returns: The bookmark type and assigned label identifiers.
+     - Side effects: Fetches SwiftData records.
+     - Throws: `LabelAssignmentMutationError.missingBookmark` when no matching bookmark exists, or
+       a SwiftData fetch error.
+     */
+    static func state(for bookmarkId: UUID, in modelContext: ModelContext) throws -> State {
+        if let bookmark = try fetchBibleBookmark(bookmarkId, in: modelContext) {
+            return State(
+                kind: .bible,
+                assignedLabelIds: Set(bookmark.bookmarkToLabels?.compactMap { $0.label?.id } ?? [])
+            )
+        }
+        if let bookmark = try fetchGenericBookmark(bookmarkId, in: modelContext) {
+            return State(
+                kind: .generic,
+                assignedLabelIds: Set(bookmark.bookmarkToLabels?.compactMap { $0.label?.id } ?? [])
+            )
+        }
+        throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
+    }
+
+    /**
+     Toggles one label assignment for the specified bookmark type.
+
+     - Parameters:
+       - label: Label whose relationship row should be added or removed.
+       - bookmarkId: Bookmark receiving the assignment change.
+       - kind: Persisted bookmark table already resolved by the visible label-assignment view.
+       - modelContext: SwiftData context used for the mutation.
+     - Returns: Refreshed assignment state after saving.
+     - Side effects: Inserts or deletes a bookmark-to-label junction, updates the bookmark
+       timestamp, and saves the context.
+     - Throws: `LabelAssignmentMutationError.missingBookmark` for stale routes, or a SwiftData
+       save/fetch error.
+     */
+    @discardableResult
+    static func toggleLabel(
+        _ label: BibleCore.Label,
+        bookmarkId: UUID,
+        kind: BookmarkKind,
+        in modelContext: ModelContext
+    ) throws -> State {
+        switch kind {
+        case .bible:
+            guard let bookmark = try fetchBibleBookmark(bookmarkId, in: modelContext) else {
+                throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
+            }
+            toggleBibleLabel(label, for: bookmark, in: modelContext)
+        case .generic:
+            guard let bookmark = try fetchGenericBookmark(bookmarkId, in: modelContext) else {
+                throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
+            }
+            toggleGenericLabel(label, for: bookmark, in: modelContext)
+        }
+        try modelContext.save()
+        return try state(for: bookmarkId, in: modelContext)
+    }
+
+    /**
+     Toggles whether a label should be shown as a favourite.
+
+     - Parameters:
+       - label: Label whose favourite flag should change.
+       - modelContext: SwiftData context used for persistence.
+     - Returns: The updated favourite value.
+     - Side effects: Mutates `Label.favourite` and saves the context.
+     - Throws: A SwiftData save error.
+     */
+    @discardableResult
+    static func toggleFavourite(
+        _ label: BibleCore.Label,
+        in modelContext: ModelContext
+    ) throws -> Bool {
+        label.favourite.toggle()
+        try modelContext.save()
+        return label.favourite
+    }
+
+    /**
+     Creates or reuses a user label by name and assigns it to the active bookmark.
+
+     - Parameters:
+       - name: User-visible label name. Empty names leave assignments unchanged.
+       - bookmarkId: Bookmark receiving the assignment.
+       - kind: Persisted bookmark table already resolved by the visible label-assignment view.
+       - modelContext: SwiftData context used for fetches, insertion, and save.
+     - Returns: Refreshed assignment state after the create/assign operation.
+     - Side effects:
+       - inserts a new `Label` when no real label with the exact name exists
+       - inserts one bookmark-to-label junction when the bookmark is not already assigned
+       - updates the bookmark timestamp and saves the context
+     - Throws: `LabelAssignmentMutationError.missingBookmark` for stale routes, or a SwiftData
+       fetch/save error.
+     */
+    @discardableResult
+    static func createAndAssignLabel(
+        named name: String,
+        bookmarkId: UUID,
+        kind: BookmarkKind,
+        in modelContext: ModelContext
+    ) throws -> State {
+        guard !name.isEmpty else {
+            return try state(for: bookmarkId, in: modelContext)
+        }
+
+        let label: BibleCore.Label
+        if let existingLabel = try existingUserLabel(named: name, in: modelContext) {
+            label = existingLabel
+        } else {
+            let createdLabel = BibleCore.Label(name: name)
+            modelContext.insert(createdLabel)
+            label = createdLabel
+        }
+
+        switch kind {
+        case .bible:
+            guard let bookmark = try fetchBibleBookmark(bookmarkId, in: modelContext) else {
+                throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
+            }
+            assignBibleLabelIfNeeded(label, to: bookmark, in: modelContext)
+        case .generic:
+            guard let bookmark = try fetchGenericBookmark(bookmarkId, in: modelContext) else {
+                throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
+            }
+            assignGenericLabelIfNeeded(label, to: bookmark, in: modelContext)
+        }
+        try modelContext.save()
+        return try state(for: bookmarkId, in: modelContext)
+    }
+
+    /**
+     Fetches one Bible bookmark by identifier.
+
+     - Parameters:
+       - bookmarkId: Bookmark identifier to resolve.
+       - modelContext: SwiftData context containing bookmark records.
+     - Returns: Matching Bible bookmark, or `nil`.
+     - Side effects: Fetches SwiftData records.
+     - Throws: A SwiftData fetch error.
+     */
+    private static func fetchBibleBookmark(
+        _ bookmarkId: UUID,
+        in modelContext: ModelContext
+    ) throws -> BibleBookmark? {
+        let target = bookmarkId
+        var descriptor = FetchDescriptor<BibleBookmark>(
+            predicate: #Predicate { $0.id == target }
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
+    /**
+     Fetches one generic bookmark by identifier.
+
+     - Parameters:
+       - bookmarkId: Bookmark identifier to resolve.
+       - modelContext: SwiftData context containing generic bookmark records.
+     - Returns: Matching generic bookmark, or `nil`.
+     - Side effects: Fetches SwiftData records.
+     - Throws: A SwiftData fetch error.
+     */
+    private static func fetchGenericBookmark(
+        _ bookmarkId: UUID,
+        in modelContext: ModelContext
+    ) throws -> GenericBookmark? {
+        let target = bookmarkId
+        var descriptor = FetchDescriptor<GenericBookmark>(
+            predicate: #Predicate { $0.id == target }
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
+    /**
+     Resolves an existing user-created label by exact display name.
+
+     - Parameters:
+       - name: Exact label name to find.
+       - modelContext: SwiftData context containing labels.
+     - Returns: The first real user label with the supplied name, or `nil`.
+     - Side effects: Fetches SwiftData records.
+     - Throws: A SwiftData fetch error.
+     */
+    private static func existingUserLabel(
+        named name: String,
+        in modelContext: ModelContext
+    ) throws -> BibleCore.Label? {
+        let target = name
+        let descriptor = FetchDescriptor<BibleCore.Label>(
+            predicate: #Predicate { $0.name == target }
+        )
+        return try modelContext.fetch(descriptor).first { $0.isRealLabel }
+    }
+
+    /**
+     Toggles a Bible bookmark-label relationship without saving.
+
+     - Parameters:
+       - label: Label to add or remove.
+       - bookmark: Bible bookmark being mutated.
+       - modelContext: SwiftData context used to insert or delete relationship rows.
+     - Side effects: Mutates `bookmark.bookmarkToLabels`, deletes stale links, inserts new links,
+       and updates `lastUpdatedOn`.
+     - Failure modes: This helper does not throw; callers save and surface persistence failures.
+     */
+    private static func toggleBibleLabel(
+        _ label: BibleCore.Label,
+        for bookmark: BibleBookmark,
+        in modelContext: ModelContext
+    ) {
+        let links = bookmark.bookmarkToLabels ?? []
+        let matchingLinks = links.filter { $0.label?.id == label.id }
+        if !matchingLinks.isEmpty {
+            matchingLinks.forEach(modelContext.delete)
+            bookmark.bookmarkToLabels?.removeAll { $0.label?.id == label.id }
+        } else {
+            assignBibleLabelIfNeeded(label, to: bookmark, in: modelContext)
+        }
+        bookmark.lastUpdatedOn = Date()
+    }
+
+    /**
+     Toggles a generic bookmark-label relationship without saving.
+
+     - Parameters:
+       - label: Label to add or remove.
+       - bookmark: Generic bookmark being mutated.
+       - modelContext: SwiftData context used to insert or delete relationship rows.
+     - Side effects: Mutates `bookmark.bookmarkToLabels`, deletes stale links, inserts new links,
+       and updates `lastUpdatedOn`.
+     - Failure modes: This helper does not throw; callers save and surface persistence failures.
+     */
+    private static func toggleGenericLabel(
+        _ label: BibleCore.Label,
+        for bookmark: GenericBookmark,
+        in modelContext: ModelContext
+    ) {
+        let links = bookmark.bookmarkToLabels ?? []
+        let matchingLinks = links.filter { $0.label?.id == label.id }
+        if !matchingLinks.isEmpty {
+            matchingLinks.forEach(modelContext.delete)
+            bookmark.bookmarkToLabels?.removeAll { $0.label?.id == label.id }
+        } else {
+            assignGenericLabelIfNeeded(label, to: bookmark, in: modelContext)
+        }
+        bookmark.lastUpdatedOn = Date()
+    }
+
+    /**
+     Assigns a label to a Bible bookmark when the relationship does not already exist.
+
+     - Parameters:
+       - label: Label to assign.
+       - bookmark: Bible bookmark receiving the label.
+       - modelContext: SwiftData context used to insert the relationship.
+     - Side effects: Inserts one `BibleBookmarkToLabel` and updates `lastUpdatedOn`.
+     - Failure modes: This helper does not throw; callers save and surface persistence failures.
+     */
+    private static func assignBibleLabelIfNeeded(
+        _ label: BibleCore.Label,
+        to bookmark: BibleBookmark,
+        in modelContext: ModelContext
+    ) {
+        guard bookmark.bookmarkToLabels?.contains(where: { $0.label?.id == label.id }) != true else {
+            return
+        }
+        let link = BibleBookmarkToLabel()
+        link.bookmark = bookmark
+        link.label = label
+        modelContext.insert(link)
+        var links = bookmark.bookmarkToLabels ?? []
+        links.append(link)
+        bookmark.bookmarkToLabels = links
+        bookmark.lastUpdatedOn = Date()
+    }
+
+    /**
+     Assigns a label to a generic bookmark when the relationship does not already exist.
+
+     - Parameters:
+       - label: Label to assign.
+       - bookmark: Generic bookmark receiving the label.
+       - modelContext: SwiftData context used to insert the relationship.
+     - Side effects: Inserts one `GenericBookmarkToLabel` and updates `lastUpdatedOn`.
+     - Failure modes: This helper does not throw; callers save and surface persistence failures.
+     */
+    private static func assignGenericLabelIfNeeded(
+        _ label: BibleCore.Label,
+        to bookmark: GenericBookmark,
+        in modelContext: ModelContext
+    ) {
+        guard bookmark.bookmarkToLabels?.contains(where: { $0.label?.id == label.id }) != true else {
+            return
+        }
+        let link = GenericBookmarkToLabel()
+        link.bookmark = bookmark
+        link.label = label
+        modelContext.insert(link)
+        var links = bookmark.bookmarkToLabels ?? []
+        links.append(link)
+        bookmark.bookmarkToLabels = links
+        bookmark.lastUpdatedOn = Date()
+    }
+}
+
+/**
+ Errors surfaced when label-assignment persistence cannot resolve the active bookmark route.
+
+ The visible UI treats these as non-fatal stale-route failures, while package tests assert them
+ directly so persistence regressions are not hidden behind XCUITest waits.
+ */
+enum LabelAssignmentMutationError: Error, Equatable {
+    /// The requested bookmark identifier no longer exists in either bookmark table.
+    case missingBookmark(UUID)
+}
+
+/**
  Assigns and removes labels for a single bookmark.
 
  `LabelAssignmentView` supports both `BibleBookmark` and `GenericBookmark` records. It loads the
@@ -209,54 +573,25 @@ struct LabelAssignmentView: View {
         return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
     }
 
-    // MARK: - Bible Bookmark helpers
-
     /**
-     Fetches the target Bible bookmark, if the identifier belongs to one.
+     Loads the target bookmark type and currently assigned labels into SwiftUI state.
 
-     - Returns: Matching `BibleBookmark`, or `nil` when the identifier belongs to another type or
-       no record exists.
+     - Side effects:
+       - fetches SwiftData bookmark relationship rows through `LabelAssignmentMutation`
+       - mutates `isGenericBookmark` and `assignedLabelIds` for row rendering
+       - logs stale-route or persistence failures without dismissing the view
+     - Failure modes: Missing bookmarks and SwiftData fetch errors are logged and leave the
+       previous in-memory row state unchanged.
      */
-    private func fetchBibleBookmark() -> BibleBookmark? {
-        let target = bookmarkId
-        var descriptor = FetchDescriptor<BibleBookmark>(
-            predicate: #Predicate { $0.id == target }
-        )
-        descriptor.fetchLimit = 1
-        return try? modelContext.fetch(descriptor).first
-    }
-
-    /**
-     Fetches the target generic bookmark, if the identifier belongs to one.
-
-     - Returns: Matching `GenericBookmark`, or `nil` when the identifier belongs to another type
-       or no record exists.
-     */
-    private func fetchGenericBookmark() -> GenericBookmark? {
-        let target = bookmarkId
-        var descriptor = FetchDescriptor<GenericBookmark>(
-            predicate: #Predicate { $0.id == target }
-        )
-        descriptor.fetchLimit = 1
-        return try? modelContext.fetch(descriptor).first
-    }
-
-    /// Loads the target bookmark type and its currently assigned label IDs into local state.
     private func loadAssignedLabels() {
         logger.info("loadAssignedLabels: looking for bookmarkId=\(bookmarkId)")
-        // Try BibleBookmark first, then GenericBookmark
-        if let bookmark = fetchBibleBookmark() {
-            isGenericBookmark = false
-            let ids = bookmark.bookmarkToLabels?.compactMap { $0.label?.id } ?? []
-            assignedLabelIds = Set(ids)
-            logger.info("loadAssignedLabels: found BibleBookmark, \(ids.count) labels assigned")
-        } else if let bookmark = fetchGenericBookmark() {
-            isGenericBookmark = true
-            let ids = bookmark.bookmarkToLabels?.compactMap { $0.label?.id } ?? []
-            assignedLabelIds = Set(ids)
-            logger.info("loadAssignedLabels: found GenericBookmark, \(ids.count) labels assigned")
-        } else {
-            logger.error("loadAssignedLabels: NO bookmark found for id=\(bookmarkId)")
+        do {
+            let state = try LabelAssignmentMutation.state(for: bookmarkId, in: modelContext)
+            isGenericBookmark = state.kind == .generic
+            assignedLabelIds = state.assignedLabelIds
+            logger.info("loadAssignedLabels: found \(isGenericBookmark ? "GenericBookmark" : "BibleBookmark"), \(assignedLabelIds.count) labels assigned")
+        } catch {
+            logger.error("loadAssignedLabels: failed for id=\(bookmarkId), error=\(String(describing: error))")
         }
     }
 
@@ -264,77 +599,58 @@ struct LabelAssignmentView: View {
      Routes label toggling to the correct bookmark type handler.
 
      - Parameter label: Label whose assignment should be toggled.
+     - Side effects:
+       - inserts or deletes the persisted bookmark-to-label relationship through
+         `LabelAssignmentMutation`
+       - refreshes local bookmark type and assignment state after save
+       - logs stale-route or persistence failures without dismissing the view
+     - Failure modes: Missing bookmarks and SwiftData save/fetch errors are logged and leave the
+       current visible assignment state unchanged.
      */
     private func toggleLabel(_ label: BibleCore.Label) {
-        if isGenericBookmark {
-            toggleGenericLabel(label)
-        } else {
-            toggleBibleLabel(label)
+        do {
+            let kind: LabelAssignmentMutation.BookmarkKind = isGenericBookmark ? .generic : .bible
+            let state = try LabelAssignmentMutation.toggleLabel(
+                label,
+                bookmarkId: bookmarkId,
+                kind: kind,
+                in: modelContext
+            )
+            isGenericBookmark = state.kind == .generic
+            assignedLabelIds = state.assignedLabelIds
+        } catch {
+            logger.error("toggleLabel failed for bookmarkId=\(bookmarkId), label=\(label.name), error=\(String(describing: error))")
         }
-    }
-
-    /**
-     Toggles assignment for a Bible bookmark.
-
-     - Parameter label: Label whose assignment should be toggled.
-     */
-    private func toggleBibleLabel(_ label: BibleCore.Label) {
-        logger.info("toggleBibleLabel: label=\(label.name) id=\(label.id)")
-        guard let bookmark = fetchBibleBookmark() else {
-            logger.error("toggleBibleLabel: bookmark NOT found for id=\(bookmarkId)")
-            return
-        }
-
-        if assignedLabelIds.contains(label.id) {
-            bookmark.bookmarkToLabels?.removeAll { $0.label?.id == label.id }
-            assignedLabelIds.remove(label.id)
-            logger.info("toggleBibleLabel: REMOVED label \(label.name)")
-        } else {
-            let btl = BibleBookmarkToLabel()
-            btl.bookmark = bookmark
-            btl.label = label
-            modelContext.insert(btl)
-            assignedLabelIds.insert(label.id)
-            logger.info("toggleBibleLabel: ADDED label \(label.name)")
-        }
-        bookmark.lastUpdatedOn = Date()
-        try? modelContext.save()
-    }
-
-    /**
-     Toggles assignment for a generic bookmark.
-
-     - Parameter label: Label whose assignment should be toggled.
-     */
-    private func toggleGenericLabel(_ label: BibleCore.Label) {
-        guard let bookmark = fetchGenericBookmark() else { return }
-
-        if assignedLabelIds.contains(label.id) {
-            bookmark.bookmarkToLabels?.removeAll { $0.label?.id == label.id }
-            assignedLabelIds.remove(label.id)
-        } else {
-            let gbtl = GenericBookmarkToLabel()
-            gbtl.bookmark = bookmark
-            gbtl.label = label
-            modelContext.insert(gbtl)
-            assignedLabelIds.insert(label.id)
-        }
-        bookmark.lastUpdatedOn = Date()
-        try? modelContext.save()
     }
 
     /**
      Toggles whether a label is marked as a favourite.
 
      - Parameter label: Label whose favourite state should change.
+     - Side effects:
+       - mutates `Label.favourite`
+       - saves the supplied SwiftData context through `LabelAssignmentMutation`
+       - logs persistence failures without dismissing the view
+     - Failure modes: SwiftData save errors are logged after the attempted in-memory toggle.
      */
     private func toggleFavourite(_ label: BibleCore.Label) {
         logger.info("toggleFavourite: label=\(label.name), was=\(label.favourite), now=\(!label.favourite)")
-        label.favourite.toggle()
-        try? modelContext.save()
+        do {
+            _ = try LabelAssignmentMutation.toggleFavourite(label, in: modelContext)
+        } catch {
+            logger.error("toggleFavourite failed for label=\(label.name), error=\(String(describing: error))")
+        }
     }
 
-    /// Creates a new label and immediately assigns it to the active bookmark.
+    /**
+     Handles the create-label alert confirmation.
+
+     - Side effects:
+       - delegates non-empty names to `createAndAssignLabel(named:)`
+       - clears the alert text field after attempting the create/assign mutation
+     - Failure modes: Empty names are ignored; persistence failures are handled by
+       `createAndAssignLabel(named:)`.
+     */
     private func createAndAssignLabel() {
         guard !newLabelName.isEmpty else { return }
         createAndAssignLabel(named: newLabelName)
@@ -356,40 +672,18 @@ struct LabelAssignmentView: View {
     private func createAndAssignLabel(named name: String) {
         guard !name.isEmpty else { return }
         logger.info("createAndAssignLabel: name=\(name)")
-
-        let label: BibleCore.Label
-        if let existingLabel = userLabels.first(where: { $0.name == name }) {
-            label = existingLabel
-        } else {
-            let createdLabel = BibleCore.Label(name: name)
-            modelContext.insert(createdLabel)
-            try? modelContext.save()
-            label = createdLabel
+        do {
+            let kind: LabelAssignmentMutation.BookmarkKind = isGenericBookmark ? .generic : .bible
+            let state = try LabelAssignmentMutation.createAndAssignLabel(
+                named: name,
+                bookmarkId: bookmarkId,
+                kind: kind,
+                in: modelContext
+            )
+            isGenericBookmark = state.kind == .generic
+            assignedLabelIds = state.assignedLabelIds
+        } catch {
+            logger.error("createAndAssignLabel failed for bookmarkId=\(bookmarkId), name=\(name), error=\(String(describing: error))")
         }
-
-        if assignedLabelIds.contains(label.id) {
-            return
-        }
-
-        if isGenericBookmark {
-            if let bookmark = fetchGenericBookmark() {
-                let gbtl = GenericBookmarkToLabel()
-                gbtl.bookmark = bookmark
-                gbtl.label = label
-                modelContext.insert(gbtl)
-                bookmark.lastUpdatedOn = Date()
-                assignedLabelIds.insert(label.id)
-            }
-        } else {
-            if let bookmark = fetchBibleBookmark() {
-                let btl = BibleBookmarkToLabel()
-                btl.bookmark = bookmark
-                btl.label = label
-                modelContext.insert(btl)
-                bookmark.lastUpdatedOn = Date()
-                assignedLabelIds.insert(label.id)
-            }
-        }
-        try? modelContext.save()
     }
 }
