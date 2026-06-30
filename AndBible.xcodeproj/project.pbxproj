@@ -23,6 +23,8 @@
 		CA1C01A1D3E74B1F00A1B001 /* CalculatorIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C001 /* CalculatorIcon.png */; };
 		CA1C01A1D3E74B1F00A1B002 /* CalculatorIcon@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C002 /* CalculatorIcon@2x.png */; };
 		CA1C01A1D3E74B1F00A1B003 /* CalculatorIcon@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C003 /* CalculatorIcon@3x.png */; };
+		CA1C01A1D3E74B1F00A1B004 /* CalculatorIcon-76.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C004 /* CalculatorIcon-76.png */; };
+		CA1C01A1D3E74B1F00A1B005 /* CalculatorIcon-76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C005 /* CalculatorIcon-76@2x.png */; };
 		E798724B03764F55FC3187E5 /* SwordKit in Frameworks */ = {isa = PBXBuildFile; productRef = 020BEFE49A96B4F15548630F /* SwordKit */; };
 		5126013EC1173F5B6609881C /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 451FFBBE453EACF1547FF4B6 /* Localizable.strings */; };
 		34F21932E6E652AD0A369D9C /* AndBibleTests+AppAndReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */; };
@@ -67,6 +69,8 @@
 		CA1C01A1D3E74B1F00A1C001 /* CalculatorIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = CalculatorIcon.png; sourceTree = "<group>"; };
 		CA1C01A1D3E74B1F00A1C002 /* CalculatorIcon@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "CalculatorIcon@2x.png"; sourceTree = "<group>"; };
 		CA1C01A1D3E74B1F00A1C003 /* CalculatorIcon@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "CalculatorIcon@3x.png"; sourceTree = "<group>"; };
+		CA1C01A1D3E74B1F00A1C004 /* CalculatorIcon-76.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "CalculatorIcon-76.png"; sourceTree = "<group>"; };
+		CA1C01A1D3E74B1F00A1C005 /* CalculatorIcon-76@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "CalculatorIcon-76@2x.png"; sourceTree = "<group>"; };
 		F57750A41A385FA784921EB2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CA1C01A1D3E74B1F00A1C010 /* AndBible.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AndBible.entitlements; sourceTree = "<group>"; };
 		B83687E30A3647745B9C9D89 /* af */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = af; path = af.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -179,6 +183,8 @@
 				CA1C01A1D3E74B1F00A1C001 /* CalculatorIcon.png */,
 				CA1C01A1D3E74B1F00A1C002 /* CalculatorIcon@2x.png */,
 				CA1C01A1D3E74B1F00A1C003 /* CalculatorIcon@3x.png */,
+				CA1C01A1D3E74B1F00A1C004 /* CalculatorIcon-76.png */,
+				CA1C01A1D3E74B1F00A1C005 /* CalculatorIcon-76@2x.png */,
 				0ABFA8AEBF4A6CA89CDD4AF5 /* ContentView.swift */,
 				451FFBBE453EACF1547FF4B6 /* Localizable.strings */,
 				F57750A41A385FA784921EB2 /* Info.plist */,
@@ -405,6 +411,8 @@
 				CA1C01A1D3E74B1F00A1B001 /* CalculatorIcon.png in Resources */,
 				CA1C01A1D3E74B1F00A1B002 /* CalculatorIcon@2x.png in Resources */,
 				CA1C01A1D3E74B1F00A1B003 /* CalculatorIcon@3x.png in Resources */,
+				CA1C01A1D3E74B1F00A1B004 /* CalculatorIcon-76.png in Resources */,
+				CA1C01A1D3E74B1F00A1B005 /* CalculatorIcon-76@2x.png in Resources */,
 				B7A2824A96F5AFC2D2782AB2 /* sword in Resources */,
 				5126013EC1173F5B6609881C /* Localizable.strings in Resources */,
 			);
