@@ -7,47 +7,6 @@ import UIKit
 
 extension AndBibleUITests {
     /**
-     Verifies StudyPads opens from the drawer and selecting a row opens the StudyPad document.
-     *
-     * Android launches `ManageLabels` in `Mode.STUDYPAD` from the drawer, so iOS should expose the
-     * StudyPads selector as a reader-owned destination instead of the legacy modal sheet route.
-     * Android then opens the selected StudyPad through `studyPadSelected`, so the regression also
-     * proves a seeded row exits the destination and renders the corresponding StudyPad document.
-     *
-     * - Side effects:
-     *   - opens the reader drawer and activates StudyPads
-     *   - selects the seeded StudyPad row
-     * - Failure modes:
-     *   - fails if StudyPads does not appear, if the route regresses to a sheet/modal, or if sheet
-     *     Done chrome is visible on the drawer-owned screen
-     *   - fails if selecting the row does not open the matching StudyPad document
-     */
-    func testStudyPadsScreenOpensFromReaderMenu() {
-        let app = makeApp()
-        app.launch()
-
-        openReaderActionDestination(
-            actionIdentifier: "readerOpenStudyPadsAction",
-            destinationIdentifier: "labelManagerScreen",
-            readinessIdentifiers: ["labelManagerAddButton", "labelManagerStateExport"],
-            in: app,
-            timeout: 20
-        )
-        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
-        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
-        waitForReaderRenderedContentState(containing: "readerDestination=studyPads", in: app, timeout: 10)
-        XCTAssertFalse(
-            app.navigationBars.buttons["Done"].firstMatch.exists,
-            "Drawer StudyPads should use reader destination back chrome, not iOS sheet Done chrome."
-        )
-        waitForLabelManagerState(containing: labelManagerRowStateToken("UI Test Seed"), in: app, timeout: 10)
-        tapElementReliably(labelRow(named: "UI Test Seed", in: app), timeout: 10)
-        waitForReaderRenderedContentState(containing: "readerDestination=none", in: app, timeout: 10)
-        waitForStudyPadPresentation(in: app, timeout: 20)
-        XCTAssertEqual(requireElement("readerStudyPadTitle", in: app, timeout: 10).label, "UI Test Seed")
-    }
-
-    /**
      Verifies the drawer My Notes/My Documents action opens Android's app-owned document manager.
      *
      * Android's drawer `myDocumentsButton` launches `MyDocumentsActivity`, then
@@ -103,16 +62,20 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies History and Bookmarks visible navigation routes from one seeded reader workflow.
+     Verifies StudyPads, History, and Bookmarks visible navigation routes from one seeded workflow.
      *
-     * Android launches History and Bookmarks as app-owned destinations, then returns to the reader
-     * when the user selects a row. This workflow keeps both live route/no-sheet contracts with the
-     * selection behavior so the UI suite does not spend separate cold app launches on route
-     * ownership alone.
+     * Android launches StudyPads, History, and Bookmarks as app-owned reader destinations, then
+     * returns to the reader when the user backs out or selects a row. This workflow keeps those live
+     * route/no-sheet contracts with selection behavior so the UI suite does not spend a separate
+     * cold app launch on StudyPads route ownership while retaining terminal My Documents and
+     * My Notes coverage in their dedicated smokes.
      *
      * - Side effects:
-     *   - launches the reader shell with labeled `Genesis 1:1` and `Exodus 2:1` bookmarks, plus
-     *     a persisted `Exodus 2:1` history row, while the reader itself stays on `Genesis 1`
+     *   - launches the reader shell with labeled `Genesis 1:1` and `Exodus 2:1` bookmarks, a
+     *     matching StudyPad, and a persisted `Exodus 2:1` history row, while the reader itself
+     *     starts on `Genesis 1`
+     *   - opens StudyPads from the drawer, verifies the seeded row is available in the reader
+     *     destination, and returns to the reader shell
      *   - opens History from the reader menu and selects the seeded row
      *   - opens the bookmark list from the actual reader overflow menu
      *   - opens Label Assignment for the seeded Genesis bookmark, verifies assignment state, and
@@ -121,6 +84,8 @@ extension AndBibleUITests {
      *     `Genesis 1`
      *   - reopens Bookmarks, selects the seeded label, and opens the matching StudyPad document
      * - Failure modes:
+     *   - fails if StudyPads regresses to sheet/modal presentation, shows sheet Done chrome, skips
+     *     its Android-style manager screen, or cannot return to the reader destination chrome
      *   - fails if the history route regresses or selecting the seeded row does not navigate the
      *     reader to `Exodus 2`
      *   - fails if the bookmark list route regresses to sheet presentation
@@ -140,7 +105,29 @@ extension AndBibleUITests {
         let initialReference = requireReaderReferenceValue(in: app, timeout: 20)
         XCTAssertTrue(
             initialReference.localizedCaseInsensitiveContains("Genesis 1"),
-            "Expected the seeded bookmark-navigation scenario to start on Genesis 1, but saw '\(initialReference)'."
+            "Expected the seeded bookmark-filter scenario to start on Genesis 1, but saw '\(initialReference)'."
+        )
+
+        let studyPadsDestination = openReaderActionDestination(
+            actionIdentifier: "readerOpenStudyPadsAction",
+            destinationIdentifier: "labelManagerScreen",
+            readinessIdentifiers: ["labelManagerAddButton", "labelManagerStateExport"],
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=studyPads", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer StudyPads should use reader destination back chrome, not iOS sheet Done chrome."
+        )
+        waitForLabelManagerState(containing: labelManagerRowStateToken("UI Test Seed"), in: app, timeout: 10)
+        tapElementReliably(requireElement("readerDestinationBackButton", in: app, timeout: 10), timeout: 10)
+        waitForElementToDisappear(studyPadsDestination, timeout: 10)
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected backing out of the StudyPads destination to return to the reader shell."
         )
 
         XCTAssertTrue(openHistory(in: app).exists)

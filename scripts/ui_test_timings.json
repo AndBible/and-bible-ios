@@ -1,6 +1,6 @@
 {
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": 118.209,
-  "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": 100.0,
+  "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": 105.0,
   "AndBibleUITests/AndBibleUITests/testColorSettingsResetRestoresDefaultThemeColors": 103.06,
   "AndBibleUITests/AndBibleUITests/testDownloadsRepositoryManagerOpensFromOverflow": 114.81,
   "AndBibleUITests/AndBibleUITests/testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen": 6.194,
@@ -14,7 +14,6 @@
   "AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState": 165.0,
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreDatabaseWorkflowDestinationAndShareCancel": 133.4,
   "AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions": 127.486,
-  "AndBibleUITests/AndBibleUITests/testStudyPadsScreenOpensFromReaderMenu": 86.531,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen": 125.0,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow": 160.0,
   "AndBibleUITests/AndBibleUITests/testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms": 0.874,
