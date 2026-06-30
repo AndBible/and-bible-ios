@@ -45,3 +45,66 @@ struct StartupDocumentSetupPromptPolicy {
         return nil
     }
 }
+
+/**
+ Android startup setup presentation contract.
+
+ Android's first-download page is a full setup screen, not a transient action sheet. This value
+ keeps the startup action set explicit so the reader can render a route-backed surface while tests
+ assert behavior instead of SwiftUI implementation details.
+
+ Failure modes:
+ - unsupported locales simply omit Easy Start because Android exposes it for English only
+ - first-run setup may be skipped because iOS can already show a bundled fallback Bible
+ - no-Bible setup intentionally cannot be skipped because Android blocks on first-download setup
+ */
+struct StartupDocumentSetupPresentation: Equatable {
+    /// Android first-download action exposed by the startup setup surface.
+    enum Action: Equatable {
+        /// English-only default document download flow.
+        case easyStart
+
+        /// Open the document download screen.
+        case downloadDocuments
+
+        /// Open document loading from local files.
+        case loadDocumentsFromFiles
+
+        /// Open database restore.
+        case restoreDatabase
+
+        /// Skip the non-blocking first-run setup prompt.
+        case skip
+    }
+
+    /// Reason the setup screen is being shown.
+    let reason: StartupDocumentSetupPromptPolicy.PromptReason
+
+    /// Whether Android's English-only Easy Start row should be present.
+    let isEasyStartAvailable: Bool
+
+    /// The startup surface is reader-stack backed to match Android's full setup page.
+    var usesReaderStackSurface: Bool {
+        true
+    }
+
+    /// Skip is allowed only for iOS's non-blocking first-run setup path.
+    var allowsSkip: Bool {
+        reason == .firstRunSetup
+    }
+
+    /// Ordered actions matching Android's first-download layout with iOS's skip extension last.
+    var actions: [Action] {
+        var startupActions: [Action] = []
+        if isEasyStartAvailable {
+            startupActions.append(.easyStart)
+        }
+        startupActions.append(.downloadDocuments)
+        startupActions.append(.restoreDatabase)
+        startupActions.append(.loadDocumentsFromFiles)
+        if allowsSkip {
+            startupActions.append(.skip)
+        }
+        return startupActions
+    }
+}

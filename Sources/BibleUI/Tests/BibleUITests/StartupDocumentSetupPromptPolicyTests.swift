@@ -56,4 +56,45 @@ final class StartupDocumentSetupPromptPolicyTests: XCTestCase {
             )
         )
     }
+
+    /**
+     English first-run setup exposes Android's setup actions without using a transient dialog.
+
+     Android's first-download surface exposes English-only Easy Start, Download, database restore,
+     and file import actions as a setup screen. iOS keeps the same discoverable action set while
+     adding Skip only for the non-blocking bundled-Bible first-run case.
+     */
+    func testFirstRunEnglishPresentationUsesAndroidSetupActionsWithSkip() {
+        let presentation = StartupDocumentSetupPresentation(
+            reason: .firstRunSetup,
+            isEasyStartAvailable: true
+        )
+
+        XCTAssertEqual(
+            presentation.actions,
+            [.easyStart, .downloadDocuments, .restoreDatabase, .loadDocumentsFromFiles, .skip]
+        )
+        XCTAssertTrue(presentation.allowsSkip)
+        XCTAssertTrue(presentation.usesReaderStackSurface)
+    }
+
+    /**
+     Required no-Bible setup remains blocking while still exposing Android's setup entry points.
+
+     Skip is intentionally absent here because Android keeps users on first-download setup until a
+     readable Bible/document path is installed.
+     */
+    func testNoBiblePresentationUsesBlockingAndroidSetupActionsWithoutSkip() {
+        let presentation = StartupDocumentSetupPresentation(
+            reason: .noBibleModules,
+            isEasyStartAvailable: false
+        )
+
+        XCTAssertEqual(
+            presentation.actions,
+            [.downloadDocuments, .restoreDatabase, .loadDocumentsFromFiles]
+        )
+        XCTAssertFalse(presentation.allowsSkip)
+        XCTAssertTrue(presentation.usesReaderStackSurface)
+    }
 }

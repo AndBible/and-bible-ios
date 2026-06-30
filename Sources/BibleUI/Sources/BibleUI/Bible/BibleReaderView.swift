@@ -116,7 +116,11 @@ public struct BibleReaderView: View {
         /// Drawer-owned reading-plan list destination that avoids legacy sheet chrome.
         case readingPlans
         case settings
+        /// Android-style startup setup route used instead of transient iOS dialog chrome.
+        case startupDocumentSetup
         case downloads
+        /// Backup & Restore route opened by startup setup file-import and restore actions.
+        case importExport
         case globalTextOptions
         case workspaceTextOptions = "textOptions"
         case windowTextOptions
@@ -848,15 +852,6 @@ public struct BibleReaderView: View {
         .navigationDestination(item: $activeReaderDestination) { destination in
             readerDestinationContent(destination)
         }
-        .confirmationDialog(
-            startupDownloadPromptTitle,
-            isPresented: startupDownloadPromptPresentedBinding,
-            titleVisibility: .visible
-        ) {
-            startupDownloadPromptActions
-        } message: {
-            startupDownloadPromptMessage
-        }
         .sheet(item: readerSheetModalBinding) { modal in
             readerModalContent(modal)
         }
@@ -1286,6 +1281,29 @@ public struct BibleReaderView: View {
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
+        case .startupDocumentSetup:
+            if let startupDownloadPromptReason {
+                StartupDocumentSetupView(
+                    presentation: StartupDocumentSetupPresentation(
+                        reason: startupDownloadPromptReason,
+                        isEasyStartAvailable: isStartupEasyStartAvailable
+                    ),
+                    versionText: AndBibleAppVersionMetadata.current().drawerFooterText,
+                    onEasyStart: presentStartupDefaultDownloads,
+                    onDownloadDocuments: presentStartupDownloadDocuments,
+                    onLoadDocumentsFromFiles: presentStartupLoadDocumentsFromFiles,
+                    onRestoreDatabase: presentStartupRestoreDatabase,
+                    onSkip: handleStartupDownloadPromptCancelled
+                )
+                #if os(iOS)
+                .toolbar(.visible, for: .navigationBar)
+                #endif
+                .overlay(alignment: .topLeading) {
+                    readerRenderedContentStateExport
+                }
+            } else {
+                EmptyView()
+            }
         case .downloads:
             ModuleBrowserView(
                 initialSearchText: downloadsInitialSearchText,
@@ -1297,6 +1315,18 @@ public struct BibleReaderView: View {
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
+        case .importExport:
+            ImportExportView()
+                #if os(iOS)
+                .toolbar(.visible, for: .navigationBar)
+                .navigationBarBackButtonHidden(true)
+                .toolbar {
+                    readerDestinationBackToolbarItem
+                }
+                #endif
+                .overlay(alignment: .topLeading) {
+                    readerRenderedContentStateExport
+                }
         case .globalTextOptions:
             TextDisplaySettingsView(
                 settings: $globalDisplaySettings,
@@ -1387,87 +1417,6 @@ public struct BibleReaderView: View {
             }
             .accessibilityLabel(String(localized: "back", defaultValue: "Back"))
             .accessibilityIdentifier("readerDestinationBackButton")
-        }
-    }
-
-    /// Presentation binding for the startup setup prompt.
-    private var startupDownloadPromptPresentedBinding: Binding<Bool> {
-        Binding(
-            get: { startupDownloadPromptReason != nil },
-            set: { isPresented in
-                if !isPresented {
-                    dismissStartupDownloadPromptFromSystem()
-                }
-            }
-        )
-    }
-
-    /// Title shown in the startup document-setup prompt.
-    private var startupDownloadPromptTitle: String {
-        switch startupDownloadPromptReason {
-        case .firstRunSetup:
-            if isStartupEasyStartAvailable {
-                String(localized: "easy_start_title", defaultValue: "Easy start")
-            } else {
-                String(localized: "download_modules")
-            }
-        case .noBibleModules, nil:
-            String(localized: "picker_no_bible_modules")
-        }
-    }
-
-    /// Buttons shown when startup needs document setup.
-    @ViewBuilder
-    private var startupDownloadPromptActions: some View {
-        if isStartupEasyStartAvailable {
-            Button(String(localized: "easy_start", defaultValue: "Easy Start")) {
-                presentStartupDefaultDownloads()
-            }
-        }
-        Button(String(localized: "download_modules")) {
-            markFirstRunDocumentSetupPromptHandled()
-            startupDownloadPromptReason = nil
-            presentDownloads(from: windowManager.activeWindow?.id)
-        }
-        Button(startupDownloadPromptCancelTitle, role: .cancel) {
-            handleStartupDownloadPromptCancelled()
-        }
-    }
-
-    /// Cancel button copy for the current startup document-setup prompt reason.
-    private var startupDownloadPromptCancelTitle: String {
-        if startupDownloadPromptReason == .firstRunSetup {
-            return String(localized: "skip", defaultValue: "Skip")
-        }
-        return String(localized: "cancel")
-    }
-
-    /// Message shown in the startup document-setup prompt.
-    private var startupDownloadPromptMessage: some View {
-        switch startupDownloadPromptReason {
-        case .firstRunSetup:
-            if isStartupEasyStartAvailable {
-                Text(
-                    String(
-                        localized: "easy_start_message",
-                        defaultValue: "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on."
-                    )
-                )
-            } else {
-                Text(
-                    String(
-                        localized: "startup_document_setup_prompt",
-                        defaultValue: "Open Downloads to choose Bible modules and other documents. You can change these settings later on."
-                    )
-                )
-            }
-        case .noBibleModules, nil:
-            Text(
-                String(
-                    localized: "startup_download_prompt",
-                    defaultValue: "Download Bible modules to start reading."
-                )
-            )
         }
     }
 
@@ -1828,14 +1777,58 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Dismisses the startup setup prompt from SwiftUI system cancellation.
+     Opens the standard document download route from startup setup.
 
      Side effects:
-     - marks first-run setup handled when the user dismisses the non-blocking recommended setup
-     - preserves no-Bible behavior so that a later app launch can still prompt for required setup
+     - marks the one-time first-run setup as handled when applicable
+     - presents Downloads on the reader destination stack
      */
-    private func dismissStartupDownloadPromptFromSystem() {
-        handleStartupDownloadPromptCancelled()
+    private func presentStartupDownloadDocuments() {
+        if startupDownloadPromptReason == .firstRunSetup {
+            markFirstRunDocumentSetupPromptHandled()
+            startupDownloadPromptReason = nil
+        }
+        presentDownloads(from: windowManager.activeWindow?.id)
+    }
+
+    /**
+     Opens Backup & Restore so the user can load local document files from startup setup.
+
+     Android launches `InstallZip` directly from this action. iOS keeps the existing import engine
+     behind the Android-aligned Backup & Restore screen so startup does not fork file-import logic.
+
+     Side effects:
+     - marks the one-time first-run setup as handled when applicable
+     - presents Backup & Restore on the reader destination stack
+     */
+    private func presentStartupLoadDocumentsFromFiles() {
+        presentStartupImportExport()
+    }
+
+    /**
+     Opens Backup & Restore so the user can restore a database from startup setup.
+
+     Side effects:
+     - marks the one-time first-run setup as handled when applicable
+     - presents Backup & Restore on the reader destination stack
+     */
+    private func presentStartupRestoreDatabase() {
+        presentStartupImportExport()
+    }
+
+    /**
+     Routes startup import/restore actions through the existing Android-compatible backup surface.
+
+     Side effects:
+     - marks the one-time first-run setup as handled when applicable
+     - pushes `.importExport` as the active reader destination
+     */
+    private func presentStartupImportExport() {
+        if startupDownloadPromptReason == .firstRunSetup {
+            markFirstRunDocumentSetupPromptHandled()
+            startupDownloadPromptReason = nil
+        }
+        presentReaderDestination(.importExport, from: windowManager.activeWindow?.id)
     }
 
     /**
@@ -1850,6 +1843,9 @@ public struct BibleReaderView: View {
             markFirstRunDocumentSetupPromptHandled()
         }
         startupDownloadPromptReason = nil
+        if activeReaderDestination == .startupDocumentSetup {
+            activeReaderDestination = nil
+        }
     }
 
     /**
@@ -1936,9 +1932,37 @@ public struct BibleReaderView: View {
             break
         case .settings:
             reloadBehaviorPreferences()
+        case .startupDocumentSetup:
+            handleStartupDocumentSetupClosed()
         case .downloads:
             handleDownloadsDestinationClosed()
+        case .importExport:
+            handleImportExportDestinationClosed()
         case .globalTextOptions, .workspaceTextOptions, .windowTextOptions, .windowColorSettings:
+            break
+        }
+    }
+
+    /**
+     Handles an unexpected close of the startup setup route.
+
+     The no-Bible setup screen is blocking in Android, so if SwiftUI reports that it was closed
+     without a setup action, iOS immediately re-evaluates startup state. The first-run setup route is
+     optional because iOS can already display the bundled fallback Bible, so closing it marks the
+     prompt handled like Skip.
+
+     Side effects:
+     - may mark first-run setup handled
+     - may re-present startup setup when no Bible is installed
+     */
+    private func handleStartupDocumentSetupClosed() {
+        switch startupDownloadPromptReason {
+        case .firstRunSetup:
+            handleStartupDownloadPromptCancelled()
+        case .noBibleModules:
+            didEvaluateStartupDownloadPrompt = false
+            evaluateStartupDownloadPromptIfNeeded()
+        case nil:
             break
         }
     }
@@ -1972,6 +1996,24 @@ public struct BibleReaderView: View {
     }
 
     /**
+     Refreshes reader module state after the startup import/restore route closes.
+
+     Backup & Restore can install modules or restore Android-compatible backups through existing
+     engines. This mirrors Android's `afterDownload()` check by returning to blocking setup when the
+     user still has no Bible.
+
+     Side effects:
+     - refreshes installed-module snapshots in every open reader controller
+     - may re-show the startup no-Bible route
+     */
+    private func handleImportExportDestinationClosed() {
+        for (_, ctrl) in windowManager.controllers {
+            (ctrl as? BibleReaderController)?.refreshInstalledModules()
+        }
+        reevaluateStartupDownloadPromptAfterDownloads()
+    }
+
+    /**
      Refreshes open reader controllers after the installed SWORD module store changes.
 
      Settings restores, external ZIP opens, and Downloads installs mutate module files outside the
@@ -1991,6 +2033,9 @@ public struct BibleReaderView: View {
         }
         if startupDownloadPromptReason == .noBibleModules, !startupHasNoBibleModules() {
             startupDownloadPromptReason = nil
+            if activeReaderDestination == .startupDocumentSetup {
+                activeReaderDestination = nil
+            }
         }
     }
 
@@ -2541,10 +2586,14 @@ public struct BibleReaderView: View {
             return
         }
         didEvaluateStartupDownloadPrompt = true
-        startupDownloadPromptReason = StartupDocumentSetupPromptPolicy.promptReason(
+        let promptReason = StartupDocumentSetupPromptPolicy.promptReason(
             hasNoBibleModules: startupHasNoBibleModules(),
             hasHandledFirstRunSetup: hasHandledFirstRunDocumentSetupPrompt()
         )
+        startupDownloadPromptReason = promptReason
+        if promptReason != nil {
+            presentReaderDestination(.startupDocumentSetup, from: windowManager.activeWindow?.id)
+        }
     }
 
     /**
@@ -2564,6 +2613,9 @@ public struct BibleReaderView: View {
     private func reevaluateStartupDownloadPromptAfterDownloads() {
         guard startupHasNoBibleModules() else {
             startupDownloadPromptReason = nil
+            if activeReaderDestination == .startupDocumentSetup {
+                activeReaderDestination = nil
+            }
             return
         }
         didEvaluateStartupDownloadPrompt = false
