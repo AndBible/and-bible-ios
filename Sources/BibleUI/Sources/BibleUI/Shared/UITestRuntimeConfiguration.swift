@@ -10,6 +10,8 @@ enum UITestRuntimeConfiguration {
     private static let studyPadCreatedNoteTextArgument = "-UITEST_STUDYPAD_CREATED_NOTE_TEXT"
     private static let remoteSyncBootstrapScenarioEnvironmentKey = "UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO"
     private static let remoteSyncBootstrapScenarioArgument = "-UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO"
+    private static let firstRunDocumentSetupHandledEnvironmentKey = "UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED"
+    private static let firstRunDocumentSetupHandledArgument = "-UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED"
 
     /// Test-only remote sync bootstrap paths that can replace live backend transport in UI tests.
     enum RemoteSyncBootstrapScenario: String {
@@ -61,6 +63,32 @@ enum UITestRuntimeConfiguration {
             return nil
         }
         return RemoteSyncBootstrapScenario(rawValue: value)
+    }
+
+    /// Whether UI automation should treat the informational first-run setup prompt as handled.
+    static var treatsFirstRunDocumentSetupAsHandled: Bool {
+        isFirstRunDocumentSetupHandled(
+            environment: ProcessInfo.processInfo.environment,
+            arguments: ProcessInfo.processInfo.arguments
+        )
+    }
+
+    /**
+     Resolves the test-only first-run setup marker from a supplied process shape.
+
+     - Parameters:
+       - environment: Process environment to inspect.
+       - arguments: Process arguments to inspect.
+     - Returns: `true` only when the explicit UI-test environment variable or argument is present.
+     */
+    static func isFirstRunDocumentSetupHandled(
+        environment: [String: String],
+        arguments: [String]
+    ) -> Bool {
+        if environment[firstRunDocumentSetupHandledEnvironmentKey] == "1" {
+            return true
+        }
+        return arguments.contains(firstRunDocumentSetupHandledArgument)
     }
 
     /**

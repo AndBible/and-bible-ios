@@ -4,6 +4,8 @@
    General / Shared
    ======================================== */
 "app_name" = "AndBible";
+"app_name_andbible" = "AndBible";
+"app_name_long" = "AndBible: Bible Study";
 "done" = "Done";
 "cancel" = "Cancel";
 "delete" = "Delete";
@@ -33,6 +35,7 @@
 "clear" = "Clear";
 "reset" = "Reset";
 "retry" = "Retry";
+"skip" = "Skip";
 "all" = "All";
 "sort" = "Sort";
 "name" = "Name";
@@ -90,6 +93,18 @@
 "picker_no_general_book_modules" = "No general book modules installed";
 "picker_no_map_modules" = "No map modules installed";
 "download_modules" = "Download Modules";
+"download" = "Download Documents";
+"easy_start" = "Easy Start";
+"easy_start_title" = "Easy start";
+"easy_start_message" = "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on.";
+"startup_document_setup_prompt" = "Open Downloads to choose Bible modules and other documents. You can change these settings later on.";
+"startup_download_prompt" = "Download Bible modules to start reading.";
+"welcome_message" = "Thank you for downloading %@. There are currently no Bibles or documents installed. To continue, please install at least 1 document by downloading from the internet, or by loading from a zip file document.";
+"supported_formats" = "Supported formats for loading documents from a file: %@";
+"format_zip" = "Zip file containing Sword module(s), or documents backup file (*.abmd) created by %@";
+"format_mysword" = "MySword documents (*.mybible)";
+"format_mybible" = "MyBible documents (*.SQLite3)";
+"format_epub" = "EPUB documents (*.epub)";
 
 /* Toolbar / Actions */
 "toggle_strongs_numbers" = "Toggle Strong's numbers";
@@ -195,6 +210,7 @@
 "documents_count %lld" = "%lld documents";
 "download_errors" = "Download errors";
 "install_zip" = "Load Documents From Files";
+"restore_database" = "Restore Database File";
 "refreshing_catalog" = "Refreshing catalog...";
 "no_modules_match_filters" = "No modules match your filters";
 "tap_refresh_to_load" = "Tap Refresh to load available modules";

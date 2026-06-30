@@ -73,9 +73,17 @@ ROUTE_CLASSIFICATIONS: dict[str, tuple[str, str]] = {
         "Android app-owned",
         "Adapted app-owned route with Settings UI coverage.",
     ),
+    "ReaderDestination.startupDocumentSetup": (
+        "Android app-owned",
+        "Startup setup route matching Android's first-download activity surface.",
+    ),
     "ReaderDestination.downloads": (
         "Android app-owned",
         "Adapted app-owned route.",
+    ),
+    "ReaderDestination.importExport": (
+        "Android app-owned plus iOS system boundary",
+        "Startup setup route may use native iOS file boundaries only at OS handoff points.",
     ),
     "ReaderDestination.globalTextOptions": (
         "Android app-owned",
@@ -144,10 +152,6 @@ ROUTE_CLASSIFICATIONS: dict[str, tuple[str, str]] = {
     "ReaderModal.help": (
         "Android app-owned",
         "Adapted informational route. Vue-scoped help remains bridge-owned when invoked from Vue.",
-    ),
-    "showStartupDownloadPrompt": (
-        "Android app-owned",
-        "Acceptable dialog adaptation if labels, cancel/default behavior, and Downloads handoff remain equivalent.",
     ),
     "showReaderStrongsModeDialog": (
         "Android app-owned",
@@ -273,7 +277,6 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
     def test_standalone_transient_routes_are_classified(self) -> None:
         """State-backed reader presentations outside the enums remain documented."""
         for token in [
-            "showStartupDownloadPrompt",
             "showReaderStrongsModeDialog",
             "shareSheetBinding",
             "crossReferenceSheetBinding",

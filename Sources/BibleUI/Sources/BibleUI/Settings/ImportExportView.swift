@@ -59,6 +59,12 @@ public struct ImportExportView: View {
     /// Controls presentation of the shared restore/import file picker.
     @State private var showRestoreImportPicker = false
 
+    /// Startup setup target that should open its picker as soon as this route appears.
+    private let startupRestoreImportTarget: RestoreWorkflowTarget?
+
+    /// Prevents a startup-triggered restore/import picker from reopening after dismissal.
+    @State private var didPresentStartupRestoreImportPicker = false
+
     /// Restore/import target whose content types and result handler are active for the file picker.
     @State private var restoreImportPickerTarget: RestoreWorkflowTarget?
 
@@ -153,7 +159,24 @@ public struct ImportExportView: View {
 
      - Note: This initializer has no inputs and performs no side effects.
      */
-    public init() {}
+    public init() {
+        self.startupRestoreImportTarget = nil
+    }
+
+    /**
+     Creates the import/export screen for a startup setup action.
+
+     Android's startup Restore Database and Load Documents From Files buttons open their target
+     pickers directly instead of first showing BackupActivity's generic landing screen. This
+     initializer preserves that entry-point intent while reusing the same picker handlers as the
+     normal Backup & Restore screen.
+
+     - Parameter startupRestoreImportTarget: Optional restore/import target to present once after
+       the route appears.
+     */
+    init(startupRestoreImportTarget: RestoreWorkflowTarget?) {
+        self.startupRestoreImportTarget = startupRestoreImportTarget
+    }
 
     /**
      Current presentation snapshot for UI automation and picker routing.
@@ -365,6 +388,9 @@ public struct ImportExportView: View {
         .accessibilityIdentifier("importExportScreen")
         .accessibilityValue(accessibilityState)
         .navigationTitle(String(localized: "backup_and_restore", defaultValue: "Backup & Restore"))
+        .onAppear {
+            presentStartupRestoreImportPickerIfNeeded()
+        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -502,6 +528,29 @@ public struct ImportExportView: View {
      */
     private func beginRestoreOrImport() {
         restoreImportPickerTarget = restoreTarget.wrappedValue
+        showRestoreImportPicker = true
+    }
+
+    /**
+     Opens the startup-requested restore/import picker once.
+
+     Android startup setup has direct buttons for Database restore and Documents loading. iOS still
+     needs this route in the navigation stack to own SwiftUI's file importer, so this method applies
+     the startup target and presents the existing shared picker exactly once.
+
+     - Side effects: Updates the persisted restore/import radio target, captures the picker target,
+       and presents the file picker.
+     - Failure modes: If another backup workflow is already busy, the startup picker is not opened.
+     */
+    private func presentStartupRestoreImportPickerIfNeeded() {
+        guard !didPresentStartupRestoreImportPicker,
+              let startupRestoreImportTarget,
+              !isBackupWorkflowBusy else {
+            return
+        }
+        didPresentStartupRestoreImportPicker = true
+        restoreTargetRawValue = startupRestoreImportTarget.rawValue
+        restoreImportPickerTarget = startupRestoreImportTarget
         showRestoreImportPicker = true
     }
 
