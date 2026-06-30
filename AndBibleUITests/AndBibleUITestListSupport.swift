@@ -800,6 +800,62 @@ extension AndBibleUITests {
     }
 
     /**
+     Opens the Available Plans picker from the Reading Plans list.
+     *
+     * The Start toolbar item flips `showAvailablePlans` on the list before SwiftUI exports the
+     * picker root. Polling both the list state and the picker root keeps the smoke synchronized on
+     * the route contract instead of treating a toolbar tap as sufficient presentation evidence.
+     *
+     * - Parameters:
+     *   - app: Running application currently showing the Reading Plans list.
+     *   - timeout: Maximum time to activate the Start action and resolve the picker root.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The resolved Available Plans root once it exposes a usable frame.
+     * - Side effects:
+     *   - taps the production Start toolbar item while the list still reports the picker as hidden
+     * - Failure modes:
+     *   - records an XCTest failure when the picker route never becomes visible
+     */
+    @discardableResult
+    func openAvailableReadingPlans(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastListState = resolvedReadingPlanListStateValue(in: app) ?? "<missing>"
+
+        repeat {
+            if let picker = resolvedElement("availablePlansScreen", in: app),
+               elementHasUsableFrame(picker)
+            {
+                return picker
+            }
+
+            lastListState = resolvedReadingPlanListStateValue(in: app) ?? "<missing>"
+            if !lastListState.contains("showAvailablePlans=true") {
+                let remaining = max(0.1, deadline.timeIntervalSinceNow)
+                if let startButton = resolvedElement("readingPlanStartButton", in: app) {
+                    _ = tapElementIfPossible(startButton, timeout: min(1, remaining))
+                }
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let fallback = unresolvedElement("availablePlansScreen", in: app)
+        XCTAssertTrue(
+            fallback.exists,
+            "Expected Available Plans picker to appear within \(timeout) seconds. Final Reading Plans state: '\(lastListState)'.",
+            file: file,
+            line: line
+        )
+        return fallback
+    }
+
+    /**
      Reveals and returns the custom reading-plan import button in the available-plan picker.
      *
      * - Parameters:

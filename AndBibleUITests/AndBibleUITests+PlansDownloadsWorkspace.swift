@@ -41,8 +41,7 @@ extension AndBibleUITests {
         )
         waitForReadingPlanListState(containing: "active=0", in: app, timeout: 10)
 
-        tapElementReliably(requireElement("readingPlanStartButton", in: app, timeout: 10), timeout: 10)
-        _ = requireElement("availablePlansScreen", in: app, timeout: 10)
+        openAvailableReadingPlans(in: app, timeout: 10)
         waitForAvailablePlansState(containing: builtInPlanToken, in: app, timeout: 10)
 
         tapElementReliably(requireElement("readingPlanTemplateButton", in: app, timeout: 15), timeout: 10)
@@ -74,8 +73,7 @@ extension AndBibleUITests {
         waitForReadingPlanListState(containing: "active=0", in: app, timeout: 10)
         waitForReadingPlanListState(notContaining: builtInPlanToken, in: app, timeout: 10)
 
-        tapElementReliably(requireElement("readingPlanStartButton", in: app, timeout: 10), timeout: 10)
-        _ = requireElement("availablePlansScreen", in: app, timeout: 10)
+        openAvailableReadingPlans(in: app, timeout: 10)
         tapElementReliably(revealAvailablePlansImportButton(in: app, timeout: 10), timeout: 10)
         waitForAvailablePlansState(containing: "importPickerPresented=true", in: app, timeout: 20)
     }

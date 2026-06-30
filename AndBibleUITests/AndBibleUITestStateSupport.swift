@@ -2026,6 +2026,7 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The resolved control once it is visible inside the Sync Settings viewport.
      * - Side effects:
+     *   - clears any focused text input so the software keyboard cannot block lower Form rows
      *   - scrolls Sync Settings lower content until the requested control materializes inside the
      *     visible form viewport
      * - Failure modes:
@@ -2045,6 +2046,9 @@ extension AndBibleUITests {
             file: file,
             line: line
         )
+        dismissKeyboardIfPresent(in: app)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+
         let deadline = Date().addingTimeInterval(timeout)
         var lastCandidate = syncSettingsControlCandidates(identifier, in: app).first ?? app.buttons[identifier].firstMatch
         let minimumRevealPasses = identifier.hasPrefix("syncCategoryToggle::") ? 4 : 1

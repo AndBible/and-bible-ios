@@ -97,6 +97,7 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
 
         self.assertIn("let syncScreen = requireElement(", resolver_body)
         self.assertIn('"syncSettingsScreen"', resolver_body)
+        self.assertIn("dismissKeyboardIfPresent(in: app)", resolver_body)
         self.assertRegex(
             resolver_body,
             r"waitForElementToBecomeHittable\([^)]+\)\s*\|\|\s*"
