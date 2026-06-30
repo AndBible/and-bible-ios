@@ -10,8 +10,8 @@ import SwordKit
  Tracks one active or failed Downloads row operation using Android's document-status shape.
 
  Android exposes `BEING_INSTALLED` with a percent and `ERROR_DOWNLOADING` as row states rather
- than a global spinner. iOS keeps the same contract locally: in-progress rows sort first and show
- determinate progress plus cancel, while failed rows remain in the list with a retry action.
+ than a global spinner. iOS keeps the same contract locally: in-progress rows show determinate
+ progress plus cancel, while failed rows remain in the list with a retry action.
 
  Side effects:
  - none; values are immutable snapshots of row state
@@ -87,6 +87,28 @@ struct ModuleBrowserDownloadActivity: Equatable {
     var progressPercent: Int {
         Int((min(max(progressFraction, 0), 1) * 100).rounded(.towardZero))
     }
+}
+
+/**
+ Captures the Android Downloads state used for list ordering.
+
+ Android rebuilds sort order when `DocumentSelectionBase.filterDocuments()` runs, but starting a
+ row install only calls `notifyDataSetChanged()`, which updates that row in place. iOS uses this
+ snapshot to keep row ordering stable during live progress updates while still allowing explicit
+ filter/catalog rebuilds to apply Android's active-download-first sort.
+
+ Side effects:
+ - none; values are immutable ordering inputs
+
+ Failure modes:
+ - none; stale snapshots are intentional until the next filter/catalog rebuild
+ */
+struct ModuleBrowserDownloadSortSnapshot {
+    /// Installed modules used to determine installed/update sort rank.
+    let installedModules: [ModuleInfo]
+
+    /// Row activities used to determine Android `BEING_INSTALLED`/error sort rank.
+    let downloadActivities: [String: ModuleBrowserDownloadActivity]
 }
 
 /**
@@ -305,6 +327,15 @@ public struct ModuleBrowserView: View {
     /// Per-module row activity for Android-style progress, cancel, and retry state.
     @State private var downloadActivities: [String: ModuleBrowserDownloadActivity] = [:]
 
+    /// Whether Downloads has captured Android's current filter/sort inputs for visible row order.
+    @State private var didCaptureDownloadSortSnapshot = false
+
+    /// Installed/activity state used for Android-style row ordering until the next filter rebuild.
+    @State private var downloadSortSnapshot = ModuleBrowserDownloadSortSnapshot(
+        installedModules: [],
+        downloadActivities: [:]
+    )
+
     /// Running install tasks keyed by module initials so row cancel buttons can stop work.
     @State private var installTasks: [String: Task<Void, Never>] = [:]
 
@@ -444,16 +475,51 @@ public struct ModuleBrowserView: View {
 
     /// Available (remote) modules filtered by category, language, and search text.
     private var filteredAvailableModules: [RemoteModuleInfo] {
-        Self.filteredDownloadModules(
+        let sortSnapshot = currentDownloadSortSnapshot
+        return Self.filteredDownloadModules(
             availableModules,
             selectedCategory: selectedCategory,
             selectedLanguage: selectedLanguage,
             searchText: searchText,
-            installedModules: installedModules,
-            downloadActivities: downloadActivities,
+            installedModules: sortSnapshot.installedModules,
+            downloadActivities: sortSnapshot.downloadActivities,
             recommendedDocuments: recommendedDocuments,
             badDocuments: badDocuments
         )
+    }
+
+    /**
+     Current installed/activity state that should influence Downloads row order.
+
+     Android does not rerun `filterDocuments()` when a row begins installing; it updates the row in
+     place. Until iOS has captured a filter/catalog rebuild snapshot, this falls back to live state
+     so previews/tests that exercise the helper without loading state still behave deterministically.
+     */
+    private var currentDownloadSortSnapshot: ModuleBrowserDownloadSortSnapshot {
+        didCaptureDownloadSortSnapshot
+            ? downloadSortSnapshot
+            : Self.downloadListSortSnapshot(
+                installedModules: installedModules,
+                downloadActivities: downloadActivities
+            )
+    }
+
+    /**
+     Captures the state Android would use after rerunning `DocumentSelectionBase.filterDocuments()`.
+
+     Side effects:
+     - updates the Downloads sort snapshot used by `filteredAvailableModules`
+     - marks the snapshot as initialized for this view lifetime
+
+     Failure modes:
+     - none; the snapshot intentionally remains stale during row-only install progress changes
+     */
+    private func captureDownloadListSortSnapshot() {
+        downloadSortSnapshot = Self.downloadListSortSnapshot(
+            installedModules: installedModules,
+            downloadActivities: downloadActivities
+        )
+        didCaptureDownloadSortSnapshot = true
     }
 
     // MARK: - Body
@@ -508,6 +574,7 @@ public struct ModuleBrowserView: View {
         .background(ModuleBrowserPalette.background.ignoresSafeArea())
         .onChange(of: searchText) {
             alignFiltersWithAndroidSearchState(searchText)
+            captureDownloadListSortSnapshot()
         }
         .navigationBarBackButtonHidden(true)
         #if os(iOS)
@@ -807,6 +874,7 @@ public struct ModuleBrowserView: View {
         Menu {
             Button(languageFilterTitle(for: "")) {
                 selectedLanguage = ""
+                captureDownloadListSortSnapshot()
             }
             if !availableLanguages.isEmpty {
                 Divider()
@@ -815,6 +883,7 @@ public struct ModuleBrowserView: View {
                 Button(displayName(for: language)) {
                     selectedLanguage = language
                     Self.rememberExplicitSelectedLanguage(language)
+                    captureDownloadListSortSnapshot()
                 }
             }
         } label: {
@@ -865,6 +934,7 @@ public struct ModuleBrowserView: View {
                     selectedLanguage = ""
                     persistSelectedCategory(nil)
                     applyAndroidDefaultLanguageIfNeeded(force: true)
+                    captureDownloadListSortSnapshot()
                 }
                 Divider()
                 ForEach(visibleCategoryFilters, id: \.self) { category in
@@ -873,6 +943,7 @@ public struct ModuleBrowserView: View {
                         selectedLanguage = ""
                         persistSelectedCategory(category)
                         applyAndroidDefaultLanguageIfNeeded(force: true)
+                        captureDownloadListSortSnapshot()
                     }
                 }
             } label: {
@@ -1943,6 +2014,34 @@ public struct ModuleBrowserView: View {
     }
 
     /**
+     Captures Android Downloads ordering inputs for a list/filter rebuild.
+
+     Android's adapter receives row-state updates after a download starts, but the list order is
+     only recomputed when the document filter list is rebuilt. Tests use this helper to preserve
+     that distinction without constructing SwiftUI view state.
+
+     - Parameters:
+       - installedModules: Installed module state at the rebuild boundary.
+       - downloadActivities: Active or failed row activities at the rebuild boundary.
+     - Returns: Immutable sort inputs for `filteredDownloadModules`.
+
+     Side effects:
+     - none
+
+     Failure modes:
+     - none
+     */
+    static func downloadListSortSnapshot(
+        installedModules: [ModuleInfo],
+        downloadActivities: [String: ModuleBrowserDownloadActivity]
+    ) -> ModuleBrowserDownloadSortSnapshot {
+        ModuleBrowserDownloadSortSnapshot(
+            installedModules: installedModules,
+            downloadActivities: downloadActivities
+        )
+    }
+
+    /**
      Filters and sorts remote modules using Android `DocumentSelectionBase.filterDocuments`
      semantics adapted to iOS data models.
 
@@ -2438,6 +2537,7 @@ public struct ModuleBrowserView: View {
             availableModules = deduplicatedModules(from: initialState.cachedModules)
         }
         applyAndroidDefaultLanguageIfNeeded()
+        captureDownloadListSortSnapshot()
         isLoadingInitialState = false
         if defaultDownloadMode.shouldInstallDefaultDocuments {
             startDefaultDownloadFlowIfNeeded()
@@ -2708,6 +2808,7 @@ public struct ModuleBrowserView: View {
                 availableModules = uniqueModules
                 replaceDownloadErrors(with: errors)
                 applyAndroidDefaultLanguageIfNeeded()
+                captureDownloadListSortSnapshot()
                 isRefreshing = false
                 refreshProgress = nil
                 installDefaultDocumentsIfNeeded(
