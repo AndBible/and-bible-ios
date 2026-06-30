@@ -155,6 +155,58 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies Search translation picker drafts preserve Android Cancel, dismiss, and empty-OK semantics.
+
+     Android's multiselect dialog mutates a temporary checked-row set while open. Cancel and
+     outside dismiss discard the draft, while OK with no checked rows preserves the previously
+     committed selection. This reducer-level coverage replaces the removed full-app Cancel/dismiss
+     UI path without adding another slow launched Search smoke.
+
+     - Setup: Opens a draft from a two-module committed selection, mutates it, then exercises
+       Cancel, outside dismiss, and empty OK result paths.
+     - Expected result: Cancel/dismiss clear only draft state, and empty OK preserves the previous
+       primary-first committed selection while dismissing the draft.
+     - Failure meaning: Search can drift into iOS-specific sheet semantics where transient row
+       toggles leak into the committed Search modules or empty OK clears translations.
+     - Side effects: none.
+     */
+    func testSearchTranslationPickerDraftStateDiscardsCancelAndOutsideDismissDrafts() {
+        let modules = [
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en"),
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en"),
+            ModuleInfo(name: "ASV", description: "American Standard Version", category: .bible, language: "en"),
+        ]
+
+        let opened = SearchTranslationPickerDraftState.opened(
+            selectedModuleNames: ["KJV", "WEB"],
+            primaryModuleName: "KJV",
+            installedModules: modules
+        )
+        XCTAssertTrue(opened.isPresented)
+        XCTAssertEqual(opened.pendingSelection, ["KJV", "WEB"])
+
+        let cancelled = opened.toggled("ASV").toggled("KJV").cancelled()
+        XCTAssertFalse(cancelled.isPresented)
+        XCTAssertTrue(cancelled.pendingSelection.isEmpty)
+
+        let outsideDismiss = opened.toggled("ASV").cancelled()
+        XCTAssertFalse(outsideDismiss.isPresented)
+        XCTAssertTrue(outsideDismiss.pendingSelection.isEmpty)
+
+        let emptyOK = SearchTranslationPickerDraftState(
+            isPresented: true,
+            pendingSelection: []
+        ).committedSelection(
+            previousModuleNames: ["KJV", "WEB"],
+            primaryModuleName: "KJV",
+            installedModules: modules
+        )
+        XCTAssertEqual(emptyOK.orderedModuleNames, ["KJV", "WEB"])
+        XCTAssertFalse(emptyOK.draftState.isPresented)
+        XCTAssertTrue(emptyOK.draftState.pendingSelection.isEmpty)
+    }
+
+    /**
      Verifies Search's visible translation summary uses Android's primary-first abbreviation list.
 
      Android presents the committed translation selection as a comma-separated abbreviation list

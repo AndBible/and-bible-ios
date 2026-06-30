@@ -69,7 +69,8 @@ rules explicit for changes in:
 At minimum, search-adjacent changes should keep the focused search subset
 described in `regression-report.md` green, especially:
 
-- direct-launch query retention and index creation
+- direct-launch query retention in a seeded ready-state UI route, plus package/service coverage for
+  index creation and readiness
 - scope rerun behavior
 - word-mode rerun behavior
 - Strong's normalization and indexed lexical-token regressions

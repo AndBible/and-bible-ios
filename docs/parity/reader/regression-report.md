@@ -76,13 +76,10 @@ Related domain references:
 
 ### UI
 
-- `AndBibleUITests/testSettingsScreenShowsPrimaryNavigationRows`
 - `AndBibleUITests/testDownloadsRepositoryManagerOpensFromOverflow`
-- `AndBibleUITests/testWorkspaceSelectorCreateFlowReturnsToReaderShell`
 - `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
 - `AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions`
 - `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
-- `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
 - `BibleUITests/HistoryListPresentationTests`
 
 ## What This Validation Actually Covers

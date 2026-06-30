@@ -186,16 +186,4 @@ extension AndBibleUITests {
         XCTAssertTrue(requireElement("repositoryManagerScreen", in: app, timeout: 20).exists)
         XCTAssertTrue(requireElement("repositoryManagerAddButton", in: app, timeout: 10).exists)
     }
-
-    /**
-     Verifies that the bookmark list can be opened from the reader shell.
-     *
-     * - Side effects:
-     *   - launches the app with the calculator gate disabled, in-memory persistence, and one
-     *     deterministic seeded bookmark-label pair for stable reader-shell startup
-     *   - opens the reader overflow menu and pushes the bookmark list
-     * - Failure modes:
-     *   - fails if the bookmarks action is missing from the reader menu
-     *   - fails if the bookmark list screen does not render after navigation completes
-     */
 }
