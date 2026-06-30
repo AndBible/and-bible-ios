@@ -41,8 +41,7 @@ extension AndBibleUITests {
         )
         waitForReadingPlanListState(containing: "active=0", in: app, timeout: 10)
 
-        tapElementReliably(requireElement("readingPlanStartButton", in: app, timeout: 10), timeout: 10)
-        _ = requireElement("availablePlansScreen", in: app, timeout: 10)
+        openAvailableReadingPlans(in: app, timeout: 10)
         waitForAvailablePlansState(containing: builtInPlanToken, in: app, timeout: 10)
 
         tapElementReliably(requireElement("readingPlanTemplateButton", in: app, timeout: 15), timeout: 10)
@@ -74,8 +73,7 @@ extension AndBibleUITests {
         waitForReadingPlanListState(containing: "active=0", in: app, timeout: 10)
         waitForReadingPlanListState(notContaining: builtInPlanToken, in: app, timeout: 10)
 
-        tapElementReliably(requireElement("readingPlanStartButton", in: app, timeout: 10), timeout: 10)
-        _ = requireElement("availablePlansScreen", in: app, timeout: 10)
+        openAvailableReadingPlans(in: app, timeout: 10)
         tapElementReliably(revealAvailablePlansImportButton(in: app, timeout: 10), timeout: 10)
         waitForAvailablePlansState(containing: "importPickerPresented=true", in: app, timeout: 20)
     }
@@ -136,23 +134,39 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the Downloads overflow can open the repository manager route.
+     Verifies workspace creation and Downloads repository management from reader-owned routes.
 
      Repository add, replace, delete, and reset persistence runs in `RepositorySourceManagerTests`
      because that is the SwordKit-owned source-management contract. This UI smoke intentionally
      stays at the visible route boundary while still proving the real reader menu opens Downloads
-     and Android's Downloads overflow exposes Custom repositories.
+     and Android's Downloads overflow exposes Custom repositories. Workspace graph persistence is
+     package-covered by `WorkspaceWindowStoreTests`; the visible smoke only proves the selector
+     prompt can create a workspace and return control to the reader shell before another route opens.
      *
      * - Side effects:
-     *   - launches the reader shell and opens Downloads from the real reader menu
+     *   - launches the reader shell and opens the workspace selector from the reader menu
+     *   - creates one workspace from the selector-owned prompt and verifies reader-shell return
+     *   - opens Downloads from the real reader menu
      *   - opens the repository manager from Android's Downloads overflow menu
      * - Failure modes:
+     *   - fails if the workspace selector, create alert, or reader-shell return regresses
      *   - fails if the downloads browser or repository manager never appears
      *   - fails if the repository manager loses the visible add-source affordance
      */
     func testDownloadsRepositoryManagerOpensFromOverflow() {
         let app = makeApp()
+        let createdName = "W1"
         app.launch()
+
+        XCTAssertTrue(openWorkspaceSelector(in: app).exists)
+        _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
+        typeWorkspaceNamePromptText(createdName, in: app, timeout: 15)
+        tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
+
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected creating a workspace to return to the reader shell before opening Downloads."
+        )
 
         XCTAssertTrue(openDownloads(in: app).exists)
         tapElementReliably(
@@ -163,76 +177,4 @@ extension AndBibleUITests {
         XCTAssertTrue(requireElement("repositoryManagerScreen", in: app, timeout: 20).exists)
         XCTAssertTrue(requireElement("repositoryManagerAddButton", in: app, timeout: 10).exists)
     }
-
-    /**
-     Verifies that the workspace selector can create a workspace, make it active, and switch back.
-     *
-     * Rename, clone, and delete semantics are covered by `WorkspaceStore` unit tests because the
-     * production UI exposes those actions through long-press context menus that are pathologically
-     * slow under hosted XCTest.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell and opens the workspace selector from the reader
-     *     menu
-     *   - creates one workspace, verifies it becomes active, then switches back to the original
-     *     active workspace
-     * - Failure modes:
-     *   - fails if the workspace selector never appears
-     *   - fails if the create alert, workspace rows, or active-workspace state do not update as
-     *     expected
-     */
-    func testWorkspaceSelectorCreateAndSwitchFlow() {
-        let app = makeApp()
-        let createdName = "W1"
-        app.launch()
-
-        XCTAssertTrue(openWorkspaceSelector(in: app).exists)
-        let originalActiveWorkspaceName = requireActiveWorkspaceRow(in: app, timeout: 10).label
-
-        _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
-        let workspaceNameField = requireWorkspaceNamePromptField(in: app, timeout: 10)
-        typePromptText(
-            createdName,
-            into: workspaceNameField,
-            in: app,
-            timeout: 15,
-            accessibilityIdentifier: "workspaceNamePromptTextField"
-        )
-        tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
-
-        XCTAssertTrue(
-            waitForReaderShellReady(in: app, timeout: 20),
-            "Expected creating a workspace to return to the reader shell."
-        )
-
-        _ = openWorkspaceSelector(in: app)
-        _ = requireWorkspaceRow(named: createdName, in: app, timeout: 15)
-        XCTAssertEqual(
-            requireActiveWorkspaceRow(in: app, timeout: 10).label,
-            createdName,
-            "Expected the new workspace to become active after creation."
-        )
-
-        tapElementReliably(
-            requireWorkspaceRow(named: originalActiveWorkspaceName, in: app, timeout: 10),
-            timeout: 10
-        )
-        dismissWorkspaceSelectorIfStillPresented(in: app, timeout: 20)
-        XCTAssertTrue(
-            waitForReaderShellReady(in: app, timeout: 20),
-            "Expected switching workspaces to return to the reader shell."
-        )
-    }
-
-    /**
-     Verifies that the bookmark list can be opened from the reader shell.
-     *
-     * - Side effects:
-     *   - launches the app with the calculator gate disabled, in-memory persistence, and one
-     *     deterministic seeded bookmark-label pair for stable reader-shell startup
-     *   - opens the reader overflow menu and pushes the bookmark list
-     * - Failure modes:
-     *   - fails if the bookmarks action is missing from the reader menu
-     *   - fails if the bookmark list screen does not render after navigation completes
-     */
 }

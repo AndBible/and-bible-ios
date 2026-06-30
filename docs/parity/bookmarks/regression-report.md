@@ -42,9 +42,7 @@ Verification matrix:
 ### UI
 
 - `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
-- `AndBibleUITests/testBookmarkListOpensLabelAssignmentForSeededBookmark`
-- `AndBibleUITests/testLabelManagerScreenOpensFromSettings`
-- `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
+- `AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions`
 - `AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser`
 
 ### Package UI Projection and Mutation

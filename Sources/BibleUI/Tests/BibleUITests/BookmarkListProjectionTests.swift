@@ -163,6 +163,81 @@ final class BookmarkListProjectionTests: XCTestCase {
     }
 
     /**
+     Verifies a selected label and in-content query compose without leaking stale state.
+
+     Setup:
+     - builds the same Genesis/Exodus label split used by the visible UI fixture
+     - applies the seeded label filter, then a conflicting query, then clears both controls
+
+     Expected result:
+     - the selected label narrows the list to Genesis
+     - the conflicting query hides Genesis without surfacing the unselected Exodus row
+     - clearing label and query state restores both rows and exports the default `all` state
+
+     Failure meaning:
+     - BookmarkList reset behavior can regress while route-level UI smokes keep passing, or search
+       can incorrectly bypass the selected-label filter.
+     */
+    func testBookmarkListProjectionComposesLabelFilterAndSearchThenResets() {
+        let seedLabel = Label(name: "UI Test Seed")
+        let genesis = bibleItem(
+            reference: "Genesis 1:1",
+            ordinal: 1,
+            labels: [seedLabel]
+        )
+        let exodus = bibleItem(reference: "Exodus 2:1", ordinal: 81)
+        let items = [genesis, exodus]
+
+        let labelFiltered = BookmarkListProjection.filteredItems(
+            items,
+            selectedLabelId: seedLabel.id,
+            searchText: "",
+            sortOrder: .bibleOrder
+        )
+        XCTAssertEqual(labelFiltered.map(\.reference), ["Genesis 1:1"])
+
+        let conflictingQuery = BookmarkListProjection.filteredItems(
+            items,
+            selectedLabelId: seedLabel.id,
+            searchText: "Exodus",
+            sortOrder: .bibleOrder
+        )
+        XCTAssertTrue(conflictingQuery.isEmpty)
+        XCTAssertEqual(
+            BookmarkListProjection.accessibilityValue(
+                for: conflictingQuery,
+                selectedLabelId: seedLabel.id,
+                labels: [seedLabel],
+                searchText: "Exodus",
+                isAssigningLabels: false,
+                includeRowTokens: true,
+                rowTokenLimit: 10
+            ),
+            "count=0;selectedLabel=UI_Test_Seed;query=Exodus;labelAssignment=false;rows="
+        )
+
+        let reset = BookmarkListProjection.filteredItems(
+            items,
+            selectedLabelId: nil,
+            searchText: "",
+            sortOrder: .bibleOrder
+        )
+        XCTAssertEqual(reset.map(\.reference), ["Genesis 1:1", "Exodus 2:1"])
+        XCTAssertEqual(
+            BookmarkListProjection.accessibilityValue(
+                for: reset,
+                selectedLabelId: nil,
+                labels: [seedLabel],
+                searchText: "",
+                isAssigningLabels: false,
+                includeRowTokens: true,
+                rowTokenLimit: 10
+            ),
+            "count=2;selectedLabel=all;query=;labelAssignment=false;rows=|Genesis_1_1|,|Exodus_2_1|"
+        )
+    }
+
+    /**
      Verifies generic bookmark rows participate in the same label-filter projection as Bible rows.
 
      Setup:

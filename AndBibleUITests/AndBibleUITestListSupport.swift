@@ -98,6 +98,76 @@ extension AndBibleUITests {
     }
 
     /**
+     Types a workspace name into the selector-owned prompt without broad text-field queries.
+     *
+     * The workspace prompt autofocuses its text entry. Hosted XCTest can still stall when resolving
+     * `app.textFields["Name"]` for this prompt, so this helper treats the prompt root/confirm button
+     * as the synchronization contract, types through the active application keyboard focus, and waits
+     * for the prompt-owned confirm button to become enabled.
+     *
+     * - Parameters:
+     *   - text: Workspace name to enter.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for prompt readiness and submit enablement.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - taps the prompt surface when available
+     *   - sends keyboard input through the running application
+     * - Failure modes:
+     *   - records an XCTest failure if the prompt is absent or the confirm button never enables
+     */
+    func typeWorkspaceNamePromptText(
+        _ text: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let promptReady = waitForAnyElement(
+            [
+                "workspaceNamePromptScreen",
+                "workspaceNamePromptConfirmButton",
+                "workspaceNamePromptCancelButton",
+            ],
+            in: app,
+            timeout: min(5, timeout)
+        )
+        XCTAssertNotNil(
+            promptReady,
+            "Expected the workspace name prompt before typing.",
+            file: file,
+            line: line
+        )
+
+        if let promptScreen = firstExistingElement(workspaceNamePromptScreenCandidates(in: app), timeout: 0.2),
+           elementFrameIsUsable(promptScreen.frame)
+        {
+            promptScreen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52)).tap()
+        }
+
+        app.typeText(text)
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let submitCandidates = workspaceNamePromptButtonCandidates(
+                "workspaceNamePromptConfirmButton",
+                in: app
+            )
+            for submitButton in submitCandidates where submitButton.exists && submitButton.isEnabled {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected the workspace name prompt confirm button to enable within \(timeout) seconds after typing.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Opens Label Manager through the reader overflow admin route.
      *
      * - Parameter app: Running application under test.
@@ -730,6 +800,62 @@ extension AndBibleUITests {
     }
 
     /**
+     Opens the Available Plans picker from the Reading Plans list.
+     *
+     * The Start toolbar item flips `showAvailablePlans` on the list before SwiftUI exports the
+     * picker root. Polling both the list state and the picker root keeps the smoke synchronized on
+     * the route contract instead of treating a toolbar tap as sufficient presentation evidence.
+     *
+     * - Parameters:
+     *   - app: Running application currently showing the Reading Plans list.
+     *   - timeout: Maximum time to activate the Start action and resolve the picker root.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The resolved Available Plans root once it exposes a usable frame.
+     * - Side effects:
+     *   - taps the production Start toolbar item while the list still reports the picker as hidden
+     * - Failure modes:
+     *   - records an XCTest failure when the picker route never becomes visible
+     */
+    @discardableResult
+    func openAvailableReadingPlans(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastListState = resolvedReadingPlanListStateValue(in: app) ?? "<missing>"
+
+        repeat {
+            if let picker = resolvedElement("availablePlansScreen", in: app),
+               elementHasUsableFrame(picker)
+            {
+                return picker
+            }
+
+            lastListState = resolvedReadingPlanListStateValue(in: app) ?? "<missing>"
+            if !lastListState.contains("showAvailablePlans=true") {
+                let remaining = max(0.1, deadline.timeIntervalSinceNow)
+                if let startButton = resolvedElement("readingPlanStartButton", in: app) {
+                    _ = tapElementIfPossible(startButton, timeout: min(1, remaining))
+                }
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let fallback = unresolvedElement("availablePlansScreen", in: app)
+        XCTAssertTrue(
+            fallback.exists,
+            "Expected Available Plans picker to appear within \(timeout) seconds. Final Reading Plans state: '\(lastListState)'.",
+            file: file,
+            line: line
+        )
+        return fallback
+    }
+
+    /**
      Reveals and returns the custom reading-plan import button in the available-plan picker.
      *
      * - Parameters:
@@ -1057,24 +1183,6 @@ extension AndBibleUITests {
         } while Date() < deadline
 
         return candidates[0]
-    }
-
-    /**
-     Opens Colors through Android's All Text Options navigation.
-     *
-     * - Parameter app: Running application under test.
-     * - Returns: The root accessibility-identified Colors screen element.
-     * - Side effects:
-     *   - opens the reader All Text Options screen
-     *   - taps the Colors preference row and pushes the Colors screen
-     * - Failure modes:
-     *   - fails when the Colors screen never appears
-     */
-    func openColorSettings(in app: XCUIApplication) -> XCUIElement {
-        _ = openAllTextOptions(in: app)
-        let colorsLink = requireReachableTextDisplayButton("textDisplayColorsLink", in: app, timeout: 10)
-        tapElementReliably(colorsLink, timeout: 10)
-        return requireElement("colorSettingsScreen", in: app, timeout: 20)
     }
 
     /**

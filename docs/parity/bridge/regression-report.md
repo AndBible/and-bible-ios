@@ -68,7 +68,7 @@ Related domain references:
 
 ### UI
 
-- `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
+- `AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference`
 - `AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser`
 
 ## What This Validation Actually Covers

@@ -27,7 +27,7 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
             REPO_ROOT / "AndBibleUITests" / "AndBibleUITests+SettingsAndSync.swift"
         ).read_text()
         test_start = source.index(
-            "func testSyncSettingsNextCloudInvalidURLShowsValidationStatus()"
+            "func testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen()"
         )
         test_end = source.index("/**", test_start)
         test_body = source[test_start:test_end]
@@ -71,8 +71,15 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
 
         self.assertIn("validateNextCloudServerURLAfterEditing()", credential_body)
         self.assertIn("focusedNextCloudCredentialField", credential_body)
+        self.assertIn("_ = validateNextCloudServerURLAfterEditing()", credential_body)
+        self.assertNotIn("if validateNextCloudServerURLAfterEditing()", credential_body)
         self.assertIn('"syncNextCloudServerURLCommitButton"', source)
         self.assertIn("ToolbarItemGroup(placement: .keyboard)", source)
+        commit_button_start = source.index('"syncNextCloudServerURLCommitButton"')
+        toolbar_commit_body = source[source.rfind("Button(String(localized: \"ok\"))", 0, commit_button_start):commit_button_start]
+        self.assertIn("_ = validateNextCloudServerURLAfterEditing()", toolbar_commit_body)
+        self.assertIn("focusedNextCloudCredentialField = nil", toolbar_commit_body)
+        self.assertNotIn("if validateNextCloudServerURLAfterEditing()", toolbar_commit_body)
         self.assertIn("-> Bool", validation_body)
         self.assertIn("@State private var lastCommittedServerURL", source)
         self.assertIn("lastCommittedServerURL = serverURL", persist_body)
@@ -97,9 +104,15 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
 
         self.assertIn("let syncScreen = requireElement(", resolver_body)
         self.assertIn('"syncSettingsScreen"', resolver_body)
-        self.assertIn("isElementVisible(button, within: syncScreen)", resolver_body)
+        self.assertIn("dismissKeyboardIfPresent(in: app)", resolver_body)
+        self.assertRegex(
+            resolver_body,
+            r"waitForElementToBecomeHittable\([^)]+\)\s*\|\|\s*"
+            r"isElementVisible\([^,]+,\s*within:\s*syncScreen\)",
+        )
         self.assertIn("isElementVisible(lastCandidate, within: syncScreen)", resolver_body)
         self.assertNotIn("become hittable within", resolver_body)
+        self.assertIn("revealPasses < minimumRevealPasses", resolver_body)
 
     def test_sync_connection_trigger_does_not_recheck_hittability_after_resolution(self) -> None:
         """Triggering the connection test uses the resolved row instead of a second hittability wait.

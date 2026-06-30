@@ -80,11 +80,8 @@ Verification matrix:
 - `RemoteSyncMyDocumentRestoreTests/testRemoteSyncSynchronizationServiceUploadsLocalMyDocumentChangesWhenNoRemotePatchesExist`
 ### UI
 
-- `AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus`
-- `AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen`
-- `AndBibleUITests/testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow`
-- `AndBibleUITests/testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath`
-- `AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen`
+- `AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen`
+- `AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow`
 - `BibleUITests/SettingsIconsTests/testApplicationPreferenceFeatureShortcutsExposeAndroidRows`
 - `BibleUITests/SettingsIconsTests/testApplicationPreferenceFeatureShortcutsFollowRuntimeAvailability`
 
@@ -98,12 +95,10 @@ Verification matrix:
 
 - missing or unknown backend values fall back safely to iCloud
 - Android-compatible raw keys persist NextCloud/WebDAV credentials and per-category enablement
-- backend and category mutations persist across direct Sync Settings reopen
+- backend and category mutations persist across direct Sync Settings reopen in one retained UI smoke
 - invalid NextCloud URL input surfaces the expected UI validation state
-- the visible adopt/create prompt can drive the create-new cloud replacement branch and complete
-  synchronization with the selected category enabled
-- the My Documents category is visible in Sync Settings and starts the same manual remote-sync
-  prompt path as the other supported categories
+- the visible My Documents adopt/create prompt can drive the create-new cloud replacement branch
+  and complete synchronization with the selected category enabled
 
 ### Bootstrap and baseline handling
 

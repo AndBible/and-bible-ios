@@ -29,27 +29,28 @@ Important nuance:
   two UI shards
 - `UI_TEST_MAX_SHARD_COUNT` is a ceiling that prevents stale or inflated timing
   data from multiplying macOS runner setup work
-- with the current manifest, target duration, and cap, the planner emits four
+- with the current manifest, target duration, and cap, the planner emits three
   balanced shards
-- without the cap, the current manifest would emit twelve shards
+- with the current 15-test smoke suite and timing manifest, the planner would
+  still emit three shards without the cap; the cap remains a guardrail against
+  stale or inflated future timing data
 
 It is better to describe the current system as "planner-capable with a minimum
 of two shards and a maximum of four shards" unless the timing manifest is being
 refreshed from real runs and the shard limits are being changed because of
 current evidence.
 
-Current local planner output for the checked-in suite is:
+Current local planner output for the checked-in 15-test smoke suite is:
 
 ```text
-Shard 1/4: 14 tests, estimated 1782.578s
-Shard 2/4: 14 tests, estimated 1743.700s
-Shard 3/4: 13 tests, estimated 1743.904s
-Shard 4/4: 14 tests, estimated 1746.836s
+Shard 1/3: 5 tests, estimated 520.107s
+Shard 2/3: 6 tests, estimated 515.852s
+Shard 3/3: 4 tests, estimated 525.000s
 ```
 
 The current timing manifest was regenerated from successful CI run
-`27824737059` on June 19, 2026, and updated with focused local bookmark/My Notes
-timings on June 28, 2026.
+`27824737059` on June 19, 2026, and updated with focused local route-smoke
+timings through June 29, 2026.
 
 ## How CI Actually Executes
 
@@ -101,7 +102,7 @@ Preferred order:
 
 Why this matters:
 
-- a full serial local UI run covers the same 55 UI tests, but its wall-clock
+- a full serial local UI run covers the same 15 UI tests, but its wall-clock
   runtime is not comparable to CI because CI runs shards in parallel
 - a targeted subset can prove a specific fix, but it does not prove the shard
   or full-suite shape is clean

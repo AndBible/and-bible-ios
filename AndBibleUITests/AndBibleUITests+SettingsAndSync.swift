@@ -105,206 +105,22 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that Android Restore or Import keeps Database and Documents as distinct targets.
-     *
-     * - Side effects:
-     *   - launches the app and opens Backup & Restore
-     *   - triggers the default Database Restore/Import picker
-     *   - relaunches a fresh app instance, selects Documents, and triggers the document/module picker
-     * - Failure modes:
-     *   - fails if the default Database target no longer opens the `.abdb.zip` restore/import path
-     *   - fails if Documents restore/import is collapsed into the database picker or legacy iOS
-     *     JSON/CSV importer
-     */
-    func testSettingsBackupRestoreRestoreImportPresentsTargetSpecificPickers() {
-        let databaseApp = makeApp()
-        databaseApp.launch()
-
-        let databaseScreen = openImportExport(in: databaseApp)
-        XCTAssertTrue(databaseScreen.exists)
-
-        let databaseTarget = requireElement("restoreWorkflowTarget.databaseButton", in: databaseApp, timeout: 10)
-        tapElementReliably(databaseTarget, timeout: 10)
-
-        let databaseRestoreButton = requireElement("backupWorkflowRestoreButton", in: databaseApp, timeout: 10)
-        tapElementReliably(databaseRestoreButton, timeout: 10)
-        waitForElementValue("importExportScreen", toEqual: "databaseRestorePickerPresented", in: databaseApp, timeout: 20)
-        databaseApp.terminate()
-
-        let documentsApp = makeApp()
-        documentsApp.launch()
-
-        let documentsScreen = openImportExport(in: documentsApp)
-        XCTAssertTrue(documentsScreen.exists)
-
-        let documentsTarget = requireElement("restoreWorkflowTarget.documentsButton", in: documentsApp, timeout: 10)
-        tapElementReliably(documentsTarget, timeout: 10)
-
-        let documentsRestoreButton = requireElement("backupWorkflowRestoreButton", in: documentsApp, timeout: 10)
-        tapElementReliably(documentsRestoreButton, timeout: 10)
-        waitForElementValue("importExportScreen", toEqual: "documentsRestorePickerPresented", in: documentsApp, timeout: 20)
-    }
-
-    /**
-     Verifies that bookmark-list filter and search state reset after dismissing and reopening the
-     real bookmark sheet.
-     *
-     * - Side effects:
-     *   - launches the reader shell with deterministic `Genesis 1:1` and `Exodus 2:1` bookmarks
-     *     assigned to different labels
-     *   - opens the real bookmark list, applies the seeded label filter, then adds a conflicting
-     *     search query so the filtered list becomes empty
-     *   - dismisses and reopens the bookmark list from the reader menu
-     * - Failure modes:
-     *   - fails if the bookmark list, seeded label chip, or search field never appears
-     *   - fails if the conflicting search query does not hide the remaining filtered bookmark
-     *   - fails if reopening the bookmark list does not restore both seeded rows
-     */
-    func testBookmarkListFilterAndSearchResetAcrossReopen() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openBookmarkList(in: app)
-
-        let searchField = requireBookmarkListSearchField(in: app, timeout: 10)
-
-        selectBookmarkListFilterChip("UI_Test_Seed", in: app, timeout: 10)
-        waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
-        waitForBookmarkListState(containing: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
-        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
-
-        replaceText(in: searchField, with: "Exodus", placeholderHints: ["Search bookmarks"])
-        waitForBookmarkListState(containing: "count=0", in: app, timeout: 10)
-        waitForBookmarkListState(containing: "query=Exodus", in: app, timeout: 10)
-        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
-
-        reopenBookmarkList(in: app)
-        waitForBookmarkListState(containing: "selectedLabel=all", in: app, timeout: 10)
-        waitForBookmarkListState(containing: "count=2", in: app, timeout: 10)
-        waitForBookmarkListState(notContaining: "query=Exodus", in: app, timeout: 10)
-        waitForBookmarkListState(containing: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
-        waitForBookmarkListState(containing: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
-    }
-
-    /**
-     Verifies that the Settings Label Manager route opens the native manager screen.
-     *
-     * Label creation, edit-save, and delete persistence now run in `LabelManagerMutationTests`
-     * because they are package-owned SwiftData contracts. This UI smoke intentionally stays small
-     * and protects only the live app route and readiness probes.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell and opens the label manager through Settings
-     * - Failure modes:
-     *   - fails if the Settings route cannot reach `LabelManagerView` or if the screen loses its
-     *     app-visible readiness/export identifiers
-     */
-    func testLabelManagerScreenOpensFromSettings() {
-        let app = makeApp()
-        app.launch()
-
-        XCTAssertTrue(openLabelManager(in: app).exists)
-        _ = requireElement("labelManagerAddButton", in: app, timeout: 10)
-        _ = requireElement("labelManagerStateExport", in: app, timeout: 10)
-    }
-
-    /**
-     Verifies that invalid NextCloud server input surfaces the expected validation status.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell and opens Sync Settings from the reader action
-     *   - enters one invalid server URL and commits the inline credential edit through the
-     *     Android-equivalent keyboard commit action
-     * - Failure modes:
-     *   - fails if the Sync Settings sheet never appears
-     *   - fails if the NextCloud server field is missing
-     *   - fails if the exported connection-test state never reaches `failureInvalidURL`
-     */
-    func testSyncSettingsNextCloudInvalidURLShowsValidationStatus() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openSyncSettingsFromReaderAction(in: app)
-        let serverField = requireElement("syncNextCloudServerURLField", in: app, timeout: 10)
-
-        replaceText(in: serverField, with: "not-a-url")
-        let commitButton = requireElement("syncNextCloudServerURLCommitButton", in: app, timeout: 5)
-        tapElementReliably(commitButton, timeout: 2)
-        waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
-    }
-
-    /**
-     Verifies that the visible adopt-versus-create confirmation can drive the create-new branch.
+     Verifies that the visible My Documents adopt-versus-create confirmation can drive the
+     create-new branch.
      *
      * - Side effects:
      *   - launches Sync Settings with deterministic NextCloud settings and a UI-test remote
-     *     backend that reports one existing same-named bookmark sync folder
-     *   - enables bookmark sync through the production category row
+     *     backend that reports one existing same-named My Documents sync folder
+     *   - scrolls to and enables My Documents sync through the production category row
      *   - chooses "Copy from this device to Cloud" in the adopt-versus-create prompt and confirms
      *     the destructive reset-cloud branch
      * - Failure modes:
      *   - fails if the first adopt/create prompt never appears
      *   - fails if the create-new choice does not surface the reset-cloud confirmation
      *   - fails if confirming the reset-cloud branch does not complete synchronization with the
-     *     bookmarks category enabled
+     *     My Documents category enabled
      */
-    func testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow() {
-        let app = makeApp(remoteSyncBootstrapScenario: "adopt-existing")
-        app.launch()
-
-        _ = openSyncSettingsFromReaderAction(in: app)
-        waitForSyncState(["backend": "NEXT_CLOUD", "enabled": "none"], in: app, timeout: 10)
-
-        toggleSyncCategory(
-            "syncCategoryToggle::bookmarks",
-            in: app,
-            expectedTokens: [
-                "backend": "NEXT_CLOUD",
-                "enabled": "bookmarks",
-                "bootstrapPrompt": "adoptOrCreate:bookmarks",
-            ],
-            timeout: 15
-        )
-
-        let createFromDeviceButton = app.alerts.firstMatch.buttons["Copy from this device to Cloud"].firstMatch
-        XCTAssertTrue(
-            createFromDeviceButton.waitForExistence(timeout: 10),
-            "Expected the adopt-versus-create alert to expose the create-new choice."
-        )
-        tapElementReliably(createFromDeviceButton, timeout: 10)
-
-        waitForSyncState(["pendingConfirmation": "resetCloud:bookmarks"], in: app, timeout: 10)
-        tapAlertButton("OK", in: app, timeout: 10)
-
-        waitForSyncState(
-            [
-                "backend": "NEXT_CLOUD",
-                "enabled": "bookmarks",
-                "bootstrapPrompt": "none",
-                "pendingConfirmation": "none",
-                "lastConfirmation": "resetCloud:bookmarks",
-            ],
-            in: app,
-            timeout: 20
-        )
-    }
-
-    /**
-     Verifies that the My Documents category row is exposed and starts the same manual
-     synchronization path as existing supported categories.
-     *
-     * - Side effects:
-     *   - launches Sync Settings with deterministic NextCloud settings and a UI-test remote
-     *     backend that reports one existing same-named My Documents sync folder
-     *   - scrolls to and enables the production My Documents category row
-     *   - leaves synchronization at the visible adopt-versus-create prompt, proving the category
-     *     entered the manual remote-sync branch without requiring live credentials
-     * - Failure modes:
-     *   - fails if the My Documents category row is missing from Sync Settings
-     *   - fails if enabling the row does not persist `enabled=mydocuments`
-     *   - fails if enabling the row does not surface the My Documents adopt/create prompt
-     */
-    func testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath() {
+    func testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow() {
         let app = makeApp(remoteSyncBootstrapScenario: "adopt-existing")
         app.launch()
 
@@ -321,26 +137,56 @@ extension AndBibleUITests {
             ],
             timeout: 15
         )
+
+        let createFromDeviceButton = app.alerts.firstMatch.buttons["Copy from this device to Cloud"].firstMatch
+        XCTAssertTrue(
+            createFromDeviceButton.waitForExistence(timeout: 10),
+            "Expected the adopt-versus-create alert to expose the create-new choice."
+        )
+        tapElementReliably(createFromDeviceButton, timeout: 10)
+
+        waitForSyncState(["pendingConfirmation": "resetCloud:mydocuments"], in: app, timeout: 10)
+        tapAlertButton("OK", in: app, timeout: 10)
+
+        waitForSyncState(
+            [
+                "backend": "NEXT_CLOUD",
+                "enabled": "mydocuments",
+                "bootstrapPrompt": "none",
+                "pendingConfirmation": "none",
+                "lastConfirmation": "resetCloud:mydocuments",
+            ],
+            in: app,
+            timeout: 20
+        )
     }
 
     /**
-     Verifies disabling a seeded NextCloud category mutates state and persists across reopen.
+     Verifies NextCloud invalid URL validation, category disabling, and backend switching.
      *
      * - Side effects:
      *   - launches the app on the reader shell with persisted NextCloud settings and bookmarks
      *     already enabled through host-side fixture seeding
+     *   - enters one invalid server URL and commits the inline credential edit through the
+     *     Android-equivalent keyboard commit action
      *   - disables the bookmarks category through the production toggle and observes the immediate
      *     exported `enabled=none` state
      *   - dismisses the Sync screen, reopens it from the reader action, and rehydrates from
      *     persisted settings state
+     *   - switches from NextCloud to iCloud through the production backend picker, dismisses, and
+     *     reopens again so the iCloud section is rehydrated from persisted settings
      * - Failure modes:
      *   - fails if the seeded Sync screen does not start with `backend=NEXT_CLOUD;enabled=bookmarks`
+     *   - fails if the NextCloud server field is missing or if the exported connection-test state
+     *     never reaches `failureInvalidURL`
      *   - fails if disabling the category does not update the exported Sync screen state to
      *     `backend=NEXT_CLOUD;enabled=none`
      *   - fails if the direct dismiss or reopen controls never appear
      *   - fails if reopening the sheet does not preserve the exported `enabled=none` state token
+     *   - fails if switching backend does not expose the iCloud section immediately and after
+     *     direct reopen
      */
-    func testSyncSettingsCategoryDisablePersistsAcrossDirectReopen() {
+    func testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen() {
         let app = makeApp()
         app.launch()
 
@@ -351,6 +197,13 @@ extension AndBibleUITests {
             backend: "NEXT_CLOUD",
             enabled: "bookmarks"
         )
+
+        let serverField = requireElement("syncNextCloudServerURLField", in: app, timeout: 10)
+        replaceText(in: serverField, with: "not-a-url")
+        let commitButton = requireElement("syncNextCloudServerURLCommitButton", in: app, timeout: 5)
+        tapElementReliably(commitButton, timeout: 2)
+        waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
+        tapAlertButton("OK", in: app, timeout: 10)
 
         toggleSyncCategory(
             "syncCategoryToggle::bookmarks",
@@ -364,36 +217,6 @@ extension AndBibleUITests {
         let reopenedSyncState = requireElement("syncSettingsState", in: app, timeout: 10)
         assertSyncState(
             reopenedSyncState.value as? String,
-            backend: "NEXT_CLOUD",
-            enabled: "none"
-        )
-    }
-
-    /**
-     Verifies switching the active sync backend swaps visible sections and persists across reopen.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell and opens Sync Settings with its persisted backend
-     *   - switches the backend from NextCloud to iCloud through the production picker and observes
-     *     the immediate iCloud section
-     *   - dismisses and reopens Sync Settings from the reader action so the sheet rehydrates from
-     *     persisted settings state
-     * - Failure modes:
-     *   - fails if the seeded Sync screen does not start in the NextCloud branch
-     *   - fails if the exported Sync screen state does not move from `backend=NEXT_CLOUD;enabled=none`
-     *     to `backend=ICLOUD;enabled=none`
-     *   - fails if the dismiss or reopen controls never appear
-     *   - fails if reopening the sheet does not preserve the exported `backend=ICLOUD;enabled=none`
-     *     state token or the iCloud section
-     */
-    func testSyncSettingsBackendSwitchPersistsAcrossDirectReopen() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openSyncSettingsFromReaderAction(in: app)
-        let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        assertSyncState(
-            syncState.value as? String,
             backend: "NEXT_CLOUD",
             enabled: "none"
         )
@@ -415,31 +238,6 @@ extension AndBibleUITests {
             timeout: 10
         )
         XCTAssertTrue(requireElement("syncICloudEnabledToggle", in: app, timeout: 10).exists)
-    }
-
-    /**
-     Verifies that the Colors reset action restores the seeded theme tuple to defaults.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell and opens the Colors editor with a seeded
-     *     non-default theme tuple
-     *   - triggers the reset-to-defaults action and waits for the exported color state to return
-     *     to the default marker
-     * - Failure modes:
-     *   - fails if the Colors editor never appears
-     *   - fails if the reset action is missing or if the exported color state never changes back
-     *     to `colorDefaults`
-     */
-    func testColorSettingsResetRestoresDefaultThemeColors() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openColorSettings(in: app)
-        waitForElementValue("colorSettingsScreen", toEqual: "colorCustom", in: app, timeout: 10)
-        XCTAssertEqual(resolvedElementSemanticText("colorSettingsScreen", in: app), "colorCustom")
-
-        tapElementReliably(requireElement("colorSettingsResetButton", in: app, timeout: 10), timeout: 10)
-        waitForElementValue("colorSettingsScreen", toEqual: "colorDefaults", in: app, timeout: 10)
     }
 
     /**

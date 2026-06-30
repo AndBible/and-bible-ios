@@ -155,6 +155,99 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies Search translation picker drafts preserve Android Cancel, dismiss, and empty-OK semantics.
+
+     Android's multiselect dialog mutates a temporary checked-row set while open. Cancel and
+     outside dismiss discard the draft, while OK with no checked rows preserves the previously
+     committed selection. This reducer-level coverage replaces the removed full-app Cancel/dismiss
+     UI path without adding another slow launched Search smoke.
+
+     - Setup: Opens a draft from a two-module committed selection, mutates it, then exercises
+       Cancel, outside dismiss, and empty OK result paths.
+     - Expected result: Cancel/dismiss clear only draft state, and empty OK preserves the previous
+       primary-first committed selection while dismissing the draft.
+     - Failure meaning: Search can drift into iOS-specific sheet semantics where transient row
+       toggles leak into the committed Search modules or empty OK clears translations.
+     - Side effects: none.
+     */
+    func testSearchTranslationPickerDraftStateDiscardsCancelAndOutsideDismissDrafts() {
+        let modules = [
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en"),
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en"),
+            ModuleInfo(name: "ASV", description: "American Standard Version", category: .bible, language: "en"),
+        ]
+
+        let opened = SearchTranslationPickerDraftState.opened(
+            selectedModuleNames: ["KJV", "WEB"],
+            primaryModuleName: "KJV",
+            installedModules: modules
+        )
+        XCTAssertTrue(opened.isPresented)
+        XCTAssertEqual(opened.pendingSelection, ["KJV", "WEB"])
+
+        let cancelled = opened.toggled("ASV").toggled("KJV").cancelled()
+        XCTAssertFalse(cancelled.isPresented)
+        XCTAssertTrue(cancelled.pendingSelection.isEmpty)
+
+        let outsideDismiss = opened.toggled("ASV").cancelled()
+        XCTAssertFalse(outsideDismiss.isPresented)
+        XCTAssertTrue(outsideDismiss.pendingSelection.isEmpty)
+
+        let emptyOK = SearchTranslationPickerDraftState(
+            isPresented: true,
+            pendingSelection: []
+        ).committedSelection(
+            previousModuleNames: ["KJV", "WEB"],
+            primaryModuleName: "KJV",
+            installedModules: modules
+        )
+        XCTAssertEqual(emptyOK.orderedModuleNames, ["KJV", "WEB"])
+        XCTAssertFalse(emptyOK.draftState.isPresented)
+        XCTAssertTrue(emptyOK.draftState.pendingSelection.isEmpty)
+    }
+
+    /**
+     Verifies Search's visible translation summary uses Android's primary-first abbreviation list.
+
+     Android presents the committed translation selection as a comma-separated abbreviation list
+     after preserving the active document first. This package-level assertion replaces the former
+     full-app Search UI smoke assertion for the visible `KJV, AATESTWEB` label.
+
+     - Setup: Selects KJV and AATESTWEB while installed module metadata is intentionally unsorted.
+     - Expected result: The primary KJV abbreviation is first and empty selections use the localized
+       fallback label.
+     - Failure meaning: Search can drift back to an iOS count/generic label or unstable module
+       order even though the picker commit itself succeeds.
+     - Side effects: none.
+     */
+    func testSearchTranslationSummaryUsesAndroidPrimaryFirstAbbreviationList() {
+        let modules = [
+            ModuleInfo(name: "AATESTWEB", description: "World English Bible", category: .bible, language: "en"),
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en"),
+            ModuleInfo(name: "ASV", description: "American Standard Version", category: .bible, language: "en"),
+        ]
+
+        XCTAssertEqual(
+            SearchView.androidSelectedTranslationSummaryLabel(
+                selectedModuleNames: ["AATESTWEB", "KJV"],
+                primaryModuleName: "KJV",
+                installedModules: modules,
+                fallbackLabel: "Translations"
+            ),
+            "KJV, AATESTWEB"
+        )
+        XCTAssertEqual(
+            SearchView.androidSelectedTranslationSummaryLabel(
+                selectedModuleNames: [],
+                primaryModuleName: nil,
+                installedModules: modules,
+                fallbackLabel: "Translations"
+            ),
+            "Translations"
+        )
+    }
+
+    /**
      Verifies Search translation picker row labels expose index readiness like Android.
 
      Android appends the localized `search_index_not_created` status to unindexed modules inside
@@ -530,17 +623,16 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies UI-test seeded Search fixtures satisfy the app's index-readiness checks.
+     Verifies seeded Search index metadata satisfies the app's index-readiness checks.
 
-     The fixture tool writes deterministic `search-indexed` and `search-multi-translation`
-     metadata directly into `search_indexes.sqlite` before the app launches. SearchView decides
-     whether to prompt `state=needsIndex` through `SearchIndexService.hasIndex` and
-     `hasStrongsIndex`, so this test anchors that fixture schema to the same app-side readiness
-     contract instead of only checking that rows exist.
+     UI fixtures write deterministic metadata directly into `search_indexes.sqlite` before the app
+     launches. SearchView decides whether to prompt `state=needsIndex` through
+     `SearchIndexService.hasIndex` and `hasStrongsIndex`, so this test anchors that schema to the
+     same app-side readiness contract instead of only checking that rows exist.
 
      - Setup: Creates an isolated SQLite search-index database with KJV text/Strong's rows and
-       UITESTWEB text rows matching the seeded fixture shape.
-     - Expected result: KJV and UITESTWEB do not need indexing, and KJV is Strong's-ready.
+       AATESTWEB text rows matching the multi-module fixture shape.
+     - Expected result: KJV and AATESTWEB do not need indexing, and KJV is Strong's-ready.
      - Failure meaning: Normal Search UI tests can fall back to runtime index creation despite the
        fixture claiming to be preseeded.
      - Side effects: Creates and removes one temporary SQLite database.
@@ -558,14 +650,14 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
                 ('Genesis 1:2', 'And the Spirit of God moved upon the face of the waters.', 'KJV', 0),
                 ('Matthew 1:1', 'The book of the generation of Jesus Christ.', 'KJV', 1),
                 ('Genesis 6:8', 'But Noah found grace in the eyes of the Lord.', 'KJV', 2),
-                ('Genesis 1:2', 'The earth was formless and empty.', 'UITESTWEB', 0),
-                ('John 3:16', 'For God so loved the world.', 'UITESTWEB', 1);
+                ('Genesis 1:2', 'The earth was formless and empty.', 'AATESTWEB', 0),
+                ('John 3:16', 'For God so loved the world.', 'AATESTWEB', 1);
             INSERT INTO verse_strongs (module_name, token, verse_key, entry_order)
             VALUES ('KJV', 'H0430', 'Genesis 1:2', 0);
             INSERT INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
             VALUES
                 ('KJV', 3, datetime('now'), \(SearchIndexService.currentSchemaVersion)),
-                ('UITESTWEB', 2, datetime('now'), \(SearchIndexService.currentSchemaVersion));
+                ('AATESTWEB', 2, datetime('now'), \(SearchIndexService.currentSchemaVersion));
             """
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
                 let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "SQLite write failed"
@@ -577,8 +669,8 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
 
         XCTAssertTrue(service.hasIndex(for: "KJV"))
         XCTAssertTrue(service.hasStrongsIndex(for: "KJV"))
-        XCTAssertTrue(service.hasIndex(for: "UITESTWEB"))
-        XCTAssertEqual(service.modulesNeedingIndex(from: ["KJV", "UITESTWEB"]), [])
+        XCTAssertTrue(service.hasIndex(for: "AATESTWEB"))
+        XCTAssertEqual(service.modulesNeedingIndex(from: ["KJV", "AATESTWEB"]), [])
     }
 
     /**

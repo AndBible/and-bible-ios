@@ -20,12 +20,11 @@ extension AndBibleUITests {
     /**
      Opens Search and waits for it to become interactive under the current fixture contract.
 
-     Normal Search UI tests use the `search-indexed` and `search-multi-translation` fixture
-     scenarios from `scripts/ui_test_fixture_manifest.json`. Those scenarios must be detected by
-     the app as already indexed and must not enter `state=needsIndex`; otherwise the test is hiding
-     a fixture regression behind runtime index creation and long readiness waits. Intentional
-     runtime index-creation coverage should use a non-seeded fixture path and test that workflow
-     explicitly.
+     Normal Search UI tests use `search-indexed` or `search-multi-translation` fixture scenarios
+     from `scripts/ui_test_fixture_manifest.json`. Those scenarios must be detected by the app as
+     already indexed and must not enter `state=needsIndex`; otherwise the test is hiding a fixture
+     regression behind runtime index creation and long readiness waits. Intentional runtime
+     index-creation coverage should use a non-seeded fixture path and test that workflow explicitly.
 
      - Parameters:
        - app: Running application under test.
@@ -838,13 +837,18 @@ extension AndBibleUITests {
      Toggles one module row in the Search translation picker.
      *
      * - Parameters:
-     *   - moduleName: Stable module abbreviation, such as `UITESTWEB`.
+     *   - moduleName: Stable module abbreviation, such as `AATESTWEB`.
      *   - app: Running application under test.
      *   - timeout: Maximum time to wait for the row.
      * - Side effects:
      *   - taps the matching translation row
      * - Failure modes:
      *   - fails when the picker does not expose the requested row
+     *
+     * SwiftUI may materialize lazy-list rows outside the dialog's clipped viewport. Those rows
+     * expose usable frames, but XCTest correctly reports them as non-hittable. This helper waits
+     * for the requested row to become hittable before tapping so it cannot fall back to stale
+     * offscreen coordinates that hit the overlay chrome instead of the row.
      */
     func tapSearchTranslationRow(
         moduleName: String,
@@ -859,21 +863,30 @@ extension AndBibleUITests {
                 searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
                 timeout: 0
             ) {
-                let expectedValue = expectedSearchTranslationRowValue(afterTapping: row)
-                if waitForElementToBecomeHittable(row, timeout: 1),
-                   elementHasUsableFrame(row) {
-                    row.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
-                } else {
-                    tapElementReliably(row, timeout: 1)
+                if waitForElementToBecomeHittable(row, timeout: 0.5) {
+                    let expectedValue = expectedSearchTranslationRowValue(afterTapping: row)
+                    row.tap()
+                    waitForSearchTranslationRowMutation(
+                        identifier: identifier,
+                        moduleName: moduleName,
+                        expectedValue: expectedValue,
+                        in: app,
+                        timeout: min(3, timeout)
+                    )
+                    return
                 }
-                waitForSearchTranslationRowMutation(
-                    identifier: identifier,
-                    moduleName: moduleName,
-                    expectedValue: expectedValue,
-                    in: app,
-                    timeout: min(3, timeout)
-                )
-                return
+
+                if let pickerList = firstExistingElement(searchTranslationPickerListCandidates(in: app), timeout: 0.1),
+                   pickerList.exists {
+                    if elementHasUsableFrame(row),
+                       row.frame.midY < app.frame.midY {
+                        pickerList.swipeDown()
+                    } else {
+                        pickerList.swipeUp()
+                    }
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                continue
             }
 
             if let pickerList = firstExistingElement(searchTranslationPickerListCandidates(in: app), timeout: 0.1),
@@ -1047,8 +1060,10 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to wait for the toolbar action.
      * - Side effects:
      *   - taps the picker dialog neutral select toggle
+     *   - waits for the toggle's semantic value to flip, proving the draft selection mutated
      * - Failure modes:
      *   - fails when the Search All action is not reachable
+     *   - fails when the neutral action does not mutate the picker draft
      */
     func tapSearchTranslationSelectAll(
         in app: XCUIApplication,
@@ -1056,7 +1071,13 @@ extension AndBibleUITests {
     ) {
         let selectAll = app.buttons["searchTranslationSelectAllButton"].firstMatch
         if selectAll.waitForExistence(timeout: timeout) {
+            let expectedValue = expectedSearchTranslationSelectToggleValue(afterTapping: selectAll)
             tapElementReliably(selectAll, timeout: timeout)
+            waitForSearchTranslationSelectToggleValue(
+                expectedValue,
+                in: app,
+                timeout: min(3, timeout)
+            )
             return
         }
 
@@ -1066,6 +1087,54 @@ extension AndBibleUITests {
             "Expected Search translation select toggle to exist within \(timeout) seconds."
         )
         tapElementReliably(fallbackSelectAll, timeout: timeout)
+    }
+
+    /// Returns the expected neutral select-toggle semantic value after tapping it.
+    func expectedSearchTranslationSelectToggleValue(afterTapping toggle: XCUIElement) -> String? {
+        switch toggle.value as? String {
+        case "selectAll":
+            return "selectNone"
+        case "selectNone":
+            return "selectAll"
+        default:
+            return nil
+        }
+    }
+
+    /**
+     Waits for the Search translation picker neutral action to expose an expected semantic state.
+     *
+     * - Parameters:
+     *   - expectedValue: Expected accessibility value after a Select all/none tap. `nil` skips the
+     *     wait for localized fallback controls that do not expose the stable test value.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the semantic state change.
+     * - Side effects: polls the live picker button only.
+     * - Failure modes: fails when the stable picker button remains visible but does not reach the
+     *   expected value before the timeout.
+     */
+    func waitForSearchTranslationSelectToggleValue(
+        _ expectedValue: String?,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        guard let expectedValue else { return }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        let toggle = app.buttons["searchTranslationSelectAllButton"].firstMatch
+        var lastValue = toggle.value as? String
+
+        repeat {
+            if toggle.exists, toggle.value as? String == expectedValue {
+                return
+            }
+            lastValue = toggle.value as? String
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected Search translation select toggle value '\(expectedValue)' within \(timeout) seconds; last value was '\(lastValue ?? "nil")'."
+        )
     }
 
     /**

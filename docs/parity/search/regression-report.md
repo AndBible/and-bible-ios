@@ -32,31 +32,36 @@ Verification matrix:
 
 ### Unit
 
-- `AndBibleTests/testStrongsQueryNormalizationHandlesLeadingZeroes`
-- `AndBibleTests/testStrongsQueryNormalizationAcceptsDecoratedInput`
-- `AndBibleTests/testParseVerseKeySupportsHumanReadableFormat`
-- `AndBibleTests/testParseVerseKeySupportsOsisFormat`
-- `AndBibleTests/testParseVerseKeySupportsOsisFormatWithSuffix`
-- `AndBibleTests/testStrongsSearchFindAllOccurrencesReturnsBundledKJVMatches`
-- `AndBibleTests/testStrongsSearchFindAllOccurrencesSupportsIntermediateZeroTrimVariant`
-- `AndBibleTests/testSearchIndexFindsCanonicalStrongsTokens`
-- `AndBibleTests/testSearchIndexReturnsTextHitsInCanonicalEntryOrder`
+- `BibleUITests/StrongsAndDictionaryTests/testStrongsQueryNormalizationHandlesLeadingZeroes`
+- `BibleUITests/StrongsAndDictionaryTests/testStrongsQueryNormalizationAcceptsDecoratedInput`
+- `BibleUITests/StrongsAndDictionaryTests/testParseVerseKeySupportsHumanReadableFormat`
+- `BibleUITests/StrongsAndDictionaryTests/testParseVerseKeySupportsOsisFormat`
+- `BibleUITests/StrongsAndDictionaryTests/testParseVerseKeySupportsOsisFormatWithSuffix`
+- `BibleUITests/StrongsAndDictionaryTests/testStrongsSearchFindAllOccurrencesReturnsBundledKJVMatches`
+- `BibleUITests/StrongsAndDictionaryTests/testStrongsSearchFindAllOccurrencesSupportsIntermediateZeroTrimVariant`
+- `BibleUITests/StrongsAndDictionaryTests/testSearchIndexFindsCanonicalStrongsTokens`
+- `BibleUITests/StrongsAndDictionaryTests/testSearchIndexReturnsTextHitsInCanonicalEntryOrder`
 - `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchWordModesMatchAndroidSearchContracts`
 - `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchScopeFiltersMatchAndroidSearchContracts`
 - `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchMultipleReturnsPerModuleBucketsForGroupedTotals`
+- `BibleUITests/StrongsAndDictionaryTests/testSearchTranslationSelectionKeepsPrimaryFirstAfterAndroidSortedCommit`
+- `BibleUITests/StrongsAndDictionaryTests/testSearchTranslationEmptyDialogConfirmationPreservesPreviousSelection`
+- `BibleUITests/StrongsAndDictionaryTests/testSearchTranslationPickerDraftStateDiscardsCancelAndOutsideDismissDrafts`
+- `BibleUITests/StrongsAndDictionaryTests/testSearchTranslationSummaryUsesAndroidPrimaryFirstAbbreviationList`
 
 ### UI
 
-- `AndBibleUITests/testSearchEntryRouteRetainsSeededQuery`
-- `AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals`
 - `AndBibleUITests/testSearchOptionControlsMutateVisibleState`
 
 ## Expected Assertions Covered
 
-### Direct-launch search harness
+### Reader-owned search route
 
+- Search opens as an Android-style reader destination, not an iOS sheet
 - seeded query survives hydration into the visible Search screen
 - indexed text results are emitted in canonical verse order for broad queries through package tests
+- the retained visible Search workflow also commits a second translation and selects a grouped
+  result without launching a second app session
 
 ### Search options
 
@@ -70,10 +75,13 @@ Verification matrix:
 ### Multi-translation grouped results
 
 - selecting a second translation from the Search translation picker reruns the active query
+- live Cancel, outside-dismiss, and Select all -> Select none -> OK picker actions preserve the
+  previous selected translation instead of committing the draft
+- the visible selected-translation summary preserves Android's primary-first abbreviation list
 - grouped Search state reports the selected translation set
 - grouped Search state reports a combined total plus per-translation counts
-- the regression fixture returns more hits only when both KJV and UITESTWEB participate
-- selecting a grouped UITESTWEB result navigates the reader away from its original passage
+- the regression fixture returns more hits only when both KJV and AATESTWEB participate
+- selecting a grouped result navigates the reader away from its original passage
 
 ### Strong's behavior
 
@@ -104,6 +112,7 @@ This gives the search domain current regression evidence for:
 - query retention
 - scope and word-mode mutation
 - multi-translation grouped totals
+- live multi-translation dialog cancel/dismiss/empty-OK wiring
 - grouped-result navigation
 - Strong's normalization/indexed lexical-token hit search
 - result navigation into the reader

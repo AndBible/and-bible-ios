@@ -82,7 +82,7 @@ At minimum, reader-adjacent changes should keep the focused workflow subset in
 - reader drawer/overflow routing
 - search-result navigation back into the reader
 - history jump-back plus clear/delete persistence
-- workspace selector create/switch from the reader shell
+- workspace selector create from the reader shell, with workspace switching covered below the UI layer
 - restored-position highlight behavior
 - bridge-driven compare and Strong's document-pipeline payload construction
 

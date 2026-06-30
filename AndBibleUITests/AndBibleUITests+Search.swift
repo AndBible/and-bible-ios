@@ -7,20 +7,22 @@ import UIKit
 
 extension AndBibleUITests {
     /**
-     Verifies reader menu About still opens and Settings routes Android's global text-options row.
+     Verifies reader menu About still opens and Settings routes Android shortcut rows.
      *
      * Package tests own the full Application Preferences row catalog. This UI smoke keeps the live
-     * route contract: About remains reachable from the reader menu, Settings is pushed from the
-     * reader action surface, its key shortcuts are exposed, and the Global text options row opens
-     * root-scoped Text Display settings rather than workspace/window options.
+     * route contract: About and Label Settings remain reachable from the reader menu, Settings is
+     * pushed from the reader action surface, and the Global text options row opens root-scoped Text
+     * Display settings rather than workspace/window options.
      *
      * - Side effects:
      *   - launches the app with deterministic in-memory persistence
      *   - opens and dismisses About from the reader menu
+     *   - opens and dismisses Label Manager from the reader menu's Label Settings action
      *   - pushes Settings from the reader action surface
      *   - activates the production Global text options row
      * - Failure modes:
      *   - fails if About no longer opens from the reader menu or cannot return to the reader shell
+     *   - fails if Label Settings cannot reach `LabelManagerView` readiness exports
      *   - fails if Settings still presents as a sheet instead of a reader destination
      *   - fails if the Android shortcut rows disappear from the Settings state
      *   - fails if Global text options opens any scope other than `global`
@@ -36,6 +38,26 @@ extension AndBibleUITests {
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
             "Expected About dismissal to return to the reader shell."
+        )
+
+        XCTAssertTrue(openLabelManager(in: app).exists)
+        _ = requireElement("labelManagerAddButton", in: app, timeout: 10)
+        _ = requireElement("labelManagerStateExport", in: app, timeout: 10)
+        let labelManagerDoneButton = firstExistingElement(
+            [
+                app.navigationBars.buttons["Done"].firstMatch,
+                app.buttons["Done"].firstMatch,
+            ],
+            timeout: 10
+        )
+        XCTAssertNotNil(labelManagerDoneButton, "Expected Label Manager to expose a Done action.")
+        guard let labelManagerDoneButton else {
+            return
+        }
+        tapElementReliably(labelManagerDoneButton, timeout: 10)
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected Label Manager dismissal to return to the reader shell."
         )
 
         openSettings(in: app)
@@ -55,8 +77,8 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Android's reader All Text Options route, workspace parent link, and font-family
-     editor presentation.
+     Verifies Android's reader All Text Options route, color reset, workspace parent link, and
+     font-family editor presentation.
      *
      Package tests own text-display row order, row visibility, editor state semantics, and Android
      value normalization. This UI smoke keeps the production route live: the reader action opens
@@ -67,11 +89,13 @@ extension AndBibleUITests {
      * - Side effects:
      *   - launches the reader shell with deterministic in-memory data
      *   - opens the real overflow menu action identified by Android's All Text Options row
+     *   - opens Colors from that workspace-scoped route and resets seeded custom colors
      *   - taps the Global text options parent link inside Text Display settings
      *   - opens the font-family editor overlay
      * - Failure modes:
      *   - fails if the overflow action is routed to global Application Preferences
      *   - fails if the overflow action is routed to window-scoped Text Display settings
+     *   - fails if the Colors route or reset action is missing from the visible Android path
      *   - fails if the workspace parent link is missing or if global scope still exposes parent
      *     links
      *   - fails if the editor route regresses to native iOS picker/sheet presentation
@@ -95,7 +119,28 @@ extension AndBibleUITests {
             "Workspace text options must not show Android's window-only workspace parent link."
         )
 
-        let globalLink = requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10)
+        let colorsLink = requireReachableTextDisplayButton("textDisplayColorsLink", in: app, timeout: 10)
+        tapElementReliably(colorsLink, timeout: 10)
+        waitForElementValue("colorSettingsScreen", toEqual: "colorCustom", in: app, timeout: 10)
+        XCTAssertEqual(resolvedElementSemanticText("colorSettingsScreen", in: app), "colorCustom")
+
+        tapElementReliably(requireElement("colorSettingsResetButton", in: app, timeout: 10), timeout: 10)
+        waitForElementValue("colorSettingsScreen", toEqual: "colorDefaults", in: app, timeout: 10)
+
+        let colorSettingsBackButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(
+            colorSettingsBackButton.waitForExistence(timeout: 10),
+            "Expected Colors to expose NavigationStack back chrome to Text Options."
+        )
+        tapElementReliably(colorSettingsBackButton, timeout: 10)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
+
+        let globalLink = requireReachableTextDisplayButton(
+            "textDisplayOpenGlobalSettingsButton",
+            in: app,
+            revealDirection: .upper,
+            timeout: 10
+        )
         tapElementReliably(globalLink, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
         XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
@@ -111,21 +156,25 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Android's per-window Text Options route and parent-link ladder.
+     Verifies Android's per-window Text Options route, parent-link ladder, and pane Close action.
 
-     Android's pane/window menu opens window-scoped text options. That screen shows both parent
-     links; the workspace link then opens workspace-scoped settings with only the global parent
-     link visible.
+     Android's pane/window menu owns both per-window Text Options and Close. These are distinct
+     commands, but both require the same setup: create a second reader pane, open that pane's
+     hamburger menu, and exercise a pane-scoped command. Keeping them in one workflow removes a
+     duplicate cold launch while preserving the visible window-scope route and delete transaction.
      *
      * - Side effects:
      *   - launches the app, creates a second reader window through the tab bar, and opens the
      *     active pane hamburger menu
      *   - activates the pane-level All text options command
      *   - taps the workspace parent link from the window-scoped Text Display screen
+     *   - exits the Text Options route, reopens the same pane menu, and activates Close
      * - Failure modes:
      *   - fails if pane All text options routes to workspace/global scope
      *   - fails if window scope lacks either Android parent link
      *   - fails if the workspace parent link does not navigate to `scope=workspace`
+     *   - fails if pane-menu Close terminates the app, leaves the deleted tab visible, or removes
+     *     the remaining pane menu/add-window affordances
      */
     func testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink() {
         let app = makeApp()
@@ -147,30 +196,21 @@ extension AndBibleUITests {
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
         XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
         XCTAssertTrue(requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10).exists)
-    }
 
-    /**
-     Verifies that closing a pane from Android's pane hamburger menu leaves the reader alive.
-
-     The close action removes the active SwiftData `Window` and its cascaded `PageManager`. The
-     reader must detach that window from visible SwiftUI state before deleting it so the split view
-     never re-renders a pane backed by invalidated model objects.
-     *
-     - Side effects:
-     *   - launches the app, creates a second reader window through the tab bar, and opens the
-     *     active pane hamburger menu
-     *   - activates the pane-level Close command
-     * - Failure modes:
-     *   - fails if the pane menu close action terminates the app
-     *   - fails if the closed window tab remains visible after the close transaction settles
-     *   - fails if the remaining one-window pane loses Android's pane hamburger affordance
-     *   - fails if the remaining one-window footer cannot create another window
-     */
-    func testPaneMenuCloseWindowKeepsReaderAlive() {
-        let app = makeApp()
-        app.launch()
-
-        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
+        let nestedTextOptionsBackButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(
+            nestedTextOptionsBackButton.waitForExistence(timeout: 10),
+            "Expected workspace Text Options to expose NavigationStack back chrome."
+        )
+        tapElementReliably(nestedTextOptionsBackButton, timeout: 10)
+        if !waitForReaderShellReady(in: app, timeout: 5) {
+            waitForElementValue("textDisplaySettingsScreen", toContain: "scope=window", in: app, timeout: 10)
+            tapElementReliably(requireElement("readerDestinationBackButton", in: app, timeout: 10), timeout: 10)
+            XCTAssertTrue(
+                waitForReaderShellReady(in: app, timeout: 20),
+                "Expected Text Options back navigation to return to the reader shell before closing the pane."
+            )
+        }
         openPaneMenu(requireElement("windowPaneMenuButton::1", in: app, timeout: 10), in: app, timeout: 10)
         tapElementReliably(
             requirePaneMenuItem("windowPaneMenuItem::close", in: app, timeout: 12),
@@ -393,169 +433,45 @@ extension AndBibleUITests {
     /**
      Search fixture contract for normal UI workflows.
 
-     `scripts/ui_test_fixture_manifest.json` maps these Search tests to the `search-indexed` or
-     `search-multi-translation` scenarios. Those scenarios seed `search_indexes.sqlite` before app
-     launch, so the app should detect the selected modules as already indexed. Normal Search tests
-     must not enter `state=needsIndex`; runtime index-creation coverage belongs in a separate test
-     and fixture path so it cannot hide seeded-fixture regressions.
+     `scripts/ui_test_fixture_manifest.json` maps retained Search UI tests to the
+     `search-multi-translation` scenario. That scenario seeds `search_indexes.sqlite` and the
+     deterministic AATESTWEB module before app launch, so the app should detect selected modules as
+     already indexed. Normal Search tests must not enter `state=needsIndex`; runtime index-creation
+     coverage belongs in a separate test and fixture path so it cannot hide seeded-fixture
+     regressions.
      */
 
     /**
-     Verifies Search opens as an integrated reader destination and preserves a seeded query.
-     *
-     * Android Search is a full activity with toolbar navigation, not a bottom/large iOS sheet with a
-     * `Done` affordance. Package tests own indexed query semantics; this smoke keeps the visible
-     * route alive and proves a launch-seeded query reaches the real Search screen/results surface.
-     *
-     * - Setup: Launches the standard seeded Search fixture and opens Search through the reader entry.
-     * - Expected result: The reader state reports `readerDestination=search`, and no navigation-bar
-     *   `Done` button is exposed by the Search surface. The seeded query remains visible and returns
-     *   the deterministic fixture row.
-     * - Failure meaning: Search has drifted back to sheet/modal presentation instead of Android's
-     *   destination-style surface, or the visible Search route dropped its launch-seeded query.
-     * - Side effects: Presents Search from the reader shell.
-     */
-    func testSearchEntryRouteRetainsSeededQuery() {
-        let app = makeApp(searchQuery: "earth")
-        app.launch()
-
-        _ = openSearch(in: app)
-        waitForReaderRenderedContentState(containing: "readerDestination=search", in: app, timeout: 10)
-        XCTAssertFalse(
-            app.navigationBars.buttons["Done"].firstMatch.exists,
-            "Search should not expose iOS sheet-style Done chrome when opened from the reader."
-        )
-        waitForSearchQuery("earth", in: app, timeout: 20)
-        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
-    }
-
-    /**
-     Verifies that selecting a second Search translation reruns the query and reports grouped totals.
-     *
-     * - Side effects:
-     *   - launches Search with deterministic KJV and UITESTWEB index rows for `earth`
-     *   - uses the seeded startup reader reference `Genesis 1:1` as the before-navigation value
-     *   - verifies picker Cancel ignores a draft UITESTWEB row selection
-     *   - verifies outside dismissal ignores a draft UITESTWEB row selection
-     *   - verifies Select all followed by Select none and OK preserves the prior selection
-     *   - opens the real translation picker, selects UITESTWEB, and commits with OK
-     *   - verifies the visible selected-translation summary matches Android's abbreviation list
-     *   - waits for the active query to rerun and export grouped per-translation counts
-     * - Failure modes:
-     *   - fails if the translation picker is not reachable from Search options
-     *   - fails if Cancel, outside dismissal, or empty OK mutates the committed module selection
-     *   - fails if selecting a second translation does not rerun the active query with KJV first
-     *   - fails if the selected-translation button collapses Android's abbreviation list into a
-     *     generic iOS count label
-     *   - fails if grouped totals collapse to single-translation results
-     */
-    func testSearchMultiTranslationSelectionUpdatesGroupedTotals() {
-        let app = makeApp(searchQuery: "earth")
-        app.launch()
-
-        let initialReference = "Genesis 1:1"
-
-        _ = openSearch(in: app)
-        waitForSearchState(containing: "query=earth", in: app, timeout: 20)
-        waitForSearchSelectedModules(
-            in: app,
-            timeout: 20,
-            description: "exactly KJV"
-        ) { modules in
-            modules == Set(["KJV"])
-        }
-        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
-
-        tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
-        tapSearchTranslationCancel(in: app, timeout: 10)
-        waitForSearchSelectedModules(
-            in: app,
-            timeout: 10,
-            description: "still exactly KJV after cancel"
-        ) { modules in
-            modules == Set(["KJV"])
-        }
-
-        tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
-        tapSearchTranslationOutsideDismiss(in: app, timeout: 10)
-        waitForSearchSelectedModules(
-            in: app,
-            timeout: 10,
-            description: "still exactly KJV after outside dismissal"
-        ) { modules in
-            modules == Set(["KJV"])
-        }
-
-        tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationSelectAll(in: app, timeout: 10)
-        tapSearchTranslationSelectAll(in: app, timeout: 10)
-        tapSearchTranslationOK(in: app, timeout: 10)
-        waitForSearchSelectedModules(
-            in: app,
-            timeout: 10,
-            description: "still exactly KJV after empty OK"
-        ) { modules in
-            modules == Set(["KJV"])
-        }
-
-        tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
-        tapSearchTranslationOK(in: app, timeout: 10)
-
-        waitForSearchSelectedModules(
-            in: app,
-            timeout: 20,
-            description: "more than one module including UITESTWEB"
-        ) { modules in
-            modules.count > 1 && modules.contains("UITESTWEB")
-        }
-        waitForSearchState(containing: "selectedModuleOrder=KJV,UITESTWEB", in: app, timeout: 20)
-        XCTAssertTrue(
-            app.staticTexts["KJV, UITESTWEB"].waitForExistence(timeout: 5),
-            "Expected the Search translation button to show Android's selected abbreviation list."
-        )
-        waitForSearchState(containing: "groupedTotal=3", in: app, timeout: 20)
-        waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
-        waitForSearchState(containing: "UITESTWEB:2", in: app, timeout: 20)
-        waitForSearchResultCount(atLeast: 3, in: app, timeout: 20)
-
-        let groupedResult = requireElement("searchResultRow::John_3_16", in: app, timeout: 20)
-        tapElementReliably(groupedResult, timeout: 10)
-
-        let updatedReference = waitForReaderReferenceValueToChange(
-            from: initialReference,
-            in: app,
-            timeout: 20
-        )
-        XCTAssertNotEqual(
-            updatedReference,
-            initialReference,
-            "Expected selecting a grouped Search result to move the reader away from '\(initialReference)'."
-        )
-    }
-
-    /**
-     Verifies Search option controls mutate active-query state and result selection returns to the
-     reader.
+     Verifies Search opens as an integrated reader destination, mutates active-query state, and
+     returns to the reader from result selection.
      *
      * Exact Android search semantics for scope filters and word modes are covered in
      * `SearchIndexServiceQueryTests`. This UI smoke stays focused on the live Search surface:
-     * the real scope and word-mode radio rows must be tappable, update exported state, and rerender
-     * the seeded result list after each option change. The same live Search route then enters a
-     * deterministic bundled query and selects a result so reader-navigation handoff remains covered
+     * Search must open as an Android-style reader destination rather than an iOS sheet, preserve
+     * the launch-seeded query, expose tappable scope and word-mode rows, update exported state, and
+     * rerender the seeded result list after each option change. The same live Search route then
+     * enters a deterministic bundled query, verifies the live translation picker Cancel,
+     * outside-dismiss, and empty-OK paths, commits a second translation through the live picker,
+     * verifies grouped totals, and selects a result so reader-navigation handoff remains covered
      * without a second cold app launch.
      *
      * - Side effects:
      *   - launches the app directly into Search with the initial query `earth void`
+     *   - opens Search through the reader entry and verifies destination/no-sheet chrome
      *   - switches Search scope between NT and OT
      *   - switches Search word mode from all words to phrase and then to any word
-     *   - enters a deterministic bundled query and taps the first returned result row
+     *   - enters a deterministic bundled query, exercises negative Search translation-picker
+     *     dialog paths, commits the seeded two-module translation selection, and taps a grouped
+     *     result row
      * - Failure modes:
+     *   - fails if Search regresses to sheet/modal presentation or drops the launch-seeded query
      *   - fails if visible Search option controls are not accessible
      *   - fails if scope or word-mode changes do not update the Search state export
      *   - fails if the visible seeded result list does not rerender after option changes
+     *   - fails if live translation-picker Cancel, outside-dismiss, or empty OK commits draft
+     *     changes instead of preserving the previous selection
+     *   - fails if the translation picker cannot commit a second module with KJV first
+     *   - fails if grouped totals collapse to single-translation results
      *   - fails if selecting the final result row does not navigate the reader to the selected
      *     passage
      */
@@ -565,6 +481,12 @@ extension AndBibleUITests {
 
         let initialReference = "Genesis 1:1"
         _ = openSearch(in: app)
+        waitForReaderRenderedContentState(containing: "readerDestination=search", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Search should not expose iOS sheet-style Done chrome when opened from the reader."
+        )
+        waitForSearchQuery("earth void", in: app, timeout: 20)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
         tapSearchScope(.newTestament, in: app)
@@ -594,14 +516,77 @@ extension AndBibleUITests {
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
         let searchField = requireSearchInput(in: app, timeout: 10)
-        replaceText(in: searchField, with: "noah", placeholderHints: ["Search Bible text", "Search Bible", "Search"])
+        replaceText(in: searchField, with: "earth", placeholderHints: ["Search Bible text", "Search Bible", "Search"])
         dismissSearchFieldFocusIfNeeded(in: app)
-        waitForSearchQuery("noah", in: app, timeout: 20)
+        waitForSearchQuery("earth", in: app, timeout: 20)
 
-        let noahResultIdentifier = "searchResultRow::Genesis_6_8"
-        waitForSearchResultRow(noahResultIdentifier, in: app, shouldExist: true, timeout: 20)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "exactly KJV before multi-translation commit"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationCancel(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "KJV after cancelling translation-picker draft"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationOutsideDismiss(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "KJV after outside-dismissing translation-picker draft"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationOK(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "KJV after empty translation-picker OK"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationRow(moduleName: "AATESTWEB", in: app, timeout: 20)
+        tapSearchTranslationOK(in: app, timeout: 10)
+
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "more than one module including AATESTWEB"
+        ) { modules in
+            modules.count > 1 && modules.contains("AATESTWEB")
+        }
+        waitForSearchState(containing: "selectedModuleOrder=KJV,AATESTWEB", in: app, timeout: 20)
+        XCTAssertTrue(
+            app.staticTexts["KJV, AATESTWEB"].waitForExistence(timeout: 5),
+            "Expected the Search translation button to show Android's selected abbreviation list."
+        )
+        waitForSearchState(containing: "groupedTotal=2", in: app, timeout: 20)
+        waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
+        waitForSearchState(containing: "AATESTWEB:1", in: app, timeout: 20)
+        waitForSearchResultCount(atLeast: 2, in: app, timeout: 20)
+
+        let groupedResultIdentifier = "searchResultRow::Genesis_1_2"
+        waitForSearchResultRow(groupedResultIdentifier, in: app, shouldExist: true, timeout: 20)
         let updatedReference = tapSearchResultRowAndWaitForReaderReferenceChange(
-            noahResultIdentifier,
+            groupedResultIdentifier,
             from: initialReference,
             in: app,
             timeout: 20
@@ -612,8 +597,8 @@ extension AndBibleUITests {
             "Expected selecting a Search result to move the reader away from '\(initialReference)'."
         )
         XCTAssertTrue(
-            updatedReference.localizedCaseInsensitiveContains("Genesis 6:8"),
-            "Expected selecting the Search result to navigate to Genesis 6:8, but saw '\(updatedReference)'."
+            updatedReference.localizedCaseInsensitiveContains("Genesis 1:2"),
+            "Expected selecting the Search result to navigate to Genesis 1:2, but saw '\(updatedReference)'."
         )
     }
 

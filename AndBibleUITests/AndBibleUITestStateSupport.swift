@@ -1827,46 +1827,14 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let toggle = app.buttons[identifier].firstMatch
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if waitForElementToBecomeHittable(toggle, timeout: min(1, timeout)) {
-                toggle.tap()
-                waitForSyncState(
-                    expectedTokens,
-                    in: app,
-                    timeout: timeout,
-                    file: file,
-                    line: line
-                )
-                return
-            }
-            let syncScreen = resolvedElement("syncSettingsScreen", in: app)
-            if syncScreen?.exists == true {
-                syncScreen?.swipeUp()
-            } else {
-                app.swipeUp()
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        XCTAssertTrue(
-            toggle.exists,
-            "Expected sync category control '\(identifier)' to exist within \(timeout) seconds.",
+        let toggle = requireReachableSyncSettingsButton(
+            identifier,
+            in: app,
+            timeout: timeout,
             file: file,
             line: line
         )
-        let didBecomeHittable = waitForElementToBecomeHittable(toggle, timeout: 1)
-        XCTAssertTrue(
-            didBecomeHittable,
-            "Expected sync category control '\(identifier)' to become hittable during the final 1-second retry.",
-            file: file,
-            line: line
-        )
-        guard didBecomeHittable else {
-            return
-        }
-        toggle.tap()
+        tapElementReliably(toggle, timeout: timeout, file: file, line: line)
         waitForSyncState(
             expectedTokens,
             in: app,
@@ -1923,21 +1891,49 @@ extension AndBibleUITests {
         )
     }
 
+    /// Direction used when revealing offscreen Text Display rows in the custom flat settings list.
+    enum TextDisplaySettingsRevealDirection {
+        case lower
+        case upper
+    }
+
+    /**
+     Scrolls the flat Text Display settings surface toward rows outside the visible viewport.
+     *
+     * - Parameter app: Running application under test.
+     * - Parameter direction: Whether to reveal content below or above the current viewport.
+     * - Side effects: Swipes the Text Display scroll view, falling back to an app-level swipe.
+     * - Failure modes: Leaves scroll position unchanged when no scrollable surface accepts the gesture.
+     */
+    func revealTextDisplaySettingsContent(
+        in app: XCUIApplication,
+        direction: TextDisplaySettingsRevealDirection
+    ) {
+        if let textDisplayScrollView = resolvedElement("textDisplaySettingsScrollView", in: app),
+           textDisplayScrollView.exists
+        {
+            switch direction {
+            case .lower:
+                textDisplayScrollView.swipeUp()
+            case .upper:
+                textDisplayScrollView.swipeDown()
+            }
+        } else if direction == .lower {
+            app.swipeUp()
+        } else {
+            app.swipeDown()
+        }
+    }
+
     /**
      Scrolls the flat Text Display settings surface toward rows below the visible viewport.
      *
      * - Parameter app: Running application under test.
-     * - Side effects: Swipes the Text Display scroll view, falling back to an app-level swipe.
+     * - Side effects: Swipes the Text Display scroll view upward, falling back to an app-level swipe.
      * - Failure modes: Leaves scroll position unchanged when no scrollable surface accepts the gesture.
      */
     func revealTextDisplaySettingsLowerContent(in app: XCUIApplication) {
-        if let textDisplayScrollView = resolvedElement("textDisplaySettingsScrollView", in: app),
-           textDisplayScrollView.exists
-        {
-            textDisplayScrollView.swipeUp()
-        } else {
-            app.swipeUp()
-        }
+        revealTextDisplaySettingsContent(in: app, direction: .lower)
     }
 
     /**
@@ -1950,16 +1946,18 @@ extension AndBibleUITests {
      * - Parameters:
      *   - identifier: Accessibility identifier of the production row button.
      *   - app: Running application under test.
+     *   - revealDirection: Scroll direction used while searching for the row.
      *   - timeout: Maximum time to keep resolving and revealing the list.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The row button once XCTest reports a hittable activation point.
-     * - Side effects: Scrolls Text Display lower content until the requested row is hittable.
+     * - Side effects: Scrolls Text Display content until the requested row is hittable.
      * - Failure modes: Records a test failure if the row never appears or never becomes hittable.
      */
     func requireReachableTextDisplayButton(
         _ identifier: String,
         in app: XCUIApplication,
+        revealDirection: TextDisplaySettingsRevealDirection = .lower,
         timeout: TimeInterval,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -1976,7 +1974,7 @@ extension AndBibleUITests {
                 }
             }
 
-            revealTextDisplaySettingsLowerContent(in: app)
+            revealTextDisplaySettingsContent(in: app, direction: revealDirection)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
@@ -2016,20 +2014,23 @@ extension AndBibleUITests {
     }
 
     /**
-     Resolves a Sync Settings button that may live in a lazily materialized SwiftUI form section.
+     Resolves a Sync Settings control that may live in a lazily materialized SwiftUI form section.
      *
      * - Parameters:
-     *   - identifier: Accessibility identifier of the production button.
+     *   - identifier: Accessibility identifier of the production control.
      *   - app: Running application under test.
-     *   - timeout: Maximum time to keep resolving and revealing the form.
+     *   - timeout: Preferred maximum time to keep resolving and revealing the form. Category rows
+     *     still receive enough reveal passes to traverse the known Sync Settings form when XCTest
+     *     accessibility queries are slow.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
-     * - Returns: The resolved button once it is visible inside the Sync Settings viewport.
+     * - Returns: The resolved control once it is visible inside the Sync Settings viewport.
      * - Side effects:
-     *   - scrolls Sync Settings lower content until the requested button materializes as a native
-     *     button inside the visible form viewport
+     *   - clears any focused text input so the software keyboard cannot block lower Form rows
+     *   - scrolls Sync Settings lower content until the requested control materializes inside the
+     *     visible form viewport
      * - Failure modes:
-     *   - records an XCTest failure if the button never appears or never becomes visible
+     *   - records an XCTest failure if the control never appears or never becomes visible
      */
     func requireReachableSyncSettingsButton(
         _ identifier: String,
@@ -2045,35 +2046,93 @@ extension AndBibleUITests {
             file: file,
             line: line
         )
+        dismissKeyboardIfPresent(in: app)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+
         let deadline = Date().addingTimeInterval(timeout)
-        var lastCandidate = app.buttons[identifier].firstMatch
+        var lastCandidate = syncSettingsControlCandidates(identifier, in: app).first ?? app.buttons[identifier].firstMatch
+        let minimumRevealPasses = identifier.hasPrefix("syncCategoryToggle::") ? 4 : 1
+        var revealPasses = 0
+
+        func resolveVisibleControl() -> XCUIElement? {
+            for control in syncSettingsControlCandidates(identifier, in: app) {
+                guard control.exists else {
+                    continue
+                }
+                lastCandidate = control
+                if waitForElementToBecomeHittable(control, timeout: 0.25) ||
+                    isElementVisible(control, within: syncScreen)
+                {
+                    return control
+                }
+            }
+            return nil
+        }
 
         repeat {
-            let button = app.buttons[identifier].firstMatch
-            if button.exists {
-                lastCandidate = button
-                if isElementVisible(button, within: syncScreen) {
-                    return button
-                }
+            if let control = resolveVisibleControl() {
+                return control
             }
 
             revealSyncSettingsLowerContent(in: app)
+            revealPasses += 1
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+        } while Date() < deadline || revealPasses < minimumRevealPasses
+
+        let recoveryDeadline = Date().addingTimeInterval(min(3, max(1, timeout / 4)))
+        repeat {
+            if let control = resolveVisibleControl() {
+                return control
+            }
+            if syncScreen.exists, !syncScreen.frame.isEmpty {
+                syncScreen.swipeDown()
+            } else {
+                app.swipeDown()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < recoveryDeadline
 
         XCTAssertTrue(
             lastCandidate.exists,
-            "Expected Sync Settings button '\(identifier)' to exist within \(timeout) seconds.",
+            "Expected Sync Settings control '\(identifier)' to exist within \(timeout) seconds.",
             file: file,
             line: line
         )
         XCTAssertTrue(
             isElementVisible(lastCandidate, within: syncScreen),
-            "Expected Sync Settings button '\(identifier)' to become visible within \(timeout) seconds.",
+            "Expected Sync Settings control '\(identifier)' to become visible within \(timeout) seconds.",
             file: file,
             line: line
         )
         return lastCandidate
+    }
+
+    /**
+     Returns the native Sync Settings controls that can perform one logical row action.
+     *
+     * - Parameters:
+     *   - identifier: Production row/action identifier to resolve.
+     *   - app: Running application under test.
+     * - Returns: Candidate controls in preferred interaction order.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    func syncSettingsControlCandidates(_ identifier: String, in app: XCUIApplication) -> [XCUIElement] {
+        var candidates = [
+            app.buttons[identifier].firstMatch,
+            app.switches[identifier].firstMatch,
+        ]
+
+        let categoryPrefix = "syncCategoryToggle::"
+        if identifier.hasPrefix(categoryPrefix) {
+            let category = String(identifier.dropFirst(categoryPrefix.count))
+            let switchIdentifier = "syncCategoryToggleSwitch::\(category)"
+            candidates.append(contentsOf: [
+                app.switches[switchIdentifier].firstMatch,
+            ])
+        }
+
+        return candidates
     }
 
     /**

@@ -88,6 +88,173 @@ enum RestoreWorkflowTarget: String, CaseIterable, Identifiable {
 }
 
 /**
+ Presentation state exported by the Android-aligned Backup & Restore screen.
+
+ The SwiftUI view owns the actual `@State` values and platform presenters. This value type keeps
+ the derived accessibility sentinel and restore/import picker content-type contract testable without
+ booting the app, while preserving Android's visible split between Database restore/import archives
+ and Documents/module imports.
+
+ - Parameters:
+   - backupDestinationPresented: Whether Android's "Backup to where?" destination dialog is active.
+   - backupFileExporterPresented: Whether the iOS Files exporter is active for Phone storage.
+   - shareSheetPresented: Whether the iOS share controller is active for Share.
+   - restoreImportPickerPresented: Whether the shared Restore or Import file picker is active.
+   - restoreImportPickerTarget: Transient target captured when the user tapped Restore or Import.
+   - restoreTarget: Persisted Android restore/import radio target.
+   - androidModuleBackupExportPresented: Whether module-backup export selection is active.
+   - androidBackupImportPresented: Whether Android database-backup section selection is active.
+   - resetInProgress: Whether an Android BackupActivity reset category is mutating storage.
+   - backupPayloadPending: Whether a generated backup archive is awaiting a destination.
+ - Side effects: none; callers are responsible for presenting and mutating SwiftUI state.
+ - Failure modes: If the transient restore/import picker target is absent, the persisted target is
+   used so SwiftUI lifecycle cleanup cannot collapse Documents imports into Database restores.
+ */
+struct ImportExportPresentationState: Equatable {
+    /// Whether Android's "Backup to where?" destination dialog is active.
+    let backupDestinationPresented: Bool
+
+    /// Whether the iOS Files exporter is active for Phone storage.
+    let backupFileExporterPresented: Bool
+
+    /// Whether the iOS share controller is active for Share.
+    let shareSheetPresented: Bool
+
+    /// Whether the shared Restore or Import file picker is active.
+    let restoreImportPickerPresented: Bool
+
+    /// Transient target captured when the user tapped Restore or Import.
+    let restoreImportPickerTarget: RestoreWorkflowTarget?
+
+    /// Persisted Android restore/import radio target.
+    let restoreTarget: RestoreWorkflowTarget
+
+    /// Whether module-backup export selection is active.
+    let androidModuleBackupExportPresented: Bool
+
+    /// Whether Android database-backup section selection is active.
+    let androidBackupImportPresented: Bool
+
+    /// Whether an Android BackupActivity reset category is mutating storage.
+    let resetInProgress: Bool
+
+    /// Whether a generated backup archive is awaiting a destination.
+    let backupPayloadPending: Bool
+
+    /**
+     Creates a presentation snapshot for Backup & Restore derived state.
+
+     - Parameters:
+       - backupDestinationPresented: Whether Android's destination dialog is active.
+       - backupFileExporterPresented: Whether the Files exporter is active.
+       - shareSheetPresented: Whether the share sheet is active.
+       - restoreImportPickerPresented: Whether the restore/import picker is active.
+       - restoreImportPickerTarget: Optional target captured for the active picker.
+       - restoreTarget: Persisted fallback target for restore/import.
+       - androidModuleBackupExportPresented: Whether module backup export selection is active.
+       - androidBackupImportPresented: Whether Android database backup selection is active.
+       - resetInProgress: Whether a reset operation is active.
+       - backupPayloadPending: Whether an export payload is pending.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    init(
+        backupDestinationPresented: Bool = false,
+        backupFileExporterPresented: Bool = false,
+        shareSheetPresented: Bool = false,
+        restoreImportPickerPresented: Bool = false,
+        restoreImportPickerTarget: RestoreWorkflowTarget? = nil,
+        restoreTarget: RestoreWorkflowTarget = .database,
+        androidModuleBackupExportPresented: Bool = false,
+        androidBackupImportPresented: Bool = false,
+        resetInProgress: Bool = false,
+        backupPayloadPending: Bool = false
+    ) {
+        self.backupDestinationPresented = backupDestinationPresented
+        self.backupFileExporterPresented = backupFileExporterPresented
+        self.shareSheetPresented = shareSheetPresented
+        self.restoreImportPickerPresented = restoreImportPickerPresented
+        self.restoreImportPickerTarget = restoreImportPickerTarget
+        self.restoreTarget = restoreTarget
+        self.androidModuleBackupExportPresented = androidModuleBackupExportPresented
+        self.androidBackupImportPresented = androidBackupImportPresented
+        self.resetInProgress = resetInProgress
+        self.backupPayloadPending = backupPayloadPending
+    }
+
+    /**
+     Target that should own the active restore/import picker.
+
+     - Returns: The transient picker target when present, otherwise the persisted radio target.
+     - Side effects: none.
+     - Failure modes: none; fallback preserves a valid Android target.
+     */
+    var effectiveRestoreImportTarget: RestoreWorkflowTarget {
+        restoreImportPickerTarget ?? restoreTarget
+    }
+
+    /**
+     Accessibility sentinel exposed for UI tests on the Backup & Restore root.
+
+     - Returns: A single stable token describing the foremost active presentation surface.
+     - Side effects: none.
+     - Failure modes: none; inactive state returns `idle`.
+     */
+    var accessibilityValue: String {
+        if backupDestinationPresented {
+            return "backupDestinationPresented"
+        }
+        if backupFileExporterPresented {
+            return "fileExporterPresented"
+        }
+        if shareSheetPresented {
+            return "shareSheetPresented"
+        }
+        if restoreImportPickerPresented {
+            switch effectiveRestoreImportTarget {
+            case .database:
+                return "databaseRestorePickerPresented"
+            case .documents:
+                return "documentsRestorePickerPresented"
+            }
+        }
+        if androidModuleBackupExportPresented {
+            return "androidModuleBackupExportPresented"
+        }
+        if androidBackupImportPresented {
+            return "androidBackupImportPresented"
+        }
+        if resetInProgress {
+            return "resetInProgress"
+        }
+        if backupPayloadPending {
+            return "backupPayloadPending"
+        }
+        return "idle"
+    }
+
+    /**
+     Allowed content types for the currently active restore/import picker.
+
+     Android keeps database backups and module/document imports as separate visible restore targets.
+     iOS uses one SwiftUI importer and selects content types from this derived state so the platform
+     picker still follows that Android contract.
+
+     - Returns: Database archive types for Database, or module/document types for Documents.
+     - Side effects: none.
+     - Failure modes: Falls back to `restoreTarget` when no transient picker target is available.
+     */
+    var restoreImportPickerContentTypes: [UTType] {
+        switch effectiveRestoreImportTarget {
+        case .database:
+            return [.zip, .data]
+        case .documents:
+            return ExternalDocumentImportService.supportedContentTypes
+        }
+    }
+}
+
+/**
  Android BackupActivity destination choices adapted to iOS file plumbing.
 
  Android labels the choices Phone storage and Share. iOS implements Phone storage through the

@@ -110,9 +110,9 @@ final class SearchIndexServiceQueryTests: XCTestCase {
     /**
      Verifies multi-translation Search returns per-module buckets used for grouped totals.
 
-     Android displays grouped totals after selecting additional translations. The remaining UI
-     smoke still proves the picker presentation, while this package test proves the indexed backing
-     service returns the per-module counts that the UI summarizes.
+     Android displays grouped totals after selecting additional translations. BibleUI package tests
+     own picker ordering, commit, and visible summary formatting; this Core package test owns the
+     indexed backing service buckets that the UI summarizes.
      */
     func testIndexedSearchMultipleReturnsPerModuleBucketsForGroupedTotals() async throws {
         let databaseURL = FileManager.default.temporaryDirectory
@@ -122,18 +122,18 @@ final class SearchIndexServiceQueryTests: XCTestCase {
         let service = SearchIndexService(databasePath: databaseURL.path)
         try await seedSearchIndex(service: service, rows: [
             SearchIndexFixtureRow(key: "Genesis 1:2", text: "earth", moduleName: "KJV", order: 0),
-            SearchIndexFixtureRow(key: "John 3:16", text: "earth", moduleName: "UITESTWEB", order: 1),
-            SearchIndexFixtureRow(key: "Romans 8:1", text: "earth", moduleName: "UITESTWEB", order: 2),
+            SearchIndexFixtureRow(key: "John 3:16", text: "earth", moduleName: "AATESTWEB", order: 1),
+            SearchIndexFixtureRow(key: "Romans 8:1", text: "earth", moduleName: "AATESTWEB", order: 2),
         ])
 
         let grouped = service.searchMultiple(
             query: "earth",
-            moduleNames: ["UITESTWEB", "KJV"],
+            moduleNames: ["AATESTWEB", "KJV"],
             wordMode: .allWords
         )
 
         XCTAssertEqual(grouped["KJV"]?.map(\.key), ["Genesis 1:2"])
-        XCTAssertEqual(grouped["UITESTWEB"]?.map(\.key), ["John 3:16", "Romans 8:1"])
+        XCTAssertEqual(grouped["AATESTWEB"]?.map(\.key), ["John 3:16", "Romans 8:1"])
         XCTAssertEqual(grouped.values.reduce(0) { $0 + $1.count }, 3)
     }
 

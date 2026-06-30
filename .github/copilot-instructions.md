@@ -67,7 +67,7 @@ xcodebuild -project AndBible.xcodeproj -scheme AndBibleUnitTests \
 
 xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
-  test -only-testing:AndBibleUITests/AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery
+  test -only-testing:AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState
 ```
 
 ### Package Test Targets

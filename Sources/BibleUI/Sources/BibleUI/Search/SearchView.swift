@@ -366,20 +366,52 @@ public struct SearchView: View {
      moving the primary document to the front. iOS uses the same helper as search execution so the
      visible control, request order, and grouped result order cannot drift independently.
 
-     - Returns: Ordered abbreviations such as `KJV, UITESTWEB`, or a localized fallback label when
+     - Returns: Ordered abbreviations such as `KJV, WEB`, or a localized fallback label when
        no module can be resolved.
      - Side effects: none.
      - Failure modes: Empty selection and missing primary module metadata produce the generic
        `search_translations` fallback instead of a malformed empty button.
      */
     private var selectedTranslationSummaryLabel: String {
-        let orderedModules = Self.androidOrderedSelectedSearchModuleNames(
+        Self.androidSelectedTranslationSummaryLabel(
             selectedModuleNames: selectedModules,
             primaryModuleName: swordModule?.info.name,
-            installedModules: installedBibleModules
+            installedModules: installedBibleModules,
+            fallbackLabel: String(localized: "search_translations", defaultValue: "Translations")
+        )
+    }
+
+    /**
+     Builds the Android Search selected-translation summary label.
+
+     Android shows the committed translation abbreviations as a comma-separated list after moving
+     the active document to the front. This helper keeps the visible button label aligned with the
+     same ordering helper used by search execution and grouped result summaries.
+
+     - Parameters:
+       - selectedModuleNames: Committed Search module abbreviations.
+       - primaryModuleName: Current reader/search module abbreviation, preferred first.
+       - installedModules: Installed Bible modules used to derive Android dialog order.
+       - fallbackLabel: Localized label shown when no module can be resolved.
+     - Returns: Ordered abbreviations such as `KJV, WEB`, or `fallbackLabel` for an empty
+       effective selection.
+     - Side effects: none.
+     - Failure modes: Empty selection and missing primary module metadata return the supplied
+       fallback instead of a malformed empty label.
+     */
+    nonisolated static func androidSelectedTranslationSummaryLabel(
+        selectedModuleNames: Set<String>,
+        primaryModuleName: String?,
+        installedModules: [ModuleInfo],
+        fallbackLabel: String
+    ) -> String {
+        let orderedModules = androidOrderedSelectedSearchModuleNames(
+            selectedModuleNames: selectedModuleNames,
+            primaryModuleName: primaryModuleName,
+            installedModules: installedModules
         )
         guard !orderedModules.isEmpty else {
-            return String(localized: "search_translations", defaultValue: "Translations")
+            return fallbackLabel
         }
         return orderedModules.joined(separator: ", ")
     }
@@ -1044,7 +1076,9 @@ public struct SearchView: View {
      without using an iOS sheet or committing row taps directly to Search state.
 
      - Parameter modules: Installed Bible modules available for selection.
-     - Returns: Centered modal dialog containing title, selectable rows, and dialog actions.
+     - Returns: Centered modal dialog containing title, selectable rows, and dialog actions. The
+       scroll view owns the picker-list accessibility identifier so UI automation addresses the
+       clipped viewport rather than the lazy content stack.
      - Side effects: Row and Select all/none actions mutate only `pendingTranslationSelection`; OK
        may commit to `selectedModules` through `commitTranslationPickerSelection()`.
      - Failure modes: Missing index-service state is treated as unknown and therefore does not add
@@ -1072,9 +1106,9 @@ public struct SearchView: View {
                             .padding(.leading, 22)
                     }
                 }
-                .accessibilityIdentifier("searchTranslationPickerList")
             }
             .frame(maxHeight: 420)
+            .accessibilityIdentifier("searchTranslationPickerList")
 
             Divider()
                 .background(dialogSecondaryText.opacity(0.25))
@@ -1199,12 +1233,13 @@ public struct SearchView: View {
      */
     private func openTranslationPicker() {
         isSearchFieldFocused = false
-        pendingTranslationSelection = Set(Self.androidOrderedSelectedSearchModuleNames(
+        let draftState = SearchTranslationPickerDraftState.opened(
             selectedModuleNames: selectedModules,
             primaryModuleName: swordModule?.info.name,
             installedModules: installedBibleModules
-        ))
-        showTranslationPicker = true
+        )
+        pendingTranslationSelection = draftState.pendingSelection
+        showTranslationPicker = draftState.isPresented
     }
 
     /**
@@ -1218,8 +1253,12 @@ public struct SearchView: View {
      - sets `showTranslationPicker` to false
      */
     private func cancelTranslationPicker() {
-        pendingTranslationSelection.removeAll()
-        showTranslationPicker = false
+        let draftState = SearchTranslationPickerDraftState(
+            isPresented: showTranslationPicker,
+            pendingSelection: pendingTranslationSelection
+        ).cancelled()
+        pendingTranslationSelection = draftState.pendingSelection
+        showTranslationPicker = draftState.isPresented
     }
 
     /**
@@ -1235,17 +1274,20 @@ public struct SearchView: View {
      - triggers the existing `selectedModules` change observer when the committed set changes
      */
     private func commitTranslationPickerSelection() {
-        let orderedSelection = Self.androidCommittedTranslationSelection(
+        let result = SearchTranslationPickerDraftState(
+            isPresented: showTranslationPicker,
+            pendingSelection: pendingTranslationSelection
+        ).committedSelection(
             previousModuleNames: selectedModules,
-            draftModuleNames: pendingTranslationSelection,
             primaryModuleName: swordModule?.info.name,
             installedModules: installedBibleModules
         )
+        let orderedSelection = result.orderedModuleNames
         if !orderedSelection.isEmpty {
             selectedModules = Set(orderedSelection)
         }
-        pendingTranslationSelection.removeAll()
-        showTranslationPicker = false
+        pendingTranslationSelection = result.draftState.pendingSelection
+        showTranslationPicker = result.draftState.isPresented
     }
 
     /**
@@ -1259,11 +1301,10 @@ public struct SearchView: View {
      - Side effects: Mutates `pendingTranslationSelection`.
      */
     private func togglePendingTranslationSelection(_ moduleName: String) {
-        if pendingTranslationSelection.contains(moduleName) {
-            pendingTranslationSelection.remove(moduleName)
-        } else {
-            pendingTranslationSelection.insert(moduleName)
-        }
+        pendingTranslationSelection = SearchTranslationPickerDraftState(
+            isPresented: showTranslationPicker,
+            pendingSelection: pendingTranslationSelection
+        ).toggled(moduleName).pendingSelection
     }
 
     /**
@@ -1276,12 +1317,12 @@ public struct SearchView: View {
      Side effects: Mutates `pendingTranslationSelection`; does not commit to `selectedModules`.
      */
     private func toggleAllTranslationRows() {
-        let allModuleNames = Set(Self.androidSortedTranslationModules(installedBibleModules).map(\.name))
-        if pendingTranslationSelection.count == allModuleNames.count {
-            pendingTranslationSelection.removeAll()
-        } else {
-            pendingTranslationSelection = allModuleNames
-        }
+        pendingTranslationSelection = SearchTranslationPickerDraftState(
+            isPresented: showTranslationPicker,
+            pendingSelection: pendingTranslationSelection
+        ).toggledAll(
+            moduleNames: Self.androidSortedTranslationModules(installedBibleModules).map(\.name)
+        ).pendingSelection
     }
 
     /**
