@@ -220,7 +220,7 @@
 				9153C9F6F1FDD489F80C26C3 /* AndBibleUITestListSupport.swift */,
 				3A90A042DDD33607A1761CCE /* AndBibleUITestSearchSupport.swift */,
 			);
-			path = AndBibleUITests;
+			path = Tests/UI/AndBibleUITests;
 			sourceTree = "<group>";
 		};
 		B5A39C18FE90DC3846D8F361 /* AndBibleTests */ = {
@@ -229,7 +229,7 @@
 				DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */,
 				F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */,
 			);
-			path = AndBibleTests;
+			path = Tests/AppHost/AndBibleTests;
 			sourceTree = "<group>";
 		};
 		B9FA767A0E84719CAFF44F06 /* Packages */ = {

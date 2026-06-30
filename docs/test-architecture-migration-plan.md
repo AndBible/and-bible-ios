@@ -22,7 +22,7 @@ Evidence captured during review:
 | Of those, files importing the app module | 0 (all `@testable import` package modules) | grep |
 | Test funcs in actual package test targets | 42 (fast lane nearly empty) | `Sources/*/Tests/` |
 | UI tests | 68 funcs / 184 asserts (~2.7 asserts/test) | `AndBibleUITests/` |
-| UI suite serial wall-clock | ~150 min, avg 145s/test, slowest 317s | `scripts/ui_test_timings.json` |
+| UI suite serial wall-clock | ~150 min, avg 145s/test, slowest 317s | `Tests/UI/Fixtures/ui_test_timings.json` |
 | App relaunches | 66 `app.launch()` ~ one cold launch per test | grep |
 | Brittleness machinery | 102 polling loops, 463 `firstMatch`, sharding-by-timings, retry-upload | grep / `ios-ci.yml` |
 | `.xcresult` rerun artifacts on disk | 434 (`rerun`/`fix`/`reliab`/`flak`/`retry`) | `.artifacts/` |
@@ -49,11 +49,14 @@ Sources/
   BibleCore/Tests/BibleCoreTests/      <- models, services, sync, backup, downloads, bookmarks
   BibleView/Tests/BibleViewTests/      <- bridge payload / contract tests
   BibleUI/Tests/BibleUITests/          <- view-model / catalog / navigation logic (no live app)
-AndBibleTests/                         <- ONLY app-host unit tests (AppDelegate/scene/bootstrap)
-AndBibleUITests/                       <- ONLY true end-to-end journeys, trimmed to a small smoke set
+Tests/
+  AppHost/AndBibleTests/               <- AndBibleTests target; ONLY app-host unit tests (AppDelegate/scene/bootstrap)
+  UI/AndBibleUITests/                  <- AndBibleUITests target; ONLY true end-to-end journeys, trimmed smoke set
+  UI/Fixtures/                         <- UI fixture manifest and timing manifest consumed by XCUITest/CI
+  Support/UITestFixtureTool/           <- host-side SwiftPM fixture executable for UI tests
 ```
 
-Current progress as of 2026-06-29:
+Current progress as of 2026-06-30:
 
 | Lane | Current state |
 |---|---|
@@ -201,8 +204,9 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - Search multi-translation trim merged the second-translation commit into `testSearchOptionControlsMutateVisibleState`, so one Search launch now proves Android destination chrome, option-control rerenders, visible picker commit, abbreviation summary, grouped totals, and grouped-row reader handoff. `StrongsAndDictionaryTests` owns Android picker ordering, empty confirmation, and summary formatting semantics; `SearchIndexServiceQueryTests` owns grouped buckets/counts.
 - Third-window active-pane isolation trim moved captured pane routing, bookmark navigation targeting, document switching, and window-scoped Strong's-mode mutation into `ReaderActivePaneIsolationTests`. The UI suite no longer spends three separate three-window launches proving package-owned controller/page-manager invariants, while retained reader workflows still cover visible pane-menu and document/search routes.
 - Host-process harness trim kept fixture-bootstrap coverage inside the XCUITest host runner, where macOS subprocess behavior is real, but merged the sub-second user-directory, selected-Xcode, and CommandLineTools fallback assertions into one environment/toolchain test. Moving those tests into the existing package lanes would lose coverage because those lanes run on an iOS Simulator destination, not on the macOS host.
-- UI fixture-runner trim removed the inactive `run_ui_test_groups.py` grouped-execution harness and its tests. The active workflow has already converged on direct shard-selected `xcodebuild` invocations via `run_xcodebuild_with_test_selection.py`, while fixture seeding remains per test through `UITestFixtureTool` and `scripts/ui_test_fixture_manifest.json`.
+- UI fixture-runner trim removed the inactive `run_ui_test_groups.py` grouped-execution harness and its tests. The active workflow has already converged on direct shard-selected `xcodebuild` invocations via `run_xcodebuild_with_test_selection.py`, while fixture seeding remains per test through `UITestFixtureTool` and `Tests/UI/Fixtures/ui_test_fixture_manifest.json`.
 - UI shard documentation has been refreshed for the current 15-test smoke suite and 3-shard planner output; no shard-count change was made because the current planner already stays under the cap and changing the limits should be backed by runtime data.
+- App-host and UI smoke files now live under `Tests/AppHost/AndBibleTests/` and `Tests/UI/AndBibleUITests/`, while preserving target, scheme, and `-only-testing` identifiers. The UI fixture manifests live under `Tests/UI/Fixtures/`, and the host-side `UITestFixtureTool` source lives under `Tests/Support/UITestFixtureTool/`.
 - Simplify CI: replace `ios-simulator-unit-tests` app-build path with app-host-free package-test lanes. Baseline is per-target simulator schemes; macOS `swift test` is an optimization only for targets proven to compile under SwiftPM. The optional build-product-reuse experiment is retired; reassess the shard planner and timings file as UI coverage continues moving into package lanes.
 - Trim `AndBibleUITests` to an explicit smoke set (target <=15 journeys); demote/convert the rest.
 - Update `CLAUDE.md` + `.github/copilot-instructions.md`: replace "swift test is supplemental" with the actual placement rule - *new tests go in the lowest package test target that owns the behavior after imports are minimized; app-host only for true app-delegate/scene/bootstrap behavior.*
@@ -217,6 +221,6 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 
 ## Success criteria
 - ~38k lines of logic tests build against libraries, not the app. Baseline execution is app-host-free per-target package schemes; framework-agnostic targets may later run via macOS `swift test` once SwiftPM host compile is proven.
-- `AndBibleTests` holds only app-host tests; `AndBibleUITests` is a small intentional smoke set.
+- `Tests/AppHost/AndBibleTests` holds only app-host tests; `Tests/UI/AndBibleUITests` is a small intentional smoke set.
 - CI has fast app-host-free package-test lanes; the old app-host unit-test simulator job and much sharding machinery are retired. A macOS `swift test` lane is a stretch optimization, not a prerequisite for the migration's main win.
 - One documented rule for test placement.

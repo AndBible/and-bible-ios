@@ -25,7 +25,7 @@ This repository is no longer in an early scaffolding state:
 - **BibleCore** (`Sources/BibleCore/`): SwiftData models, services, sync, persistence, business logic
 - **BibleView** (`Sources/BibleView/`): WKWebView bridge and bundled Vue.js frontend resources
 - **BibleUI** (`Sources/BibleUI/`): native SwiftUI feature screens and reader coordinator
-- **Tests** (`AndBibleTests/`, `AndBibleUITests/`, package test targets): unit and UI coverage
+- **Tests** (`Tests/AppHost/AndBibleTests/`, `Tests/UI/AndBibleUITests/`, package test targets): app-host, UI smoke, and package coverage
 
 ### Key Patterns
 
@@ -140,6 +140,7 @@ xcodebuild -project AndBible.xcodeproj -scheme BibleUITests \
 
 - Use `AndBibleUnitTests` / `AndBibleTests` only for behavior that genuinely requires the app host, app delegate, scene wiring, or installed app bundle
 - Use `AndBibleUITests` only for true end-to-end workflows that require a launched app
+- Keep physical app-host and UI smoke test files under `Tests/AppHost/AndBibleTests/` and `Tests/UI/AndBibleUITests/`; target and `-only-testing` identifiers remain `AndBibleTests/...` and `AndBibleUITests/...`
 - Use `-only-testing:` whenever a focused subset is enough
 - `AndBibleUnitTests` contains only the app-host unit-test bundle; `AndBible` includes the app and XCUITest workflow bundle
 
@@ -187,7 +188,9 @@ python3 scripts/check_repo_standards.py docblocks --all-files
 - `Sources/BibleCore/Sources/BibleCore/Services/RemoteSyncSynchronizationService.swift`: sync coordination
 - `Sources/SwordKit/Sources/SwordKit/SwordManager.swift`: module management and libsword-facing orchestration
 - `Sources/BibleView/Sources/BibleView/BibleWebView.swift`: WKWebView integration surface
-- `AndBibleUITests/AndBibleUITests.swift`: XCUITest harnesses and workflow coverage
+- `Tests/UI/AndBibleUITests/AndBibleUITests.swift`: XCUITest harnesses and workflow coverage
+- `Tests/UI/Fixtures/`: UI smoke fixture and timing manifests consumed by XCUITest/CI
+- `Tests/Support/UITestFixtureTool/`: host-side SwiftPM fixture executable used by UI tests
 - `scripts/check_repo_standards.py`: docblock and commit-message guardrails
 
 ### Vue.js Frontend

@@ -23,7 +23,7 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         using the editable field as a final readiness signal.
         """
         source = (
-            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestListSupport.swift"
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestListSupport.swift"
         ).read_text()
         open_prompt_start = source.index("func openWorkspaceCreatePrompt(")
         open_prompt_end = source.index("func requireWorkspaceNamePromptField(", open_prompt_start)
@@ -43,7 +43,7 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         accessibility identifier or focused-descendant scans that can stall hosted XCTest.
         """
         source = (
-            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
         ).read_text()
         candidates_start = source.index("func workspaceNamePromptTextFieldCandidates")
         candidates_end = source.index("func workspaceNamePromptButtonCandidates", candidates_start)
@@ -65,7 +65,7 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         `otherElements` before the actual button surface has had a chance to appear.
         """
         source = (
-            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
         ).read_text()
         candidates_start = source.index("func workspaceNamePromptButtonCandidates")
         candidates_end = source.index("func semanticStateCandidates", candidates_start)
@@ -91,10 +91,10 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         to a hosted XCTest snapshot path that stalls before text entry.
         """
         source = (
-            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
         ).read_text()
         state_source = (
-            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
         ).read_text()
         prompt_candidates_start = source.index("func workspaceNamePromptScreenCandidates")
         prompt_candidates_end = source.index(
@@ -137,7 +137,7 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         and by the later workspace-row assertions, not by re-sampling the transient field.
         """
         state_source = (
-            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
         ).read_text()
         typing_start = state_source.index("func typePromptText(")
         typing_end = state_source.index("func dismissLabelAssignment", typing_start)

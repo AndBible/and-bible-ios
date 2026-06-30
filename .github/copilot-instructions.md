@@ -114,6 +114,7 @@ python3 scripts/check_repo_standards.py docblocks --all-files
 - Prefer targeted package-scheme `xcodebuild test` runs for package logic, reader/controller contracts, bridge DTOs, SwiftData services, and Android parity helpers
 - Use `AndBibleUnitTests` / `AndBibleTests` only for behavior that genuinely requires the app host, app delegate, scene wiring, or installed app bundle
 - Use `AndBibleUITests` only for true end-to-end workflows that require a launched app
+- Keep physical app-host and UI smoke test files under `Tests/AppHost/AndBibleTests/` and `Tests/UI/AndBibleUITests/`; target and `-only-testing` identifiers remain `AndBibleTests/...` and `AndBibleUITests/...`
 - Use `-only-testing:` whenever practical
 - If you changed shared reader coordination, UI harnesses, or scheme-level behavior, run a broader shared-scheme test pass
 
@@ -155,7 +156,9 @@ If frontend assets changed, rebuild before app validation.
 - `Sources/BibleCore/Sources/BibleCore/Services/RemoteSyncSynchronizationService.swift`: sync orchestration
 - `Sources/SwordKit/Sources/SwordKit/SwordManager.swift`: module management and libsword-facing orchestration
 - `Sources/BibleView/Sources/BibleView/`: WKWebView integration and bridge surface
-- `AndBibleUITests/AndBibleUITests.swift`: XCUITest workflow coverage
+- `Tests/UI/AndBibleUITests/AndBibleUITests.swift`: XCUITest workflow coverage
+- `Tests/UI/Fixtures/`: UI smoke fixture and timing manifests consumed by XCUITest/CI
+- `Tests/Support/UITestFixtureTool/`: host-side SwiftPM fixture executable used by UI tests
 - `scripts/check_repo_standards.py`: docblock and commit guardrails
 
 ### Shared Frontend

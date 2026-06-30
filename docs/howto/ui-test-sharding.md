@@ -20,7 +20,7 @@ Current workflow inputs:
 - `UI_TEST_MAX_SHARD_COUNT = 4`
 - `UI_TEST_TARGET_SHARD_DURATION_SECONDS = 600`
 - `UI_TEST_TIMEOUT_MINUTES = 90`
-- `UI_TEST_TIMINGS_FILE = scripts/ui_test_timings.json`
+- `UI_TEST_TIMINGS_FILE = Tests/UI/Fixtures/ui_test_timings.json`
 
 Important nuance:
 
@@ -57,8 +57,8 @@ timings through June 29, 2026.
 ### Workflow shape
 
 1. discover test identifiers from files matching
-   `AndBibleUITests/AndBibleUITests*.swift`
-2. load estimated durations from `scripts/ui_test_timings.json`
+   `Tests/UI/AndBibleUITests/AndBibleUITests*.swift`
+2. load estimated durations from `Tests/UI/Fixtures/ui_test_timings.json`
 3. build a shard matrix via `scripts/build_ui_test_shards.py`
 4. for each shard:
    - run `build-for-testing`
@@ -151,7 +151,7 @@ For sharding decisions, use shard-shaped runs and current CI data.
 3. Be careful about treating the current timing manifest as authoritative unless
    it has been refreshed recently.
 
-   `scripts/ui_test_timings.json` can go stale. When it is stale, the planner
+   `Tests/UI/Fixtures/ui_test_timings.json` can go stale. When it is stale, the planner
    still works as a rough balancer, but the "target shard duration" becomes
    aspirational rather than predictive.
 
@@ -170,8 +170,8 @@ For sharding decisions, use shard-shaped runs and current CI data.
 - `.github/workflows/ios-ci.yml`
 - `scripts/build_ui_test_shards.py`
 - `scripts/run_xcodebuild_with_test_selection.py`
-- `scripts/ui_test_timings.json`
-- `AndBibleUITests/AndBibleUITests.swift`
+- `Tests/UI/Fixtures/ui_test_timings.json`
+- `Tests/UI/AndBibleUITests/AndBibleUITests.swift`
 
 ## What This Guide Does Not Claim
 

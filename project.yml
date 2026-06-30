@@ -53,7 +53,7 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - AndBibleTests
+      - Tests/AppHost/AndBibleTests
     dependencies:
       - target: AndBible
       - package: BibleModules

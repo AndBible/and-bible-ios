@@ -526,7 +526,7 @@ extension AndBibleUITests {
      *
      * Resolution order:
      * - explicit `UITEST_FIXTURE_SCENARIO` host environment override
-     * - checked-in `scripts/ui_test_fixture_manifest.json` entry for the current test method
+     * - checked-in `Tests/UI/Fixtures/ui_test_fixture_manifest.json` entry for the current test method
      *
      * - Parameters:
      *   - environment: Current XCTest host environment.
@@ -552,7 +552,7 @@ extension AndBibleUITests {
 
         guard let testIdentifier = currentFixtureManifestTestIdentifier(file: file, line: line),
               let manifestURL = resolveRepositoryRootURL(file: file, line: line)?
-                .appendingPathComponent("scripts", isDirectory: true)
+                .appendingPathComponent("Tests/UI/Fixtures", isDirectory: true)
                 .appendingPathComponent("ui_test_fixture_manifest.json", isDirectory: false) else {
             return nil
         }
@@ -673,21 +673,28 @@ extension AndBibleUITests {
         line: UInt = #line
     ) -> URL? {
         let fileURL = URL(fileURLWithPath: String(describing: file), isDirectory: false)
-        let repoRootURL = fileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let manifestURL = repoRootURL
-            .appendingPathComponent("scripts", isDirectory: true)
-            .appendingPathComponent("ui_test_fixture_manifest.json", isDirectory: false)
-        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
-            XCTFail(
-                "Unable to resolve repository root from '\(fileURL.path)'; missing '\(manifestURL.path)'.",
-                file: file,
-                line: line
-            )
-            return nil
+        var candidateURL = fileURL.deletingLastPathComponent()
+        while true {
+            let manifestURL = candidateURL
+                .appendingPathComponent("Tests/UI/Fixtures", isDirectory: true)
+                .appendingPathComponent("ui_test_fixture_manifest.json", isDirectory: false)
+            if FileManager.default.fileExists(atPath: manifestURL.path) {
+                return candidateURL
+            }
+
+            let parentURL = candidateURL.deletingLastPathComponent()
+            if parentURL.path == candidateURL.path {
+                break
+            }
+            candidateURL = parentURL
         }
-        return repoRootURL
+
+        XCTFail(
+            "Unable to resolve repository root from '\(fileURL.path)'; missing Tests/UI/Fixtures/ui_test_fixture_manifest.json in parent directories.",
+            file: file,
+            line: line
+        )
+        return nil
     }
 
     /**
