@@ -18,6 +18,7 @@ extension AndBibleUITests {
      * - Side effects:
      *   - terminates any previously launched app process through CoreSimulator when possible
      *   - assigns a fresh `UITEST_SESSION_ID` and standard locale/accessibility launch flags
+     *   - marks the informational first-run setup prompt handled for fixture-backed reader flows
      *   - prepares the fixture scenario declared for the current test method
      * - Failure modes:
      *   - fixture preparation records XCTest failures when required host-side setup cannot complete
@@ -35,7 +36,9 @@ extension AndBibleUITests {
         trackedApp = app
         app.launchEnvironment["UITEST_SESSION_ID"] = UUID().uuidString
         app.launchEnvironment["UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"] = "1"
+        app.launchEnvironment["UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED"] = "1"
         app.launchArguments += ["-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"]
+        app.launchArguments += ["-UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED"]
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         if let remoteSyncBootstrapScenario {
             app.launchEnvironment["UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO"] = remoteSyncBootstrapScenario

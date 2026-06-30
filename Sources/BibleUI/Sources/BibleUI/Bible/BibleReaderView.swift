@@ -1857,10 +1857,13 @@ public struct BibleReaderView: View {
      Reads the durable first-run setup marker.
 
      - Returns: `true` when the user has opened Downloads/Easy Start or skipped setup.
-     - Side effects: Reads SwiftData settings through `SettingsStore`.
+     - Side effects: Reads SwiftData settings through `SettingsStore` outside UI-test harnesses.
      */
     private func hasHandledFirstRunDocumentSetupPrompt() -> Bool {
-        SettingsStore(modelContext: modelContext).getBool(Self.firstRunDocumentSetupPromptHandledKey)
+        if UITestRuntimeConfiguration.treatsFirstRunDocumentSetupAsHandled {
+            return true
+        }
+        return SettingsStore(modelContext: modelContext).getBool(Self.firstRunDocumentSetupPromptHandledKey)
     }
 
     /**

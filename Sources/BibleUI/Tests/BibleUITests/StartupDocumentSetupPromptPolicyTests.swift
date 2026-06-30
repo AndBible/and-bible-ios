@@ -58,6 +58,34 @@ final class StartupDocumentSetupPromptPolicyTests: XCTestCase {
     }
 
     /**
+     UI tests can explicitly keep their existing seeded-reader startup contract.
+
+     The flag is intentionally opt-in and test-namespaced so production launches still show the
+     first-run setup prompt, while hosted route tests that seed reader state do not get blocked by
+     the informational prompt.
+     */
+    func testUITestRuntimeCanTreatFirstRunSetupAsHandledOnlyWhenExplicit() {
+        XCTAssertTrue(
+            UITestRuntimeConfiguration.isFirstRunDocumentSetupHandled(
+                environment: ["UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED": "1"],
+                arguments: []
+            )
+        )
+        XCTAssertTrue(
+            UITestRuntimeConfiguration.isFirstRunDocumentSetupHandled(
+                environment: [:],
+                arguments: ["-UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED"]
+            )
+        )
+        XCTAssertFalse(
+            UITestRuntimeConfiguration.isFirstRunDocumentSetupHandled(
+                environment: ["UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED": "0"],
+                arguments: []
+            )
+        )
+    }
+
+    /**
      English first-run setup exposes Android's setup actions without using a transient dialog.
 
      Android's first-download surface exposes English-only Easy Start, Download, database restore,
