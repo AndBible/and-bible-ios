@@ -97,4 +97,19 @@ final class StartupDocumentSetupPromptPolicyTests: XCTestCase {
         XCTAssertFalse(presentation.allowsSkip)
         XCTAssertTrue(presentation.usesReaderStackSurface)
     }
+
+    /**
+     Startup file actions target the same Android BackupActivity categories as their button labels.
+
+     Android's first-download Restore button opens database restore, while Load Documents From Files
+     opens the document/module loader. Keeping this mapping explicit prevents the iOS startup page
+     from routing both buttons through an indistinct Backup & Restore landing screen.
+     */
+    func testStartupFileActionsResolveSpecificRestoreImportTargets() {
+        XCTAssertEqual(StartupDocumentSetupPresentation.Action.restoreDatabase.restoreImportTarget, .database)
+        XCTAssertEqual(StartupDocumentSetupPresentation.Action.loadDocumentsFromFiles.restoreImportTarget, .documents)
+        XCTAssertNil(StartupDocumentSetupPresentation.Action.downloadDocuments.restoreImportTarget)
+        XCTAssertNil(StartupDocumentSetupPresentation.Action.easyStart.restoreImportTarget)
+        XCTAssertNil(StartupDocumentSetupPresentation.Action.skip.restoreImportTarget)
+    }
 }

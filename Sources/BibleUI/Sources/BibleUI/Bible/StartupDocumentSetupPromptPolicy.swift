@@ -75,6 +75,18 @@ struct StartupDocumentSetupPresentation: Equatable {
 
         /// Skip the non-blocking first-run setup prompt.
         case skip
+
+        /// Startup-specific BackupActivity category target, when the action opens a file picker.
+        var restoreImportTarget: RestoreWorkflowTarget? {
+            switch self {
+            case .restoreDatabase:
+                return .database
+            case .loadDocumentsFromFiles:
+                return .documents
+            case .easyStart, .downloadDocuments, .skip:
+                return nil
+            }
+        }
     }
 
     /// Reason the setup screen is being shown.

@@ -261,6 +261,9 @@ public struct BibleReaderView: View {
     /// Reason the startup document-setup prompt should be visible.
     @State private var startupDownloadPromptReason: StartupDocumentSetupPromptPolicy.PromptReason?
 
+    /// Startup restore/import target passed to Backup & Restore for direct Android-style pickers.
+    @State private var startupRestoreImportTarget: RestoreWorkflowTarget?
+
     /// Guards startup prompt evaluation so it does not reappear repeatedly in one session.
     @State private var didEvaluateStartupDownloadPrompt = false
 
@@ -1316,7 +1319,7 @@ public struct BibleReaderView: View {
                 readerRenderedContentStateExport
             }
         case .importExport:
-            ImportExportView()
+            ImportExportView(startupRestoreImportTarget: startupRestoreImportTarget)
                 #if os(iOS)
                 .toolbar(.visible, for: .navigationBar)
                 .navigationBarBackButtonHidden(true)
@@ -1799,35 +1802,37 @@ public struct BibleReaderView: View {
 
      Side effects:
      - marks the one-time first-run setup as handled when applicable
-     - presents Backup & Restore on the reader destination stack
+     - presents Backup & Restore on the reader destination stack with the Documents target
      */
     private func presentStartupLoadDocumentsFromFiles() {
-        presentStartupImportExport()
+        presentStartupImportExport(for: .documents)
     }
 
     /**
-     Opens Backup & Restore so the user can restore a database from startup setup.
+     Opens the database restore picker from startup setup.
 
      Side effects:
      - marks the one-time first-run setup as handled when applicable
-     - presents Backup & Restore on the reader destination stack
+     - presents Backup & Restore on the reader destination stack with the Database target
      */
     private func presentStartupRestoreDatabase() {
-        presentStartupImportExport()
+        presentStartupImportExport(for: .database)
     }
 
     /**
-     Routes startup import/restore actions through the existing Android-compatible backup surface.
+     Routes startup import/restore actions through the existing Android-compatible picker surface.
 
      Side effects:
      - marks the one-time first-run setup as handled when applicable
+     - stores the startup restore/import target for the next Backup & Restore route
      - pushes `.importExport` as the active reader destination
      */
-    private func presentStartupImportExport() {
+    private func presentStartupImportExport(for restoreImportTarget: RestoreWorkflowTarget) {
         if startupDownloadPromptReason == .firstRunSetup {
             markFirstRunDocumentSetupPromptHandled()
             startupDownloadPromptReason = nil
         }
+        startupRestoreImportTarget = restoreImportTarget
         presentReaderDestination(.importExport, from: windowManager.activeWindow?.id)
     }
 
@@ -2007,6 +2012,7 @@ public struct BibleReaderView: View {
      - may re-show the startup no-Bible route
      */
     private func handleImportExportDestinationClosed() {
+        startupRestoreImportTarget = nil
         for (_, ctrl) in windowManager.controllers {
             (ctrl as? BibleReaderController)?.refreshInstalledModules()
         }
