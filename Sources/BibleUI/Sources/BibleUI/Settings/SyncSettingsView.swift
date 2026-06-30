@@ -212,9 +212,8 @@ public struct SyncSettingsView: View {
                 if focusedNextCloudCredentialField == .serverURL {
                     Spacer()
                     Button(String(localized: "ok")) {
-                        if validateNextCloudServerURLAfterEditing() {
-                            focusedNextCloudCredentialField = nil
-                        }
+                        _ = validateNextCloudServerURLAfterEditing()
+                        focusedNextCloudCredentialField = nil
                     }
                     .accessibilityIdentifier("syncNextCloudServerURLCommitButton")
                 }
@@ -432,9 +431,8 @@ public struct SyncSettingsView: View {
                         .multilineTextAlignment(.trailing)
                         .focused($focusedNextCloudCredentialField, equals: .serverURL)
                         .onSubmit {
-                            if validateNextCloudServerURLAfterEditing() {
-                                focusedNextCloudCredentialField = nil
-                            }
+                            _ = validateNextCloudServerURLAfterEditing()
+                            focusedNextCloudCredentialField = nil
                         }
                         .accessibilityIdentifier("syncNextCloudServerURLField")
                         #if os(iOS)
