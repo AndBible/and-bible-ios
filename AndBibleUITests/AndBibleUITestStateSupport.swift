@@ -2014,20 +2014,22 @@ extension AndBibleUITests {
     }
 
     /**
-     Resolves a Sync Settings button that may live in a lazily materialized SwiftUI form section.
+     Resolves a Sync Settings control that may live in a lazily materialized SwiftUI form section.
      *
      * - Parameters:
-     *   - identifier: Accessibility identifier of the production button.
+     *   - identifier: Accessibility identifier of the production control.
      *   - app: Running application under test.
-     *   - timeout: Maximum time to keep resolving and revealing the form.
+     *   - timeout: Preferred maximum time to keep resolving and revealing the form. Category rows
+     *     still receive enough reveal passes to traverse the known Sync Settings form when XCTest
+     *     accessibility queries are slow.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
-     * - Returns: The resolved button once it is visible inside the Sync Settings viewport.
+     * - Returns: The resolved control once it is visible inside the Sync Settings viewport.
      * - Side effects:
-     *   - scrolls Sync Settings lower content until the requested button materializes as a native
-     *     button inside the visible form viewport
+     *   - scrolls Sync Settings lower content until the requested control materializes inside the
+     *     visible form viewport
      * - Failure modes:
-     *   - records an XCTest failure if the button never appears or never becomes visible
+     *   - records an XCTest failure if the control never appears or never becomes visible
      */
     func requireReachableSyncSettingsButton(
         _ identifier: String,
@@ -2044,34 +2046,89 @@ extension AndBibleUITests {
             line: line
         )
         let deadline = Date().addingTimeInterval(timeout)
-        var lastCandidate = app.buttons[identifier].firstMatch
+        var lastCandidate = syncSettingsControlCandidates(identifier, in: app).first ?? app.buttons[identifier].firstMatch
+        let minimumRevealPasses = identifier.hasPrefix("syncCategoryToggle::") ? 4 : 1
+        var revealPasses = 0
+
+        func resolveVisibleControl() -> XCUIElement? {
+            for control in syncSettingsControlCandidates(identifier, in: app) {
+                guard control.exists else {
+                    continue
+                }
+                lastCandidate = control
+                if waitForElementToBecomeHittable(control, timeout: 0.25) ||
+                    isElementVisible(control, within: syncScreen)
+                {
+                    return control
+                }
+            }
+            return nil
+        }
 
         repeat {
-            let button = app.buttons[identifier].firstMatch
-            if button.exists {
-                lastCandidate = button
-                if isElementVisible(button, within: syncScreen) {
-                    return button
-                }
+            if let control = resolveVisibleControl() {
+                return control
             }
 
             revealSyncSettingsLowerContent(in: app)
+            revealPasses += 1
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+        } while Date() < deadline || revealPasses < minimumRevealPasses
+
+        let recoveryDeadline = Date().addingTimeInterval(min(3, max(1, timeout / 4)))
+        repeat {
+            if let control = resolveVisibleControl() {
+                return control
+            }
+            if syncScreen.exists, !syncScreen.frame.isEmpty {
+                syncScreen.swipeDown()
+            } else {
+                app.swipeDown()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < recoveryDeadline
 
         XCTAssertTrue(
             lastCandidate.exists,
-            "Expected Sync Settings button '\(identifier)' to exist within \(timeout) seconds.",
+            "Expected Sync Settings control '\(identifier)' to exist within \(timeout) seconds.",
             file: file,
             line: line
         )
         XCTAssertTrue(
             isElementVisible(lastCandidate, within: syncScreen),
-            "Expected Sync Settings button '\(identifier)' to become visible within \(timeout) seconds.",
+            "Expected Sync Settings control '\(identifier)' to become visible within \(timeout) seconds.",
             file: file,
             line: line
         )
         return lastCandidate
+    }
+
+    /**
+     Returns the native Sync Settings controls that can perform one logical row action.
+     *
+     * - Parameters:
+     *   - identifier: Production row/action identifier to resolve.
+     *   - app: Running application under test.
+     * - Returns: Candidate controls in preferred interaction order.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    func syncSettingsControlCandidates(_ identifier: String, in app: XCUIApplication) -> [XCUIElement] {
+        var candidates = [
+            app.buttons[identifier].firstMatch,
+            app.switches[identifier].firstMatch,
+        ]
+
+        let categoryPrefix = "syncCategoryToggle::"
+        if identifier.hasPrefix(categoryPrefix) {
+            let category = String(identifier.dropFirst(categoryPrefix.count))
+            let switchIdentifier = "syncCategoryToggleSwitch::\(category)"
+            candidates.append(contentsOf: [
+                app.switches[switchIdentifier].firstMatch,
+            ])
+        }
+
+        return candidates
     }
 
     /**
