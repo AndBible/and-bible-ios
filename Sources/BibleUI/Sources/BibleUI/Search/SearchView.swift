@@ -366,7 +366,7 @@ public struct SearchView: View {
      moving the primary document to the front. iOS uses the same helper as search execution so the
      visible control, request order, and grouped result order cannot drift independently.
 
-     - Returns: Ordered abbreviations such as `KJV, UITESTWEB`, or a localized fallback label when
+     - Returns: Ordered abbreviations such as `KJV, WEB`, or a localized fallback label when
        no module can be resolved.
      - Side effects: none.
      - Failure modes: Empty selection and missing primary module metadata produce the generic
@@ -393,7 +393,7 @@ public struct SearchView: View {
        - primaryModuleName: Current reader/search module abbreviation, preferred first.
        - installedModules: Installed Bible modules used to derive Android dialog order.
        - fallbackLabel: Localized label shown when no module can be resolved.
-     - Returns: Ordered abbreviations such as `KJV, UITESTWEB`, or `fallbackLabel` for an empty
+     - Returns: Ordered abbreviations such as `KJV, WEB`, or `fallbackLabel` for an empty
        effective selection.
      - Side effects: none.
      - Failure modes: Empty selection and missing primary module metadata return the supplied

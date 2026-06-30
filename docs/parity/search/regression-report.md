@@ -46,6 +46,7 @@ Verification matrix:
 - `BibleCoreTests/SearchIndexServiceQueryTests/testIndexedSearchMultipleReturnsPerModuleBucketsForGroupedTotals`
 - `BibleUITests/StrongsAndDictionaryTests/testSearchTranslationSelectionKeepsPrimaryFirstAfterAndroidSortedCommit`
 - `BibleUITests/StrongsAndDictionaryTests/testSearchTranslationEmptyDialogConfirmationPreservesPreviousSelection`
+- `BibleUITests/StrongsAndDictionaryTests/testSearchTranslationPickerDraftStateDiscardsCancelAndOutsideDismissDrafts`
 - `BibleUITests/StrongsAndDictionaryTests/testSearchTranslationSummaryUsesAndroidPrimaryFirstAbbreviationList`
 
 ### UI
@@ -74,10 +75,12 @@ Verification matrix:
 ### Multi-translation grouped results
 
 - selecting a second translation from the Search translation picker reruns the active query
+- live Cancel, outside-dismiss, and Select all -> Select none -> OK picker actions preserve the
+  previous selected translation instead of committing the draft
 - the visible selected-translation summary preserves Android's primary-first abbreviation list
 - grouped Search state reports the selected translation set
 - grouped Search state reports a combined total plus per-translation counts
-- the regression fixture returns more hits only when both KJV and UITESTWEB participate
+- the regression fixture returns more hits only when both KJV and AATESTWEB participate
 - selecting a grouped result navigates the reader away from its original passage
 
 ### Strong's behavior
@@ -109,6 +112,7 @@ This gives the search domain current regression evidence for:
 - query retention
 - scope and word-mode mutation
 - multi-translation grouped totals
+- live multi-translation dialog cancel/dismiss/empty-OK wiring
 - grouped-result navigation
 - Strong's normalization/indexed lexical-token hit search
 - result navigation into the reader

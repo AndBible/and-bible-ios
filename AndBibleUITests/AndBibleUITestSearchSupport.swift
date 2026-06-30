@@ -837,7 +837,7 @@ extension AndBibleUITests {
      Toggles one module row in the Search translation picker.
      *
      * - Parameters:
-     *   - moduleName: Stable module abbreviation, such as `UITESTWEB`.
+     *   - moduleName: Stable module abbreviation, such as `AATESTWEB`.
      *   - app: Running application under test.
      *   - timeout: Maximum time to wait for the row.
      * - Side effects:

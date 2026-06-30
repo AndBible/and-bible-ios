@@ -435,7 +435,7 @@ extension AndBibleUITests {
 
      `scripts/ui_test_fixture_manifest.json` maps retained Search UI tests to the
      `search-multi-translation` scenario. That scenario seeds `search_indexes.sqlite` and the
-     deterministic UITESTWEB module before app launch, so the app should detect selected modules as
+     deterministic AATESTWEB module before app launch, so the app should detect selected modules as
      already indexed. Normal Search tests must not enter `state=needsIndex`; runtime index-creation
      coverage belongs in a separate test and fixture path so it cannot hide seeded-fixture
      regressions.
@@ -450,7 +450,8 @@ extension AndBibleUITests {
      * Search must open as an Android-style reader destination rather than an iOS sheet, preserve
      * the launch-seeded query, expose tappable scope and word-mode rows, update exported state, and
      * rerender the seeded result list after each option change. The same live Search route then
-     * enters a deterministic bundled query, commits a second translation through the live picker,
+     * enters a deterministic bundled query, verifies the live translation picker Cancel,
+     * outside-dismiss, and empty-OK paths, commits a second translation through the live picker,
      * verifies grouped totals, and selects a result so reader-navigation handoff remains covered
      * without a second cold app launch.
      *
@@ -459,12 +460,16 @@ extension AndBibleUITests {
      *   - opens Search through the reader entry and verifies destination/no-sheet chrome
      *   - switches Search scope between NT and OT
      *   - switches Search word mode from all words to phrase and then to any word
-     *   - enters a deterministic bundled query, selects UITESTWEB, and taps a grouped result row
+     *   - enters a deterministic bundled query, exercises negative Search translation-picker
+     *     dialog paths, commits the seeded two-module translation selection, and taps a grouped
+     *     result row
      * - Failure modes:
      *   - fails if Search regresses to sheet/modal presentation or drops the launch-seeded query
      *   - fails if visible Search option controls are not accessible
      *   - fails if scope or word-mode changes do not update the Search state export
      *   - fails if the visible seeded result list does not rerender after option changes
+     *   - fails if live translation-picker Cancel, outside-dismiss, or empty OK commits draft
+     *     changes instead of preserving the previous selection
      *   - fails if the translation picker cannot commit a second module with KJV first
      *   - fails if grouped totals collapse to single-translation results
      *   - fails if selecting the final result row does not navigate the reader to the selected
@@ -522,25 +527,60 @@ extension AndBibleUITests {
         ) { modules in
             modules == Set(["KJV"])
         }
+
         tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationCancel(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "KJV after cancelling translation-picker draft"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationOutsideDismiss(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "KJV after outside-dismissing translation-picker draft"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationOK(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "KJV after empty translation-picker OK"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationRow(moduleName: "AATESTWEB", in: app, timeout: 20)
         tapSearchTranslationOK(in: app, timeout: 10)
 
         waitForSearchSelectedModules(
             in: app,
             timeout: 20,
-            description: "more than one module including UITESTWEB"
+            description: "more than one module including AATESTWEB"
         ) { modules in
-            modules.count > 1 && modules.contains("UITESTWEB")
+            modules.count > 1 && modules.contains("AATESTWEB")
         }
-        waitForSearchState(containing: "selectedModuleOrder=KJV,UITESTWEB", in: app, timeout: 20)
+        waitForSearchState(containing: "selectedModuleOrder=KJV,AATESTWEB", in: app, timeout: 20)
         XCTAssertTrue(
-            app.staticTexts["KJV, UITESTWEB"].waitForExistence(timeout: 5),
+            app.staticTexts["KJV, AATESTWEB"].waitForExistence(timeout: 5),
             "Expected the Search translation button to show Android's selected abbreviation list."
         )
         waitForSearchState(containing: "groupedTotal=2", in: app, timeout: 20)
         waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
-        waitForSearchState(containing: "UITESTWEB:1", in: app, timeout: 20)
+        waitForSearchState(containing: "AATESTWEB:1", in: app, timeout: 20)
         waitForSearchResultCount(atLeast: 2, in: app, timeout: 20)
 
         let groupedResultIdentifier = "searchResultRow::Genesis_1_2"

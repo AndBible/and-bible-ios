@@ -290,10 +290,13 @@ private struct FixtureTool {
             swordURL.appendingPathComponent("mods.d/modules-conf.cache", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/000uitestcomm.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/uitestcomm.conf", isDirectory: false),
+            swordURL.appendingPathComponent("mods.d/aatestweb.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/uitestweb.conf", isDirectory: false),
             swordURL.appendingPathComponent("modules/comments/rawcom/000uitestcomm", isDirectory: true),
             swordURL.appendingPathComponent("modules/comments/rawcom/uitestcomm", isDirectory: true),
+            swordURL.appendingPathComponent("modules/texts/rawtext/aatestweb", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/rawtext/uitestweb", isDirectory: true),
+            swordURL.appendingPathComponent("modules/texts/ztext/aatestweb", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/ztext/uitestweb", isDirectory: true),
         ]
         for candidate in candidates where fileManager.fileExists(atPath: candidate.path) {
@@ -500,7 +503,7 @@ private final class FixtureContext {
     /**
      Seeds a second deterministic Bible module plus grouped FTS rows for multi-translation search.
      *
-     * The fixture writes deterministic KJV rows plus two `UITESTWEB` rows for the same query so a
+     * The fixture writes deterministic KJV rows plus two `AATESTWEB` rows for the same query so a
      * grouped search must report results from more than one selected translation.
      *
      * - Throws: `FixtureToolError.sqlite` when the search-index database cannot be created or
@@ -527,7 +530,7 @@ private final class FixtureContext {
         defer { sqlite3_close(db) }
 
         try prepareSearchIndexSchema(in: db)
-        for moduleName in ["KJV", "UITESTWEB"] {
+        for moduleName in ["KJV", "AATESTWEB", "UITESTWEB"] {
             try executeSearchSQL("DELETE FROM verse_fts WHERE module_name = '\(moduleName)'", db: db)
             try executeSearchSQL("DELETE FROM verse_strongs WHERE module_name = '\(moduleName)'", db: db)
             try executeSearchSQL("DELETE FROM indexed_modules WHERE module_name = '\(moduleName)'", db: db)
@@ -793,12 +796,12 @@ private final class FixtureContext {
         (
             verseKey: "Genesis 1:2",
             plainText: "The earth had become formless and empty, and darkness was on the surface of the deep.",
-            moduleName: "UITESTWEB"
+            moduleName: "AATESTWEB"
         ),
         (
             verseKey: "John 3:16",
             plainText: "For God so loved the earth that the deterministic fixture can prove grouped search totals.",
-            moduleName: "UITESTWEB"
+            moduleName: "AATESTWEB"
         ),
     ]
 
@@ -812,14 +815,14 @@ private final class FixtureContext {
 
      Search assertions read deterministic FTS rows from `search_indexes.sqlite`, but production
      module discovery and book-list generation now require normal SWORD zText semantics. The fixture
-     therefore clones the bundled KJV module data under deterministic `UITESTWEB` metadata instead of
+     therefore clones the bundled KJV module data under deterministic `AATESTWEB` metadata instead of
      publishing an empty RawText shell that Android/JSword-style discovery would reject.
      */
     private func seedUITestBibleModule() throws {
         let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
         let modsDURL = swordURL.appendingPathComponent("mods.d", isDirectory: true)
         let dataURL = swordURL.appendingPathComponent(
-            "modules/texts/ztext/uitestweb",
+            "modules/texts/ztext/aatestweb",
             isDirectory: true
         )
         let sourceDataURL = try bundledSwordResourceURL()
@@ -833,9 +836,9 @@ private final class FixtureContext {
         try copyDirectoryContents(from: sourceDataURL, to: dataURL, replacingExisting: true)
 
         let conf = """
-        [UITESTWEB]
+        [AATESTWEB]
         Description=UI Test Web Bible
-        DataPath=./modules/texts/ztext/uitestweb/
+        DataPath=./modules/texts/ztext/aatestweb/
         ModDrv=zText
         SourceType=OSIS
         Encoding=UTF-8
@@ -846,7 +849,7 @@ private final class FixtureContext {
         About=Deterministic Bible module for iOS multi-translation Search UI automation.
         """
         try conf.write(
-            to: modsDURL.appendingPathComponent("uitestweb.conf", isDirectory: false),
+            to: modsDURL.appendingPathComponent("aatestweb.conf", isDirectory: false),
             atomically: true,
             encoding: .utf8
         )
