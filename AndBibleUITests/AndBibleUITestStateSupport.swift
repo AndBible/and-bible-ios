@@ -1923,21 +1923,49 @@ extension AndBibleUITests {
         )
     }
 
+    /// Direction used when revealing offscreen Text Display rows in the custom flat settings list.
+    enum TextDisplaySettingsRevealDirection {
+        case lower
+        case upper
+    }
+
+    /**
+     Scrolls the flat Text Display settings surface toward rows outside the visible viewport.
+     *
+     * - Parameter app: Running application under test.
+     * - Parameter direction: Whether to reveal content below or above the current viewport.
+     * - Side effects: Swipes the Text Display scroll view, falling back to an app-level swipe.
+     * - Failure modes: Leaves scroll position unchanged when no scrollable surface accepts the gesture.
+     */
+    func revealTextDisplaySettingsContent(
+        in app: XCUIApplication,
+        direction: TextDisplaySettingsRevealDirection
+    ) {
+        if let textDisplayScrollView = resolvedElement("textDisplaySettingsScrollView", in: app),
+           textDisplayScrollView.exists
+        {
+            switch direction {
+            case .lower:
+                textDisplayScrollView.swipeUp()
+            case .upper:
+                textDisplayScrollView.swipeDown()
+            }
+        } else if direction == .lower {
+            app.swipeUp()
+        } else {
+            app.swipeDown()
+        }
+    }
+
     /**
      Scrolls the flat Text Display settings surface toward rows below the visible viewport.
      *
      * - Parameter app: Running application under test.
-     * - Side effects: Swipes the Text Display scroll view, falling back to an app-level swipe.
+     * - Side effects: Swipes the Text Display scroll view upward, falling back to an app-level swipe.
      * - Failure modes: Leaves scroll position unchanged when no scrollable surface accepts the gesture.
      */
     func revealTextDisplaySettingsLowerContent(in app: XCUIApplication) {
-        if let textDisplayScrollView = resolvedElement("textDisplaySettingsScrollView", in: app),
-           textDisplayScrollView.exists
-        {
-            textDisplayScrollView.swipeUp()
-        } else {
-            app.swipeUp()
-        }
+        revealTextDisplaySettingsContent(in: app, direction: .lower)
     }
 
     /**
@@ -1950,16 +1978,18 @@ extension AndBibleUITests {
      * - Parameters:
      *   - identifier: Accessibility identifier of the production row button.
      *   - app: Running application under test.
+     *   - revealDirection: Scroll direction used while searching for the row.
      *   - timeout: Maximum time to keep resolving and revealing the list.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The row button once XCTest reports a hittable activation point.
-     * - Side effects: Scrolls Text Display lower content until the requested row is hittable.
+     * - Side effects: Scrolls Text Display content until the requested row is hittable.
      * - Failure modes: Records a test failure if the row never appears or never becomes hittable.
      */
     func requireReachableTextDisplayButton(
         _ identifier: String,
         in app: XCUIApplication,
+        revealDirection: TextDisplaySettingsRevealDirection = .lower,
         timeout: TimeInterval,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -1976,7 +2006,7 @@ extension AndBibleUITests {
                 }
             }
 
-            revealTextDisplaySettingsLowerContent(in: app)
+            revealTextDisplaySettingsContent(in: app, direction: revealDirection)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 

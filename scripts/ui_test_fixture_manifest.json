@@ -2,20 +2,16 @@
   "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": "my-notes-single",
   "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": "bookmark-filter",
   "AndBibleUITests/AndBibleUITests/testMyDocumentsScreenOpensFromReaderMenuAndOpensPage": "my-documents-single",
-  "AndBibleUITests/AndBibleUITests/testColorSettingsResetRestoresDefaultThemeColors": "display-colors-custom",
   "AndBibleUITests/AndBibleUITests/testDownloadsRepositoryManagerOpensFromOverflow": "baseline",
   "AndBibleUITests/AndBibleUITests/testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen": "none",
-  "AndBibleUITests/AndBibleUITests/testHostProcessDeveloperDirSelectionPrefersSelectedXcodeOverInheritedDeveloperDir": "none",
-  "AndBibleUITests/AndBibleUITests/testHostProcessDeveloperDirSelectionSkipsCommandLineToolsWithoutSimulatorTools": "none",
   "AndBibleUITests/AndBibleUITests/testHostProcessEnvironmentRestoresMacOSUserDirectories": "none",
   "AndBibleUITests/AndBibleUITests/testReadingPlansRouteStartAdvanceDeleteAndImportAffordanceFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState": "search-multi-translation",
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreDatabaseWorkflowDestinationAndShareCancel": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions": "baseline",
-  "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": "baseline",
+  "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": "display-colors-custom",
   "AndBibleUITests/AndBibleUITests/testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink": "baseline",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow": "none",
-  "AndBibleUITests/AndBibleUITests/testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms": "none",
-  "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateFlowReturnsToReaderShell": "baseline"
+  "AndBibleUITests/AndBibleUITests/testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms": "none"
 }

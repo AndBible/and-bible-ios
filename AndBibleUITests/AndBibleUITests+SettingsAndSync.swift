@@ -240,31 +240,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the Colors reset action restores the seeded theme tuple to defaults.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell and opens the Colors editor with a seeded
-     *     non-default theme tuple
-     *   - triggers the reset-to-defaults action and waits for the exported color state to return
-     *     to the default marker
-     * - Failure modes:
-     *   - fails if the Colors editor never appears
-     *   - fails if the reset action is missing or if the exported color state never changes back
-     *     to `colorDefaults`
-     */
-    func testColorSettingsResetRestoresDefaultThemeColors() {
-        let app = makeApp()
-        app.launch()
-
-        _ = openColorSettings(in: app)
-        waitForElementValue("colorSettingsScreen", toEqual: "colorCustom", in: app, timeout: 10)
-        XCTAssertEqual(resolvedElementSemanticText("colorSettingsScreen", in: app), "colorCustom")
-
-        tapElementReliably(requireElement("colorSettingsResetButton", in: app, timeout: 10), timeout: 10)
-        waitForElementValue("colorSettingsScreen", toEqual: "colorDefaults", in: app, timeout: 10)
-    }
-
-    /**
      Resolves a Backup & Restore action that may live below the first visible viewport.
      *
      * - Parameters:

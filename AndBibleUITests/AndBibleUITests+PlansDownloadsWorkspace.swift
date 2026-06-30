@@ -136,57 +136,31 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the Downloads overflow can open the repository manager route.
+     Verifies workspace creation and Downloads repository management from reader-owned routes.
 
      Repository add, replace, delete, and reset persistence runs in `RepositorySourceManagerTests`
      because that is the SwordKit-owned source-management contract. This UI smoke intentionally
      stays at the visible route boundary while still proving the real reader menu opens Downloads
-     and Android's Downloads overflow exposes Custom repositories.
+     and Android's Downloads overflow exposes Custom repositories. Workspace graph persistence is
+     package-covered by `WorkspaceWindowStoreTests`; the visible smoke only proves the selector
+     prompt can create a workspace and return control to the reader shell before another route opens.
      *
      * - Side effects:
-     *   - launches the reader shell and opens Downloads from the real reader menu
+     *   - launches the reader shell and opens the workspace selector from the reader menu
+     *   - creates one workspace from the selector-owned prompt and verifies reader-shell return
+     *   - opens Downloads from the real reader menu
      *   - opens the repository manager from Android's Downloads overflow menu
      * - Failure modes:
+     *   - fails if the workspace selector, create alert, or reader-shell return regresses
      *   - fails if the downloads browser or repository manager never appears
      *   - fails if the repository manager loses the visible add-source affordance
      */
     func testDownloadsRepositoryManagerOpensFromOverflow() {
         let app = makeApp()
-        app.launch()
-
-        XCTAssertTrue(openDownloads(in: app).exists)
-        tapElementReliably(
-            openDownloadsOverflowItem("moduleBrowserRepositoriesButton", in: app, timeout: 15),
-            timeout: 15
-        )
-
-        XCTAssertTrue(requireElement("repositoryManagerScreen", in: app, timeout: 20).exists)
-        XCTAssertTrue(requireElement("repositoryManagerAddButton", in: app, timeout: 10).exists)
-    }
-
-    /**
-     Verifies that the workspace selector can create a workspace, make it active, and switch back.
-     *
-     * Rename, clone, and delete semantics are covered by `WorkspaceStore` unit tests because the
-     * production UI exposes those actions through long-press context menus that are pathologically
-     * slow under hosted XCTest.
-     *
-     * - Side effects:
-     *   - launches the app on the reader shell and opens the workspace selector from the reader
-     *     menu
-     *   - creates one workspace from the selector-owned prompt and verifies the reader shell is
-     *     restored after creation
-     * - Failure modes:
-     *   - fails if the workspace selector never appears
-     *   - fails if the create alert or reader-shell return does not complete as expected
-     */
-    func testWorkspaceSelectorCreateFlowReturnsToReaderShell() {
-        let app = makeApp()
         let createdName = "W1"
         app.launch()
 
         XCTAssertTrue(openWorkspaceSelector(in: app).exists)
-
         _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
         let workspaceNameField = requireWorkspaceNamePromptField(in: app, timeout: 10)
         typePromptText(
@@ -200,8 +174,17 @@ extension AndBibleUITests {
 
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
-            "Expected creating a workspace to return to the reader shell."
+            "Expected creating a workspace to return to the reader shell before opening Downloads."
         )
+
+        XCTAssertTrue(openDownloads(in: app).exists)
+        tapElementReliably(
+            openDownloadsOverflowItem("moduleBrowserRepositoriesButton", in: app, timeout: 15),
+            timeout: 15
+        )
+
+        XCTAssertTrue(requireElement("repositoryManagerScreen", in: app, timeout: 20).exists)
+        XCTAssertTrue(requireElement("repositoryManagerAddButton", in: app, timeout: 10).exists)
     }
 
     /**

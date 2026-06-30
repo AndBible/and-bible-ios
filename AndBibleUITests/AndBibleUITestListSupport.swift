@@ -1060,24 +1060,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens Colors through Android's All Text Options navigation.
-     *
-     * - Parameter app: Running application under test.
-     * - Returns: The root accessibility-identified Colors screen element.
-     * - Side effects:
-     *   - opens the reader All Text Options screen
-     *   - taps the Colors preference row and pushes the Colors screen
-     * - Failure modes:
-     *   - fails when the Colors screen never appears
-     */
-    func openColorSettings(in app: XCUIApplication) -> XCUIElement {
-        _ = openAllTextOptions(in: app)
-        let colorsLink = requireReachableTextDisplayButton("textDisplayColorsLink", in: app, timeout: 10)
-        tapElementReliably(colorsLink, timeout: 10)
-        return requireElement("colorSettingsScreen", in: app, timeout: 20)
-    }
-
-    /**
      Opens Text Display through Android's All Text Options route.
      *
      * - Parameter app: Running application under test.

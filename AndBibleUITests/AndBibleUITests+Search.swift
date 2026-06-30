@@ -77,8 +77,8 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Android's reader All Text Options route, workspace parent link, and font-family
-     editor presentation.
+     Verifies Android's reader All Text Options route, color reset, workspace parent link, and
+     font-family editor presentation.
      *
      Package tests own text-display row order, row visibility, editor state semantics, and Android
      value normalization. This UI smoke keeps the production route live: the reader action opens
@@ -89,11 +89,13 @@ extension AndBibleUITests {
      * - Side effects:
      *   - launches the reader shell with deterministic in-memory data
      *   - opens the real overflow menu action identified by Android's All Text Options row
+     *   - opens Colors from that workspace-scoped route and resets seeded custom colors
      *   - taps the Global text options parent link inside Text Display settings
      *   - opens the font-family editor overlay
      * - Failure modes:
      *   - fails if the overflow action is routed to global Application Preferences
      *   - fails if the overflow action is routed to window-scoped Text Display settings
+     *   - fails if the Colors route or reset action is missing from the visible Android path
      *   - fails if the workspace parent link is missing or if global scope still exposes parent
      *     links
      *   - fails if the editor route regresses to native iOS picker/sheet presentation
@@ -117,7 +119,28 @@ extension AndBibleUITests {
             "Workspace text options must not show Android's window-only workspace parent link."
         )
 
-        let globalLink = requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10)
+        let colorsLink = requireReachableTextDisplayButton("textDisplayColorsLink", in: app, timeout: 10)
+        tapElementReliably(colorsLink, timeout: 10)
+        waitForElementValue("colorSettingsScreen", toEqual: "colorCustom", in: app, timeout: 10)
+        XCTAssertEqual(resolvedElementSemanticText("colorSettingsScreen", in: app), "colorCustom")
+
+        tapElementReliably(requireElement("colorSettingsResetButton", in: app, timeout: 10), timeout: 10)
+        waitForElementValue("colorSettingsScreen", toEqual: "colorDefaults", in: app, timeout: 10)
+
+        let colorSettingsBackButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(
+            colorSettingsBackButton.waitForExistence(timeout: 10),
+            "Expected Colors to expose NavigationStack back chrome to Text Options."
+        )
+        tapElementReliably(colorSettingsBackButton, timeout: 10)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
+
+        let globalLink = requireReachableTextDisplayButton(
+            "textDisplayOpenGlobalSettingsButton",
+            in: app,
+            revealDirection: .upper,
+            timeout: 10
+        )
         tapElementReliably(globalLink, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
         XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
