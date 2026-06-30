@@ -97,9 +97,14 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
 
         self.assertIn("let syncScreen = requireElement(", resolver_body)
         self.assertIn('"syncSettingsScreen"', resolver_body)
-        self.assertIn("isElementVisible(button, within: syncScreen)", resolver_body)
+        self.assertRegex(
+            resolver_body,
+            r"waitForElementToBecomeHittable\([^)]+\)\s*\|\|\s*"
+            r"isElementVisible\([^,]+,\s*within:\s*syncScreen\)",
+        )
         self.assertIn("isElementVisible(lastCandidate, within: syncScreen)", resolver_body)
         self.assertNotIn("become hittable within", resolver_body)
+        self.assertIn("revealPasses < minimumRevealPasses", resolver_body)
 
     def test_sync_connection_trigger_does_not_recheck_hittability_after_resolution(self) -> None:
         """Triggering the connection test uses the resolved row instead of a second hittability wait.
