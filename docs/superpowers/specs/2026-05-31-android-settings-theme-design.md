@@ -53,7 +53,9 @@ For each iOS settings row that corresponds to an Android preference row:
 - Port the referenced Android drawable/vector asset into an iOS-friendly asset when licensing and format allow.
 - Preserve the Android icon metaphor, silhouette, fixed left-column placement, and disabled-state tinting.
 - If a direct Android drawable cannot be reused, document the row-level fallback and choose the nearest faithful native replacement. The fallback is a deviation, not a redesign.
-- Keep a mapping table in parity docs so future Android icon changes can be audited against iOS.
+- Keep the mapping in source, tests, or a focused ADR so future Android icon
+  changes can be audited against iOS without restoring tracker-style parity
+  docs.
 
 The screenshots remain useful for validating size, placement, density, and disabled/active treatment after the source assets are mapped.
 
@@ -125,7 +127,9 @@ Add focused coverage where it gives signal:
 
 ## Documentation
 
-Update parity docs to say native SwiftUI is the implementation choice, but the visual contract is Android-derived. The docs should explicitly reject one-off local styling in #155 and #159.
+Update the relevant ADR, source comments, or tests to say native SwiftUI is the
+implementation choice, but the visual contract is Android-derived. The durable
+record should explicitly reject one-off local styling in #155 and #159.
 
 ## Acceptance
 
@@ -137,4 +141,5 @@ Update parity docs to say native SwiftUI is the implementation choice, but the v
 - Row icons are mapped from Android `android:icon` references and drawable/vector sources, with documented fallbacks for any asset that cannot be ported directly.
 - The settings surface inherits the rest of the app’s active theme in light and dark modes.
 - The implementation leaves search/reset behavior to #155 while providing the row metadata and presentation hooks those workflows need.
-- Parity docs describe the Android-derived native settings visual contract.
+- The relevant ADR, source comments, or tests describe the Android-derived
+  native settings visual contract.

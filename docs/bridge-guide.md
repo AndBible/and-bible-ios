@@ -137,15 +137,16 @@ Notes:
   related `mydocuments` sync category is implemented separately through
   #72/#104/#105/#106/#108/#107/#109.
 - Android's reading-progress bridge family is accepted and model-backed on iOS.
-  The native iOS reading-progress model, storage, settings contract, and Android
-  owner references are recorded in
-  `docs/parity/bridge/reading-progress-model.md`. `recordChapterRead` appends
-  local chapter-read history, updates `chapterReadCount`, and emits
-  `update_chapter_read_status`; iOS also exposes local `markChapterRead` and
-  `unmarkChapterRead` operation aliases for #86. #87 adds
-  `openChapterReadHistory`, `openReadingProgress`,
-  `openReadingProgressSettings`, and `setReadingProgressSettings` with native
-  sheet presentation, Android tab-position mapping, settings validation, and
+  `ReadingProgressStore`, `ReadingProgressSettingsBundle`,
+  `BridgeDispatchTests`, `ProgressStoreTests`, and
+  `ReaderProgressBridgeTests` own the native model, storage, settings contract,
+  and bridge regression coverage. `recordChapterRead` appends local chapter-read
+  history, updates `chapterReadCount`, and emits `update_chapter_read_status`;
+  iOS also exposes local `markChapterRead` and `unmarkChapterRead` operation
+  aliases for #86. #87 adds `openChapterReadHistory`,
+  `openReadingProgress`, `openReadingProgressSettings`, and
+  `setReadingProgressSettings` with native sheet presentation, Android
+  tab-position mapping, settings validation, and
   `update_reading_progress_settings` events. The related `progress` sync
   category remains tracked in #73 and distinct from `readingplans`.
 - Android's AI bridge family is accepted but deferred. iOS should not add

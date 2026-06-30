@@ -20,7 +20,8 @@ List any relevant contracts, standards, or design references that govern this ch
 
 Examples:
 - `commit-message-standard.md`
-- parity contract docs under `docs/parity/`
+- parity ADRs under `docs/adr/`
+- machine parity fixtures under `scripts/fixtures/` when a script consumes them
 - issue/task references such as `SETPAR-####`
 
 ## Change Details

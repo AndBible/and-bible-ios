@@ -129,6 +129,7 @@ Tests:
 ### Docs
 
 - Docs index: `docs/README.md`
-- Parity docs: `docs/parity/`
+- Parity decisions: `docs/adr/`
+- Machine parity fixtures: `scripts/fixtures/`
 - Developer guides: `docs/howto/`
 - Backlog/task tracking outside repo history: `../parity-tasks/`

@@ -1,6 +1,6 @@
 # 0001: Gradually Convert Parity Decisions To ADRs
 
-Status: Accepted
+Status: Superseded by [ADR 0008](0008-parity-documentation-ownership.md)
 
 Date: 2026-05-25
 
@@ -38,8 +38,8 @@ ADRs are the long-lived source for:
 - architecture or documentation ownership rules
 - decisions that should survive the issue or PR that introduced them
 
-`docs/parity/` remains useful during the migration, but it should become
-lighter over time. Its role is:
+`docs/parity/` remained useful during the migration, but it was expected to
+become lighter over time. Its role was:
 
 - orientation and current status snapshots
 - links to ADRs that own durable decisions
@@ -53,18 +53,12 @@ from the relevant parity page.
 
 ## Consequences
 
-- Existing parity docs do not need to be converted in one large migration.
-- When a parity domain is touched, stable decisions in that domain should move
-  into ADRs or link to existing ADRs instead of expanding the domain tracker.
-- Parity docs may temporarily duplicate ADR content during migration, but new
-  work should reduce duplication when practical.
-- Status updates and validation evidence can remain in parity docs or issues,
-  but they should not grow into permanent decision records.
-- Reviewers should treat a new long-form parity rationale without an ADR as a
-  documentation smell.
+- This ADR allowed an incremental migration period.
+- ADR 0008 supersedes that migration period and makes ADRs, source, tests,
+  issues, and PRs the durable homes for parity decisions and status.
+- Reviewers should treat a new long-form parity rationale outside an ADR as a
+  documentation smell unless it is a machine-readable guardrail baseline.
 
 ## Related
 
-- [Parity documentation](../parity/README.md)
-- [Parity status overview](../parity/status-overview.md)
-- [Android parity contract](../parity/android-parity-contract.md)
+- [ADR 0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)
