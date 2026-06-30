@@ -40,7 +40,7 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
     def test_search_fixture_manifest_maps_search_workflows_to_seeded_indexes(self) -> None:
         """Document which normal Search UI tests are expected to start indexed."""
         manifest = json.loads(
-            (REPO_ROOT / "scripts/ui_test_fixture_manifest.json").read_text(encoding="utf-8")
+            (REPO_ROOT / "Tests/UI/Fixtures/ui_test_fixture_manifest.json").read_text(encoding="utf-8")
         )
         search_entries = {
             test_identifier: scenario
@@ -68,7 +68,7 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
     def test_search_open_path_rejects_runtime_index_creation_for_seeded_fixtures(self) -> None:
         """Ensure normal seeded Search tests cannot tap Create and hide fixture regressions."""
         support_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
         ).read_text(encoding="utf-8")
 
         self.assertIn("seededSearchFixtureScenarios", support_source)
@@ -80,7 +80,7 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
     def test_search_open_path_preserves_call_site_failure_attribution(self) -> None:
         """Ensure seeded fixture failures point at the invoking Search UI test."""
         support_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
         ).read_text(encoding="utf-8")
 
         self.assertRegex(
@@ -121,7 +121,7 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
     def test_seeded_open_search_readiness_uses_reduced_budget(self) -> None:
         """Ensure normal seeded Search tests no longer inherit index-creation timeouts."""
         support_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
         ).read_text(encoding="utf-8")
 
         self.assertIn("seededSearchReadinessTimeout", support_source)
@@ -160,7 +160,7 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
     def test_search_state_waits_use_shared_semantic_wait_helper(self) -> None:
         """Keep Search's pure state waits on one shared diagnostic helper."""
         support_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
         ).read_text(encoding="utf-8")
 
         self.assertIn("func waitForSearchSemanticState", support_source)
@@ -180,7 +180,7 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
     def test_search_readiness_failure_reports_final_state_and_needs_index_history(self) -> None:
         """Keep readiness failures actionable when seeded indexes are missing or stale."""
         support_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
         ).read_text(encoding="utf-8")
 
         self.assertIn("observedNeedsIndex", support_source)
@@ -209,7 +209,7 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
 
     def test_search_tests_document_seeded_index_contract_near_workflow_tests(self) -> None:
         """Keep the fixture expectation visible where future Search UI tests are added."""
-        search_source = (REPO_ROOT / "AndBibleUITests/AndBibleUITests+Search.swift").read_text(
+        search_source = (REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITests+Search.swift").read_text(
             encoding="utf-8"
         )
 

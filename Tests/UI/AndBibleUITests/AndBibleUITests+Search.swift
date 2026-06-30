@@ -433,7 +433,7 @@ extension AndBibleUITests {
     /**
      Search fixture contract for normal UI workflows.
 
-     `scripts/ui_test_fixture_manifest.json` maps retained Search UI tests to the
+     `Tests/UI/Fixtures/ui_test_fixture_manifest.json` maps retained Search UI tests to the
      `search-multi-translation` scenario. That scenario seeds `search_indexes.sqlite` and the
      deterministic AATESTWEB module before app launch, so the app should detect selected modules as
      already indexed. Normal Search tests must not enter `state=needsIndex`; runtime index-creation

@@ -106,7 +106,7 @@ let package = Package(
         .executableTarget(
             name: "UITestFixtureTool",
             dependencies: ["BibleCore", "SwordKit"],
-            path: "Tools/UITestFixtureTool"
+            path: "Tests/Support/UITestFixtureTool"
         ),
     ]
 )

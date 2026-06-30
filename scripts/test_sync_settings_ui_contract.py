@@ -24,7 +24,7 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
         reaches the behavior under test.
         """
         source = (
-            REPO_ROOT / "AndBibleUITests" / "AndBibleUITests+SettingsAndSync.swift"
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITests+SettingsAndSync.swift"
         ).read_text()
         test_start = source.index(
             "func testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen()"
@@ -96,7 +96,7 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
         a visible Form row as reachable.
         """
         source = (
-            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
         ).read_text()
         resolver_start = source.index("func requireReachableSyncSettingsButton(")
         resolver_end = source.index("func toggledSwitchValue(", resolver_start)
@@ -122,7 +122,7 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
         XCTest marks a visible SwiftUI row non-hittable.
         """
         source = (
-            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
         ).read_text()
         trigger_start = source.index("func triggerSyncConnectionTest(")
         trigger_end = source.index("func syncStateToken(", trigger_start)

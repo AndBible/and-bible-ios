@@ -96,7 +96,7 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
     def test_workspace_create_prompt_waits_on_prompt_root_before_buttons(self) -> None:
         """Avoid hosted XCTest stalls from proving absent prompt buttons before root exists."""
         list_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestListSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
         ).read_text(encoding="utf-8")
         body = swift_function_body(list_source, "openWorkspaceCreatePrompt")
 
@@ -116,7 +116,7 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
     def test_workspace_prompt_button_candidates_prefer_prompt_scope_and_titles(self) -> None:
         """Keep workspace prompt button lookup off expensive app-wide identifier queries first."""
         element_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestElementSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
         ).read_text(encoding="utf-8")
         body = swift_function_body(element_source, "workspaceNamePromptButtonCandidates")
 
@@ -140,7 +140,7 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
     def test_search_state_candidates_prefer_hidden_export_before_screen_root(self) -> None:
         """Keep Search state polling on the dedicated lightweight export before the root."""
         element_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestElementSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
         ).read_text(encoding="utf-8")
         body = swift_function_body(element_source, "semanticStateValueCandidates")
         search_case_start = body.find('case "searchStateExport":')
@@ -164,7 +164,7 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
     def test_search_interaction_ready_does_not_read_state_before_poll_loop(self) -> None:
         """Keep the Search readiness timeout from being consumed by a pre-loop XCTest snapshot."""
         search_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
         ).read_text(encoding="utf-8")
         body = swift_function_body(search_source, "waitForSearchInteractionReady")
         loop_start = body.find("while Date() < deadline")
@@ -177,7 +177,7 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
     def test_search_opening_verifies_presentation_before_success(self) -> None:
         """Keep reader-triggered Search opening state-driven instead of tap-assumption driven."""
         search_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
         ).read_text(encoding="utf-8")
         open_body = swift_function_body(search_source, "openSearch")
         presentation_body = swift_function_body(search_source, "presentSearchFromReader")
@@ -219,10 +219,10 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
     def test_window_tab_helpers_avoid_app_wide_button_fallbacks(self) -> None:
         """Keep tab selection from falling back to expensive full-hierarchy button queries."""
         element_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestElementSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
         ).read_text(encoding="utf-8")
         reader_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestReaderSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestReaderSupport.swift"
         ).read_text(encoding="utf-8")
 
         candidates_body = swift_function_body(element_source, "windowTabBarButtonCandidates")
@@ -264,7 +264,7 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
     def test_resolved_semantic_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
         """Ensure the shared pure-observation wait is backed by XCTest wait primitives."""
         state_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestStateSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
         ).read_text(encoding="utf-8")
         body = swift_function_body(state_source, "waitForResolvedSemanticState")
 
@@ -276,7 +276,7 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
     def test_resolved_semantic_wait_failure_reports_elapsed_and_final_state(self) -> None:
         """Keep timeout failures actionable without reintroducing custom polling loops."""
         state_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestStateSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
         ).read_text(encoding="utf-8")
         body = swift_function_body(state_source, "waitForResolvedSemanticState")
 
@@ -302,10 +302,10 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
     def test_representative_pure_observation_waits_use_shared_helper(self) -> None:
         """Keep migrated value/state waits on the shared XCTest-backed helper."""
         reader_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestReaderSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestReaderSupport.swift"
         ).read_text(encoding="utf-8")
         list_source = (
-            REPO_ROOT / "AndBibleUITests/AndBibleUITestListSupport.swift"
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
         ).read_text(encoding="utf-8")
 
         for body in swift_function_bodies(reader_source, "waitForElementValue"):

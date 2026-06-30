@@ -41,7 +41,7 @@ xcodebuild \
 Notes:
 - `CODE_SIGNING_ALLOWED=NO` keeps CLI simulator runs simple.
 - `.derivedData/` and `.artifacts/` are local build artifacts and should not be committed.
-- Current maintained regression coverage includes the Strong's `H02022` find-all flow in `AndBibleTests/AndBibleTests.swift`.
+- Current maintained regression coverage includes the Strong's `H02022` find-all flow in `Sources/BibleCore/Tests/BibleCoreTests/SearchIndexServiceQueryTests.swift`.
 
 ## Build The App For Simulator
 

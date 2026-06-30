@@ -21,7 +21,7 @@ extension AndBibleUITests {
      Opens Search and waits for it to become interactive under the current fixture contract.
 
      Normal Search UI tests use `search-indexed` or `search-multi-translation` fixture scenarios
-     from `scripts/ui_test_fixture_manifest.json`. Those scenarios must be detected by the app as
+     from `Tests/UI/Fixtures/ui_test_fixture_manifest.json`. Those scenarios must be detected by the app as
      already indexed and must not enter `state=needsIndex`; otherwise the test is hiding a fixture
      regression behind runtime index creation and long readiness waits. Intentional runtime
      index-creation coverage should use a non-seeded fixture path and test that workflow explicitly.

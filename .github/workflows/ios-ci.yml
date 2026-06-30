@@ -14,7 +14,7 @@ env:
   UI_TEST_MAX_SHARD_COUNT: "4"
   UI_TEST_TARGET_SHARD_DURATION_SECONDS: "600"
   UI_TEST_TIMEOUT_MINUTES: "90"
-  UI_TEST_TIMINGS_FILE: scripts/ui_test_timings.json
+  UI_TEST_TIMINGS_FILE: Tests/UI/Fixtures/ui_test_timings.json
 
 jobs:
   repo-standards:
@@ -749,7 +749,7 @@ jobs:
         id: plan
         run: >-
           python3 -u scripts/build_ui_test_shards.py
-          --test-file AndBibleUITests/AndBibleUITests*.swift
+          --test-file Tests/UI/AndBibleUITests/AndBibleUITests*.swift
           --timings-file "${UI_TEST_TIMINGS_FILE}"
           --shard-count "${UI_TEST_MIN_SHARD_COUNT}"
           --target-shard-duration-seconds "${UI_TEST_TARGET_SHARD_DURATION_SECONDS}"

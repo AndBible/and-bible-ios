@@ -38,6 +38,8 @@ Examples:
 
 Preferred locations:
 - `Sources/SwordKit/Tests/SwordKitTests` for low-level wrapper behavior
-- `AndBibleTests/AndBibleTests.swift` for end-to-end app-facing regressions
+- `Sources/BibleCore/Tests/BibleCoreTests` or `Sources/BibleUI/Tests/BibleUITests` for package-owned service/UI contracts after imports are minimized
+- `Tests/UI/AndBibleUITests` only for true launched-app smoke workflows
+- `Tests/AppHost/AndBibleTests` only for app delegate, scene, bootstrap, or installed-bundle behavior
 
 If the feature broke in the UI before, add the regression at the highest realistic layer.

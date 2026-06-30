@@ -916,19 +916,25 @@ private final class FixtureContext {
      - Throws: `FixtureToolError.missingBundledSwordResources` when the resources are unavailable.
      */
     private func bundledSwordResourceURL() throws -> URL {
-        let repositoryRootURL = URL(fileURLWithPath: #filePath)
+        var candidateRootURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while candidateRootURL.path != candidateRootURL.deletingLastPathComponent().path {
+            let bundledSwordURL = candidateRootURL
+                .appendingPathComponent("AndBible", isDirectory: true)
+                .appendingPathComponent("Resources", isDirectory: true)
+                .appendingPathComponent("sword", isDirectory: true)
+            if fileManager.fileExists(atPath: bundledSwordURL.path) {
+                return bundledSwordURL
+            }
+            candidateRootURL.deleteLastPathComponent()
+        }
+
+        let fallbackPath = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let bundledSwordURL = repositoryRootURL
             .appendingPathComponent("AndBible", isDirectory: true)
             .appendingPathComponent("Resources", isDirectory: true)
             .appendingPathComponent("sword", isDirectory: true)
-
-        guard fileManager.fileExists(atPath: bundledSwordURL.path) else {
-            throw FixtureToolError.missingBundledSwordResources(bundledSwordURL.path)
-        }
-        return bundledSwordURL
+            .path
+        throw FixtureToolError.missingBundledSwordResources(fallbackPath)
     }
 
     /**
