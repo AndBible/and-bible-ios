@@ -203,6 +203,7 @@ extension AndBibleUITests {
         let commitButton = requireElement("syncNextCloudServerURLCommitButton", in: app, timeout: 5)
         tapElementReliably(commitButton, timeout: 2)
         waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
+        tapAlertButton("OK", in: app, timeout: 10)
 
         toggleSyncCategory(
             "syncCategoryToggle::bookmarks",

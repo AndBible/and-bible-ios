@@ -162,14 +162,7 @@ extension AndBibleUITests {
 
         XCTAssertTrue(openWorkspaceSelector(in: app).exists)
         _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
-        let workspaceNameField = requireWorkspaceNamePromptField(in: app, timeout: 10)
-        typePromptText(
-            createdName,
-            into: workspaceNameField,
-            in: app,
-            timeout: 15,
-            accessibilityIdentifier: "workspaceNamePromptTextField"
-        )
+        typeWorkspaceNamePromptText(createdName, in: app, timeout: 15)
         tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
 
         XCTAssertTrue(

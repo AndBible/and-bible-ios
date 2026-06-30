@@ -1827,46 +1827,14 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let toggle = app.buttons[identifier].firstMatch
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if waitForElementToBecomeHittable(toggle, timeout: min(1, timeout)) {
-                toggle.tap()
-                waitForSyncState(
-                    expectedTokens,
-                    in: app,
-                    timeout: timeout,
-                    file: file,
-                    line: line
-                )
-                return
-            }
-            let syncScreen = resolvedElement("syncSettingsScreen", in: app)
-            if syncScreen?.exists == true {
-                syncScreen?.swipeUp()
-            } else {
-                app.swipeUp()
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        XCTAssertTrue(
-            toggle.exists,
-            "Expected sync category control '\(identifier)' to exist within \(timeout) seconds.",
+        let toggle = requireReachableSyncSettingsButton(
+            identifier,
+            in: app,
+            timeout: timeout,
             file: file,
             line: line
         )
-        let didBecomeHittable = waitForElementToBecomeHittable(toggle, timeout: 1)
-        XCTAssertTrue(
-            didBecomeHittable,
-            "Expected sync category control '\(identifier)' to become hittable during the final 1-second retry.",
-            file: file,
-            line: line
-        )
-        guard didBecomeHittable else {
-            return
-        }
-        toggle.tap()
+        tapElementReliably(toggle, timeout: timeout, file: file, line: line)
         waitForSyncState(
             expectedTokens,
             in: app,

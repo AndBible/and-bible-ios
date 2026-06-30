@@ -98,6 +98,76 @@ extension AndBibleUITests {
     }
 
     /**
+     Types a workspace name into the selector-owned prompt without broad text-field queries.
+     *
+     * The workspace prompt autofocuses its text entry. Hosted XCTest can still stall when resolving
+     * `app.textFields["Name"]` for this prompt, so this helper treats the prompt root/confirm button
+     * as the synchronization contract, types through the active application keyboard focus, and waits
+     * for the prompt-owned confirm button to become enabled.
+     *
+     * - Parameters:
+     *   - text: Workspace name to enter.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for prompt readiness and submit enablement.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - taps the prompt surface when available
+     *   - sends keyboard input through the running application
+     * - Failure modes:
+     *   - records an XCTest failure if the prompt is absent or the confirm button never enables
+     */
+    func typeWorkspaceNamePromptText(
+        _ text: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let promptReady = waitForAnyElement(
+            [
+                "workspaceNamePromptScreen",
+                "workspaceNamePromptConfirmButton",
+                "workspaceNamePromptCancelButton",
+            ],
+            in: app,
+            timeout: min(5, timeout)
+        )
+        XCTAssertNotNil(
+            promptReady,
+            "Expected the workspace name prompt before typing.",
+            file: file,
+            line: line
+        )
+
+        if let promptScreen = firstExistingElement(workspaceNamePromptScreenCandidates(in: app), timeout: 0.2),
+           elementFrameIsUsable(promptScreen.frame)
+        {
+            promptScreen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52)).tap()
+        }
+
+        app.typeText(text)
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let submitCandidates = workspaceNamePromptButtonCandidates(
+                "workspaceNamePromptConfirmButton",
+                in: app
+            )
+            for submitButton in submitCandidates where submitButton.exists && submitButton.isEnabled {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected the workspace name prompt confirm button to enable within \(timeout) seconds after typing.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Opens Label Manager through the reader overflow admin route.
      *
      * - Parameter app: Running application under test.
