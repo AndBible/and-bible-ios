@@ -11,7 +11,7 @@ Date: 2026-06-18
   - direct comparison with a local Android reference checkout, especially
     `Search.kt`, `SearchResults.kt`, `EpubSearch.kt`, and `MultiSearchItemAdapter.kt`
   - focused simulator-backed UI coverage from `AndBibleUITests`
-  - focused unit regression coverage from `AndBibleTests`
+  - focused package-level regression coverage from `BibleCoreTests` and `BibleUITests`
 - Regression evidence: `docs/parity/search/regression-report.md`
 
 ## Status Legend

@@ -85,7 +85,8 @@ add focused coverage rather than relying on the current subset alone.
   regressions for Strong's normalization, indexed canonical tokens, and bundled KJV hits.
 - Current protection is a combination of:
   - search workflow tests in `AndBibleUITests`
-  - Strong's search regressions in `AndBibleTests`
+  - Strong's search regressions in `BibleUITests/StrongsAndDictionaryTests`
+  - indexed Search query contracts in `BibleCoreTests/SearchIndexServiceQueryTests`
   - explicit parity documentation in this directory
 
 ## Potential Improvements
