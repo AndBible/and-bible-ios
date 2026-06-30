@@ -97,7 +97,7 @@ Primary iOS sources:
 | `eink_mode` | XML `settings.xml:201-206`; Android emits `einkMode` at `BibleView.kt:1531`; Vue uses it for scroll helper lines/page buttons at `BibleView.vue:74-83`. | Documented divergence. Do not implement as dead iOS UI; see `dispositions.md`. |
 | `disable_animations` | XML `settings.xml:207-212`; Android runtime default is `isOnyxDevice` at `CommonUtils.kt:454`. | Registry-backed adapted pass. iOS default remains `false` because iOS has no Onyx-device default path. |
 | `discrete_help` | XML `settings.xml:216-221`; click behavior is `SettingsActivity.kt:325-353`. | Registry-backed adapted action. |
-| `discrete_mode` | XML `settings.xml:222-227`; hidden in discrete flavor at `SettingsActivity.kt:310-314`. | Registry-backed adapted pass. |
+| `discrete_mode` | XML `settings.xml:222-227`; hidden in discrete flavor at `SettingsActivity.kt:310-314`; standard Android toggles launcher identity through activity aliases, while the discrete flavor bakes calculator identity into resources. | Registry-backed adapted pass. iOS changes the alternate launcher icon only; runtime app-name changes are not supported by the iOS bundle metadata model. See [ADR 0007](../../adr/0007-ios-discrete-mode-app-name-boundary.md). |
 | `show_calculator` | XML `settings.xml:228-232`; hidden/summary adjusted at `SettingsActivity.kt:315-324`. | Registry-backed pass. |
 | `calculator_pin` | XML `settings.xml:233-238`; numeric editor enforced at `SettingsActivity.kt:280-282`. | Registry-backed pass. |
 | `sync_settings_shortcut` | XML `settings.xml:241-245`; starts `SyncSettingsActivity` at `SettingsActivity.kt:284-287`. | Outside registry, adapted as an iOS Features shortcut to `SyncSettingsView` with Android-sourced icon mapping. |

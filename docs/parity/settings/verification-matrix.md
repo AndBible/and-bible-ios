@@ -74,7 +74,7 @@ divergences.
 | `eink_mode` | No iOS registry/UI/payload; Android Vue uses it for e-ink helper lines/page buttons | Documented Divergence | iOS has no e-ink-specific reader controls; see `dispositions.md`. |
 | `disable_animations` | `AppPreferenceRegistry`; `SettingsView`; iOS Vue `disableAnimations` payload | Adapted Pass | iOS default is `false`; Android Onyx-device default does not apply. |
 | `discrete_help` | `AppPreferenceRegistry` action; `SettingsView` help sheet | Adapted Pass | Android dialog is adapted to native iOS sheet. |
-| `discrete_mode` | `AppPreferenceRegistry`; `SettingsView`; `AndBibleApp` alternate icon behavior | Adapted Pass | Android launcher identity behavior adapted to iOS alternate icon API. |
+| `discrete_mode` | `AppPreferenceRegistry`; `SettingsView`; `AndBibleApp` alternate icon behavior | Adapted Pass | Android launcher identity behavior adapted to iOS alternate icon API. iOS cannot change `CFBundleDisplayName` at runtime; see [ADR 0007](../../adr/0007-ios-discrete-mode-app-name-boundary.md). |
 | `show_calculator` | `AppPreferenceRegistry`; `SettingsView`; `AndBibleApp` startup calculator gate | Pass | Startup calculator gate follows persisted preference. |
 | `calculator_pin` | `AppPreferenceRegistry`; `SettingsView` numeric field; `CalculatorView` unlock | Pass | Numeric PIN entry and unlock behavior are wired. |
 | `sync_settings_shortcut` | `SettingsView` Features section exposes `settingsSyncLink` to `SyncSettingsView`; `AndBibleIconCatalog` maps Android icon | Outside Registry | Implemented as a native iOS shortcut, not a durable preference. |
