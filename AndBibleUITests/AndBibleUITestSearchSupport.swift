@@ -1060,8 +1060,10 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to wait for the toolbar action.
      * - Side effects:
      *   - taps the picker dialog neutral select toggle
+     *   - waits for the toggle's semantic value to flip, proving the draft selection mutated
      * - Failure modes:
      *   - fails when the Search All action is not reachable
+     *   - fails when the neutral action does not mutate the picker draft
      */
     func tapSearchTranslationSelectAll(
         in app: XCUIApplication,
@@ -1069,7 +1071,13 @@ extension AndBibleUITests {
     ) {
         let selectAll = app.buttons["searchTranslationSelectAllButton"].firstMatch
         if selectAll.waitForExistence(timeout: timeout) {
+            let expectedValue = expectedSearchTranslationSelectToggleValue(afterTapping: selectAll)
             tapElementReliably(selectAll, timeout: timeout)
+            waitForSearchTranslationSelectToggleValue(
+                expectedValue,
+                in: app,
+                timeout: min(3, timeout)
+            )
             return
         }
 
@@ -1079,6 +1087,54 @@ extension AndBibleUITests {
             "Expected Search translation select toggle to exist within \(timeout) seconds."
         )
         tapElementReliably(fallbackSelectAll, timeout: timeout)
+    }
+
+    /// Returns the expected neutral select-toggle semantic value after tapping it.
+    func expectedSearchTranslationSelectToggleValue(afterTapping toggle: XCUIElement) -> String? {
+        switch toggle.value as? String {
+        case "selectAll":
+            return "selectNone"
+        case "selectNone":
+            return "selectAll"
+        default:
+            return nil
+        }
+    }
+
+    /**
+     Waits for the Search translation picker neutral action to expose an expected semantic state.
+     *
+     * - Parameters:
+     *   - expectedValue: Expected accessibility value after a Select all/none tap. `nil` skips the
+     *     wait for localized fallback controls that do not expose the stable test value.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the semantic state change.
+     * - Side effects: polls the live picker button only.
+     * - Failure modes: fails when the stable picker button remains visible but does not reach the
+     *   expected value before the timeout.
+     */
+    func waitForSearchTranslationSelectToggleValue(
+        _ expectedValue: String?,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        guard let expectedValue else { return }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        let toggle = app.buttons["searchTranslationSelectAllButton"].firstMatch
+        var lastValue = toggle.value as? String
+
+        repeat {
+            if toggle.exists, toggle.value as? String == expectedValue {
+                return
+            }
+            lastValue = toggle.value as? String
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected Search translation select toggle value '\(expectedValue)' within \(timeout) seconds; last value was '\(lastValue ?? "nil")'."
+        )
     }
 
     /**
