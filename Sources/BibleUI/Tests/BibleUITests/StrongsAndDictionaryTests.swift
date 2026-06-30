@@ -50,7 +50,7 @@ private final class SwordConcurrencyFailureRecorder: @unchecked Sendable {
 /**
  BibleUI Strongs, dictionary, and search parity coverage.
 
- These tests protect Android-aligned Strong's query normalization, SWORD-backed search/indexing,
+ These tests protect Android-aligned Strong's query normalization, SWORD-backed Strong's search,
  dictionary rendering, restored MyBible dictionary handling, and related reader document builders.
  They run in the app-host-free BibleUI package lane while still using temporary bundled SWORD
  fixtures through `BibleUISwordFixtureTestCase`.
@@ -459,7 +459,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
             "Expected H02022 to normalize into entry-attribute Strong's search queries"
         )
 
-        let hits = StrongsSearchSupport.searchVerseHits(in: module, queryOptions: queryOptions)
+        let hits = StrongsSearchSupport.searchVerseHits(in: module, queryOptions: queryOptions, scope: "Gen")
 
         XCTAssertFalse(
             hits.isEmpty,
@@ -486,7 +486,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
             "Expected H00430 to normalize into Strong's search queries"
         )
 
-        let hits = StrongsSearchSupport.searchVerseHits(in: module, queryOptions: queryOptions)
+        let hits = StrongsSearchSupport.searchVerseHits(in: module, queryOptions: queryOptions, scope: "Gen")
 
         XCTAssertFalse(
             hits.isEmpty,
@@ -495,56 +495,6 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(
             hits.contains { $0.book == "Genesis" && $0.chapter == 1 && $0.verse == 1 },
             "Expected JSword-style Strong's token search for H00430/H0430 to find Genesis 1:1"
-        )
-    }
-
-    /**
-     Verifies the app's reusable search index stores and queries canonical Strong's tokens.
-
-     Android routes "find all occurrences" through JSword's Lucene index rather than walking every
-     verse during the visible search. The iOS index must therefore preserve the same canonical
-     Strong's token contract while keeping normal text snippets available for result rows. A failure
-     means Search can regress to a long SWORD scan for common numbers such as H00430, which is the
-     production behavior that made the UI shard sit in `searching=true`.
-
-     - Setup: Builds an isolated SQLite search index from the bundled KJV SWORD fixture.
-     - Expected result: Searching the canonical H00430/H0430 token finds Genesis 1:1 through the
-       index with cleaned preview text.
-     - Failure meaning: Strong's searches are not backed by the same indexed semantics Android uses.
-     - Side effects: Creates temporary SWORD and SQLite files removed by shared test cleanup/defer.
-     */
-    func testSearchIndexFindsCanonicalStrongsTokens() async throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
-        let manager = try XCTUnwrap(
-            SwordManager(modulePath: modulePath),
-            "Expected SwordManager to initialize against a temporary bundled sword module path"
-        )
-        let module = try XCTUnwrap(
-            manager.module(named: "KJV"),
-            "Expected bundled KJV module to be available for Strong's index regression testing"
-        )
-        let queryOptions = try XCTUnwrap(
-            StrongsSearchSupport.normalizedQueryOptions(for: "H00430"),
-            "Expected H00430 to normalize into canonical Strong's search tokens"
-        )
-        let databaseURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("search-index-strongs-\(UUID().uuidString).sqlite")
-        defer { try? FileManager.default.removeItem(at: databaseURL) }
-        let service = SearchIndexService(databasePath: databaseURL.path)
-
-        await service.createIndex(module: module)
-        let hits = service.searchStrongs(
-            canonicalTokens: queryOptions.canonicalStrongTokens,
-            moduleName: "KJV"
-        )
-
-        XCTAssertTrue(
-            hits.contains { $0.key == "Genesis 1:1" },
-            "Expected indexed Strong's search for H00430/H0430 to find Genesis 1:1"
-        )
-        XCTAssertTrue(
-            hits.allSatisfy { !$0.snippet.contains("<H") && !$0.snippet.contains("<G") },
-            "Expected indexed Strong's previews to use cleaned verse text rather than raw Strong's tags"
         )
     }
 
@@ -674,59 +624,6 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies indexed text search emits hits in Android-style canonical verse order.
-
-     Android groups Lucene hits by verse and sorts scripture results by book, chapter, and verse
-     before rendering them. The iOS FTS index must therefore preserve module entry order instead of
-     exposing SQLite's rank ordering for broad queries such as `earth`, `jesus`, and `noah`. A
-     failure means users can see search results jump to later books even though earlier canonical
-     matches exist.
-
-     - Setup: Builds an isolated SQLite search index from the bundled KJV SWORD fixture.
-     - Expected result: Broad searches return early canonical KJV hits before later-book relevance
-       matches.
-     - Failure meaning: Indexed search result ordering has drifted from Android's visible search
-       result contract.
-     - Side effects: Creates temporary SWORD and SQLite files removed by shared test cleanup/defer.
-     */
-    func testSearchIndexReturnsTextHitsInCanonicalEntryOrder() async throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
-        let manager = try XCTUnwrap(
-            SwordManager(modulePath: modulePath),
-            "Expected SwordManager to initialize against a temporary bundled sword module path"
-        )
-        let module = try XCTUnwrap(
-            manager.module(named: "KJV"),
-            "Expected bundled KJV module to be available for text index ordering regression testing"
-        )
-        let databaseURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("search-index-order-\(UUID().uuidString).sqlite")
-        defer { try? FileManager.default.removeItem(at: databaseURL) }
-        let service = SearchIndexService(databasePath: databaseURL.path)
-
-        await service.createIndex(module: module)
-        let earthHits = service.search(query: "earth", moduleName: "KJV", wordMode: .allWords)
-        let jesusHits = service.search(query: "jesus", moduleName: "KJV", wordMode: .allWords)
-        let noahHits = service.search(query: "noah", moduleName: "KJV", wordMode: .allWords)
-
-        XCTAssertGreaterThanOrEqual(earthHits.count, 2, "Expected broad KJV search for earth to return multiple hits")
-        XCTAssertEqual(
-            Array(earthHits.prefix(2).map(\.key)),
-            ["Genesis 1:1", "Genesis 1:2"],
-            "Expected indexed search hits to follow canonical module order, not SQLite rank order"
-        )
-        XCTAssertEqual(
-            jesusHits.first?.key,
-            "Matthew 1:1",
-            "Expected broad New Testament hits to start at the first canonical KJV match"
-        )
-        XCTAssertTrue(
-            noahHits.prefix(5).map(\.key).contains("Genesis 6:8"),
-            "Expected early canonical Noah hits to remain visible in the first rendered results"
-        )
-    }
-
-    /**
      Verifies the Strong's search path can use SWORD entry-attribute results as a candidate index
      without trusting them as the semantic result source.
 
@@ -752,7 +649,8 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
 
         let candidateResult = StrongsSearchSupport.searchVerseHitsByEntryAttributeCandidates(
             in: module,
-            queryOptions: queryOptions
+            queryOptions: queryOptions,
+            scope: "Gen"
         )
 
         XCTAssertTrue(

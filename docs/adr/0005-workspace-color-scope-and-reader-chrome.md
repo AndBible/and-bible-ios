@@ -86,8 +86,6 @@ contract is the persistence and application model: only workspace scope owns
 
 ## Related
 
-- [Reader All Text Options Contract](../parity/reader/text-display-options-contract.md)
-- [Android Settings Contract](../parity/settings/contract.md)
-- [Android parity contract](../parity/android-parity-contract.md)
+- [ADR 0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)
 - AndBible iOS PR #227
 - #226

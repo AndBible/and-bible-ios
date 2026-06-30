@@ -5,9 +5,9 @@ product-architecture, and documentation-ownership decisions.
 
 ADRs are not status reports. They explain why a decision was made, what options
 were considered, and what consequences follow from the decision. Current status,
-test evidence, parity matrices, and implementation checklists can stay in
-domain docs while they are useful, but durable decisions should move here over
-time instead of accumulating in tracker-style parity docs.
+test evidence, parity matrices, and implementation checklists belong in issues,
+PRs, code, tests, or machine-readable guardrails rather than tracker-style
+parity docs.
 
 ## When To Add An ADR
 
@@ -22,7 +22,7 @@ Add an ADR when a decision:
 Do not add an ADR for every small implementation change. Add one when the
 change decides or revises product/architecture direction. If a change only
 updates status, validation evidence, or implementation notes under an existing
-decision, update the domain doc or issue instead.
+decision, update the issue, PR, source, or test instead.
 
 ## Format
 
@@ -32,7 +32,20 @@ Use a numbered Markdown file:
 NNNN-short-kebab-case-title.md
 ```
 
-Use these sections:
+New ADRs should include YAML front matter when practical, following this
+metadata shape:
+
+- `adr`: stable ADR identifier, such as `ADR-0008`
+- `title`: short decision title
+- `description`: one-sentence decision summary
+- `date`: `YYYY-MM-DD`
+- `status`: `proposed`, `accepted`, `rejected`, `deprecated`, or `superseded`
+- `supersedes` / `superseded-by`: replacement relationships
+- `decision-owner`, `deciders`, `consulted`, `informed`
+- `tags`, `related-adrs`, `related-work-items`
+
+Older ADRs may use the legacy body-only format. Either way, include these
+sections or their front-matter equivalents:
 
 - `Status`: Proposed, Accepted, Superseded, or Rejected
 - `Date`: YYYY-MM-DD
@@ -43,9 +56,11 @@ Use these sections:
 
 ## Current ADRs
 
-- [0001: Gradually Convert Parity Decisions To ADRs](0001-gradually-convert-parity-decisions-to-adrs.md)
+- [0001: Gradually Convert Parity Decisions To ADRs](0001-gradually-convert-parity-decisions-to-adrs.md) (Superseded by ADR 0008)
 - [0002: Route Reader Document Modals Through The Shared Document Pipeline](0002-route-reader-document-modals-through-shared-document-pipeline.md)
 - [0003: Android Database Backup Restore Parity](0003-android-database-backup-restore-parity.md)
 - [0004: Reader Pointer Affordances And Upstream Bug Handling](0004-reader-pointer-affordances-and-upstream-bug-handling.md)
 - [0005: Workspace Color Scope And Reader Chrome](0005-workspace-color-scope-and-reader-chrome.md)
 - [0006: Modal Presentation Ownership For Android Parity](0006-modal-presentation-ownership-for-android-parity.md)
+- [0007: iOS Discrete Mode App Name Boundary](0007-ios-discrete-mode-app-name-boundary.md)
+- [0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)

@@ -90,10 +90,8 @@ Every reader parity decision should use an honest evaluation:
 
 ## Related
 
-- [Reader parity contract](../parity/reader/contract.md)
-- [Reader parity dispositions](../parity/reader/dispositions.md)
-- [Reader verification matrix](../parity/reader/verification-matrix.md)
-- [Bridge parity dispositions](../parity/bridge/dispositions.md)
+- [ADR 0006: Modal Presentation Ownership For Android Parity](0006-modal-presentation-ownership-for-android-parity.md)
+- [ADR 0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)
 - #8
 - #122
 - #123

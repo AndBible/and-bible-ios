@@ -20,7 +20,7 @@ semantics, state persistence, or follow-up routing. The risk is highest in the
 reader because reader actions can cross WebView state, module selection,
 bookmark and StudyPad mutation, settings inheritance, and platform services.
 
-The Android parity contract allows native iOS presentation only when it
+The project parity standard allows native iOS presentation only when it
 preserves the same visible information architecture and user outcome. That rule
 needs a concrete ownership matrix so future PRs can decide whether a sheet is a
 valid parity implementation, a temporary gap, or an intentional platform
@@ -58,10 +58,9 @@ Every PR that adds or materially changes a parity-sensitive presentation surface
 must identify the owner category in one of:
 
 - an ADR when the decision is durable or cross-cutting
-- the relevant parity domain doc when the decision is domain-local
 - source comments or tests when the route is easy to regress
 - the PR description when the change is small and already covered by an ADR or
-  domain doc
+  source/test contract
 
 ## Consequences
 
@@ -77,16 +76,12 @@ must identify the owner category in one of:
 - Parity status should use `Partial`, `Documented Divergence`, or `Automation
   Gap` when a surface has equivalent behavior but no ownership classification or
   visual validation.
-- If Android changes a surface owner, this ADR and the affected domain docs
-  should be updated before iOS preserves the older route.
+- If Android changes a surface owner, this ADR and the relevant tests or source
+  contracts should be updated before iOS preserves the older route.
 
 ## Related
 
-- [Android parity contract](../parity/android-parity-contract.md)
-- [Parity documentation](../parity/README.md)
-- [Reader parity docs](../parity/reader/README.md)
-- [Search parity docs](../parity/search/README.md)
-- [Settings parity docs](../parity/settings/README.md)
+- [ADR 0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)
 - #244
 - #245
 - #246

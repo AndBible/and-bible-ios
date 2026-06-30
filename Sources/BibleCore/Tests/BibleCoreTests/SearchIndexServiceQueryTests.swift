@@ -138,18 +138,151 @@ final class SearchIndexServiceQueryTests: XCTestCase {
     }
 
     /**
+     Verifies indexed Strong's search reads canonical token rows in Android-style module order.
+
+     Android's JSword search uses the Lucene `strong` field for "find all occurrences" instead of
+     walking every verse at interaction time. This test keeps the iOS `verse_strongs` contract in the
+     BibleCore package lane with a deterministic fixture, so package CI does not need to rebuild the
+     full bundled KJV index to prove the same behavior.
+
+     - Setup: Seeds cleaned verse-text rows plus explicit Strong's token rows for KJV.
+     - Expected result: H0430 hits return only the tokenized verses, ordered by canonical entry order,
+       with cleaned snippets and Strong's readiness set for the module.
+     - Failure meaning: The indexed Strong's facet no longer behaves like Android's JSword field, or
+       the fixture metadata no longer exercises the readiness gate Search uses before querying.
+     - Side effects: Creates and removes one temporary SQLite database.
+     */
+    func testIndexedStrongsSearchFindsCanonicalTokensInModuleOrder() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-query-strongs-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let service = SearchIndexService(databasePath: databaseURL.path)
+        try await seedSearchIndex(service: service, rows: [
+            SearchIndexFixtureRow(
+                key: "Genesis 1:1",
+                text: "In the beginning God created the heaven and the earth.",
+                moduleName: "KJV",
+                order: 0,
+                strongTokens: ["H0430"]
+            ),
+            SearchIndexFixtureRow(
+                key: "Genesis 1:2",
+                text: "And the Spirit of God moved upon the face of the waters.",
+                moduleName: "KJV",
+                order: 1,
+                strongTokens: ["H0430"]
+            ),
+            SearchIndexFixtureRow(
+                key: "John 1:1",
+                text: "In the beginning was the Word.",
+                moduleName: "KJV",
+                order: 2,
+                strongTokens: ["G3056"]
+            ),
+        ])
+
+        XCTAssertTrue(service.hasIndex(for: "KJV"))
+        XCTAssertTrue(service.hasStrongsIndex(for: "KJV"))
+
+        let hits = service.searchStrongs(canonicalTokens: ["H0430"], moduleName: "KJV")
+
+        XCTAssertEqual(hits.map(\.key), ["Genesis 1:1", "Genesis 1:2"])
+        XCTAssertTrue(
+            hits.allSatisfy { !$0.snippet.contains("<H") && !$0.snippet.contains("<G") },
+            "Expected indexed Strong's previews to use cleaned verse text rather than raw Strong's tags"
+        )
+    }
+
+    /**
+     Verifies indexed text search emits hits in Android-style canonical verse order.
+
+     Android groups Lucene hits by verse and sorts scripture results by book, chapter, and verse
+     before rendering them. The iOS FTS index must therefore preserve module entry order instead of
+     exposing SQLite rank ordering for broad queries such as `earth`, `jesus`, and `noah`.
+
+     - Setup: Seeds deliberately mixed OT/NT fixture rows with canonical entry_order values.
+     - Expected result: Broad searches return early canonical KJV hits before later-book relevance
+       matches.
+     - Failure meaning: Indexed search result ordering has drifted from Android's visible search
+       result contract.
+     - Side effects: Creates and removes one temporary SQLite database.
+     */
+    func testIndexedSearchReturnsTextHitsInCanonicalEntryOrder() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-query-order-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let service = SearchIndexService(databasePath: databaseURL.path)
+        try await seedSearchIndex(service: service, rows: [
+            SearchIndexFixtureRow(
+                key: "Genesis 1:1",
+                text: "In the beginning God created the heaven and the earth.",
+                moduleName: "KJV",
+                order: 0
+            ),
+            SearchIndexFixtureRow(
+                key: "Genesis 1:2",
+                text: "And the earth was without form, and void.",
+                moduleName: "KJV",
+                order: 1
+            ),
+            SearchIndexFixtureRow(
+                key: "Genesis 6:8",
+                text: "But Noah found grace in the eyes of the Lord.",
+                moduleName: "KJV",
+                order: 2
+            ),
+            SearchIndexFixtureRow(
+                key: "Matthew 1:1",
+                text: "The book of the generation of Jesus Christ.",
+                moduleName: "KJV",
+                order: 3
+            ),
+            SearchIndexFixtureRow(
+                key: "Luke 3:23",
+                text: "And Jesus himself began to be about thirty years of age.",
+                moduleName: "KJV",
+                order: 4
+            ),
+        ])
+
+        let earthHits = service.search(query: "earth", moduleName: "KJV", wordMode: .allWords)
+        let jesusHits = service.search(query: "jesus", moduleName: "KJV", wordMode: .allWords)
+        let noahHits = service.search(query: "noah", moduleName: "KJV", wordMode: .allWords)
+
+        XCTAssertEqual(
+            Array(earthHits.prefix(2).map(\.key)),
+            ["Genesis 1:1", "Genesis 1:2"],
+            "Expected indexed search hits to follow canonical module order, not SQLite rank order"
+        )
+        XCTAssertEqual(
+            jesusHits.first?.key,
+            "Matthew 1:1",
+            "Expected broad New Testament hits to start at the first canonical KJV match"
+        )
+        XCTAssertTrue(
+            noahHits.prefix(5).map(\.key).contains("Genesis 6:8"),
+            "Expected early canonical Noah hits to remain visible in the first rendered results"
+        )
+    }
+
+    /**
      Seeds a deterministic FTS fixture through the production index mutation queue.
 
      - Parameters:
        - service: Search index service under test.
-       - rows: FTS rows to install before querying.
-     - Side effects: Mutates the service's temporary SQLite database.
+       - rows: FTS and optional Strong's-token rows to install before querying.
+     - Side effects: Mutates the service's temporary SQLite database on its production mutation queue.
      - Failure modes: Throws when SQLite rejects the fixture writes.
      */
     private func seedSearchIndex(service: SearchIndexService, rows: [SearchIndexFixtureRow]) async throws {
         try await service.performIndexMutationForTesting { db in
             for row in rows {
                 try self.insert(row, db: db)
+                for strongToken in row.strongTokens {
+                    try self.insertStrongToken(strongToken, row: row, db: db)
+                }
             }
             for moduleName in Set(rows.map(\.moduleName)) {
                 try self.markModuleIndexed(
@@ -191,6 +324,36 @@ final class SearchIndexServiceQueryTests: XCTestCase {
     }
 
     /**
+     Inserts one canonical Strong's token row linked to an already seeded verse row.
+
+     - Parameters:
+       - strongToken: JSword-style canonical token such as `H0430`.
+       - row: Fixture row whose verse key, module name, and entry order should own the token.
+       - db: SQLite handle supplied by `SearchIndexService` on its mutation queue.
+     - Side effects: Writes one `verse_strongs` row using the same schema as runtime indexing.
+     - Failure modes: Throws when SQLite cannot prepare or execute the insert.
+     */
+    private func insertStrongToken(_ strongToken: String, row: SearchIndexFixtureRow, db: OpaquePointer?) throws {
+        let sql = """
+            INSERT INTO verse_strongs (module_name, token, verse_key, entry_order)
+            VALUES (?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw SearchIndexQueryFixtureError.writeFailed
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, row.moduleName, -1, searchIndexQueryFixtureSQLiteTransient)
+        sqlite3_bind_text(stmt, 2, strongToken, -1, searchIndexQueryFixtureSQLiteTransient)
+        sqlite3_bind_text(stmt, 3, row.key, -1, searchIndexQueryFixtureSQLiteTransient)
+        sqlite3_bind_int(stmt, 4, Int32(row.order))
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw SearchIndexQueryFixtureError.writeFailed
+        }
+    }
+
+    /**
      Marks a fixture module as indexed so `SearchIndexService` mirrors runtime readiness.
 
      - Parameters:
@@ -220,12 +383,19 @@ final class SearchIndexServiceQueryTests: XCTestCase {
     }
 }
 
-/// One deterministic indexed-search fixture row.
+/**
+ One deterministic indexed-search fixture row.
+
+ The fixture mirrors `SearchIndexService.createIndex(module:)` output: `text` becomes a row in the
+ FTS table, and each `strongTokens` value becomes a linked row in the Strong's-token table. Tests use
+ this instead of rebuilding full SWORD module indexes when the behavior under test is query semantics.
+ */
 private struct SearchIndexFixtureRow {
     let key: String
     let text: String
     let moduleName: String
     let order: Int
+    var strongTokens: [String] = []
 }
 
 private enum SearchIndexQueryFixtureError: Error {
