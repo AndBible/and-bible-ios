@@ -89,6 +89,9 @@ struct ReaderWindowControlsAvoidanceMetrics {
    display updates into active pane controllers
  */
 public struct BibleReaderView: View {
+    /// Local-only flag recording whether the user entered or skipped first-run document setup.
+    private static let firstRunDocumentSetupPromptHandledKey = "startup_document_setup_prompt_handled"
+
     /// Top-level sheets launched from the reader shell or its global shortcuts.
     enum ReaderSheet: String, Identifiable {
         case history
@@ -251,8 +254,8 @@ public struct BibleReaderView: View {
     /// Tracks whether Android Easy Start default downloads are still refreshing or installing.
     @State private var startupDefaultDownloadsInFlight = false
 
-    /// Whether the no-Bible startup prompt should be visible.
-    @State private var showStartupDownloadPrompt = false
+    /// Reason the startup document-setup prompt should be visible.
+    @State private var startupDownloadPromptReason: StartupDocumentSetupPromptPolicy.PromptReason?
 
     /// Guards startup prompt evaluation so it does not reappear repeatedly in one session.
     @State private var didEvaluateStartupDownloadPrompt = false
@@ -846,8 +849,8 @@ public struct BibleReaderView: View {
             readerDestinationContent(destination)
         }
         .confirmationDialog(
-            String(localized: "picker_no_bible_modules"),
-            isPresented: $showStartupDownloadPrompt,
+            startupDownloadPromptTitle,
+            isPresented: startupDownloadPromptPresentedBinding,
             titleVisibility: .visible
         ) {
             startupDownloadPromptActions
@@ -1387,7 +1390,33 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Buttons shown when startup detects there are no installed Bible modules.
+    /// Presentation binding for the startup setup prompt.
+    private var startupDownloadPromptPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { startupDownloadPromptReason != nil },
+            set: { isPresented in
+                if !isPresented {
+                    dismissStartupDownloadPromptFromSystem()
+                }
+            }
+        )
+    }
+
+    /// Title shown in the startup document-setup prompt.
+    private var startupDownloadPromptTitle: String {
+        switch startupDownloadPromptReason {
+        case .firstRunSetup:
+            if isStartupEasyStartAvailable {
+                String(localized: "easy_start_title", defaultValue: "Easy start")
+            } else {
+                String(localized: "download_modules")
+            }
+        case .noBibleModules, nil:
+            String(localized: "picker_no_bible_modules")
+        }
+    }
+
+    /// Buttons shown when startup needs document setup.
     @ViewBuilder
     private var startupDownloadPromptActions: some View {
         if isStartupEasyStartAvailable {
@@ -1396,19 +1425,50 @@ public struct BibleReaderView: View {
             }
         }
         Button(String(localized: "download_modules")) {
+            markFirstRunDocumentSetupPromptHandled()
+            startupDownloadPromptReason = nil
             presentDownloads(from: windowManager.activeWindow?.id)
         }
-        Button(String(localized: "cancel"), role: .cancel) {}
+        Button(startupDownloadPromptCancelTitle, role: .cancel) {
+            handleStartupDownloadPromptCancelled()
+        }
     }
 
-    /// Message shown in the no-Bible startup prompt.
+    /// Cancel button copy for the current startup document-setup prompt reason.
+    private var startupDownloadPromptCancelTitle: String {
+        if startupDownloadPromptReason == .firstRunSetup {
+            return String(localized: "skip", defaultValue: "Skip")
+        }
+        return String(localized: "cancel")
+    }
+
+    /// Message shown in the startup document-setup prompt.
     private var startupDownloadPromptMessage: some View {
-        Text(
-            String(
-                localized: "startup_download_prompt",
-                defaultValue: "Download Bible modules to start reading."
+        switch startupDownloadPromptReason {
+        case .firstRunSetup:
+            if isStartupEasyStartAvailable {
+                Text(
+                    String(
+                        localized: "easy_start_message",
+                        defaultValue: "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on."
+                    )
+                )
+            } else {
+                Text(
+                    String(
+                        localized: "startup_document_setup_prompt",
+                        defaultValue: "Open Downloads to choose Bible modules and other documents. You can change these settings later on."
+                    )
+                )
+            }
+        case .noBibleModules, nil:
+            Text(
+                String(
+                    localized: "startup_download_prompt",
+                    defaultValue: "Download Bible modules to start reading."
+                )
             )
-        )
+        }
     }
 
     /// Strong's mode picker options used by the reader toolbar dialog.
@@ -1758,11 +1818,62 @@ public struct BibleReaderView: View {
      - installation failures are handled inside `ModuleBrowserView`
      */
     private func presentStartupDefaultDownloads() {
-        showStartupDownloadPrompt = false
+        markFirstRunDocumentSetupPromptHandled()
+        startupDownloadPromptReason = nil
         startupDefaultDownloadsInFlight = true
         presentDownloads(
             from: windowManager.activeWindow?.id,
             defaultDownloadMode: .englishStartup
+        )
+    }
+
+    /**
+     Dismisses the startup setup prompt from SwiftUI system cancellation.
+
+     Side effects:
+     - marks first-run setup handled when the user dismisses the non-blocking recommended setup
+     - preserves no-Bible behavior so that a later app launch can still prompt for required setup
+     */
+    private func dismissStartupDownloadPromptFromSystem() {
+        handleStartupDownloadPromptCancelled()
+    }
+
+    /**
+     Handles the startup setup prompt's explicit cancel/skip action.
+
+     Side effects:
+     - persists the first-run setup skip when the prompt is informational
+     - clears the current prompt reason for the active reader session
+     */
+    private func handleStartupDownloadPromptCancelled() {
+        if startupDownloadPromptReason == .firstRunSetup {
+            markFirstRunDocumentSetupPromptHandled()
+        }
+        startupDownloadPromptReason = nil
+    }
+
+    /**
+     Reads the durable first-run setup marker.
+
+     - Returns: `true` when the user has opened Downloads/Easy Start or skipped setup.
+     - Side effects: Reads SwiftData settings through `SettingsStore`.
+     */
+    private func hasHandledFirstRunDocumentSetupPrompt() -> Bool {
+        SettingsStore(modelContext: modelContext).getBool(Self.firstRunDocumentSetupPromptHandledKey)
+    }
+
+    /**
+     Persists that the user has handled first-run document setup.
+
+     Side effects:
+     - writes a local-only SwiftData setting
+     - intentionally does not use `AppPreferenceKey` because Android has no matching global
+       preference; this marker only compensates for iOS shipping a bundled fallback Bible.
+     */
+    private func markFirstRunDocumentSetupPromptHandled() {
+        SettingsStore(modelContext: modelContext).setBool(
+            Self.firstRunDocumentSetupPromptHandledKey,
+            value: true
         )
     }
 
@@ -1878,8 +1989,8 @@ public struct BibleReaderView: View {
         for (_, ctrl) in windowManager.controllers {
             (ctrl as? BibleReaderController)?.refreshInstalledModules()
         }
-        if showStartupDownloadPrompt, !startupHasNoBibleModules() {
-            showStartupDownloadPrompt = false
+        if startupDownloadPromptReason == .noBibleModules, !startupHasNoBibleModules() {
+            startupDownloadPromptReason = nil
         }
     }
 
@@ -2408,16 +2519,16 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Shows the no-Bible startup prompt once when the local module store has no Bible modules.
+     Shows the startup document-setup prompt once when setup requires user attention.
 
      Android `StartupActivity` stops on its first-download layout whenever `SwordDocumentFacade`
-     has no Bibles. iOS is reader-first, so this coordinator presents the equivalent decision as a
-     startup prompt over the reader shell: normal Downloads for every locale, and English Easy
-     Start when Android would expose it.
+     has no Bibles. iOS also ships a bundled fallback Bible, so this coordinator separates that
+     required no-Bible state from a one-time recommended setup path for first-run users.
 
      Side effects:
      - reads installed modules through the focused controller or a temporary `SwordManager`
-     - mutates `didEvaluateStartupDownloadPrompt` and `showStartupDownloadPrompt`
+     - reads the durable first-run setup marker
+     - mutates `didEvaluateStartupDownloadPrompt` and `startupDownloadPromptReason`
 
      Failure modes:
      - if `SwordManager` cannot be created, no prompt is shown and normal reader fallback remains
@@ -2430,7 +2541,10 @@ public struct BibleReaderView: View {
             return
         }
         didEvaluateStartupDownloadPrompt = true
-        showStartupDownloadPrompt = startupHasNoBibleModules()
+        startupDownloadPromptReason = StartupDocumentSetupPromptPolicy.promptReason(
+            hasNoBibleModules: startupHasNoBibleModules(),
+            hasHandledFirstRunSetup: hasHandledFirstRunDocumentSetupPrompt()
+        )
     }
 
     /**
@@ -2442,14 +2556,14 @@ public struct BibleReaderView: View {
 
      Side effects:
      - may reset the startup-prompt guard
-     - may show the startup prompt again
+     - may show the required no-Bible startup prompt again
 
      Failure modes:
      - if module discovery fails, the prompt is not shown
      */
     private func reevaluateStartupDownloadPromptAfterDownloads() {
         guard startupHasNoBibleModules() else {
-            showStartupDownloadPrompt = false
+            startupDownloadPromptReason = nil
             return
         }
         didEvaluateStartupDownloadPrompt = false

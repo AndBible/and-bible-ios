@@ -33,6 +33,7 @@
 "clear" = "Clear";
 "reset" = "Reset";
 "retry" = "Retry";
+"skip" = "Skip";
 "all" = "All";
 "sort" = "Sort";
 "name" = "Name";
@@ -90,6 +91,11 @@
 "picker_no_general_book_modules" = "No general book modules installed";
 "picker_no_map_modules" = "No map modules installed";
 "download_modules" = "Download Modules";
+"easy_start" = "Easy Start";
+"easy_start_title" = "Easy start";
+"easy_start_message" = "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on.";
+"startup_document_setup_prompt" = "Open Downloads to choose Bible modules and other documents. You can change these settings later on.";
+"startup_download_prompt" = "Download Bible modules to start reading.";
 
 /* Toolbar / Actions */
 "toggle_strongs_numbers" = "Toggle Strong's numbers";
