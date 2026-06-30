@@ -20,7 +20,156 @@ READER_VIEW = (
     / "Bible"
     / "BibleReaderView.swift"
 )
-MATRIX = REPO_ROOT / "docs" / "parity" / "reader" / "modal-ownership-matrix.md"
+ADR_0006 = REPO_ROOT / "docs" / "adr" / "0006-modal-presentation-ownership-for-android-parity.md"
+ADR_0008 = REPO_ROOT / "docs" / "adr" / "0008-parity-documentation-ownership.md"
+
+
+ROUTE_CLASSIFICATIONS: dict[str, tuple[str, str]] = {
+    "ReaderSheet.history": (
+        "Android app-owned",
+        "Adapted reader shell route with focused UI coverage for selection, clear, and delete.",
+    ),
+    "ReaderSheet.readingProgress": (
+        "Android app-owned",
+        "Adapted app-owned route.",
+    ),
+    "ReaderSheet.readingProgressSettings": (
+        "Android app-owned",
+        "Adapted app-owned settings route.",
+    ),
+    "ReaderSheet.chapterReadHistory": (
+        "Android app-owned",
+        "Adapted app-owned route. Keep pane-target capture intact.",
+    ),
+    "ReaderSheet.workspaces": (
+        "Android app-owned",
+        "Adapted reader shell route with UI coverage for create.",
+    ),
+    "ReaderSheet.about": (
+        "Android app-owned",
+        "Acceptable app-owned informational route.",
+    ),
+    "ReaderDestination.search": (
+        "Android app-owned",
+        "Adapted app-owned route with UI coverage protecting destination presentation.",
+    ),
+    "ReaderDestination.bookmarks": (
+        "Android app-owned",
+        "App-owned route. Bookmarks must not be reintroduced as a ReaderSheet route.",
+    ),
+    "ReaderDestination.studyPads": (
+        "Android app-owned",
+        "App-owned route. StudyPads must not be reintroduced as a nested selector modal.",
+    ),
+    "ReaderDestination.myDocuments": (
+        "Android app-owned",
+        "Drawer-owned app route through the reader My Documents document pipeline.",
+    ),
+    "ReaderDestination.readingPlans": (
+        "Android app-owned",
+        "App-owned route. Reading Plans must not be reintroduced as a ReaderSheet route.",
+    ),
+    "ReaderDestination.settings": (
+        "Android app-owned",
+        "Adapted app-owned route with Settings UI coverage.",
+    ),
+    "ReaderDestination.downloads": (
+        "Android app-owned",
+        "Adapted app-owned route.",
+    ),
+    "ReaderDestination.globalTextOptions": (
+        "Android app-owned",
+        "App-owned settings route. Scope semantics are governed by ADR 0005.",
+    ),
+    "ReaderDestination.workspaceTextOptions": (
+        "Android app-owned",
+        "App-owned settings route. Workspace color behavior is governed by ADR 0005.",
+    ),
+    "ReaderDestination.windowTextOptions": (
+        "Android app-owned",
+        "App-owned settings route.",
+    ),
+    "ReaderDestination.windowColorSettings": (
+        "Android app-owned",
+        "App-owned settings route.",
+    ),
+    "ReaderModal.syncSettings": (
+        "Android app-owned",
+        "Adapted app-owned settings route.",
+    ),
+    "ReaderModal.importExport": (
+        "Android app-owned plus iOS system boundary",
+        "App-owned route may use native iOS file/share boundaries only at OS handoff points.",
+    ),
+    "ReaderModal.speakControls": (
+        "Android app-owned",
+        "Adapted app-owned route; transport semantics must remain reader/pane-aware.",
+    ),
+    "ReaderModal.modulePicker": (
+        "Android app-owned",
+        "App-owned full-screen route.",
+    ),
+    "ReaderModal.dictionaryBrowser": (
+        "Android app-owned",
+        "Adapted app-owned browser route.",
+    ),
+    "ReaderModal.generalBookBrowser": (
+        "Android app-owned",
+        "Adapted app-owned browser route.",
+    ),
+    "ReaderModal.mapBrowser": (
+        "Android app-owned",
+        "Adapted app-owned browser route.",
+    ),
+    "ReaderModal.epubLibrary": (
+        "Android app-owned",
+        "Adapted app-owned route.",
+    ),
+    "ReaderModal.epubBrowser": (
+        "Android app-owned",
+        "Adapted app-owned route.",
+    ),
+    "ReaderModal.epubSearch": (
+        "Android app-owned",
+        "Adapted app-owned route.",
+    ),
+    "ReaderModal.labelManager": (
+        "Android app-owned",
+        "Partial. Label/StudyPad ownership details are tracked by #246.",
+    ),
+    "ReaderModal.chooseDocument": (
+        "Android app-owned",
+        "App-owned full-screen route.",
+    ),
+    "ReaderModal.help": (
+        "Android app-owned",
+        "Adapted informational route. Vue-scoped help remains bridge-owned when invoked from Vue.",
+    ),
+    "showStartupDownloadPrompt": (
+        "Android app-owned",
+        "Acceptable dialog adaptation if labels, cancel/default behavior, and Downloads handoff remain equivalent.",
+    ),
+    "showReaderStrongsModeDialog": (
+        "Android app-owned",
+        "Acceptable dialog adaptation if choices, reset/default semantics, and preference mutation match Android.",
+    ),
+    "shareSheetBinding": (
+        "iOS system boundary",
+        "Acceptable platform boundary when it only hands selected/generated content to OS sharing.",
+    ),
+    "crossReferenceSheetBinding": (
+        "Vue/WebView-owned",
+        "Multi-reference links already bypass this route through the Vue MultiDocument path. Do not expand the legacy sheet as a substitute for document-pipeline routing.",
+    ),
+    "showRefChooser": (
+        "Android app-owned",
+        "Adapted app-owned chooser route. Keep async callback semantics and pane context intact.",
+    ),
+    "BibleReaderModulePicker.AndroidPseudoDocument.myNotes": (
+        "Vue/WebView-owned",
+        "Chooser-owned pseudo-document route. Drawer My Notes/My Documents must route through ReaderDestination.myDocuments.",
+    ),
+}
 
 
 def swift_enum_cases(source: str, enum_name: str) -> list[str]:
@@ -89,56 +238,49 @@ def swift_switch_case_body(function_body: str, case_name: str) -> str:
     return function_body[case_match.end() : case_match.end() + next_case.start()]
 
 
-def matrix_row(matrix: str, token: str) -> list[str]:
-    """Return the Markdown table cells for one reader presentation route."""
-    for line in matrix.splitlines():
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if cells and cells[0] == f"`{token}`":
-            return cells
-
-    raise AssertionError(f"Expected {token} to be classified in the matrix.")
+def route_classification(token: str) -> tuple[str, str]:
+    """Return the durable owner and disposition for one reader presentation route."""
+    try:
+        return ROUTE_CLASSIFICATIONS[token]
+    except KeyError as error:
+        raise AssertionError(f"Expected {token} to be classified under ADR 0006.") from error
 
 
 class ReaderModalOwnershipMatrixTests(unittest.TestCase):
     """Keeps reader presentation routes classified under ADR 0006."""
 
     def test_reader_sheet_cases_are_classified(self) -> None:
-        """Every `ReaderSheet` case appears as a matrix route token."""
+        """Every `ReaderSheet` case has an ADR-owned route classification."""
         source = READER_VIEW.read_text(encoding="utf-8")
-        matrix = MATRIX.read_text(encoding="utf-8")
 
         for case in swift_enum_cases(source, "ReaderSheet"):
-            self.assertIn(f"`ReaderSheet.{case}`", matrix)
+            route_classification(f"ReaderSheet.{case}")
 
     def test_reader_destination_cases_are_classified(self) -> None:
-        """Every `ReaderDestination` case appears as a matrix route token."""
+        """Every `ReaderDestination` case has an ADR-owned route classification."""
         source = READER_VIEW.read_text(encoding="utf-8")
-        matrix = MATRIX.read_text(encoding="utf-8")
 
         for case in swift_enum_cases(source, "ReaderDestination"):
-            self.assertIn(f"`ReaderDestination.{case}`", matrix)
+            route_classification(f"ReaderDestination.{case}")
 
     def test_reader_modal_cases_are_classified(self) -> None:
-        """Every `ReaderModal` case appears as a matrix route token."""
+        """Every `ReaderModal` case has an ADR-owned route classification."""
         source = READER_VIEW.read_text(encoding="utf-8")
-        matrix = MATRIX.read_text(encoding="utf-8")
 
         for case in swift_enum_cases(source, "ReaderModal"):
-            self.assertIn(f"`ReaderModal.{case}`", matrix)
+            route_classification(f"ReaderModal.{case}")
 
     def test_standalone_transient_routes_are_classified(self) -> None:
         """State-backed reader presentations outside the enums remain documented."""
-        matrix = MATRIX.read_text(encoding="utf-8")
-
         for token in [
-            "`showStartupDownloadPrompt`",
-            "`showReaderStrongsModeDialog`",
-            "`shareSheetBinding`",
-            "`crossReferenceSheetBinding`",
-            "`showRefChooser`",
-            "`BibleReaderModulePicker.AndroidPseudoDocument.myNotes`",
+            "showStartupDownloadPrompt",
+            "showReaderStrongsModeDialog",
+            "shareSheetBinding",
+            "crossReferenceSheetBinding",
+            "showRefChooser",
+            "BibleReaderModulePicker.AndroidPseudoDocument.myNotes",
         ]:
-            self.assertIn(token, matrix)
+            route_classification(token)
 
     def test_high_risk_routes_keep_expected_owner_classification(self) -> None:
         """
@@ -151,25 +293,23 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         change has altered that contract and needs product review before parity
         is claimed.
         """
-        matrix = MATRIX.read_text(encoding="utf-8")
-
         expected_owners = {
-            "ReaderDestination.search": "`Android app-owned`",
-            "ReaderDestination.bookmarks": "`Android app-owned`",
-            "ReaderDestination.studyPads": "`Android app-owned`",
-            "ReaderDestination.myDocuments": "`Android app-owned`",
-            "ReaderDestination.readingPlans": "`Android app-owned`",
-            "showRefChooser": "`Android app-owned`",
-            "ReaderModal.chooseDocument": "`Android app-owned`",
-            "ReaderModal.modulePicker": "`Android app-owned`",
-            "ReaderModal.labelManager": "`Android app-owned`",
-            "shareSheetBinding": "`iOS system boundary`",
-            "crossReferenceSheetBinding": "`Vue/WebView-owned`",
-            "BibleReaderModulePicker.AndroidPseudoDocument.myNotes": "`Vue/WebView-owned`",
+            "ReaderDestination.search": "Android app-owned",
+            "ReaderDestination.bookmarks": "Android app-owned",
+            "ReaderDestination.studyPads": "Android app-owned",
+            "ReaderDestination.myDocuments": "Android app-owned",
+            "ReaderDestination.readingPlans": "Android app-owned",
+            "showRefChooser": "Android app-owned",
+            "ReaderModal.chooseDocument": "Android app-owned",
+            "ReaderModal.modulePicker": "Android app-owned",
+            "ReaderModal.labelManager": "Android app-owned",
+            "shareSheetBinding": "iOS system boundary",
+            "crossReferenceSheetBinding": "Vue/WebView-owned",
+            "BibleReaderModulePicker.AndroidPseudoDocument.myNotes": "Vue/WebView-owned",
         }
 
         for token, owner in expected_owners.items():
-            self.assertEqual(owner, matrix_row(matrix, token)[2])
+            self.assertEqual(owner, route_classification(token)[0])
 
     def test_drawer_owned_destinations_do_not_route_through_reader_sheets(self) -> None:
         """
@@ -227,19 +367,18 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         Keep incomplete reader modal routes tied to explicit follow-up work.
 
         Android parity is not satisfied by labeling an iOS sheet as native.
-        Rows listed here intentionally remain partial, so their issue references
-        must stay visible in the disposition column until the owning behavior is
-        migrated or completed. Completed chooser routes should not remain in this
-        sentinel because that would normalize stale partial-parity language.
+        Routes listed here intentionally remain partial, so their issue
+        references must stay visible in the disposition until the owning
+        behavior is migrated or completed. Completed chooser routes should not
+        remain in this sentinel because that would normalize stale partial-parity
+        language.
         """
-        matrix = MATRIX.read_text(encoding="utf-8")
-
         expected_issues = {
             "ReaderModal.labelManager": "#246",
         }
 
         for token, issue in expected_issues.items():
-            self.assertIn(issue, matrix_row(matrix, token)[4])
+            self.assertIn(issue, route_classification(token)[1])
 
     def test_legacy_cross_reference_sheet_is_not_a_document_pipeline_substitute(self) -> None:
         """
@@ -250,18 +389,18 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         so future reader work should either keep it quarantined or remove it
         rather than treating it as an acceptable native replacement.
         """
-        matrix = MATRIX.read_text(encoding="utf-8")
-        disposition = matrix_row(matrix, "crossReferenceSheetBinding")[4]
+        disposition = route_classification("crossReferenceSheetBinding")[1]
 
         self.assertIn("already bypass this route", disposition)
         self.assertIn("Do not expand the legacy sheet", disposition)
 
-    def test_matrix_links_back_to_durable_modal_ownership_adr(self) -> None:
-        """The reader matrix stays tied to the cross-domain ownership policy."""
-        matrix = MATRIX.read_text(encoding="utf-8")
+    def test_classifications_link_back_to_durable_modal_ownership_adrs(self) -> None:
+        """The route classifications stay tied to the durable ownership ADRs."""
+        modal_ownership_adr = ADR_0006.read_text(encoding="utf-8")
+        documentation_adr = ADR_0008.read_text(encoding="utf-8")
 
-        self.assertIn("ADR 0006", matrix)
-        self.assertIn("../../adr/0006-modal-presentation-ownership-for-android-parity.md", matrix)
+        self.assertIn("Modal Presentation Ownership For Android Parity", modal_ownership_adr)
+        self.assertIn("ADR 0006", documentation_adr)
 
 
 if __name__ == "__main__":

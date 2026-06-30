@@ -71,7 +71,7 @@ for superficial visual parity. The team should:
 ## Related
 
 - [ADR 0002: Route Reader Document Modals Through The Shared Document Pipeline](0002-route-reader-document-modals-through-shared-document-pipeline.md)
-- [Reader parity contract](../parity/reader/contract.md)
+- [ADR 0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)
 - [Android issue #3824: Fix title scroll button placement in RTL reader layouts](https://github.com/AndBible/and-bible/issues/3824)
 - AndBible iOS PR #181
 - #174

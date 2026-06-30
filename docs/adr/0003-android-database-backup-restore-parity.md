@@ -156,7 +156,7 @@ skipping entries or treating a partial archive as a valid empty backup.
 
 ## Related
 
-- [ADR 0001: Gradually Convert Parity Decisions To ADRs](0001-gradually-convert-parity-decisions-to-adrs.md)
+- [ADR 0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)
 - [ADR 0002: Route Reader Document Modals Through The Shared Document Pipeline](0002-route-reader-document-modals-through-shared-document-pipeline.md)
 - [Android database backup service](../../Sources/BibleCore/Sources/BibleCore/Services/AndroidDatabaseBackupService.swift)
 - [Android database backup import sheet](../../Sources/BibleUI/Sources/BibleUI/Settings/AndroidDatabaseBackupImportSheet.swift)

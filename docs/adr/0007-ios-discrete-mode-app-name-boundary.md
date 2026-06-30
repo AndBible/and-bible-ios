@@ -62,7 +62,7 @@ as a runtime setting inside the standard iOS app bundle.
 
 ## Consequences
 
-- `discrete_mode` remains `Adapted Pass` in the iOS settings parity matrix.
+- `discrete_mode` remains an adapted parity implementation under this ADR.
 - The standard iOS app can show a calculator alternate icon, including iPad's
   required 152x152 alternate icon asset, but its Home Screen label remains the
   bundle display name.
@@ -75,8 +75,7 @@ as a runtime setting inside the standard iOS app bundle.
 
 ## Related
 
-- [Android Settings Contract](../parity/settings/contract.md)
-- [SETPAR-701 Verification Matrix](../parity/settings/verification-matrix.md)
+- [ADR 0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)
 - [Apple CFBundleDisplayName](https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundledisplayname)
 - [Apple CFBundleIcons](https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundleicons)
 - [Apple alternate app icons](https://developer.apple.com/documentation/xcode/configuring-your-app-to-use-alternate-app-icons)

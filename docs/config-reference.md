@@ -134,7 +134,7 @@ Examples from the Vue.js side:
 - `appSettings.disableBibleModalButtons` and `disableGenericModalButtons` control modal actions: `bibleview-js/src/components/AmbiguousActionButtons.vue:102`
 - `appSettings.studyPadCursors` and `autoAssignLabels` affect StudyPad document behavior: `bibleview-js/src/components/documents/StudyPadDocument.vue:273`
 - `appSettings.hideCompareDocuments` filters compare fragments: `bibleview-js/src/components/documents/MultiDocument.vue:72-78`
-- `appSettings.autoTrackReading` and `readingProgressSettings` expose the native reading-progress bridge settings bundle documented in `docs/parity/bridge/reading-progress-model.md`
+- `appSettings.autoTrackReading` and `readingProgressSettings` expose the native reading-progress bridge settings bundle implemented by `ReadingProgressStore` and covered by `ProgressStoreTests`, `BridgeDispatchTests`, and `ReaderProgressBridgeTests`
 
 ## Important Constraints
 

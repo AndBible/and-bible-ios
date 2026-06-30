@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validate the bridge parity gap inventory against the checked-in iOS bridge type.
+Validate the bridge parity gap fixture against the checked-in iOS bridge type.
 
 If an Android reference checkout is available, pass its root with --android-root
 to also verify that every Android-only method is represented in the inventory.
@@ -18,7 +18,7 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_INVENTORY = REPO_ROOT / "docs/parity/bridge/baselines/android-bridge-gap-inventory.json"
+DEFAULT_INVENTORY = REPO_ROOT / "scripts/fixtures/bridge-parity/android-bridge-gap-inventory.json"
 ANDROID_ROOT_ENV = "ANDBIBLE_ANDROID_ROOT"
 RECOMMENDED_ANDROID_ROOT = "../and-bible"
 ALLOWED_MISSING_STATUSES = {
@@ -232,11 +232,11 @@ def validate_inventory(
         f"- inventory: {display_path(inventory_path)}",
         f"- iOS interface: {display_path(ios_interface_path)} ({len(ios_methods)} methods)",
         (
-            "- resolved iOS bridge dispositions: "
+            "- tracked iOS no-op bridge dispositions: "
             f"{len(no_op_methods)} ({format_method_names(no_op_methods)})"
         ),
         (
-            "- resolved iOS bridge methods needing decision: "
+            "- tracked iOS no-op bridge methods needing decision: "
             f"{len(no_ops_needing_decision)} ({format_method_names(no_ops_needing_decision)})"
         ),
     ]
