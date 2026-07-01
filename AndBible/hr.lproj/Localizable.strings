@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "Radne površine";
 "reading_plans_plural" = "Planovi čitanja";
+"download_document_confirm_prefix" = "Preuzmi";
+"bookmark_warning4" = "Preporučljivo je da napravite rezervnu kopiju modula prije ažuriranja";
+"bookmark_warning3" = "Želite li i dalje ažurirati modul?";
+"bookmark_warning2" = "Ukoliko je struktura dokumenta promijenjena, ažuriranje istog bi moglo dovesti do trajnog gubitka ovih straničnika/bilješki ili pak pomjeranja njihovih lokacija unutar dokumenta";
+"bookmark_warning" = "Ima straničnika, odnosno bilješki za ovaj dokument";

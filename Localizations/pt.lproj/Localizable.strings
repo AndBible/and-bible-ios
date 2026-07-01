@@ -539,3 +539,8 @@
 
 "help_workspaces_title" = "Ambientes de trabalho";
 "reading_plans_plural" = "Planos de Leitura";
+"download_document_confirm_prefix" = "Download";
+"bookmark_warning4" = "É recomendado que faça uma cópia de segurança do módulo antes de atualizar.";
+"bookmark_warning3" = "Ainda deseja atualizar o módulo?";
+"bookmark_warning2" = "Se a estrutura do documento tiver sido alterada, a atualização deste documento poderá fazer com que os locais desses marcadores/notas se movam dentro do documento ou desapareçam completamente.";
+"bookmark_warning" = "Há marcadores e/ou notas para este documento";

@@ -2,6 +2,7 @@
 
 import Foundation
 import SwiftUI
+import SwiftData
 import UniformTypeIdentifiers
 import BibleCore
 import SwordKit
@@ -109,6 +110,78 @@ struct ModuleBrowserDownloadSortSnapshot {
 
     /// Row activities used to determine Android `BEING_INSTALLED`/error sort rank.
     let downloadActivities: [String: ModuleBrowserDownloadActivity]
+}
+
+/**
+ Staged Downloads confirmation matching Android's two download dialog paths.
+
+ Android shows a simple `Download <name>` confirmation for new/retry installs, but installed
+ modules with generic bookmarks or notes use a stronger update warning before `doDownload(...)`.
+ iOS keeps both cases in one payload so every row entry point (tap, retry, update icon) commits
+ through the same Android-equivalent confirmation branch.
+
+ Side effects:
+ - none; this value only describes pending UI state
+
+ Failure modes:
+ - none; installing after confirmation is handled by `ModuleBrowserView.installModule(_:)`
+ */
+private struct ModuleBrowserDownloadConfirmation: Identifiable {
+    /**
+     Android confirmation variant for the staged document action.
+
+     Cases mirror `DownloadActivity.manageDownload`: normal rows use the download prefix message,
+     while installed rows with generic bookmarks route through `documentUpgradeConfirmation`.
+     */
+    enum Kind: String {
+        /// Standard install, retry, or update confirmation without bookmark risk.
+        case download
+
+        /// Update confirmation warning that generic bookmarks or notes may move or disappear.
+        case genericBookmarkUpdateWarning
+    }
+
+    /// Remote module row selected by the user.
+    let module: RemoteModuleInfo
+
+    /// Android confirmation branch selected for this row.
+    let kind: Kind
+
+    /// Stable SwiftUI identity for the pending alert.
+    var id: String { "\(kind.rawValue)::\(module.id)" }
+
+    /// Android alert title for the selected confirmation branch.
+    var title: String {
+        switch kind {
+        case .download:
+            return ""
+        case .genericBookmarkUpdateWarning:
+            return String(
+                localized: "bookmark_warning",
+                defaultValue: "There are bookmarks and/or notes for this document."
+            )
+        }
+    }
+
+    /// Android positive-button label for the selected confirmation branch.
+    var confirmButtonTitle: String {
+        switch kind {
+        case .download:
+            return String(localized: "okay", defaultValue: "OK")
+        case .genericBookmarkUpdateWarning:
+            return String(localized: "yes", defaultValue: "Yes")
+        }
+    }
+
+    /// Android alert message for the selected confirmation branch.
+    var message: String {
+        switch kind {
+        case .download:
+            return ModuleBrowserView.downloadConfirmationMessage(for: module)
+        case .genericBookmarkUpdateWarning:
+            return ModuleBrowserView.genericBookmarkUpdateWarningMessage()
+        }
+    }
 }
 
 /**
@@ -372,11 +445,17 @@ public struct ModuleBrowserView: View {
     /// Current Dynamic Type size used to keep Android's compact filter row readable.
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    /// SwiftData context used to check Android's generic-bookmark update warning condition.
+    @Environment(\.modelContext) private var modelContext
+
     /// Ensures Android's startup/default language is applied once after catalog state exists.
     @State private var didApplyAndroidDefaultLanguage = false
 
     /// Destructive row action waiting for Android-style confirmation.
     @State private var pendingRowActionConfirmation: ModuleBrowserRowActionConfirmation?
+
+    /// Install/update row waiting for Android's download confirmation dialog.
+    @State private var pendingDownloadConfirmation: ModuleBrowserDownloadConfirmation?
 
     /// Progress text describing which remote source is being refreshed.
     @State private var refreshProgress: String?
@@ -550,6 +629,10 @@ public struct ModuleBrowserView: View {
 
         return ZStack(alignment: .topTrailing) {
             moduleBrowserScreenMarker
+            moduleBrowserStateExport(
+                visibleModules: visibleModules,
+                installedModulesByName: installedModulesByName
+            )
             VStack(spacing: 0) {
                 androidTopAppBar
                 androidFilterBar(visibleModuleCount: visibleModules.count)
@@ -621,6 +704,28 @@ public struct ModuleBrowserView: View {
             Text(externalDocumentImportMessage ?? "")
         }
         .alert(
+            pendingDownloadConfirmation?.title ?? "",
+            isPresented: Binding(
+                get: { pendingDownloadConfirmation != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingDownloadConfirmation = nil
+                    }
+                }
+            ),
+            presenting: pendingDownloadConfirmation
+        ) { confirmation in
+            Button(confirmation.confirmButtonTitle) {
+                pendingDownloadConfirmation = nil
+                installModule(confirmation.module)
+            }
+            Button(String(localized: "cancel"), role: .cancel) {
+                pendingDownloadConfirmation = nil
+            }
+        } message: { confirmation in
+            Text(confirmation.message)
+        }
+        .alert(
             pendingRowActionConfirmation?.title ?? "",
             isPresented: Binding(
                 get: { pendingRowActionConfirmation != nil },
@@ -684,6 +789,70 @@ public struct ModuleBrowserView: View {
             .accessibilityLabel(String(localized: "download_documents", defaultValue: "Download Documents"))
             .accessibilityIdentifier("moduleBrowserScreen")
             .allowsHitTesting(false)
+    }
+
+    /**
+     Builds the compact Downloads state probe consumed by targeted UI smoke tests.
+
+     The export intentionally reports semantic row order and status tokens instead of full row text or
+     layout geometry. That keeps the test anchored to Android's download-list behavior while avoiding
+     brittle pixel or string-wrapping assertions.
+
+     - Parameters:
+       - visibleModules: The currently filtered row sequence shown in Downloads.
+       - installedModulesByName: Installed modules keyed by initials for live row-status lookup.
+     - Returns: A one-pixel hidden state export when detailed UI-test accessibility is enabled.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    @ViewBuilder
+    private func moduleBrowserStateExport(
+        visibleModules: [RemoteModuleInfo],
+        installedModulesByName: [String: ModuleInfo]
+    ) -> some View {
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            let value = moduleBrowserAccessibilityValue(
+                visibleModules: visibleModules,
+                installedModulesByName: installedModulesByName
+            )
+            Text(value)
+                .font(.system(size: 1))
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("moduleBrowserStateExport")
+                .accessibilityValue(value)
+        }
+    }
+
+    /**
+     Produces a stable, parseable Downloads state summary for UI automation.
+
+     - Parameters:
+       - visibleModules: The currently filtered row sequence shown in Downloads.
+       - installedModulesByName: Installed modules keyed by initials for live row-status lookup.
+     - Returns: A semicolon-delimited state string containing row count, order, and row status tokens.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func moduleBrowserAccessibilityValue(
+        visibleModules: [RemoteModuleInfo],
+        installedModulesByName: [String: ModuleInfo]
+    ) -> String {
+        let rowLimit = UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit
+        let limitedModules = visibleModules.prefix(rowLimit)
+        let order = limitedModules.map(\.name).joined(separator: "|")
+        let rowTokens = limitedModules
+            .map { module in
+                let status = Self.displayStatus(
+                    for: module,
+                    installedModulesByName: installedModulesByName,
+                    downloadActivities: downloadActivities
+                )
+                return "\(module.name):\(Self.downloadStatusAccessibilityToken(status))"
+            }
+            .joined(separator: ",")
+        return "visible=\(visibleModules.count);refreshing=\(isRefreshing);order=\(order);rows=\(rowTokens)"
     }
 
     /**
@@ -1699,6 +1868,11 @@ public struct ModuleBrowserView: View {
         .onTapGesture {
             performPrimaryRowAction(for: module, status: status)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(module.name)
+        .accessibilityValue(Self.downloadStatusAccessibilityToken(status))
+        .accessibilityAddTraits(Self.primaryRowTapStartsDownload(status) ? .isButton : [])
+        .accessibilityIdentifier("moduleBrowserRow::\(module.name)")
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if rowActions.contains(.uninstall) {
                 Button(role: .destructive) {
@@ -1867,7 +2041,7 @@ public struct ModuleBrowserView: View {
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.red)
                 Button {
-                    installModule(module)
+                    requestDownloadConfirmation(for: module, status: status)
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 22, weight: .semibold))
@@ -1878,7 +2052,7 @@ public struct ModuleBrowserView: View {
             }
         case .update:
             Button {
-                installModule(module)
+                requestDownloadConfirmation(for: module, status: status)
             } label: {
                 Image(systemName: presentation.statusIconSystemName ?? "arrow.up.circle.fill")
                     .font(.system(size: 24, weight: .bold))
@@ -1901,14 +2075,15 @@ public struct ModuleBrowserView: View {
      Runs Android's primary row action for a visible Downloads document.
 
      Android rows dispatch to `DownloadControl.manageDownload`: installable, update, and failed rows
-     start or retry downloads; active rows cancel; installed/unavailable rows do not install again.
-     iOS keeps the same behavior for row taps while preserving the explicit trailing icons.
+     show a confirmation before starting or retrying downloads; active rows are ignored because the
+     explicit undo/cancel control owns cancellation. Installed and unavailable rows do not install
+     again. iOS keeps the same behavior for row taps while preserving the explicit trailing icons.
 
      - Parameters:
        - module: Remote catalog row represented by the tapped row.
        - status: Current Android-equivalent install status.
-     - Side effects: May start, retry, or cancel one install task.
-     - Failure modes: `installModule(_:)` and `cancelInstall(_:)` own their failure behavior.
+     - Side effects: May show Android's download confirmation dialog.
+     - Failure modes: `installModule(_:)` owns confirmed install failure behavior.
      */
     private func performPrimaryRowAction(
         for module: RemoteModuleInfo,
@@ -1916,12 +2091,42 @@ public struct ModuleBrowserView: View {
     ) {
         switch status {
         case .installable, .updateAvailable, .errorDownloading:
-            installModule(module)
-        case .beingInstalled:
-            cancelInstall(module.name)
-        case .installed, .unavailable:
+            requestDownloadConfirmation(for: module, status: status)
+        case .beingInstalled, .installed, .unavailable:
             break
         }
+    }
+
+    /**
+     Stages Android's per-document download confirmation for one row.
+
+     Android opens either a simple `download_document_confirm_prefix` confirmation or, for installed
+     documents with generic bookmarks, `documentUpgradeConfirmation` before `doDownload(...)` runs.
+     Keeping this as a separate staging step preserves the confirmation/cancel contract for row taps,
+     retry, and update affordances without changing startup/default-document installs.
+
+     - Parameters:
+       - module: Remote catalog row the user requested.
+       - status: Current Android-equivalent install status for the row entry point.
+     - Side effects: Presents the confirmation alert.
+     - Failure modes: bookmark-count fetch failures fall back to the simple confirmation; confirmed
+       installs are handled by `installModule(_:)`.
+     */
+    private func requestDownloadConfirmation(
+        for module: RemoteModuleInfo,
+        status: ModuleBrowserDownloadStatus
+    ) {
+        let kind: ModuleBrowserDownloadConfirmation.Kind
+        if Self.shouldShowGenericBookmarkUpdateWarning(
+            status: status,
+            isInstalled: installedModules.contains(where: { $0.name == module.name }),
+            hasGenericBookmarks: hasGenericBookmarks(for: module)
+        ) {
+            kind = .genericBookmarkUpdateWarning
+        } else {
+            kind = .download
+        }
+        pendingDownloadConfirmation = ModuleBrowserDownloadConfirmation(module: module, kind: kind)
     }
 
     // MARK: - Helpers
@@ -2369,6 +2574,152 @@ public struct ModuleBrowserView: View {
     }
 
     /**
+     Returns whether a Downloads row tap should be exposed as an actionable control.
+
+     Android row taps start by opening confirmation for install/update/retry states. Active installs
+     cancel only from the explicit undo control, and installed/unavailable rows are passive.
+
+     - Parameter status: Current Android-equivalent row status.
+     - Returns: `true` only when tapping the row opens download confirmation.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func primaryRowTapStartsDownload(_ status: ModuleBrowserDownloadStatus) -> Bool {
+        switch status {
+        case .installable, .updateAvailable, .errorDownloading:
+            return true
+        case .beingInstalled, .installed, .unavailable:
+            return false
+        }
+    }
+
+    /**
+     Formats Android's per-row download confirmation text.
+
+     - Parameter module: Remote catalog row selected by the user.
+     - Returns: Localized prefix plus the best available document display name.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    fileprivate static func downloadConfirmationMessage(for module: RemoteModuleInfo) -> String {
+        let prefix = String(localized: "download_document_confirm_prefix", defaultValue: "Download")
+        let trimmedDescription = module.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = trimmedDescription.isEmpty ? module.name : trimmedDescription
+        return "\(prefix) \(displayName)"
+    }
+
+    /**
+     Builds Android's generic-bookmark update warning body.
+
+     Android concatenates `bookmark_warning2`, `bookmark_warning4`, and `bookmark_warning3` with
+     blank lines. Keeping that assembly in one helper preserves the same warning order for update
+     confirmations without coupling the alert renderer to individual string keys.
+
+     - Returns: Localized warning text used when updating a document with generic bookmarks/notes.
+     - Side effects: none.
+     - Failure modes: missing translations fall back to the supplied English defaults.
+     */
+    fileprivate static func genericBookmarkUpdateWarningMessage() -> String {
+        let warningMessage = String(
+            localized: "bookmark_warning2",
+            defaultValue: "If document structure has changed, updating this document could make the locations of these bookmarks/notes move inside the document or disappear completely."
+        )
+        let warningRecommendation = String(
+            localized: "bookmark_warning4",
+            defaultValue: "It is recommended that you backup the module before updating."
+        )
+        let warningQuestion = String(
+            localized: "bookmark_warning3",
+            defaultValue: "Do you still want to update module?"
+        )
+        return "\(warningMessage)\n\n\(warningRecommendation)\n\n\(warningQuestion)"
+    }
+
+    /**
+     Checks Android's update-warning condition for generic bookmarks tied to a module.
+
+     Android queries `GenericBookmarkWithNotes` by document initials before updating an installed
+     document. iOS mirrors the same user-safety gate by fetching at most one `GenericBookmark` with
+     the selected module initials; the warning is only needed when a matching row exists.
+
+     - Parameter module: Remote catalog row that is about to be updated.
+     - Returns: `true` when at least one generic bookmark targets `module.name`.
+     - Side effects: performs a read-only SwiftData fetch.
+     - Failure modes: fetch errors return `false` so the download path remains usable.
+     */
+    private func hasGenericBookmarks(for module: RemoteModuleInfo) -> Bool {
+        Self.hasGenericBookmarks(for: module.name, in: modelContext)
+    }
+
+    /**
+     Performs Android's `GenericBookmarkWithNotes.bookInitials` existence query against SwiftData.
+
+     Android counts rows from the `GenericBookmarkWithNotes` view before warning on installed
+     document updates. That view left-joins notes, so the correct iOS equivalent is the owning
+     `GenericBookmark` row keyed by document initials, regardless of whether a note payload exists.
+
+     - Parameters:
+       - moduleName: Module initials for the document being updated.
+       - modelContext: SwiftData context that owns bookmark rows.
+     - Returns: `true` when at least one generic bookmark targets `moduleName`.
+     - Side effects: performs a read-only SwiftData fetch.
+     - Failure modes: fetch errors return `false` so the download path remains usable.
+     */
+    static func hasGenericBookmarks(for moduleName: String, in modelContext: ModelContext) -> Bool {
+        var descriptor = FetchDescriptor<GenericBookmark>(
+            predicate: #Predicate { bookmark in
+                bookmark.bookInitials == moduleName
+            }
+        )
+        descriptor.fetchLimit = 1
+        return ((try? modelContext.fetch(descriptor)) ?? []).isEmpty == false
+    }
+
+    /**
+     Selects Android's bookmark/notes warning branch for Downloads update confirmations.
+
+     Android checks for installed documents with generic bookmarks before every non-active
+     `manageDownload` action, not only before clean `UPGRADE_AVAILABLE` rows. That means a failed
+     retry for an already-installed document must still warn before replacing module files.
+
+     - Parameters:
+       - status: Current Android-equivalent row status.
+       - isInstalled: Whether the selected document is already installed locally.
+       - hasGenericBookmarks: Whether generic bookmarks/notes target the selected module initials.
+     - Returns: `true` when iOS should show Android's `documentUpgradeConfirmation` warning.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func shouldShowGenericBookmarkUpdateWarning(
+        status: ModuleBrowserDownloadStatus,
+        isInstalled: Bool,
+        hasGenericBookmarks: Bool
+    ) -> Bool {
+        Self.canPromptForDownload(status) && isInstalled && hasGenericBookmarks
+    }
+
+    /**
+     Confirms that a status is in Android's download-manageable set before warning selection.
+
+     Android only enters `manageDownload` for non-active, non-pseudo rows. iOS calls the confirmation
+     staging helper from installable, retry, and update entry points; this helper keeps the
+     bookmark-warning predicate tied to that same actionable status set.
+
+     - Parameter status: Current Android-equivalent row status.
+     - Returns: `true` for statuses that can proceed to a download confirmation.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func canPromptForDownload(_ status: ModuleBrowserDownloadStatus) -> Bool {
+        switch status {
+        case .installable, .updateAvailable, .errorDownloading:
+            return true
+        case .beingInstalled, .installed, .unavailable:
+            return false
+        }
+    }
+
+    /**
      Returns Android's primary status sort rank.
 
      - Parameter status: Resolved row status.
@@ -2384,6 +2735,31 @@ public struct ModuleBrowserView: View {
             return 2
         case .errorDownloading, .installable, .unavailable:
             return 3
+        }
+    }
+
+    /**
+     Converts a Downloads row status into a compact token for UI-test state exports.
+
+     - Parameter status: Resolved Android-parity download row status.
+     - Returns: Stable ASCII token used by `moduleBrowserStateExport`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func downloadStatusAccessibilityToken(_ status: ModuleBrowserDownloadStatus) -> String {
+        switch status {
+        case .beingInstalled:
+            return "beingInstalled"
+        case .errorDownloading:
+            return "errorDownloading"
+        case .updateAvailable:
+            return "updateAvailable"
+        case .installed:
+            return "installed"
+        case .unavailable:
+            return "unavailable"
+        case .installable:
+            return "installable"
         }
     }
 
@@ -2871,6 +3247,15 @@ public struct ModuleBrowserView: View {
         downloadActivities[module.name] = .inProgress(0)
         installTaskIDs[module.name] = installID
         errorMessage = nil
+
+        if UITestRuntimeConfiguration.shouldHoldDownloadInstall(for: module.name) {
+            installTasks[module.name] = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
+                }
+            }
+            return
+        }
 
         let task = Task {
             await Task.yield()

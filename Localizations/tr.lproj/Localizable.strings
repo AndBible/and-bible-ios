@@ -539,3 +539,8 @@
 
 "help_workspaces_title" = "Çalışma Alanları";
 "reading_plans_plural" = "Okuma Planları";
+"download_document_confirm_prefix" = "İndir";
+"bookmark_warning4" = "It is recommended that you backup the module before updating.";
+"bookmark_warning3" = "Do you still want to update module?";
+"bookmark_warning2" = "Belge yapısı değiştiyse, bu belgenin güncellenmesi bu yer imlerinin/notların konumlarının belge içinde yer değiştirmesine veya tamamen kaybolmasına neden olabilir.";
+"bookmark_warning" = "Bu belge için yer imleri ve/veya notlar bulunmaktadır.";

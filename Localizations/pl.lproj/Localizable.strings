@@ -540,3 +540,8 @@ Podczas korzystania z Dysku Google, aplikacja %@ otrzymuje uprawnienie na dostę
 
 "help_workspaces_title" = "Obszary robocze";
 "reading_plans_plural" = "Plany czytania";
+"download_document_confirm_prefix" = "Pobieranie";
+"bookmark_warning4" = "Zaleca się utworzenie kopii zapasowej modułu przed jago aktualizacją.";
+"bookmark_warning3" = "Czy wciąż chcesz zaktualizować moduł?";
+"bookmark_warning2" = "Jeżeli struktura dokumentu uległa zmianie, jego aktualizacja może spowodować zmianę położenia lub całkowite usunięcie zawartych w nim zakładek i notatek.";
+"bookmark_warning" = "Ten dokument zawiera zakładki lub notatki.";

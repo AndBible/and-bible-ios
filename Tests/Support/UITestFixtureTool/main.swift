@@ -53,6 +53,7 @@ private enum FixtureScenario: String, CaseIterable {
     case syncNextCloud = "sync-nextcloud"
     case syncNextCloudBookmarksEnabled = "sync-nextcloud-bookmarks-enabled"
     case displayColorsCustom = "display-colors-custom"
+    case downloadsRowOrder = "downloads-row-order"
 }
 
 /// Parsed CLI arguments for one fixture-tool invocation.
@@ -218,7 +219,8 @@ private struct FixtureTool {
     }
 
     /**
-     Deletes the app's persisted SwiftData stores, search index, and preferences file.
+     Deletes the app's persisted SwiftData stores, search index, SWORD install metadata, and
+     preferences file.
      *
      * - Throws: Filesystem errors only when creating the parent directories fails.
      */
@@ -240,6 +242,10 @@ private struct FixtureTool {
         try removeSQLiteFamily(at: paths.localStoreURL)
         try removeSQLiteFamily(at: paths.applicationSupportURL.appendingPathComponent("CloudStore.store"))
         try removeSQLiteFamily(at: paths.documentsURL.appendingPathComponent("search_indexes.sqlite"))
+        let installManagerURL = paths.documentsURL.appendingPathComponent("sword_install", isDirectory: true)
+        if fileManager.fileExists(atPath: installManagerURL.path) {
+            try fileManager.removeItem(at: installManagerURL)
+        }
         try removeUITestSwordModules(from: paths)
         if fileManager.fileExists(atPath: paths.preferencesURL.path) {
             try fileManager.removeItem(at: paths.preferencesURL)
@@ -443,10 +449,184 @@ private final class FixtureContext {
             seedSyncNextCloud(enabledCategories: [.bookmarks])
         case .displayColorsCustom:
             seedCustomColorSettings()
+        case .downloadsRowOrder:
+            try seedDownloadsRowOrderCatalog()
         }
 
         try modelContext.save()
         try writePreferences(["icloud_sync_enabled": false])
+    }
+
+    /// Disk shape used by `ModuleRepository.loadCachedCatalogs()` for one UI-test catalog fixture.
+    private struct CachedDownloadCatalogFixture: Codable {
+        /// Fresh cache timestamp so Downloads opens cached rows without automatic repository refresh.
+        var timestamp: Date
+
+        /// Remote modules exposed by the deterministic smoke-test source.
+        var modules: [CachedDownloadModuleFixture]
+    }
+
+    /// Disk shape used by `ModuleRepository.loadCachedCatalogs()` for one module row.
+    private struct CachedDownloadModuleFixture: Codable {
+        /// Module initials used as the Downloads row identity.
+        var name: String
+
+        /// Human-readable description shown under the initials.
+        var description: String
+
+        /// Android/SWORD category string consumed by `ModuleCategory`.
+        var category: String
+
+        /// Module language code shown by the Downloads language filter.
+        var language: String
+
+        /// Repository source name matching the cache filename and config row.
+        var sourceName: String
+
+        /// SWORD driver used for row category inference and install-file planning.
+        var modDrv: String
+
+        /// SWORD `DataPath` preserved for install attempts from the cached row.
+        var dataPath: String
+
+        /// Full `.conf` payload persisted if an install succeeds.
+        var confContent: String
+
+        /// Remote module version used for update-vs-installed status comparison.
+        var version: String
+
+        /// Raw SWORD catalog size field used by row metadata display.
+        var size: String
+
+        /// Android repository family, normally `sword-https` for this fixture.
+        var repositoryType: String?
+
+        /// Optional direct MyBible package URL; absent for SWORD rows.
+        var downloadURL: String?
+
+        /// Optional MyBible package filename; absent for SWORD rows.
+        var packageFileName: String?
+    }
+
+    /**
+     Seeds a deterministic Downloads catalog that catches row-order regressions during install state.
+
+     Android updates the tapped document row in place when a download starts; it does not rebuild and
+     status-sort the list until filter data is rebuilt. This fixture writes a single local-only source
+     and fresh cache containing installed KJV followed by two installable Bible rows, so the UI smoke
+     can tap the last row and assert that it does not jump to Android's `BEING_INSTALLED` sort bucket.
+     The seeded source points at a TEST-NET address and is never refreshed automatically because the
+     cache is fresh; if the test taps install, the real download task stays active long enough for
+     the smoke test to observe Android's in-place progress state without touching a live repository.
+     */
+    private func seedDownloadsRowOrderCatalog() throws {
+        let sourceName = "UITest Downloads"
+        let installManagerURL = paths.documentsURL.appendingPathComponent("sword_install", isDirectory: true)
+        if fileManager.fileExists(atPath: installManagerURL.path) {
+            try fileManager.removeItem(at: installManagerURL)
+        }
+
+        let cacheURL = installManagerURL.appendingPathComponent("catalog-cache", isDirectory: true)
+        try fileManager.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+
+        let config = """
+        [General]
+        PassiveFTP=true
+
+        [Sources]
+        # AndBibleDefaultSourcesVersion=2
+        HTTPSource=\(sourceName)|192.0.2.1|/catalog
+        """
+        try config.write(
+            to: installManagerURL.appendingPathComponent("InstallMgr.conf", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let catalog = CachedDownloadCatalogFixture(
+            timestamp: Date(),
+            modules: [
+                cachedDownloadModule(
+                    name: "KJV",
+                    description: "King James Version",
+                    dataPath: "./modules/texts/ztext/kjv/",
+                    modDrv: "zText",
+                    version: "3.1",
+                    sourceName: sourceName
+                ),
+                cachedDownloadModule(
+                    name: "UITESTDLREC",
+                    description: "UI Test Downloads Recommended",
+                    dataPath: "./modules/texts/rawtext/uitestdlrec/",
+                    modDrv: "RawText",
+                    version: "1.0",
+                    sourceName: sourceName
+                ),
+                cachedDownloadModule(
+                    name: "UITESTDLWARN",
+                    description: "UI Test Downloads Warning",
+                    dataPath: "./modules/texts/rawtext/uitestdlwarn/",
+                    modDrv: "RawText",
+                    version: "1.0",
+                    sourceName: sourceName
+                ),
+            ]
+        )
+        let data = try JSONEncoder().encode(catalog)
+        try data.write(
+            to: cacheURL.appendingPathComponent("\(sourceName).json", isDirectory: false),
+            options: .atomic
+        )
+    }
+
+    /**
+     Builds one cached Bible row using the same persisted shape as `ModuleRepository`.
+
+     - Parameters:
+       - name: Module initials shown in the Downloads list.
+       - description: User-visible module description.
+       - dataPath: SWORD `DataPath` used if the row is installed during the smoke test.
+       - modDrv: SWORD driver used for category and install-file planning.
+       - version: Remote module version string.
+       - sourceName: Repository source name matching the cache filename and config row.
+     - Returns: Codable fixture row consumed by `ModuleRepository.loadCachedCatalogs()`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func cachedDownloadModule(
+        name: String,
+        description: String,
+        dataPath: String,
+        modDrv: String,
+        version: String,
+        sourceName: String
+    ) -> CachedDownloadModuleFixture {
+        let normalizedDataPath = dataPath.hasPrefix("./") ? dataPath : "./\(dataPath)"
+        let confContent = """
+        [\(name)]
+        Description=\(description)
+        DataPath=\(normalizedDataPath)
+        ModDrv=\(modDrv)
+        Category=Biblical Texts
+        Encoding=UTF-8
+        Lang=en
+        Version=\(version)
+        """
+        return CachedDownloadModuleFixture(
+            name: name,
+            description: description,
+            category: ModuleCategory.bible.rawValue,
+            language: "en",
+            sourceName: sourceName,
+            modDrv: modDrv,
+            dataPath: normalizedDataPath,
+            confContent: confContent,
+            version: version,
+            size: "1000",
+            repositoryType: SourceConfig.swordHTTPSRepositoryType,
+            downloadURL: nil,
+            packageFileName: nil
+        )
     }
 
     /**

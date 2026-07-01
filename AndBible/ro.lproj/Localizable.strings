@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "Spații de studiu";
 "reading_plans_plural" = "Planuri de citire";
+"download_document_confirm_prefix" = "Descarcă";
+"bookmark_warning4" = "Se recomandă efectuarea unei copii de rezervă a modulului înainte de actualizare.";
+"bookmark_warning3" = "Mai vrei să actualizezi modulul?";
+"bookmark_warning2" = "Dacă structura documentului s-a modificat, actualizarea acestui document ar putea face ca pozițiile acestor semne de carte/notițe să se mute în interiorul documentului sau să dispară.";
+"bookmark_warning" = "Există semne de carte și/sau notițe pentru acest document.";

@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "Spazi di lavoro";
 "reading_plans_plural" = "Piani di lettura";
+"download_document_confirm_prefix" = "Scarica";
+"bookmark_warning4" = "Si consiglia di eseguire il backup del modulo prima dell\\'aggiornamento.";
+"bookmark_warning3" = "Vuoi ancora aggiornare il modulo?";
+"bookmark_warning2" = "Se la struttura del documento è cambiata, l\\'aggiornamento di questo documento potrebbe far spostare le posizioni di questi segnalibri/note all\\'interno del documento o farli scomparire.";
+"bookmark_warning" = "Sono presenti segnalibri e/o note per questo documento.";

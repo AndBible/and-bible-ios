@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "Munkamenetek";
 "reading_plans_plural" = "Olvasási tervek";
+"download_document_confirm_prefix" = "Letöltés";
+"bookmark_warning4" = "Frissítés előtt javasolt a modul biztonsági mentése.";
+"bookmark_warning3" = "Biztos, hogy frissíti a modult?";
+"bookmark_warning2" = "Ha a dokumentum struktúrája változik, akkor az ilyen könyvjelzők/jegyzetek a dokumentum frissítése után rossz helyre mutathatnak vagy akár teljesen eltűnhetnek.";
+"bookmark_warning" = "Ehhez a dokumentumhoz könyvjelzők és/vagy jegyzetek tartoznak.";

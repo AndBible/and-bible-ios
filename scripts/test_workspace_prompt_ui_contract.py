@@ -15,12 +15,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 class WorkspacePromptUITestContractTests(unittest.TestCase):
     """Guards the CI-stable workspace prompt lookup path used by UI tests."""
 
-    def test_workspace_prompt_open_waits_for_prompt_surface_before_field_queries(self) -> None:
-        """The create flow waits for prompt-owned controls before falling back to field resolution.
+    def test_workspace_prompt_open_waits_for_controls_without_root_probe(self) -> None:
+        """The create flow waits for prompt-owned controls before fallback field resolution.
 
-        The failing CI shard showed generic prompt-surface lookup could hang when it used the wrong
-        container types. The opener should prefer prompt-owned buttons and the prompt surface before
-        using the editable field as a final readiness signal.
+        The failing CI shard showed root prompt-surface lookup can hang before the actual controls
+        are considered. The opener should prefer prompt-owned controls and avoid using the root
+        surface as a readiness signal.
         """
         source = (
             REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestListSupport.swift"
@@ -31,8 +31,8 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
 
         self.assertIn('"workspaceNamePromptConfirmButton"', open_prompt_body)
         self.assertIn('"workspaceNamePromptCancelButton"', open_prompt_body)
-        self.assertIn('"workspaceNamePromptScreen"', open_prompt_body)
         self.assertIn('"workspaceNamePromptTextField"', open_prompt_body)
+        self.assertNotIn('"workspaceNamePromptScreen"', open_prompt_body)
 
     def test_workspace_prompt_field_candidates_avoid_custom_identifier_and_focus_queries(self) -> None:
         """The prompt field lookup stays on title candidates instead of custom identifier queries.

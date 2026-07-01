@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "Delovni prostori";
 "reading_plans_plural" = "Načrti branja ";
+"download_document_confirm_prefix" = "Prenos";
+"bookmark_warning4" = "Priporočljivo je, da pred posodobitvijo naredite varnostno kopijo modula.";
+"bookmark_warning3" = "Ali še vedno želite posodobiti modul?";
+"bookmark_warning2" = "Če se je struktura dokumenta spremenila, lahko posodobitev tega dokumenta povzroči, da se lokacije teh zaznamkov/opomb premaknejo znotraj dokumenta ali popolnoma izginejo.";
+"bookmark_warning" = "Ta dokument vsebuje zaznamke in/ali opombe.";

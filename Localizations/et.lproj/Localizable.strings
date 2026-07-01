@@ -539,3 +539,8 @@
 
 "help_workspaces_title" = "Tööalad";
 "reading_plans_plural" = "Lugemiskavad";
+"download_document_confirm_prefix" = "Lae alla";
+"bookmark_warning4" = "Soovitatav on moodul varundada enne uuendamist.";
+"bookmark_warning3" = "Kas soovid uuendada moodulit?";
+"bookmark_warning2" = "Kui dokumendi struktuur on muutunud, võib selle dokumendi uuendamine põhjustada järjehoidjate/märkmete asukohtade nihkumise dokumendis või nende kadumise.";
+"bookmark_warning" = "Dokumendi järjehoidjad ja märkmed.";

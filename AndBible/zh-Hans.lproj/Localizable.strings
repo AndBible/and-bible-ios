@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "工作检视";
 "reading_plans_plural" = "读经计划";
+"download_document_confirm_prefix" = "下载";
+"bookmark_warning4" = "推荐您先备份模块再更新。";
+"bookmark_warning3" = "您是否仍想更新模块？";
+"bookmark_warning2" = "如果文档结构被修改，更新此文档可能让 这些书签或笔记移动到文档中或彻底消失。";
+"bookmark_warning" = "此文档中有书签或笔记。";

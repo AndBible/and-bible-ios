@@ -540,3 +540,8 @@ Kada koristite Google Drive, %@ dat je pristup samo fajlovima aplikacije, ne li�
 
 "help_workspaces_title" = "Radne površi";
 "reading_plans_plural" = "Planovi čitanja";
+"download_document_confirm_prefix" = "Preuzmi";
+"bookmark_warning4" = "Preporučljivo je da napravite rezervnu kopiju modula pre ažuriranja.";
+"bookmark_warning3" = "Da li idalje želite da ažurirate modul?";
+"bookmark_warning2" = "Ukoliko je struktura dokumenta promenjena, ažuriranje istog bi moglo dovesti do trajnog gubitka ovih obeleživača/beleški ili pak pomeranja njihovih lokacija unutar dokumenta.";
+"bookmark_warning" = "Ima obeleživača, odnosno beleški za ovaj dokument.";

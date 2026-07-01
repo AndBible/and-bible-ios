@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "工作區";
 "reading_plans_plural" = "讀經計劃";
+"download_document_confirm_prefix" = "下載";
+"bookmark_warning4" = "建議你先備份模組後再作更新。";
+"bookmark_warning3" = "你仍想更新模組嗎？";
+"bookmark_warning2" = "如果文件結構被修改，更新此文件可能會讓 這些書籤或筆記移動或消失。";
+"bookmark_warning" = "此文件中有書籤及/或筆記。";

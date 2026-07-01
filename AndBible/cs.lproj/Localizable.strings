@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "Pracovní plochy";
 "reading_plans_plural" = "Plány čtení";
+"download_document_confirm_prefix" = "Stáhnout";
+"bookmark_warning4" = "Je doporučeno zálohovat tento modul před jeho aktualizací.";
+"bookmark_warning3" = "Opravdu chcete aktualizovat modul?";
+"bookmark_warning2" = "Jestliže se struktura dokumentu změní, aktualizace dokumentu může způsobit, že umístění těchto záložek/poznámek se v dokumentu změní nebo bude ztraceno.";
+"bookmark_warning" = "Pro tento dokument existují záložky/poznámky";

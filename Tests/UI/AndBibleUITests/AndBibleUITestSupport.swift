@@ -14,6 +14,8 @@ extension AndBibleUITests {
      *     search mode.
      *   - remoteSyncBootstrapScenario: Optional remote-sync scenario name passed to the app under
      *     test.
+     *   - heldDownloadModules: Optional comma-delimited UI-test fixture list of Downloads module
+     *     initials whose install tasks should remain in progress until cancelled.
      * - Returns: A configured `XCUIApplication` that has not yet been launched by the caller.
      * - Side effects:
      *   - terminates any previously launched app process through CoreSimulator when possible
@@ -25,7 +27,8 @@ extension AndBibleUITests {
      */
     func makeApp(
         searchQuery: String? = nil,
-        remoteSyncBootstrapScenario: String? = nil
+        remoteSyncBootstrapScenario: String? = nil,
+        heldDownloadModules: [String] = []
     ) -> XCUIApplication {
         if let trackedApp {
             _ = terminateAppReliably(trackedApp)
@@ -47,6 +50,11 @@ extension AndBibleUITests {
         if let searchQuery {
             app.launchEnvironment["UITEST_SEARCH_QUERY"] = searchQuery
             app.launchArguments += ["-UITEST_SEARCH_QUERY", searchQuery]
+        }
+        if !heldDownloadModules.isEmpty {
+            let heldDownloadModuleList = heldDownloadModules.joined(separator: ",")
+            app.launchEnvironment["UITEST_HELD_DOWNLOAD_MODULES"] = heldDownloadModuleList
+            app.launchArguments += ["-UITEST_HELD_DOWNLOAD_MODULES", heldDownloadModuleList]
         }
         prepareFixtureIfRequested(for: app)
         return app

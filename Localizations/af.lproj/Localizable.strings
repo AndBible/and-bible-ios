@@ -540,3 +540,8 @@ Wanneer Google Drive gebruik word, kry %@ slegs toegang tot toepassinglêers, ni
 
 "help_workspaces_title" = "Werkruimtes";
 "reading_plans_plural" = "Lees Planne";
+"download_document_confirm_prefix" = "Laai af";
+"bookmark_warning4" = "Dit word aanbeveel dat u die module rugsteun voordat u dit opdateer.";
+"bookmark_warning3" = "Wil u nog steeds die module opdateer?";
+"bookmark_warning2" = "As dokument struktuur verander het, kan die opdatering van hierdie dokument maak dat die liggings van hierdie boekmerke/notas beweeg binne die dokument of verdwyn heeltemal.";
+"bookmark_warning" = "Daar is boekmerke en/of notas vir hierdie dokument.";

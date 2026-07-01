@@ -540,3 +540,8 @@ Dum uzi Google Drive, %@ akiros aliron nur al aplikaĵaj datumoj, al neniu priva
 
 "help_workspaces_title" = "Laborspacoj";
 "reading_plans_plural" = "Legplanoj";
+"download_document_confirm_prefix" = "Elŝuti";
+"bookmark_warning4" = "Estas konsilinde fari sekurkopion de modulo antaŭ ol ĝisdatigi ĝin.";
+"bookmark_warning3" = "Ĉu vi certe volas ĝisdatigi la modulon?";
+"bookmark_warning2" = "Se strukturo de dokumento ŝanĝiĝos, ĝisdatigo de la dokumento povos movi legosignojn/notojn ene la dokumento aŭ eĉ tute malaperigi ilin.";
+"bookmark_warning" = "Estas legosignoj aŭ notoj por tiu ĉi dokumento.";

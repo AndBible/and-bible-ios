@@ -539,3 +539,8 @@
 
 "help_workspaces_title" = "Espaces";
 "reading_plans_plural" = "Plans de lecture";
+"download_document_confirm_prefix" = "Télécharger";
+"bookmark_warning4" = "Il est recommandé de sauvegarder le module avant de le mettre à jour.";
+"bookmark_warning3" = "Voulez-vous toujours mettre à jour le module ?";
+"bookmark_warning2" = "Si la structure du document a été modifiée, la mise à jour de ce document peut entraîner le déplacement de ces signets/notes à l’intérieur du document ou leur disparition complète l’emplacement de ces signets/notes se déplace à l’intérieur du document ou disparaît complètement.";
+"bookmark_warning" = "Ce document comporte des signets et/ou des notes.";

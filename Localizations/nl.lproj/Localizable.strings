@@ -540,3 +540,8 @@
 
 "help_workspaces_title" = "Werkbladen";
 "reading_plans_plural" = "Leesplannen";
+"download_document_confirm_prefix" = "Downloaden";
+"bookmark_warning4" = "Het wordt aanbevolen om een reservekopie te maken van de module voordat je hem bijwerkt.";
+"bookmark_warning3" = "Wil je nog steeds de module updaten?";
+"bookmark_warning2" = "Als de indeling van het document is veranderd, kan het bijwerken van het document de bladwijzers/notities van plek laten veranderen of zelfs compleet laten verdwijnen uit het document";
+"bookmark_warning" = "Er zijn bladwijzers en/of notities voor dit document";
