@@ -58,8 +58,8 @@ final class AndBibleUITests: XCTestCase {
      Protects the host-process capture helper from blocking on descendants that inherit stdout.
      *
      * Setup:
-     * - runs a Python process that exits immediately after writing output
-     * - forks a short-lived descendant that keeps the inherited stdout descriptor open
+     * - runs a shell process that exits immediately after writing output
+     * - starts a short-lived background `sleep` that keeps the inherited stdout descriptor open
      *
      * Expected result:
      * - the helper returns after the direct child exits and captures the direct child's output
@@ -71,7 +71,7 @@ final class AndBibleUITests: XCTestCase {
      *   pipe descriptors attached to a launched process that outlives the command
      *
      * Side effects:
-     * - starts and terminates one descendant host Python process that inherits stdout
+     * - starts and terminates one descendant host `sleep` process that inherits stdout
      */
     func testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen() {
         var descendantPID: pid_t?
@@ -82,22 +82,14 @@ final class AndBibleUITests: XCTestCase {
         }
 
         let result = runHostProcess(
-            executablePath: "/usr/bin/python3",
+            executablePath: "/bin/sh",
             arguments: [
                 "-c",
                 """
-                import os
-                import sys
-                import time
-
-                child_pid = os.fork()
-                if child_pid == 0:
-                    time.sleep(30)
-                    os._exit(0)
-
-                sys.stdout.write(f"fixture-ready:{child_pid}")
-                sys.stdout.flush()
-                os._exit(0)
+                sleep 30 &
+                child_pid=$!
+                printf "fixture-ready:%s" "$child_pid"
+                exit 0
                 """
             ],
             timeout: 15
