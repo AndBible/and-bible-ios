@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "Ruang Kerja";
 "reading_plans_plural" = "Reading Plans";
+"download_document_confirm_prefix" = "Unduh";
+"bookmark_warning4" = "Disarankan untuk mencadangkan modul sebelum memperbarui.";
+"bookmark_warning3" = "Apakah Anda tetap ingin memperbarui modul?";
+"bookmark_warning2" = "Jika struktur dokumen telah berubah, memperbarui dokumen ini dapat menyebabkan lokasi penanda buku/catatan ini berpindah di dalam dokumen atau hilang sepenuhnya.";
+"bookmark_warning" = "Ada penanda buku dan/atau catatan untuk dokumen ini.";

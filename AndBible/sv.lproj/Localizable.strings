@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "Arbetsytor";
 "reading_plans_plural" = "Läsningsplaner";
+"download_document_confirm_prefix" = "Ladda ner";
+"bookmark_warning4" = "Det rekommenderas att du säkerhetskopierar modulen innan du uppdaterar.";
+"bookmark_warning3" = "Vill du ändå uppdatera modulen?";
+"bookmark_warning2" = "Om dokumentets struktur har ändrat kan uppdatering av dokumentet göra att bokmärkena/anteckningarna flyttas inom dokumentet eller försvinner helt.";
+"bookmark_warning" = "Det finns bokmärken och/eller anteckningar till detta dokument";

@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "Työtilat";
 "reading_plans_plural" = "Lukusuunnitelmat";
+"download_document_confirm_prefix" = "Lataa";
+"bookmark_warning4" = "On suositeltavaa että varmuuskopioit moduulin ennen päivitystä.";
+"bookmark_warning3" = "Haluatko silti päivittää moduulin?";
+"bookmark_warning2" = "Jos dokumentin rakenne on muuttunut, dokumentin päivittäminen voi saada aikaan sen, että näiden kirjanmerkkit / merkinnöt siirtyvät dokumentin sisällä tai katoavat kokonaan.";
+"bookmark_warning" = "Tässä dokumentissa on kirjanmerkkejä ja/tai merkintöjä.";

@@ -561,3 +561,8 @@
 
 "help_workspaces_title" = "Arbeitsbereich";
 "reading_plans_plural" = "Lesepläne";
+"download_document_confirm_prefix" = "Download";
+"bookmark_warning4" = "Es ist angeraten, das Modul zu sichern, bevor du es akutalisierst.";
+"bookmark_warning3" = "Möchtest du das Modul immer noch aktualisieren";
+"bookmark_warning2" = "Wenn die Dokumentstruktur geändert wurde, kann die Aktualisierung dieses Dokuments dazu führen, dass die Stellen der Lesezeichen/Notzien verschoben werden oder ganz verschwinden-";
+"bookmark_warning" = "Es gibt Lesezeichen und/oder Notizen für dieses Dokument";

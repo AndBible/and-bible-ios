@@ -539,3 +539,8 @@
 
 "help_workspaces_title" = "Darbo sritys";
 "reading_plans_plural" = "Skaitymo planai";
+"download_document_confirm_prefix" = "Atsisiųsti";
+"bookmark_warning4" = "Rekomenduojama prieš atnaujinant padaryti modulio atsarginę kopiją.";
+"bookmark_warning3" = "Ar vis dar norite atnaujinti pmodulį?";
+"bookmark_warning2" = "Jei dokumento struktūra pasikeitė, dokumento atnaujinimas gali žymių/pastabų vietą perkelti dokumento viduje arba  jos išvis gali pradingti.";
+"bookmark_warning" = "Šis dokumentas turi žymių ir/arba pastabų";

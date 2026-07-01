@@ -219,7 +219,8 @@ private struct FixtureTool {
     }
 
     /**
-     Deletes the app's persisted SwiftData stores, search index, and preferences file.
+     Deletes the app's persisted SwiftData stores, search index, SWORD install metadata, and
+     preferences file.
      *
      * - Throws: Filesystem errors only when creating the parent directories fails.
      */
@@ -241,6 +242,10 @@ private struct FixtureTool {
         try removeSQLiteFamily(at: paths.localStoreURL)
         try removeSQLiteFamily(at: paths.applicationSupportURL.appendingPathComponent("CloudStore.store"))
         try removeSQLiteFamily(at: paths.documentsURL.appendingPathComponent("search_indexes.sqlite"))
+        let installManagerURL = paths.documentsURL.appendingPathComponent("sword_install", isDirectory: true)
+        if fileManager.fileExists(atPath: installManagerURL.path) {
+            try fileManager.removeItem(at: installManagerURL)
+        }
         try removeUITestSwordModules(from: paths)
         if fileManager.fileExists(atPath: paths.preferencesURL.path) {
             try fileManager.removeItem(at: paths.preferencesURL)

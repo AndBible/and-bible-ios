@@ -539,3 +539,8 @@
 
 "help_workspaces_title" = "Arbeidsområder";
 "reading_plans_plural" = "Leseplaner";
+"download_document_confirm_prefix" = "Last ned";
+"bookmark_warning4" = "Det er anbefalt å ta en sikkerhetskopi av modulen før du oppdaterer.";
+"bookmark_warning3" = "Ønsker du fortsatt å oppdatere modulen?";
+"bookmark_warning2" = "Hvis dokumentstrukturen har endret seg, kan oppdatering av dette dokumentet gjøre at plasseringen av disse bokmerkene/notatene flyttes inne i dokumentet eller forsvinner helt.";
+"bookmark_warning" = "Det eksisterer bokmerker og/eller notater for dette dokumentet";
