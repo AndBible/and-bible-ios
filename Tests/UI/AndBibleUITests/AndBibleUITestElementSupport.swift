@@ -32,6 +32,21 @@ extension AndBibleUITests {
             identifier.hasPrefix("readerCommentaryQuickSelectorRow_")
     }
 
+    /**
+     Returns whether an identifier targets a Downloads row container.
+
+     Downloads rows contain child buttons such as About. The row itself owns Android's tap-to-install
+     behavior, so UI tests must resolve the row container before broad button fallbacks.
+
+     - Parameter identifier: Accessibility identifier requested by a UI test.
+     - Returns: `true` for Downloads row container identifiers.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    func isModuleBrowserRowIdentifier(_ identifier: String) -> Bool {
+        identifier.hasPrefix("moduleBrowserRow::")
+    }
+
     func heuristicElementCandidates(
         for identifier: String,
         in app: XCUIApplication
@@ -40,6 +55,14 @@ extension AndBibleUITests {
             return [
                 app.scrollViews[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
+            ]
+        }
+
+        if isModuleBrowserRowIdentifier(identifier) {
+            return [
+                app.otherElements[identifier].firstMatch,
+                app.cells[identifier].firstMatch,
+                app.buttons[identifier].firstMatch,
             ]
         }
 
@@ -373,6 +396,8 @@ extension AndBibleUITests {
                 + screenScopedStateCandidates(identifier, within: "availablePlansScreen", in: app)
         case "labelManagerStateExport":
             return screenScopedStateCandidates(identifier, within: "labelManagerScreen", in: app)
+        case "moduleBrowserStateExport":
+            return screenScopedStateCandidates(identifier, within: "moduleBrowserScreen", in: app)
         case "syncSettingsState":
             return screenRootCandidates("syncSettingsScreen", in: app)
                 + screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
@@ -552,6 +577,8 @@ extension AndBibleUITests {
             return screenScopedStateCandidates(identifier, within: "availablePlansScreen", in: app)
         case "labelManagerStateExport":
             return screenScopedStateCandidates(identifier, within: "labelManagerScreen", in: app)
+        case "moduleBrowserStateExport":
+            return screenScopedStateCandidates(identifier, within: "moduleBrowserScreen", in: app)
         case "syncSettingsState":
             return screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
         default:
@@ -785,6 +812,7 @@ extension AndBibleUITests {
             "readingPlanListStateExport",
             "availablePlansStateExport",
             "labelManagerStateExport",
+            "moduleBrowserStateExport",
             "myDocumentsListStateExport",
             "myDocumentPagesStateExport":
             return semanticStateCandidates(for: identifier, in: app)

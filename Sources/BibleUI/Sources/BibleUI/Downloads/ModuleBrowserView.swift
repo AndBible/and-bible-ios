@@ -550,6 +550,10 @@ public struct ModuleBrowserView: View {
 
         return ZStack(alignment: .topTrailing) {
             moduleBrowserScreenMarker
+            moduleBrowserStateExport(
+                visibleModules: visibleModules,
+                installedModulesByName: installedModulesByName
+            )
             VStack(spacing: 0) {
                 androidTopAppBar
                 androidFilterBar(visibleModuleCount: visibleModules.count)
@@ -684,6 +688,70 @@ public struct ModuleBrowserView: View {
             .accessibilityLabel(String(localized: "download_documents", defaultValue: "Download Documents"))
             .accessibilityIdentifier("moduleBrowserScreen")
             .allowsHitTesting(false)
+    }
+
+    /**
+     Builds the compact Downloads state probe consumed by targeted UI smoke tests.
+
+     The export intentionally reports semantic row order and status tokens instead of full row text or
+     layout geometry. That keeps the test anchored to Android's download-list behavior while avoiding
+     brittle pixel or string-wrapping assertions.
+
+     - Parameters:
+       - visibleModules: The currently filtered row sequence shown in Downloads.
+       - installedModulesByName: Installed modules keyed by initials for live row-status lookup.
+     - Returns: A one-pixel hidden state export when detailed UI-test accessibility is enabled.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    @ViewBuilder
+    private func moduleBrowserStateExport(
+        visibleModules: [RemoteModuleInfo],
+        installedModulesByName: [String: ModuleInfo]
+    ) -> some View {
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            let value = moduleBrowserAccessibilityValue(
+                visibleModules: visibleModules,
+                installedModulesByName: installedModulesByName
+            )
+            Text(value)
+                .font(.system(size: 1))
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("moduleBrowserStateExport")
+                .accessibilityValue(value)
+        }
+    }
+
+    /**
+     Produces a stable, parseable Downloads state summary for UI automation.
+
+     - Parameters:
+       - visibleModules: The currently filtered row sequence shown in Downloads.
+       - installedModulesByName: Installed modules keyed by initials for live row-status lookup.
+     - Returns: A semicolon-delimited state string containing row count, order, and row status tokens.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func moduleBrowserAccessibilityValue(
+        visibleModules: [RemoteModuleInfo],
+        installedModulesByName: [String: ModuleInfo]
+    ) -> String {
+        let rowLimit = UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit
+        let limitedModules = visibleModules.prefix(rowLimit)
+        let order = limitedModules.map(\.name).joined(separator: "|")
+        let rowTokens = limitedModules
+            .map { module in
+                let status = Self.displayStatus(
+                    for: module,
+                    installedModulesByName: installedModulesByName,
+                    downloadActivities: downloadActivities
+                )
+                return "\(module.name):\(Self.downloadStatusAccessibilityToken(status))"
+            }
+            .joined(separator: ",")
+        return "visible=\(visibleModules.count);refreshing=\(isRefreshing);order=\(order);rows=\(rowTokens)"
     }
 
     /**
@@ -1699,6 +1767,11 @@ public struct ModuleBrowserView: View {
         .onTapGesture {
             performPrimaryRowAction(for: module, status: status)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(module.name)
+        .accessibilityValue(Self.downloadStatusAccessibilityToken(status))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("moduleBrowserRow::\(module.name)")
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if rowActions.contains(.uninstall) {
                 Button(role: .destructive) {
@@ -2384,6 +2457,31 @@ public struct ModuleBrowserView: View {
             return 2
         case .errorDownloading, .installable, .unavailable:
             return 3
+        }
+    }
+
+    /**
+     Converts a Downloads row status into a compact token for UI-test state exports.
+
+     - Parameter status: Resolved Android-parity download row status.
+     - Returns: Stable ASCII token used by `moduleBrowserStateExport`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func downloadStatusAccessibilityToken(_ status: ModuleBrowserDownloadStatus) -> String {
+        switch status {
+        case .beingInstalled:
+            return "beingInstalled"
+        case .errorDownloading:
+            return "errorDownloading"
+        case .updateAvailable:
+            return "updateAvailable"
+        case .installed:
+            return "installed"
+        case .unavailable:
+            return "unavailable"
+        case .installable:
+            return "installable"
         }
     }
 

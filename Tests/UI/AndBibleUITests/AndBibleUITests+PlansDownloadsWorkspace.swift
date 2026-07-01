@@ -177,4 +177,48 @@ extension AndBibleUITests {
         XCTAssertTrue(requireElement("repositoryManagerScreen", in: app, timeout: 20).exists)
         XCTAssertTrue(requireElement("repositoryManagerAddButton", in: app, timeout: 10).exists)
     }
+
+    /**
+     Verifies Downloads keeps Android's visible row order stable while an install row changes status.
+
+     Android's Downloads list updates the tapped row in place after `downloadDocument(...)` and does
+     not re-run the install-status sort until the user rebuilds the filtered document list. This smoke
+     test launches the real route with a deterministic cached catalog, starts one installable row, and
+     asserts that only the row status changes while the visible row sequence stays unchanged.
+     Failure means the app has regressed to re-sorting the visible list from transient download state.
+     */
+    func testDownloadsInstallKeepsRowOrderVisibleDuringActivity() {
+        let app = makeApp()
+        app.launch()
+
+        XCTAssertTrue(openDownloads(in: app).exists)
+        waitForResolvedSemanticState(
+            named: "moduleBrowserStateExport",
+            timeout: 20,
+            valueProvider: { self.semanticStateExportValue("moduleBrowserStateExport", in: app) },
+            success: { value in
+                value.contains("visible=3;")
+                    && value.contains("order=KJV|UITESTDLREC|UITESTDLWARN;")
+                    && value.contains("UITESTDLWARN:installable")
+            },
+            failureDescription: { "Expected deterministic Downloads smoke catalog before install, got '\($0)'." }
+        )
+
+        tapElementReliably(
+            requireElement("moduleBrowserRow::UITESTDLWARN", in: app, timeout: 10),
+            timeout: 10
+        )
+
+        waitForResolvedSemanticState(
+            named: "moduleBrowserStateExport",
+            timeout: 20,
+            valueProvider: { self.semanticStateExportValue("moduleBrowserStateExport", in: app) },
+            success: { value in
+                value.contains("visible=3;")
+                    && value.contains("order=KJV|UITESTDLREC|UITESTDLWARN;")
+                    && value.contains("UITESTDLWARN:beingInstalled")
+            },
+            failureDescription: { "Expected tapped Downloads row to update in place, got '\($0)'." }
+        )
+    }
 }
