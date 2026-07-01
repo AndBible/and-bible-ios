@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass
 from datetime import date
@@ -137,6 +138,7 @@ LOCALE_TO_ANDROID_VALUES = {
     "zh-Hant": "values-zh-rTW",
 }
 
+ANDROID_ROOT_ENV = "ANDBIBLE_ANDROID_ROOT"
 
 LINE_RE = re.compile(r'^"(?P<key>[^"]+)"\s*=\s*"(?P<val>(?:[^"\\]|\\.)*)";\s*$')
 LOCALE_OPTIONS_BLOCK_RE = re.compile(
@@ -275,6 +277,15 @@ def default_repo_root() -> Path:
 
 
 def default_android_root() -> Path:
+    """Return the Android resource tree used for live parity checks.
+
+    ANDBIBLE_ANDROID_ROOT points to the Android repository checkout root so
+    bridge and localization guardrails can share one CI/local setup contract.
+    """
+    android_root_env = os.environ.get(ANDROID_ROOT_ENV)
+    if android_root_env:
+        return Path(android_root_env).expanduser() / "app" / "src" / "main" / "res"
+
     return Path(__file__).resolve().parents[2] / "and-bible" / "app" / "src" / "main" / "res"
 
 

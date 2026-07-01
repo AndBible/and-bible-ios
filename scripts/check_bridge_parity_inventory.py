@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,29 @@ def format_method_names(methods: set[str] | list[str]) -> str:
     return "none" if not names else ", ".join(names)
 
 
+def default_android_root() -> Path:
+    """Return the conventional sibling Android checkout path."""
+    return REPO_ROOT.parent / "and-bible"
+
+
+def is_git_checkout(path: Path) -> bool:
+    """Return whether path is the root of a usable Git worktree checkout."""
+    result = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+
+    try:
+        checkout_root = Path(result.stdout.strip()).resolve()
+        return checkout_root == path.resolve()
+    except OSError:
+        return False
+
+
 def methods_with_status(entries: list[Any], status: str) -> set[str]:
     """Return method names from entries that carry the requested status."""
     return {
@@ -98,6 +122,10 @@ def resolve_android_root(android_root_arg: Path | None) -> Path | None:
     android_root_env = os.environ.get(ANDROID_ROOT_ENV)
     if android_root_env:
         return Path(android_root_env).expanduser()
+
+    sibling_checkout = default_android_root()
+    if is_git_checkout(sibling_checkout):
+        return sibling_checkout
 
     return None
 
