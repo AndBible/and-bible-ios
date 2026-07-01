@@ -77,6 +77,7 @@
 "picker_no_general_book_modules" = "No general book modules installed";
 "picker_no_map_modules" = "No map modules installed";
 "download_modules" = "Download Modules";
+"download_document_confirm_prefix" = "Download";
 
 /* Toolbar / Actions */
 "toggle_strongs_numbers" = "Toggle Strong's numbers";

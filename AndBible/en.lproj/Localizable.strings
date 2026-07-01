@@ -202,6 +202,7 @@
 "update" = "Update";
 "uninstall" = "Uninstall";
 "unavailable" = "Unavailable";
+"download_document_confirm_prefix" = "Download";
 "recommended_document" = "Recommended!";
 "bad_document_warning" = "Warning";
 "refresh_catalog" = "Refresh Catalog";

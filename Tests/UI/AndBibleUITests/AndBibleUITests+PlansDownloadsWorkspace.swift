@@ -183,8 +183,8 @@ extension AndBibleUITests {
 
      Android's Downloads list updates the tapped row in place after `downloadDocument(...)` and does
      not re-run the install-status sort until the user rebuilds the filtered document list. This smoke
-     test launches the real route with a deterministic cached catalog, starts one installable row, and
-     asserts that only the row status changes while the visible row sequence stays unchanged.
+     test launches the real route with a deterministic cached catalog, confirms one installable row,
+     and asserts that only the row status changes while the visible row sequence stays unchanged.
      Failure means the app has regressed to re-sorting the visible list from transient download state.
      */
     func testDownloadsInstallKeepsRowOrderVisibleDuringActivity() {
@@ -208,6 +208,7 @@ extension AndBibleUITests {
             requireElement("moduleBrowserRow::UITESTDLWARN", in: app, timeout: 10),
             timeout: 10
         )
+        tapAlertButton("OK", in: app, timeout: 10)
 
         waitForResolvedSemanticState(
             named: "moduleBrowserStateExport",

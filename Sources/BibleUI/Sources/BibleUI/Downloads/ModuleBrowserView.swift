@@ -378,6 +378,9 @@ public struct ModuleBrowserView: View {
     /// Destructive row action waiting for Android-style confirmation.
     @State private var pendingRowActionConfirmation: ModuleBrowserRowActionConfirmation?
 
+    /// Install/update row waiting for Android's download confirmation dialog.
+    @State private var pendingDownloadConfirmation: RemoteModuleInfo?
+
     /// Progress text describing which remote source is being refreshed.
     @State private var refreshProgress: String?
 
@@ -623,6 +626,28 @@ public struct ModuleBrowserView: View {
             Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
         } message: {
             Text(externalDocumentImportMessage ?? "")
+        }
+        .alert(
+            "",
+            isPresented: Binding(
+                get: { pendingDownloadConfirmation != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingDownloadConfirmation = nil
+                    }
+                }
+            ),
+            presenting: pendingDownloadConfirmation
+        ) { module in
+            Button(String(localized: "okay", defaultValue: "OK")) {
+                pendingDownloadConfirmation = nil
+                installModule(module)
+            }
+            Button(String(localized: "cancel"), role: .cancel) {
+                pendingDownloadConfirmation = nil
+            }
+        } message: { module in
+            Text(Self.downloadConfirmationMessage(for: module))
         }
         .alert(
             pendingRowActionConfirmation?.title ?? "",
@@ -1770,7 +1795,7 @@ public struct ModuleBrowserView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(module.name)
         .accessibilityValue(Self.downloadStatusAccessibilityToken(status))
-        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(Self.primaryRowTapStartsDownload(status) ? .isButton : [])
         .accessibilityIdentifier("moduleBrowserRow::\(module.name)")
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if rowActions.contains(.uninstall) {
@@ -1940,7 +1965,7 @@ public struct ModuleBrowserView: View {
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.red)
                 Button {
-                    installModule(module)
+                    requestDownloadConfirmation(for: module)
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 22, weight: .semibold))
@@ -1951,7 +1976,7 @@ public struct ModuleBrowserView: View {
             }
         case .update:
             Button {
-                installModule(module)
+                requestDownloadConfirmation(for: module)
             } label: {
                 Image(systemName: presentation.statusIconSystemName ?? "arrow.up.circle.fill")
                     .font(.system(size: 24, weight: .bold))
@@ -1974,14 +1999,15 @@ public struct ModuleBrowserView: View {
      Runs Android's primary row action for a visible Downloads document.
 
      Android rows dispatch to `DownloadControl.manageDownload`: installable, update, and failed rows
-     start or retry downloads; active rows cancel; installed/unavailable rows do not install again.
-     iOS keeps the same behavior for row taps while preserving the explicit trailing icons.
+     show a confirmation before starting or retrying downloads; active rows are ignored because the
+     explicit undo/cancel control owns cancellation. Installed and unavailable rows do not install
+     again. iOS keeps the same behavior for row taps while preserving the explicit trailing icons.
 
      - Parameters:
        - module: Remote catalog row represented by the tapped row.
        - status: Current Android-equivalent install status.
-     - Side effects: May start, retry, or cancel one install task.
-     - Failure modes: `installModule(_:)` and `cancelInstall(_:)` own their failure behavior.
+     - Side effects: May show Android's download confirmation dialog.
+     - Failure modes: `installModule(_:)` owns confirmed install failure behavior.
      */
     private func performPrimaryRowAction(
         for module: RemoteModuleInfo,
@@ -1989,12 +2015,26 @@ public struct ModuleBrowserView: View {
     ) {
         switch status {
         case .installable, .updateAvailable, .errorDownloading:
-            installModule(module)
-        case .beingInstalled:
-            cancelInstall(module.name)
-        case .installed, .unavailable:
+            requestDownloadConfirmation(for: module)
+        case .beingInstalled, .installed, .unavailable:
             break
         }
+    }
+
+    /**
+     Stages Android's per-document download confirmation for one row.
+
+     Android opens an `AlertDialog` with `download_document_confirm_prefix` plus the document display
+     name before `doDownload(...)` runs. Keeping this as a separate staging step preserves the
+     confirmation/cancel contract for row taps, retry, and update affordances without changing the
+     install implementation used by startup/default-document flows.
+
+     - Parameter module: Remote catalog row the user requested.
+     - Side effects: Presents the confirmation alert.
+     - Failure modes: none; confirmed installs are handled by `installModule(_:)`.
+     */
+    private func requestDownloadConfirmation(for module: RemoteModuleInfo) {
+        pendingDownloadConfirmation = module
     }
 
     // MARK: - Helpers
@@ -2439,6 +2479,41 @@ public struct ModuleBrowserView: View {
             }
         }
         return .orderedSame
+    }
+
+    /**
+     Returns whether a Downloads row tap should be exposed as an actionable control.
+
+     Android row taps start by opening confirmation for install/update/retry states. Active installs
+     cancel only from the explicit undo control, and installed/unavailable rows are passive.
+
+     - Parameter status: Current Android-equivalent row status.
+     - Returns: `true` only when tapping the row opens download confirmation.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func primaryRowTapStartsDownload(_ status: ModuleBrowserDownloadStatus) -> Bool {
+        switch status {
+        case .installable, .updateAvailable, .errorDownloading:
+            return true
+        case .beingInstalled, .installed, .unavailable:
+            return false
+        }
+    }
+
+    /**
+     Formats Android's per-row download confirmation text.
+
+     - Parameter module: Remote catalog row selected by the user.
+     - Returns: Localized prefix plus the best available document display name.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func downloadConfirmationMessage(for module: RemoteModuleInfo) -> String {
+        let prefix = String(localized: "download_document_confirm_prefix", defaultValue: "Download")
+        let trimmedDescription = module.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = trimmedDescription.isEmpty ? module.name : trimmedDescription
+        return "\(prefix) \(displayName)"
     }
 
     /**

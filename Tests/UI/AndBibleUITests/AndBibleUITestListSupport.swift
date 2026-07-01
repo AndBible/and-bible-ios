@@ -17,7 +17,7 @@ extension AndBibleUITests {
      * - Parameters:
      *   - app: Running application under test.
      *   - timeout: Maximum number of seconds to wait for prompt controls to appear.
-     * - Returns: The first visible prompt control or prompt root.
+     * - Returns: The first visible prompt control.
      * - Side effects:
      *   - taps the production Add toolbar button in the workspace selector
      *   - waits for prompt-specific controls instead of relying on one container type
@@ -35,7 +35,6 @@ extension AndBibleUITests {
         )
         if let promptElement = waitForAnyElement(
             [
-                "workspaceNamePromptScreen",
                 "workspaceNamePromptTextField",
                 "workspaceNamePromptConfirmButton",
                 "workspaceNamePromptCancelButton",
@@ -101,9 +100,9 @@ extension AndBibleUITests {
      Types a workspace name into the selector-owned prompt without broad text-field queries.
      *
      * The workspace prompt autofocuses its text entry. Hosted XCTest can still stall when resolving
-     * `app.textFields["Name"]` for this prompt, so this helper treats the prompt root/confirm button
-     * as the synchronization contract, types through the active application keyboard focus, and waits
-     * for the prompt-owned confirm button to become enabled.
+     * broad prompt containers for this prompt, so this helper treats the prompt controls as the
+     * synchronization contract, types through the active application keyboard focus, and waits for
+     * the prompt-owned confirm button to become enabled.
      *
      * - Parameters:
      *   - text: Workspace name to enter.
@@ -112,7 +111,6 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - taps the prompt surface when available
      *   - sends keyboard input through the running application
      * - Failure modes:
      *   - records an XCTest failure if the prompt is absent or the confirm button never enables
@@ -126,7 +124,6 @@ extension AndBibleUITests {
     ) {
         let promptReady = waitForAnyElement(
             [
-                "workspaceNamePromptScreen",
                 "workspaceNamePromptConfirmButton",
                 "workspaceNamePromptCancelButton",
             ],
@@ -139,12 +136,6 @@ extension AndBibleUITests {
             file: file,
             line: line
         )
-
-        if let promptScreen = firstExistingElement(workspaceNamePromptScreenCandidates(in: app), timeout: 0.2),
-           elementFrameIsUsable(promptScreen.frame)
-        {
-            promptScreen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52)).tap()
-        }
 
         app.typeText(text)
 
