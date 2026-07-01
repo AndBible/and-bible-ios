@@ -539,17 +539,26 @@
 
 "help_workspaces_title" = "Darbo sritys";
 "reading_plans_plural" = "Skaitymo planai";
+"download_document_confirm_prefix" = "Atsisiųsti";
+"bookmark_warning4" = "Rekomenduojama prieš atnaujinant padaryti modulio atsarginę kopiją.";
+"bookmark_warning3" = "Ar vis dar norite atnaujinti pmodulį?";
+"bookmark_warning2" = "Jei dokumento struktūra pasikeitė, dokumento atnaujinimas gali žymių/pastabų vietą perkelti dokumento viduje arba jos išvis gali pradingti.";
+"bookmark_warning" = "Šis dokumentas turi žymių ir/arba pastabų";
 
 /* Android shared translations */
 "about" = "Apie";
 "all_text_options_window_menutitle" = "Visos teksto parinktys";
 "app_name_long" = "AndBible: Biblijos studijos";
+"application_preferences" = "Programėlės nustatymai";
 "change_to_normal" = "Keisti į normalų";
+"choose_document" = "Pasirinkti dokumentą";
 "color_workspace" = "Darbo srities spalva";
 "copyReference" = "Kopijuoti nuorodą į iškarpinę";
+"copy_of %@" = "%@ kopija";
 "copy_settings" = "Kopijuoti nustatymus į";
 "copy_settings_title" = "Kuriuos nustatymus kopijuoti?";
 "copy_settings_to_global" = "Globalūs numatytieji";
+"copy_settings_to_window" = "Langas %1$d (%2$@: %3$@)";
 "copy_settings_to_workspace" = "Darbo sritis";
 "doc_type_all" = "Visi tipai";
 "download" = "Atsisiųsti dokumentus";
@@ -557,18 +566,30 @@
 "format_epub" = "EPUB dokumentai (*.epub)";
 "format_mybible" = "MyBible dokumentai (*.SQLite3)";
 "format_mysword" = "MySword dokumentai (*.mybible)";
+"format_zip" = "%@ sukūrė zip failą, kuriame yra Sword modulis(-iai) arba dokumentų atsarginės kopijos failas (.abmd)";
 "global_text_display_settings_summary" = "Numatytieji teksto rodymo nustatymai visoms darbo sritims";
 "global_text_display_settings_title" = "Globalios teksto parinktys";
 "global_text_options_link" = "Globalios teksto parinktys";
 "global_text_options_link_summary" = "Redaguoti numatytuosius teksto rodymo nustatymus visoms darbo sritims";
+"infinite_scroll" = "Begalinė slinkimas";
 "install_zip" = "Įkelti dokumentus iš failų";
+"mark_as_read_button" = "Mygtukas „Žymėti kaip skaitytą\"";
+"memorization_indicators" = "Įsiminimo rodikliai";
+"module_category" = "Kategorija";
+"module_language" = "Kalba";
+"module_name" = "Pavadinimas";
 "move_window" = "Perkelti į";
+"move_window_to_position2" = "Pozicija%1$d (%2$@:%3$@)";
+"non_strongs_word_italic" = "Kursyvu rašyti pridėtus žodžius";
 "notes_content_type_html" = "Raiškusis tekstas (HTML)";
+"page_scroll_amount" = "Puslapio slinkties kiekis";
 "parent_settings_category_title" = "Tėviniai nustatymai";
+"prefs_noise_summary" = "Fonui pridėjus triukšmo, padidėja komfortas akims.";
 "prefs_noise_title" = "Fono triukšmas";
 "prefs_notes_content_type_summary" = "Teksto formatas, naudojamas kuriant naujas žymių pastabas ir užrašų knygelės įrašus";
 "prefs_notes_content_type_title" = "Naujų žymių pastabų formatas";
 "prefs_section_title_title" = "Skyriaus antraštės";
+"prefs_show_strongs_title" = "Strongo numeriai";
 "prefs_show_verseno_title" = "Skyrių & eilučių numeriai";
 "prefs_text_colors_menutitle" = "Spalvos nustatymai";
 "recommended_document" = "Rekomenduojama!";
@@ -577,39 +598,9 @@
 "restore_database" = "Atkurti duomenų bazės failą";
 "select_all" = "Žymėti viską";
 "select_none" = "Pasirinkti nieko";
-"sync_group_n" = "Grupė %d";
-"text_options_window_menutitle" = "Teksto parinktys";
-"windowMaximise" = "Išskleisti";
-"windowMinimise" = "Suskleisti";
-"windowSynchronise" = "Sinchronizuoti";
-"window_pin_mode" = "Prisegti";
-"window_text_display_settings_title" = "Teksto parinktys - Langas %d";
-"workspace_text_options_link_summary" = "Redaguoti teksto rodymo nustatymus šiai darbo sričiai";
-
-/* Android shared translations */
-"copy_settings_to_window" = "Langas %1$d (%2$@: %3$@)";
-"format_zip" = "%@ sukūrė zip failą, kuriame yra Sword modulis(-iai) arba dokumentų atsarginės kopijos failas (.abmd)";
-"move_window_to_position2" = "Pozicija%1$d (%2$@:%3$@)";
-"prefs_noise_summary" = "Fonui pridėjus triukšmo, padidėja komfortas akims.";
-"prefs_show_strongs_title" = "Strongo numeriai";
-"supported_formats" = "Dokumentų įkėlimo iš failo palaikomi formatai: %@";
-"welcome_message" = "Dėkojame, kad atsisiuntėte %@. Šiuo metu nėra įdiegta jokių dokumentų ar Biblijų. Norėdami tęsti, įsidiekite bent 1 dokumentą, atsisiųsdami jį iš interneto arba įkeldami iš zip failo dokumento atsarginės kopijos.";
-"workspace_text_display_settings_title" = "Teksto parinktys - %@";
-"workspace_text_options_link" = "Darbo srities teksto parinktys — %@";
-
-/* Android shared translations */
-"application_preferences" = "Programėlės nustatymai";
-"choose_document" = "Pasirinkti dokumentą";
-"copy_of %@" = "%@ kopija";
-"infinite_scroll" = "Begalinė slinkimas";
-"mark_as_read_button" = "Mygtukas „Žymėti kaip skaitytą\"";
-"memorization_indicators" = "Įsiminimo rodikliai";
-"module_category" = "Kategorija";
-"module_language" = "Kalba";
-"module_name" = "Pavadinimas";
-"non_strongs_word_italic" = "Kursyvu rašyti pridėtus žodžius";
-"page_scroll_amount" = "Puslapio slinkties kiekis";
 "skip" = "Praleisti";
+"supported_formats" = "Dokumentų įkėlimo iš failo palaikomi formatai: %@";
+"sync_group_n" = "Grupė %d";
 "text_display_font_family_title_format" = "Šriftas (%@)";
 "text_display_font_size_title_format" = "Šrifto dydis (%d tšk.)";
 "text_display_left_margin_title_format" = "Kairioji paraštė (%d mm)";
@@ -617,6 +608,16 @@
 "text_display_max_width_title_format" = "Didžiausias teksto plotis (%d mm)";
 "text_display_right_margin_title_format" = "Dešinioji paraštė (%d mm)";
 "text_display_top_margin_title_format" = "Viršutinė paraštė (%d mm)";
+"text_options_window_menutitle" = "Teksto parinktys";
 "title_scroll_button" = "Antraštės slinkimo mygtukas";
 "top_margin" = "Paraštė viršuje";
+"welcome_message" = "Dėkojame, kad atsisiuntėte %@. Šiuo metu nėra įdiegta jokių dokumentų ar Biblijų. Norėdami tęsti, įsidiekite bent 1 dokumentą, atsisiųsdami jį iš interneto arba įkeldami iš zip failo dokumento atsarginės kopijos.";
+"windowMaximise" = "Išskleisti";
+"windowMinimise" = "Suskleisti";
+"windowSynchronise" = "Sinchronizuoti";
 "window_disable_sync" = "Išjungti sinchronizavimą";
+"window_pin_mode" = "Prisegti";
+"window_text_display_settings_title" = "Teksto parinktys - Langas %d";
+"workspace_text_display_settings_title" = "Teksto parinktys - %@";
+"workspace_text_options_link" = "Darbo srities teksto parinktys — %@";
+"workspace_text_options_link_summary" = "Redaguoti teksto rodymo nustatymus šiai darbo sričiai";

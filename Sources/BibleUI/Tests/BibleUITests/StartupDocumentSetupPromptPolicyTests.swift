@@ -86,6 +86,55 @@ final class StartupDocumentSetupPromptPolicyTests: XCTestCase {
     }
 
     /**
+     Held Downloads installs require both UI-test exports and an explicit module match.
+
+     The downloads row-order smoke uses this fixture hook to keep one row in Android's
+     `BEING_INSTALLED` state without relying on a real network. Requiring detailed accessibility
+     exports and a named module keeps the hook unavailable to production launches and unrelated UI
+     tests.
+     */
+    func testUITestRuntimeHeldDownloadInstallRequiresExportAndModuleMatch() {
+        XCTAssertTrue(
+            UITestRuntimeConfiguration.isDownloadInstallHeld(
+                for: "UITESTDLWARN",
+                environment: [
+                    "UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS": "1",
+                    "UITEST_HELD_DOWNLOAD_MODULES": "OTHER, UITESTDLWARN",
+                ],
+                arguments: []
+            )
+        )
+        XCTAssertTrue(
+            UITestRuntimeConfiguration.isDownloadInstallHeld(
+                for: "UITESTDLWARN",
+                environment: [:],
+                arguments: [
+                    "-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS",
+                    "-UITEST_HELD_DOWNLOAD_MODULES",
+                    "UITESTDLWARN",
+                ]
+            )
+        )
+        XCTAssertFalse(
+            UITestRuntimeConfiguration.isDownloadInstallHeld(
+                for: "UITESTDLWARN",
+                environment: ["UITEST_HELD_DOWNLOAD_MODULES": "UITESTDLWARN"],
+                arguments: []
+            )
+        )
+        XCTAssertFalse(
+            UITestRuntimeConfiguration.isDownloadInstallHeld(
+                for: "UITESTDLWARN",
+                environment: [
+                    "UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS": "1",
+                    "UITEST_HELD_DOWNLOAD_MODULES": "OTHER",
+                ],
+                arguments: []
+            )
+        )
+    }
+
+    /**
      English first-run setup exposes Android's setup actions without using a transient dialog.
 
      Android's first-download surface exposes English-only Easy Start, Download, database restore,

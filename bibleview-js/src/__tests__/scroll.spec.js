@@ -1,8 +1,11 @@
-import {mount} from "@vue/test-utils";
+import {enableAutoUnmount, mount} from "@vue/test-utils";
 import {defineComponent, ref} from "vue";
 import {afterEach, describe, expect, it, vi} from "vitest";
 
 import {resolveScrollToVerseRequest, useScroll} from "@/composables/scroll";
+import {eventBus} from "@/eventbus";
+
+enableAutoUnmount(afterEach);
 
 afterEach(() => {
     vi.restoreAllMocks();
@@ -116,5 +119,50 @@ describe("scroll composable", () => {
         wrapper.unmount();
 
         expect(removeListener).toHaveBeenCalledWith("touchstart", touchStartAdd[1]);
+    });
+
+    /**
+     * Protects Android scroll-anchor parity for reader links that open auxiliary panels.
+     *
+     * Android records the clicked link as a temporary scroll anchor, then keeps it visible if a
+     * viewport resize would otherwise push it under the top toolbar or out of view. Failure means
+     * the link-modal path can move the original tap target off-screen after the auxiliary panel
+     * changes available reader height.
+     */
+    it("keeps the emitted scroll anchor visible across resize", async () => {
+        const target = document.createElement("a");
+        target.className = "reference-link";
+        target.textContent = "Genesis 1:1";
+        target.getBoundingClientRect = () => ({top: 10, bottom: 20});
+        document.body.appendChild(target);
+
+        Object.defineProperty(window, "scrollY", {value: 500, configurable: true});
+        Object.defineProperty(window, "innerHeight", {value: 600, configurable: true});
+        vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => {
+            callback(0);
+            return 1;
+        });
+        const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+        mount(defineComponent({
+            setup() {
+                useScroll(
+                    {},
+                    {disableAnimations: false, topOffset: 0, bottomOffset: 0, imeOpen: false},
+                    ref({topOffset: 100}),
+                    {highlightOrdinal: vi.fn(), resetHighlights: vi.fn()},
+                    ref(Promise.resolve()),
+                    ref(0)
+                );
+            },
+            template: "<div />",
+        }));
+
+        await new Promise(resolve => setTimeout(resolve, 0));
+        eventBus.emit("set_scroll_anchor", [target]);
+        window.dispatchEvent(new Event("resize"));
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(scrollTo).toHaveBeenCalledWith(0, 243.33333333333334);
     });
 });

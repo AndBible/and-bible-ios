@@ -539,17 +539,26 @@
 
 "help_workspaces_title" = "Spații de studiu";
 "reading_plans_plural" = "Planuri de citire";
+"download_document_confirm_prefix" = "Descarcă";
+"bookmark_warning4" = "Se recomandă efectuarea unei copii de rezervă a modulului înainte de actualizare.";
+"bookmark_warning3" = "Mai vrei să actualizezi modulul?";
+"bookmark_warning2" = "Dacă structura documentului s-a modificat, actualizarea acestui document ar putea face ca pozițiile acestor semne de carte/notițe să se mute în interiorul documentului sau să dispară.";
+"bookmark_warning" = "Există semne de carte și/sau notițe pentru acest document.";
 
 /* Android shared translations */
 "about" = "Despre";
 "all_text_options_window_menutitle" = "Toate opțiunile de text";
 "app_name_long" = "AndBible: Biblia";
+"application_preferences" = "Preferințe";
 "change_to_normal" = "Treci la fereastra normală";
+"choose_document" = "Alege documentul";
 "color_workspace" = "Culoarea spațiului de studiu";
 "copyReference" = "Copiază legătura în memorie";
+"copy_of %@" = "Copie a %@";
 "copy_settings" = "Copiază reglările în";
 "copy_settings_title" = "Care reglări vrei să copiezi?";
 "copy_settings_to_global" = "Opțiuni globale prestabilite";
+"copy_settings_to_window" = "Fereastra %1$d (%2$@: %3$@)";
 "copy_settings_to_workspace" = "Spațiu de studiu";
 "doc_type_all" = "Toate tipurile";
 "download" = "Descarcă documente";
@@ -557,17 +566,29 @@
 "format_epub" = "Documente EPUB (*.epub)";
 "format_mybible" = "Documente MyBible (*.SQLite3)";
 "format_mysword" = "Documente MySword (*.mybible)";
+"format_zip" = "Fișier zip care conține modul(e) Sword sau copie de rezervă a documentelor (*.abmd) creată de %@";
 "global_text_display_settings_summary" = "Reglări prestabilite pentru afișarea textului în toate spațiile de studiu";
 "global_text_display_settings_title" = "Opțiuni globale de text";
 "global_text_options_link" = "Opțiuni globale de text";
 "global_text_options_link_summary" = "Modifică reglările prestabilite de afișare a textului pentru toate spațiile de studiu";
+"infinite_scroll" = "Răsfoire infinită";
 "install_zip" = "Folosește documente din fișiere";
+"mark_as_read_button" = "Buton de marcare ca citit";
+"memorization_indicators" = "Indicatori de memorare";
+"module_category" = "Categorie";
+"module_language" = "Limba";
+"module_name" = "Nume";
 "move_window" = "Mută în";
+"move_window_to_position2" = "Poziția %1$d (%2$@:%3$@)";
+"non_strongs_word_italic" = "Cuvinte adăugate în cursiv";
+"page_scroll_amount" = "Cantitate derulare pagină";
 "parent_settings_category_title" = "Reglări părinte";
+"prefs_noise_summary" = "Adăugînd zgomot fondului, ar putea fi mai confortabil pentru ochi.";
 "prefs_noise_title" = "Zgomotul fondului";
 "prefs_notes_content_type_summary" = "Formatul de text folosit la crearea de notițe noi la semne de carte și în Notița de studiu";
 "prefs_notes_content_type_title" = "Format pentru notițele noi la semne de carte";
 "prefs_section_title_title" = "Titlurile pasajelor";
+"prefs_show_strongs_title" = "Numere Strong";
 "prefs_show_verseno_title" = "Numărul capitolului și al versetului";
 "prefs_text_colors_menutitle" = "Culori";
 "recommended_document" = "Recomandat!";
@@ -576,39 +597,9 @@
 "restore_database" = "Recuperează fișierul bazei de date";
 "select_all" = "Alege tot";
 "select_none" = "Nu alege nimic";
-"sync_group_n" = "Grupul %d";
-"text_options_window_menutitle" = "Opțiuni de text";
-"windowMaximise" = "Maximizează";
-"windowMinimise" = "Minimizează";
-"windowSynchronise" = "Sincronizează";
-"window_pin_mode" = "Fixează";
-"window_text_display_settings_title" = "Opțiuni de text - Fereastra %d";
-"workspace_text_options_link_summary" = "Modifică reglările de afișare a textului pentru acest spațiu de studiu";
-
-/* Android shared translations */
-"copy_settings_to_window" = "Fereastra %1$d (%2$@: %3$@)";
-"format_zip" = "Fișier zip care conține modul(e) Sword sau copie de rezervă a documentelor (*.abmd) creată de %@";
-"move_window_to_position2" = "Poziția %1$d (%2$@:%3$@)";
-"prefs_noise_summary" = "Adăugînd zgomot fondului, ar putea fi mai confortabil pentru ochi.";
-"prefs_show_strongs_title" = "Numere Strong";
-"supported_formats" = "Formate acceptate pentru încărcarea documentelor dintr-un fișier: %@";
-"welcome_message" = "Mulțumim că ai descărcat %@. În prezent, nu există Biblii sau documente instalate. Pentru a continua, instalează cel puțin 1 document descărcîndu-l de pe internet sau încărcîndu-l dintr-un fișier Zip de rezervă.";
-"workspace_text_display_settings_title" = "Opțiuni de text - %@";
-"workspace_text_options_link" = "Opțiuni text spațiu de studiu — %@";
-
-/* Android shared translations */
-"application_preferences" = "Preferințe";
-"choose_document" = "Alege documentul";
-"copy_of %@" = "Copie a %@";
-"infinite_scroll" = "Răsfoire infinită";
-"mark_as_read_button" = "Buton de marcare ca citit";
-"memorization_indicators" = "Indicatori de memorare";
-"module_category" = "Categorie";
-"module_language" = "Limba";
-"module_name" = "Nume";
-"non_strongs_word_italic" = "Cuvinte adăugate în cursiv";
-"page_scroll_amount" = "Cantitate derulare pagină";
 "skip" = "Saltă";
+"supported_formats" = "Formate acceptate pentru încărcarea documentelor dintr-un fișier: %@";
+"sync_group_n" = "Grupul %d";
 "text_display_font_family_title_format" = "Tip de litere (%@)";
 "text_display_font_size_title_format" = "Mărime litere (%d pt)";
 "text_display_left_margin_title_format" = "Marginea stîngă (%d mm)";
@@ -616,6 +607,16 @@
 "text_display_max_width_title_format" = "Lățimea maximă a textului (%d mm)";
 "text_display_right_margin_title_format" = "Marginea dreaptă (%d mm)";
 "text_display_top_margin_title_format" = "Marginea de sus (%d mm)";
+"text_options_window_menutitle" = "Opțiuni de text";
 "title_scroll_button" = "Buton de răsfoire la titlu";
 "top_margin" = "Marginea de sus";
+"welcome_message" = "Mulțumim că ai descărcat %@. În prezent, nu există Biblii sau documente instalate. Pentru a continua, instalează cel puțin 1 document descărcîndu-l de pe internet sau încărcîndu-l dintr-un fișier Zip de rezervă.";
+"windowMaximise" = "Maximizează";
+"windowMinimise" = "Minimizează";
+"windowSynchronise" = "Sincronizează";
 "window_disable_sync" = "Dezactivează sincronizarea";
+"window_pin_mode" = "Fixează";
+"window_text_display_settings_title" = "Opțiuni de text - Fereastra %d";
+"workspace_text_display_settings_title" = "Opțiuni de text - %@";
+"workspace_text_options_link" = "Opțiuni text spațiu de studiu — %@";
+"workspace_text_options_link_summary" = "Modifică reglările de afișare a textului pentru acest spațiu de studiu";

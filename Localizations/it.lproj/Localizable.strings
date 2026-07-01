@@ -539,17 +539,26 @@
 
 "help_workspaces_title" = "Spazi di lavoro";
 "reading_plans_plural" = "Piani di lettura";
+"download_document_confirm_prefix" = "Scarica";
+"bookmark_warning4" = "Si consiglia di eseguire il backup del modulo prima dell'aggiornamento.";
+"bookmark_warning3" = "Vuoi ancora aggiornare il modulo?";
+"bookmark_warning2" = "Se la struttura del documento è cambiata, l'aggiornamento di questo documento potrebbe far spostare le posizioni di questi segnalibri/note all'interno del documento o farli scomparire.";
+"bookmark_warning" = "Sono presenti segnalibri e/o note per questo documento.";
 
 /* Android shared translations */
 "about" = "Informazioni";
 "all_text_options_window_menutitle" = "Tutte le opzioni di testo";
 "app_name_long" = "AndBible: Studi Biblici";
+"application_preferences" = "Preferenze dell'app";
 "change_to_normal" = "Passa alla finestra normale";
+"choose_document" = "Scegli un documento";
 "color_workspace" = "Colore dello spazio di lavoro";
 "copyReference" = "Copia collegamento negli appunti";
+"copy_of %@" = "Copia di %@";
 "copy_settings" = "Copia le impostazioni in";
 "copy_settings_title" = "Quali impostazioni vuoi copiare?";
 "copy_settings_to_global" = "Impostazioni predefinite globali";
+"copy_settings_to_window" = "Finestra %1$d (%2$@: %3$@)";
 "copy_settings_to_workspace" = "Spazio di lavoro";
 "doc_type_all" = "Tutti i tipi";
 "download" = "Scarica documenti";
@@ -557,18 +566,30 @@
 "format_epub" = "Documenti EPUB (*.epub)";
 "format_mybible" = "Documenti MyBible (*.SQLite3)";
 "format_mysword" = "Documenti MySword (*.mybible)";
+"format_zip" = "File zip contenente i moduli Sword, o file di backup documenti (*.abmd) creato da %@";
 "global_text_display_settings_summary" = "Impostazioni di visualizzazione testo predefinite per tutti gli spazi di lavoro";
 "global_text_display_settings_title" = "Opzioni testo globali";
 "global_text_options_link" = "Opzioni testo globali";
 "global_text_options_link_summary" = "Modifica le impostazioni di visualizzazione testo predefinite per tutti gli spazi di lavoro";
+"infinite_scroll" = "Scorrimento infinito";
 "install_zip" = "Carica Documenti Dai File";
+"mark_as_read_button" = "Pulsante segna come letto";
+"memorization_indicators" = "Indicatori di memorizzazione";
+"module_category" = "Categoria";
+"module_language" = "Lingua";
+"module_name" = "Nome";
 "move_window" = "Sposta in";
+"move_window_to_position2" = "Posizione %1$d (%2$@:%3$@)";
+"non_strongs_word_italic" = "Corsivo per le parole aggiunte";
 "notes_content_type_html" = "Testo formattato (HTML)";
+"page_scroll_amount" = "Quantità scorrimento pagina";
 "parent_settings_category_title" = "Impostazioni superiori";
+"prefs_noise_summary" = "Aggiungere del rumore allo sfondo può rendere più confortevole la lettura.";
 "prefs_noise_title" = "Rumore di sottofondo";
 "prefs_notes_content_type_summary" = "Formato del testo usato per creare nuove note dei segnalibri e voci degli appunti di studio";
 "prefs_notes_content_type_title" = "Formato per le nuove note dei segnalibri";
 "prefs_section_title_title" = "Titoli delle sezioni";
+"prefs_show_strongs_title" = "Numeri di Strong";
 "prefs_show_verseno_title" = "Numeri di capitolo e versetto";
 "prefs_text_colors_menutitle" = "Impostazioni colore";
 "recommended_document" = "Consigliato!";
@@ -577,39 +598,9 @@
 "restore_database" = "Ripristina il file del database";
 "select_all" = "Seleziona tutto";
 "select_none" = "Seleziona niente";
-"sync_group_n" = "Gruppo %d";
-"text_options_window_menutitle" = "Opzioni di testo";
-"windowMaximise" = "Massimizza";
-"windowMinimise" = "Minimizza";
-"windowSynchronise" = "Sincronizza";
-"window_pin_mode" = "Fissa";
-"window_text_display_settings_title" = "Opzioni di testo - Finestra %d";
-"workspace_text_options_link_summary" = "Modifica le impostazioni di visualizzazione testo per questo spazio di lavoro";
-
-/* Android shared translations */
-"copy_settings_to_window" = "Finestra %1$d (%2$@: %3$@)";
-"format_zip" = "File zip contenente i moduli Sword, o file di backup documenti (*.abmd) creato da %@";
-"move_window_to_position2" = "Posizione %1$d (%2$@:%3$@)";
-"prefs_noise_summary" = "Aggiungere del rumore allo sfondo può rendere più confortevole la lettura.";
-"prefs_show_strongs_title" = "Numeri di Strong";
-"supported_formats" = "Formati supportati per il caricamento di documenti da file: %@";
-"welcome_message" = "Grazie per aver scaricato %@. Al momento non hai Bibbie o documenti installati. Per continuare, per favore installa almeno 1 documento scaricandolo da internet, oppure caricandolo da un backup su file zip.";
-"workspace_text_display_settings_title" = "Opzioni di testo - %@";
-"workspace_text_options_link" = "Opzioni testo spazio di lavoro — %@";
-
-/* Android shared translations */
-"application_preferences" = "Preferenze dell'app";
-"choose_document" = "Scegli un documento";
-"copy_of %@" = "Copia di %@";
-"infinite_scroll" = "Scorrimento infinito";
-"mark_as_read_button" = "Pulsante segna come letto";
-"memorization_indicators" = "Indicatori di memorizzazione";
-"module_category" = "Categoria";
-"module_language" = "Lingua";
-"module_name" = "Nome";
-"non_strongs_word_italic" = "Corsivo per le parole aggiunte";
-"page_scroll_amount" = "Quantità scorrimento pagina";
 "skip" = "Salta";
+"supported_formats" = "Formati supportati per il caricamento di documenti da file: %@";
+"sync_group_n" = "Gruppo %d";
 "text_display_font_family_title_format" = "Famiglia di carattere (%@)";
 "text_display_font_size_title_format" = "Dimensione carattere (%d pt)";
 "text_display_left_margin_title_format" = "Margine sinistro (%d mm)";
@@ -617,6 +608,16 @@
 "text_display_max_width_title_format" = "Larghezza massima del testo (%d mm)";
 "text_display_right_margin_title_format" = "Margine destro (%d mm)";
 "text_display_top_margin_title_format" = "Margine superiore (%d mm)";
+"text_options_window_menutitle" = "Opzioni di testo";
 "title_scroll_button" = "Pulsante di scorrimento al titolo";
 "top_margin" = "Margine superiore";
+"welcome_message" = "Grazie per aver scaricato %@. Al momento non hai Bibbie o documenti installati. Per continuare, per favore installa almeno 1 documento scaricandolo da internet, oppure caricandolo da un backup su file zip.";
+"windowMaximise" = "Massimizza";
+"windowMinimise" = "Minimizza";
+"windowSynchronise" = "Sincronizza";
 "window_disable_sync" = "Disattiva sincronizzazione";
+"window_pin_mode" = "Fissa";
+"window_text_display_settings_title" = "Opzioni di testo - Finestra %d";
+"workspace_text_display_settings_title" = "Opzioni di testo - %@";
+"workspace_text_options_link" = "Opzioni testo spazio di lavoro — %@";
+"workspace_text_options_link_summary" = "Modifica le impostazioni di visualizzazione testo per questo spazio di lavoro";

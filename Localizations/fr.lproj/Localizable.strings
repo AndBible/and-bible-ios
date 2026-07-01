@@ -539,17 +539,26 @@
 
 "help_workspaces_title" = "Espaces";
 "reading_plans_plural" = "Plans de lecture";
+"download_document_confirm_prefix" = "Télécharger";
+"bookmark_warning4" = "Il est recommandé de sauvegarder le module avant de le mettre à jour.";
+"bookmark_warning3" = "Voulez-vous toujours mettre à jour le module ?";
+"bookmark_warning2" = "Si la structure du document a été modifiée, la mise à jour de ce document peut entraîner le déplacement de ces signets/notes à l’intérieur du document ou leur disparition complète l’emplacement de ces signets/notes se déplace à l’intérieur du document ou disparaît complètement.";
+"bookmark_warning" = "Ce document comporte des signets et/ou des notes.";
 
 /* Android shared translations */
 "about" = "À propos";
 "all_text_options_window_menutitle" = "Toutes les options du texte";
 "app_name_long" = "AndBible : Étude de la Bible";
+"application_preferences" = "Préférences de l’application";
 "change_to_normal" = "Modifier en fenêtre normale";
+"choose_document" = "Ouvrir un document";
 "color_workspace" = "Couleur de l’espace de travail";
 "copyReference" = "Copier dans le presse-papier";
+"copy_of %@" = "Copie de %@";
 "copy_settings" = "Copier les paramètres dans";
 "copy_settings_title" = "Quels paramètres voulez-vous copier ?";
 "copy_settings_to_global" = "Valeurs par défaut globales";
+"copy_settings_to_window" = "Fenêtre %1$d (%2$@: %3$@)";
 "copy_settings_to_workspace" = "Espace";
 "doc_type_all" = "Tous types";
 "download" = "Télécharger des documents";
@@ -557,18 +566,29 @@
 "format_epub" = "Documents EPUB (*.epub)";
 "format_mybible" = "Documents MyBible (*.SQLite3)";
 "format_mysword" = "Documents MySword (*.mybible)";
+"format_zip" = "Fichier Zip contenant le(s) module(s) Sword, ou fichier de sauvegarde de documents (*.abmd) créé par %@";
 "global_text_display_settings_summary" = "Paramètres d'affichage du texte par défaut pour tous les espaces de travail";
 "global_text_display_settings_title" = "Options de texte globales";
 "global_text_options_link" = "Options de texte globales";
 "global_text_options_link_summary" = "Modifier les paramètres d'affichage du texte par défaut pour tous les espaces de travail";
+"infinite_scroll" = "Défilement infini";
 "install_zip" = "Charger des documents depuis des fichiers";
+"mark_as_read_button" = "Bouton Marquer comme lu";
+"memorization_indicators" = "Indicateurs de mémorisation";
+"module_category" = "Catégorie";
+"module_language" = "Langue";
+"module_name" = "Nom";
 "move_window" = "Déplacer vers";
+"non_strongs_word_italic" = "Mettre en italique les mots ajoutés";
 "notes_content_type_html" = "Texte enrichi (HTML)";
+"page_scroll_amount" = "Quantité de défilement par page";
 "parent_settings_category_title" = "Paramètres parents";
+"prefs_noise_summary" = "Ajouter un peu de moiré sur le fond peut rendre la lecture plus confortable.";
 "prefs_noise_title" = "Motif de fond";
 "prefs_notes_content_type_summary" = "Format de texte utilisé lors de la création de nouvelles notes de signet et d'entrées dans le bloc-notes";
 "prefs_notes_content_type_title" = "Format des nouvelles notes de signet";
 "prefs_section_title_title" = "Titres de sections";
+"prefs_show_strongs_title" = "Nombres de Strong";
 "prefs_show_verseno_title" = "Chapitre et numéros de versets";
 "prefs_text_colors_menutitle" = "Options de couleur";
 "recommended_document" = "Recommandé!";
@@ -577,38 +597,9 @@
 "restore_database" = "Restaurer le fichier de base de données";
 "select_all" = "Sélectionner tout";
 "select_none" = "Ne rien sélectionner";
-"sync_group_n" = "Groupe %d";
-"text_options_window_menutitle" = "Options du texte";
-"windowMaximise" = "Maximiser";
-"windowMinimise" = "Minimiser";
-"windowSynchronise" = "Synchroniser";
-"window_pin_mode" = "Épingler";
-"window_text_display_settings_title" = "Options du texte - Fenêtre %d";
-"workspace_text_options_link_summary" = "Modifier les paramètres d'affichage du texte pour cet espace de travail";
-
-/* Android shared translations */
-"copy_settings_to_window" = "Fenêtre %1$d (%2$@: %3$@)";
-"format_zip" = "Fichier Zip contenant le(s) module(s) Sword, ou fichier de sauvegarde de documents (*.abmd) créé par %@";
-"prefs_noise_summary" = "Ajouter un peu de moiré sur le fond peut rendre la lecture plus confortable.";
-"prefs_show_strongs_title" = "Nombres de Strong";
-"supported_formats" = "Formats pris en charge pour le chargement de documents à partir d’un fichier : %@";
-"welcome_message" = "Merci d’avoir téléchargé %@. Il n’y a actuellement aucune bible ou document installé. Pour continuer, veuillez installer au moins 1 document en le téléchargeant depuis l’internet, ou en le chargeant depuis un fichier zip de document sauvegardé.";
-"workspace_text_display_settings_title" = "Options du texte - %@";
-"workspace_text_options_link" = "Options de texte de l'espace de travail — %@";
-
-/* Android shared translations */
-"application_preferences" = "Préférences de l’application";
-"choose_document" = "Ouvrir un document";
-"copy_of %@" = "Copie de %@";
-"infinite_scroll" = "Défilement infini";
-"mark_as_read_button" = "Bouton Marquer comme lu";
-"memorization_indicators" = "Indicateurs de mémorisation";
-"module_category" = "Catégorie";
-"module_language" = "Langue";
-"module_name" = "Nom";
-"non_strongs_word_italic" = "Mettre en italique les mots ajoutés";
-"page_scroll_amount" = "Quantité de défilement par page";
 "skip" = "Sauter";
+"supported_formats" = "Formats pris en charge pour le chargement de documents à partir d’un fichier : %@";
+"sync_group_n" = "Groupe %d";
 "text_display_font_family_title_format" = "Famille de police (%@)";
 "text_display_font_size_title_format" = "Taille de la police (%d pt)";
 "text_display_left_margin_title_format" = "Marge de gauche (%d mm)";
@@ -616,6 +607,16 @@
 "text_display_max_width_title_format" = "Longueur maximum du texte (%d mm)";
 "text_display_right_margin_title_format" = "Marge de droite (%d mm)";
 "text_display_top_margin_title_format" = "Marge supérieure (%d mm)";
+"text_options_window_menutitle" = "Options du texte";
 "title_scroll_button" = "Bouton de défilement vers le titre";
 "top_margin" = "Marge supérieure";
+"welcome_message" = "Merci d’avoir téléchargé %@. Il n’y a actuellement aucune bible ou document installé. Pour continuer, veuillez installer au moins 1 document en le téléchargeant depuis l’internet, ou en le chargeant depuis un fichier zip de document sauvegardé.";
+"windowMaximise" = "Maximiser";
+"windowMinimise" = "Minimiser";
+"windowSynchronise" = "Synchroniser";
 "window_disable_sync" = "Désactiver la synchronisation";
+"window_pin_mode" = "Épingler";
+"window_text_display_settings_title" = "Options du texte - Fenêtre %d";
+"workspace_text_display_settings_title" = "Options du texte - %@";
+"workspace_text_options_link" = "Options de texte de l'espace de travail — %@";
+"workspace_text_options_link_summary" = "Modifier les paramètres d'affichage du texte pour cet espace de travail";

@@ -17,6 +17,7 @@
 
 import {onMounted, ref, watch} from "vue";
 import {navigateLink} from "@/utils";
+import {emit} from "@/eventbus";
 
 /**
  * DOMPurify config that allows AndBible custom URI schemes alongside standard ones.
@@ -50,6 +51,17 @@ export function useSlotHtmlContent() {
         }
     });
 
+    /**
+     * Routes clicks from sanitized HTML content through the app link pipeline.
+     *
+     * The clicked anchor is emitted as a scroll anchor before navigation so reader viewport changes
+     * caused by link panels can keep the source content visible.
+     *
+     * @param event Bubbled click event from the rendered slot HTML container.
+     * @returns Nothing.
+     * @remarks Prevents default browser navigation for handled anchors, emits reader scroll-anchor
+     * state, and may route the link through the native bridge via `navigateLink`.
+     */
     function handleClick(event: MouseEvent) {
         const target = event.target as HTMLElement;
         const link = target.closest("a") as HTMLAnchorElement | null;
@@ -57,6 +69,7 @@ export function useSlotHtmlContent() {
             event.preventDefault();
             const href = link.getAttribute("href");
             if (href) {
+                emit("set_scroll_anchor", link);
                 navigateLink(href);
             }
         }

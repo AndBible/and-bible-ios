@@ -539,17 +539,26 @@
 
 "help_workspaces_title" = "Работни пространства";
 "reading_plans_plural" = "Планове за четене";
+"download_document_confirm_prefix" = "Изтегляне";
+"bookmark_warning4" = "Препоръчително е да направите резервно копие на модула преди актуализация.";
+"bookmark_warning3" = "Искате ли да актуализирате модула?";
+"bookmark_warning2" = "Ако структурата на документа се е променила, актуализирането на този документ може да доведе до преместване на местоположенията на тези отметки/бележки в документа или до пълното им изчезване.";
+"bookmark_warning" = "За този ресурс има отметки и/или бележки.";
 
 /* Android shared translations */
 "about" = "Относно";
 "all_text_options_window_menutitle" = "Всички текстови опции";
 "app_name_long" = "AndBible: Библейско изследване";
+"application_preferences" = "Настройки на приложението";
 "change_to_normal" = "Промени в обикновен прозорец";
+"choose_document" = "Избери документ";
 "color_workspace" = "Цвят на работното пространство";
 "copyReference" = "Копирай връзката в клипборда";
+"copy_of %@" = "Копие на %@";
 "copy_settings" = "Копирай настройките в";
 "copy_settings_title" = "Кои настройки искате да копирате?";
 "copy_settings_to_global" = "Глобални настройки по подразбиране";
+"copy_settings_to_window" = "Прозорец %1$d (%2$@: %3$@)";
 "copy_settings_to_workspace" = "Работно пространство";
 "doc_type_all" = "Всички видове";
 "download" = "Изтеглете ресурси";
@@ -557,18 +566,30 @@
 "format_epub" = "EPUB ресурси (*.epub)";
 "format_mybible" = "MyBible ресурси (*.SQLite3)";
 "format_mysword" = "MySword ресурси (*.mybible)";
+"format_zip" = "Zip файл, съдържащ Sword модул(и), или файл с резервно копие на ресурси (*.abmd), създаден от %@";
 "global_text_display_settings_summary" = "Настройки за показване на текст по подразбиране за всички работни пространства";
 "global_text_display_settings_title" = "Глобални текстови опции";
 "global_text_options_link" = "Глобални текстови опции";
 "global_text_options_link_summary" = "Редактирай настройките за показване на текст по подразбиране за всички работни пространства";
+"infinite_scroll" = "Безкрайно превъртане";
 "install_zip" = "Зареди документ от ZIP архив";
+"mark_as_read_button" = "Бутон „Маркирай като прочетено\"";
+"memorization_indicators" = "Индикатори за запаметяване";
+"module_category" = "Категория";
+"module_language" = "Език";
+"module_name" = "Наименование";
 "move_window" = "Премести в";
+"move_window_to_position2" = "Позиция %1$d (%2$@:%3$@)";
+"non_strongs_word_italic" = "Курсив за добавени думи";
 "notes_content_type_html" = "Форматиран текст (HTML)";
+"page_scroll_amount" = "Количество превъртане на страница";
 "parent_settings_category_title" = "Родителски настройки";
+"prefs_noise_summary" = "Добавянето на малко шум към фона може да го направи по-удобен за очите.";
 "prefs_noise_title" = "Фонов шум";
 "prefs_notes_content_type_summary" = "Текстов формат при създаване на нови бележки към отметки и записи в Study Pad";
 "prefs_notes_content_type_title" = "Формат за нови бележки към отметки";
 "prefs_section_title_title" = "Заглавия";
+"prefs_show_strongs_title" = "Номера на Strong's";
 "prefs_show_verseno_title" = "Номера на глави и стихове";
 "prefs_text_colors_menutitle" = "Настройки на цветовете";
 "recommended_document" = "Препоръчано!";
@@ -577,39 +598,9 @@
 "restore_database" = "Възстанови файл с база данни";
 "select_all" = "Избери всички";
 "select_none" = "Избери нищо";
-"sync_group_n" = "Група %d";
-"text_options_window_menutitle" = "Текстови опции";
-"windowMaximise" = "Уголеми";
-"windowMinimise" = "Смали";
-"windowSynchronise" = "Синхронизирай";
-"window_pin_mode" = "Закачи";
-"window_text_display_settings_title" = "Текстови опции — Прозорец %d";
-"workspace_text_options_link_summary" = "Редактирай настройките за показване на текст за това работно пространство";
-
-/* Android shared translations */
-"copy_settings_to_window" = "Прозорец %1$d (%2$@: %3$@)";
-"format_zip" = "Zip файл, съдържащ Sword модул(и), или файл с резервно копие на ресурси (*.abmd), създаден от %@";
-"move_window_to_position2" = "Позиция %1$d (%2$@:%3$@)";
-"prefs_noise_summary" = "Добавянето на малко шум към фона може да го направи по-удобен за очите.";
-"prefs_show_strongs_title" = "Номера на Strong's";
-"supported_formats" = "Поддържани формати за зареждане на ресурси от файл: %@";
-"welcome_message" = "Благодарим ви, че изтеглихте %@. В момента няма инсталирани Библии или документи. За да продължите, моля инсталирайте поне 1 документ, като го изтеглите от интернет или го заредите от zip файл с архив на документи.";
-"workspace_text_display_settings_title" = "Текстови опции — %@";
-"workspace_text_options_link" = "Текстови опции на работното пространство — %@";
-
-/* Android shared translations */
-"application_preferences" = "Настройки на приложението";
-"choose_document" = "Избери документ";
-"copy_of %@" = "Копие на %@";
-"infinite_scroll" = "Безкрайно превъртане";
-"mark_as_read_button" = "Бутон „Маркирай като прочетено\"";
-"memorization_indicators" = "Индикатори за запаметяване";
-"module_category" = "Категория";
-"module_language" = "Език";
-"module_name" = "Наименование";
-"non_strongs_word_italic" = "Курсив за добавени думи";
-"page_scroll_amount" = "Количество превъртане на страница";
 "skip" = "Пропусни";
+"supported_formats" = "Поддържани формати за зареждане на ресурси от файл: %@";
+"sync_group_n" = "Група %d";
 "text_display_font_family_title_format" = "Шрифтово семейство (%@)";
 "text_display_font_size_title_format" = "Размер на шрифта (%d pt)";
 "text_display_left_margin_title_format" = "Ляво поле (%d мм)";
@@ -617,6 +608,16 @@
 "text_display_max_width_title_format" = "Максимална ширина на текста (%d мм)";
 "text_display_right_margin_title_format" = "Дясно поле (%d мм)";
 "text_display_top_margin_title_format" = "Горно поле (%d мм)";
+"text_options_window_menutitle" = "Текстови опции";
 "title_scroll_button" = "Бутон за превъртане към заглавие";
 "top_margin" = "Горно поле";
+"welcome_message" = "Благодарим ви, че изтеглихте %@. В момента няма инсталирани Библии или документи. За да продължите, моля инсталирайте поне 1 документ, като го изтеглите от интернет или го заредите от zip файл с архив на документи.";
+"windowMaximise" = "Уголеми";
+"windowMinimise" = "Смали";
+"windowSynchronise" = "Синхронизирай";
 "window_disable_sync" = "Забрани синхронизирането";
+"window_pin_mode" = "Закачи";
+"window_text_display_settings_title" = "Текстови опции — Прозорец %d";
+"workspace_text_display_settings_title" = "Текстови опции — %@";
+"workspace_text_options_link" = "Текстови опции на работното пространство — %@";
+"workspace_text_options_link_summary" = "Редактирай настройките за показване на текст за това работно пространство";

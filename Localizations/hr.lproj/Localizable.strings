@@ -540,17 +540,26 @@ Kada koristite Google Drive, %@ dozvoljen je pristup samo datotekama aplikacije,
 
 "help_workspaces_title" = "Radne površine";
 "reading_plans_plural" = "Planovi čitanja";
+"download_document_confirm_prefix" = "Preuzmi";
+"bookmark_warning4" = "Preporučljivo je da napravite rezervnu kopiju modula prije ažuriranja";
+"bookmark_warning3" = "Želite li i dalje ažurirati modul?";
+"bookmark_warning2" = "Ukoliko je struktura dokumenta promijenjena, ažuriranje istog bi moglo dovesti do trajnog gubitka ovih straničnika/bilješki ili pak pomjeranja njihovih lokacija unutar dokumenta";
+"bookmark_warning" = "Ima straničnika, odnosno bilješki za ovaj dokument";
 
 /* Android shared translations */
 "about" = "O programu";
 "all_text_options_window_menutitle" = "Sve opcije teksta";
 "app_name_long" = "AndBible: Biblija Studij";
+"application_preferences" = "Postavke";
 "change_to_normal" = "Promijeni u običan prozor";
+"choose_document" = "Odaberi dokument";
 "color_workspace" = "Boja radne površine";
 "copyReference" = "Kopiraj poveznicu u međuspremnik";
+"copy_of %@" = "Kopija %@";
 "copy_settings" = "Kopiraj postavke na";
 "copy_settings_title" = "Koje postavke želite kopirati?";
 "copy_settings_to_global" = "Globalne zadane vrijednosti";
+"copy_settings_to_window" = "Prozor %1$d(%2$@:%3$@)";
 "copy_settings_to_workspace" = "Radna površina";
 "doc_type_all" = "Sve vrste";
 "download" = "Preuzimanje dokumenata";
@@ -558,18 +567,30 @@ Kada koristite Google Drive, %@ dozvoljen je pristup samo datotekama aplikacije,
 "format_epub" = "EPUB dokumenti (*.epub)";
 "format_mybible" = "MyBible dokumenti (*SQLite3)";
 "format_mysword" = "MySword dokumenti (*.mybible)";
+"format_zip" = "Zip datoteke koje sadrže Sword modul(e), ili rezervne kopije dokumenata (*.abmd) napravljeni su od strane %@";
 "global_text_display_settings_summary" = "Zadane postavke prikaza teksta za sve radne površine";
 "global_text_display_settings_title" = "Globalne opcije teksta";
 "global_text_options_link" = "Globalne opcije teksta";
 "global_text_options_link_summary" = "Uredi zadane postavke prikaza teksta za sve radne površine";
+"infinite_scroll" = "Beskonačno pomicanje";
 "install_zip" = "Učitaj dokumente iz Datoteka";
+"mark_as_read_button" = "Gumb za označavanje kao pročitano";
+"memorization_indicators" = "Pokazatelji memoriranja";
+"module_category" = "Kategorija";
+"module_language" = "Jezik";
+"module_name" = "Naziv";
 "move_window" = "Premjesti";
+"move_window_to_position2" = "Pozicija %1$d(%2$@2:%3$@)";
+"non_strongs_word_italic" = "Stavljanje dodanih riječi u kurziv";
 "notes_content_type_html" = "Obogaćeni tekst (HTML)";
+"page_scroll_amount" = "Količina pomicanja stranice";
 "parent_settings_category_title" = "Nadređene postavke";
+"prefs_noise_summary" = "Dodavanje malo šuma na pozadinu može biti ugodnije za oči";
 "prefs_noise_title" = "Pozadinski šum";
 "prefs_notes_content_type_summary" = "Format teksta koji se koristi pri stvaranju novih bilješki straničnika i unosa u radnu bilježnicu";
 "prefs_notes_content_type_title" = "Format za nove bilješke straničnika";
 "prefs_section_title_title" = "Naslovi odjeljaka";
+"prefs_show_strongs_title" = "Strongovi brojevi";
 "prefs_show_verseno_title" = "Brojevi poglavlja i redaka";
 "prefs_text_colors_menutitle" = "Postavke boja";
 "recommended_document" = "Preporučeno!";
@@ -578,39 +599,9 @@ Kada koristite Google Drive, %@ dozvoljen je pristup samo datotekama aplikacije,
 "restore_database" = "Vrati datoteku sa bazom podataka";
 "select_all" = "Odaberi sve";
 "select_none" = "Poništi odabrano";
-"sync_group_n" = "Grupa %d";
-"text_options_window_menutitle" = "Opcije teksta";
-"windowMaximise" = "Povećaj";
-"windowMinimise" = "Umanji";
-"windowSynchronise" = "Uskladi";
-"window_pin_mode" = "Prikvači";
-"window_text_display_settings_title" = "Opcije teksta - Prozor %d";
-"workspace_text_options_link_summary" = "Uredi postavke prikaza teksta za ovu radnu površinu";
-
-/* Android shared translations */
-"copy_settings_to_window" = "Prozor %1$d(%2$@:%3$@)";
-"format_zip" = "Zip datoteke koje sadrže Sword modul(e), ili rezervne kopije dokumenata (*.abmd) napravljeni su od strane %@";
-"move_window_to_position2" = "Pozicija %1$d(%2$@2:%3$@)";
-"prefs_noise_summary" = "Dodavanje malo šuma na pozadinu može biti ugodnije za oči";
-"prefs_show_strongs_title" = "Strongovi brojevi";
-"supported_formats" = "Podržani formati za učitavanje dokumenata iz datoteke: %@";
-"welcome_message" = "Hvala Vam na preuzimanju %@. Trenutno nema instaliranih Biblija ili dokumenata. Da biste nastavili, molimo instalirajte barem jedan dokument preuzimanjem sa interneta ili učitavanjem rezervnih kopija iz zip datoteke.";
-"workspace_text_display_settings_title" = "Opcije teksta - %@";
-"workspace_text_options_link" = "Opcije teksta radne površine — %@";
-
-/* Android shared translations */
-"application_preferences" = "Postavke";
-"choose_document" = "Odaberi dokument";
-"copy_of %@" = "Kopija %@";
-"infinite_scroll" = "Beskonačno pomicanje";
-"mark_as_read_button" = "Gumb za označavanje kao pročitano";
-"memorization_indicators" = "Pokazatelji memoriranja";
-"module_category" = "Kategorija";
-"module_language" = "Jezik";
-"module_name" = "Naziv";
-"non_strongs_word_italic" = "Stavljanje dodanih riječi u kurziv";
-"page_scroll_amount" = "Količina pomicanja stranice";
 "skip" = "Preskoči";
+"supported_formats" = "Podržani formati za učitavanje dokumenata iz datoteke: %@";
+"sync_group_n" = "Grupa %d";
 "text_display_font_family_title_format" = "Stil teksta (%@)";
 "text_display_font_size_title_format" = "Veličina teksta (%d pt)";
 "text_display_left_margin_title_format" = "Lijeva margina (%d mm)";
@@ -618,6 +609,16 @@ Kada koristite Google Drive, %@ dozvoljen je pristup samo datotekama aplikacije,
 "text_display_max_width_title_format" = "Maksimalna širina teksta (%d mm)";
 "text_display_right_margin_title_format" = "Desna margina (%d mm)";
 "text_display_top_margin_title_format" = "Gornja margina (%d mm)";
+"text_options_window_menutitle" = "Opcije teksta";
 "title_scroll_button" = "Gumb za pomicanje naslova";
 "top_margin" = "Gornja margina";
+"welcome_message" = "Hvala Vam na preuzimanju %@. Trenutno nema instaliranih Biblija ili dokumenata. Da biste nastavili, molimo instalirajte barem jedan dokument preuzimanjem sa interneta ili učitavanjem rezervnih kopija iz zip datoteke.";
+"windowMaximise" = "Povećaj";
+"windowMinimise" = "Umanji";
+"windowSynchronise" = "Uskladi";
 "window_disable_sync" = "Onemogući usklađivanje";
+"window_pin_mode" = "Prikvači";
+"window_text_display_settings_title" = "Opcije teksta - Prozor %d";
+"workspace_text_display_settings_title" = "Opcije teksta - %@";
+"workspace_text_options_link" = "Opcije teksta radne površine — %@";
+"workspace_text_options_link_summary" = "Uredi postavke prikaza teksta za ovu radnu površinu";

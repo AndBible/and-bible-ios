@@ -561,13 +561,12 @@
 
 "help_workspaces_title" = "Workspaces";
 "reading_plans_plural" = "Reading Plans";
+"download_document_confirm_prefix" = "ഡൌൺലോഡ്";
 
 /* Android shared translations */
+"choose_document" = "ഡോക്കുമെന്റ് തിരഞ്ഞെടുക്കുക";
 "download" = "ഡോക്കുമെന്റ് ഡൌൺലോഡ് ചെയ്യുക";
 "prefs_section_title_title" = "ശീർഷകം തലക്കെട്ട്";
 "windowMaximise" = "വലുതാക്കുക";
 "windowMinimise" = "ചെറുതാക്കുക";
 "windowSynchronise" = "ഒരുപോലെയാക്കുക";
-
-/* Android shared translations */
-"choose_document" = "ഡോക്കുമെന്റ് തിരഞ്ഞെടുക്കുക";

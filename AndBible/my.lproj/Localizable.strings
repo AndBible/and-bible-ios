@@ -561,43 +561,32 @@
 
 "help_workspaces_title" = "အလုပ်ခွင်များ";
 "reading_plans_plural" = "စာဖတ်ခြင်း အစီအစဉ်များ";
+"download_document_confirm_prefix" = "ဒေါင်းလုပ်ဆွဲပါ";
 
 /* Android shared translations */
+"add_ellipsis" = "%@ ...";
 "all_text_options_window_menutitle" = "စာသားအားလုံး ရွေးချယ်စရာများ";
 "app_name_long" = "AndBible: သမ္မာကျမ်းစာ";
+"application_preferences" = "စိတ်ကြိုက် အက်ပ်ရွေးချယ်မှု";
 "change_to_normal" = "ပုံမှန် ဝင်းဒိုးသို့ ပြောင်းပါ";
+"choose_document" = "မှတ်တမ်းရွေးချယ်ပါ";
 "copy_settings" = "...သို့ ဆက်တင်များကို ကော်ပီကူးခြင်း";
 "copy_settings_title" = "မည်သည့်ဆက်တင်များကို သင်ကော်ပီကူးလိုသနည်း။";
 "copy_settings_to_workspace" = "အလုပ်ခွင်";
 "doc_type_all" = "အမျိုးအစားအားလုံး";
 "download" = "မှတ်တမ်းများကို ဒေါင်းလုပ်ဆွဲပါ";
+"module_language" = "ဘာသာစကား";
 "move_window" = "...သို့ရွှေ့ပြောင်းပါ";
+"prefs_noise_summary" = "နောက်ခံကို ဝေဝါးမှုအနည်းငယ်ထည့်သွင်းခြင်းဖြင့် မျက်စိအတွက် ပိုပြီးသက်တောင့်သက်သာ ဖြစ်စေနိုင်ပါသည်။";
 "prefs_noise_title" = "နောက်ခံ ဝေဝါးခြင်း";
 "prefs_section_title_title" = "အစိတ်အပိုင်း ခေါင်းစဉ်များ";
+"prefs_show_strongs_title" = "Strong နံပါတ်များ";
 "prefs_show_verseno_title" = "အခန်းကြီး & အခန်းငယ်နံပါတ်များ";
 "prefs_text_colors_menutitle" = "အရောင်ဆက်တင်များ";
 "recommended_document" = "ထောက်ခံအကြံပြုပါသည်";
 "restore_database" = "ဒေတာဘေ့စ်ဖိုင်ကို ပြန်ယူပါ";
 "select_all" = "အားလုံးကို ရွေးချယ်ပါ";
 "select_none" = "တစ်ခုမှ မရွေးချယ်ပါနှင့်";
-"text_options_window_menutitle" = "စာသား ရွေးချယ်စရာများ";
-"windowMaximise" = "အကြီးချဲ့ပါ";
-"windowMinimise" = "ချုံ့ပါ";
-"windowSynchronise" = "ထပ်တူကျအောင်ပြုပါ";
-"window_pin_mode" = "တွဲပါ";
-"window_text_display_settings_title" = "စာသား ရွေးချယ်စရာများ - ဝင်းဒိုး %d";
-
-/* Android shared translations */
-"add_ellipsis" = "%@ ...";
-"prefs_noise_summary" = "နောက်ခံကို ဝေဝါးမှုအနည်းငယ်ထည့်သွင်းခြင်းဖြင့် မျက်စိအတွက် ပိုပြီးသက်တောင့်သက်သာ ဖြစ်စေနိုင်ပါသည်။";
-"prefs_show_strongs_title" = "Strong နံပါတ်များ";
-"welcome_message" = "%@ ဒေါင်းလုပ်ဆွဲသည့်အတွက် ကျေးဇူးတင်ပါသည်။ လက်ရှိတွင် သမ္မာကျမ်းစာနှင့် မှတ်စုများ ထည့်သွင်းထားခြင်း မရှိပါ။ ဆက်လက် လုပ်ဆောင်ရန် အနည်းဆုံး မှတ်စု 1 ခုကို အင်တာနက်မှ ဒေါင်းလုပ်ဆွဲခြင်း သို့မဟုတ် အရန် zip ဖိုင်မှတ်စုတစ်ခုကို ဖွင့်ခြင်းဖြင့် ထည့်သွင်းပေးပါ။";
-"workspace_text_display_settings_title" = "စာသား ရွေးချယ်စရာများ %@";
-
-/* Android shared translations */
-"application_preferences" = "စိတ်ကြိုက် အက်ပ်ရွေးချယ်မှု";
-"choose_document" = "မှတ်တမ်းရွေးချယ်ပါ";
-"module_language" = "ဘာသာစကား";
 "skip" = "ကျော်သွားပါ";
 "text_display_font_family_title_format" = "ဖောင့်စာလုံး မိသားစု (%@)";
 "text_display_font_size_title_format" = "ဖောင့်စာလုံးအရွယ်အစား (%d pt)";
@@ -606,4 +595,12 @@
 "text_display_max_width_title_format" = "စာသား၏ အကြီးဆုံးအနံ (%d mm)";
 "text_display_right_margin_title_format" = "ညာမာဂျင် (%d mm)";
 "text_display_top_margin_title_format" = "အပေါ်မာဂျင် (%d mm)";
+"text_options_window_menutitle" = "စာသား ရွေးချယ်စရာများ";
 "top_margin" = "အပေါ်မာဂျင်";
+"welcome_message" = "%@ ဒေါင်းလုပ်ဆွဲသည့်အတွက် ကျေးဇူးတင်ပါသည်။ လက်ရှိတွင် သမ္မာကျမ်းစာနှင့် မှတ်စုများ ထည့်သွင်းထားခြင်း မရှိပါ။ ဆက်လက် လုပ်ဆောင်ရန် အနည်းဆုံး မှတ်စု 1 ခုကို အင်တာနက်မှ ဒေါင်းလုပ်ဆွဲခြင်း သို့မဟုတ် အရန် zip ဖိုင်မှတ်စုတစ်ခုကို ဖွင့်ခြင်းဖြင့် ထည့်သွင်းပေးပါ။";
+"windowMaximise" = "အကြီးချဲ့ပါ";
+"windowMinimise" = "ချုံ့ပါ";
+"windowSynchronise" = "ထပ်တူကျအောင်ပြုပါ";
+"window_pin_mode" = "တွဲပါ";
+"window_text_display_settings_title" = "စာသား ရွေးချယ်စရာများ - ဝင်းဒိုး %d";
+"workspace_text_display_settings_title" = "စာသား ရွေးချယ်စရာများ %@";

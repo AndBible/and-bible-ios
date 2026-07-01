@@ -539,19 +539,16 @@
 
 "help_workspaces_title" = "Workspaces";
 "reading_plans_plural" = "Reading Plans";
+"download_document_confirm_prefix" = "Yüklə";
 
 /* Android shared translations */
 "about" = "Sənəd haqqında";
+"choose_document" = "Sənədi seçin";
 "download" = "Sənəd yüklə";
 "install_zip" = "Sənədi ZIP arxivdən yüklə";
 "prefs_section_title_title" = "Hissə başlıqları";
+"prefs_show_strongs_title" = "Stronqun rəqəmləri";
 "rename" = "Yenidən adlandır";
 "windowMaximise" = "Böyüt";
 "windowMinimise" = "Kiçilt";
 "windowSynchronise" = "Sinxronlaşdır";
-
-/* Android shared translations */
-"prefs_show_strongs_title" = "Stronqun rəqəmləri";
-
-/* Android shared translations */
-"choose_document" = "Sənədi seçin";

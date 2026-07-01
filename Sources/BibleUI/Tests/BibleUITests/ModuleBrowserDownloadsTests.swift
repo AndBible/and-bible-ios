@@ -1,5 +1,7 @@
 import Foundation
+import SwiftData
 import XCTest
+@testable import BibleCore
 @testable import BibleUI
 @testable import SwordKit
 
@@ -152,6 +154,71 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
             ),
             .errorDownloading(message: "testdict.idx download failed (HTTP 500)")
         )
+    }
+
+    /**
+     Verifies Downloads update confirmation warns when installed generic bookmarks exist.
+
+     Android checks installed documents for generic bookmarks before `doDownload(...)` and routes
+     those rows through `documentUpgradeConfirmation`, including failed update retries. A failure
+     means iOS can overwrite a module with dictionary/book notes without Android's data-safety
+     warning.
+     */
+    func testModuleBrowserWarnsBeforeUpdatingInstalledGenericBookmarkDocument() {
+        XCTAssertTrue(
+            ModuleBrowserView.shouldShowGenericBookmarkUpdateWarning(
+                status: .updateAvailable,
+                isInstalled: true,
+                hasGenericBookmarks: true
+            )
+        )
+        XCTAssertTrue(
+            ModuleBrowserView.shouldShowGenericBookmarkUpdateWarning(
+                status: .errorDownloading(message: "Previous update failed"),
+                isInstalled: true,
+                hasGenericBookmarks: true
+            )
+        )
+        XCTAssertFalse(
+            ModuleBrowserView.shouldShowGenericBookmarkUpdateWarning(
+                status: .installable,
+                isInstalled: false,
+                hasGenericBookmarks: true
+            )
+        )
+        XCTAssertFalse(
+            ModuleBrowserView.shouldShowGenericBookmarkUpdateWarning(
+                status: .updateAvailable,
+                isInstalled: true,
+                hasGenericBookmarks: false
+            )
+        )
+        XCTAssertFalse(
+            ModuleBrowserView.shouldShowGenericBookmarkUpdateWarning(
+                status: .beingInstalled(progressPercent: 10),
+                isInstalled: true,
+                hasGenericBookmarks: true
+            )
+        )
+    }
+
+    /**
+     Verifies the Downloads update-warning lookup matches Android's document-initials count.
+
+     Android queries `GenericBookmarkWithNotes` by `bookInitials`, but that view left-joins note
+     payloads, so bookmarks without notes still trigger the installed-document warning. This seeds
+     in-memory SwiftData generic bookmarks directly and proves iOS does not accidentally require a
+     note row or match a neighboring document.
+     */
+    func testModuleBrowserGenericBookmarkLookupMatchesDocumentInitials() throws {
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
+        context.insert(GenericBookmark(key: "entry-one", bookInitials: "DICT"))
+        context.insert(GenericBookmark(key: "entry-two", bookInitials: "OTHER"))
+        try context.save()
+
+        XCTAssertTrue(ModuleBrowserView.hasGenericBookmarks(for: "DICT", in: context))
+        XCTAssertFalse(ModuleBrowserView.hasGenericBookmarks(for: "KJV", in: context))
     }
 
     /**

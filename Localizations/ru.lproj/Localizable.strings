@@ -539,17 +539,26 @@
 
 "help_workspaces_title" = "Рабочие области";
 "reading_plans_plural" = "Планы чтения";
+"download_document_confirm_prefix" = "Скачать";
+"bookmark_warning4" = "Перед обновлением рекомендуется сделать резервную копию модуля.";
+"bookmark_warning3" = "Вы все еще хотите обновить модуль?";
+"bookmark_warning2" = "Если структура ресурса изменилась, обновление этого ресурса может привести к расположению этих закладок/заметок переместиться внутрь ресурса или полностью исчезнуть.";
+"bookmark_warning" = "В этом ресурсе есть закладки и/или примечания.";
 
 /* Android shared translations */
 "about" = "Источник";
 "all_text_options_window_menutitle" = "Все параметры текста";
 "app_name_long" = "AndBible: Изучение Библии";
+"application_preferences" = "Настройки приложения";
 "change_to_normal" = "Изменить на нормальное окно";
+"choose_document" = "Выбрать модуль";
 "color_workspace" = "Цвет рабочей области";
 "copyReference" = "Скопировать ссылку в буфер обмена";
+"copy_of %@" = "Копия %@";
 "copy_settings" = "Копировать настройки в";
 "copy_settings_title" = "Какие настройки вы хотите скопировать?";
 "copy_settings_to_global" = "Глобальные значения по умолчанию";
+"copy_settings_to_window" = "Окно %1$d (%2$@: %3$@)";
 "copy_settings_to_workspace" = "Рабочая область";
 "doc_type_all" = "Все типы";
 "download" = "Скачать ресурсы";
@@ -557,18 +566,30 @@
 "format_epub" = "EPUB ресурсы (*.epub)";
 "format_mybible" = "MyBible ресурсы (*.SQLite3)";
 "format_mysword" = "MySword ресурсы (*.mybible)";
+"format_zip" = "ZIP-файл, содержащий модуль(и) Sword, или файл резервной копии ресурсов (*.abmd), созданный %@";
 "global_text_display_settings_summary" = "Настройки отображения текста по умолчанию для всех рабочих областей";
 "global_text_display_settings_title" = "Глобальные параметры текста";
 "global_text_options_link" = "Глобальные параметры текста";
 "global_text_options_link_summary" = "Изменить настройки отображения текста по умолчанию для всех рабочих областей";
+"infinite_scroll" = "Бесконечная прокрутка";
 "install_zip" = "Загрузка ресурсов из файлов";
+"mark_as_read_button" = "Кнопка «Отметить как прочитанное»";
+"memorization_indicators" = "Индикаторы запоминания";
+"module_category" = "Категория";
+"module_language" = "Язык";
+"module_name" = "Название";
 "move_window" = "Переместить в";
+"move_window_to_position2" = "Положение %1$d (%2$@:%3$@)";
+"non_strongs_word_italic" = "Курсив для добавленных слов";
 "notes_content_type_html" = "Форматированный текст (HTML)";
+"page_scroll_amount" = "Величина прокрутки страницы";
 "parent_settings_category_title" = "Родительские настройки";
+"prefs_noise_summary" = "Добавление некоторого шума к фону может сделать его более удобным для глаз.";
 "prefs_noise_title" = "Фоновый шум";
 "prefs_notes_content_type_summary" = "Текстовый формат для новых заметок к закладкам и записей в блокноте";
 "prefs_notes_content_type_title" = "Формат новых заметок к закладкам";
 "prefs_section_title_title" = "Названия разделов";
+"prefs_show_strongs_title" = "Номера Стронга";
 "prefs_show_verseno_title" = "Номера глав и стихов";
 "prefs_text_colors_menutitle" = "Настройки цвета";
 "recommended_document" = "Рекомендуемые!";
@@ -577,39 +598,9 @@
 "restore_database" = "Восстановить файл базы данных";
 "select_all" = "Выбрать все";
 "select_none" = "Выберите нет";
-"sync_group_n" = "Группа %d";
-"text_options_window_menutitle" = "Параметры текста";
-"windowMaximise" = "Развернуть";
-"windowMinimise" = "Свернуть";
-"windowSynchronise" = "Синхронизировать";
-"window_pin_mode" = "Прикрепить";
-"window_text_display_settings_title" = "Параметры текста - Окно %d";
-"workspace_text_options_link_summary" = "Изменить настройки отображения текста для этой рабочей области";
-
-/* Android shared translations */
-"copy_settings_to_window" = "Окно %1$d (%2$@: %3$@)";
-"format_zip" = "ZIP-файл, содержащий модуль(и) Sword, или файл резервной копии ресурсов (*.abmd), созданный %@";
-"move_window_to_position2" = "Положение %1$d (%2$@:%3$@)";
-"prefs_noise_summary" = "Добавление некоторого шума к фону может сделать его более удобным для глаз.";
-"prefs_show_strongs_title" = "Номера Стронга";
-"supported_formats" = "Поддерживаемые форматы загрузки документов из файла: %@";
-"welcome_message" = "Спасибо за скачивание проложения %@. В настоящее время Библии, ресурсы не установлены. Чтобы продолжить, установите хотя бы 1 ресурс, загрузив его из Интернета или загрузив из резервной копии документа в zip-архиве.";
-"workspace_text_display_settings_title" = "Параметры текста - %@";
-"workspace_text_options_link" = "Параметры текста рабочей области — %@";
-
-/* Android shared translations */
-"application_preferences" = "Настройки приложения";
-"choose_document" = "Выбрать модуль";
-"copy_of %@" = "Копия %@";
-"infinite_scroll" = "Бесконечная прокрутка";
-"mark_as_read_button" = "Кнопка «Отметить как прочитанное»";
-"memorization_indicators" = "Индикаторы запоминания";
-"module_category" = "Категория";
-"module_language" = "Язык";
-"module_name" = "Название";
-"non_strongs_word_italic" = "Курсив для добавленных слов";
-"page_scroll_amount" = "Величина прокрутки страницы";
 "skip" = "Пропустить";
+"supported_formats" = "Поддерживаемые форматы загрузки документов из файла: %@";
+"sync_group_n" = "Группа %d";
 "text_display_font_family_title_format" = "Семейство шрифтов (%@)";
 "text_display_font_size_title_format" = "Размер шрифта (%d pt)";
 "text_display_left_margin_title_format" = "Левое поле (%d mm)";
@@ -617,6 +608,16 @@
 "text_display_max_width_title_format" = "Максимальная ширина текста (%d mm)";
 "text_display_right_margin_title_format" = "Правое поле (%d mm)";
 "text_display_top_margin_title_format" = "Верхнее поле (%d мм)";
+"text_options_window_menutitle" = "Параметры текста";
 "title_scroll_button" = "Кнопка прокрутки к заголовку";
 "top_margin" = "Верхнее поле";
+"welcome_message" = "Спасибо за скачивание проложения %@. В настоящее время Библии, ресурсы не установлены. Чтобы продолжить, установите хотя бы 1 ресурс, загрузив его из Интернета или загрузив из резервной копии документа в zip-архиве.";
+"windowMaximise" = "Развернуть";
+"windowMinimise" = "Свернуть";
+"windowSynchronise" = "Синхронизировать";
 "window_disable_sync" = "Отключить синхронизацию";
+"window_pin_mode" = "Прикрепить";
+"window_text_display_settings_title" = "Параметры текста - Окно %d";
+"workspace_text_display_settings_title" = "Параметры текста - %@";
+"workspace_text_options_link" = "Параметры текста рабочей области — %@";
+"workspace_text_options_link_summary" = "Изменить настройки отображения текста для этой рабочей области";

@@ -121,7 +121,7 @@ const limitAmbiguousModalSize = computed({
     }
 });
 const {bookmarkMap, bookmarkIdsByOrdinal} = inject(globalBookmarksKey)!;
-const {strings} = useCommon();
+const {strings, config} = useCommon();
 const android = inject(androidKey)!;
 const multiSelectionMode = ref(false);
 
@@ -296,12 +296,59 @@ function minusKeyPressed() {
     }
     updateHighlight();
 }
+
+/**
+ * Finds the nearest clicked anchor from a reader click event.
+ *
+ * Reader clicks can originate from nested elements or text nodes inside an anchor. Normalizing to
+ * the anchor keeps downstream scroll-anchor behavior stable.
+ *
+ * @param event Bubbled reader mouse event.
+ * @returns The nearest containing anchor, or null when the click did not come from link content.
+ */
+function closestAnchorFromEvent(event: MouseEvent): HTMLAnchorElement | null {
+    const target = event.target;
+    if (target instanceof Element) {
+        return target.closest("a");
+    }
+    if (target instanceof Node) {
+        return target.parentElement?.closest("a") ?? null;
+    }
+    return null;
+}
+
+/**
+ * Handles bubbled reader clicks and chooses between direct actions, verse selection, and modal
+ * dismissal.
+ *
+ * The activation debounce still suppresses plain pane-activation taps, but verse or ordinal
+ * metadata marks the event as a content tap and must be processed even when the pane has just
+ * become active. Plain unmanaged links record a scroll anchor and stay on the link path, while
+ * bookmark actions are filtered out of chooser state when bookmark display is disabled.
+ *
+ * @param event Bubbled mouse event that may carry registered callbacks, verse metadata, or ordinal
+ * metadata added by child document components.
+ * @returns A promise that settles after a direct callback runs or the ambiguous selection modal is
+ * dismissed.
+ * @remarks Mutates modal/highlight state and emits reader events. Action mode returns before state
+ * mutation; inactive plain taps return after clearing any existing highlights.
+ */
 async function handle(event: MouseEvent) {
+    const clickedLink = closestAnchorFromEvent(event);
+    if (clickedLink) {
+        emit("set_scroll_anchor", clickedLink);
+    }
     const isActive = appSettings.activeWindow && (performance.now() - appSettings.activeSince > 250);
     const eventFunctions = getHighestPriorityEventFunctions(event);
-    const allEventFunctions = getAllEventFunctions(event);
+    const allEventFunctions = getAllEventFunctions(event).filter(e => config.showBookmarks || !e.options.bookmarkId);
     const hasParticularClicks = eventFunctions.filter(f => !f.options.hidden).length > 0; // let's not show only "hidden" items
+    const _verseInfo: Nullable<EventVerseInfo> = getEventVerseInfo(event);
+    const _ordinalInfo: Nullable<EventOrdinalInfo> = getEventOrdinalInfo(event);
+    const hasContentSelection = _verseInfo != null || _ordinalInfo != null;
     if (appSettings.actionMode) {
+        return;
+    }
+    if (!hasParticularClicks && clickedLink) {
         return;
     }
     const hadHighlights = hasHighlights.value;
@@ -309,12 +356,10 @@ async function handle(event: MouseEvent) {
     if (hadHighlights && !showModal.value && !hasParticularClicks) {
         return;
     }
-    if (!isActive && !hasParticularClicks) {
+    if (!isActive && !hasParticularClicks && !hasContentSelection) {
         return;
     }
     emit("back_clicked");
-    const _verseInfo: Nullable<EventVerseInfo> = getEventVerseInfo(event);
-    const _ordinalInfo: Nullable<EventOrdinalInfo> = getEventOrdinalInfo(event);
 
     if (multiSelectionMode.value && multiSelect(_verseInfo, _ordinalInfo)) {
         return;

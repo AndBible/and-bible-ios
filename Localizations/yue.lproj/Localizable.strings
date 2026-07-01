@@ -539,16 +539,26 @@
 
 "help_workspaces_title" = "工作區";
 "reading_plans_plural" = "讀經計劃";
+"download_document_confirm_prefix" = "下載";
+"bookmark_warning4" = "建議你先備份模組後再作更新。";
+"bookmark_warning3" = "你仍想更新模組嗎？";
+"bookmark_warning2" = "如果文件結構被修改，更新此文件可能會讓 這些書籤或筆記移動或消失。";
+"bookmark_warning" = "此文件中有書籤及/或筆記。";
 
 /* Android shared translations */
 "about" = "關於";
+"add_ellipsis" = "%@...";
 "all_text_options_window_menutitle" = "所有文字選項";
 "app_name_long" = "AndBible: 研經工具";
+"application_preferences" = "程式偏好";
 "change_to_normal" = "轉換至正常視窗";
+"choose_document" = "選擇文件";
 "color_workspace" = "工作區顏色";
 "copyReference" = "複製連結至剪貼簿";
+"copy_of %@" = "%@的複本";
 "copy_settings" = "複製設定至";
 "copy_settings_title" = "複製哪個設定？";
+"copy_settings_to_window" = "視窗 %1$d (%2$@: %3$@)";
 "copy_settings_to_workspace" = "工作區";
 "doc_type_all" = "所有類型";
 "download" = "下載文件";
@@ -556,10 +566,15 @@
 "format_epub" = "EPUB 文件 (*.epub)";
 "format_mybible" = "MyBible 文件 (*.SQLite3)";
 "format_mysword" = "MySword 文件 (*.mybible)";
+"format_zip" = "包含 Sword 模組的 zip 檔案，或由 %@ 建立的文件備份檔案 (*.abmd)";
 "install_zip" = "從檔案載入文件";
+"module_language" = "語言";
 "move_window" = "移動至";
+"move_window_to_position2" = "位置 %1$d (%2$@:%3$@)";
+"prefs_noise_summary" = "在背景增加噪點或會另視覺上更舒服";
 "prefs_noise_title" = "背景雜訊";
 "prefs_section_title_title" = "章節標題";
+"prefs_show_strongs_title" = "Strong's原文編號";
 "prefs_show_verseno_title" = "章節號碼";
 "prefs_text_colors_menutitle" = "顏色設定";
 "recommended_document" = "建議的！";
@@ -568,31 +583,9 @@
 "restore_database" = "回復資料庫檔案";
 "select_all" = "全選";
 "select_none" = "全不選";
-"sync_group_n" = "小組 %d";
-"text_options_window_menutitle" = "文字選項";
-"windowMaximise" = "最大化";
-"windowMinimise" = "最小化";
-"windowSynchronise" = "同步";
-"window_pin_mode" = "釘選";
-"window_text_display_settings_title" = "文字選項 - 視窗 %d";
-
-/* Android shared translations */
-"add_ellipsis" = "%@...";
-"copy_settings_to_window" = "視窗 %1$d (%2$@: %3$@)";
-"format_zip" = "包含 Sword 模組的 zip 檔案，或由 %@ 建立的文件備份檔案 (*.abmd)";
-"move_window_to_position2" = "位置 %1$d (%2$@:%3$@)";
-"prefs_noise_summary" = "在背景增加噪點或會另視覺上更舒服";
-"prefs_show_strongs_title" = "Strong's原文編號";
-"supported_formats" = "支援載入文件的檔案格式：%@";
-"welcome_message" = "感謝你下載 %@。現時並未有下載聖經或文件。請下載至少一份文件，或從Zip備份檔案匯入。";
-"workspace_text_display_settings_title" = "文字選項 - %@";
-
-/* Android shared translations */
-"application_preferences" = "程式偏好";
-"choose_document" = "選擇文件";
-"copy_of %@" = "%@的複本";
-"module_language" = "語言";
 "skip" = "暫停";
+"supported_formats" = "支援載入文件的檔案格式：%@";
+"sync_group_n" = "小組 %d";
 "text_display_font_family_title_format" = "字型家族 (%@)";
 "text_display_font_size_title_format" = "字型大小 (%d pt)";
 "text_display_left_margin_title_format" = "左邊界 (%dmm)";
@@ -600,5 +593,13 @@
 "text_display_max_width_title_format" = "最大文字寬度 (%dmm)";
 "text_display_right_margin_title_format" = "右邊界 (%dmm)";
 "text_display_top_margin_title_format" = "頂邊界 (%d mm)";
+"text_options_window_menutitle" = "文字選項";
 "top_margin" = "頂邊界";
+"welcome_message" = "感謝你下載 %@。現時並未有下載聖經或文件。請下載至少一份文件，或從Zip備份檔案匯入。";
+"windowMaximise" = "最大化";
+"windowMinimise" = "最小化";
+"windowSynchronise" = "同步";
 "window_disable_sync" = "停用同步";
+"window_pin_mode" = "釘選";
+"window_text_display_settings_title" = "文字選項 - 視窗 %d";
+"workspace_text_display_settings_title" = "文字選項 - %@";

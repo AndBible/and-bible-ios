@@ -22,10 +22,21 @@
 <script setup lang="ts">
 import {useCommon} from "@/composables";
 import {navigateLink} from "@/utils";
+import {emit} from "@/eventbus";
 
 defineProps<{href: string}>();
 
+/**
+ * Routes an OSIS link through the app navigation bridge after recording its scroll anchor.
+ *
+ * @param event Click event from the rendered anchor.
+ * @param url Internal or external AndBible link target.
+ * @returns Nothing.
+ * @remarks Emits `set_scroll_anchor` for viewport preservation and then delegates navigation to
+ * `navigateLink`, which uses the native iOS bridge when required.
+ */
 function openLink(event: MouseEvent, url: string) {
+    emit("set_scroll_anchor", event.currentTarget as HTMLElement);
     navigateLink(url);
 }
 

@@ -12,6 +12,8 @@ enum UITestRuntimeConfiguration {
     private static let remoteSyncBootstrapScenarioArgument = "-UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO"
     private static let firstRunDocumentSetupHandledEnvironmentKey = "UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED"
     private static let firstRunDocumentSetupHandledArgument = "-UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED"
+    private static let heldDownloadModulesEnvironmentKey = "UITEST_HELD_DOWNLOAD_MODULES"
+    private static let heldDownloadModulesArgument = "-UITEST_HELD_DOWNLOAD_MODULES"
 
     /// Test-only remote sync bootstrap paths that can replace live backend transport in UI tests.
     enum RemoteSyncBootstrapScenario: String {
@@ -99,8 +101,67 @@ enum UITestRuntimeConfiguration {
         !enablesDetailedAccessibilityExports
     }
 
+    /**
+     Resolves whether a UI test has requested a deterministic held Downloads install.
+
+     The downloads row-order smoke needs the row to remain in Android's `BEING_INSTALLED` state
+     long enough for accessibility polling to observe it. Production never enables this path; UI
+     automation must opt in with detailed accessibility exports and an explicit comma-delimited
+     module list.
+
+     - Parameter moduleName: Module initials for the row whose install is starting.
+     - Returns: `true` only for a named module in an explicitly opted-in UI-test launch.
+     - Side effects: reads process environment and arguments.
+     - Failure modes: malformed or empty lists are treated as no held modules.
+     */
+    static func shouldHoldDownloadInstall(for moduleName: String) -> Bool {
+        isDownloadInstallHeld(
+            for: moduleName,
+            environment: ProcessInfo.processInfo.environment,
+            arguments: ProcessInfo.processInfo.arguments
+        )
+    }
+
+    /**
+     Resolves the held-download fixture marker from a supplied process shape.
+
+     This pure variant keeps the UI-test fixture contract covered by package tests without mutating
+     the process environment. The detailed-accessibility flag is required so accidental production
+     environment values cannot hold a real install.
+
+     - Parameters:
+       - moduleName: Module initials for the row whose install is starting.
+       - environment: Process environment to inspect.
+       - arguments: Process arguments to inspect.
+     - Returns: `true` only when detailed accessibility exports and a matching module name are
+       both present.
+     - Side effects: none.
+     - Failure modes: malformed or empty lists are treated as no held modules.
+     */
+    static func isDownloadInstallHeld(
+        for moduleName: String,
+        environment: [String: String],
+        arguments: [String]
+    ) -> Bool {
+        guard environment[detailedAccessibilityExportsEnvironmentKey] == "1"
+                || arguments.contains(detailedAccessibilityExportsArgument) else {
+            return false
+        }
+        let rawValue = environment[heldDownloadModulesEnvironmentKey]
+            ?? argumentValue(after: heldDownloadModulesArgument, arguments: arguments)
+            ?? ""
+        let heldModules = rawValue
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return heldModules.contains(moduleName)
+    }
+
     private static func argumentValue(after argument: String) -> String? {
-        let arguments = ProcessInfo.processInfo.arguments
+        argumentValue(after: argument, arguments: ProcessInfo.processInfo.arguments)
+    }
+
+    private static func argumentValue(after argument: String, arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: argument) else { return nil }
         let valueIndex = arguments.index(after: index)
         guard valueIndex < arguments.endIndex else { return nil }

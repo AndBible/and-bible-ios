@@ -561,16 +561,13 @@
 
 "help_workspaces_title" = "Workspaces";
 "reading_plans_plural" = "Reading Plans";
-
-/* Android shared translations */
-"download" = "Sənəd yüklə";
-"prefs_section_title_title" = "Hissə başlıqları";
-"windowMaximise" = "Böyüt";
-"windowMinimise" = "Kiçilt";
-"windowSynchronise" = "Sinxronlaşdır";
-
-/* Android shared translations */
-"prefs_show_strongs_title" = "Stronqun rəqəmləri";
+"download_document_confirm_prefix" = "Yüklə";
 
 /* Android shared translations */
 "choose_document" = "Sənədi seçin";
+"download" = "Sənəd yüklə";
+"prefs_section_title_title" = "Hissə başlıqları";
+"prefs_show_strongs_title" = "Stronqun rəqəmləri";
+"windowMaximise" = "Böyüt";
+"windowMinimise" = "Kiçilt";
+"windowSynchronise" = "Sinxronlaşdır";

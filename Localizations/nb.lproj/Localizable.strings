@@ -539,17 +539,26 @@
 
 "help_workspaces_title" = "Arbeidsområder";
 "reading_plans_plural" = "Leseplaner";
+"download_document_confirm_prefix" = "Last ned";
+"bookmark_warning4" = "Det er anbefalt å ta en sikkerhetskopi av modulen før du oppdaterer.";
+"bookmark_warning3" = "Ønsker du fortsatt å oppdatere modulen?";
+"bookmark_warning2" = "Hvis dokumentstrukturen har endret seg, kan oppdatering av dette dokumentet gjøre at plasseringen av disse bokmerkene/notatene flyttes inne i dokumentet eller forsvinner helt.";
+"bookmark_warning" = "Det eksisterer bokmerker og/eller notater for dette dokumentet";
 
 /* Android shared translations */
 "about" = "Om";
 "all_text_options_window_menutitle" = "Alle tekstinnstillinger";
 "app_name_long" = "AndBible: Bibelstudie";
+"application_preferences" = "Applikasjonsinnstillinger";
 "change_to_normal" = "Endre til normalt vindu";
+"choose_document" = "Velg modul";
 "color_workspace" = "Arbeidsområdefarge";
 "copyReference" = "Kopier lenke til utklippstavle";
+"copy_of %@" = "Kopi av %@";
 "copy_settings" = "Kopier innstillinger til";
 "copy_settings_title" = "Hvilke innstillinger ønsker du å kopiere?";
 "copy_settings_to_global" = "Globale standarder";
+"copy_settings_to_window" = "Vindu %1$d (%2$@: %3$@)";
 "copy_settings_to_workspace" = "Arbeidsområde";
 "doc_type_all" = "Alle dokumenter";
 "download" = "Last ned moduler";
@@ -557,18 +566,30 @@
 "format_epub" = "EPUB-dokumenter (*.epub)";
 "format_mybible" = "MyBible-dokumenter (*.SQLite3)";
 "format_mysword" = "MySword-dokumenter (*.mybible)";
+"format_zip" = "Zip-fil med Sword-modul(er), eller dokumentsikkerhetskopi (.abmd) opprettet av %@";
 "global_text_display_settings_summary" = "Standard tekstvisningsinnstillinger for alle arbeidsområder";
 "global_text_display_settings_title" = "Globale tekstinnstillinger";
 "global_text_options_link" = "Globale tekstinnstillinger";
 "global_text_options_link_summary" = "Rediger standard tekstvisningsinnstillinger for alle arbeidsområder";
+"infinite_scroll" = "Uendelig rulling";
 "install_zip" = "Last inn dokumenter fra filer";
+"mark_as_read_button" = "Merk som lest-knapp";
+"memorization_indicators" = "Memoreringsindikatorer";
+"module_category" = "Kategori";
+"module_language" = "Språk";
+"module_name" = "Navn";
 "move_window" = "Flytt til";
+"move_window_to_position2" = "Posisjon %1$d (%2$@:%3$@)";
+"non_strongs_word_italic" = "Kursiver tillagte ord";
 "notes_content_type_html" = "Rik tekst (HTML)";
+"page_scroll_amount" = "Siderullemengde";
 "parent_settings_category_title" = "Overordnede innstillinger";
+"prefs_noise_summary" = "Det blir mer behagelig for øynene dersom man legger til litt støy i bakgrunnen.";
 "prefs_noise_title" = "Bakgrunnsstøy";
 "prefs_notes_content_type_summary" = "Tekstformat brukt ved opprettelse av nye bokmerkenotater og studiebrettoppføringer";
 "prefs_notes_content_type_title" = "Format for nye bokmerkenotater";
 "prefs_section_title_title" = "Seksjonsoverskrifter";
+"prefs_show_strongs_title" = "Strong-nummerering";
 "prefs_show_verseno_title" = "Kapittel- og versnummer";
 "prefs_text_colors_menutitle" = "Fargeinnstillinger";
 "recommended_document" = "Anbefalt!";
@@ -577,39 +598,9 @@
 "restore_database" = "Gjenopprett databasefil";
 "select_all" = "Velg alle";
 "select_none" = "Ingen";
-"sync_group_n" = "Gruppe %d";
-"text_options_window_menutitle" = "Tekstinnstillinger";
-"windowMaximise" = "Maksimer";
-"windowMinimise" = "Minimer";
-"windowSynchronise" = "Synkroniser";
-"window_pin_mode" = "Fest";
-"window_text_display_settings_title" = "Tekstinnstillinger - Vindu %d";
-"workspace_text_options_link_summary" = "Rediger tekstvisningsinnstillinger for dette arbeidsområdet";
-
-/* Android shared translations */
-"copy_settings_to_window" = "Vindu %1$d (%2$@: %3$@)";
-"format_zip" = "Zip-fil med Sword-modul(er), eller dokumentsikkerhetskopi (.abmd) opprettet av %@";
-"move_window_to_position2" = "Posisjon %1$d (%2$@:%3$@)";
-"prefs_noise_summary" = "Det blir mer behagelig for øynene dersom man legger til litt støy i bakgrunnen.";
-"prefs_show_strongs_title" = "Strong-nummerering";
-"supported_formats" = "Støttede formater for innlasting av dokumenter fra fil: %@";
-"welcome_message" = "Takk for at du laster ned %@. Det er for øyeblikket ingen bibeldokumenter installert. For å fortsette, vennligst installér minst ett dokument ved å laste ned fra internett, eller ved å laste inn en sikkerhetskopi i ZIP-format.";
-"workspace_text_display_settings_title" = "Tekstinnstillinger - %@";
-"workspace_text_options_link" = "Tekstinnstillinger for arbeidsområde — %@";
-
-/* Android shared translations */
-"application_preferences" = "Applikasjonsinnstillinger";
-"choose_document" = "Velg modul";
-"copy_of %@" = "Kopi av %@";
-"infinite_scroll" = "Uendelig rulling";
-"mark_as_read_button" = "Merk som lest-knapp";
-"memorization_indicators" = "Memoreringsindikatorer";
-"module_category" = "Kategori";
-"module_language" = "Språk";
-"module_name" = "Navn";
-"non_strongs_word_italic" = "Kursiver tillagte ord";
-"page_scroll_amount" = "Siderullemengde";
 "skip" = "Hopp over";
+"supported_formats" = "Støttede formater for innlasting av dokumenter fra fil: %@";
+"sync_group_n" = "Gruppe %d";
 "text_display_font_family_title_format" = "Skrifttype (%@)";
 "text_display_font_size_title_format" = "Skriftstørrelse (%dpunkt)";
 "text_display_left_margin_title_format" = "Venstremarg (%d mm)";
@@ -617,6 +608,16 @@
 "text_display_max_width_title_format" = "Maksimum tekstbredde (%d mm)";
 "text_display_right_margin_title_format" = "Høyremarg (%d mm)";
 "text_display_top_margin_title_format" = "Toppmarg (%dmm)";
+"text_options_window_menutitle" = "Tekstinnstillinger";
 "title_scroll_button" = "Tittels rulleknapp";
 "top_margin" = "Toppmarg";
+"welcome_message" = "Takk for at du laster ned %@. Det er for øyeblikket ingen bibeldokumenter installert. For å fortsette, vennligst installér minst ett dokument ved å laste ned fra internett, eller ved å laste inn en sikkerhetskopi i ZIP-format.";
+"windowMaximise" = "Maksimer";
+"windowMinimise" = "Minimer";
+"windowSynchronise" = "Synkroniser";
 "window_disable_sync" = "Deaktiver synkronisering";
+"window_pin_mode" = "Fest";
+"window_text_display_settings_title" = "Tekstinnstillinger - Vindu %d";
+"workspace_text_display_settings_title" = "Tekstinnstillinger - %@";
+"workspace_text_options_link" = "Tekstinnstillinger for arbeidsområde — %@";
+"workspace_text_options_link_summary" = "Rediger tekstvisningsinnstillinger for dette arbeidsområdet";

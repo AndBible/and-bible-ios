@@ -561,13 +561,12 @@
 
 "help_workspaces_title" = "Workspaces";
 "reading_plans_plural" = "Reading Plans";
+"download_document_confirm_prefix" = "Yuklab oling";
 
 /* Android shared translations */
+"choose_document" = "Faylni tanlang";
 "download" = "Fayllarni yuklab oling";
 "prefs_section_title_title" = "Bo'lim sarlavhalari";
 "windowMaximise" = "Maksimallashtirmoq";
 "windowMinimise" = "Kamaytirish";
 "windowSynchronise" = "Sinxronlashtiring";
-
-/* Android shared translations */
-"choose_document" = "Faylni tanlang";

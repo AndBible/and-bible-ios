@@ -539,18 +539,27 @@
 
 "help_workspaces_title" = "பணியிடங்கள்";
 "reading_plans_plural" = "வாசிப்பு திட்டங்கள்";
+"download_document_confirm_prefix" = "தரவிறக்கம்";
+"bookmark_warning4" = "புதுப்பிப்பதற்கு முன்பு மாடியுல்களை பிரதி எடுக்க பரிந்துரைக்கப்படுகிறது.";
+"bookmark_warning3" = "இன்னமும் மாடியல்களை புதுப்பிக்கலாமா?";
+"bookmark_warning2" = "ஆவண அமைப்பு மாறியிருந்தால், இதனைப் புதுப்பிப்பது இந்த புக்மார்க்குகள்/குறிப்புகளை ஆவணத்தின் உள்ளேயே இடம் மாற்றலாம் அல்லது முற்றிலும் தொலைந்து போகலாம்.";
+"bookmark_warning" = "இந்த ஆவணத்திற்கு புக் மார்க்குகள் அல்லது/மற்றும் குறிப்புகள் உள்ளன";
 
 /* Android shared translations */
 "about" = "எம்மைப் பற்றி";
 "all_text_options_window_menutitle" = "அனைத்து உரை விருப்பத்தேர்வுகள்";
 "app_name_andbible" = "ஆண்ட் பைபில்";
 "app_name_long" = "ஆண்ட் பைபில்: பைபில் ஸ்டடி";
+"application_preferences" = "விருப்பத்தேர்வுகள்";
 "change_to_normal" = "சாதாரண சாரளமாக மாற்று";
+"choose_document" = "கோப்பினைத் தேர்வு செய்க";
 "color_workspace" = "பணியிட நிறம்";
 "copyReference" = "இணைப்பை கிளிப்போடுக்கு நகலெடு";
+"copy_of %@" = "%@இன் நகல்";
 "copy_settings" = "அமைப்புகளை நகலெடு";
 "copy_settings_title" = "எந்த அமைப்புகளை நகலெடுக்க?";
 "copy_settings_to_global" = "உலகளாவிய இயல்புநிலைகள்";
+"copy_settings_to_window" = "சாளரம் %1$d (%2$@: %3$@)";
 "copy_settings_to_workspace" = "பணியிடம்";
 "doc_type_all" = "எல்லா வகைகள்";
 "download" = "கோப்புகளை தரவிறக்கு";
@@ -558,18 +567,30 @@
 "format_epub" = "EPUB ஆவணங்கள் (*.epub)";
 "format_mybible" = "MyBible கோப்புகள் (*.SQLite3)";
 "format_mysword" = "MySword கோப்புகள் (*.mybible)";
+"format_zip" = "Sword மாடியுல்(கள்) அடங்கிய zip கோப்பு அல்லது ஆவண பாதுகாப்பு நகல் (*.abmd) %@ ஆல் உருவாக்கப்பட்டது.";
 "global_text_display_settings_summary" = "அனைத்து பணியிடங்களுக்கும் இயல்புநிலை உரை காட்சி அமைப்புகள்";
 "global_text_display_settings_title" = "உலகளாவிய உரை விருப்பங்கள்";
 "global_text_options_link" = "உலகளாவிய உரை விருப்பங்கள்";
 "global_text_options_link_summary" = "அனைத்து பணியிடங்களுக்கும் இயல்புநிலை உரை காட்சி அமைப்புகளை மாற்று";
+"infinite_scroll" = "தொடர் உருட்டல்";
 "install_zip" = "கோப்புகளிலிருந்து ஆவணங்களை ஏற்றவும்";
+"mark_as_read_button" = "படித்தது என குறி பொத்தான்";
+"memorization_indicators" = "மனனக் குறிகாட்டிகள்";
+"module_category" = "வகை";
+"module_language" = "மொழி";
+"module_name" = "பெயர்";
 "move_window" = "நகர்த்துக";
+"move_window_to_position2" = "நிலை %1$d (%2$@:%3$@)";
+"non_strongs_word_italic" = "சேர்க்கப்பட்ட சொற்களை சாய்வெழுத்தில் காட்டு";
 "notes_content_type_html" = "வளமான உரை (HTML)";
+"page_scroll_amount" = "பக்க உருட்டல் அளவு";
 "parent_settings_category_title" = "பெற்றோர் அமைப்புகள்";
+"prefs_noise_summary" = "பின்னணியில் இறைச்சலை சேர்ப்பது படிப்பதை எளிமையாக்கும்";
 "prefs_noise_title" = "பின்னணி இரைச்சல்";
 "prefs_notes_content_type_summary" = "புதிய புக்மார்க் குறிப்புகள் மற்றும் ஸ்டடி பேடு உள்ளீடுகளை உருவாக்கும்போது பயன்படுத்தப்படும் உரை வடிவம்";
 "prefs_notes_content_type_title" = "புதிய புக்மார்க் குறிப்புகளின் வடிவம்";
 "prefs_section_title_title" = "பகுதி தலைப்புகள்";
+"prefs_show_strongs_title" = "ஸ்டிராங் எண்கள்";
 "prefs_show_verseno_title" = "அதிகாரம் & வசன எண்கள்";
 "prefs_text_colors_menutitle" = "நிற அமைப்புகள்";
 "recommended_document" = "பரிந்துரைக்கப்பட்டது!";
@@ -578,39 +599,9 @@
 "restore_database" = "தரவு தள கோப்பை மீட்டமை";
 "select_all" = "அனைத்தையும் தெரிவுசெய்";
 "select_none" = "எதையும் தேர்ந்தெடுக்க வேண்டாம்";
-"sync_group_n" = "தோகுதி %d";
-"text_options_window_menutitle" = "உரை விருப்பத்தேர்வுகள்";
-"windowMaximise" = "விரி";
-"windowMinimise" = "சுருக்கு";
-"windowSynchronise" = "ஒத்திசைவு";
-"window_pin_mode" = "கடவு எண்";
-"window_text_display_settings_title" = "உரை விருப்பத்தேர்வுகள் - சாளரம் %d";
-"workspace_text_options_link_summary" = "இந்த பணியிடத்திற்கான உரை காட்சி அமைப்புகளை மாற்று";
-
-/* Android shared translations */
-"copy_settings_to_window" = "சாளரம் %1$d (%2$@: %3$@)";
-"format_zip" = "Sword மாடியுல்(கள்) அடங்கிய zip கோப்பு அல்லது ஆவண பாதுகாப்பு நகல் (*.abmd) %@ ஆல் உருவாக்கப்பட்டது.";
-"move_window_to_position2" = "நிலை %1$d (%2$@:%3$@)";
-"prefs_noise_summary" = "பின்னணியில் இறைச்சலை சேர்ப்பது படிப்பதை எளிமையாக்கும்";
-"prefs_show_strongs_title" = "ஸ்டிராங் எண்கள்";
-"supported_formats" = "கோப்பில் இருந்து ஆவணங்களை ஏற்றத் தகுந்த வடிவமைப்புகள்: %@";
-"welcome_message" = "%@ஐ தரவிறக்கம் செய்வதற்கு நன்றி. தற்போது எந்த விவிலியமோ அல்லது ஆவணங்களோ நிறுவப்படவில்லை. ஆகவே 1 ஆவணத்தையாவது இணையத்தில் இருந்தோ அல்லது zip வடிவ காப்பு நகலில் இருந்தோ நிறுவவும் நிறுவவும்";
-"workspace_text_display_settings_title" = "உரை விருப்பத்தேர்வுகள் - %@";
-"workspace_text_options_link" = "பணியிட உரை விருப்பங்கள் — %@";
-
-/* Android shared translations */
-"application_preferences" = "விருப்பத்தேர்வுகள்";
-"choose_document" = "கோப்பினைத் தேர்வு செய்க";
-"copy_of %@" = "%@இன் நகல்";
-"infinite_scroll" = "தொடர் உருட்டல்";
-"mark_as_read_button" = "படித்தது என குறி பொத்தான்";
-"memorization_indicators" = "மனனக் குறிகாட்டிகள்";
-"module_category" = "வகை";
-"module_language" = "மொழி";
-"module_name" = "பெயர்";
-"non_strongs_word_italic" = "சேர்க்கப்பட்ட சொற்களை சாய்வெழுத்தில் காட்டு";
-"page_scroll_amount" = "பக்க உருட்டல் அளவு";
 "skip" = "தவிர்க்க";
+"supported_formats" = "கோப்பில் இருந்து ஆவணங்களை ஏற்றத் தகுந்த வடிவமைப்புகள்: %@";
+"sync_group_n" = "தோகுதி %d";
 "text_display_font_family_title_format" = "எழுத்துரு குடும்பம் (%@)";
 "text_display_font_size_title_format" = "எழுத்துரு அளவு (%d pt)";
 "text_display_left_margin_title_format" = "இடது விளிம்பு (%d mm)";
@@ -618,6 +609,16 @@
 "text_display_max_width_title_format" = "உரையின் அதிகபட்ச அகலம் (%d mm)";
 "text_display_right_margin_title_format" = "வலது விளிம்பு (%d mm)";
 "text_display_top_margin_title_format" = "மேல் விளிம்பு (%d mm)";
+"text_options_window_menutitle" = "உரை விருப்பத்தேர்வுகள்";
 "title_scroll_button" = "தலைப்பு உருட்டு பொத்தான்";
 "top_margin" = "மேல் விளிம்பு";
+"welcome_message" = "%@ஐ தரவிறக்கம் செய்வதற்கு நன்றி. தற்போது எந்த விவிலியமோ அல்லது ஆவணங்களோ நிறுவப்படவில்லை. ஆகவே 1 ஆவணத்தையாவது இணையத்தில் இருந்தோ அல்லது zip வடிவ காப்பு நகலில் இருந்தோ நிறுவவும் நிறுவவும்";
+"windowMaximise" = "விரி";
+"windowMinimise" = "சுருக்கு";
+"windowSynchronise" = "ஒத்திசைவு";
 "window_disable_sync" = "ஒத்திசைவை முடக்கு";
+"window_pin_mode" = "கடவு எண்";
+"window_text_display_settings_title" = "உரை விருப்பத்தேர்வுகள் - சாளரம் %d";
+"workspace_text_display_settings_title" = "உரை விருப்பத்தேர்வுகள் - %@";
+"workspace_text_options_link" = "பணியிட உரை விருப்பங்கள் — %@";
+"workspace_text_options_link_summary" = "இந்த பணியிடத்திற்கான உரை காட்சி அமைப்புகளை மாற்று";
