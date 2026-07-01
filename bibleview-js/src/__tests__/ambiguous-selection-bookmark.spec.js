@@ -16,7 +16,7 @@
  */
 
 import {mount} from "@vue/test-utils";
-import {afterEach, describe, expect, it} from "vitest";
+import {afterEach, describe, expect, it, vi} from "vitest";
 import {ref} from "vue";
 import AmbiguousSelection from "@/components/modals/AmbiguousSelection.vue";
 import {useOrdinalHighlight} from "@/composables/ordinal-highlight";
@@ -44,7 +44,7 @@ function testBookmark(id = "bookmark-1") {
     };
 }
 
-function mountAmbiguousSelection({bookmarks = []} = {}) {
+function mountAmbiguousSelection({bookmarks = [], appSettings = {}} = {}) {
     const bookmarkMap = new Map(bookmarks.map(bookmark => [bookmark.id, bookmark]));
 
     return mount(AmbiguousSelection, {
@@ -60,6 +60,7 @@ function mountAmbiguousSelection({bookmarks = []} = {}) {
                     activeSince: -1000,
                     activeWindow: true,
                     limitAmbiguousModalSize: false,
+                    ...appSettings,
                 },
                 [calculatedConfigKey]: {},
                 [configKey]: {},
@@ -106,6 +107,7 @@ function mountAmbiguousSelection({bookmarks = []} = {}) {
 
 afterEach(() => {
     document.body.innerHTML = "";
+    vi.restoreAllMocks();
 });
 
 describe("AmbiguousSelection bookmark routing", () => {
@@ -203,5 +205,47 @@ describe("AmbiguousSelection bookmark routing", () => {
         } finally {
             eventBus.off("bookmark_clicked", listener);
         }
+    });
+
+    /**
+     * Protects shared reader content-tap behavior while a pane is becoming active.
+     *
+     * Android and iOS both route verse clicks through this web handler. A physical tap can focus a
+     * pane and carry verse metadata in the same bubbled event, so the activation debounce must keep
+     * suppressing plain background taps without dropping explicit verse selections. Failure means a
+     * legitimate first tap on verse text can be ignored instead of opening the verse chooser.
+     */
+    it("keeps a verse metadata tap during the activation debounce", async () => {
+        vi.spyOn(performance, "now").mockReturnValue(1000);
+
+        const wrapper = mountAmbiguousSelection({
+            appSettings: {
+                activeSince: 900,
+                activeWindow: true,
+            },
+        });
+        const event = new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            clientY: 100,
+        });
+
+        addEventVerseInfo(event, {
+            bibleBookName: "Genesis",
+            bookInitials: "KJV",
+            chapter: 1,
+            ordinal: 9,
+            osisRef: "Gen.1.9",
+            verse: 9,
+            verseTo: "",
+        });
+
+        const handlePromise = wrapper.vm.handle(event);
+        await Promise.resolve();
+
+        expect(wrapper.text()).toContain("Genesis 1:9");
+
+        wrapper.vm.cancelled();
+        await handlePromise;
     });
 });

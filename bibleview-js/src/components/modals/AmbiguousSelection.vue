@@ -296,11 +296,30 @@ function minusKeyPressed() {
     }
     updateHighlight();
 }
+
+/**
+ * Handles bubbled reader clicks and chooses between direct actions, verse selection, and modal
+ * dismissal.
+ *
+ * The activation debounce still suppresses plain pane-activation taps, but verse or ordinal
+ * metadata marks the event as a content tap and must be processed even when the pane has just
+ * become active.
+ *
+ * @param event Bubbled mouse event that may carry registered callbacks, verse metadata, or ordinal
+ * metadata added by child document components.
+ * @returns A promise that settles after a direct callback runs or the ambiguous selection modal is
+ * dismissed.
+ * @remarks Mutates modal/highlight state and emits reader events. Action mode returns before state
+ * mutation; inactive plain taps return after clearing any existing highlights.
+ */
 async function handle(event: MouseEvent) {
     const isActive = appSettings.activeWindow && (performance.now() - appSettings.activeSince > 250);
     const eventFunctions = getHighestPriorityEventFunctions(event);
     const allEventFunctions = getAllEventFunctions(event);
     const hasParticularClicks = eventFunctions.filter(f => !f.options.hidden).length > 0; // let's not show only "hidden" items
+    const _verseInfo: Nullable<EventVerseInfo> = getEventVerseInfo(event);
+    const _ordinalInfo: Nullable<EventOrdinalInfo> = getEventOrdinalInfo(event);
+    const hasContentSelection = _verseInfo != null || _ordinalInfo != null;
     if (appSettings.actionMode) {
         return;
     }
@@ -309,12 +328,10 @@ async function handle(event: MouseEvent) {
     if (hadHighlights && !showModal.value && !hasParticularClicks) {
         return;
     }
-    if (!isActive && !hasParticularClicks) {
+    if (!isActive && !hasParticularClicks && !hasContentSelection) {
         return;
     }
     emit("back_clicked");
-    const _verseInfo: Nullable<EventVerseInfo> = getEventVerseInfo(event);
-    const _ordinalInfo: Nullable<EventOrdinalInfo> = getEventOrdinalInfo(event);
 
     if (multiSelectionMode.value && multiSelect(_verseInfo, _ordinalInfo)) {
         return;
