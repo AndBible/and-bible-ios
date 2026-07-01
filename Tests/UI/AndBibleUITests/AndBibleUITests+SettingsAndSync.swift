@@ -138,14 +138,12 @@ extension AndBibleUITests {
             timeout: 15
         )
 
-        let createFromDeviceButton = app.alerts.firstMatch.buttons["Copy from this device to Cloud"].firstMatch
-        XCTAssertTrue(
-            createFromDeviceButton.waitForExistence(timeout: 10),
-            "Expected the adopt-versus-create alert to expose the create-new choice."
+        chooseSyncBootstrapPromptOption(
+            "Copy from this device to Cloud",
+            expecting: ["pendingConfirmation": "resetCloud:mydocuments"],
+            in: app,
+            timeout: 10
         )
-        tapElementReliably(createFromDeviceButton, timeout: 10)
-
-        waitForSyncState(["pendingConfirmation": "resetCloud:mydocuments"], in: app, timeout: 10)
         tapAlertButton("OK", in: app, timeout: 10)
 
         waitForSyncState(
