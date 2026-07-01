@@ -58,20 +58,19 @@ final class AndBibleUITests: XCTestCase {
      Protects the host-process capture helper from blocking on descendants that inherit stdout.
      *
      * Setup:
-     * - runs a Python process that exits immediately after writing output
-     * - forks a short-lived descendant that keeps the inherited stdout descriptor open
+     * - runs a shell process that exits immediately after writing output
+     * - starts a background `sleep` process that inherits stdout
      *
      * Expected result:
-     * - the helper returns after the direct child exits and captures the direct child's output
-     * - the descendant is still alive when the helper returns, proving capture did not wait for
-     *   inherited pipe descriptors to close
+     * - the helper returns quickly after the direct child exits
+     * - the helper captures direct-child output without depending on descendant liveness checks
      *
      * Failure meaning:
      * - UI-test fixture bootstrap can stall when `simctl launch` or another host command leaves
      *   pipe descriptors attached to a launched process that outlives the command
      *
      * Side effects:
-     * - starts and terminates one descendant host Python process that inherits stdout
+     * - starts and best-effort terminates one descendant host `sleep` process
      */
     func testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen() {
         var descendantPID: pid_t?
@@ -81,41 +80,33 @@ final class AndBibleUITests: XCTestCase {
             }
         }
 
+        let startDate = Date()
         let result = runHostProcess(
-            executablePath: "/usr/bin/python3",
+            executablePath: "/bin/sh",
             arguments: [
                 "-c",
                 """
-                import os
-                import sys
-                import time
-
-                child_pid = os.fork()
-                if child_pid == 0:
-                    time.sleep(30)
-                    os._exit(0)
-
-                sys.stdout.write(f"fixture-ready:{child_pid}")
-                sys.stdout.flush()
-                os._exit(0)
+                sleep 30 &
+                child_pid=$!
+                printf "fixture-ready:%s" "$child_pid"
+                exit 0
                 """
             ],
-            timeout: 15
+            timeout: 5
         )
+        let elapsedSeconds = Date().timeIntervalSince(startDate)
 
         XCTAssertEqual(result.status, 0)
+        XCTAssertLessThan(
+            elapsedSeconds,
+            5,
+            "Host process capture should return on direct-child exit instead of waiting for inherited pipe descriptors to close."
+        )
         let outputParts = result.stdout.split(separator: ":", maxSplits: 1)
         XCTAssertEqual(outputParts.first, "fixture-ready")
         XCTAssertEqual(outputParts.count, 2)
         descendantPID = outputParts.last.flatMap { pid_t(String($0)) }
         XCTAssertNotNil(descendantPID)
-        if let descendantPID {
-            XCTAssertEqual(
-                kill(descendantPID, 0),
-                0,
-                "Host process capture should not block until inherited pipe descriptors close."
-            )
-        }
     }
 
     /**
