@@ -64,3 +64,4 @@ sections or their front-matter equivalents:
 - [0006: Modal Presentation Ownership For Android Parity](0006-modal-presentation-ownership-for-android-parity.md)
 - [0007: iOS Discrete Mode App Name Boundary](0007-ios-discrete-mode-app-name-boundary.md)
 - [0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)
+- [0009: Android Localization Source Of Truth](0009-android-localization-source-of-truth.md)
