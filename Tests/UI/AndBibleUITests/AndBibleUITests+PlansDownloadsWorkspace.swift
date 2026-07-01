@@ -134,39 +134,26 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies workspace creation and Downloads repository management from reader-owned routes.
+     Verifies Downloads repository management from the reader-owned route.
 
      Repository add, replace, delete, and reset persistence runs in `RepositorySourceManagerTests`
      because that is the SwordKit-owned source-management contract. This UI smoke intentionally
      stays at the visible route boundary while still proving the real reader menu opens Downloads
-     and Android's Downloads overflow exposes Custom repositories. Workspace graph persistence is
-     package-covered by `WorkspaceWindowStoreTests`; the visible smoke only proves the selector
-     prompt can create a workspace and return control to the reader shell before another route opens.
+     and Android's Downloads overflow exposes Custom repositories. Workspace graph persistence and
+     prompt behavior stay covered by workspace-specific package and UI contracts instead of being
+     coupled to this Downloads route smoke.
      *
      * - Side effects:
-     *   - launches the reader shell and opens the workspace selector from the reader menu
-     *   - creates one workspace from the selector-owned prompt and verifies reader-shell return
+     *   - launches the reader shell
      *   - opens Downloads from the real reader menu
      *   - opens the repository manager from Android's Downloads overflow menu
      * - Failure modes:
-     *   - fails if the workspace selector, create alert, or reader-shell return regresses
      *   - fails if the downloads browser or repository manager never appears
      *   - fails if the repository manager loses the visible add-source affordance
      */
     func testDownloadsRepositoryManagerOpensFromOverflow() {
         let app = makeApp()
-        let createdName = "W1"
         app.launch()
-
-        XCTAssertTrue(openWorkspaceSelector(in: app).exists)
-        _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
-        typeWorkspaceNamePromptText(createdName, in: app, timeout: 15)
-        tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
-
-        XCTAssertTrue(
-            waitForReaderShellReady(in: app, timeout: 20),
-            "Expected creating a workspace to return to the reader shell before opening Downloads."
-        )
 
         XCTAssertTrue(openDownloads(in: app).exists)
         tapElementReliably(
