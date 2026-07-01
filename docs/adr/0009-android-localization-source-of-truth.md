@@ -190,13 +190,21 @@ Android `app/src/main/res/values*/strings.xml` resources are canonical for iOS
 keys that represent the same user-facing AndBible text.
 
 Same-name shared keys are Android-sourced automatically when both platforms
-define the key and the Android catalog provides the source English value.
+define the key and the Android catalog provides the source English value, unless
+the iOS key is listed as a same-name semantic collision in the guardrail. A
+same-name collision means Android and iOS use the same resource key for
+different product surfaces.
 
 Cross-name shared keys must be listed in
 `ANDROID_SHARED_KEY_MAPPINGS` in
 `scripts/check_settings_localization_guardrails.py`. Each entry maps one iOS key
 to one Android resource key. Contributors must not rely on fuzzy matching,
 partial English matching, or unstated manual judgment for these keys.
+
+Same-name semantic collisions must be listed in
+`ANDROID_SHARED_SAME_NAME_EXCLUSIONS` in the same script. Exclusions apply only
+to automatic same-name sourcing; an explicit cross-name mapping may still use
+that Android key when the mapped iOS surface is Android-equivalent.
 
 The generated settings localization snapshot must record `source_key_by_key` so
 reviewers can see the Android resource key that sources each iOS key. Snapshot

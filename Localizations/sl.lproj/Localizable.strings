@@ -30,7 +30,7 @@
 "off" = "Off";
 "inline" = "Inline";
 "links" = "Povezave";
-"hidden" = "skrito";
+"hidden" = "Hidden";
 "completed" = "Dokončano";
 "no_results" = "No Results";
 "searching" = "Searching...";
@@ -376,7 +376,7 @@
 "restart_required" = "Restart Required";
 "restart_to_apply_sync" = "Please restart the app to apply sync changes.";
 "disable_sync_title" = "Disable iCloud Sync?";
-"disable_sync" = "Onemogoči sinhronizacijo";
+"disable_sync" = "Disable Sync";
 "disable_sync_warning" = "Data already synced to iCloud will remain. New changes will only be saved locally.";
 
 

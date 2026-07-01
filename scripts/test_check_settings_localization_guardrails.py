@@ -432,6 +432,57 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
             },
         )
 
+    def test_shared_catalog_excludes_same_name_semantic_collisions(self) -> None:
+        """Prevents broad same-name matching from importing unrelated Android text.
+
+        Some iOS keys share a resource name with Android but not a product
+        meaning. The catalog must leave those iOS-owned keys out of automatic
+        same-name sourcing while still allowing an explicit cross-name mapping
+        to use the same Android source key for the Android-equivalent iOS
+        surface.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            android_root = root / "android"
+            self.make_shared_translation_repo(root, ["en", "fr"])
+            self.write_ios_strings(
+                root,
+                "AndBible",
+                "en",
+                {
+                    "disable_sync": "Disable Sync",
+                    "hidden": "Hidden",
+                    "safe_title": "Safe title",
+                    "window_disable_sync": "Disable synchronize",
+                },
+            )
+            self.write_android_strings(
+                android_root,
+                "values",
+                {
+                    "disable_sync": "Disable synchronize",
+                    "hidden": "hidden",
+                    "safe_title": "Safe title",
+                },
+            )
+            self.write_android_strings(
+                android_root,
+                "values-fr",
+                {
+                    "disable_sync": "Desactiver synchroniser",
+                    "hidden": "masque",
+                    "safe_title": "Titre sur",
+                },
+            )
+
+            catalog = build_android_shared_localization(root, android_root)
+
+        self.assertEqual(catalog.safe_keys, ["safe_title", "window_disable_sync"])
+        self.assertEqual(catalog.source_key_by_key["safe_title"], "safe_title")
+        self.assertEqual(catalog.source_key_by_key["window_disable_sync"], "disable_sync")
+        self.assertNotIn("disable_sync", catalog.source_key_by_key)
+        self.assertNotIn("hidden", catalog.source_key_by_key)
+
     def test_shared_audit_reports_missing_placeholders_and_android_drift(self) -> None:
         """Reports every safe shared key that is not using Android's translation.
 

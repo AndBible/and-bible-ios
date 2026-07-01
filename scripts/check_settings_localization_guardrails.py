@@ -257,6 +257,19 @@ particular fixture or checkout.
 """
 
 
+ANDROID_SHARED_SAME_NAME_EXCLUSIONS = {
+    "disable_sync",
+    "hidden",
+}
+"""iOS keys that must not be Android-sourced by same-name matching.
+
+Entries are same-name semantic collisions: Android has the same resource key,
+but the iOS key is used for a different product surface. Explicit cross-name
+mappings may still point at one of these Android keys when that mapping names an
+Android-equivalent iOS surface.
+"""
+
+
 def default_repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -675,6 +688,7 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
     source_key_by_key = {
         key: key
         for key in set(ios_english) & set(android_base)
+        if key not in ANDROID_SHARED_SAME_NAME_EXCLUSIONS
     }
     source_key_by_key.update(
         {

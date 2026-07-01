@@ -30,7 +30,7 @@
 "off" = "Off";
 "inline" = "Inline";
 "links" = "链接";
-"hidden" = "已隐藏";
+"hidden" = "Hidden";
 "completed" = "已完成";
 "no_results" = "No Results";
 "searching" = "Searching...";
@@ -409,7 +409,7 @@
 "restart_required" = "Restart Required";
 "restart_to_apply_sync" = "Please restart the app to apply sync changes.";
 "disable_sync_title" = "Disable iCloud Sync?";
-"disable_sync" = "取消同步";
+"disable_sync" = "Disable Sync";
 "disable_sync_warning" = "Data already synced to iCloud will remain. New changes will only be saved locally.";
 
 /* Phase H: Module Browser */
