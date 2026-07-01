@@ -165,4 +165,50 @@ describe("scroll composable", () => {
 
         expect(scrollTo).toHaveBeenCalledWith(0, 243.33333333333334);
     });
+
+    /**
+     * Protects reader document lifecycle cleanup for temporary link scroll anchors.
+     *
+     * Link navigation can clear or replace the reader document before the resize that follows panel
+     * opening. A detached source anchor must not be measured later because that would scroll the new
+     * document based on stale geometry from the old document.
+     */
+    it("ignores a detached scroll anchor after the reader document is cleared", async () => {
+        const target = document.createElement("a");
+        target.className = "reference-link";
+        target.textContent = "Genesis 1:1";
+        target.getBoundingClientRect = () => ({top: 10, bottom: 20});
+        document.body.appendChild(target);
+
+        Object.defineProperty(window, "scrollY", {value: 500, configurable: true});
+        Object.defineProperty(window, "innerHeight", {value: 600, configurable: true});
+        vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => {
+            callback(0);
+            return 1;
+        });
+        const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+        mount(defineComponent({
+            setup() {
+                useScroll(
+                    {},
+                    {disableAnimations: false, topOffset: 0, bottomOffset: 0, imeOpen: false},
+                    ref({topOffset: 100}),
+                    {highlightOrdinal: vi.fn(), resetHighlights: vi.fn()},
+                    ref(Promise.resolve()),
+                    ref(0)
+                );
+            },
+            template: "<div />",
+        }));
+
+        await new Promise(resolve => setTimeout(resolve, 0));
+        eventBus.emit("set_scroll_anchor", [target]);
+        eventBus.emit("clear_document", []);
+        target.remove();
+        window.dispatchEvent(new Event("resize"));
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(scrollTo).not.toHaveBeenCalled();
+    });
 });

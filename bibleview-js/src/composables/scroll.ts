@@ -290,8 +290,6 @@ export function useScroll(
         const {targetId, options} = resolveScrollToVerseRequest(request);
         scrollToId(targetId, options);
     })
-    setupEventBusListener("setup_content", setupContent)
-
     let scrollAnchorElement: HTMLElement | null = null;
     let scrollAnchorCleanupTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -330,12 +328,21 @@ export function useScroll(
         scrollAnchorCleanupTimeout = setTimeout(clearScrollAnchor, 3000);
     }
 
+    setupEventBusListener("clear_document", clearScrollAnchor);
+    setupEventBusListener("setup_content", async (...args: Parameters<typeof setupContent>) => {
+        clearScrollAnchor();
+        await setupContent(...args);
+    })
     setupEventBusListener("set_scroll_anchor", setScrollAnchor);
 
     setupWindowEventListener('resize', async () => {
         if (!scrollAnchorElement) return;
         await waitNextAnimationFrame();
         if (!scrollAnchorElement) return;
+        if (!scrollAnchorElement.isConnected) {
+            clearScrollAnchor();
+            return;
+        }
         const rect = scrollAnchorElement.getBoundingClientRect();
         const viewTop = calculatedConfig.value.topOffset;
         const viewBottom = window.innerHeight;
