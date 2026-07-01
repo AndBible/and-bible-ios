@@ -15,7 +15,19 @@
  * If not, see http://www.gnu.org/licenses/.
  */
 
+import {mount} from "@vue/test-utils";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {defineComponent} from "vue";
+import AndBibleLink from "@/components/OSIS/AndBibleLink.vue";
+import {useSlotHtmlContent} from "@/composables/slot-html-content";
+import {eventBus} from "@/eventbus";
+import {
+    androidKey,
+    appSettingsKey,
+    calculatedConfigKey,
+    configKey,
+    stringsKey,
+} from "@/types/constants";
 import {handleAnchorNavigation} from "@/utils";
 
 describe("link navigation", () => {
@@ -97,5 +109,85 @@ describe("link navigation", () => {
         expect(handled).toBe(false);
         expect(event.defaultPrevented).toBe(false);
         expect(postMessage).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Protects Android link-panel scroll anchoring for sanitized slot HTML links.
+     *
+     * Links rendered from sanitized HTML should record their clicked anchor before routing so the
+     * scroll composable can keep the source link visible if the destination panel changes viewport
+     * height.
+     */
+    it("records a scroll anchor before navigating sanitized slot HTML links", async () => {
+        const scrollAnchorEvents = [];
+        const listener = args => scrollAnchorEvents.push(args);
+        eventBus.on("set_scroll_anchor", listener);
+
+        try {
+            const wrapper = mount(defineComponent({
+                setup() {
+                    return useSlotHtmlContent();
+                },
+                template: `
+                    <div ref="slotContent" @click="handleClick">
+                        <a href="osis://?osis=Gen.1.1"><span>Genesis 1:1</span></a>
+                    </div>
+                `,
+            }));
+            const link = wrapper.find("a").element;
+
+            await wrapper.find("span").trigger("click");
+
+            expect(scrollAnchorEvents).toEqual([[link]]);
+            expect(postMessage).toHaveBeenCalledWith({
+                method: "openExternalLink",
+                args: ["osis://?osis=Gen.1.1"],
+            });
+        } finally {
+            eventBus.off("set_scroll_anchor", listener);
+        }
+    });
+
+    /**
+     * Protects Android link-panel scroll anchoring for OSIS component links.
+     *
+     * Component-managed AndBible links bypass the plain document click handler, so they must record
+     * the clicked element themselves before routing to the native link path.
+     */
+    it("records a scroll anchor before navigating AndBibleLink component clicks", async () => {
+        const scrollAnchorEvents = [];
+        const listener = args => scrollAnchorEvents.push(args);
+        eventBus.on("set_scroll_anchor", listener);
+
+        try {
+            const wrapper = mount(AndBibleLink, {
+                props: {
+                    href: "osis://?osis=Gen.1.1",
+                },
+                global: {
+                    provide: {
+                        [androidKey]: {},
+                        [appSettingsKey]: {},
+                        [calculatedConfigKey]: {},
+                        [configKey]: {},
+                        [stringsKey]: {},
+                    },
+                },
+                slots: {
+                    default: "<span>Genesis 1:1</span>",
+                },
+            });
+            const link = wrapper.find("a").element;
+
+            await wrapper.find("span").trigger("click");
+
+            expect(scrollAnchorEvents).toEqual([[link]]);
+            expect(postMessage).toHaveBeenCalledWith({
+                method: "openExternalLink",
+                args: ["osis://?osis=Gen.1.1"],
+            });
+        } finally {
+            eventBus.off("set_scroll_anchor", listener);
+        }
     });
 });
