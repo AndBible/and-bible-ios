@@ -308,12 +308,7 @@ struct BibleReaderAnnotationDocumentLoader {
             "type": "memorize",
             "title": memorizeReferenceTitle(request),
             "texts": textItems,
-            "state": [
-                "memorize": [
-                    "mode": "blur",
-                    "modeConfig": [String: Any](),
-                ] as [String: Any],
-            ] as [String: Any],
+            "state": memorizeDocumentState(from: request.stateJSON),
             "bookInitials": request.bookInitials,
             "v11n": "KJVA",
             "osisRef": memorizeOsisRef(request),
@@ -339,6 +334,22 @@ struct BibleReaderAnnotationDocumentLoader {
             return nil
         }
         return json
+    }
+
+    private func memorizeDocumentState(from rawState: String?) -> [String: Any] {
+        if let rawState,
+           let data = rawState.data(using: .utf8),
+           let state = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? [String: Any],
+           JSONSerialization.isValidJSONObject(state) {
+            return state
+        }
+
+        return [
+            "memorize": [
+                "mode": "blur",
+                "modeConfig": [String: Any](),
+            ] as [String: Any],
+        ]
     }
 
     /**
@@ -501,6 +512,8 @@ struct MemorizeDocumentRequest {
     let osisBookId: String
     /// Active SWORD module, or `nil` for no-module placeholder behavior.
     let activeModule: SwordModule?
+    /// Saved Vue document state from the active page manager.
+    let stateJSON: String?
     /// Resolves ordinals using active versification.
     let verseReference: BibleReaderAnnotationDocumentLoader.VerseReferenceProvider
     /// Parses SWORD verse keys.

@@ -3816,6 +3816,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 currentChapter: currentChapter,
                 osisBookId: osisBookId(for: currentBook),
                 activeModule: activeModule,
+                stateJSON: activeWindow?.pageManager?.jsState,
                 verseReference: { [weak self] book, ordinal in
                     self?.verseReference(book: book, ordinal: ordinal)
                 },

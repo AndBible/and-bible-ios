@@ -134,6 +134,49 @@ extension AndBibleTests {
             [1]
         )
     }
+
+    /**
+     Verifies Memorize document payloads reuse saved page-manager state.
+
+     Android stores the full Vue state blob on `PageManager.jsState` through `saveState`, then passes
+     that same state into the next Memorize fake document. This regression keeps iOS from
+     synthesizing a fresh blur-mode-only state that loses the user's selected memorization mode or
+     sibling document state keys.
+
+     Failure means opening Memorize on iOS resets the shared Vue document state instead of restoring
+     the Android `pageManager.jsState` contract.
+     */
+    func testMemorizeDocumentUsesSavedPageManagerState() throws {
+        let (bridge, recordedScripts) = makeMemorizeParityRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        controller.settingsStore = try makeMemorizeParitySettingsStore()
+
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.jsState = #"{"memorize":{"mode":"scramble","modeConfig":{"memorizeWordVisibility":"hidden","customLevel":7}},"otherDocument":{"selectedTab":"lexicon"}}"#
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+
+        let baselineScriptCount = recordedScripts().count
+        XCTAssertEqual(bridge.dispatchMessage(method: "memorize", args: ["KJV", 1, 1]), .handled)
+
+        let memorizeScripts = Array(recordedScripts().dropFirst(baselineScriptCount))
+        let document = try XCTUnwrap(
+            memorizeParityBridgeEmissionPayload(from: memorizeScripts, event: "add_documents") as? [String: Any]
+        )
+        let state = try XCTUnwrap(document["state"] as? [String: Any])
+        let memorizeState = try XCTUnwrap(state["memorize"] as? [String: Any])
+        XCTAssertEqual(memorizeState["mode"] as? String, "scramble")
+        XCTAssertEqual(
+            (memorizeState["modeConfig"] as? [String: Any])?["memorizeWordVisibility"] as? String,
+            "hidden"
+        )
+        XCTAssertEqual(
+            (state["otherDocument"] as? [String: Any])?["selectedTab"] as? String,
+            "lexicon"
+        )
+    }
 }
 
 /**
@@ -185,4 +228,30 @@ private func memorizationParityPayloads(from scripts: [String]) throws -> [[Stri
             let data = try XCTUnwrap(json.data(using: .utf8))
             return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         }
+}
+
+/**
+ Decodes a recorded `bibleView.emit` payload for app-host memorization parity tests.
+
+ - Parameters:
+   - scripts: JavaScript snippets recorded from `BibleBridge.emit`.
+   - event: Event name passed to `bibleView.emit`.
+ - Returns: Decoded JSON payload for the first matching event.
+ - Side effects: None.
+ - Failure modes: Throws XCTest unwrap or JSON errors when the emission wrapper is malformed.
+ */
+private func memorizeParityBridgeEmissionPayload(from scripts: [String], event: String) throws -> Any {
+    let json = try memorizeParityBridgeEmissionPayloadJSON(from: scripts, event: event)
+    let data = try XCTUnwrap(json.data(using: .utf8))
+    return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+}
+
+private func memorizeParityBridgeEmissionPayloadJSON(from scripts: [String], event: String) throws -> String {
+    let prefix = "bibleView.emit('\(event)', "
+    let script = try XCTUnwrap(scripts.first { $0.contains(prefix) })
+    let start = try XCTUnwrap(script.range(of: prefix)?.upperBound)
+    let end = try XCTUnwrap(
+        script.range(of: "); } catch", options: .backwards, range: start..<script.endIndex)?.lowerBound
+    )
+    return String(script[start..<end])
 }
