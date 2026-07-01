@@ -14,6 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import check_bridge_parity_inventory as bridge_parity
 from check_bridge_parity_inventory import (
     InventoryError,
     resolve_android_root,
@@ -182,6 +183,26 @@ class BridgeParityInventoryTests(unittest.TestCase):
         with mock.patch.dict("os.environ", {"ANDBIBLE_ANDROID_ROOT": "/tmp/and-bible"}):
             self.assertEqual(resolve_android_root(None), Path("/tmp/and-bible"))
             self.assertEqual(resolve_android_root(Path("../explicit")), Path("../explicit"))
+
+    def test_resolve_android_root_uses_sibling_checkout_when_available(self) -> None:
+        """Uses the shared sibling Android checkout when no explicit root is set.
+
+        The CI helper and local setup both place AndBible at ../and-bible. A
+        failure means bridge parity can silently fall back to inventory-only
+        validation even though a live Android checkout is available.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            ios_root = root / "and-bible-ios"
+            android_root = root / "and-bible"
+            ios_root.mkdir()
+            android_root.mkdir()
+
+            with (
+                mock.patch.object(bridge_parity, "REPO_ROOT", ios_root),
+                mock.patch.dict("os.environ", {}, clear=True),
+            ):
+                self.assertEqual(resolve_android_root(None), android_root)
 
     def test_validate_inventory_rejects_non_object_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

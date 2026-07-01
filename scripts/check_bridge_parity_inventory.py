@@ -81,6 +81,11 @@ def format_method_names(methods: set[str] | list[str]) -> str:
     return "none" if not names else ", ".join(names)
 
 
+def default_android_root() -> Path:
+    """Return the conventional sibling Android checkout path."""
+    return REPO_ROOT.parent / "and-bible"
+
+
 def methods_with_status(entries: list[Any], status: str) -> set[str]:
     """Return method names from entries that carry the requested status."""
     return {
@@ -98,6 +103,10 @@ def resolve_android_root(android_root_arg: Path | None) -> Path | None:
     android_root_env = os.environ.get(ANDROID_ROOT_ENV)
     if android_root_env:
         return Path(android_root_env).expanduser()
+
+    sibling_checkout = default_android_root()
+    if sibling_checkout.exists():
+        return sibling_checkout
 
     return None
 

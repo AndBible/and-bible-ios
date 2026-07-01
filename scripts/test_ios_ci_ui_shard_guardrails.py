@@ -82,6 +82,12 @@ def upload_step_scalar(step_text: str, key: str) -> str:
     return match.group(1)
 
 
+def step_offsets(workflow_text: str, step_name: str) -> list[int]:
+    """Return source offsets for every workflow step with the requested name."""
+    pattern = re.compile(rf"^\s*-\s+name:\s+{re.escape(step_name)}\s*$", re.MULTILINE)
+    return [match.start() for match in pattern.finditer(workflow_text)]
+
+
 class IOSCIUIShardGuardrailsTests(unittest.TestCase):
     """Checks the workflow-level guardrail around dynamic UI shard counts."""
 
@@ -101,6 +107,36 @@ class IOSCIUIShardGuardrailsTests(unittest.TestCase):
             )
 
         self.assertGreater(len(upload_steps), 0, "Expected the workflow to contain upload-artifact steps.")
+
+    def test_ios_ci_clones_android_reference_before_parity_guardrails(self) -> None:
+        """Ensures parity jobs have a live Android checkout before guardrails run.
+
+        The workflow-level contract is that both bridge and localization parity
+        checks use the shared checkout helper and ANDBIBLE_ANDROID_ROOT. A
+        failure means CI can regress to snapshot-only or inventory-only checks.
+        """
+        workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
+        checkout_offsets = step_offsets(workflow_text, "Checkout Android reference")
+        bridge_check_offsets = step_offsets(workflow_text, "Check bridge parity inventory")
+        localization_check_offsets = step_offsets(workflow_text, "Run SETPAR-603 guardrails")
+
+        self.assertTrue(
+            (REPO_ROOT / "scripts/ensure_android_reference_checkout.sh").exists(),
+            "Expected a reusable Android reference checkout script.",
+        )
+        self.assertRegex(
+            workflow_text,
+            re.compile(r"^\s+ANDBIBLE_ANDROID_ROOT:\s+['\"]?\.\./and-bible['\"]?\s*$", re.MULTILINE),
+        )
+        self.assertEqual(2, len(checkout_offsets))
+        self.assertEqual(1, len(bridge_check_offsets))
+        self.assertEqual(1, len(localization_check_offsets))
+        self.assertLess(checkout_offsets[0], bridge_check_offsets[0])
+        self.assertLess(checkout_offsets[1], localization_check_offsets[0])
+        self.assertEqual(
+            "scripts/ensure_android_reference_checkout.sh",
+            workflow_step_run_block(workflow_text, "Checkout Android reference"),
+        )
 
     def test_upload_artifact_retention_guardrail_handles_name_less_steps(self) -> None:
         """Ensure the retention guardrail classifies valid `- uses:` upload steps."""
