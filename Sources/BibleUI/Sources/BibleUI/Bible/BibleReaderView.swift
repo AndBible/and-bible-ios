@@ -4421,7 +4421,8 @@ public struct BibleReaderView: View {
        emit page-scroll commands into the active web view.
      - Failure modes: Returns without action when the gesture did not originate from the active
        window, no focused controller is registered, an in-page text selection is active, the Vue
-       client reports an open modal, or the configured swipe mode is `.none`.
+       client reports an open modal, the rendered document blocks host page navigation, or the
+       configured swipe mode is `.none`.
      */
     private func handleHorizontalSwipe(from window: Window, direction: NativeHorizontalSwipeDirection) {
         guard windowManager.activeWindow?.id == window.id else { return }
@@ -4430,7 +4431,8 @@ public struct BibleReaderView: View {
             modeRawValue: bibleViewSwipeMode,
             direction: direction,
             hasActiveSelection: ctrl.hasActiveSelection,
-            hasOpenModal: ctrl.webModalIsOpen
+            hasOpenModal: ctrl.webModalIsOpen,
+            allowsDocumentNavigation: ctrl.allowsHorizontalDocumentNavigation
         ) {
         case .navigateNextChapter:
             ctrl.navigateNext()

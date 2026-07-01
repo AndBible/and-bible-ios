@@ -68,7 +68,14 @@ struct BibleReaderAnnotationDocumentLoader {
     /// Reads memorization state for a rendered ordinal range.
     typealias OrdinalProgressProvider = (String, Int, Int) -> [Int]
     /// Updates the compact rendered-content state owned by the controller.
-    typealias RenderedContentStateSetter = (DocumentCategory, String?, String, Int?, String?) -> Void
+    typealias RenderedContentStateSetter = (
+        DocumentCategory,
+        String?,
+        String,
+        Int?,
+        String?,
+        ReaderRenderedDocumentKind
+    ) -> Void
 
     /// Bridge used for Vue event emission.
     private let bridge: BibleBridge
@@ -172,7 +179,7 @@ struct BibleReaderAnnotationDocumentLoader {
             event: "setup_content",
             data: ReaderSetupContentPayload(jumpToOrdinal: jumpToOrdinal)
         )
-        setRenderedContentState(.bible, "My Notes", "My Notes", currentChapter, docId)
+        setRenderedContentState(.bible, "My Notes", "My Notes", currentChapter, docId, .standard)
         incrementMyNotesRevision()
         return true
     }
@@ -243,7 +250,7 @@ struct BibleReaderAnnotationDocumentLoader {
             event: "setup_content",
             data: ReaderSetupContentPayload(jumpToId: bookmarkId?.uuidString)
         )
-        setRenderedContentState(.bible, "StudyPad", label.name, nil, "journal_\(labelId.uuidString)")
+        setRenderedContentState(.bible, "StudyPad", label.name, nil, "journal_\(labelId.uuidString)", .studyPad)
         applyNightModeBackground()
         return true
     }
@@ -276,7 +283,8 @@ struct BibleReaderAnnotationDocumentLoader {
             request.activeModuleName,
             "Memorize",
             request.currentChapter,
-            "memorize:\(request.bookInitials):\(request.startOrdinal)-\(request.endOrdinal)"
+            "memorize:\(request.bookInitials):\(request.startOrdinal)-\(request.endOrdinal)",
+            .memorize
         )
         clearSelection()
         applyNightModeBackground()
