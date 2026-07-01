@@ -62,11 +62,12 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
-     Verifies active and failed Downloads activity drives Android-style status ordering.
+     Verifies active and failed Downloads activity drives Android-style status ordering on rebuild.
 
-     Android promotes active installs and update rows while preserving visible failure state. iOS must
-     keep in-progress percentages and failure messages tied to row status instead of flattening those
-     rows into ordinary installable documents.
+     Android promotes active installs and update rows when `filterDocuments()` recomputes the list,
+     while preserving visible failure state. iOS must keep in-progress percentages and failure
+     messages tied to row status instead of flattening those rows into ordinary installable
+     documents.
      */
     func testModuleBrowserDownloadActivityDrivesAndroidProgressAndErrorStatus() {
         let modules = [
@@ -154,12 +155,122 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
+     Verifies Downloads row activity updates do not recompute visible row order.
+
+     Android `DownloadActivity.doDownload` enqueues the document and calls `notifyDataSetChanged()`;
+     it does not rerun `DocumentSelectionBase.filterDocuments()`. That means the tapped row updates
+     progress in place, while a later explicit filter rebuild can still apply Android's
+     active-download-first sort. iOS must keep the same split so live progress state does not make
+     the selected row disappear from the current scroll position.
+     */
+    func testModuleBrowserKeepsDownloadRowOrderStableUntilFilterRebuild() {
+        let modules = [
+            RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "WEB",
+                description: "World English Bible",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "2.0"
+            ),
+            RemoteModuleInfo(
+                name: "REC",
+                description: "Recommended Bible",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "WARN",
+                description: "Active warning module",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            )
+        ]
+        let installed = [
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en", version: "1.0"),
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en", version: "1.0")
+        ]
+        let recommended = ModuleDownloadConfiguration(
+            bibles: ["en": ["REC::CrossWire"]]
+        )
+
+        let initialSortSnapshot = ModuleBrowserView.downloadListSortSnapshot(
+            installedModules: installed,
+            downloadActivities: [:]
+        )
+        let visibleBeforeInstall = ModuleBrowserView.filteredDownloadModules(
+            modules,
+            selectedCategory: nil,
+            selectedLanguage: "en",
+            searchText: "",
+            installedModules: initialSortSnapshot.installedModules,
+            downloadActivities: initialSortSnapshot.downloadActivities,
+            recommendedDocuments: recommended,
+            badDocuments: nil
+        )
+
+        let liveActivities: [String: ModuleBrowserDownloadActivity] = [
+            "WARN": .inProgress(0.25)
+        ]
+        let visibleAfterRowActivity = ModuleBrowserView.filteredDownloadModules(
+            modules,
+            selectedCategory: nil,
+            selectedLanguage: "en",
+            searchText: "",
+            installedModules: initialSortSnapshot.installedModules,
+            downloadActivities: initialSortSnapshot.downloadActivities,
+            recommendedDocuments: recommended,
+            badDocuments: nil
+        )
+
+        XCTAssertEqual(visibleBeforeInstall.map(\.name), ["WEB", "KJV", "REC", "WARN"])
+        XCTAssertEqual(visibleAfterRowActivity.map(\.name), ["WEB", "KJV", "REC", "WARN"])
+        XCTAssertEqual(
+            ModuleBrowserView.displayStatus(
+                for: modules[3],
+                installedModules: installed,
+                downloadActivities: liveActivities
+            ),
+            .beingInstalled(progressPercent: 25)
+        )
+
+        let rebuiltSortSnapshot = ModuleBrowserView.downloadListSortSnapshot(
+            installedModules: installed,
+            downloadActivities: liveActivities
+        )
+        let visibleAfterFilterRebuild = ModuleBrowserView.filteredDownloadModules(
+            modules,
+            selectedCategory: nil,
+            selectedLanguage: "en",
+            searchText: "",
+            installedModules: rebuiltSortSnapshot.installedModules,
+            downloadActivities: rebuiltSortSnapshot.downloadActivities,
+            recommendedDocuments: recommended,
+            badDocuments: nil
+        )
+
+        XCTAssertEqual(visibleAfterFilterRebuild.map(\.name), ["WARN", "WEB", "KJV", "REC"])
+    }
+
+    /**
      Verifies Downloads filtering and sort order match Android's document browser rules.
 
-     Android keeps active warnings first, then updates, installed rows, recommended rows, copyright
-     placeholder rows, and finally other matching documents while hiding hard-hidden bad documents.
-     iOS must keep that same ordering contract across Bible rows, add-ons, pseudo rows, version
-     comparisons, and install-size formatting without app-host state.
+     Android keeps active warnings first after a filter rebuild, then updates, installed rows,
+     recommended rows, copyright placeholder rows, and finally other matching documents while hiding
+     hard-hidden bad documents. iOS must keep that same ordering contract across Bible rows, add-ons,
+     pseudo rows, version comparisons, and install-size formatting without app-host state.
      */
     func testModuleBrowserFiltersAndSortsAndroidDownloadRows() {
         let modules = [
