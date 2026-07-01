@@ -21,6 +21,20 @@ import UniformTypeIdentifiers
  - presenting the available-plan sheet can also import a custom plan file
  */
 public struct ReadingPlanListView: View {
+    /// Destinations owned by the reading-plan list while it remains inside the reader stack.
+    private enum ReadingPlanListRoute: Identifiable, Hashable {
+        /// Daily-reading view for a plan that was just started from the selector.
+        case dailyReading(UUID)
+
+        /// Stable route identity used by SwiftUI's item-based navigation destination.
+        var id: String {
+            switch self {
+            case .dailyReading(let planID):
+                return "dailyReading::\(planID.uuidString)"
+            }
+        }
+    }
+
     /// SwiftData context used to create and delete plans.
     @Environment(\.modelContext) private var modelContext
 
@@ -29,6 +43,12 @@ public struct ReadingPlanListView: View {
 
     /// Whether the available-plan picker sheet is presented.
     @State private var showAvailablePlans = false
+
+    /// Route pushed after a new plan is created from the available-plan selector.
+    @State private var activeReadingPlanRoute: ReadingPlanListRoute?
+
+    /// New plan identifier waiting for the selector sheet to dismiss before navigation.
+    @State private var pendingStartedPlanID: UUID?
 
     /**
      Creates the reading-plan list screen.
@@ -53,11 +73,7 @@ public struct ReadingPlanListView: View {
     public var body: some View {
         Group {
             if plans.isEmpty {
-                ContentUnavailableView(
-                    String(localized: "reading_plan_no_plans"),
-                    systemImage: "calendar",
-                    description: Text(String(localized: "reading_plan_no_plans_description"))
-                )
+                emptyState
                 .accessibilityIdentifier("readingPlanListScreen")
                 .accessibilityValue(readingPlanListAccessibilityValue)
             } else {
@@ -76,22 +92,77 @@ public struct ReadingPlanListView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(String(localized: "reading_plan_start"), systemImage: "plus") {
-                    showAvailablePlans = true
+                    presentAvailablePlans()
                 }
                 .accessibilityIdentifier("readingPlanStartButton")
             }
         }
+        .navigationDestination(item: $activeReadingPlanRoute) { route in
+            readingPlanListDestination(route)
+        }
         .sheet(isPresented: $showAvailablePlans) {
             NavigationStack {
                 AvailablePlansView { template in
-                    let _ = ReadingPlanService.startPlan(
+                    let plan = ReadingPlanService.startPlan(
                         template: template,
                         modelContext: modelContext
                     )
+                    pendingStartedPlanID = plan.id
                     showAvailablePlans = false
                 }
             }
             .presentationDetents([.large])
+        }
+        .onChange(of: showAvailablePlans) { _, isPresented in
+            guard !isPresented else { return }
+            navigateToPendingStartedPlan()
+        }
+    }
+
+    /// Empty reading-plan state with the same start affordance Android exposes from the selector path.
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            ContentUnavailableView(
+                String(localized: "reading_plan_no_plans"),
+                systemImage: "calendar",
+                description: Text(String(localized: "reading_plan_no_plans_description"))
+            )
+
+            Button {
+                presentAvailablePlans()
+            } label: {
+                SwiftUI.Label(String(localized: "reading_plan_start"), systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("readingPlanStartButton")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Opens the available-plan selector through one shared state mutation path.
+    private func presentAvailablePlans() {
+        showAvailablePlans = true
+    }
+
+    /**
+     Pushes the just-created plan into Daily Reading after the selector sheet has dismissed.
+
+     Side effects:
+     - clears `pendingStartedPlanID`
+     - sets `activeReadingPlanRoute`, which drives SwiftUI navigation in the parent stack
+     */
+    private func navigateToPendingStartedPlan() {
+        guard let pendingStartedPlanID else { return }
+        self.pendingStartedPlanID = nil
+        activeReadingPlanRoute = .dailyReading(pendingStartedPlanID)
+    }
+
+    /// Builds reading-plan list destinations without adding another modal presentation layer.
+    @ViewBuilder
+    private func readingPlanListDestination(_ route: ReadingPlanListRoute) -> some View {
+        switch route {
+        case .dailyReading(let planID):
+            DailyReadingView(planId: planID)
         }
     }
 

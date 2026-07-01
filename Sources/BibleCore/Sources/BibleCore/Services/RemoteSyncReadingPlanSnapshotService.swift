@@ -125,6 +125,8 @@ public struct RemoteSyncReadingPlanCurrentSnapshot: Sendable, Equatable {
  - preserved Android `remoteStatusID` values are reused when present
  - locally completed days without preserved Android status JSON are synthesized as fully-read
    `chapterReadArray` payloads using the current reading assignment count
+ - non-date-based days before `currentDay` are not synthesized because Android treats them as
+   historic progress derived from the plan row itself
  - synthesized status identifiers are deterministic so later uploads keep stable row keys even
    before Android-origin status metadata exists
 
@@ -418,6 +420,9 @@ public final class RemoteSyncReadingPlanSnapshotService {
         guard day.isCompleted else {
             return nil
         }
+        guard !Self.isImplicitHistoricStatus(plan: plan, day: day) else {
+            return nil
+        }
 
         let readingCount = Self.expectedReadingCount(for: day.readings)
         let payload = SynthesizedReadingStatusPayload(
@@ -462,6 +467,34 @@ public final class RemoteSyncReadingPlanSnapshotService {
     }
 
     /**
+     Checks whether one completed local day is Android-historic progress represented by `currentDay`.
+
+     - Parameters:
+       - plan: Parent reading plan containing Android's persisted current-day pointer.
+       - day: Local day row being considered for synthesized status upload.
+     - Returns: `true` when Android would derive the day as read without a status row.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func isImplicitHistoricStatus(plan: ReadingPlan, day: ReadingPlanDay) -> Bool {
+        !isDateBasedReadings(day.readings) && day.dayNumber < plan.currentDay
+    }
+
+    /**
+     Detects Android's date-prefixed reading-plan assignment format.
+
+     - Parameter readings: Local reading-assignment string for one plan day.
+     - Returns: `true` for strings beginning with Android's `Mon-1;` date prefix.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func isDateBasedReadings(_ readings: String) -> Bool {
+        let regex = try! NSRegularExpression(pattern: #"^[A-Za-z]{3}-\d{1,2};"#)
+        let range = NSRange(readings.startIndex..<readings.endIndex, in: readings)
+        return regex.firstMatch(in: readings, options: [], range: range) != nil
+    }
+
+    /**
      Counts how many logical readings are present in one local plan-day assignment string.
 
      Android date-based plans prefix the actual comma-delimited reading list with a leading
@@ -473,12 +506,8 @@ public final class RemoteSyncReadingPlanSnapshotService {
      - Failure modes: This helper cannot fail.
      */
     private static func expectedReadingCount(for readings: String) -> Int {
-        let regex = try! NSRegularExpression(pattern: #"^[A-Za-z]{3}-\d{1,2};"#)
-        let range = NSRange(readings.startIndex..<readings.endIndex, in: readings)
-
         let readingsPortion: String
-        if regex.firstMatch(in: readings, options: [], range: range) != nil,
-           let separatorIndex = readings.firstIndex(of: ";") {
+        if isDateBasedReadings(readings), let separatorIndex = readings.firstIndex(of: ";") {
             readingsPortion = String(readings[readings.index(after: separatorIndex)...])
         } else {
             readingsPortion = readings
