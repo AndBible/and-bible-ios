@@ -23,6 +23,34 @@ enum ReaderHorizontalSwipeAction: Equatable {
     case none
 }
 
+/// Rendered Vue document kind currently hosted by a native reader pane.
+enum ReaderRenderedDocumentKind: Equatable {
+    /// Standard Bible, commentary, auxiliary, or transient document content.
+    case standard
+
+    /// Android-style StudyPad document rendered inside the shared Vue reader.
+    case studyPad
+
+    /// Android-style Memorize document rendered inside the shared Vue reader.
+    case memorize
+
+    /**
+     Whether native chapter/document swipes may leave this rendered document.
+
+     Android refuses page-next/page-previous gestures for StudyPad and Memorize fake documents.
+     Keeping that gate on the rendered document kind prevents the host gesture recognizer from
+     escaping special Vue documents that manage their own internal interaction.
+     */
+    var allowsHorizontalDocumentNavigation: Bool {
+        switch self {
+        case .standard:
+            return true
+        case .studyPad, .memorize:
+            return false
+        }
+    }
+}
+
 /// Resolves configured Bible-view swipe behavior without touching view or controller state.
 enum ReaderHorizontalSwipePolicy {
     /**
@@ -35,6 +63,8 @@ enum ReaderHorizontalSwipePolicy {
        - hasActiveSelection: Whether the pane currently owns a text selection that should keep
          swipe gestures from navigating away.
        - hasOpenModal: Whether the Vue reader client reports an open modal for the pane.
+       - allowsDocumentNavigation: Whether the current rendered document may be replaced by a
+         horizontal chapter/document navigation action.
      - Returns: The navigation, page-scroll, or no-op action the host should execute.
 
      Side effects:
@@ -48,13 +78,15 @@ enum ReaderHorizontalSwipePolicy {
         modeRawValue: String,
         direction: NativeHorizontalSwipeDirection,
         hasActiveSelection: Bool,
-        hasOpenModal: Bool
+        hasOpenModal: Bool,
+        allowsDocumentNavigation: Bool = true
     ) -> ReaderHorizontalSwipeAction {
         guard !hasOpenModal else { return .none }
         guard !hasActiveSelection else { return .none }
 
         switch BibleSwipeMode(rawValue: modeRawValue) ?? .chapter {
         case .chapter:
+            guard allowsDocumentNavigation else { return .none }
             return direction == .left ? .navigateNextChapter : .navigatePreviousChapter
         case .page:
             return direction == .left ? .scrollPageDown : .scrollPageUp

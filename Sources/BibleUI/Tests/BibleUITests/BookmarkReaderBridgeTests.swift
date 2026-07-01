@@ -529,6 +529,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
             ) as? [String: Any]
         )
         XCTAssertEqual(payload["type"] as? String, "journal")
+        XCTAssertFalse(controller.allowsHorizontalDocumentNavigation)
 
         let labelObject = try XCTUnwrap(payload["label"] as? [String: Any])
         XCTAssertEqual(labelObject["name"] as? String, "Study \"Notes\"")

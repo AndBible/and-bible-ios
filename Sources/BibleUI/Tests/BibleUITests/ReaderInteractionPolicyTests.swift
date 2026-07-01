@@ -121,6 +121,47 @@ final class ReaderInteractionPolicyTests: XCTestCase {
     }
 
     /**
+     Verifies that non-pageable rendered documents cannot be changed by native horizontal swipes.
+
+     Android refuses page-next/page-previous gestures while Memorize owns the reader document.
+     The iOS host must keep the same boundary: chapter-mode swipes are ignored instead of
+     navigating away from Memorize, while page-scroll mode can still operate inside the current
+     document. A failure means the native gesture recognizer can escape a special Vue document.
+     */
+    func testReaderHorizontalSwipePolicyBlocksDocumentNavigationWhenCurrentDocumentCannotPage() {
+        XCTAssertEqual(
+            ReaderHorizontalSwipePolicy.action(
+                modeRawValue: "CHAPTER",
+                direction: .left,
+                hasActiveSelection: false,
+                hasOpenModal: false,
+                allowsDocumentNavigation: false
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ReaderHorizontalSwipePolicy.action(
+                modeRawValue: "CHAPTER",
+                direction: .right,
+                hasActiveSelection: false,
+                hasOpenModal: false,
+                allowsDocumentNavigation: false
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ReaderHorizontalSwipePolicy.action(
+                modeRawValue: "PAGE",
+                direction: .left,
+                hasActiveSelection: false,
+                hasOpenModal: false,
+                allowsDocumentNavigation: false
+            ),
+            .scrollPageDown
+        )
+    }
+
+    /**
      Verifies auto-fullscreen threshold accumulation across scroll directions.
 
      The policy should accumulate deltas until the Android-parity threshold is crossed, reset after
