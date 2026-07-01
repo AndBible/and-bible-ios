@@ -10,9 +10,11 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import check_settings_localization_guardrails as localization_guardrails
 from check_settings_localization_guardrails import (
     LocalePrefOption,
     PARITY_KEYS,
@@ -148,6 +150,19 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
 
         self.assertEqual(audit.supported_values, ["", "iw", "in", "zh-Hant-TW", "zh-Hans-CN"])
         self.assertEqual(audit.failures, [])
+
+    def test_default_android_root_uses_shared_android_checkout_env(self) -> None:
+        """Derives the Android resource path from the shared checkout env var.
+
+        CI exposes ANDBIBLE_ANDROID_ROOT as the repository root so all parity
+        scripts agree on one cloned checkout. A failure means localization can
+        keep using stale snapshots while other parity checks use live Android.
+        """
+        with mock.patch.dict("os.environ", {"ANDBIBLE_ANDROID_ROOT": "/tmp/and-bible"}):
+            self.assertEqual(
+                localization_guardrails.default_android_root(),
+                Path("/tmp/and-bible/app/src/main/res"),
+            )
 
     def test_locale_pref_snapshot_loader_preserves_default_empty_value(self) -> None:
         """Protects the Android default locale option while validating snapshot shape.

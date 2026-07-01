@@ -15,6 +15,7 @@ env:
   UI_TEST_TARGET_SHARD_DURATION_SECONDS: "600"
   UI_TEST_TIMEOUT_MINUTES: "90"
   UI_TEST_TIMINGS_FILE: Tests/UI/Fixtures/ui_test_timings.json
+  ANDBIBLE_ANDROID_ROOT: ../and-bible
 
 jobs:
   repo-standards:
@@ -78,6 +79,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Checkout Android reference
+        run: scripts/ensure_android_reference_checkout.sh
+
       - name: Run repo standards unit tests
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
@@ -116,6 +120,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Checkout Android reference
+        run: scripts/ensure_android_reference_checkout.sh
 
       - name: Setup Python
         uses: actions/setup-python@v6
