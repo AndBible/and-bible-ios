@@ -37,9 +37,6 @@ public struct SyncSettingsView: View {
     /// Whether the destructive disable-sync confirmation dialog is presented.
     @State private var showDisableConfirmation = false
 
-    /// Whether the restart-required informational alert is presented.
-    @State private var showRestartAlert = false
-
     /// Currently selected sync backend shown in the backend picker.
     @State private var selectedBackend: RemoteSyncBackend = .iCloud
 
@@ -285,15 +282,9 @@ public struct SyncSettingsView: View {
         ) {
             Button(String(localized: "disable_sync"), role: .destructive) {
                 syncService.toggleSync()
-                showRestartAlert = true
             }
         } message: {
             Text(String(localized: "disable_sync_warning"))
-        }
-        .alert(String(localized: "restart_required"), isPresented: $showRestartAlert) {
-            Button(String(localized: "ok")) {}
-        } message: {
-            Text(String(localized: "restart_to_apply_sync"))
         }
         .alert(
             String(localized: "cloud_sync_title"),
@@ -348,11 +339,13 @@ public struct SyncSettingsView: View {
                 Toggle(isOn: Binding(
                     get: { syncService.isEnabled },
                     set: { newValue in
+                        guard newValue != syncService.isEnabled else {
+                            return
+                        }
                         if !newValue {
                             showDisableConfirmation = true
                         } else {
                             syncService.toggleSync()
-                            showRestartAlert = true
                         }
                     }
                 )) {
@@ -360,10 +353,10 @@ public struct SyncSettingsView: View {
                         SyncSettingsPresentation.backend,
                         title: String(localized: "icloud_sync_enabled"),
                         summary: String(localized: "icloud_sync_description"),
-                        isEnabled: !syncService.requiresRestart
+                        isEnabled: isICloudToggleEnabled
                     )
                 }
-                .disabled(syncService.requiresRestart)
+                .disabled(!isICloudToggleEnabled)
                 .accessibilityIdentifier("syncICloudEnabledToggle")
             } header: {
                 syncSettingsSectionHeader(String(localized: "icloud_sync"))
@@ -416,6 +409,17 @@ public struct SyncSettingsView: View {
                 }
             }
         }
+    }
+
+    /**
+     Returns whether the iCloud toggle should accept another user change.
+
+     Live runtime rebuilds complete synchronously from the settings screen, but the transient
+     `.syncing` state still protects the control from repeated taps while SwiftUI is reconciling
+     the updated data stack.
+     */
+    private var isICloudToggleEnabled: Bool {
+        !syncService.requiresRestart && syncService.state != .syncing
     }
 
     /**

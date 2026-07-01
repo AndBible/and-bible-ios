@@ -17,6 +17,36 @@ public enum SyncState: Sendable, Equatable {
 }
 
 /**
+ Result produced after a host app applies a requested iCloud sync mode change.
+
+ `SyncService` owns the persisted toggle and public status, but the app shell owns SwiftData
+ container construction. Returning the effective mode keeps CloudKit startup recovery honest: if a
+ requested CloudKit container fails and the app falls back to local storage, the visible toggle
+ returns to disabled instead of requiring a relaunch.
+ */
+public struct SyncModeChangeResult {
+    /// Runtime mode that actually became active after the app rebuilt its data stack.
+    public let effectiveEnabled: Bool
+
+    /// Container the service should monitor for CloudKit remote-change notifications.
+    public let modelContainer: ModelContainer?
+
+    /**
+     Creates one live sync-mode change result.
+
+     - Parameters:
+       - effectiveEnabled: Runtime iCloud mode after the app attempted the change.
+       - modelContainer: Container to monitor when `effectiveEnabled` is true.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(effectiveEnabled: Bool, modelContainer: ModelContainer? = nil) {
+        self.effectiveEnabled = effectiveEnabled
+        self.modelContainer = modelContainer
+    }
+}
+
+/**
  Manages iCloud/CloudKit sync status monitoring.
 
  SwiftData handles actual data sync automatically when configured with
@@ -31,6 +61,9 @@ public enum SyncState: Sendable, Equatable {
  */
 @Observable
 public final class SyncService {
+    /// Host callback that rebuilds SwiftData for a requested iCloud mode.
+    public typealias ModeChangeHandler = @MainActor (_ requestedEnabled: Bool) throws -> SyncModeChangeResult
+
     /// Current sync state.
     public private(set) var state: SyncState = .disabled
 
@@ -39,8 +72,7 @@ public final class SyncService {
 
     /**
      Whether iCloud sync is enabled (persisted in UserDefaults).
-     This reflects the *persisted* preference. The actual CloudKit mode
-     is determined at app startup and cannot change mid-session.
+     This reflects the active runtime mode after any installed mode-change handler completes.
      */
     public private(set) var isEnabled: Bool = false
 
@@ -58,9 +90,27 @@ public final class SyncService {
 
     private var notificationObserver: NSObjectProtocol?
     private var accountObserver: NSObjectProtocol?
+    private let defaults: UserDefaults
+    private let syncEnabledKey: String
+    private var modeChangeHandler: ModeChangeHandler?
 
-    /// Creates an idle sync monitor. Call `setInitialState(enabled:)` during app startup before `startMonitoring(container:)`.
-    public init() {}
+    /**
+     Creates an idle sync monitor. Call `setInitialState(enabled:)` during app startup before
+     `startMonitoring(container:)`.
+
+     - Parameters:
+       - defaults: Preference store that owns the iCloud sync toggle.
+       - syncEnabledKey: Preference key for the iCloud sync toggle.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(
+        defaults: UserDefaults = .standard,
+        syncEnabledKey: String = "icloud_sync_enabled"
+    ) {
+        self.defaults = defaults
+        self.syncEnabledKey = syncEnabledKey
+    }
 
     deinit {
         stopMonitoring()
@@ -73,7 +123,20 @@ public final class SyncService {
     public func setInitialState(enabled: Bool) {
         isEnabled = enabled
         activeMode = enabled
+        requiresRestart = false
         state = enabled ? .idle : .disabled
+    }
+
+    /**
+     Installs the app-shell hook that can rebuild SwiftData for iCloud mode changes.
+
+     Production app startup installs this handler so Settings can apply the toggle immediately.
+     Test hosts and previews may leave it unset; `toggleSync()` then preserves the old explicit
+     restart-required fallback instead of silently pretending a container was rebuilt.
+     */
+    @MainActor
+    public func setModeChangeHandler(_ handler: ModeChangeHandler?) {
+        modeChangeHandler = handler
     }
 
     // MARK: - Monitoring
@@ -181,14 +244,43 @@ public final class SyncService {
     // MARK: - Toggle
 
     /**
-     Toggle sync on/off. Sets `requiresRestart` and moves to `.pendingRestart`
-     state because the ModelContainer must be reconstructed.
+     Toggles iCloud sync.
+
+     When the host app has installed a mode-change handler, this applies the requested mode in the
+     current session by rebuilding the SwiftData stack and restarting monitoring against the new
+     container. Without a handler it preserves the legacy explicit restart-required fallback used
+     by previews and non-app hosts.
      */
+    @MainActor
     public func toggleSync() {
-        isEnabled.toggle()
-        UserDefaults.standard.set(isEnabled, forKey: "icloud_sync_enabled")
-        requiresRestart = true
-        state = .pendingRestart
+        let previousMode = isEnabled
+        let requestedMode = !previousMode
+
+        guard let modeChangeHandler else {
+            isEnabled = requestedMode
+            defaults.set(isEnabled, forKey: syncEnabledKey)
+            requiresRestart = true
+            state = .pendingRestart
+            return
+        }
+
+        defaults.set(requestedMode, forKey: syncEnabledKey)
+        requiresRestart = false
+        state = .syncing
+
+        do {
+            let result = try modeChangeHandler(requestedMode)
+            stopMonitoring()
+            defaults.set(result.effectiveEnabled, forKey: syncEnabledKey)
+            applyRuntimeMode(enabled: result.effectiveEnabled)
+            if result.effectiveEnabled, let modelContainer = result.modelContainer {
+                startMonitoring(container: modelContainer)
+            }
+        } catch {
+            defaults.set(previousMode, forKey: syncEnabledKey)
+            applyRuntimeMode(enabled: previousMode)
+            state = .error(error.localizedDescription)
+        }
     }
 
     /// Reset sync state (for troubleshooting).
@@ -202,5 +294,22 @@ public final class SyncService {
         } else {
             state = .disabled
         }
+    }
+
+    /**
+     Applies an already-rebuilt runtime mode to the service state.
+
+     - Parameter enabled: Effective CloudKit mode after container construction completed.
+     - Side effects: Clears stale account and sync timestamps because they describe the previous
+       container mode.
+     - Failure modes: none.
+     */
+    private func applyRuntimeMode(enabled: Bool) {
+        isEnabled = enabled
+        activeMode = enabled
+        requiresRestart = false
+        accountDescription = nil
+        lastSyncDate = nil
+        state = enabled ? .idle : .disabled
     }
 }
