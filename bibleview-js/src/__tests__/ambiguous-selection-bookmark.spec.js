@@ -44,7 +44,7 @@ function testBookmark(id = "bookmark-1") {
     };
 }
 
-function mountAmbiguousSelection({bookmarks = [], appSettings = {}} = {}) {
+function mountAmbiguousSelection({bookmarks = [], appSettings = {}, config = {}} = {}) {
     const bookmarkMap = new Map(bookmarks.map(bookmark => [bookmark.id, bookmark]));
 
     return mount(AmbiguousSelection, {
@@ -63,7 +63,10 @@ function mountAmbiguousSelection({bookmarks = [], appSettings = {}} = {}) {
                     ...appSettings,
                 },
                 [calculatedConfigKey]: {},
-                [configKey]: {},
+                [configKey]: {
+                    showBookmarks: true,
+                    ...config,
+                },
                 [globalBookmarksKey]: {
                     bookmarkIdsByOrdinal: new Map(),
                     bookmarkMap,
@@ -247,5 +250,94 @@ describe("AmbiguousSelection bookmark routing", () => {
 
         wrapper.vm.cancelled();
         await handlePromise;
+    });
+
+    /**
+     * Protects Android bookmark visibility parity when bookmark display is disabled.
+     *
+     * Android filters bookmark actions from the ambiguous chooser when `showBookmarks` is false.
+     * A failure means hidden bookmark UI can still leak through the chooser even though the reader
+     * has been configured not to show bookmark affordances.
+     */
+    it("filters bookmark chooser actions when bookmark display is disabled", async () => {
+        const bookmark = testBookmark();
+        const wrapper = mountAmbiguousSelection({
+            bookmarks: [bookmark],
+            config: {
+                showBookmarks: false,
+            },
+        });
+        const event = new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            clientY: 100,
+        });
+
+        addEventFunction(event, null, {
+            bookmarkId: "bookmark-1",
+            hidden: false,
+            priority: EventPriorities.VISIBLE_BOOKMARK,
+        });
+        addEventVerseInfo(event, {
+            bibleBookName: "Genesis",
+            bookInitials: "KJV",
+            chapter: 1,
+            ordinal: 9,
+            osisRef: "Gen.1.9",
+            verse: 9,
+            verseTo: "",
+        });
+
+        const handlePromise = wrapper.vm.handle(event);
+        await Promise.resolve();
+
+        expect(wrapper.text()).toContain("Genesis 1:9");
+        expect(wrapper.find("[data-test='ambiguous-bookmark-button']").exists()).toBe(false);
+
+        wrapper.vm.cancelled();
+        await handlePromise;
+    });
+
+    /**
+     * Protects Android unmanaged-link parity in the reader click classifier.
+     *
+     * Plain rendered links without registered event functions should be left to the browser/native
+     * link path after recording a scroll anchor. The ambiguous-selection handler must not treat
+     * those clicks as background modal-dismiss taps.
+     */
+    it("records a scroll anchor and ignores plain unmanaged link clicks", async () => {
+        const scrollAnchorEvents = [];
+        const backEvents = [];
+        const scrollAnchorListener = args => scrollAnchorEvents.push(args);
+        const backListener = args => backEvents.push(args);
+        eventBus.on("set_scroll_anchor", scrollAnchorListener);
+        eventBus.on("back_clicked", backListener);
+
+        try {
+            const wrapper = mountAmbiguousSelection();
+            const link = document.createElement("a");
+            link.setAttribute("href", "https://example.test");
+            const linkText = document.createElement("span");
+            const textNode = document.createTextNode("Example");
+            linkText.appendChild(textNode);
+            link.appendChild(linkText);
+            document.body.appendChild(link);
+
+            const event = new MouseEvent("click", {
+                bubbles: true,
+                cancelable: true,
+                clientY: 100,
+            });
+            Object.defineProperty(event, "target", {value: textNode});
+
+            await wrapper.vm.handle(event);
+
+            expect(scrollAnchorEvents).toEqual([[link]]);
+            expect(backEvents).toEqual([]);
+            expect(wrapper.text()).toBe("");
+        } finally {
+            eventBus.off("set_scroll_anchor", scrollAnchorListener);
+            eventBus.off("back_clicked", backListener);
+        }
     });
 });

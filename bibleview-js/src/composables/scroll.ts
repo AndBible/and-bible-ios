@@ -17,7 +17,7 @@
 
 import {computed, nextTick, onScopeDispose, ref, Ref, watch} from "vue";
 import {setupEventBusListener} from "@/eventbus";
-import {isInViewport, setupWindowEventListener} from "@/utils";
+import {isInViewport, setupWindowEventListener, waitNextAnimationFrame} from "@/utils";
 import {AppSettings, CalculatedConfig, Config} from "@/composables/config";
 import {useOrdinalHighlight} from "@/composables/ordinal-highlight";
 import {Nullable} from "@/types/common";
@@ -291,5 +291,62 @@ export function useScroll(
         scrollToId(targetId, options);
     })
     setupEventBusListener("setup_content", setupContent)
+
+    let scrollAnchorElement: HTMLElement | null = null;
+    let scrollAnchorCleanupTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    /**
+     * Clears the temporary link scroll anchor and any scheduled cleanup timer.
+     *
+     * The anchor is local to the current reader document lifetime. It is intentionally short-lived
+     * because it only protects the immediate viewport resize caused by opening a link destination.
+     *
+     * @returns Nothing.
+     * @remarks Mutates module-local anchor state and cancels pending timer work.
+     */
+    function clearScrollAnchor() {
+        scrollAnchorElement = null;
+        if (scrollAnchorCleanupTimeout) {
+            clearTimeout(scrollAnchorCleanupTimeout);
+            scrollAnchorCleanupTimeout = null;
+        }
+    }
+
+    /**
+     * Records a clicked link or its containing ordinal as the temporary scroll anchor.
+     *
+     * Android records the link source before opening link panels so later viewport changes can keep
+     * the tapped content visible. iOS mirrors that contract while preserving its native bridge
+     * navigation path.
+     *
+     * @param element Clicked link or descendant element emitted by the reader click path.
+     * @returns Nothing.
+     * @remarks Mutates module-local anchor state and schedules automatic cleanup after three
+     * seconds.
+     */
+    function setScrollAnchor(element: HTMLElement) {
+        clearScrollAnchor();
+        scrollAnchorElement = (element.closest('.ordinal') as HTMLElement) || element;
+        scrollAnchorCleanupTimeout = setTimeout(clearScrollAnchor, 3000);
+    }
+
+    setupEventBusListener("set_scroll_anchor", setScrollAnchor);
+
+    setupWindowEventListener('resize', async () => {
+        if (!scrollAnchorElement) return;
+        await waitNextAnimationFrame();
+        if (!scrollAnchorElement) return;
+        const rect = scrollAnchorElement.getBoundingClientRect();
+        const viewTop = calculatedConfig.value.topOffset;
+        const viewBottom = window.innerHeight;
+
+        if (rect.bottom < viewTop || rect.top > viewBottom) {
+            const elementTop = rect.top + window.scrollY;
+            const targetY = elementTop - viewTop - (viewBottom - viewTop) / 3;
+            window.scrollTo(0, Math.max(0, targetY));
+        }
+        clearScrollAnchor();
+    });
+
     return {scrollToId, isScrolling, doScrolling, scrollYAtStart, scrollY}
 }
