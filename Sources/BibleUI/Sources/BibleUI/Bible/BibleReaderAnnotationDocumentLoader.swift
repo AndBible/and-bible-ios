@@ -273,6 +273,7 @@ struct BibleReaderAnnotationDocumentLoader {
         request: MemorizeDocumentRequest,
         prepareVisibleState: () -> Void
     ) -> Bool {
+        guard let ordinalRange = memorizeOrdinalRange(request) else { return false }
         guard let document = buildMemorizeDocumentJSON(request) else { return false }
         prepareVisibleState()
         bridge.emit(event: "clear_document")
@@ -283,7 +284,7 @@ struct BibleReaderAnnotationDocumentLoader {
             request.activeModuleName,
             "Memorize",
             request.currentChapter,
-            "memorize:\(request.bookInitials):\(request.startOrdinal)-\(request.endOrdinal)",
+            "memorize:\(request.bookInitials):\(ordinalRange.start)-\(ordinalRange.end)",
             .memorize
         )
         clearSelection()
@@ -300,11 +301,12 @@ struct BibleReaderAnnotationDocumentLoader {
      - Failure modes: Returns `nil` for invalid ordinal ranges or JSON serialization failure.
      */
     private func buildMemorizeDocumentJSON(_ request: MemorizeDocumentRequest) -> String? {
+        guard let ordinalRange = memorizeOrdinalRange(request) else { return nil }
         let textItems = memorizeTextItems(request)
         guard !textItems.isEmpty else { return nil }
 
         let document: [String: Any] = [
-            "id": "memorize-\(request.bookInitials)-\(request.startOrdinal)-\(request.endOrdinal)",
+            "id": "memorize-\(request.bookInitials)-\(ordinalRange.start)-\(ordinalRange.end)",
             "type": "memorize",
             "title": memorizeReferenceTitle(request),
             "texts": textItems,
@@ -312,17 +314,17 @@ struct BibleReaderAnnotationDocumentLoader {
             "bookInitials": request.bookInitials,
             "v11n": "KJVA",
             "osisRef": memorizeOsisRef(request),
-            "startOrdinal": request.startOrdinal,
-            "endOrdinal": request.endOrdinal,
+            "startOrdinal": ordinalRange.start,
+            "endOrdinal": ordinalRange.end,
             "memorizedOrdinals": request.memorizedOrdinals(
                 request.bookInitials,
-                request.startOrdinal,
-                request.endOrdinal
+                ordinalRange.start,
+                ordinalRange.end
             ),
             "targetOrdinals": request.targetOrdinals(
                 request.bookInitials,
-                request.startOrdinal,
-                request.endOrdinal
+                ordinalRange.start,
+                ordinalRange.end
             ),
             "readingProgressSettings": request.readingProgressSettings(),
         ]
@@ -356,35 +358,31 @@ struct BibleReaderAnnotationDocumentLoader {
      Builds ordered verse text rows for Memorize.
 
      - Parameter request: Active reader/module data.
-     - Returns: Verse key/text rows for the selected same-chapter range.
+     - Returns: Verse key/text rows for each concrete verse in the selected range.
      - Side effects: May move the active SWORD module cursor.
      - Failure modes: Returns an empty array when ordinals cannot be mapped to visible verses.
      */
     private func memorizeTextItems(_ request: MemorizeDocumentRequest) -> [[String: String]] {
-        guard let startVerse = ordinalToVerse(request.startOrdinal, request: request),
-              let endVerse = ordinalToVerse(request.endOrdinal, request: request),
-              startVerse <= endVerse else {
-            return []
-        }
+        let references = memorizeVerseReferences(request)
+        guard !references.isEmpty else { return [] }
 
         if let activeModule = request.activeModule {
             return swordMemorizeTextItems(
                 module: activeModule,
                 request: request,
-                startVerse: startVerse,
-                endVerse: endVerse
+                references: references
             )
         }
 
-        let boundedEndVerse = min(endVerse, BibleReaderBookCatalog.verseCount(
-            for: request.currentBook,
-            chapter: request.currentChapter
-        ))
-        guard startVerse <= boundedEndVerse else { return [] }
-        return (startVerse...boundedEndVerse).map { verse in
-            [
-                "key": "\(request.osisBookId).\(request.currentChapter).\(verse)",
-                "text": request.placeholderVerseText(request.currentBook, request.currentChapter, verse),
+        return references.compactMap { reference in
+            let boundedEndVerse = BibleReaderBookCatalog.verseCount(
+                for: request.currentBook,
+                chapter: reference.chapter
+            )
+            guard reference.verse <= boundedEndVerse else { return nil }
+            return [
+                "key": reference.osisRef,
+                "text": request.placeholderVerseText(request.currentBook, reference.chapter, reference.verse),
             ]
         }
     }
@@ -395,75 +393,101 @@ struct BibleReaderAnnotationDocumentLoader {
      - Parameters:
        - module: Active Bible module.
        - request: Active reader state.
-       - startVerse: First visible verse in the selected range.
-       - endVerse: Last visible verse in the selected range.
+       - references: Concrete verse references in selected ordinal order.
      - Returns: Non-empty verse text rows when SWORD exposes text for the selected range.
-     - Side effects: Moves the module cursor through the current chapter.
-     - Failure modes: Stops at unparsable keys, chapter changes, or failed cursor advancement.
+     - Side effects: Moves the module cursor through selected verse keys.
+     - Failure modes: Skips references whose exact SWORD key cannot be validated or has no text.
      */
     private func swordMemorizeTextItems(
         module: SwordModule,
         request: MemorizeDocumentRequest,
-        startVerse: Int,
-        endVerse: Int
+        references: [VerseKeyReference]
     ) -> [[String: String]] {
-        module.setKey("\(request.osisBookId) \(request.currentChapter):1")
-        var items: [[String: String]] = []
-
-        while true {
+        references.compactMap { reference in
+            module.setKey("=\(reference.osisRef)")
             let key = module.currentKey()
-            guard let (_, parsedChapter, parsedVerse) = request.parseVerseKey(key) else { break }
-            if parsedChapter != request.currentChapter { break }
-
-            if parsedVerse >= startVerse && parsedVerse <= endVerse {
-                let verseText = module.stripText().trimmingCharacters(in: .whitespacesAndNewlines)
-                if !verseText.isEmpty {
-                    items.append([
-                        "key": "\(request.osisBookId).\(request.currentChapter).\(parsedVerse)",
-                        "text": verseText,
-                    ])
-                }
-            }
-            if parsedVerse > endVerse { break }
-            if !module.next() { break }
+            guard let (_, parsedChapter, parsedVerse) = request.parseVerseKey(key),
+                  parsedChapter == reference.chapter,
+                  parsedVerse == reference.verse else { return nil }
+            let verseText = module.stripText().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !verseText.isEmpty else { return nil }
+            return [
+                "key": reference.osisRef,
+                "text": verseText,
+            ]
         }
-
-        return items
     }
 
     /**
-     Converts an ordinal to the visible verse number for the request chapter.
+     Resolves the selected ordinal range using Android's `endOrdinal <= 0` behavior.
 
-     - Parameters:
-       - ordinal: SWORD/JSword ordinal to resolve.
-       - request: Active reader state.
-     - Returns: Visible verse number, or `nil` when the ordinal is outside the current chapter.
-     - Side effects: May query active SWORD versification through the supplied closure.
-     - Failure modes: Invalid ordinals return `nil`.
+     - Parameter request: Active reader state.
+     - Returns: Inclusive rendered ordinal range, or `nil` for invalid start ordinals.
+     - Side effects: None.
+     - Failure modes: Invalid start ordinals return `nil`.
      */
-    private func ordinalToVerse(_ ordinal: Int, request: MemorizeDocumentRequest) -> Int? {
-        guard let reference = request.verseReference(request.currentBook, ordinal),
-              reference.chapter == request.currentChapter else {
-            return nil
+    private func memorizeOrdinalRange(_ request: MemorizeDocumentRequest) -> (start: Int, end: Int)? {
+        guard request.startOrdinal > 0 else { return nil }
+        let effectiveEnd = request.endOrdinal > 0 ? request.endOrdinal : request.startOrdinal
+        guard effectiveEnd > 0 else { return nil }
+        return (
+            start: min(request.startOrdinal, effectiveEnd),
+            end: max(request.startOrdinal, effectiveEnd)
+        )
+    }
+
+    /**
+     Resolves every concrete verse reference in the selected Memorize ordinal range.
+
+     - Parameter request: Active reader state.
+     - Returns: Ordered verse references, excluding SWORD intro/title ordinals.
+     - Side effects: May query active SWORD versification through the supplied closure.
+     - Failure modes: Invalid ranges or non-verse ordinals produce an empty array.
+     */
+    private func memorizeVerseReferences(_ request: MemorizeDocumentRequest) -> [VerseKeyReference] {
+        guard let ordinalRange = memorizeOrdinalRange(request) else { return [] }
+        return (ordinalRange.start...ordinalRange.end).compactMap { ordinal in
+            request.verseReference(request.currentBook, ordinal)
         }
-        return reference.verse
+    }
+
+    /**
+     Resolves the first and last concrete verse reference for the selected Memorize range.
+
+     - Parameter request: Active reader state.
+     - Returns: Boundary references for title and OSIS formatting.
+     - Side effects: May query active SWORD versification through the supplied closure.
+     - Failure modes: Returns `nil` when the range contains no concrete verses.
+     */
+    private func memorizeReferenceRange(
+        _ request: MemorizeDocumentRequest
+    ) -> (start: VerseKeyReference, end: VerseKeyReference)? {
+        let references = memorizeVerseReferences(request)
+        guard let start = references.first,
+              let end = references.last else { return nil }
+        return (start, end)
     }
 
     /**
      Builds the human-readable Memorize title.
 
      - Parameter request: Active reader state.
-     - Returns: `Book chapter:verse-range` when ordinals resolve, otherwise `Book chapter`.
+     - Returns: Android-style range title when ordinals resolve, otherwise `Book chapter`.
      - Side effects: May query active SWORD versification through the supplied closure.
      - Failure modes: Falls back to chapter-only title for invalid ordinals.
      */
     private func memorizeReferenceTitle(_ request: MemorizeDocumentRequest) -> String {
-        guard let startVerse = ordinalToVerse(request.startOrdinal, request: request),
-              let endVerse = ordinalToVerse(request.endOrdinal, request: request) else {
+        guard let range = memorizeReferenceRange(request) else {
             return "\(request.currentBook) \(request.currentChapter)"
         }
-        let verseSuffix = startVerse == endVerse ? "\(startVerse)" : "\(startVerse)-\(endVerse)"
-        return "\(request.currentBook) \(request.currentChapter):\(verseSuffix)"
+        if range.start.chapter == range.end.chapter {
+            let verseSuffix = range.start.verse == range.end.verse ?
+                "\(range.start.verse)" :
+                "\(range.start.verse)-\(range.end.verse)"
+            return "\(request.currentBook) \(range.start.chapter):\(verseSuffix)"
+        }
+
+        return "\(request.currentBook) \(range.start.chapter):\(range.start.verse)-\(range.end.chapter):\(range.end.verse)"
     }
 
     /**
@@ -475,13 +499,12 @@ struct BibleReaderAnnotationDocumentLoader {
      - Failure modes: Falls back to chapter-only OSIS reference for invalid ordinals.
      */
     private func memorizeOsisRef(_ request: MemorizeDocumentRequest) -> String {
-        guard let startVerse = ordinalToVerse(request.startOrdinal, request: request),
-              let endVerse = ordinalToVerse(request.endOrdinal, request: request) else {
+        guard let range = memorizeReferenceRange(request) else {
             return "\(request.osisBookId).\(request.currentChapter)"
         }
-        let startRef = "\(request.osisBookId).\(request.currentChapter).\(startVerse)"
-        let endRef = "\(request.osisBookId).\(request.currentChapter).\(endVerse)"
-        return startVerse == endVerse ? startRef : "\(startRef)-\(endRef)"
+        return range.start.osisRef == range.end.osisRef ?
+            range.start.osisRef :
+            "\(range.start.osisRef)-\(range.end.osisRef)"
     }
 }
 

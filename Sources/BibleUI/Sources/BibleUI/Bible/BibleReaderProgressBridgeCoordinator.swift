@@ -270,7 +270,8 @@ struct BibleReaderProgressBridgeCoordinator {
 
      The native store is KJVA-global, while the open Vue document expects update arrays in the
      currently rendered ordinal domain. The projection closure is the only boundary that knows both
-     domains for the active reader.
+     domains for the active reader. Android treats non-positive end ordinals as a single-verse
+     range ending at the start ordinal.
      */
     private func mutateMemorization(
         startOrdinal: Int,
@@ -278,8 +279,9 @@ struct BibleReaderProgressBridgeCoordinator {
         operation: (MemorizationProgressStore, MemorizationKJVARange) -> MemorizationProgressDelta
     ) {
         guard let store = memorizationStore() else { return }
-        let lower = min(startOrdinal, endOrdinal)
-        let upper = max(startOrdinal, endOrdinal)
+        let effectiveEnd = endOrdinal > 0 ? endOrdinal : startOrdinal
+        let lower = min(startOrdinal, effectiveEnd)
+        let upper = max(startOrdinal, effectiveEnd)
         let projections = resolveMemorizationOrdinals(lower, upper)
             .sorted { $0.renderedOrdinal < $1.renderedOrdinal }
         guard !projections.isEmpty else { return }

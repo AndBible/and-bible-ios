@@ -3,6 +3,7 @@ import XCTest
 @testable import BibleCore
 @testable import BibleUI
 @testable import BibleView
+@testable import SwordKit
 #if os(iOS)
 import UIKit
 #endif
@@ -177,6 +178,63 @@ extension AndBibleTests {
             "lexicon"
         )
     }
+
+    /**
+     Verifies Memorize document payloads preserve Android's cross-chapter `VerseRange`.
+
+     Android creates the fake Memorize document from the selected JSword `VerseRange`, so a
+     selection spanning Genesis 1:31 through Genesis 2:2 yields all three concrete verses, a
+     cross-chapter title, and a cross-chapter OSIS range. This app-host test keeps that parity
+     executable in the iOS simulator because package tests cannot currently compile on macOS.
+
+     Failure means iOS is still using a same-chapter Memorize loader shape instead of the selected
+     Android range contract.
+     */
+    func testMemorizeDocumentPreservesCrossChapterAndroidRange() throws {
+        let (bridge, recordedScripts) = makeMemorizeParityRecordingBridge()
+        let modulePath = try makeMemorizeParityTemporarySwordPath()
+        defer { try? FileManager.default.removeItem(atPath: modulePath) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeMemorizeParitySettingsStore()
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31))
+        let middleOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 1))
+        let endOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2))
+
+        controller.bridgeDidSetClientReady(bridge)
+        let baselineScriptCount = recordedScripts().count
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "memorize", args: ["KJV", startOrdinal, endOrdinal]),
+            .handled
+        )
+
+        let memorizeScripts = Array(recordedScripts().dropFirst(baselineScriptCount))
+        let document = try XCTUnwrap(
+            memorizeParityBridgeEmissionPayload(from: memorizeScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "memorize")
+        XCTAssertEqual(document["title"] as? String, "Genesis 1:31-2:2")
+        XCTAssertEqual(document["osisRef"] as? String, "Gen.1.31-Gen.2.2")
+        XCTAssertEqual(document["startOrdinal"] as? Int, startOrdinal)
+        XCTAssertEqual(document["endOrdinal"] as? Int, endOrdinal)
+        XCTAssertEqual(document["targetOrdinals"] as? [Int], [startOrdinal, middleOrdinal, endOrdinal])
+
+        let texts = try XCTUnwrap(document["texts"] as? [[String: String]])
+        XCTAssertEqual(texts.map { $0["key"] }, ["Gen.1.31", "Gen.2.1", "Gen.2.2"])
+        XCTAssertTrue(
+            texts[0]["text"]?.contains("saw <H07200> every thing") == true,
+            "Unexpected Gen.1.31 text: \(texts[0]["text"] ?? "<nil>")"
+        )
+        XCTAssertTrue(
+            texts[1]["text"]?.contains("heavens <H08064> and the earth") == true,
+            "Unexpected Gen.2.1 text: \(texts[1]["text"] ?? "<nil>")"
+        )
+        XCTAssertTrue(
+            texts[2]["text"]?.contains("seventh <H07637> day") == true,
+            "Unexpected Gen.2.2 text: \(texts[2]["text"] ?? "<nil>")"
+        )
+    }
 }
 
 /**
@@ -205,6 +263,80 @@ private func makeMemorizeParityRecordingBridge() -> (BibleBridge, () -> [String]
     var scripts: [String] = []
     bridge.javaScriptEvaluationObserver = { scripts.append($0) }
     return (bridge, { scripts })
+}
+
+/**
+ Copies bundled KJV SWORD resources into an isolated app-host test directory.
+
+ - Returns: Path to a temporary `sword` module root containing `mods.d` and module data.
+ - Side effects: Creates a temporary directory and recursively copies repository fixture files.
+ - Failure modes: Throws when the repository fixture cannot be located or copied.
+ */
+private func makeMemorizeParityTemporarySwordPath(file: StaticString = #filePath) throws -> String {
+    let fileManager = FileManager.default
+    let sourceFile = URL(fileURLWithPath: String(describing: file), isDirectory: false)
+    let bundledSwordURL = try memorizeParityRepositoryRoot(from: sourceFile)
+        .appendingPathComponent("AndBible", isDirectory: true)
+        .appendingPathComponent("Resources", isDirectory: true)
+        .appendingPathComponent("sword", isDirectory: true)
+
+    let tempRoot = fileManager.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        .appendingPathComponent("sword", isDirectory: true)
+    try fileManager.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    try copyMemorizeParityDirectoryContents(from: bundledSwordURL, to: tempRoot)
+    return tempRoot.path
+}
+
+/**
+ Finds the repository root that contains the bundled SWORD fixture.
+
+ - Parameter sourceFile: Source file URL used as the upward-search anchor.
+ - Returns: Repository root URL.
+ - Side effects: None.
+ - Failure modes: Throws when `AndBible/Resources/sword` cannot be found from the source path.
+ */
+private func memorizeParityRepositoryRoot(from sourceFile: URL) throws -> URL {
+    var candidate = sourceFile.deletingLastPathComponent()
+    while candidate.path != candidate.deletingLastPathComponent().path {
+        let swordPath = candidate
+            .appendingPathComponent("AndBible", isDirectory: true)
+            .appendingPathComponent("Resources", isDirectory: true)
+            .appendingPathComponent("sword", isDirectory: true)
+        if FileManager.default.fileExists(atPath: swordPath.path) {
+            return candidate
+        }
+        candidate.deleteLastPathComponent()
+    }
+    throw NSError(
+        domain: "AndBibleTests",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Could not locate AndBible/Resources/sword from \(sourceFile.path)"]
+    )
+}
+
+/**
+ Recursively copies directory contents for app-host SWORD fixture setup.
+
+ - Parameters:
+   - source: Existing directory whose contents should be copied.
+   - destination: Destination directory to create or populate.
+ - Side effects: Creates directories and copies files under `destination`.
+ - Failure modes: Propagates filesystem enumeration, directory creation, and copy errors.
+ */
+private func copyMemorizeParityDirectoryContents(from source: URL, to destination: URL) throws {
+    let fileManager = FileManager.default
+    try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+
+    for item in try fileManager.contentsOfDirectory(at: source, includingPropertiesForKeys: [.isDirectoryKey]) {
+        let values = try item.resourceValues(forKeys: [.isDirectoryKey])
+        let target = destination.appendingPathComponent(item.lastPathComponent, isDirectory: values.isDirectory == true)
+        if values.isDirectory == true {
+            try copyMemorizeParityDirectoryContents(from: item, to: target)
+        } else {
+            try fileManager.copyItem(at: item, to: target)
+        }
+    }
 }
 
 /**
