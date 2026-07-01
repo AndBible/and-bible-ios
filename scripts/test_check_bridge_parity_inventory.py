@@ -6,6 +6,7 @@ Unit tests for bridge parity inventory validation.
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -197,12 +198,33 @@ class BridgeParityInventoryTests(unittest.TestCase):
             android_root = root / "and-bible"
             ios_root.mkdir()
             android_root.mkdir()
+            subprocess.run(["git", "init", "-q", str(android_root)], check=True)
 
             with (
                 mock.patch.object(bridge_parity, "REPO_ROOT", ios_root),
                 mock.patch.dict("os.environ", {}, clear=True),
             ):
                 self.assertEqual(resolve_android_root(None), android_root)
+
+    def test_resolve_android_root_ignores_non_git_sibling_directory(self) -> None:
+        """Falls back to inventory-only checks when the sibling is not a checkout.
+
+        Local folders named ../and-bible can be empty placeholders or wrong
+        directories. A failure means bridge parity tries to read invalid Android
+        sources instead of clearly reporting that no live checkout was used.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            ios_root = root / "and-bible-ios"
+            android_root = root / "and-bible"
+            ios_root.mkdir()
+            android_root.mkdir()
+
+            with (
+                mock.patch.object(bridge_parity, "REPO_ROOT", ios_root),
+                mock.patch.dict("os.environ", {}, clear=True),
+            ):
+                self.assertIsNone(resolve_android_root(None))
 
     def test_validate_inventory_rejects_non_object_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

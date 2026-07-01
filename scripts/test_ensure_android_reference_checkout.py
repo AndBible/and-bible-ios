@@ -66,6 +66,69 @@ class EnsureAndroidReferenceCheckoutTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("Android reference checkout already available", result.stdout)
 
+    def test_helper_expands_tilde_android_root_env(self) -> None:
+        """Expands local env overrides before resolving checkout paths.
+
+        Operators may run parity checks with ANDBIBLE_ANDROID_ROOT=~/src/and-bible.
+        A failure means the helper treats "~" as a literal repo-relative folder
+        and may clone into the iOS checkout instead of reusing the requested
+        Android repository.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            fake_repo = root / "ios"
+            helper = fake_repo / "scripts" / "ensure_android_reference_checkout.sh"
+            home = root / "home"
+            android = home / "and-bible"
+            helper.parent.mkdir(parents=True)
+            home.mkdir()
+            helper.write_text(HELPER.read_text(encoding="utf-8"), encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(android)], check=True)
+
+            result = subprocess.run(
+                ["bash", str(helper)],
+                cwd=fake_repo,
+                env={
+                    "ANDBIBLE_ANDROID_REPO_URL": str(root / "missing-remote"),
+                    "ANDBIBLE_ANDROID_ROOT": "~/and-bible",
+                    "HOME": str(home),
+                    "PATH": os.environ["PATH"],
+                },
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn(f"Android reference checkout already available: {android}", result.stdout)
+
+    def test_helper_rejects_git_subdirectory_android_root(self) -> None:
+        """Rejects paths inside a checkout that are not the Android repo root.
+
+        ANDBIBLE_ANDROID_ROOT is consumed as the Android repository root by both
+        bridge and localization guardrails. A failure means the helper can bless
+        a subdirectory, after which localization may miss live resources and
+        fall back to snapshots.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            android = root / "and-bible"
+            app_subdir = android / "app"
+            app_subdir.mkdir(parents=True)
+            subprocess.run(["git", "init", "-q", str(android)], check=True)
+
+            result = subprocess.run(
+                ["bash", str(HELPER), str(app_subdir)],
+                cwd=REPO_ROOT,
+                env={"PATH": os.environ["PATH"]},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(2, result.returncode, result.stdout)
+        self.assertIn("is not the checkout root", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

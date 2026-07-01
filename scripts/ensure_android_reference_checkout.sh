@@ -10,13 +10,25 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 android_root_input="${1:-${ANDBIBLE_ANDROID_ROOT:-${REPO_ROOT}/../and-bible}}"
 android_repo_url="${ANDBIBLE_ANDROID_REPO_URL:-https://github.com/AndBible/and-bible.git}"
 
+if [[ "${android_root_input}" == "~" || "${android_root_input}" == "~/"* ]]; then
+  android_root_input="${HOME}${android_root_input:1}"
+fi
+
 if [[ "${android_root_input}" = /* ]]; then
   android_root="${android_root_input}"
 else
   android_root="${REPO_ROOT}/${android_root_input}"
 fi
 
-if git -C "${android_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if git_root="$(git -C "${android_root}" rev-parse --show-toplevel 2>/dev/null)"; then
+  canonical_git_root="$(cd -- "${git_root}" && pwd -P)"
+  canonical_android_root="$(cd -- "${android_root}" && pwd -P)"
+  if [[ "${canonical_git_root}" != "${canonical_android_root}" ]]; then
+    echo "Android reference path is inside a git checkout but is not the checkout root: ${android_root}" >&2
+    echo "Checkout root: ${canonical_git_root}" >&2
+    exit 2
+  fi
+
   echo "Android reference checkout already available: ${android_root}"
   exit 0
 fi

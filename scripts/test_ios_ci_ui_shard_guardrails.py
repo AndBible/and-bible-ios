@@ -17,18 +17,32 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def workflow_step_run_block(workflow_text: str, step_name: str) -> str:
     """Return the run block for one named GitHub Actions step."""
+    run_blocks = workflow_step_run_blocks(workflow_text, step_name)
+    if len(run_blocks) != 1:
+        raise AssertionError(
+            f"Expected exactly one run block for workflow step {step_name!r}, found {len(run_blocks)}."
+        )
+
+    return run_blocks[0]
+
+
+def workflow_step_run_blocks(workflow_text: str, step_name: str) -> list[str]:
+    """Return run blocks for every GitHub Actions step with the requested name."""
     lines = workflow_text.splitlines()
     step_pattern = re.compile(rf"^(\s*)-\s+name:\s+{re.escape(step_name)}\s*$")
+    run_blocks: list[str] = []
 
     for index, line in enumerate(lines):
         step_match = step_pattern.match(line)
         if step_match is None:
             continue
 
+        step_run_block: str | None = None
         step_indent = len(step_match.group(1))
+        step_boundary = re.compile(rf"^ {{{step_indent}}}-\s+")
         for step_line_index in range(index + 1, len(lines)):
             step_line = lines[step_line_index]
-            if step_line.startswith(" " * step_indent + "- name:"):
+            if step_boundary.match(step_line):
                 break
 
             run_match = re.match(r"^(\s*)run:\s*(.*)$", step_line)
@@ -38,16 +52,25 @@ def workflow_step_run_block(workflow_text: str, step_name: str) -> str:
             run_indent = len(run_match.group(1))
             inline_run = run_match.group(2).strip()
             if inline_run not in {"|", "|-", ">", ">-"}:
-                return inline_run
+                step_run_block = inline_run
+                break
 
             run_lines: list[str] = []
             for run_line in lines[step_line_index + 1 :]:
                 if run_line.strip() and len(run_line) - len(run_line.lstrip(" ")) <= run_indent:
                     break
                 run_lines.append(run_line[run_indent + 2 :])
-            return "\n".join(run_lines)
+            step_run_block = "\n".join(run_lines)
+            break
 
-    raise AssertionError(f"Unable to find run block for workflow step {step_name!r}.")
+        if step_run_block is None:
+            raise AssertionError(f"Unable to find run block for workflow step {step_name!r}.")
+        run_blocks.append(step_run_block)
+
+    if not run_blocks:
+        raise AssertionError(f"Unable to find workflow step {step_name!r}.")
+
+    return run_blocks
 
 
 def upload_artifact_steps(workflow_text: str) -> list[tuple[int, str]]:
@@ -134,8 +157,11 @@ class IOSCIUIShardGuardrailsTests(unittest.TestCase):
         self.assertLess(checkout_offsets[0], bridge_check_offsets[0])
         self.assertLess(checkout_offsets[1], localization_check_offsets[0])
         self.assertEqual(
-            "scripts/ensure_android_reference_checkout.sh",
-            workflow_step_run_block(workflow_text, "Checkout Android reference"),
+            [
+                "scripts/ensure_android_reference_checkout.sh",
+                "scripts/ensure_android_reference_checkout.sh",
+            ],
+            workflow_step_run_blocks(workflow_text, "Checkout Android reference"),
         )
 
     def test_upload_artifact_retention_guardrail_handles_name_less_steps(self) -> None:
@@ -166,6 +192,34 @@ jobs:
         self.assertEqual("14", upload_step_scalar(upload_steps[0][1], "retention-days"))
         self.assertEqual("build-products.tar.gz", upload_step_scalar(upload_steps[1][1], "path"))
         self.assertEqual("1", upload_step_scalar(upload_steps[1][1], "retention-days"))
+
+    def test_workflow_step_run_blocks_reports_every_duplicate_step_name(self) -> None:
+        """Locks duplicate step-name checks to every occurrence, not the first.
+
+        The Android checkout guardrail uses the same step name in two jobs. A
+        failure means a later job can drift while tests keep inspecting only the
+        first duplicate step.
+        """
+        workflow_text = """
+name: demo
+jobs:
+  first:
+    steps:
+      - name: Checkout Android reference
+        run: scripts/ensure_android_reference_checkout.sh
+  second:
+    steps:
+      - name: Checkout Android reference
+        run: scripts/not-the-helper.sh
+"""
+
+        self.assertEqual(
+            [
+                "scripts/ensure_android_reference_checkout.sh",
+                "scripts/not-the-helper.sh",
+            ],
+            workflow_step_run_blocks(workflow_text, "Checkout Android reference"),
+        )
 
     def test_ios_ci_passes_max_shard_count_to_ui_shard_planner(self) -> None:
         workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
