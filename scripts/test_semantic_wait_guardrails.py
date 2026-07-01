@@ -93,8 +93,8 @@ def swift_property_body(source: str, name: str) -> str:
 class SemanticWaitGuardrailsTests(unittest.TestCase):
     """Protects pure semantic-state waits from regressing to ad hoc run-loop polling."""
 
-    def test_workspace_create_prompt_waits_on_prompt_root_before_buttons(self) -> None:
-        """Avoid hosted XCTest stalls from proving absent prompt buttons before root exists."""
+    def test_workspace_create_prompt_waits_on_prompt_controls_without_root_probe(self) -> None:
+        """Avoid hosted XCTest stalls from probing the prompt root before controls."""
         list_source = (
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
         ).read_text(encoding="utf-8")
@@ -105,12 +105,11 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         confirm_button = '"workspaceNamePromptConfirmButton"'
         cancel_button = '"workspaceNamePromptCancelButton"'
 
-        for identifier in [prompt_root, prompt_field, confirm_button, cancel_button]:
+        for identifier in [prompt_field, confirm_button, cancel_button]:
             self.assertIn(identifier, body)
+        self.assertNotIn(prompt_root, body)
 
-        self.assertLess(body.find(prompt_root), body.find(confirm_button))
         self.assertLess(body.find(prompt_field), body.find(confirm_button))
-        self.assertLess(body.find(prompt_root), body.find(cancel_button))
         self.assertLess(body.find(prompt_field), body.find(cancel_button))
 
     def test_workspace_prompt_button_candidates_prefer_prompt_scope_and_titles(self) -> None:
