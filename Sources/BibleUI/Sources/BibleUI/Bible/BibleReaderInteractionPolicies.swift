@@ -73,6 +73,8 @@ enum ReaderHorizontalSwipePolicy {
      Failure modes:
      - returns `.none` when a selection or Vue modal owns interaction, or when the preference
        explicitly disables horizontal swipe handling.
+     - returns `.none` for chapter-navigation swipes when the current rendered document does not
+       allow horizontal document navigation.
      */
     static func action(
         modeRawValue: String,
