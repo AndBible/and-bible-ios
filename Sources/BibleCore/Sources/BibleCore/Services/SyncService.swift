@@ -12,7 +12,7 @@ public enum SyncState: Sendable, Equatable {
     case idle
     case syncing
     case error(String)
-    /// User toggled sync but app hasn't restarted yet to apply the change.
+    /// User toggled sync in a host that cannot rebuild the runtime data stack in-session.
     case pendingRestart
 }
 
@@ -76,15 +76,18 @@ public final class SyncService {
      */
     public private(set) var isEnabled: Bool = false
 
-    /// Whether a restart is required to apply sync changes.
+    /// Whether the current host requires a restart because no live mode-change handler is installed.
     public private(set) var requiresRestart: Bool = false
 
     /// The iCloud account display name, if available.
     public private(set) var accountDescription: String?
 
     /**
-     The sync mode that is actually active for this session
-     (set at startup, does not change until restart).
+     The sync mode that is currently active for this service.
+
+     App startup seeds this value from the loaded SwiftData container. When the production app
+     installs a live mode-change handler, `toggleSync()` updates it after the app shell rebuilds
+     the container; hosts without that handler leave it unchanged and enter `.pendingRestart`.
      */
     private var activeMode: Bool = false
 

@@ -241,6 +241,73 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies the production Sync Settings iCloud toggle uses the live runtime applier instead of
+     the legacy restart-required fallback.
+     *
+     Issue #322 moved iCloud mode changes from "save preference and restart" to "rebuild the app
+     data stack now." The old path is easy to regress because it is still preserved for previews
+     and non-app hosts that do not install a runtime mode-change handler. This smoke test opens the
+     real Sync Settings route, taps the iCloud toggle, and asserts the exported state never becomes
+     `restartRequired=true` / `.pendingRestart`. A live runtime rebuild can reset the reader shell
+     and dismiss this route, so the test accepts either an in-place enabled token or a clean return
+     to the reader after the tap. It intentionally does not require a signed-in iCloud account or
+     successful CloudKit adoption; those outcomes are separate service contracts, while this test
+     protects the production wiring to the live applier.
+     */
+    func testSyncSettingsICloudToggleDoesNotRequireRestart() {
+        let app = makeApp()
+        app.launch()
+
+        _ = openSyncSettingsFromReaderAction(in: app)
+        tapSyncBackend("ICLOUD", in: app)
+        waitForSyncState(
+            ["backend": "ICLOUD", "restartRequired": "false"],
+            in: app,
+            timeout: 10
+        )
+
+        let toggle = requireElement("syncICloudEnabledToggle", in: app, timeout: 10)
+        let initialState = resolvedElementSemanticText("syncSettingsState", in: app) ?? ""
+        let startedEnabled = syncStateToken(named: "icloudEnabled", in: initialState) == "true"
+        if !startedEnabled {
+            tapElementReliably(toggle, timeout: 10)
+            RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+        }
+
+        let deadline = Date().addingTimeInterval(30)
+        repeat {
+            if let state = resolvedElementSemanticText("syncSettingsState", in: app) {
+                XCTAssertNotEqual(
+                    syncStateToken(named: "restartRequired", in: state),
+                    "true",
+                    "iCloud toggle must not enter restart-required fallback. State: '\(state)'."
+                )
+                XCTAssertNotEqual(
+                    syncStateToken(named: "icloudState", in: state),
+                    "pendingRestart",
+                    "iCloud toggle must not enter pending-restart fallback. State: '\(state)'."
+                )
+                if startedEnabled || syncStateToken(named: "icloudEnabled", in: state) == "true" {
+                    return
+                }
+            }
+            if !app.otherElements["syncSettingsScreen"].exists {
+                XCTAssertTrue(
+                    waitForReaderShellReady(in: app, timeout: 1),
+                    "Live iCloud toggle dismissed Sync Settings but did not return to a ready reader shell."
+                )
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
+        XCTFail(
+            "Expected iCloud toggle to apply without restart-required fallback. Final syncSettingsState: '\(finalState)'."
+        )
+    }
+
+    /**
      Resolves a Backup & Restore action that may live below the first visible viewport.
      *
      * - Parameters:

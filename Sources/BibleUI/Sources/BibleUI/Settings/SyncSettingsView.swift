@@ -24,7 +24,9 @@ import BibleCore
  - editing WebDAV credentials updates local state and can be persisted to SwiftData plus Keychain
  - testing a NextCloud/WebDAV connection builds a transient `WebDAVClient` and performs a network
    request against the configured server
- - toggling iCloud sync calls back into `SyncService` and can persist a restart-required sync mode
+ - toggling iCloud sync calls back into `SyncService`; the production app applies it live, while
+   preview or test hosts without an installed runtime handler can still surface restart-required
+   fallback state
  - disabling iCloud sync first presents a confirmation dialog before mutating the service state
  */
 public struct SyncSettingsView: View {
@@ -786,6 +788,9 @@ public struct SyncSettingsView: View {
         return [
             "backend=\(selectedBackend.rawValue)",
             "enabled=\(enabledToken)",
+            "icloudEnabled=\(syncService.isEnabled)",
+            "restartRequired=\(syncService.requiresRestart)",
+            "icloudState=\(syncStateAccessibilityToken)",
             "visible=\(visibleRemoteCategoryRowsAccessibilityToken)",
             "deferred=\(deferredRemoteCategoryRowsAccessibilityToken)",
             "remoteStatus=\(remoteStatusAccessibilityValue)",
@@ -795,6 +800,33 @@ public struct SyncSettingsView: View {
             "lastConfirmation=\(lastRemoteConfirmationAction ?? "none")",
         ]
         .joined(separator: ";")
+    }
+
+    /**
+     Accessibility-exported token for the CloudKit runtime state shown in the iCloud section.
+
+     UI smoke tests use this token to distinguish the production no-restart path from the fallback
+     `.pendingRestart` state without matching localized status strings or SF Symbol names.
+
+     - Returns: Stable state token for the current `SyncService.state`.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private var syncStateAccessibilityToken: String {
+        switch syncService.state {
+        case .disabled:
+            return "disabled"
+        case .noAccount:
+            return "noAccount"
+        case .idle:
+            return "idle"
+        case .syncing:
+            return "syncing"
+        case .pendingRestart:
+            return "pendingRestart"
+        case .error:
+            return "error"
+        }
     }
 
     /**

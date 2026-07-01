@@ -13,6 +13,7 @@
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": "display-colors-custom",
   "AndBibleUITests/AndBibleUITests/testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink": "baseline",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen": "sync-nextcloud-bookmarks-enabled",
+  "AndBibleUITests/AndBibleUITests/testSyncSettingsICloudToggleDoesNotRequireRestart": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow": "none",
   "AndBibleUITests/AndBibleUITests/testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms": "none"
 }
