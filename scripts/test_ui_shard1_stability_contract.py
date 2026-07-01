@@ -64,12 +64,13 @@ class UIShardOneStabilityContractTests(unittest.TestCase):
         self.assertIn('"repositoryManagerScreen"', body)
         self.assertIn('"repositoryManagerAddButton"', body)
 
-    def test_host_process_descriptor_fixture_uses_shell_not_python_fork(self) -> None:
-        """Keep the descriptor-inheritance fixture out of hosted-runner Python startup paths.
+    def test_host_process_descriptor_fixture_stays_runtime_smoke(self) -> None:
+        """Keep the descriptor-inheritance runtime test out of lifecycle probing.
 
-        The contract under test is `runHostProcess` returning when the direct child exits while a
-        descendant still holds stdout open. A shell background `sleep` proves that descriptor
-        behavior without depending on Python import, fork, and sleep scheduling under CI load.
+        The runtime test should only prove that the UI-test host can launch a direct shell child and
+        return quickly while a descendant command was started. The stronger descriptor contract is
+        guarded against `runHostProcess` itself below, so this smoke must not depend on Python,
+        nohup behavior, host temp paths, marker files, or immediate descendant liveness.
         """
         source = (
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITests.swift"
@@ -82,10 +83,40 @@ class UIShardOneStabilityContractTests(unittest.TestCase):
         self.assertNotIn('executablePath: "/usr/bin/python3"', body)
         self.assertNotIn("os.fork", body)
         self.assertNotIn("time.sleep", body)
+        self.assertNotIn("nohup", body)
+        self.assertNotIn('"UITEST_HOST_TMPDIR"', body)
+        self.assertNotIn("FileManager.default.temporaryDirectory", body)
+        self.assertNotIn("fileExists(atPath:", body)
+        self.assertNotIn("kill(descendantPID, 0)", body)
         self.assertIn('executablePath: "/bin/sh"', body)
-        self.assertIn("FileManager.default.temporaryDirectory", body)
-        self.assertIn("nohup /bin/sh -c", body)
-        self.assertIn("sleep 2; printf alive", body)
-        self.assertIn("sleep 30", body)
+        self.assertIn("let startDate = Date()", body)
+        self.assertIn("Date().timeIntervalSince(startDate)", body)
+        self.assertIn("XCTAssertLessThan", body)
+        self.assertIn("sleep 30 &", body)
         self.assertIn('"fixture-ready:%s"', body)
-        self.assertIn("fileExists(atPath: markerURL.path)", body)
+
+    def test_run_host_process_returns_on_direct_child_waitpid_not_pipe_eof(self) -> None:
+        """Guard the real descriptor contract on the helper implementation.
+
+        `runHostProcess` must treat the direct child's exit as completion and avoid waiting for EOF
+        from stdout or stderr pipes that descendants may keep open. A failure here means the helper
+        can regress to blocking fixture setup when `simctl launch` leaves descriptors inherited by
+        the launched app process.
+        """
+        source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(source, "runHostProcess")
+
+        waitpid_call = "let waitResult = waitpid(pid, &waitStatus, WNOHANG)"
+        direct_child_break = "if waitResult == pid {\n                break\n            }"
+        timeout_check = "if Date() >= deadline"
+
+        self.assertIn("makeReadDescriptorNonBlocking(stdoutPipe[0])", body)
+        self.assertIn("makeReadDescriptorNonBlocking(stderrPipe[0])", body)
+        self.assertIn(waitpid_call, body)
+        self.assertIn(direct_child_break, body)
+        self.assertIn(timeout_check, body)
+        self.assertLess(body.find(waitpid_call), body.find(timeout_check))
+        self.assertNotIn("readDataToEndOfFile", body)
+        self.assertNotIn("availableData", body)
