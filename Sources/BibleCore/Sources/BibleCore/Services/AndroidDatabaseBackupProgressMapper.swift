@@ -20,11 +20,12 @@ public struct AndroidDatabaseBackupProgressReport: Sendable, Equatable {
 /**
  Maps Android's reading and memorization progress database to iOS's local progress stores.
 
- Android stores memorization state as KJV-normalized global ordinals. iOS preserves that contract by
- importing Android memorization rows as global ranges with an empty `bookInitials` field. Reader
- calls for any module can then see the same KJV ordinal state instead of a module-specific copy.
- The accepted ordinal range follows JSword's `SystemKJVA` `maximumOrdinal()` contract rather than
- SWORD module-local ordinals, matching Android's progress database semantics.
+ Android stores memorization state as KJV-normalized global rows. iOS preserves that contract by
+ importing Android memorized-verse timestamps and independent target rows with an empty
+ `bookInitials` field. Reader calls for any module can then see the same KJV ordinal state instead
+ of a module-specific copy. The accepted ordinal range follows JSword's `SystemKJVA`
+ `maximumOrdinal()` contract rather than SWORD module-local ordinals, matching Android's progress
+ database semantics.
  */
 enum AndroidDatabaseBackupProgressMapper {
     private struct Snapshot {
@@ -92,11 +93,11 @@ enum AndroidDatabaseBackupProgressMapper {
         ) { database in
             let fileName = databaseURL.lastPathComponent
             try AndroidDatabaseBackupSQLite.execute(schemaSQL, on: database, fileName: fileName)
-            for ordinal in uniqueOrdinals(in: snapshot.memorization.memorizedRanges) {
-                try insertMemorizedVerse(kjvOrdinal: ordinal, into: database, fileName: fileName)
+            for verse in exportableMemorizedVerses(in: snapshot.memorization.memorizedVerses) {
+                try insertMemorizedVerse(verse, into: database, fileName: fileName)
             }
-            for range in exportableKJVARanges(in: snapshot.memorization.targetRanges) {
-                try insertMemorizationTarget(range, into: database, fileName: fileName)
+            for target in exportableMemorizationTargets(in: snapshot.memorization.targetRows) {
+                try insertMemorizationTarget(target, into: database, fileName: fileName)
             }
             for row in snapshot.reading.history {
                 try insertChapterHistory(row, into: database, fileName: fileName)
@@ -110,15 +111,15 @@ enum AndroidDatabaseBackupProgressMapper {
     private static func readSnapshot(from databaseURL: URL) throws -> Snapshot {
         try AndroidDatabaseBackupSQLite.withDatabase(at: databaseURL) { database in
             let fileName = databaseURL.lastPathComponent
-            let memorizedRanges = try readMemorizedRanges(from: database, fileName: fileName)
-            let targetRanges = try readTargetRanges(from: database, fileName: fileName)
+            let memorizedVerses = try readMemorizedVerses(from: database, fileName: fileName)
+            let targetRows = try readTargetRows(from: database, fileName: fileName)
             let history = try readChapterHistory(from: database, fileName: fileName)
             let settings = try readGlobalSettings(from: database, fileName: fileName)
             return Snapshot(
                 reading: ReadingProgressSnapshot(history: history, settings: settings),
                 memorization: MemorizationProgressSnapshot(
-                    memorizedRanges: memorizedRanges,
-                    targetRanges: targetRanges
+                    memorizedVerses: memorizedVerses,
+                    targetRows: targetRows
                 )
             )
         }
@@ -133,6 +134,14 @@ enum AndroidDatabaseBackupProgressMapper {
             historyByID[row.id] = row
         }
         let keepLocalReadingSettings = settingsStore.getString(ReadingProgressStore.settingsKey) != nil
+        let localMemorizedOrdinals = Set(localMemorization.memorizedVerses.map(\.kjvOrdinal))
+        let importedMemorizedVerses = imported.memorization.memorizedVerses.filter {
+            !localMemorizedOrdinals.contains($0.kjvOrdinal)
+        }
+        let localTargetIDs = Set(localMemorization.targetRows.map(\.id))
+        let importedTargetRows = imported.memorization.targetRows.filter {
+            !localTargetIDs.contains($0.id)
+        }
 
         return Snapshot(
             reading: ReadingProgressSnapshot(
@@ -145,8 +154,8 @@ enum AndroidDatabaseBackupProgressMapper {
                 settings: keepLocalReadingSettings ? localReading.settings : imported.reading.settings
             ),
             memorization: MemorizationProgressSnapshot(
-                memorizedRanges: localMemorization.memorizedRanges + imported.memorization.memorizedRanges,
-                targetRanges: localMemorization.targetRanges + imported.memorization.targetRanges
+                memorizedVerses: localMemorization.memorizedVerses + importedMemorizedVerses,
+                targetRows: localMemorization.targetRows + importedTargetRows
             )
         )
     }
@@ -171,23 +180,23 @@ enum AndroidDatabaseBackupProgressMapper {
         let normalizedReading = ReadingProgressStore(settingsStore: settingsStore).snapshot()
         return AndroidDatabaseBackupProgressReport(
             readingCount: normalizedReading.history.count,
-            memorizedVerseCount: uniqueOrdinals(in: normalizedMemorization.memorizedRanges).count,
-            targetCount: exportableKJVARanges(in: normalizedMemorization.targetRanges).count
+            memorizedVerseCount: exportableMemorizedVerses(in: normalizedMemorization.memorizedVerses).count,
+            targetCount: exportableMemorizationTargets(in: normalizedMemorization.targetRows).count
         )
     }
 
-    private static func readMemorizedRanges(
+    private static func readMemorizedVerses(
         from database: OpaquePointer,
         fileName: String
-    ) throws -> [MemorizationProgressRange] {
+    ) throws -> [MemorizedVerseProgress] {
         let statement = try AndroidDatabaseBackupSQLite.prepare(
-            "SELECT kjvOrdinal FROM MemorizedVerse ORDER BY kjvOrdinal;",
+            "SELECT kjvOrdinal, memorizedAt FROM MemorizedVerse ORDER BY kjvOrdinal;",
             on: database,
             fileName: fileName
         )
         defer { sqlite3_finalize(statement) }
 
-        var ranges: [MemorizationProgressRange] = []
+        var verses: [MemorizedVerseProgress] = []
         while true {
             let result = sqlite3_step(statement)
             if result == SQLITE_DONE {
@@ -200,23 +209,33 @@ enum AndroidDatabaseBackupProgressMapper {
                 AndroidDatabaseBackupSQLite.int(statement, column: 0),
                 fileName: fileName
             )
-            ranges.append(MemorizationProgressRange(bookInitials: "", startOrdinal: ordinal, endOrdinal: ordinal))
+            verses.append(
+                MemorizedVerseProgress(
+                    bookInitials: "",
+                    kjvOrdinal: ordinal,
+                    memorizedAt: AndroidDatabaseBackupSQLite.int64(statement, column: 1)
+                )
+            )
         }
-        return ranges
+        return verses
     }
 
-    private static func readTargetRanges(
+    private static func readTargetRows(
         from database: OpaquePointer,
         fileName: String
-    ) throws -> [MemorizationProgressRange] {
+    ) throws -> [MemorizationTargetRow] {
         let statement = try AndroidDatabaseBackupSQLite.prepare(
-            "SELECT kjvOrdinalStart, kjvOrdinalEnd FROM MemorizationTarget ORDER BY kjvOrdinalStart, kjvOrdinalEnd;",
+            """
+            SELECT id, kjvOrdinalStart, kjvOrdinalEnd, createdAt
+            FROM MemorizationTarget
+            ORDER BY createdAt DESC, kjvOrdinalStart, kjvOrdinalEnd;
+            """,
             on: database,
             fileName: fileName
         )
         defer { sqlite3_finalize(statement) }
 
-        var ranges: [MemorizationProgressRange] = []
+        var rows: [MemorizationTargetRow] = []
         while true {
             let result = sqlite3_step(statement)
             if result == SQLITE_DONE {
@@ -225,15 +244,22 @@ enum AndroidDatabaseBackupProgressMapper {
             guard result == SQLITE_ROW else {
                 throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
             }
-            ranges.append(
-                try validatedKJVARange(
-                    startOrdinal: AndroidDatabaseBackupSQLite.int(statement, column: 0),
-                    endOrdinal: AndroidDatabaseBackupSQLite.int(statement, column: 1),
-                    fileName: fileName
+            let range = try validatedKJVARange(
+                startOrdinal: AndroidDatabaseBackupSQLite.int(statement, column: 1),
+                endOrdinal: AndroidDatabaseBackupSQLite.int(statement, column: 2),
+                fileName: fileName
+            )
+            rows.append(
+                MemorizationTargetRow(
+                    id: try AndroidDatabaseBackupSQLite.uuidFromBlob(statement, column: 0, fileName: fileName),
+                    bookInitials: range.bookInitials,
+                    startOrdinal: range.startOrdinal,
+                    endOrdinal: range.endOrdinal,
+                    createdAt: AndroidDatabaseBackupSQLite.int64(statement, column: 3)
                 )
             )
         }
-        return ranges
+        return rows
     }
 
     private static func readChapterHistory(
@@ -320,7 +346,7 @@ enum AndroidDatabaseBackupProgressMapper {
     }
 
     private static func insertMemorizedVerse(
-        kjvOrdinal: Int,
+        _ verse: MemorizedVerseProgress,
         into database: OpaquePointer,
         fileName: String
     ) throws {
@@ -331,13 +357,13 @@ enum AndroidDatabaseBackupProgressMapper {
         )
         defer { sqlite3_finalize(statement) }
         AndroidDatabaseBackupSQLite.bindUUIDBlob(UUID(), to: statement, index: 1)
-        sqlite3_bind_int(statement, 2, Int32(kjvOrdinal))
-        sqlite3_bind_int64(statement, 3, 0)
+        sqlite3_bind_int(statement, 2, Int32(verse.kjvOrdinal))
+        sqlite3_bind_int64(statement, 3, verse.memorizedAt)
         try AndroidDatabaseBackupSQLite.stepDone(statement, fileName: fileName)
     }
 
     private static func insertMemorizationTarget(
-        _ range: MemorizationProgressRange,
+        _ row: MemorizationTargetRow,
         into database: OpaquePointer,
         fileName: String
     ) throws {
@@ -347,10 +373,10 @@ enum AndroidDatabaseBackupProgressMapper {
             fileName: fileName
         )
         defer { sqlite3_finalize(statement) }
-        AndroidDatabaseBackupSQLite.bindUUIDBlob(UUID(), to: statement, index: 1)
-        sqlite3_bind_int(statement, 2, Int32(range.startOrdinal))
-        sqlite3_bind_int(statement, 3, Int32(range.endOrdinal))
-        sqlite3_bind_int64(statement, 4, 0)
+        AndroidDatabaseBackupSQLite.bindUUIDBlob(row.id, to: statement, index: 1)
+        sqlite3_bind_int(statement, 2, Int32(row.startOrdinal))
+        sqlite3_bind_int(statement, 3, Int32(row.endOrdinal))
+        sqlite3_bind_int64(statement, 4, row.createdAt)
         try AndroidDatabaseBackupSQLite.stepDone(statement, fileName: fileName)
     }
 
@@ -482,39 +508,50 @@ enum AndroidDatabaseBackupProgressMapper {
     }
 
     /**
-     Filters local memorization ranges to rows Android can represent without clipping.
+     Filters and de-duplicates memorized verse rows for Android export.
 
-     Out-of-domain local rows are skipped instead of clamped so iOS does not invent Android progress
-     for only part of a corrupt or non-KJVA range.
+     Android's `MemorizedVerse` table has a unique KJVA ordinal index and no module identity. If a
+     legacy iOS snapshot contains multiple module-scoped rows for the same ordinal, export keeps one
+     global Android row with the newest timestamp instead of inventing multiple Android rows.
 
-     - Parameter ranges: Local memorization ranges from the persisted snapshot.
-     - Returns: Ranges whose endpoints fit Android's JSword KJVA ordinal domain.
+     - Parameter verses: Local memorized verse rows from the persisted snapshot.
+     - Returns: Sorted global Android rows whose ordinals fit JSword's KJVA domain.
      - Side effects: none.
      - Failure modes: none.
      */
-    private static func exportableKJVARanges(
-        in ranges: [MemorizationProgressRange]
-    ) -> [MemorizationProgressRange] {
-        ranges.filter(isKJVAOrdinalRange)
+    private static func exportableMemorizedVerses(
+        in verses: [MemorizedVerseProgress]
+    ) -> [MemorizedVerseProgress] {
+        var rowByOrdinal: [Int: MemorizedVerseProgress] = [:]
+        for verse in verses where jswordKJVAOrdinalRange.contains(verse.kjvOrdinal) {
+            let existing = rowByOrdinal[verse.kjvOrdinal]
+            guard existing == nil || (existing?.memorizedAt ?? 0) < verse.memorizedAt else {
+                continue
+            }
+            rowByOrdinal[verse.kjvOrdinal] = MemorizedVerseProgress(
+                bookInitials: "",
+                kjvOrdinal: verse.kjvOrdinal,
+                memorizedAt: verse.memorizedAt
+            )
+        }
+        return rowByOrdinal.values.sorted { $0.kjvOrdinal < $1.kjvOrdinal }
     }
 
     /**
-     Expands Android-compatible memorized ranges into unique ordinals.
+     Filters memorization target rows for Android export without collapsing duplicates.
 
-     - Parameter ranges: Local memorized ranges from the persisted snapshot.
-     - Returns: Sorted unique KJVA ordinals that Android can store in `MemorizedVerse`.
+     Android stores target rows independently, so duplicate ranges remain separate rows and target
+     totals count them independently. The only export filter is KJVA-domain validity.
+
+     - Parameter rows: Local target rows from the persisted snapshot.
+     - Returns: Rows whose endpoints fit Android's JSword KJVA ordinal domain.
      - Side effects: none.
-     - Failure modes: Out-of-domain ranges are ignored instead of clamped, avoiding unbounded
-       expansion and avoiding invented partial progress.
+     - Failure modes: none.
      */
-    private static func uniqueOrdinals(in ranges: [MemorizationProgressRange]) -> [Int] {
-        var ordinals = Set<Int>()
-        for range in ranges where isKJVAOrdinalRange(range) {
-            for ordinal in range.startOrdinal...range.endOrdinal {
-                ordinals.insert(ordinal)
-            }
-        }
-        return ordinals.sorted()
+    private static func exportableMemorizationTargets(
+        in rows: [MemorizationTargetRow]
+    ) -> [MemorizationTargetRow] {
+        rows.filter { isKJVAOrdinalRange($0.range) }
     }
 
     private static var schemaSQL: String {

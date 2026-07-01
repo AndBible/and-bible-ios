@@ -3853,6 +3853,95 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
+    /**
+     Opens Memorize for a Reading Progress row stored in Android's global KJVA ordinal domain.
+
+     Reading Progress memorized passages and target rows are not scoped to the current reader book.
+     This method resolves the row's KJVA ordinals directly, then lets the existing document loader
+     fetch verse text by OSIS reference from the active module when available.
+
+     - Parameters:
+       - startOrdinal: First KJVA progress ordinal.
+       - endOrdinal: Last KJVA progress ordinal.
+     - Returns: `true` when the Memorize document was emitted.
+     - Side effects: Emits the Memorize document through the bridge and clears competing document
+       state through the same path as bridge-launched Memorize.
+     - Failure modes: Returns `false` when the client is not ready or the KJVA range contains no
+       concrete verse references.
+     */
+    @discardableResult
+    func openMemorizeKJVARange(startOrdinal: Int, endOrdinal: Int) -> Bool {
+        guard clientReady else { return false }
+        let effectiveStart = min(startOrdinal, endOrdinal)
+        let effectiveEnd = max(startOrdinal, endOrdinal)
+        let references = (effectiveStart...effectiveEnd).compactMap { ordinal -> VerseKeyReference? in
+            guard let reference = JSwordKJVAVersification.verseReference(ordinal: ordinal) else {
+                return nil
+            }
+            return VerseKeyReference(
+                osisBookId: reference.osisId,
+                chapter: reference.chapter,
+                verse: reference.verse,
+                ordinal: reference.ordinal
+            )
+        }
+        guard let firstReference = references.first else { return false }
+        let referenceOrdinals = Set(references.map(\.ordinal))
+
+        return annotationDocumentLoader().loadMemorizeDocument(
+            request: MemorizeDocumentRequest(
+                bookInitials: activeModuleName,
+                startOrdinal: effectiveStart,
+                endOrdinal: effectiveEnd,
+                activeModuleName: activeModuleName,
+                currentBook: Self.bookName(forOsisId: firstReference.osisBookId) ?? firstReference.osisBookId,
+                currentChapter: firstReference.chapter,
+                osisBookId: firstReference.osisBookId,
+                activeModule: activeModule,
+                stateJSON: activeWindow?.pageManager?.jsState,
+                directVerseReferences: references,
+                verseReference: { [weak self] book, ordinal in
+                    self?.verseReference(book: book, ordinal: ordinal)
+                },
+                parseVerseKey: { [weak self] key in
+                    self?.parseVerseKey(key)
+                },
+                placeholderVerseText: { book, chapter, verse in
+                    Self.placeholderVerseText(book: book, chapter: chapter, verse: verse)
+                },
+                memorizedOrdinals: { [weak self] _, startOrdinal, endOrdinal in
+                    self?.memorizationProgressStore?.memorizedOrdinals(
+                        bookInitials: "",
+                        startOrdinal: startOrdinal,
+                        endOrdinal: endOrdinal
+                    )
+                    .filter { referenceOrdinals.contains($0) }
+                    .sorted() ?? []
+                },
+                targetOrdinals: { [weak self] _, startOrdinal, endOrdinal in
+                    self?.memorizationProgressStore?.targetOrdinals(
+                        bookInitials: "",
+                        startOrdinal: startOrdinal,
+                        endOrdinal: endOrdinal
+                    )
+                    .filter { referenceOrdinals.contains($0) }
+                    .sorted() ?? []
+                },
+                readingProgressSettings: { [progressBridgeCoordinator] in
+                    progressBridgeCoordinator.readingProgressSettingsPayload()
+                }
+            ),
+            prepareVisibleState: { [weak self] in
+                self?.showingMyNotes = false
+                self?.showingStudyPad = false
+                self?.activeStudyPadLabelId = nil
+                self?.activeStudyPadLabelName = nil
+                self?.editingInWebView = false
+                self?.clearNativeSelectionState()
+            }
+        )
+    }
+
     /// Return from My Notes to the Bible text view.
     public func returnFromMyNotes() {
         guard showingMyNotes else { return }

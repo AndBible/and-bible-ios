@@ -63,7 +63,18 @@ struct BibleReaderActiveSheetContent: View {
                 ReadingProgressView(
                     readingStore: controller?.readingProgressStore,
                     memorizationStore: controller?.memorizationProgressStore,
-                    initialTab: readingProgressInitialTab
+                    initialTab: readingProgressInitialTab,
+                    onOpenMemorizeRange: { range in
+                        onDismiss()
+                        _ = controller?.openMemorizeKJVARange(
+                            startOrdinal: range.startOrdinal,
+                            endOrdinal: range.endOrdinal
+                        )
+                    },
+                    onOpenChapter: { osisId, chapter in
+                        onDismiss()
+                        _ = controller?.navigateToRef("\(osisId).\(chapter)")
+                    }
                 )
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {

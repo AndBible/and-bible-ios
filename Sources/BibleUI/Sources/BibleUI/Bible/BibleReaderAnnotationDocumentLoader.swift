@@ -376,13 +376,17 @@ struct BibleReaderAnnotationDocumentLoader {
 
         return references.compactMap { reference in
             let boundedEndVerse = BibleReaderBookCatalog.verseCount(
-                for: request.currentBook,
+                for: Self.bookTitle(for: reference, fallback: request.currentBook),
                 chapter: reference.chapter
             )
             guard reference.verse <= boundedEndVerse else { return nil }
             return [
                 "key": reference.osisRef,
-                "text": request.placeholderVerseText(request.currentBook, reference.chapter, reference.verse),
+                "text": request.placeholderVerseText(
+                    Self.bookTitle(for: reference, fallback: request.currentBook),
+                    reference.chapter,
+                    reference.verse
+                ),
             ]
         }
     }
@@ -445,6 +449,9 @@ struct BibleReaderAnnotationDocumentLoader {
      - Failure modes: Invalid ranges or non-verse ordinals produce an empty array.
      */
     private func memorizeVerseReferences(_ request: MemorizeDocumentRequest) -> [VerseKeyReference] {
+        if let directVerseReferences = request.directVerseReferences {
+            return directVerseReferences
+        }
         guard let ordinalRange = memorizeOrdinalRange(request) else { return [] }
         return (ordinalRange.start...ordinalRange.end).compactMap { ordinal in
             request.verseReference(request.currentBook, ordinal)
@@ -480,14 +487,19 @@ struct BibleReaderAnnotationDocumentLoader {
         guard let range = memorizeReferenceRange(request) else {
             return "\(request.currentBook) \(request.currentChapter)"
         }
+        let startBook = Self.bookTitle(for: range.start, fallback: request.currentBook)
+        let endBook = Self.bookTitle(for: range.end, fallback: request.currentBook)
+        if range.start.osisBookId != range.end.osisBookId {
+            return "\(startBook) \(range.start.chapter):\(range.start.verse)-\(endBook) \(range.end.chapter):\(range.end.verse)"
+        }
         if range.start.chapter == range.end.chapter {
             let verseSuffix = range.start.verse == range.end.verse ?
                 "\(range.start.verse)" :
                 "\(range.start.verse)-\(range.end.verse)"
-            return "\(request.currentBook) \(range.start.chapter):\(verseSuffix)"
+            return "\(startBook) \(range.start.chapter):\(verseSuffix)"
         }
 
-        return "\(request.currentBook) \(range.start.chapter):\(range.start.verse)-\(range.end.chapter):\(range.end.verse)"
+        return "\(startBook) \(range.start.chapter):\(range.start.verse)-\(range.end.chapter):\(range.end.verse)"
     }
 
     /**
@@ -505,6 +517,10 @@ struct BibleReaderAnnotationDocumentLoader {
         return range.start.osisRef == range.end.osisRef ?
             range.start.osisRef :
             "\(range.start.osisRef)-\(range.end.osisRef)"
+    }
+
+    private static func bookTitle(for reference: VerseKeyReference, fallback: String) -> String {
+        BibleReaderBookCatalog.bookName(forOsisId: reference.osisBookId) ?? fallback
     }
 }
 
@@ -537,6 +553,8 @@ struct MemorizeDocumentRequest {
     let activeModule: SwordModule?
     /// Saved Vue document state from the active page manager.
     let stateJSON: String?
+    /// Optional concrete KJVA verse references for Reading Progress row launches.
+    let directVerseReferences: [VerseKeyReference]?
     /// Resolves ordinals using active versification.
     let verseReference: BibleReaderAnnotationDocumentLoader.VerseReferenceProvider
     /// Parses SWORD verse keys.
@@ -549,4 +567,40 @@ struct MemorizeDocumentRequest {
     let targetOrdinals: BibleReaderAnnotationDocumentLoader.OrdinalProgressProvider
     /// Builds current reading-progress settings payload.
     let readingProgressSettings: () -> [String: Any]
+
+    init(
+        bookInitials: String,
+        startOrdinal: Int,
+        endOrdinal: Int,
+        activeModuleName: String,
+        currentBook: String,
+        currentChapter: Int,
+        osisBookId: String,
+        activeModule: SwordModule?,
+        stateJSON: String?,
+        directVerseReferences: [VerseKeyReference]? = nil,
+        verseReference: @escaping BibleReaderAnnotationDocumentLoader.VerseReferenceProvider,
+        parseVerseKey: @escaping BibleReaderAnnotationDocumentLoader.VerseKeyParser,
+        placeholderVerseText: @escaping BibleReaderAnnotationDocumentLoader.PlaceholderVerseTextProvider,
+        memorizedOrdinals: @escaping BibleReaderAnnotationDocumentLoader.OrdinalProgressProvider,
+        targetOrdinals: @escaping BibleReaderAnnotationDocumentLoader.OrdinalProgressProvider,
+        readingProgressSettings: @escaping () -> [String: Any] = { [:] }
+    ) {
+        self.bookInitials = bookInitials
+        self.startOrdinal = startOrdinal
+        self.endOrdinal = endOrdinal
+        self.activeModuleName = activeModuleName
+        self.currentBook = currentBook
+        self.currentChapter = currentChapter
+        self.osisBookId = osisBookId
+        self.activeModule = activeModule
+        self.stateJSON = stateJSON
+        self.directVerseReferences = directVerseReferences
+        self.verseReference = verseReference
+        self.parseVerseKey = parseVerseKey
+        self.placeholderVerseText = placeholderVerseText
+        self.memorizedOrdinals = memorizedOrdinals
+        self.targetOrdinals = targetOrdinals
+        self.readingProgressSettings = readingProgressSettings
+    }
 }

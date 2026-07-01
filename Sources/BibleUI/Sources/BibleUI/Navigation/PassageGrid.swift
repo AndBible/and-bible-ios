@@ -520,7 +520,21 @@ enum PassageBookDisplayName {
      - Failure modes: Unknown ids fall back to `book.abbreviation`.
      */
     static func shortName(for book: BookInfo) -> String {
-        shortNamesByOsisId[book.osisId] ?? book.abbreviation
+        shortName(forOsisId: book.osisId, fallback: book.abbreviation)
+    }
+
+    /**
+     Returns Android's short chooser label for an OSIS id.
+
+     - Parameters:
+       - osisId: JSword OSIS book id.
+       - fallback: Label to use when no source-derived JSword short name is known.
+     - Returns: JSword short name when known, otherwise `fallback`.
+     - Side effects: none.
+     - Failure modes: Unknown ids fall back to the supplied value.
+     */
+    static func shortName(forOsisId osisId: String, fallback: String) -> String {
+        shortNamesByOsisId[osisId] ?? fallback
     }
 
     /**
