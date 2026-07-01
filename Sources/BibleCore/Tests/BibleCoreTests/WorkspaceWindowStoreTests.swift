@@ -320,6 +320,62 @@ final class WorkspaceWindowStoreTests: XCTestCase {
     }
 
     /**
+     Ensures add-window focus never points at a pane missing from the managed window lists.
+
+     The reader footer and semantic state export render from `WindowManager.allWindows`, while pane
+     focus reads `activeWindow`. A failure here means tapping add can produce an active pane that has
+     no corresponding footer tab, which leaves UI automation and users without a stable activation
+     target.
+     */
+    func testWindowManagerAddWindowKeepsActiveWindowInManagedWindowLists() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Add Window Active List")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        windowManager.registerController(NSObject(), for: firstWindow.id)
+
+        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+
+        XCTAssertEqual(windowManager.activeWindow?.id, secondWindow.id)
+        XCTAssertTrue((workspace.windows ?? []).contains(where: { $0.id == secondWindow.id }))
+        XCTAssertTrue(windowManager.allWindows.contains(where: { $0.id == secondWindow.id }))
+        XCTAssertTrue(windowManager.visibleWindows.contains(where: { $0.id == secondWindow.id }))
+        XCTAssertEqual(windowManager.allWindows.map(\.orderNumber), [0, 1])
+    }
+
+    /**
+     Verifies active workspace selection is rebound into the manager's SwiftData context.
+
+     App startup and fixture setup can resolve `Workspace` objects through a short-lived
+     `ModelContext`, while `WindowManager` owns a long-lived store for later pane mutations.
+     Passing the foreign-context workspace into the manager must not make later add-window actions
+     attach new windows to an object graph the manager cannot save or refresh.
+     */
+    func testWindowManagerRebindsForeignContextWorkspaceBeforeAddingWindow() throws {
+        let container = try makeWorkspaceModelContainer()
+        let seedStore = WorkspaceStore(modelContext: ModelContext(container))
+        let workspace = seedStore.createWorkspace(name: "Foreign Context Workspace")
+        let workspaceID = workspace.id
+
+        let managerStore = WorkspaceStore(modelContext: ModelContext(container))
+        let windowManager = WindowManager(workspaceStore: managerStore)
+        let externalStore = WorkspaceStore(modelContext: ModelContext(container))
+        let externalWorkspace = try XCTUnwrap(externalStore.workspace(id: workspaceID))
+
+        windowManager.setActiveWorkspace(externalWorkspace)
+        let firstWindow = try XCTUnwrap(windowManager.activeWindow)
+        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+
+        XCTAssertEqual(windowManager.activeWorkspace?.id, workspaceID)
+        XCTAssertEqual(windowManager.activeWindow?.id, secondWindow.id)
+        XCTAssertEqual(windowManager.allWindows.map(\.orderNumber), [0, 1])
+        XCTAssertTrue(managerStore.windows(workspaceId: workspaceID).contains { $0.id == secondWindow.id })
+    }
+
+    /**
      Ensures new-window creation exits maximized layout before waiting for controller registration.
 
      The setup maximizes the only pane, then adds a sibling pane. The expected result is that the
