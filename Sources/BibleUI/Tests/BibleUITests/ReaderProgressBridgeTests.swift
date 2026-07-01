@@ -98,6 +98,10 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(setupPayload["jumpToId"] is NSNull)
         XCTAssertEqual(setupPayload["topOffset"] as? Int, 0)
         XCTAssertEqual(setupPayload["bottomOffset"] as? Int, 0)
+        XCTAssertFalse(controller.allowsHorizontalDocumentNavigation)
+
+        controller.loadCurrentContent()
+        XCTAssertTrue(controller.allowsHorizontalDocumentNavigation)
     }
 
     /**

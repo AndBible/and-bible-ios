@@ -130,6 +130,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     static let emptyRenderedContentState = BibleReaderRenderedContentState.empty.encodedValue
     private static let issueTrackerURLString = "https://github.com/AndBible/and-bible/issues"
     private(set) var renderedContentState: String = BibleReaderController.emptyRenderedContentState
+    private(set) var renderedDocumentKind: ReaderRenderedDocumentKind = .standard
     /// Coordinator for Android-style transient `MultiDocument` state and fake-document identity.
     private var specialDocumentCoordinator = BibleReaderSpecialDocumentCoordinator()
     /// Reader-local My Documents active page state and document payload assembly.
@@ -289,15 +290,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         studyPadAccessibilitySnapshot.encodedValue
     }
 
+    /// Whether the rendered document allows native horizontal swipes to navigate to another page.
+    var allowsHorizontalDocumentNavigation: Bool {
+        renderedDocumentKind.allowsHorizontalDocumentNavigation
+    }
+
     /// Records the latest content identity that native requested the reader WebView to display.
     private func setRenderedContentState(
         category: DocumentCategory,
         moduleName: String?,
         book: String,
         chapter: Int? = nil,
-        key: String? = nil
+        key: String? = nil,
+        documentKind: ReaderRenderedDocumentKind = .standard
     ) {
         myDocumentCoordinator.clearActivePageUnless(category: category, moduleName: moduleName)
+        renderedDocumentKind = documentKind
         renderedContentState = BibleReaderRenderedContentState(
             category: category,
             moduleName: moduleName,
@@ -5099,13 +5107,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             sendLabels: { [weak self] in
                 self?.sendLabelsToVueJS()
             },
-            setRenderedContentState: { [weak self] category, moduleName, book, chapter, key in
+            setRenderedContentState: { [weak self] category, moduleName, book, chapter, key, documentKind in
                 self?.setRenderedContentState(
                     category: category,
                     moduleName: moduleName,
                     book: book,
                     chapter: chapter,
-                    key: key
+                    key: key,
+                    documentKind: documentKind
                 )
             },
             incrementMyNotesRevision: { [weak self] in
