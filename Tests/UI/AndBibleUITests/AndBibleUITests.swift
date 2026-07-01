@@ -59,26 +59,31 @@ final class AndBibleUITests: XCTestCase {
      *
      * Setup:
      * - runs a shell process that exits immediately after writing output
-     * - starts a short-lived background `sleep` that keeps the inherited stdout descriptor open
+     * - starts a nohup descendant shell that keeps the inherited stdout descriptor open and writes
+     *   a marker after the direct shell exits
      *
      * Expected result:
      * - the helper returns after the direct child exits and captures the direct child's output
-     * - the descendant is still alive when the helper returns, proving capture did not wait for
-     *   inherited pipe descriptors to close
+     * - the descendant marker appears after the helper returns, proving capture did not wait for
+     *   inherited pipe descriptors to close and the descendant survived the shell exit
      *
      * Failure meaning:
      * - UI-test fixture bootstrap can stall when `simctl launch` or another host command leaves
      *   pipe descriptors attached to a launched process that outlives the command
      *
      * Side effects:
-     * - starts and terminates one descendant host `sleep` process that inherits stdout
+     * - creates and removes one temporary marker file
+     * - starts and terminates one descendant host shell process that inherits stdout
      */
     func testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen() {
         var descendantPID: pid_t?
+        let markerURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("andbible-host-process-\(UUID().uuidString).marker")
         defer {
             if let descendantPID {
                 _ = kill(descendantPID, SIGTERM)
             }
+            try? FileManager.default.removeItem(at: markerURL)
         }
 
         let result = runHostProcess(
@@ -86,13 +91,15 @@ final class AndBibleUITests: XCTestCase {
             arguments: [
                 "-c",
                 """
-                sleep 30 &
+                /usr/bin/nohup /bin/sh -c 'sleep 2; printf alive > "$1"; sleep 30' descriptor-descendant "$1" &
                 child_pid=$!
                 printf "fixture-ready:%s" "$child_pid"
                 exit 0
-                """
+                """,
+                "descriptor-fixture",
+                markerURL.path
             ],
-            timeout: 15
+            timeout: 5
         )
 
         XCTAssertEqual(result.status, 0)
@@ -101,13 +108,16 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertEqual(outputParts.count, 2)
         descendantPID = outputParts.last.flatMap { pid_t(String($0)) }
         XCTAssertNotNil(descendantPID)
-        if let descendantPID {
-            XCTAssertEqual(
-                kill(descendantPID, 0),
-                0,
-                "Host process capture should not block until inherited pipe descriptors close."
-            )
+
+        let markerDeadline = Date().addingTimeInterval(6)
+        while Date() < markerDeadline,
+              !FileManager.default.fileExists(atPath: markerURL.path) {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: markerURL.path),
+            "Host process capture should return before inherited pipe descriptors close while the descendant keeps running."
+        )
     }
 
     /**
