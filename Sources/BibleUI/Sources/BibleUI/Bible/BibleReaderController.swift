@@ -791,6 +791,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     chapter: chapter
                 )
             },
+            resolveMemorizationOrdinals: { [weak self] startOrdinal, endOrdinal in
+                self?.memorizationOrdinalProjections(
+                    startOrdinal: startOrdinal,
+                    endOrdinal: endOrdinal
+                ) ?? []
+            },
             loadMemorizeDocument: { [weak self] bookInitials, startOrdinal, endOrdinal in
                 self?.loadMemorizeDocument(
                     bookInitials: bookInitials,
@@ -3819,16 +3825,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 placeholderVerseText: { book, chapter, verse in
                     Self.placeholderVerseText(book: book, chapter: chapter, verse: verse)
                 },
-                memorizedOrdinals: { [memorizationProgressStore] bookInitials, startOrdinal, endOrdinal in
-                    memorizationProgressStore?.memorizedOrdinals(
-                        bookInitials: bookInitials,
+                memorizedOrdinals: { [weak self] _, startOrdinal, endOrdinal in
+                    self?.memorizedRenderedOrdinals(
                         startOrdinal: startOrdinal,
                         endOrdinal: endOrdinal
                     ) ?? []
                 },
-                targetOrdinals: { [memorizationProgressStore] bookInitials, startOrdinal, endOrdinal in
-                    memorizationProgressStore?.targetOrdinals(
-                        bookInitials: bookInitials,
+                targetOrdinals: { [weak self] _, startOrdinal, endOrdinal in
+                    self?.targetRenderedOrdinals(
                         startOrdinal: startOrdinal,
                         endOrdinal: endOrdinal
                     ) ?? []
@@ -5587,6 +5591,73 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             kjvBookOrdinal: kjvBookOrdinal,
             bookName: currentBook
         )
+    }
+
+    /**
+     Projects rendered reader ordinals into Android's KJVA memorization-progress domain.
+
+     Android persists memorization rows as global KJVA ordinals. The embedded reader still reports
+     ordinals in the active document's versification, so each bridge mutation and Memorize document
+     payload must resolve the visible verse reference first, then convert that reference to KJVA.
+
+     - Parameters:
+       - startOrdinal: First rendered ordinal reported by Vue.
+       - endOrdinal: Last rendered ordinal reported by Vue.
+     - Returns: Ordered rendered-to-KJVA projections for resolvable verse ordinals.
+     - Side effects: May temporarily move the active SWORD module cursor through `verseReference`.
+     - Failure modes: Invalid ordinals, chapter-intro rows, or references outside KJVA are skipped.
+     */
+    private func memorizationOrdinalProjections(
+        startOrdinal: Int,
+        endOrdinal: Int
+    ) -> [BibleReaderProgressBridgeCoordinator.MemorizationOrdinalProjection] {
+        guard startOrdinal > 0, endOrdinal >= startOrdinal else { return [] }
+        return (startOrdinal...endOrdinal).compactMap { ordinal in
+            let reference = activeModule?.verseReference(ordinal: ordinal) ??
+                verseReference(book: currentBook, ordinal: ordinal)
+            guard let reference,
+                  let kjvaOrdinal = JSwordKJVAVersification.verseOrdinal(
+                      osisId: reference.osisBookId,
+                      chapter: reference.chapter,
+                      verse: reference.verse
+                  ) else {
+                return nil
+            }
+            return BibleReaderProgressBridgeCoordinator.MemorizationOrdinalProjection(
+                renderedOrdinal: ordinal,
+                kjvaOrdinal: kjvaOrdinal
+            )
+        }
+    }
+
+    private func memorizedRenderedOrdinals(startOrdinal: Int, endOrdinal: Int) -> [Int] {
+        renderedMemorizationOrdinals(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
+            store.memorizedOrdinals(bookInitials: "", startOrdinal: range.startOrdinal, endOrdinal: range.endOrdinal)
+        }
+    }
+
+    private func targetRenderedOrdinals(startOrdinal: Int, endOrdinal: Int) -> [Int] {
+        renderedMemorizationOrdinals(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
+            store.targetOrdinals(bookInitials: "", startOrdinal: range.startOrdinal, endOrdinal: range.endOrdinal)
+        }
+    }
+
+    private func renderedMemorizationOrdinals(
+        startOrdinal: Int,
+        endOrdinal: Int,
+        storedOrdinals: (MemorizationProgressStore, (startOrdinal: Int, endOrdinal: Int)) -> [Int]
+    ) -> [Int] {
+        guard let store = memorizationProgressStore else { return [] }
+        let projections = memorizationOrdinalProjections(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+        guard let minKJVAOrdinal = projections.map(\.kjvaOrdinal).min(),
+              let maxKJVAOrdinal = projections.map(\.kjvaOrdinal).max() else {
+            return []
+        }
+        let stored = Set(storedOrdinals(store, (startOrdinal: minKJVAOrdinal, endOrdinal: maxKJVAOrdinal)))
+        return projections
+            .filter { stored.contains($0.kjvaOrdinal) }
+            .map(\.renderedOrdinal)
+            .sorted()
     }
 
     @discardableResult

@@ -5,11 +5,10 @@ import Foundation
 /**
  * A normalized verse range used by the local iOS memorization progress store.
  *
- * Android stores memorization state as KJV-normalized ordinals. iOS does not yet have the full
- * Android progress database, so this first bridge-backed model keeps the module/book identity with
- * the ordinals supplied by the embedded reader. That prevents ordinal collisions across books while
- * preserving the bridge contract's `endOrdinal < 0` single-verse semantics before values reach the
- * store.
+ * Android stores memorization state as KJVA-normalized ordinals without a module identity. An empty
+ * `bookInitials` value represents that global Android domain. Non-empty values are still decoded so
+ * older local state and imported fixtures remain readable, but new reader mutations should write
+ * KJVA-global ranges.
  */
 public struct MemorizationProgressRange: Codable, Equatable, Hashable {
     public let bookInitials: String
@@ -20,6 +19,52 @@ public struct MemorizationProgressRange: Codable, Equatable, Hashable {
         self.bookInitials = bookInitials
         self.startOrdinal = startOrdinal
         self.endOrdinal = endOrdinal
+    }
+}
+
+/**
+ * Android-style memorization mutation delta.
+ *
+ * The shared reader client receives only the ordinals added or removed by a mutation. Store methods
+ * return KJVA-domain deltas; reader bridge code projects them back to the currently rendered ordinal
+ * domain before emitting `update_memorization_data`.
+ */
+public struct MemorizationProgressDelta: Equatable {
+    public static let empty = MemorizationProgressDelta()
+
+    public var addedMemorized: [Int]
+    public var removedMemorized: [Int]
+    public var addedTargets: [Int]
+    public var removedTargets: [Int]
+
+    public init(
+        addedMemorized: [Int] = [],
+        removedMemorized: [Int] = [],
+        addedTargets: [Int] = [],
+        removedTargets: [Int] = []
+    ) {
+        self.addedMemorized = addedMemorized.sorted()
+        self.removedMemorized = removedMemorized.sorted()
+        self.addedTargets = addedTargets.sorted()
+        self.removedTargets = removedTargets.sorted()
+    }
+
+    public var isEmpty: Bool {
+        addedMemorized.isEmpty &&
+            removedMemorized.isEmpty &&
+            addedTargets.isEmpty &&
+            removedTargets.isEmpty
+    }
+
+    public mutating func merge(_ other: MemorizationProgressDelta) {
+        addedMemorized = Self.merged(addedMemorized, other.addedMemorized)
+        removedMemorized = Self.merged(removedMemorized, other.removedMemorized)
+        addedTargets = Self.merged(addedTargets, other.addedTargets)
+        removedTargets = Self.merged(removedTargets, other.removedTargets)
+    }
+
+    private static func merged(_ lhs: [Int], _ rhs: [Int]) -> [Int] {
+        Array(Set(lhs).union(rhs)).sorted()
     }
 }
 
@@ -47,8 +92,8 @@ public struct MemorizationProgressSnapshot: Codable, Equatable {
  * Local store for memorized verses and memorization targets.
  *
  * The store is intentionally backed by `SettingsStore` JSON so #76 can give the bridge real native
- * behavior without forcing a SwiftData schema migration. Remote Android `progress` sync and richer
- * KJV-normalization remain separate parity work.
+ * behavior without forcing a SwiftData schema migration. New bridge writes use Android-compatible
+ * KJVA-global ranges, and the same snapshot feeds Android database backup export/import.
  */
 public final class MemorizationProgressStore {
     public static let settingsKey = "memorization_progress_state_v1"
@@ -73,70 +118,98 @@ public final class MemorizationProgressStore {
         )
     }
 
+    @discardableResult
     public func addMemorizationTargetIfNeeded(
         bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int
-    ) {
+    ) -> MemorizationProgressDelta {
         guard let range = Self.range(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal) else {
-            return
+            return .empty
         }
         var snapshot = snapshot()
-        guard !Self.contains(range, in: snapshot.targetRanges) else { return }
+        guard !Self.contains(range, in: snapshot.targetRanges) else { return .empty }
+        let before = Self.ordinals(from: snapshot.targetRanges, matching: range)
         snapshot.targetRanges = Self.add(range, to: snapshot.targetRanges)
+        let after = Self.ordinals(from: snapshot.targetRanges, matching: range)
         save(snapshot)
+        return MemorizationProgressDelta(addedTargets: Array(after.subtracting(before)))
     }
 
+    @discardableResult
     public func addMemorizationTarget(
         bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int
-    ) {
+    ) -> MemorizationProgressDelta {
         guard let range = Self.range(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal) else {
-            return
+            return .empty
         }
         var snapshot = snapshot()
+        let before = Self.ordinals(from: snapshot.targetRanges, matching: range)
         snapshot.targetRanges = Self.add(range, to: snapshot.targetRanges)
+        let after = Self.ordinals(from: snapshot.targetRanges, matching: range)
+        let delta = MemorizationProgressDelta(addedTargets: Array(after.subtracting(before)))
+        guard !delta.isEmpty else { return .empty }
         save(snapshot)
+        return delta
     }
 
+    @discardableResult
     public func removeMemorizationTarget(
         bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int
-    ) {
+    ) -> MemorizationProgressDelta {
         guard let range = Self.range(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal) else {
-            return
+            return .empty
         }
         var snapshot = snapshot()
+        let before = Self.ordinals(from: snapshot.targetRanges, matching: range)
         snapshot.targetRanges = Self.subtract(range, from: snapshot.targetRanges)
+        let after = Self.ordinals(from: snapshot.targetRanges, matching: range)
+        let delta = MemorizationProgressDelta(removedTargets: Array(before.subtracting(after)))
+        guard !delta.isEmpty else { return .empty }
         save(snapshot)
+        return delta
     }
 
+    @discardableResult
     public func markAsMemorized(
         bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int
-    ) {
+    ) -> MemorizationProgressDelta {
         guard let range = Self.range(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal) else {
-            return
+            return .empty
         }
         var snapshot = snapshot()
+        let before = Self.ordinals(from: snapshot.memorizedRanges, matching: range)
         snapshot.memorizedRanges = Self.add(range, to: snapshot.memorizedRanges)
+        let after = Self.ordinals(from: snapshot.memorizedRanges, matching: range)
+        let delta = MemorizationProgressDelta(addedMemorized: Array(after.subtracting(before)))
+        guard !delta.isEmpty else { return .empty }
         save(snapshot)
+        return delta
     }
 
+    @discardableResult
     public func unmarkMemorized(
         bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int
-    ) {
+    ) -> MemorizationProgressDelta {
         guard let range = Self.range(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal) else {
-            return
+            return .empty
         }
         var snapshot = snapshot()
+        let before = Self.ordinals(from: snapshot.memorizedRanges, matching: range)
         snapshot.memorizedRanges = Self.subtract(range, from: snapshot.memorizedRanges)
+        let after = Self.ordinals(from: snapshot.memorizedRanges, matching: range)
+        let delta = MemorizationProgressDelta(removedMemorized: Array(before.subtracting(after)))
+        guard !delta.isEmpty else { return .empty }
         save(snapshot)
+        return delta
     }
 
     public func memorizedOrdinals(
@@ -191,16 +264,7 @@ public final class MemorizationProgressStore {
             return []
         }
 
-        var result = Set<Int>()
-        for range in ranges where Self.matchesStoredRange(range, query: query) {
-            let start = max(range.startOrdinal, query.startOrdinal)
-            let end = min(range.endOrdinal, query.endOrdinal)
-            guard start <= end else { continue }
-            for ordinal in start...end {
-                result.insert(ordinal)
-            }
-        }
-        return result.sorted()
+        return Self.ordinals(from: ranges, matching: query).sorted()
     }
 
     private static func range(
@@ -208,8 +272,7 @@ public final class MemorizationProgressStore {
         startOrdinal: Int,
         endOrdinal: Int
     ) -> MemorizationProgressRange? {
-        guard !bookInitials.isEmpty,
-              startOrdinal > 0,
+        guard startOrdinal > 0,
               endOrdinal >= startOrdinal else {
             return nil
         }
@@ -218,6 +281,22 @@ public final class MemorizationProgressStore {
             startOrdinal: startOrdinal,
             endOrdinal: endOrdinal
         )
+    }
+
+    private static func ordinals(
+        from ranges: [MemorizationProgressRange],
+        matching query: MemorizationProgressRange
+    ) -> Set<Int> {
+        var result = Set<Int>()
+        for range in ranges where matchesStoredRange(range, query: query) {
+            let start = max(range.startOrdinal, query.startOrdinal)
+            let end = min(range.endOrdinal, query.endOrdinal)
+            guard start <= end else { continue }
+            for ordinal in start...end {
+                result.insert(ordinal)
+            }
+        }
+        return result
     }
 
     private static func add(

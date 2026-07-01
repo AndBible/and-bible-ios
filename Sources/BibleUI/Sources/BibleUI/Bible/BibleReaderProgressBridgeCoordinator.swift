@@ -36,6 +36,8 @@ import BibleView
    still opens the Memorize document to match Android's UI handoff after a guarded target insert
  */
 struct BibleReaderProgressBridgeCoordinator {
+    private typealias MemorizationKJVARange = (startOrdinal: Int, endOrdinal: Int)
+
     /// Resolved chapter identity used by Android-compatible reading-progress persistence.
     struct ReadingProgressBridgeTarget {
         /// JSword/KJVA `BibleBook.ordinal` persisted by Android progress rows.
@@ -44,12 +46,22 @@ struct BibleReaderProgressBridgeCoordinator {
         let bookName: String
     }
 
+    /// Maps one rendered reader ordinal to Android's KJVA memorization-progress ordinal.
+    struct MemorizationOrdinalProjection {
+        /// Ordinal used by the current Vue document.
+        let renderedOrdinal: Int
+        /// Android JSword KJVA ordinal persisted in memorization progress rows.
+        let kjvaOrdinal: Int
+    }
+
     /// Supplies the active memorization store.
     private let memorizationStore: () -> MemorizationProgressStore?
     /// Supplies the active reading-progress store.
     private let readingStore: () -> ReadingProgressStore?
     /// Resolves and validates a bridge chapter target against the current reader document.
     private let resolveReadingTarget: (String, Int, Int) -> ReadingProgressBridgeTarget?
+    /// Projects rendered verse ordinals into Android's KJVA memorization domain.
+    private let resolveMemorizationOrdinals: (Int, Int) -> [MemorizationOrdinalProjection]
     /// Opens the bundled Memorize Vue document for a selected verse range.
     private let loadMemorizeDocument: (String, Int, Int) -> Void
     /// Presents the native reading-progress UI using Android tab indexes.
@@ -70,6 +82,7 @@ struct BibleReaderProgressBridgeCoordinator {
        - memorizationStore: Supplier for local memorization persistence.
        - readingStore: Supplier for local reading-progress persistence.
        - resolveReadingTarget: Closure that validates bridge chapter identity and returns KJVA data.
+       - resolveMemorizationOrdinals: Closure projecting rendered ordinals into Android KJVA ordinals.
        - loadMemorizeDocument: Closure opening the Memorize document for a selected range.
        - showReadingProgress: Native progress UI callback.
        - showReadingProgressSettings: Native settings UI callback.
@@ -83,6 +96,7 @@ struct BibleReaderProgressBridgeCoordinator {
         memorizationStore: @escaping () -> MemorizationProgressStore?,
         readingStore: @escaping () -> ReadingProgressStore?,
         resolveReadingTarget: @escaping (String, Int, Int) -> ReadingProgressBridgeTarget?,
+        resolveMemorizationOrdinals: @escaping (Int, Int) -> [MemorizationOrdinalProjection],
         loadMemorizeDocument: @escaping (String, Int, Int) -> Void,
         showReadingProgress: @escaping (Int) -> Void,
         showReadingProgressSettings: @escaping () -> Void,
@@ -93,6 +107,7 @@ struct BibleReaderProgressBridgeCoordinator {
         self.memorizationStore = memorizationStore
         self.readingStore = readingStore
         self.resolveReadingTarget = resolveReadingTarget
+        self.resolveMemorizationOrdinals = resolveMemorizationOrdinals
         self.loadMemorizeDocument = loadMemorizeDocument
         self.showReadingProgress = showReadingProgress
         self.showReadingProgressSettings = showReadingProgressSettings
@@ -103,48 +118,58 @@ struct BibleReaderProgressBridgeCoordinator {
 
     /// Adds the selected verse range as a memorization target and opens the Memorize document.
     func memorize(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        memorizationStore()?.addMemorizationTargetIfNeeded(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal
-        )
+        mutateMemorization(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
+            store.addMemorizationTargetIfNeeded(
+                bookInitials: "",
+                startOrdinal: range.startOrdinal,
+                endOrdinal: range.endOrdinal
+            )
+        }
         loadMemorizeDocument(bookInitials, startOrdinal, endOrdinal)
     }
 
     /// Marks the selected verse range as memorized in local iOS progress state.
     func markAsMemorized(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        memorizationStore()?.markAsMemorized(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal
-        )
+        mutateMemorization(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
+            store.markAsMemorized(
+                bookInitials: "",
+                startOrdinal: range.startOrdinal,
+                endOrdinal: range.endOrdinal
+            )
+        }
     }
 
     /// Adds the selected verse range to local memorization targets.
     func addMemorizationTarget(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        memorizationStore()?.addMemorizationTarget(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal
-        )
+        mutateMemorization(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
+            store.addMemorizationTarget(
+                bookInitials: "",
+                startOrdinal: range.startOrdinal,
+                endOrdinal: range.endOrdinal
+            )
+        }
     }
 
     /// Removes the selected verse range from local memorization targets.
     func removeMemorizationTarget(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        memorizationStore()?.removeMemorizationTarget(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal
-        )
+        mutateMemorization(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
+            store.removeMemorizationTarget(
+                bookInitials: "",
+                startOrdinal: range.startOrdinal,
+                endOrdinal: range.endOrdinal
+            )
+        }
     }
 
     /// Removes the selected verse range from local memorized ranges.
     func unmarkMemorized(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        memorizationStore()?.unmarkMemorized(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal
-        )
+        mutateMemorization(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
+            store.unmarkMemorized(
+                bookInitials: "",
+                startOrdinal: range.startOrdinal,
+                endOrdinal: range.endOrdinal
+            )
+        }
     }
 
     /// Records one chapter-read history row and emits the new chapter-read count to BibleView.
@@ -238,6 +263,93 @@ struct BibleReaderProgressBridgeCoordinator {
         emitReadingProgressSettings()
         emit(event: "set_config", data: buildConfigJSON())
         return savedSettings
+    }
+
+    /**
+     Applies one Android-compatible memorization mutation and emits rendered ordinal deltas.
+
+     The native store is KJVA-global, while the open Vue document expects update arrays in the
+     currently rendered ordinal domain. The projection closure is the only boundary that knows both
+     domains for the active reader.
+     */
+    private func mutateMemorization(
+        startOrdinal: Int,
+        endOrdinal: Int,
+        operation: (MemorizationProgressStore, MemorizationKJVARange) -> MemorizationProgressDelta
+    ) {
+        guard let store = memorizationStore() else { return }
+        let lower = min(startOrdinal, endOrdinal)
+        let upper = max(startOrdinal, endOrdinal)
+        let projections = resolveMemorizationOrdinals(lower, upper)
+            .sorted { $0.renderedOrdinal < $1.renderedOrdinal }
+        guard !projections.isEmpty else { return }
+
+        var renderedDelta = MemorizationProgressDelta.empty
+        for range in Self.contiguousKJVARanges(from: projections) {
+            let kjvaDelta = operation(store, range)
+            renderedDelta.merge(Self.renderedDelta(from: kjvaDelta, using: projections))
+        }
+        emitMemorizationData(renderedDelta)
+    }
+
+    private static func contiguousKJVARanges(
+        from projections: [MemorizationOrdinalProjection]
+    ) -> [MemorizationKJVARange] {
+        let ordinals = Array(Set(projections.map(\.kjvaOrdinal))).sorted()
+        guard var start = ordinals.first else { return [] }
+        var previous = start
+        var ranges: [MemorizationKJVARange] = []
+
+        for ordinal in ordinals.dropFirst() {
+            if ordinal == previous + 1 {
+                previous = ordinal
+                continue
+            }
+            ranges.append((startOrdinal: start, endOrdinal: previous))
+            start = ordinal
+            previous = ordinal
+        }
+        ranges.append((startOrdinal: start, endOrdinal: previous))
+        return ranges
+    }
+
+    private static func renderedDelta(
+        from delta: MemorizationProgressDelta,
+        using projections: [MemorizationOrdinalProjection]
+    ) -> MemorizationProgressDelta {
+        let projectedOrdinals = Dictionary(grouping: projections, by: \.kjvaOrdinal)
+        return MemorizationProgressDelta(
+            addedMemorized: renderedOrdinals(for: delta.addedMemorized, using: projectedOrdinals),
+            removedMemorized: renderedOrdinals(for: delta.removedMemorized, using: projectedOrdinals),
+            addedTargets: renderedOrdinals(for: delta.addedTargets, using: projectedOrdinals),
+            removedTargets: renderedOrdinals(for: delta.removedTargets, using: projectedOrdinals)
+        )
+    }
+
+    private static func renderedOrdinals(
+        for kjvaOrdinals: [Int],
+        using projectedOrdinals: [Int: [MemorizationOrdinalProjection]]
+    ) -> [Int] {
+        kjvaOrdinals.flatMap { kjvaOrdinal in
+            projectedOrdinals[kjvaOrdinal]?.map(\.renderedOrdinal) ?? []
+        }
+        .sorted()
+    }
+
+    private func emitMemorizationData(_ delta: MemorizationProgressDelta) {
+        guard !delta.isEmpty else { return }
+        let payload: [String: Any] = [
+            "addedMemorized": delta.addedMemorized,
+            "removedMemorized": delta.removedMemorized,
+            "addedTargets": delta.addedTargets,
+            "removedTargets": delta.removedTargets,
+        ]
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            return
+        }
+        emit(event: "update_memorization_data", data: json)
     }
 
     /// Emits a shared-client chapter-read status update for one chapter.
