@@ -10,8 +10,8 @@
 "save" = "Save";
 "edit" = "Edit";
 "add" = "Add";
-"search" = "Search";
-"settings" = "Settings";
+"search" = "Find";
+"settings" = "Application preferences";
 "close" = "Close";
 "ok" = "OK";
 "yes" = "Yes";
@@ -50,7 +50,7 @@
 "workspaces" = "Workspaces";
 "definition" = "Definition";
 "dictionary" = "Dictionary";
-"general_book" = "General Book";
+"general_book" = "Book";
 "map" = "Map";
 "locked" = "Locked";
 
@@ -120,9 +120,9 @@
 "no_labels" = "No Labels";
 "no_labels_description" = "Create labels to organize your bookmarks and notes.";
 "label_name" = "Label name";
-"studypad" = "StudyPad";
+"studypad" = "Study Pad";
 "open_studypad" = "Open StudyPad";
-"edit_label" = "Edit Label";
+"edit_label" = "Edit label";
 "label_edit_name" = "Name";
 "label_edit_color" = "Color";
 "label_edit_icon" = "Icon";
@@ -230,12 +230,12 @@
 "footnotes" = "Footnotes";
 "inline_footnotes" = "Inline Footnotes";
 "red_letters" = "Red Letters";
-"cross_references" = "Cross References";
+"cross_references" = "Cross references";
 "expand_cross_references" = "Expand Cross References";
 "strongs_numbers" = "Strong's Numbers";
 "morphology" = "Morphology";
 "settings_annotations" = "Annotations";
-"show_bookmarks" = "Show Bookmarks";
+"show_bookmarks" = "Show bookmarks";
 "show_my_notes" = "Show My Notes";
 "verse_selection" = "Verse Selection";
 
@@ -307,7 +307,7 @@
 "installed_module_%@" = "Installed module: %@";
 "installed_epub_%@" = "Installed EPUB: %@";
 "installed_font_%@" = "Installed font: %@";
-"install_do_you_want" = "Do you want to install %@?";
+"install_do_you_want" = "Do you want to install module (%@)?";
 
 /* ========================================
    Repository Manager
@@ -391,7 +391,7 @@
 /* ========================================
    Cross References
    ======================================== */
-"cross_references" = "Cross References";
+"cross_references" = "Cross references";
 
 /* ========================================
    Workspace
@@ -484,7 +484,7 @@
 /* ========================================
    Sharing
    ======================================== */
-"share_verse" = "Share Verse";
+"share_verse" = "Share…";
 "copy_verse" = "Copy Verse";
 
 /* ========================================
@@ -539,7 +539,7 @@
 "workspace_text_display_settings_title" = "Text options - %@";
 "window_text_display_settings_title" = "Text options - Window %d";
 "parent_settings_category_title" = "Parent settings";
-"workspace_text_options_link" = "Workspace text options - %@";
+"workspace_text_options_link" = "Workspace text options — %@";
 "workspace_text_options_link_summary" = "Edit text display settings for this workspace";
 "global_text_options_link" = "Global text options";
 "global_text_options_link_summary" = "Edit default text display settings for all workspaces";
@@ -594,7 +594,7 @@
 "pref_font_size_multiplier_title" = "Font size multiplier";
 "prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
 "prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
-"prefs_disable_animations_summary" = "Disable various animations such as smooth scrolling. ";
+"prefs_disable_animations_summary" = "Disable various animations such as smooth scrolling.";
 "prefs_disable_animations_title" = "Disable animations";
 "prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
 "prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
@@ -612,7 +612,7 @@
 "prefs_navigate_to_verse_title" = "Navigate to verse";
 "prefs_night_mode_automatic" = "Automatic";
 "prefs_night_mode_manual" = "Manual";
-"prefs_night_mode_summary" = "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen. ";
+"prefs_night_mode_summary" = "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen.";
 "prefs_night_mode_system" = "System";
 "prefs_night_mode_title" = "Night mode switching";
 "prefs_open_links_in_special_window_summary" = "Open links in special window, for quicker display of cross-references and Strongs";
@@ -626,7 +626,7 @@
 "prefs_swipe_mode_page" = "Page";
 
 "prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text and lists";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Experimental features";
 "prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
@@ -645,7 +645,7 @@
 "sync_adapter" = "Synchronization Backend";
 "sync_adapter_summary" = "Current: %@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "NextCloud";
+"adapters_next_cloud" = "Next Cloud";
 "auth_server_uri" = "Server URL";
 "auth_username" = "User name";
 "auth_password" = "Password";
@@ -654,14 +654,14 @@
 "invalid_url_message" = "The URL you entered is invalid. Please enter a valid URL (e.g., https://nextcloud.example.com)";
 "prefs_sync_introduction_summary1" = "Choose which backend cloud service you want to use to synchronize multiple devices.";
 "test_connection" = "Test Connection";
-"overrideBackup" = "Existing database that this device is not synchronized to is found in Cloud. Database contains %s. What do you want to do?";
+"overrideBackup" = "Existing database that this device is not synchronized to is found in Cloud. Database contains %@. What do you want to do?";
 "cloud_fetch_and_restore_initial" = "Copy from Cloud to this device";
 "cloud_create_new" = "Copy from this device to Cloud";
 "cloud_disable_sync" = "Cancel & disable synchronization";
 "cloud_sync_title" = "Device synchronization";
 "application_preferences" = "Application preferences";
-"are_you_sure_reset_local" = "This will reset your local database for %s with the content that is currently stored in cloud service.";
-"are_you_sure_reset_cloud" = "This will reset your cloud database for %s with the content that you have in this device.";
+"are_you_sure_reset_local" = "This will reset your local database for %@ with the content that is currently stored in cloud service.";
+"are_you_sure_reset_cloud" = "This will reset your cloud database for %@ with the content that you have in this device.";
 "reading_plans_content" = "Reading plans and their statuses";
 "bookmarks_contents" = "Bookmarks, Labels and Study Pads";
 "workspaces_contents" = "Workspaces and Windows";
@@ -670,9 +670,9 @@
 "synchronization_categories" = "Synchronization categories";
 "sync_error" = "Error occurred in Cloud synchronization";
 "sync_cant_fetch" = "The version of database or patch file stored in Cloud is higher than the one supported by this app.";
-"sync_disabling" = "Disabling synchronizing for %s for now.";
+"sync_disabling" = "Disabling synchronizing for %@ for now.";
 "sync_update_app" = "Please update the app to continue synchronization.";
-"last_updated" = "Last updated: %s";
+"last_updated" = "Last updated: %@";
 
 /* Google Drive Sync */
 "prefs_sync_introduction_summary2" = "When using Google Drive, %@ is granted access only to applications files, not any personal files.";
@@ -706,11 +706,11 @@
 "prefs_show_verseno_title" = "Chapter & verse numbers";
 "copy_settings" = "Copy settings to";
 "copy_settings_to_workspace" = "Workspace";
-"copy_settings_to_window" = "Window %1$d (%2$@:%3$@)";
+"copy_settings_to_window" = "Window %1$d (%2$@: %3$@)";
 "copy_settings_to_global" = "Global defaults";
 "copyReference" = "Copy link to clipboard";
 "reference_copied_to_clipboard" = "Reference copied to clipboard";
-"add_ellipsis" = "%@...";
+"add_ellipsis" = "%@…";
 "copy_settings_title" = "Which settings do you want to copy?";
 "select_all" = "Select all";
 "select_none" = "Select none";
@@ -733,3 +733,29 @@
 "ai_document_markers" = "AI document markers";
 "page_scroll_amount" = "Page scroll amount";
 "ordinals" = "Ordinals";
+
+/* Android shared translations */
+"about" = "About";
+"app_name_andbible" = "AndBible";
+"app_name_long" = "AndBible: Bible Study";
+"download" = "Download Documents";
+"download_errors" = "Download errors";
+"format_epub" = "EPUB documents (*.epub)";
+"format_mybible" = "MyBible documents (*.SQLite3)";
+"format_mysword" = "MySword documents (*.mybible)";
+"format_zip" = "Zip file containing Sword module(s), or documents backup file (*.abmd) created by %@";
+"install_zip" = "Load Documents From Files";
+"rename" = "Rename";
+"restore_database" = "Restore Database File";
+"reversed_split_mode" = "Reversed split mode";
+"supported_formats" = "Supported formats for loading documents from a file: %@";
+"welcome_message" = "Thank you for downloading %@. There are currently no Bibles or documents installed. To continue, please install at least 1 document by downloading from the internet, or by loading from a zip file document backup.";
+
+/* Android shared translations */
+"copy_of %@" = "Copy of %@";
+"fullscreen" = "Fullscreen";
+"help_bookmarks" = "Bookmarks";
+"help_navigation" = "Navigation";
+"help_search" = "Search";
+"help_workspaces" = "Workspaces";
+"skip" = "Skip";

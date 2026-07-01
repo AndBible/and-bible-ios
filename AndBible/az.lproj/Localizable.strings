@@ -2,25 +2,25 @@
 /* Auto-generated from Android translations */
 
 "app_name" = "AndBible";
-"done" = "Done";
+"done" = "Bitdi";
 "cancel" = "Ləğv";
 "delete" = "Sil";
-"save" = "Bəli";
+"save" = "Yaddaşa vur";
 "edit" = "Düzəliş edin";
 "add" = "Add";
 "search" = "Axtarış";
 "settings" = "Settings";
-"close" = "Close";
+"close" = "Bağla";
 "ok" = "Bəli";
 "yes" = "Bəli";
 "no" = "Xeyr";
-"error" = "Error";
+"error" = "Xəta";
 "loading" = "Loading...";
-"create" = "Create";
+"create" = "Düzəlt";
 "new_window" = "Yeni pəncərə";
 "clear" = "Clear";
-"reset" = "Reset";
-"all" = "All";
+"reset" = "Sıfırdan başla";
+"all" = "Hamısı";
 "sort" = "Sort";
 "name" = "Name";
 "untitled" = "Untitled";
@@ -36,15 +36,15 @@
 "searching" = "Searching...";
 "bible" = "Müqəddəs Kitab";
 "deuterocanonical" = "Deutero Kanonik (İkinci Dərəcədə Esin Kitablar)";
-"bookmarks" = "Nişanlı yerlər (Əlfəcinlər)";
+"bookmarks" = "Nişanlı yerlər (Əlfəcinlər)";
 "reading_plans" = "Reading Plans";
 "downloads" = "Downloads";
 "history" = "Əvvəl";
 "workspaces" = "Workspaces";
 "definition" = "Definition";
-"dictionary" = "Dictionary";
-"general_book" = "General Book";
-"map" = "Map";
+"dictionary" = "Lüğət";
+"general_book" = "Kitab";
+"map" = "Xəritə";
 "choose_book" = "Kitabı seç";
 "books" = "Books";
 "old_testament" = "Əhdi-Ətiq";
@@ -92,7 +92,7 @@
 "studypad" = "StudyPad";
 "open_studypad" = "Open StudyPad";
 "edit_label" = "Edit Label";
-"label_edit_name" = "Name";
+"label_edit_name" = "Etiket";
 "label_edit_color" = "Color";
 "label_edit_options" = "Options";
 "favourite" = "Favourite";
@@ -107,17 +107,17 @@
 "search_index" = "Axtarış indeksi";
 "search_checking_index" = "Checking index...";
 "search_need_index" = "To search a document we need an index.";
-"search_create_index" = "Create";
-"search_indexing_message" = "When indexing has completed you will be taken to the search screen.";
+"search_create_index" = "Düzəlt";
+"search_indexing_message" = "İndeks yaradıldıqdan sonra axtarış səhifəsi açılacaq.";
 "search_searching" = "Searching...";
 "search_enter_prompt" = "Enter a word or phrase to search";
 "search_bible_text" = "Search Bible text";
 "search_match" = "Match";
-"search_scope_all" = "All";
+"search_scope_all" = "Hamısı";
 "search_scope_ot" = "OT";
 "search_scope_nt" = "NT";
 "search_translations" = "Translations";
-"search_all" = "All";
+"search_all" = "Hamısı";
 "module_browser" = "Module Browser";
 "bibles" = "Müqəddəs Kitab";
 "commentaries" = "Commentaries";
@@ -149,7 +149,7 @@
 "strongs_numbers" = "Stronqun rəqəmləri";
 "morphology" = "Morfoloji kodlar";
 "settings_annotations" = "Annotations";
-"show_bookmarks" = "Show Bookmarks";
+"show_bookmarks" = "Nişanlı yerləri göstər";
 "show_my_notes" = "Show My Notes";
 "verse_selection" = "Verse Selection";
 "colors" = "Colors";
@@ -168,7 +168,7 @@
 "settings_security" = "Security";
 "discrete_mode" = "Discrete Mode";
 "discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
-"settings_about" = "About";
+"settings_about" = "Sənəd haqqında";
 "version" = "Version";
 "export" = "Export";
 "full_backup_json" = "Full Backup (JSON)";
@@ -204,10 +204,10 @@
 "custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
-"delete_custom_repository_message_format" = "Delete %@?";
+"delete_custom_repository_message_format" = "%@ silinsin?";
 "delete_custom_repository_title" = "Delete repository";
 "edit_custom_repository" = "Edit custom repository";
-"help" = "Help";
+"help" = "Kömək";
 "https" = "HTTPS";
 "open_wiki" = "Open Wiki";
 "repository_source_error" = "Repository source error";
@@ -332,23 +332,23 @@
 /* Quick Settings & Help */
 "fullscreen" = "Fullscreen";
 "tilt_to_scroll" = "Tilt to Scroll";
-"reversed_split_mode" = "Reversed Split Mode";
+"reversed_split_mode" = "Bölünmüşün əks rejimi";
 "window_pinning" = "Window Pinning";
 "label_settings" = "Label Settings";
 "all_text_options" = "All Text Options";
 "help_tips" = "Help & Tips";
 "sponsor_development" = "Sponsor Development";
-"help_navigation" = "Navigation";
+"help_navigation" = "Naviqasiya";
 "help_navigation_body" = "Swipe left or right to move between chapters. Tap the book name in the toolbar to choose a different book and chapter.";
 "help_selection" = "Text Selection";
 "help_selection_body" = "Long-press on a verse to select it. An action bar appears with options: Bookmark, Copy, Share, Compare, Speak, and Web Search.";
 "help_pinning" = "Window Pinning";
 "help_pinning_body" = "When you have multiple windows, pin a window to keep it visible when switching Bible/Commentary categories.";
-"help_bookmarks" = "Bookmarks";
+"help_bookmarks" = "Nişanlı yerlər (Əlfəcinlər)";
 "help_bookmarks_body" = "Long-press a verse and tap Bookmark. Add labels to organize and notes for your thoughts.";
 "help_studypads" = "StudyPads";
 "help_studypads_body" = "Rich text journals attached to labels. Access them from the label manager or bookmark list.";
-"help_search" = "Search";
+"help_search" = "Axtarış";
 "help_search_body" = "Full-text search with All Words, Any Word, and Phrase modes. You will be prompted to create an index on first use.";
 "help_workspaces" = "Workspaces";
 "help_workspaces_body" = "Save different window arrangements as workspaces. Switch between them from the overflow menu.";
@@ -356,7 +356,7 @@
 "help_hidden_body" = "Double-tap the Bible text for fullscreen mode. Enable Tilt to Scroll in the overflow menu. Discrete calculator mode is available in Settings.";
 
 /* About & Workspace Actions */
-"rename" = "Rename";
+"rename" = "Yenidən adlandır";
 "clone" = "Clone";
 "copy_of %@" = "Copy of %@";
 "copy_reference" = "Copy Reference";
@@ -364,7 +364,7 @@
 "move_up" = "Move Up";
 "move_down" = "Move Down";
 "reference_copied" = "Reference copied";
-"about" = "About";
+"about" = "Sənəd haqqında";
 "rate_app" = "Rate App";
 "report_bug" = "Report Bug";
 "tell_friend" = "Tell a Friend";
@@ -562,3 +562,12 @@
 "help_workspaces_title" = "Workspaces";
 "reading_plans_plural" = "Reading Plans";
 "download_document_confirm_prefix" = "Yüklə";
+
+/* Android shared translations */
+"choose_document" = "Sənədi seçin";
+"download" = "Sənəd yüklə";
+"prefs_section_title_title" = "Hissə başlıqları";
+"prefs_show_strongs_title" = "Stronqun rəqəmləri";
+"windowMaximise" = "Böyüt";
+"windowMinimise" = "Kiçilt";
+"windowSynchronise" = "Sinxronlaşdır";
