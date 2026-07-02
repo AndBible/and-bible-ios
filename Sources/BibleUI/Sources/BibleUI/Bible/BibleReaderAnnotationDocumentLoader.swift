@@ -12,6 +12,49 @@ private let annotationDocumentLoaderLogger = Logger(
 )
 
 /**
+ Prebuilt Memorize fake-document emission ready for a destination reader controller.
+
+ Android routes Memorize through `FakeBookFactory.memorizeDocument`, so the source pane must be able
+ to build the Vue payload once and then let the owning window decide whether the current pane or the
+ links pane renders it. This value carries both the serialized document and the native state tokens
+ the destination controller needs to expose Android's commentary-category fake document.
+
+ Inputs:
+ - serialized Vue Memorize document JSON
+ - selected source module initials and ordinal range
+ - Android-visible reference title
+
+ Outputs:
+ - immutable emission data consumed by `BibleReaderAnnotationDocumentLoader.emitMemorizeDocument`
+   and pane-level links-window routing
+
+ Side effects: None.
+ Failure modes: Construction is caller-validated; invalid JSON is still treated as opaque bridge
+ payload text by the downstream emitter, matching the existing bridge contract.
+ */
+struct MemorizeDocumentEmission {
+    /// Serialized Vue document payload to pass to `add_documents`.
+    let documentJSON: String
+
+    /// Source module initials used by Android Memorize progress and rendered-state keys.
+    let bookInitials: String
+
+    /// First selected ordinal in the resolved Memorize range.
+    let startOrdinal: Int
+
+    /// Last selected ordinal in the resolved Memorize range.
+    let endOrdinal: Int
+
+    /// Source reference title shown inside the Vue Memorize document.
+    let title: String
+
+    /// Stable rendered-content key for UI tests and client-ready replay.
+    var renderedKey: String {
+        "memorize:\(bookInitials):\(startOrdinal)-\(endOrdinal)"
+    }
+}
+
+/**
  Emits annotation-backed fake documents into the shared BibleView renderer.
 
  Android represents My Notes, StudyPad, and Memorize as reader documents rather than native sheets.
@@ -273,23 +316,63 @@ struct BibleReaderAnnotationDocumentLoader {
         request: MemorizeDocumentRequest,
         prepareVisibleState: () -> Void
     ) -> Bool {
-        guard let ordinalRange = memorizeOrdinalRange(request) else { return false }
-        guard let document = buildMemorizeDocumentJSON(request) else { return false }
+        guard let emission = makeMemorizeDocumentEmission(request: request) else { return false }
+        emitMemorizeDocument(emission, prepareVisibleState: prepareVisibleState)
+        return true
+    }
+
+    /**
+     Builds a destination-agnostic Memorize fake-document emission.
+
+     - Parameter request: Active reader/module data needed to build the Memorize document.
+     - Returns: Serialized document plus native fake-document metadata, or `nil` when the selected
+       range cannot produce a valid Memorize document.
+     - Side effects: May move the active SWORD module cursor while collecting verse text.
+     - Failure modes: Returns `nil` when the selected ordinals do not map to visible verses or JSON
+       serialization fails.
+     */
+    func makeMemorizeDocumentEmission(request: MemorizeDocumentRequest) -> MemorizeDocumentEmission? {
+        guard let ordinalRange = memorizeOrdinalRange(request) else { return nil }
+        guard let document = buildMemorizeDocumentJSON(request) else { return nil }
+        return MemorizeDocumentEmission(
+            documentJSON: document,
+            bookInitials: request.bookInitials,
+            startOrdinal: ordinalRange.start,
+            endOrdinal: ordinalRange.end,
+            title: memorizeReferenceTitle(request)
+        )
+    }
+
+    /**
+     Emits a prebuilt Memorize fake document into the selected destination controller.
+
+     - Parameters:
+       - emission: Serialized Vue payload and native fake-document metadata.
+       - prepareVisibleState: Controller callback that applies Android's commentary/Memorize
+         PageManager identity and clears competing visible special-document state.
+     - Side effects: Emits bridge events, updates rendered-content state, clears selection, and
+       reapplies background styling.
+     - Failure modes: Invalid JSON is forwarded unchanged to the Vue bridge, matching the existing
+       transient document contract.
+     */
+    func emitMemorizeDocument(
+        _ emission: MemorizeDocumentEmission,
+        prepareVisibleState: () -> Void
+    ) {
         prepareVisibleState()
         bridge.emit(event: "clear_document")
-        bridge.emit(event: "add_documents", data: document)
+        bridge.emit(event: "add_documents", data: emission.documentJSON)
         bridge.emit(event: "setup_content", data: ReaderSetupContentPayload())
         setRenderedContentState(
-            .bible,
-            request.activeModuleName,
-            "Memorize",
-            request.currentChapter,
-            "memorize:\(request.bookInitials):\(ordinalRange.start)-\(ordinalRange.end)",
+            AndroidSpecialDocumentIdentity.memorizeDocumentCategory,
+            AndroidSpecialDocumentIdentity.memorizeDocumentInitials,
+            emission.title,
+            nil,
+            emission.renderedKey,
             .memorize
         )
         clearSelection()
         applyNightModeBackground()
-        return true
     }
 
     /**

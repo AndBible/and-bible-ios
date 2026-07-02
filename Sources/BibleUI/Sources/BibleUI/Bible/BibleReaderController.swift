@@ -133,6 +133,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var renderedDocumentKind: ReaderRenderedDocumentKind = .standard
     /// Coordinator for Android-style transient `MultiDocument` state and fake-document identity.
     private var specialDocumentCoordinator = BibleReaderSpecialDocumentCoordinator()
+    /// Live Memorize fake-document payload used to replay Android's commentary `Memorize` page.
+    private var activeMemorizeEmission: MemorizeDocumentEmission?
     /// Reader-local My Documents active page state and document payload assembly.
     private var myDocumentCoordinator = BibleReaderMyDocumentCoordinator()
 
@@ -323,6 +325,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
+    /// Whether the visible page is Android's synthetic commentary `Memorize` document.
+    var isShowingAndroidMemorizeDocument: Bool {
+        AndroidSpecialDocumentIdentity.isMemorizeDocument(
+            categoryName: currentCategory.pageManagerKey,
+            moduleName: activeCommentaryModuleName ?? activeWindow?.pageManager?.commentaryDocument
+        )
+    }
+
     /**
      Visible toolbar summary for Android's synthetic `Multi` document.
 
@@ -383,7 +393,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Android delegates toolbar search visibility to `CurrentPage.isSearchable`: Bible and regular
      commentary pages are searchable, dictionary pages are not, and general-book pages are searchable
      only for EPUB-backed content. The iOS reader currently represents EPUB with its own category, so
-     non-EPUB general books, including `Multi`, remain non-searchable.
+     non-EPUB general books, including `Multi`, remain non-searchable. Android also marks hidden
+     commentary fake documents such as Memorize as special documents, so they do not expose ordinary
+     commentary search.
 
      - Returns: `true` when the toolbar/search shortcut should be enabled for the visible page.
      - Side effects: None.
@@ -391,7 +403,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     var isCurrentPageSearchable: Bool {
         switch currentCategory {
         case .bible, .commentary, .epub:
-            return !isShowingAndroidMultiDocument
+            return !isShowingAndroidMultiDocument && !isShowingAndroidMemorizeDocument
         default:
             return false
         }
@@ -400,10 +412,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Whether the current page can be spoken by Android's page-level speak action.
 
-     Android's `CurrentGeneralBookPage` disables speech for special documents such as `Multi`, while
-     ordinary Bible/commentary pages remain speakable. iOS page-level speech is backed by the current
-     SWORD text context, so this property intentionally suppresses special links-window pages instead
-     of invoking speech with stale Bible coordinates.
+     Android disables speech for special documents such as `Multi` and Memorize, while ordinary
+     Bible/commentary pages remain speakable. iOS page-level speech is backed by the current SWORD
+     text context, so this property intentionally suppresses special links-window pages instead of
+     invoking speech with stale Bible coordinates.
 
      - Returns: `true` when page-level speech is valid for the visible page.
      - Side effects: None.
@@ -411,7 +423,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     var isCurrentPageSpeakable: Bool {
         switch currentCategory {
         case .bible, .commentary:
-            return !isShowingAndroidMultiDocument
+            return !isShowingAndroidMultiDocument && !isShowingAndroidMemorizeDocument
         default:
             return false
         }
@@ -422,8 +434,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Android reports `CurrentGeneralBookPage.isSyncable=false`, while dictionary/map-style pages
      inherit the default syncable behavior. iOS mirrors that distinction by disabling general-book
-     and EPUB sync controls, including links-window `Multi`, without globally limiting sync to Bible
-     and commentary pages.
+     and EPUB sync controls, including links-window `Multi`, and by treating Memorize as Android's
+     non-syncable hidden commentary fake document without globally limiting sync to Bible and
+     commentary pages.
 
      - Returns: `true` for Android-syncable page categories; `false` for general-book/EPUB pages and
        special `Multi` content.
@@ -434,7 +447,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         case .generalBook, .epub:
             return false
         default:
-            return !isShowingAndroidMultiDocument
+            return !isShowingAndroidMultiDocument && !isShowingAndroidMemorizeDocument
         }
     }
 
@@ -580,6 +593,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      to route it into a dedicated links window or render it in the current controller.
      */
     var onOpenMultiReferenceDocumentInLinksWindow: ((String) -> Void)?
+
+    /**
+     Callback for opening Android's commentary-category Memorize fake document in the links window.
+
+     The controller builds the serialized Vue payload and Android fake-document metadata, then lets
+     the owning pane choose the destination controller. When no owner installs this callback,
+     Memorize renders in the current controller as Android's direct-window fallback.
+     */
+    var onOpenMemorizeDocumentInLinksWindow: ((MemorizeDocumentEmission) -> Void)?
 
     /// Callback for presenting native AI regeneration for a validated My Documents page.
     var onRegenerateMyDocumentPage: ((MyDocumentAIPageActionContext) -> Void)?
@@ -1114,6 +1136,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 return
             }
         }
+        if isShowingAndroidMemorizeDocument {
+            if let activeMemorizeEmission {
+                renderMemorizeDocument(activeMemorizeEmission)
+                return
+            }
+            if loadRestoredAndroidMemorizeDocument() {
+                return
+            }
+        }
 
         switch currentCategory {
         case .commentary:
@@ -1183,6 +1214,83 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             pageDocumentInitials: AndroidSpecialDocumentIdentity.multiDocumentInitials,
             pageKey: restored.pageKey
         )
+        return true
+    }
+
+    /**
+     Rebuilds a restored Android Memorize fake document from the local commentary anchor.
+
+     Android's full restore source is `commentary_sourceBookAndKey`, which iOS currently preserves
+     only in remote-sync fidelity storage and not on the live SwiftData `PageManager`. Until that
+     field exists locally, a restored `commentary/Memorize` pane can still rebuild the single-anchor
+     Memorize document from `commentaryAnchorOrdinal` rather than falling through to an ordinary
+     missing-commentary placeholder.
+
+     - Returns: `true` when a single-anchor Memorize document was rebuilt and rendered.
+     - Side effects: May move the active SWORD module cursor while building Memorize text, emits the
+       document through `renderMemorizeDocument`, and reapplies Android's fake-document identity.
+     - Failure modes: Returns `false` when no anchor ordinal is stored, the KJVA reference cannot be
+       resolved, or the resulting Memorize payload cannot be serialized.
+     */
+    private func loadRestoredAndroidMemorizeDocument() -> Bool {
+        guard let anchorOrdinal = activeWindow?.pageManager?.commentaryAnchorOrdinal,
+              let kjvaReference = JSwordKJVAVersification.verseReference(ordinal: anchorOrdinal) else {
+            return false
+        }
+        let reference = VerseKeyReference(
+            osisBookId: kjvaReference.osisId,
+            chapter: kjvaReference.chapter,
+            verse: kjvaReference.verse,
+            ordinal: kjvaReference.ordinal
+        )
+        let referenceOrdinals = Set([reference.ordinal])
+        let request = MemorizeDocumentRequest(
+            bookInitials: activeModuleName,
+            startOrdinal: anchorOrdinal,
+            endOrdinal: anchorOrdinal,
+            activeModuleName: activeModuleName,
+            currentBook: Self.bookName(forOsisId: reference.osisBookId) ?? reference.osisBookId,
+            currentChapter: reference.chapter,
+            osisBookId: reference.osisBookId,
+            activeModule: activeModule,
+            swordManager: swordManager,
+            stateJSON: activeWindow?.pageManager?.jsState,
+            directVerseReferences: [reference],
+            verseReference: { [weak self] book, ordinal in
+                self?.verseReference(book: book, ordinal: ordinal)
+            },
+            parseVerseKey: { [weak self] key in
+                self?.parseVerseKey(key)
+            },
+            placeholderVerseText: { book, chapter, verse in
+                Self.placeholderVerseText(book: book, chapter: chapter, verse: verse)
+            },
+            memorizedOrdinals: { [weak self] _, startOrdinal, endOrdinal in
+                self?.memorizationProgressStore?.memorizedOrdinals(
+                    bookInitials: "",
+                    startOrdinal: startOrdinal,
+                    endOrdinal: endOrdinal
+                )
+                .filter { referenceOrdinals.contains($0) }
+                .sorted() ?? []
+            },
+            targetOrdinals: { [weak self] _, startOrdinal, endOrdinal in
+                self?.memorizationProgressStore?.targetOrdinals(
+                    bookInitials: "",
+                    startOrdinal: startOrdinal,
+                    endOrdinal: endOrdinal
+                )
+                .filter { referenceOrdinals.contains($0) }
+                .sorted() ?? []
+            },
+            readingProgressSettings: { [progressBridgeCoordinator] in
+                progressBridgeCoordinator.readingProgressSettingsPayload()
+            }
+        )
+        guard let emission = annotationDocumentLoader().makeMemorizeDocumentEmission(request: request) else {
+            return false
+        }
+        renderMemorizeDocument(emission)
         return true
     }
 
@@ -2059,8 +2167,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             logger.info("Restored saved Bible module: \(saved)")
         }
 
-        // Restore saved commentary module
-        if let savedComm = pm.commentaryDocument,
+        // Restore saved commentary module or Android synthetic Memorize document
+        if pm.commentaryDocument == AndroidSpecialDocumentIdentity.memorizeDocumentInitials {
+            activeCommentaryModule = nil
+            activeCommentaryModuleName = AndroidSpecialDocumentIdentity.memorizeDocumentInitials
+            logger.info("Restored Android synthetic Memorize document")
+        } else if let savedComm = pm.commentaryDocument,
            let mgr = swordManager,
            let mod = mgr.module(named: savedComm) {
             activeCommentaryModule = mod
@@ -2261,6 +2373,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         if showingStudyPad, let activeStudyPadLabelId {
             loadStudyPadDocument(labelId: activeStudyPadLabelId)
+            return
+        }
+
+        if isShowingAndroidMemorizeDocument, let activeMemorizeEmission {
+            renderMemorizeDocument(activeMemorizeEmission)
             return
         }
 
@@ -3797,16 +3914,86 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Opens the bundled Memorize document for the selected verse range.
+     Renders a prebuilt Android Memorize fake document in this controller.
+
+     - Parameter emission: Serialized Vue Memorize payload plus source range metadata.
+     - Side effects: Stores the live Memorize emission for client-ready/content replay, applies
+       Android's commentary-category `Memorize` PageManager identity, emits bridge document events,
+       clears selection, and reapplies reader background.
+     - Failure modes: Invalid JSON is forwarded unchanged to the Vue bridge, matching the existing
+       transient document contract.
+     */
+    func renderMemorizeDocument(_ emission: MemorizeDocumentEmission) {
+        activeMemorizeEmission = emission
+        annotationDocumentLoader().emitMemorizeDocument(emission) { [weak self] in
+            self?.prepareMemorizeVisibleState(startOrdinal: emission.startOrdinal)
+        }
+    }
+
+    /**
+     Applies native state for Android's commentary-category Memorize fake document.
+
+     Android stores `FakeBookFactory.memorizeDocument` as a commentary page and keeps the source
+     passage as separate `BookAndKey` state. iOS currently has only the live source ordinal in
+     `PageManager`, so this method persists the available Android-compatible identity without
+     pretending a full `sourceBookAndKey` field exists locally.
+
+     - Parameter startOrdinal: First source ordinal used as the commentary anchor.
+     - Side effects: Mutates controller special-document flags, commentary module identity,
+       `PageManager` category/document/anchor fields, and may invoke `onPersistState`.
+     - Failure modes: If no active `PageManager` exists, only controller-local state is updated.
+     */
+    private func prepareMemorizeVisibleState(startOrdinal: Int) {
+        showingMyNotes = false
+        showingStudyPad = false
+        activeStudyPadLabelId = nil
+        activeStudyPadLabelName = nil
+        editingInWebView = false
+        clearNativeSelectionState()
+        currentCategory = AndroidSpecialDocumentIdentity.memorizeDocumentCategory
+        activeCommentaryModule = nil
+        activeCommentaryModuleName = AndroidSpecialDocumentIdentity.memorizeDocumentInitials
+
+        guard let pageManager = activeWindow?.pageManager else { return }
+        pageManager.currentCategoryName = AndroidSpecialDocumentIdentity.memorizeDocumentCategory.pageManagerKey
+        pageManager.commentaryDocument = AndroidSpecialDocumentIdentity.memorizeDocumentInitials
+        pageManager.commentaryAnchorOrdinal = startOrdinal
+        onPersistState?()
+    }
+
+    /**
+     Routes a built Memorize request through the pane owner when possible.
+
+     - Parameter request: Active reader/module data needed to build the Memorize document.
+     - Returns: `true` when a Memorize emission was built and either routed or rendered.
+     - Side effects: May move the active SWORD module cursor while building text, may delegate to
+       the owning pane for links-window routing, or may render the fake document in this controller.
+     - Failure modes: Returns `false` when the selected range cannot produce a valid document.
+     */
+    @discardableResult
+    private func openMemorizeDocument(request: MemorizeDocumentRequest) -> Bool {
+        guard let emission = annotationDocumentLoader().makeMemorizeDocumentEmission(request: request) else {
+            return false
+        }
+        if let openInLinksWindow = onOpenMemorizeDocumentInLinksWindow {
+            openInLinksWindow(emission)
+        } else {
+            renderMemorizeDocument(emission)
+        }
+        return true
+    }
+
+    /**
+     Opens Android's commentary-category Memorize fake document for the selected verse range.
 
      The document is backed by the same local `MemorizationProgressStore` state that the bridge
-     mutation methods update. The current frontend renders the practice modes from `texts`; the
-     extra metadata keeps the payload aligned with Android's document shape for future client-side
-     target/memorized controls.
+     mutation methods update. The source pane builds the Android-shaped payload, then owner routing
+     decides whether Android's links window or the current pane becomes the `commentary/Memorize`
+     fake-document destination.
      */
     private func loadMemorizeDocument(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
         guard clientReady else { return }
-        annotationDocumentLoader().loadMemorizeDocument(
+        openMemorizeDocument(
             request: MemorizeDocumentRequest(
                 bookInitials: bookInitials,
                 startOrdinal: startOrdinal,
@@ -3842,15 +4029,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 readingProgressSettings: { [progressBridgeCoordinator] in
                     progressBridgeCoordinator.readingProgressSettingsPayload()
                 }
-            ),
-            prepareVisibleState: { [weak self] in
-                self?.showingMyNotes = false
-                self?.showingStudyPad = false
-                self?.activeStudyPadLabelId = nil
-                self?.activeStudyPadLabelName = nil
-                self?.editingInWebView = false
-                self?.clearNativeSelectionState()
-            }
+            )
         )
     }
 
@@ -3889,7 +4068,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         guard let firstReference = references.first else { return false }
         let referenceOrdinals = Set(references.map(\.ordinal))
 
-        return annotationDocumentLoader().loadMemorizeDocument(
+        return openMemorizeDocument(
             request: MemorizeDocumentRequest(
                 bookInitials: activeModuleName,
                 startOrdinal: effectiveStart,
@@ -3932,15 +4111,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 readingProgressSettings: { [progressBridgeCoordinator] in
                     progressBridgeCoordinator.readingProgressSettingsPayload()
                 }
-            ),
-            prepareVisibleState: { [weak self] in
-                self?.showingMyNotes = false
-                self?.showingStudyPad = false
-                self?.activeStudyPadLabelId = nil
-                self?.activeStudyPadLabelName = nil
-                self?.editingInWebView = false
-                self?.clearNativeSelectionState()
-            }
+            )
         )
     }
 

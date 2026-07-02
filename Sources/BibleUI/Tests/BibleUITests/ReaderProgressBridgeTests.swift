@@ -104,9 +104,132 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(setupPayload["topOffset"] as? Int, 0)
         XCTAssertEqual(setupPayload["bottomOffset"] as? Int, 0)
         XCTAssertFalse(controller.allowsHorizontalDocumentNavigation)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=commentary;module=Memorize;book=Genesis 1:1-2;chapter=none;key=memorize:KJV:\(startOrdinal)-\(endOrdinal)"
+        )
 
         controller.loadCurrentContent()
-        XCTAssertTrue(controller.allowsHorizontalDocumentNavigation)
+        XCTAssertFalse(controller.allowsHorizontalDocumentNavigation)
+    }
+
+    /**
+     Verifies Memorize uses Android's hidden commentary fake-document identity.
+
+     Android routes Memorize through `LinkControl.showLink(FakeBookFactory.memorizeDocument, ...)`,
+     so the visible pane becomes a commentary-category fake document rather than ordinary Bible
+     content. This setup opens Memorize through the same bridge action without a pane-owner
+     links-window callback, matching Android's "open here" fallback. A failure means iOS may render
+     the right Vue payload while native chrome, tab identity, sync controls, and restore state still
+     treat the pane as a full Bible window.
+     */
+    @MainActor
+    func testReaderMemorizeBridgeUsesAndroidCommentaryFakeDocumentIdentity() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+
+        controller.bridgeDidSetClientReady(bridge)
+        controller.bridge(
+            bridge,
+            memorize: "KJV",
+            startOrdinal: ordinal,
+            endOrdinal: ordinal
+        )
+
+        XCTAssertEqual(controller.currentCategory, .commentary)
+        XCTAssertEqual(controller.activeModuleName(for: .commentary), "Memorize")
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.commentary.pageManagerKey)
+        XCTAssertEqual(pageManager.commentaryDocument, "Memorize")
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, ordinal)
+        XCTAssertFalse(controller.canUseBibleReferenceActions)
+        XCTAssertFalse(controller.isCurrentPageSearchable)
+        XCTAssertFalse(controller.isCurrentPageSpeakable)
+        XCTAssertFalse(controller.isCurrentPageSyncable)
+        XCTAssertFalse(controller.allowsHorizontalDocumentNavigation)
+    }
+
+    /**
+     Verifies Memorize bridge actions hand off to pane-owned links-window routing.
+
+     Android opens `FakeBookFactory.memorizeDocument` through the same links-window machinery used
+     by dictionary and commentary links. This setup installs the controller routing callback to
+     capture the built Memorize emission, proving the source pane does not render the document
+     itself, then renders the emission into a target links-window controller. The expected result is
+     that the target, not the source, owns Android's `commentary/Memorize` native identity and emits
+     the Vue payload. A failure means iOS can still replace the user's main Bible pane with Memorize
+     instead of using the configured multi-window target.
+     */
+    @MainActor
+    func testReaderMemorizeBridgeUsesLinksWindowRoutingCallbackWhenAvailable() throws {
+        let (sourceBridge, sourceScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let sourceController = BibleReaderController(bridge: sourceBridge, swordManagerOverride: manager)
+        sourceController.settingsStore = try makeInMemorySettingsStore()
+        var routedEmission: MemorizeDocumentEmission?
+        sourceController.onOpenMemorizeDocumentInLinksWindow = { emission in
+            routedEmission = emission
+        }
+        let module = try XCTUnwrap(manager.module(named: sourceController.activeModuleName))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+
+        sourceController.bridgeDidSetClientReady(sourceBridge)
+        let initialSourceScriptCount = sourceScripts().count
+        let initialSourceRenderedState = sourceController.renderedContentState
+
+        sourceController.bridge(
+            sourceBridge,
+            memorize: "KJV",
+            startOrdinal: ordinal,
+            endOrdinal: ordinal
+        )
+
+        let sourceMemorizeScripts = Array(sourceScripts().dropFirst(initialSourceScriptCount))
+        XCTAssertFalse(sourceMemorizeScripts.contains { $0.contains("add_documents") })
+        XCTAssertEqual(sourceController.currentCategory, .bible)
+        XCTAssertEqual(sourceController.renderedContentState, initialSourceRenderedState)
+
+        let emission = try XCTUnwrap(routedEmission)
+        XCTAssertEqual(emission.bookInitials, "KJV")
+        XCTAssertEqual(emission.startOrdinal, ordinal)
+        XCTAssertEqual(emission.endOrdinal, ordinal)
+
+        let (targetBridge, targetScripts) = makeRecordingBridge()
+        let targetController = BibleReaderController(bridge: targetBridge, swordManagerOverride: manager)
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        targetController.activeWindow = window
+        targetController.bridgeDidSetClientReady(targetBridge)
+        let initialTargetScriptCount = targetScripts().count
+
+        targetController.renderMemorizeDocument(emission)
+
+        let targetMemorizeScripts = Array(targetScripts().dropFirst(initialTargetScriptCount))
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: targetMemorizeScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "memorize")
+        XCTAssertEqual(document["title"] as? String, "Genesis 1:1")
+        XCTAssertEqual(targetController.currentCategory, .commentary)
+        XCTAssertEqual(targetController.activeModuleName(for: .commentary), "Memorize")
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.commentary.pageManagerKey)
+        XCTAssertEqual(pageManager.commentaryDocument, "Memorize")
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, ordinal)
+        XCTAssertFalse(targetController.canUseBibleReferenceActions)
+        XCTAssertFalse(targetController.isCurrentPageSearchable)
+        XCTAssertFalse(targetController.isCurrentPageSpeakable)
+        XCTAssertFalse(targetController.isCurrentPageSyncable)
+        XCTAssertFalse(targetController.allowsHorizontalDocumentNavigation)
     }
 
     /**

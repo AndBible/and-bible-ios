@@ -50,6 +50,12 @@ enum AndroidSpecialDocumentIdentity {
     /// PageManager category Android uses for `FakeBookFactory.multiDocument`.
     static let multiDocumentCategory = DocumentCategory.generalBook
 
+    /// Android `FakeBookFactory.memorizeDocument.initials`.
+    static let memorizeDocumentInitials = "Memorize"
+
+    /// PageManager category Android uses for `FakeBookFactory.memorizeDocument`.
+    static let memorizeDocumentCategory = DocumentCategory.commentary
+
     /// Rendered-content token used to identify Strong's `MultiDocument` pages for Vue state replay.
     static let strongsRenderedKey = "strongs"
 
@@ -69,6 +75,26 @@ enum AndroidSpecialDocumentIdentity {
      */
     static func isMultiDocument(categoryName: String?, moduleName: String?) -> Bool {
         categoryName == multiDocumentCategory.pageManagerKey && moduleName == multiDocumentInitials
+    }
+
+    /**
+     Identifies whether a persisted or rendered page identity is Android's synthetic Memorize page.
+
+     Android exposes Memorize as `FakeBookFactory.memorizeDocument`, a hidden commentary-category
+     fake document whose source verse range is carried separately from the page document initials.
+     iOS uses this predicate anywhere native chrome, sync/search actions, or restore state need to
+     distinguish that fake document from an installed commentary module.
+
+     - Parameters:
+       - categoryName: PageManager-style category key such as `commentary`.
+       - moduleName: Document/module initials associated with the page.
+     - Returns: `true` only for Android's `commentary` + `Memorize` fake-document pair.
+     - Side effects: None.
+     - Failure modes: Missing or differently-cased inputs return `false`; callers should preserve
+       ordinary commentary behavior in that case.
+     */
+    static func isMemorizeDocument(categoryName: String?, moduleName: String?) -> Bool {
+        categoryName == memorizeDocumentCategory.pageManagerKey && moduleName == memorizeDocumentInitials
     }
 
     /**
