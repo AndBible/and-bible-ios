@@ -9,19 +9,21 @@ extension AndBibleUITests {
     /**
      Verifies the drawer Reading Plan route can start, advance, delete, and import plans.
      *
-     * Android opens reading plans through app-owned activities, not a platform sheet. Package tests
-     * own algorithmic plan generation, imported-plan parsing, and persistence contracts; this smoke
-     * keeps one visible route through the production reader menu and user controls.
+     * Android opens the selector through `DailyReading`, returns the chosen plan code, and then
+     * immediately shows that plan's daily reading. Package tests own bundled catalog parity, custom
+     * parsing, and persistence details; this smoke keeps one visible route through the production
+     * reader menu and user controls.
      *
      * - Side effects:
      *   - launches the reader shell with empty reading-plan state
      *   - opens Reading Plans from the drawer and verifies Android-style destination chrome
-     *   - starts the first Android-parity built-in template and marks the first day read
+     *   - starts the first Android-parity built-in template and lands on Daily Reading directly
      *   - returns to the plan list, deletes the active plan, then opens the import picker path
      * - Failure modes:
      *   - fails if Reading Plans regresses to sheet presentation
      *   - fails if the list state does not publish the expected active-plan counts
-     *   - fails if the built-in template cannot be started from the picker
+     *   - fails if the built-in catalog diverges from Android's bundled templates
+     *   - fails if the built-in template does not navigate from picker selection to Daily Reading
      *   - fails if the daily reading route cannot advance through the visible controls
      *   - fails if the row-level delete action is missing or does not remove the active plan
      *   - fails if the custom import affordance does not request file-picker presentation
@@ -42,13 +44,14 @@ extension AndBibleUITests {
         waitForReadingPlanListState(containing: "active=0", in: app, timeout: 10)
 
         openAvailableReadingPlans(in: app, timeout: 10)
+        waitForAvailablePlansState(containing: "templates=7", in: app, timeout: 10)
         waitForAvailablePlansState(containing: builtInPlanToken, in: app, timeout: 10)
 
         tapElementReliably(requireElement("readingPlanTemplateButton", in: app, timeout: 15), timeout: 10)
-        waitForReadingPlanListState(containing: "active=1", in: app, timeout: 15)
-        waitForReadingPlanListState(containing: builtInPlanToken, in: app, timeout: 10)
-
-        tapElementReliably(requireElement("readingPlanActivePlanLink", in: app, timeout: 15), timeout: 10)
+        XCTAssertTrue(
+            requireElement("dailyReadingScreen", in: app, timeout: 20).exists,
+            "Choosing a reading-plan template should continue directly to Daily Reading."
+        )
         let currentDay = requireElement("dailyReadingCurrentDayLabel", in: app, timeout: 15)
         XCTAssertEqual(currentDay.value as? String, "1")
 

@@ -117,38 +117,69 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
         XCTAssertEqual(template.readingsForDay(6), "Rev.21-Rev.22")
     }
 
-    func testReadingPlanAlgorithmicPlanLifecycleRemainsAdditive() throws {
+    /**
+     Protects Android built-in catalog parity for bundled reading plans.
+
+     Android's `ReadingPlanTextFileDao` exposes the bundled `.properties` assets as the default
+     catalog, while add-on and user-file discovery is tracked separately in issue #338. The iOS
+     catalog must therefore contain exactly the same bundled plan codes and must not retain
+     iOS-only algorithmic templates. A failure means the visible picker and remote-sync restore
+     support have drifted from Android's built-in definition set.
+     */
+    func testReadingPlanCatalogMatchesAndroidBundledAssets() throws {
+        let planCodes = ReadingPlanService.availablePlans.map(\.code)
+
+        XCTAssertEqual(
+            Set(planCodes),
+            Set([
+                "y1ot1nt1_OTthenNT",
+                "y1ot1nt1_OTandNT",
+                "y1ot1nt1_chronological",
+                "y1ot1nt2_mcheyne",
+                "y1ot6nt4_profHorner",
+                "y1ntpspr",
+                "y2ot1ntps2",
+            ])
+        )
+        XCTAssertEqual(planCodes.count, 7)
+        XCTAssertFalse(planCodes.contains("nt_90"))
+        XCTAssertFalse(planCodes.contains("psalms_proverbs"))
+    }
+
+    /**
+     Verifies starting an Android-backed built-in template still materializes every day row.
+
+     The setup uses the same bundled plan code Android starts from `ReadingPlanSelectorList`.
+     The expected result proves removing iOS-only templates does not regress persisted lifecycle
+     behavior for the supported Android plan catalog. A failure means catalog parity was achieved
+     by losing the start-plan graph that list, daily-reading, and sync flows depend on.
+     */
+    func testReadingPlanAndroidTemplateLifecycleUsesBundledProperties() throws {
         let androidTemplate = try XCTUnwrap(
             ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })
         )
-        let algorithmicTemplate = try XCTUnwrap(
-            ReadingPlanService.availablePlans.first(where: { $0.code == "nt_90" })
-        )
 
         XCTAssertEqual(androidTemplate.readingsForDay(1), "Gen.1-Gen.4")
-        XCTAssertEqual(algorithmicTemplate.name, "New Testament in 90 Days")
-        XCTAssertEqual(algorithmicTemplate.totalDays, 90)
-        XCTAssertEqual(algorithmicTemplate.readingsForDay(1), "Matt.1,Matt.2,Matt.3")
 
         let container = try makeReadingPlanRestoreModelContainer()
         let modelContext = ModelContext(container)
         let plan = ReadingPlanService.startPlan(
-            template: algorithmicTemplate,
+            template: androidTemplate,
             modelContext: modelContext
         )
 
-        XCTAssertEqual(plan.planCode, "nt_90")
-        XCTAssertEqual(plan.planName, "New Testament in 90 Days")
+        XCTAssertEqual(plan.planCode, "y1ot1nt1_OTthenNT")
+        XCTAssertEqual(plan.planName, "1-Year through Bible")
         XCTAssertEqual(plan.currentDay, 0)
-        XCTAssertEqual(plan.totalDays, 90)
+        XCTAssertEqual(plan.totalDays, 365)
         XCTAssertTrue(plan.isActive)
         XCTAssertEqual(ReadingPlanService.expectedDay(for: plan), 1)
 
         let days = (plan.days ?? []).sorted { $0.dayNumber < $1.dayNumber }
-        XCTAssertEqual(days.count, 90)
+        XCTAssertEqual(days.count, 365)
         XCTAssertEqual(Array(days.prefix(3).map(\.dayNumber)), [1, 2, 3])
-        XCTAssertEqual(days.first?.readings, "Matt.1,Matt.2,Matt.3")
-        XCTAssertEqual(days.last?.dayNumber, 90)
+        XCTAssertEqual(days.first?.readings, "Gen.1-Gen.4")
+        XCTAssertEqual(days.last?.dayNumber, 365)
         XCTAssertFalse(days[0].isCompleted)
 
         days[0].isCompleted = true
@@ -156,9 +187,169 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
 
         XCTAssertEqual(
             ReadingPlanService.completionPercentage(for: plan),
-            1.0 / 90.0,
+            1.0 / 365.0,
             accuracy: 0.0001
         )
+    }
+
+    /**
+     Verifies new plans store Android's calendar-day start anchor instead of the current timestamp.
+
+     Android starts a plan with `CommonUtils.truncatedDate`, so day progression advances on the next
+     calendar day rather than 24 hours after the user tapped Start. A failure means a plan started
+     later in the day can remain on day 1 past midnight, creating iOS-only reading-plan drift.
+     */
+    func testReadingPlanStartPlanUsesAndroidTruncatedStartDate() throws {
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })
+        )
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let plan = ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        let calendar = Calendar.current
+
+        XCTAssertEqual(plan.startDate, calendar.startOfDay(for: plan.startDate))
+    }
+
+    /**
+     Verifies expected-day calculation advances at the next calendar day boundary.
+
+     Existing local plans can already have timestamped start dates from the older iOS-only behavior.
+     Matching Android requires deriving elapsed days from normalized calendar dates, not from the
+     exact elapsed seconds between two timestamps.
+     */
+    func testReadingPlanExpectedDayUsesCalendarDayBoundary() throws {
+        let calendar = Calendar.current
+        let startDate = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 2, day: 3, hour: 22, minute: 15))
+        )
+        let nextMorning = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 2, day: 4, hour: 0, minute: 30))
+        )
+        let plan = ReadingPlan(
+            planCode: "y1ot1nt1_OTthenNT",
+            planName: "1-Year through Bible",
+            startDate: startDate,
+            currentDay: 1,
+            totalDays: 365,
+            isActive: true
+        )
+
+        XCTAssertEqual(ReadingPlanService.expectedDay(for: plan, asOf: nextMorning), 2)
+    }
+
+    /**
+     Verifies Android's current-day action can rebase a plan and mark previous days complete.
+
+     Android's `DailyReading.setCurrentDay` makes the selected day today's plan day and marks prior
+     days read. This test fixes the clock so the start-date mutation is deterministic, then checks
+     that earlier rows are complete while the selected and future days remain open. A failure means
+     iOS exposes the daily-reading control without preserving Android's persisted status contract.
+     */
+    func testReadingPlanSetCurrentDayMirrorsAndroidStatusAndStartDateMutation() throws {
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })
+        )
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let plan = ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let expectedStart = try XCTUnwrap(calendar.date(byAdding: .day, value: -4, to: today))
+
+        ReadingPlanService.setCurrentDay(5, for: plan, modelContext: modelContext, now: now)
+
+        XCTAssertEqual(plan.currentDay, 5)
+        XCTAssertEqual(plan.startDate, expectedStart)
+        let days = (plan.days ?? []).sorted { $0.dayNumber < $1.dayNumber }
+        XCTAssertTrue(days[0].isCompleted)
+        XCTAssertTrue(days[3].isCompleted)
+        XCTAssertNotNil(days[0].completedDate)
+        XCTAssertFalse(days[4].isCompleted)
+        XCTAssertNil(days[4].completedDate)
+        XCTAssertFalse(days[5].isCompleted)
+    }
+
+    /**
+     Verifies Android's start-date action updates the persisted plan anchor without rewriting statuses.
+
+     Android lets the user choose a new plan start date from Daily Reading while preserving existing
+     read/unread day statuses. The setup marks one row complete before rebasing the date; the expected
+     result proves the start anchor and current-day pointer update while completion state remains
+     user-authored. A failure means iOS start-date parity is corrupting progress history.
+     */
+    func testReadingPlanSetStartDateRebasesCurrentDayWithoutChangingStatuses() throws {
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })
+        )
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let plan = ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let newStartDate = try XCTUnwrap(calendar.date(byAdding: .day, value: -2, to: today))
+        let days = (plan.days ?? []).sorted { $0.dayNumber < $1.dayNumber }
+        days[0].isCompleted = true
+        days[0].completedDate = today
+        try modelContext.save()
+
+        ReadingPlanService.setStartDate(newStartDate, for: plan, modelContext: modelContext, now: now)
+
+        XCTAssertEqual(plan.startDate, newStartDate)
+        XCTAssertEqual(plan.currentDay, 3)
+        XCTAssertTrue(days[0].isCompleted)
+        XCTAssertFalse(days[1].isCompleted)
+        XCTAssertFalse(days[2].isCompleted)
+    }
+
+    /**
+     Verifies Android's start-date maximum date is enforced below the UI layer.
+
+     Android's date picker rejects future start dates by setting `maxDate` to today. The iOS service
+     helper also clamps future inputs so backup, tests, or future non-picker call sites cannot create
+     a current-plan state Android would not allow. A failure means the SwiftUI picker may look correct
+     while programmatic plan mutation still preserves an iOS-only future-date behavior.
+     */
+    func testReadingPlanSetStartDateCapsFutureDateAtToday() throws {
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })
+        )
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let plan = ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let futureStartDate = try XCTUnwrap(calendar.date(byAdding: .day, value: 3, to: today))
+
+        ReadingPlanService.setStartDate(futureStartDate, for: plan, modelContext: modelContext, now: now)
+
+        XCTAssertEqual(plan.startDate, today)
+        XCTAssertEqual(plan.currentDay, 1)
+    }
+
+    /**
+     Verifies reset deletes the selected reading plan graph, matching Android's current-plan reset.
+
+     Android clears the current plan's stored plan info and day statuses. In iOS the equivalent
+     persisted unit is the `ReadingPlan` plus cascaded `ReadingPlanDay` rows, so the service should
+     delete the graph and save. A failure means Daily Reading can appear reset while stale plan/day
+     rows remain available to list, sync, or restore flows.
+     */
+    func testReadingPlanResetDeletesPlanGraph() throws {
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })
+        )
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let plan = ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+
+        ReadingPlanService.resetPlan(plan, modelContext: modelContext)
+
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<ReadingPlan>()).isEmpty)
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<ReadingPlanDay>()).isEmpty)
     }
 
     func testRemoteSyncReadingPlanRestoreReadsAndroidSnapshot() throws {
@@ -257,6 +448,36 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
             statusStore.status(planCode: "y1ot1nt1_OTthenNT", dayNumber: 3),
             #"{"chapterReadArray":[{"readingNumber":1,"isRead":false}]}"#
         )
+    }
+
+    /**
+     Verifies Android-historic reading-plan days remain implicit when uploading local snapshots.
+
+     For non-date-based plans, Android derives completed days before `currentDay` from the plan row
+     itself and does not need `ReadingPlanStatus` rows for those historic days. iOS still marks those
+     local rows complete for UI progress, but snapshot upload must not turn that local projection into
+     extra Android status rows.
+     */
+    func testReadingPlanSnapshotDoesNotSynthesizeHistoricNonDateStatuses() throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })
+        )
+        let plan = ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        plan.currentDay = 3
+        let days = (plan.days ?? []).sorted { $0.dayNumber < $1.dayNumber }
+        days[0].isCompleted = true
+        days[1].isCompleted = true
+        try modelContext.save()
+
+        let snapshot = RemoteSyncReadingPlanSnapshotService().snapshotCurrentState(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertTrue(snapshot.statusRowsByKey.isEmpty)
     }
 
     func testRemoteSyncReadingPlanRestoreRejectsUnknownPlanDefinitionsWithoutMutation() throws {
@@ -898,8 +1119,7 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
         XCTAssertEqual(snapshot.plans.count, 1)
         XCTAssertEqual(snapshot.plans[0].planCode, "y1ot1nt1_OTthenNT")
         XCTAssertEqual(snapshot.plans[0].currentDay, 2)
-        XCTAssertEqual(snapshot.plans[0].statuses.count, 1)
-        XCTAssertEqual(snapshot.plans[0].statuses[0].dayNumber, 1)
+        XCTAssertTrue(snapshot.plans[0].statuses.isEmpty)
     }
 
 }

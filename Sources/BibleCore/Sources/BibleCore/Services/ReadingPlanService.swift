@@ -23,9 +23,9 @@ public struct ReadingPlanTemplate: Identifiable, Sendable {
 /**
  Provides built-in reading plan templates and plan lifecycle helpers.
 
- The service has two plan sources:
- - Android-parity `.properties` plans loaded from bundled resources
- - a small set of iOS-specific algorithmic plans
+ The built-in catalog mirrors Android's bundled `.properties` reading-plan assets. Custom imports
+ remain transient templates created from user-selected `.properties` content; Android add-on and
+ user-plan discovery is intentionally tracked separately from this bundled catalog.
 
  Day numbering is intentionally 1-based for plan templates and day rows. The persisted
  `ReadingPlan.currentDay` field is still stored separately and currently starts at `0` when a
@@ -34,8 +34,11 @@ public struct ReadingPlanTemplate: Identifiable, Sendable {
 public final class ReadingPlanService {
 
     /**
-     All available built-in plans. Data-driven plans are loaded from bundled .properties files
-     matching the Android AndBible reading plan format.
+     All bundled Android reading-plan templates available to start in-app.
+
+     The list is limited to plan codes backed by bundled `.properties` files so picker, sync,
+     and restore behavior stays aligned with Android's built-in catalog. Missing resource files
+     are skipped rather than represented by empty placeholder templates.
      */
     public static let availablePlans: [ReadingPlanTemplate] = {
         var plans: [ReadingPlanTemplate] = []
@@ -93,10 +96,6 @@ public final class ReadingPlanService {
                 ))
             }
         }
-
-        // iOS-specific algorithmic plans (no Android equivalent)
-        plans.append(ntIn90Days)
-        plans.append(psalmsProverbs)
 
         return plans
     }()
@@ -158,57 +157,6 @@ public final class ReadingPlanService {
         return readings
     }
 
-    // MARK: - Algorithmic Plans (iOS-specific)
-
-    private static let ntIn90Days = ReadingPlanTemplate(
-        code: "nt_90",
-        name: "New Testament in 90 Days",
-        description: "Read through the entire New Testament in 90 days.",
-        totalDays: 90,
-        readingsForDay: { day in
-            // 260 NT chapters / 90 days = ~2.9 chapters/day
-            let chaptersPerDay = 3
-            let ntBooks = ntBookChapters
-            let startChapter = (day - 1) * chaptersPerDay
-            var remaining = startChapter
-            var readings: [String] = []
-
-            for _ in 0..<chaptersPerDay {
-                var accumulated = 0
-                for (book, chapters) in ntBooks {
-                    if remaining < accumulated + chapters {
-                        let ch = remaining - accumulated + 1
-                        readings.append("\(book).\(ch)")
-                        break
-                    }
-                    accumulated += chapters
-                }
-                remaining += 1
-            }
-
-            return readings.isEmpty ? "Matt.1" : readings.joined(separator: ",")
-        }
-    )
-
-    private static let psalmsProverbs = ReadingPlanTemplate(
-        code: "psalms_proverbs",
-        name: "Psalms & Proverbs",
-        description: "Read through Psalms and Proverbs in 60 days.",
-        totalDays: 60,
-        readingsForDay: { day in
-            if day <= 30 {
-                // Psalms: 150 chapters / 30 days = 5 per day
-                let start = (day - 1) * 5 + 1
-                let end = min(start + 4, 150)
-                return "Ps.\(start)-Ps.\(end)"
-            } else {
-                // Proverbs: 31 chapters / 30 days = ~1 per day
-                let ch = (day - 31) % 31 + 1
-                return "Prov.\(ch)"
-            }
-        }
-    )
-
     // MARK: - Custom Plan Import
 
     /**
@@ -244,16 +192,19 @@ public final class ReadingPlanService {
        - template: Template defining day count and daily readings.
        - modelContext: Context used to insert the plan and all child day rows.
      - Returns: The newly created persisted plan.
-     - Note: This pre-generates all `ReadingPlanDay` rows up front with 1-based day numbers.
+     - Note: This pre-generates all `ReadingPlanDay` rows up front with 1-based day numbers and
+       stores the start date at the local day boundary to mirror Android's truncated plan date.
      */
     public static func startPlan(
         template: ReadingPlanTemplate,
         modelContext: ModelContext
     ) -> ReadingPlan {
+        let calendar = Calendar.current
+        let startDate = calendar.startOfDay(for: Date())
         let plan = ReadingPlan(
             planCode: template.code,
             planName: template.name,
-            startDate: Date(),
+            startDate: startDate,
             currentDay: 0,
             totalDays: template.totalDays,
             isActive: true
@@ -275,13 +226,102 @@ public final class ReadingPlanService {
     }
 
     /**
-     Calculates which 1-based day the user should be on based on the plan start date.
+     Rebases a plan so the supplied 1-based day number is treated as today's current day.
+
+     - Parameters:
+       - dayNumber: Desired plan day. Values outside the plan range are clamped to `1...totalDays`.
+       - plan: Persisted plan to mutate.
+       - modelContext: SwiftData context used to save the plan and day-row mutations.
+       - now: Clock value used to derive today's date and completion timestamps.
+     - Side effects: Updates `plan.startDate`, `plan.currentDay`, marks all earlier day rows
+       completed, refreshes the active flag, and saves the context on a best-effort basis.
+     - Note: The selected day and later days are not rewritten, matching Android's current-day
+       action which preserves existing status rows outside the prior-day catch-up range.
+     */
+    public static func setCurrentDay(
+        _ dayNumber: Int,
+        for plan: ReadingPlan,
+        modelContext: ModelContext,
+        now: Date = Date()
+    ) {
+        let upperBound = max(plan.totalDays, 1)
+        let clampedDay = min(max(dayNumber, 1), upperBound)
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        plan.startDate = calendar.date(byAdding: .day, value: -(clampedDay - 1), to: today) ?? today
+        plan.currentDay = clampedDay
+
+        for day in plan.days ?? [] where day.dayNumber < clampedDay {
+            day.isCompleted = true
+            if day.completedDate == nil {
+                day.completedDate = now
+            }
+        }
+
+        if plan.days?.allSatisfy(\.isCompleted) == true {
+            plan.isActive = false
+        } else {
+            plan.isActive = true
+        }
+        try? modelContext.save()
+    }
+
+    /**
+     Sets a plan's start date and refreshes the persisted current-day pointer.
+
+     - Parameters:
+       - startDate: New date anchor. The date is normalized to the current calendar's start of day
+         and capped at today to match Android's start-date picker.
+       - plan: Persisted plan to mutate.
+       - modelContext: SwiftData context used to save the plan mutation.
+       - now: Clock value used to cap future dates and calculate the resulting current day.
+     - Side effects: Updates `plan.startDate`, recalculates `plan.currentDay`, and saves the
+       context on a best-effort basis.
+     - Note: Day completion statuses are intentionally left untouched so changing the date does not
+       rewrite user-authored reading progress.
+     */
+    public static func setStartDate(
+        _ startDate: Date,
+        for plan: ReadingPlan,
+        modelContext: ModelContext,
+        now: Date = Date()
+    ) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let requestedStart = calendar.startOfDay(for: startDate)
+        plan.startDate = min(requestedStart, today)
+        plan.currentDay = expectedDay(for: plan, asOf: now)
+        try? modelContext.save()
+    }
+
+    /**
+     Deletes one persisted reading plan and its cascaded day rows.
+
+     - Parameters:
+       - plan: Persisted plan graph to remove.
+       - modelContext: SwiftData context used to delete and save the graph.
+     - Side effects: Deletes the plan from SwiftData, relies on the model relationship cascade to
+       delete `ReadingPlanDay` rows, and saves the context on a best-effort basis.
+     */
+    public static func resetPlan(
+        _ plan: ReadingPlan,
+        modelContext: ModelContext
+    ) {
+        modelContext.delete(plan)
+        try? modelContext.save()
+    }
+
+    /**
+     Calculates which 1-based day the user should be on based on normalized calendar dates.
      - Parameter plan: Persisted reading plan.
+     - Parameter now: Clock value used when comparing the plan start date to today.
      - Returns: Clamped expected day number in the range `1...plan.totalDays`.
      */
-    public static func expectedDay(for plan: ReadingPlan) -> Int {
+    public static func expectedDay(for plan: ReadingPlan, asOf now: Date = Date()) -> Int {
         let calendar = Calendar.current
-        let days = calendar.dateComponents([.day], from: plan.startDate, to: Date()).day ?? 0
+        let startDate = calendar.startOfDay(for: plan.startDate)
+        let today = calendar.startOfDay(for: now)
+        let days = calendar.dateComponents([.day], from: startDate, to: today).day ?? 0
         return min(max(days + 1, 1), plan.totalDays)
     }
 
@@ -295,15 +335,4 @@ public final class ReadingPlanService {
         return plan.totalDays > 0 ? Double(completedDays) / Double(plan.totalDays) : 0
     }
 
-    // MARK: - Bible Reference Helpers
-
-    private static let ntBookChapters: [(String, Int)] = [
-        ("Matt", 28), ("Mark", 16), ("Luke", 24), ("John", 21),
-        ("Acts", 28), ("Rom", 16), ("1Cor", 16), ("2Cor", 13),
-        ("Gal", 6), ("Eph", 6), ("Phil", 4), ("Col", 4),
-        ("1Thess", 5), ("2Thess", 3), ("1Tim", 6), ("2Tim", 4),
-        ("Titus", 3), ("Phlm", 1), ("Heb", 13), ("Jas", 5),
-        ("1Pet", 5), ("2Pet", 3), ("1John", 5), ("2John", 1),
-        ("3John", 1), ("Jude", 1), ("Rev", 22)
-    ]
 }

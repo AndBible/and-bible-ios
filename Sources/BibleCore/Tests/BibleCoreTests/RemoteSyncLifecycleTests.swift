@@ -1273,9 +1273,9 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         let unwrappedReport = try XCTUnwrap(report)
         XCTAssertEqual(unwrappedReport.patchNumber, 1)
         XCTAssertEqual(unwrappedReport.upsertedPlanCount, 1)
-        XCTAssertEqual(unwrappedReport.upsertedStatusCount, 1)
+        XCTAssertEqual(unwrappedReport.upsertedStatusCount, 0)
         XCTAssertEqual(unwrappedReport.deletedRowCount, 0)
-        XCTAssertEqual(unwrappedReport.logEntryCount, 2)
+        XCTAssertEqual(unwrappedReport.logEntryCount, 1)
         XCTAssertEqual(unwrappedReport.lastUpdated, 2_000)
 
         let events = await adapter.eventsSnapshot()
@@ -1304,10 +1304,9 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         let patchSnapshot = try restoreService.readSnapshot(from: databaseURL)
         XCTAssertEqual(patchSnapshot.plans.count, 1)
         XCTAssertEqual(patchSnapshot.plans[0].currentDay, 2)
-        XCTAssertEqual(patchSnapshot.plans[0].statuses.count, 1)
-        XCTAssertEqual(patchSnapshot.plans[0].statuses[0].dayNumber, 1)
-        XCTAssertEqual(metadataSnapshot.logEntries.map(\.type), [.upsert, .upsert])
-        XCTAssertEqual(Set(metadataSnapshot.logEntries.map(\.tableName)), ["ReadingPlan", "ReadingPlanStatus"])
+        XCTAssertTrue(patchSnapshot.plans[0].statuses.isEmpty)
+        XCTAssertEqual(metadataSnapshot.logEntries.map(\.type), [.upsert])
+        XCTAssertEqual(Set(metadataSnapshot.logEntries.map(\.tableName)), ["ReadingPlan"])
         XCTAssertEqual(Set(metadataSnapshot.logEntries.map(\.sourceDevice)), ["ios-device"])
 
         XCTAssertEqual(
@@ -1322,22 +1321,13 @@ final class RemoteSyncLifecycleTests: XCTestCase {
             ]
         )
         XCTAssertEqual(stateStore.progressState(for: .readingPlans).lastPatchWritten, 2_000)
-        XCTAssertEqual(logEntryStore.entries(for: .readingPlans).count, 2)
+        XCTAssertEqual(logEntryStore.entries(for: .readingPlans).count, 1)
 
-        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
         let currentSnapshot = snapshotService.snapshotCurrentState(
             modelContext: modelContext,
             settingsStore: settingsStore
         )
-        let currentStatusKey = try XCTUnwrap(currentSnapshot.statusRowsByKey.keys.first)
-        XCTAssertEqual(currentSnapshot.statusRowsByKey.count, 1)
-        XCTAssertEqual(
-            fingerprintStore.fingerprint(
-                forLogKey: currentStatusKey,
-                category: .readingPlans
-            ),
-            currentSnapshot.fingerprintsByKey[currentStatusKey]
-        )
+        XCTAssertTrue(currentSnapshot.statusRowsByKey.isEmpty)
 
         let secondReport = try await service.uploadPendingPatch(
             bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-readingplans/ios-device"),

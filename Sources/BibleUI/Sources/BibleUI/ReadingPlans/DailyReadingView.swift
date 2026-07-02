@@ -17,6 +17,7 @@ import BibleCore
  Side effects:
  - `onAppear` loads the plan and derives the initial selected day index
  - marking or unmarking a day mutates SwiftData and may advance the selected day or reactivate the plan
+ - toolbar actions can rebase the start date, set the selected day as current, or reset the plan
  - plan completion status is recalculated after each completion change
  */
 public struct DailyReadingView: View {
@@ -26,6 +27,9 @@ public struct DailyReadingView: View {
     /// SwiftData context used to load and persist plan progress.
     @Environment(\.modelContext) private var modelContext
 
+    /// Dismiss action used after resetting the current plan graph.
+    @Environment(\.dismiss) private var dismiss
+
     /// Loaded reading plan, or `nil` while the view is still hydrating.
     @State private var plan: ReadingPlan?
 
@@ -34,6 +38,15 @@ public struct DailyReadingView: View {
 
     /// Reading plan days sorted by ascending day number.
     @State private var sortedDays: [ReadingPlanDay] = []
+
+    /// Whether the start-date picker sheet is currently presented.
+    @State private var showStartDatePicker = false
+
+    /// Draft start date edited in the start-date picker before it is saved.
+    @State private var draftStartDate = Date()
+
+    /// Whether the destructive reset confirmation is currently presented.
+    @State private var showResetConfirmation = false
 
     /**
      Creates the daily reading screen for one persisted plan.
@@ -83,9 +96,108 @@ public struct DailyReadingView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                dailyReadingActionsMenu
+            }
+        }
+        .sheet(isPresented: $showStartDatePicker) {
+            startDatePickerSheet
+        }
+        .confirmationDialog(
+            String(localized: "reading_plan_reset_title", defaultValue: "Reset Reading Plan?"),
+            isPresented: $showResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "reset", defaultValue: "Reset"), role: .destructive) {
+                resetCurrentPlan()
+            }
+            Button(String(localized: "cancel"), role: .cancel) {}
+        } message: {
+            Text(String(
+                localized: "reading_plan_reset_message",
+                defaultValue: "This removes the plan and its reading progress."
+            ))
+        }
         .onAppear {
             loadPlan()
         }
+    }
+
+    /// Android-parity current-plan actions exposed from the daily-reading toolbar.
+    private var dailyReadingActionsMenu: some View {
+        Menu {
+            Button {
+                setSelectedDayAsCurrent()
+            } label: {
+                SwiftUI.Label(
+                    String(localized: "reading_plan_set_current_day", defaultValue: "Set Current Day"),
+                    systemImage: "calendar.badge.clock"
+                )
+            }
+            .disabled(plan == nil || currentDay == nil)
+            .accessibilityIdentifier("dailyReadingSetCurrentDayButton")
+
+            Button {
+                presentStartDatePicker()
+            } label: {
+                SwiftUI.Label(
+                    String(localized: "reading_plan_set_start_date", defaultValue: "Set Start Date"),
+                    systemImage: "calendar"
+                )
+            }
+            .disabled(plan == nil)
+            .accessibilityIdentifier("dailyReadingSetStartDateButton")
+
+            Button(role: .destructive) {
+                showResetConfirmation = true
+            } label: {
+                SwiftUI.Label(
+                    String(localized: "reading_plan_reset", defaultValue: "Reset"),
+                    systemImage: "arrow.counterclockwise"
+                )
+            }
+            .disabled(plan == nil)
+            .accessibilityIdentifier("dailyReadingResetPlanButton")
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .accessibilityIdentifier("dailyReadingActionsMenuButton")
+    }
+
+    /// Modal date picker for Android's set-start-date action.
+    private var startDatePickerSheet: some View {
+        NavigationStack {
+            Form {
+                DatePicker(
+                    String(localized: "reading_plan_start_date", defaultValue: "Start Date"),
+                    selection: $draftStartDate,
+                    in: ...Date(),
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .accessibilityIdentifier("dailyReadingStartDatePicker")
+            }
+            .navigationTitle(String(localized: "reading_plan_set_start_date", defaultValue: "Set Start Date"))
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "cancel")) {
+                        showStartDatePicker = false
+                    }
+                    .accessibilityIdentifier("dailyReadingStartDateCancelButton")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(String(localized: "done")) {
+                        applyDraftStartDate()
+                    }
+                    .accessibilityIdentifier("dailyReadingStartDateDoneButton")
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     /**
@@ -287,6 +399,71 @@ public struct DailyReadingView: View {
             let expected = ReadingPlanService.expectedDay(for: plan) - 1
             currentDayIndex = min(max(expected, 0), max(sortedDays.count - 1, 0))
         }
+    }
+
+    /**
+     Applies Android's "set current day" action to the currently selected day.
+
+     Side effects:
+     - mutates the loaded plan through `ReadingPlanService`
+     - reloads local view state from SwiftData after saving
+     */
+    private func setSelectedDayAsCurrent() {
+        guard let plan, let currentDay else { return }
+        ReadingPlanService.setCurrentDay(
+            currentDay.dayNumber,
+            for: plan,
+            modelContext: modelContext
+        )
+        loadPlan()
+    }
+
+    /**
+     Opens the start-date picker initialized with the loaded plan's current start date.
+
+     Side effects:
+     - mutates `draftStartDate`
+     - presents the start-date sheet
+     */
+    private func presentStartDatePicker() {
+        guard let plan else { return }
+        draftStartDate = plan.startDate
+        showStartDatePicker = true
+    }
+
+    /**
+     Persists the draft start date and reloads daily-reading state.
+
+     Side effects:
+     - updates the loaded plan through `ReadingPlanService`
+     - dismisses the picker sheet
+     - reloads local view state from SwiftData after saving
+     */
+    private func applyDraftStartDate() {
+        guard let plan else { return }
+        ReadingPlanService.setStartDate(
+            draftStartDate,
+            for: plan,
+            modelContext: modelContext
+        )
+        showStartDatePicker = false
+        loadPlan()
+    }
+
+    /**
+     Deletes the current plan graph and returns to the reading-plan list.
+
+     Side effects:
+     - deletes the loaded plan through `ReadingPlanService`
+     - clears local view state
+     - dismisses the navigation destination after saving
+     */
+    private func resetCurrentPlan() {
+        guard let plan else { return }
+        ReadingPlanService.resetPlan(plan, modelContext: modelContext)
+        self.plan = nil
+        sortedDays = []
+        dismiss()
     }
 
     /**
