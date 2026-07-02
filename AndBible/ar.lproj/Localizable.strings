@@ -639,3 +639,6 @@
 "workspace_text_display_settings_title" = "خيارات النص - %@";
 "workspace_text_options_link" = "خيارات نص مساحة العمل — %@";
 "workspace_text_options_link_summary" = "تعديل إعدادات عرض النص لهذه مساحة العمل";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "يوجد خطة قراءة للمستخدم على كرت الذاكرة jsword/readingplan مع نفس الاسم الخاص بالخطة المضمنة. لا يمكن اظهارها هنا. رجاءً اعد تسمية الملف لشئ آخر، مع الحفاظ على لاحقة الملف كخصائص";

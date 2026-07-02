@@ -638,3 +638,6 @@
 "workspace_text_display_settings_title" = "Opcije teksta - %@";
 "workspace_text_options_link" = "Opcije teksta radne površine — %@";
 "workspace_text_options_link_summary" = "Uredi postavke prikaza teksta za ovu radnu površinu";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Na SD kartici postoji plan čitanja jsword/readingplan sa istim imenom kao i interni plan. Ne može biti ovdje prikazan. Molimo promijenite naziv datoteke, ostavljajući njen nastavak imena kao .properties";

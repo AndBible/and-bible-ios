@@ -638,3 +638,6 @@
 "workspace_text_display_settings_title" = "Opsi teks - %@";
 "workspace_text_options_link" = "Opsi teks ruang kerja — %@";
 "workspace_text_options_link_summary" = "Edit pengaturan tampilan teks untuk ruang kerja ini";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Terdapat rencana bacaan pengguna di SD card jsword/readingplan dengan nama yang sama dengan rencana internal. Tidak dapat didaftarkan di sini. Silahkan mengganti nama file, tinggalkan extension file sebagai .properties";

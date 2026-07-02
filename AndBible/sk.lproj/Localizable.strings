@@ -637,3 +637,6 @@
 "workspace_text_display_settings_title" = "Nastavenia textu - %@";
 "workspace_text_options_link" = "Možnosti textu pracovnej plochy — %@";
 "workspace_text_options_link_summary" = "Upraviť nastavenia zobrazenia textu pre túto pracovnú plochu";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Na sdcard existuje používateľov plán čítania jsword/readingplan s rovnakým názvom ako je interný plán. Tu to nemôže byť uvedené. Pomenujte súbor inak a ponechajte príponu súboru ako .properties";

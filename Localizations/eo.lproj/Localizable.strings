@@ -622,3 +622,6 @@ Dum uzi Google Drive, %@ akiros aliron nur al aplikaĵaj datumoj, al neniu priva
 "workspace_text_display_settings_title" = "Tekstaj agordoj – %@";
 "workspace_text_options_link" = "Tekstaj agordoj – laborspaco %@";
 "workspace_text_options_link_summary" = "Redakti agordojn pri vidigi tekston por tiu ĉi laborspaco";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Estas legplano de uzanto en la dosierujo “jsword/readingplan” kun la samo nomo kiel interna plano. Ĝi ne montriĝas tie ĉi. Alinomu la dosieron kaj lasu ĝian dosiersufikson kiel “.properties”.";

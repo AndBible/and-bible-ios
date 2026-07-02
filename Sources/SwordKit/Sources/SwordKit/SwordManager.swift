@@ -205,6 +205,60 @@ public final class SwordManager: @unchecked Sendable {
     }
 
     /**
+     Reads Android add-on modules that provide reading-plan files.
+
+     Android discovers add-on plans from repeated `AndBibleProvidesReadingPlan` config values and
+     resolves each file relative to the module's adjusted `DataPath` location. iOS mirrors that
+     behavior by using the config `DataPath` directory as the provider file base and by skipping
+     missing or unsafe file references.
+
+     - Parameter modulePath: SWORD module root containing `mods.d` and module payloads.
+     - Returns: Readable add-on reading-plan providers in config order, de-duplicated by plan code.
+     - Side effects: Reads local config files and checks provider file metadata.
+     - Failure modes: Missing configs, unreadable files, and escaped paths are skipped.
+     */
+    public static func readingPlanProviders(
+        modulePath: String = SwordManager.defaultModulePath()
+    ) -> [SwordReadingPlanProvider] {
+        var providersByCode: [String: SwordReadingPlanProvider] = [:]
+        var orderedCodes: [String] = []
+
+        for config in SwordModuleConfig.readAll(modulePath: modulePath) {
+            let planFileNames = config.values["andbibleprovidesreadingplan"] ?? []
+            for fileName in planFileNames {
+                guard let fileURL = readingPlanProviderFileURL(
+                    fileName: fileName,
+                    config: config,
+                    modulePath: modulePath
+                ) else {
+                    continue
+                }
+
+                let planCode = readingPlanCode(from: fileName)
+                guard !planCode.isEmpty else { continue }
+
+                let provider = SwordReadingPlanProvider(
+                    planCode: planCode,
+                    name: displayName(for: config),
+                    description: config.values["shortpromo"]?.first?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+                    fileURL: fileURL,
+                    versification: nonEmpty(config.values["versification"]?.first),
+                    isDateBased: config.values["andbiblereadingplandatebased"]?.first?
+                        .caseInsensitiveCompare("True") == .orderedSame
+                )
+
+                if providersByCode[planCode] == nil {
+                    orderedCodes.append(planCode)
+                }
+                providersByCode[planCode] = provider
+            }
+        }
+
+        return orderedCodes.compactMap { providersByCode[$0] }
+    }
+
+    /**
      Validates that a custom Android module config points at a readable local payload.
 
      - Parameters:
@@ -306,12 +360,28 @@ public final class SwordManager: @unchecked Sendable {
        files return `false`.
      */
     private static func readablePath(_ rawPath: String, modulePath: String, isDirectory: Bool) -> Bool {
+        readableURL(rawPath, modulePath: modulePath, isDirectory: isDirectory) != nil
+    }
+
+    /**
+     Resolves Android custom metadata paths inside the module root and returns the readable URL.
+
+     - Parameters:
+       - rawPath: Path from Android custom metadata.
+       - modulePath: SWORD module root.
+       - isDirectory: Whether the target should be checked as a directory path.
+     - Returns: Standardized URL when the resolved target is readable.
+     - Side effects: Checks file metadata on disk.
+     - Failure modes: Empty paths, parent-directory traversal, escaped absolute paths, and missing
+       files return `nil`.
+     */
+    private static func readableURL(_ rawPath: String, modulePath: String, isDirectory: Bool) -> URL? {
         let normalized = rawPath
             .replacingOccurrences(of: "\\", with: "/")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty,
               !normalized.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0 == ".." }) else {
-            return false
+            return nil
         }
 
         let rootURL = URL(fileURLWithPath: modulePath, isDirectory: true).standardizedFileURL
@@ -320,17 +390,112 @@ public final class SwordManager: @unchecked Sendable {
             : rootURL.appendingPathComponent(normalized, isDirectory: isDirectory).standardizedFileURL
         let rootPath = rootURL.path.hasSuffix("/") ? rootURL.path : "\(rootURL.path)/"
         guard url.path == rootURL.path || url.path.hasPrefix(rootPath) else {
-            return false
+            return nil
         }
 
         let fm = FileManager.default
         if isDirectory {
             var isDirectoryValue: ObjCBool = false
-            return fm.fileExists(atPath: url.path, isDirectory: &isDirectoryValue) &&
-                isDirectoryValue.boolValue &&
-                fm.isReadableFile(atPath: url.path)
+            guard fm.fileExists(atPath: url.path, isDirectory: &isDirectoryValue),
+                  isDirectoryValue.boolValue,
+                  fm.isReadableFile(atPath: url.path) else {
+                return nil
+            }
+            return url
         }
-        return fm.isReadableFile(atPath: url.path)
+        return fm.isReadableFile(atPath: url.path) ? url : nil
+    }
+
+    /**
+     Resolves one `AndBibleProvidesReadingPlan` file reference for a module config.
+
+     - Parameters:
+       - fileName: Config value containing the provider file name.
+       - config: Parsed provider module config.
+       - modulePath: SWORD module root.
+     - Returns: Validated provider file URL, or `nil` when the file is unavailable or unsafe.
+     - Side effects: Checks file metadata on disk.
+     - Failure modes: Missing `DataPath`, escaped provider paths, and unreadable files return `nil`.
+     */
+    private static func readingPlanProviderFileURL(
+        fileName: String,
+        config: SwordModuleConfig,
+        modulePath: String
+    ) -> URL? {
+        let normalizedFileName = fileName
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedFileName.isEmpty else { return nil }
+
+        let basePath = readingPlanProviderBasePath(config.dataPath)
+        let separator = basePath.isEmpty || basePath.hasSuffix("/") ? "" : "/"
+        return readableURL(
+            "\(basePath)\(separator)\(normalizedFileName)",
+            modulePath: modulePath,
+            isDirectory: false
+        )
+    }
+
+    /**
+     Derives the Android add-on resource base from a module `DataPath`.
+
+     JSword exposes add-on files relative to the adjusted module location. Directory `DataPath`
+     values are already that location; single-file driver paths resolve through their parent
+     directory, which is where add-on sidecar resources live.
+
+     - Parameter dataPath: Normalized SWORD config `DataPath`.
+     - Returns: Relative provider-file base path under the SWORD root.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func readingPlanProviderBasePath(_ dataPath: String) -> String {
+        let path = dataPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty, !path.hasSuffix("/") else { return path }
+        let parent = (path as NSString).deletingLastPathComponent
+        return parent == "." ? "" : parent
+    }
+
+    /**
+     Derives the stable Android plan code from a provider file reference.
+
+     - Parameter fileName: `AndBibleProvidesReadingPlan` config value.
+     - Returns: Last path component without its extension.
+     - Side effects: none.
+     - Failure modes: Empty or root-like paths return an empty string.
+     */
+    private static func readingPlanCode(from fileName: String) -> String {
+        URL(fileURLWithPath: fileName)
+            .deletingPathExtension()
+            .lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /**
+     Resolves the add-on display name Android uses for provided reading plans.
+
+     - Parameter config: Provider module config.
+     - Returns: Config description when present, otherwise module initials.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func displayName(for config: SwordModuleConfig) -> String {
+        nonEmpty(config.description) ?? config.name
+    }
+
+    /**
+     Trims optional config text and discards empty strings.
+
+     - Parameter value: Raw config value.
+     - Returns: Trimmed text, or `nil` when empty.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
     }
 
     // MARK: - Global Options

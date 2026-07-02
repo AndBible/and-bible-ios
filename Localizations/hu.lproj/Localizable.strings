@@ -621,3 +621,6 @@
 "workspace_text_display_settings_title" = "Szövegbeállítások - %@";
 "workspace_text_options_link" = "Munkamenet szövegbeállítások — %@";
 "workspace_text_options_link_summary" = "A munkamenet szövegmegjelenítési beállításainak szerkesztése";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Olvasási terv található az sd kártyán ugyanazzal a névvel mint az alkalmazás belső olvasási terve. Ez a terv itt nem jeleníthető meg. Nevezze át a fájlt, figyelve rá, hogy a kiterjesztése .properties maradjon.";

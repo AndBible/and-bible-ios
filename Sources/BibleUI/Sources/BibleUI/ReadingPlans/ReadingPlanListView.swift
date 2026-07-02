@@ -354,14 +354,20 @@ private struct AvailablePlansView: View {
     /// Latest user-visible custom-plan import error.
     @State private var importError: String?
 
+    /// Current Android-parity catalog snapshot used by the selector.
+    @State private var catalog = ReadingPlanService.catalog()
+
+    /// Whether Android's duplicate user-plan warning is currently visible.
+    @State private var showDuplicateUserPlanWarning = false
+
     /// Stable available-plan picker state exported for UI automation.
     private var availablePlansAccessibilityValue: String {
-        let baseState = "templates=\(ReadingPlanService.availablePlans.count);importPickerPresented=\(showImportPicker)"
+        let baseState = "templates=\(catalog.templates.count);importPickerPresented=\(showImportPicker);duplicateUserPlans=\(catalog.duplicateUserPlanCodes.count)"
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return baseState
         }
 
-        let templateTokens = ReadingPlanService.availablePlans
+        let templateTokens = catalog.templates
             .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
             .map { "|\(readingPlanAccessibilitySegment($0.code))|" }
             .joined(separator: ",")
@@ -372,7 +378,7 @@ private struct AvailablePlansView: View {
     var body: some View {
         List {
             Section {
-                ForEach(ReadingPlanService.availablePlans) { template in
+                ForEach(catalog.templates) { template in
                     Button {
                         onSelect(template)
                     } label: {
@@ -427,6 +433,7 @@ private struct AvailablePlansView: View {
         .overlay(alignment: .topLeading) {
             availablePlansStateExport
         }
+        .onAppear(perform: reloadCatalog)
         .navigationTitle(String(localized: "reading_plan_available"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -443,6 +450,31 @@ private struct AvailablePlansView: View {
         ) { result in
             handleCustomPlanImport(result)
         }
+        .alert(String(localized: "error", defaultValue: "Error"), isPresented: $showDuplicateUserPlanWarning) {
+            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
+        } message: {
+            Text(duplicateUserPlanWarningMessage)
+        }
+    }
+
+    /// Android duplicate user-plan warning text.
+    private var duplicateUserPlanWarningMessage: String {
+        String(
+            localized: "plan_duplicate_user_plan",
+            defaultValue: "There is a user reading plan in sdcard jsword/readingplan with the same name as an internal plan. It can not be listed here. Please rename the file to something else, leaving it's file extension as .properties"
+        )
+    }
+
+    /**
+     Refreshes discovered reading plans whenever the selector is shown.
+
+     Side effects:
+     - reads the Android-parity reading-plan catalog
+     - presents Android's duplicate user-plan warning when applicable
+     */
+    private func reloadCatalog() {
+        catalog = ReadingPlanService.catalog()
+        showDuplicateUserPlanWarning = catalog.hasDuplicateUserPlans
     }
 
     /// Compact hidden state probe for the available-plan picker.
@@ -474,7 +506,9 @@ private struct AvailablePlansView: View {
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            guard let data = try? Data(contentsOf: url),
+                  let text = String(data: data, encoding: .utf8) ??
+                    String(data: data, encoding: .isoLatin1) else {
                 importError = String(localized: "reading_plan_import_error_read")
                 return
             }

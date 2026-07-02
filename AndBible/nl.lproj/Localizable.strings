@@ -639,3 +639,6 @@
 "workspace_text_display_settings_title" = "Tekstopties - %@";
 "workspace_text_options_link" = "Tekstopties werkblad — %@";
 "workspace_text_options_link_summary" = "Tekstweergave-instellingen voor dit werkblad bewerken";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Er staat een gebruikers leesplan op de SD-kaart jsword/readingplan met dezelfde naam als het interne leesplan. Het kan hier niet in de lijst gezet worden . Verander de naam van het bestand naar iets anders, maar laat de bestandsextensie hetzelfde als .properties";

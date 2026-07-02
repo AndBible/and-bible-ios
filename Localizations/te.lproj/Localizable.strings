@@ -626,3 +626,6 @@ Google డ్రైవ్ ని ఉపయోగిస్తున్నప�
 "workspace_text_display_settings_title" = "%@ - వచన ఎంపికలు";
 "workspace_text_options_link" = "వర్క్‌స్పేస్ వచన ఎంపికలు — %@";
 "workspace_text_options_link_summary" = "ఈ వర్క్‌స్పేస్ కోసం వచన ప్రదర్శన సెట్టింగులు సవరించండి";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "sdcard లో యూజర్ రీడింగ్ ప్లాన్ ఉంది అంతర్గత ప్రణాళిక వలె అదే పేరుతో jsword/readingplan. ఇది ఇక్కడ జాబితా చేయబడదు. దయచేసి ఫైల్‌ని వేరొకదానికి పేరు మార్చండి, దాని ఫైల్ ఎక్స్‌టెన్షన్‌ను .properties గా వదిలివేయండి";

@@ -638,3 +638,6 @@
 "workspace_text_display_settings_title" = "Tekstinnstillinger - %@";
 "workspace_text_options_link" = "Tekstinnstillinger for arbeidsområde — %@";
 "workspace_text_options_link_summary" = "Rediger tekstvisningsinnstillinger for dette arbeidsområdet";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Det finnes en leseplan på minnekortet jsword/readingplan med samme navn som en intern leseplan. Den kan ikke vises her. Vennligst endre navn på filen til noe annet mens du bevarer fil-endelsen .properties";
