@@ -568,6 +568,62 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Protects Android's full Memorize restore source range.
+
+     Android persists Memorize as `commentary/Memorize` plus a serialized `BookAndKey` source range
+     in `commentary_sourceBookAndKey`. The setup mirrors a process restart after a multi-verse
+     Memorize links-window load. The expected result is that iOS rebuilds the original full range,
+     not only the anchor verse. A failure means iOS can preserve the fake-document tab while losing
+     the user's selected Memorize passage.
+     */
+    @MainActor
+    func testRestoredAndroidMemorizeDocumentRebuildsPayloadFromSerializedSourceBookAndKey() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let settingsStore = try makeInMemorySettingsStore()
+        controller.settingsStore = settingsStore
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+        let endOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 3))
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.commentary.pageManagerKey)
+        pageManager.commentaryDocument = "Memorize"
+        pageManager.commentaryAnchorOrdinal = startOrdinal
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore).setPageManagerEntry(
+            .init(
+                windowID: window.id,
+                rawCurrentCategoryName: "COMMENTARY",
+                commentarySourceBookAndKey: #"{"document":"KJV","htmlId":null,"key":"Gen.1.1-Gen.1.3","ordinalRange":null}"#,
+                dictionaryAnchorOrdinal: nil,
+                generalBookAnchorOrdinal: nil,
+                mapAnchorOrdinal: nil
+            )
+        )
+        controller.restoreSavedPosition()
+
+        controller.loadCurrentContent()
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "memorize")
+        XCTAssertEqual(payload["title"] as? String, "Genesis 1:1-3")
+        XCTAssertEqual(payload["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(payload["osisRef"] as? String, "Gen.1.1-Gen.1.3")
+        XCTAssertEqual(payload["startOrdinal"] as? Int, startOrdinal)
+        XCTAssertEqual(payload["endOrdinal"] as? Int, endOrdinal)
+        XCTAssertEqual((payload["texts"] as? [[String: Any]])?.count, 3)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=commentary;module=Memorize;book=Genesis 1:1-3;chapter=none;key=memorize:KJV:\(startOrdinal)-\(endOrdinal)"
+        )
+    }
+
+    /**
      Protects Android's durable restore behavior for links-window `Multi` result pages.
 
      Android restores `FakeBookFactory.multiDocument` by parsing the persisted `BookAndKeyList` OSIS

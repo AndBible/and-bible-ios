@@ -48,6 +48,9 @@ struct MemorizeDocumentEmission {
     /// Source reference title shown inside the Vue Memorize document.
     let title: String
 
+    /// Android `BookAndKeySerialized` JSON used to restore the source range.
+    let sourceBookAndKeyJSON: String?
+
     /// Stable rendered-content key for UI tests and client-ready replay.
     var renderedKey: String {
         "memorize:\(bookInitials):\(startOrdinal)-\(endOrdinal)"
@@ -339,8 +342,36 @@ struct BibleReaderAnnotationDocumentLoader {
             bookInitials: request.bookInitials,
             startOrdinal: ordinalRange.start,
             endOrdinal: ordinalRange.end,
-            title: memorizeReferenceTitle(request)
+            title: memorizeReferenceTitle(request),
+            sourceBookAndKeyJSON: memorizeSourceBookAndKeyJSON(request)
         )
+    }
+
+    /**
+     Serializes the source range using Android's `BookAndKeySerialized` shape.
+
+     Android persists `CurrentCommentaryPage.sourceBookAndKey?.serialized` for Memorize restore.
+     iOS keeps that value in the existing workspace fidelity store so a cold restore can rebuild the
+     original selected range without adding a SwiftData `PageManager` schema field.
+
+     - Parameter request: Active reader state used to derive source document initials and OSIS range.
+     - Returns: Android-compatible serialized source JSON, or `nil` when JSON serialization fails.
+     - Side effects: None.
+     - Failure modes: Invalid JSON construction returns `nil`.
+     */
+    private func memorizeSourceBookAndKeyJSON(_ request: MemorizeDocumentRequest) -> String? {
+        let payload: [String: Any] = [
+            "key": memorizeOsisRef(request),
+            "document": request.bookInitials,
+            "ordinalRange": NSNull(),
+            "htmlId": NSNull(),
+        ]
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return json
     }
 
     /**

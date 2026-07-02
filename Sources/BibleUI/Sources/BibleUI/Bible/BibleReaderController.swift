@@ -135,6 +135,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private var specialDocumentCoordinator = BibleReaderSpecialDocumentCoordinator()
     /// Live Memorize fake-document payload used to replay Android's commentary `Memorize` page.
     private var activeMemorizeEmission: MemorizeDocumentEmission?
+    /// Decoded Android `BookAndKeySerialized` payload for restored Memorize source ranges.
+    private struct SerializedBookAndKey: Decodable {
+        let key: String
+        let document: String?
+    }
+
+    /// Concrete restored Memorize source used to rebuild a cold-start fake document.
+    private struct RestoredMemorizeSource {
+        let bookInitials: String
+        let references: [VerseKeyReference]
+    }
+
     /// Reader-local My Documents active page state and document payload assembly.
     private var myDocumentCoordinator = BibleReaderMyDocumentCoordinator()
 
@@ -1218,21 +1230,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Rebuilds a restored Android Memorize fake document from the local commentary anchor.
+     Rebuilds a restored Android Memorize fake document.
 
-     Android's full restore source is `commentary_sourceBookAndKey`, which iOS currently preserves
-     only in remote-sync fidelity storage and not on the live SwiftData `PageManager`. Until that
-     field exists locally, a restored `commentary/Memorize` pane can still rebuild the single-anchor
-     Memorize document from `commentaryAnchorOrdinal` rather than falling through to an ordinary
-     missing-commentary placeholder.
+     Android persists Memorize as `commentary/Memorize` plus a serialized
+     `commentary_sourceBookAndKey` source range. iOS stores that Android-only source in the existing
+     workspace fidelity store and falls back to the local commentary anchor for older state that does
+     not yet have the source JSON.
 
-     - Returns: `true` when a single-anchor Memorize document was rebuilt and rendered.
+     - Returns: `true` when a Memorize document was rebuilt and rendered.
      - Side effects: May move the active SWORD module cursor while building Memorize text, emits the
        document through `renderMemorizeDocument`, and reapplies Android's fake-document identity.
-     - Failure modes: Returns `false` when no anchor ordinal is stored, the KJVA reference cannot be
-       resolved, or the resulting Memorize payload cannot be serialized.
+     - Failure modes: Returns `false` when neither source JSON nor anchor ordinal can be resolved, or
+       the resulting Memorize payload cannot be serialized.
      */
     private func loadRestoredAndroidMemorizeDocument() -> Bool {
+        if let source = restoredMemorizeSourceFromFidelity() {
+            return loadRestoredAndroidMemorizeDocument(source: source)
+        }
+
         guard let anchorOrdinal = activeWindow?.pageManager?.commentaryAnchorOrdinal,
               let kjvaReference = JSwordKJVAVersification.verseReference(ordinal: anchorOrdinal) else {
             return false
@@ -1243,19 +1258,198 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             verse: kjvaReference.verse,
             ordinal: kjvaReference.ordinal
         )
-        let referenceOrdinals = Set([reference.ordinal])
+        return loadRestoredAndroidMemorizeDocument(
+            source: RestoredMemorizeSource(bookInitials: activeModuleName, references: [reference])
+        )
+    }
+
+    /**
+     Reads Android's preserved Memorize source range from page-manager fidelity storage.
+
+     - Returns: Decoded source document initials and concrete verse references, or `nil` when no
+       source key is available for the active window.
+     - Side effects: Reads `SettingsStore` through `RemoteSyncWorkspaceFidelityStore`.
+     - Failure modes: Malformed JSON, unsupported OSIS keys, or empty ranges return `nil`.
+     */
+    private func restoredMemorizeSourceFromFidelity() -> RestoredMemorizeSource? {
+        guard let settingsStore,
+              let windowID = activeWindow?.id,
+              let sourceBookAndKey = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+                .pageManagerEntry(for: windowID)?
+                .commentarySourceBookAndKey else {
+            return nil
+        }
+        return restoredMemorizeSource(serializedSourceBookAndKey: sourceBookAndKey)
+    }
+
+    /**
+     Decodes one Android `BookAndKeySerialized` source value.
+
+     Android writes JSON for current versions, but older tests and imported data may carry a plain
+     OSIS key. Both forms are accepted so restore remains compatible with existing local state.
+
+     - Parameter serializedSourceBookAndKey: Android source key JSON or plain OSIS key.
+     - Returns: Source document initials and expanded verse references, or `nil` when invalid.
+     - Side effects: None.
+     - Failure modes: Malformed JSON falls back to plain OSIS parsing; invalid OSIS returns `nil`.
+     */
+    private func restoredMemorizeSource(serializedSourceBookAndKey: String) -> RestoredMemorizeSource? {
+        let trimmed = serializedSourceBookAndKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let data = trimmed.data(using: .utf8),
+           let payload = try? JSONDecoder().decode(SerializedBookAndKey.self, from: data),
+           let references = memorizeReferences(fromOsisKey: payload.key) {
+            let document = payload.document?.isEmpty == false ? payload.document! : activeModuleName
+            return RestoredMemorizeSource(bookInitials: document, references: references)
+        }
+
+        guard let references = memorizeReferences(fromOsisKey: trimmed) else { return nil }
+        return RestoredMemorizeSource(bookInitials: activeModuleName, references: references)
+    }
+
+    /**
+     Expands an OSIS verse or verse range into concrete KJVA references.
+
+     - Parameter key: OSIS key such as `Gen.1.1` or `Gen.1.1-Gen.1.3`.
+     - Returns: Ordered concrete verse references for the range, or `nil` when invalid.
+     - Side effects: None.
+     - Failure modes: Unsupported books, malformed chapters/verses, or reversed ranges return `nil`.
+     */
+    private func memorizeReferences(fromOsisKey key: String) -> [VerseKeyReference]? {
+        let pieces = key
+            .split(separator: "-", maxSplits: 1, omittingEmptySubsequences: true)
+            .map { String($0) }
+        guard let startToken = pieces.first,
+              let start = parseOsisVerseReference(startToken) else {
+            return nil
+        }
+        let end = pieces.count > 1 ?
+            parseOsisVerseReference(
+                pieces[1],
+                defaultBook: start.osisBookId,
+                defaultChapter: start.chapter
+            ) :
+            start
+        guard let end, start.ordinal <= end.ordinal else { return nil }
+
+        let references = (start.ordinal...end.ordinal).compactMap { ordinal -> VerseKeyReference? in
+            guard let reference = JSwordKJVAVersification.verseReference(ordinal: ordinal) else {
+                return nil
+            }
+            return VerseKeyReference(
+                osisBookId: reference.osisId,
+                chapter: reference.chapter,
+                verse: reference.verse,
+                ordinal: reference.ordinal
+            )
+        }
+        return references.isEmpty ? nil : references
+    }
+
+    /**
+     Parses one OSIS verse token, optionally inheriting book/chapter from a range start.
+
+     - Parameters:
+       - token: OSIS token such as `Gen.1.1`, `1.3`, or `3`.
+       - defaultBook: Book to use when `token` omits a book.
+       - defaultChapter: Chapter to use when `token` omits a chapter.
+     - Returns: Concrete verse reference with a KJVA ordinal, or `nil` when invalid.
+     - Side effects: None.
+     - Failure modes: Unsupported books and non-numeric chapter/verse components return `nil`.
+     */
+    private func parseOsisVerseReference(
+        _ token: String,
+        defaultBook: String? = nil,
+        defaultChapter: Int? = nil
+    ) -> VerseKeyReference? {
+        let components = token
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: ".", omittingEmptySubsequences: true)
+            .map { String($0) }
+
+        let osisId: String
+        let chapter: Int
+        let verse: Int
+        switch components.count {
+        case 3:
+            osisId = components[0]
+            guard let parsedChapter = Int(components[1]),
+                  let parsedVerse = Int(components[2]) else { return nil }
+            chapter = parsedChapter
+            verse = parsedVerse
+        case 2:
+            guard let defaultBook,
+                  let parsedChapter = Int(components[0]),
+                  let parsedVerse = Int(components[1]) else { return nil }
+            osisId = defaultBook
+            chapter = parsedChapter
+            verse = parsedVerse
+        case 1:
+            guard let defaultBook,
+                  let defaultChapter,
+                  let parsedVerse = Int(components[0]) else { return nil }
+            osisId = defaultBook
+            chapter = defaultChapter
+            verse = parsedVerse
+        default:
+            return nil
+        }
+
+        guard let ordinal = JSwordKJVAVersification.verseOrdinal(
+            osisId: osisId,
+            chapter: chapter,
+            verse: verse
+        ) else {
+            return nil
+        }
+        return VerseKeyReference(osisBookId: osisId, chapter: chapter, verse: verse, ordinal: ordinal)
+    }
+
+    /**
+     Emits a restored Memorize source through the shared request builder.
+
+     - Parameter source: Decoded Android source document initials and concrete verse references.
+     - Returns: `true` when a valid Memorize emission was built and rendered.
+     - Side effects: May move the source SWORD module cursor while extracting canonical text.
+     - Failure modes: Returns `false` when the source has no references or cannot serialize.
+     */
+    private func loadRestoredAndroidMemorizeDocument(source: RestoredMemorizeSource) -> Bool {
+        guard let request = restoredMemorizeDocumentRequest(source: source),
+              let emission = annotationDocumentLoader().makeMemorizeDocumentEmission(request: request) else {
+            return false
+        }
+        renderMemorizeDocument(emission)
+        return true
+    }
+
+    /**
+     Builds a Memorize document request for one restored source range.
+
+     - Parameter source: Restored Android source document initials and verse references.
+     - Returns: Request configured with source-module canonical text extraction and progress state.
+     - Side effects: None during request construction.
+     - Failure modes: Returns `nil` when the source has no concrete references.
+     */
+    private func restoredMemorizeDocumentRequest(source: RestoredMemorizeSource) -> MemorizeDocumentRequest? {
+        guard let firstReference = source.references.first,
+              let lastReference = source.references.last else { return nil }
+        let bookInitials = source.bookInitials.isEmpty ? activeModuleName : source.bookInitials
+        let sourceModule = swordManager?.module(named: bookInitials)
+            ?? (bookInitials == activeModuleName ? activeModule : nil)
+        let referenceOrdinals = Set(source.references.map(\.ordinal))
         let request = MemorizeDocumentRequest(
-            bookInitials: activeModuleName,
-            startOrdinal: anchorOrdinal,
-            endOrdinal: anchorOrdinal,
-            activeModuleName: activeModuleName,
-            currentBook: Self.bookName(forOsisId: reference.osisBookId) ?? reference.osisBookId,
-            currentChapter: reference.chapter,
-            osisBookId: reference.osisBookId,
-            activeModule: activeModule,
+            bookInitials: bookInitials,
+            startOrdinal: firstReference.ordinal,
+            endOrdinal: lastReference.ordinal,
+            activeModuleName: bookInitials,
+            currentBook: Self.bookName(forOsisId: firstReference.osisBookId) ?? firstReference.osisBookId,
+            currentChapter: firstReference.chapter,
+            osisBookId: firstReference.osisBookId,
+            activeModule: sourceModule,
             swordManager: swordManager,
             stateJSON: activeWindow?.pageManager?.jsState,
-            directVerseReferences: [reference],
+            directVerseReferences: source.references,
             verseReference: { [weak self] book, ordinal in
                 self?.verseReference(book: book, ordinal: ordinal)
             },
@@ -1287,11 +1481,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 progressBridgeCoordinator.readingProgressSettingsPayload()
             }
         )
-        guard let emission = annotationDocumentLoader().makeMemorizeDocumentEmission(request: request) else {
-            return false
-        }
-        renderMemorizeDocument(emission)
-        return true
+        return request
     }
 
     /**
@@ -3926,7 +4116,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     func renderMemorizeDocument(_ emission: MemorizeDocumentEmission) {
         activeMemorizeEmission = emission
         annotationDocumentLoader().emitMemorizeDocument(emission) { [weak self] in
-            self?.prepareMemorizeVisibleState(startOrdinal: emission.startOrdinal)
+            self?.prepareMemorizeVisibleState(emission: emission)
         }
     }
 
@@ -3934,16 +4124,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Applies native state for Android's commentary-category Memorize fake document.
 
      Android stores `FakeBookFactory.memorizeDocument` as a commentary page and keeps the source
-     passage as separate `BookAndKey` state. iOS currently has only the live source ordinal in
-     `PageManager`, so this method persists the available Android-compatible identity without
-     pretending a full `sourceBookAndKey` field exists locally.
+     passage as separate `BookAndKey` state. The PageManager owns the fake commentary identity while
+     Android-only source JSON stays in the existing workspace fidelity store.
 
-     - Parameter startOrdinal: First source ordinal used as the commentary anchor.
+     - Parameter emission: Built Memorize payload and source-range metadata.
      - Side effects: Mutates controller special-document flags, commentary module identity,
-       `PageManager` category/document/anchor fields, and may invoke `onPersistState`.
+       `PageManager` category/document/anchor fields, preserves Android source JSON in
+       `SettingsStore`, and may invoke `onPersistState`.
      - Failure modes: If no active `PageManager` exists, only controller-local state is updated.
      */
-    private func prepareMemorizeVisibleState(startOrdinal: Int) {
+    private func prepareMemorizeVisibleState(emission: MemorizeDocumentEmission) {
         showingMyNotes = false
         showingStudyPad = false
         activeStudyPadLabelId = nil
@@ -3957,8 +4147,37 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         guard let pageManager = activeWindow?.pageManager else { return }
         pageManager.currentCategoryName = AndroidSpecialDocumentIdentity.memorizeDocumentCategory.pageManagerKey
         pageManager.commentaryDocument = AndroidSpecialDocumentIdentity.memorizeDocumentInitials
-        pageManager.commentaryAnchorOrdinal = startOrdinal
+        pageManager.commentaryAnchorOrdinal = emission.startOrdinal
+        preserveMemorizeSourceBookAndKey(emission.sourceBookAndKeyJSON)
         onPersistState?()
+    }
+
+    /**
+     Preserves Android's Memorize `commentary_sourceBookAndKey` fidelity value.
+
+     - Parameter sourceBookAndKey: Serialized Android `BookAndKey` source JSON.
+     - Side effects: Reads and rewrites one page-manager fidelity settings row while preserving
+       unrelated Android-only anchor values already stored for the active window.
+     - Failure modes: Missing settings store, active window, or source JSON leaves existing state
+       unchanged.
+     */
+    private func preserveMemorizeSourceBookAndKey(_ sourceBookAndKey: String?) {
+        guard let sourceBookAndKey,
+              let settingsStore,
+              let windowID = activeWindow?.id else { return }
+
+        let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+        let existing = fidelityStore.pageManagerEntry(for: windowID)
+        fidelityStore.setPageManagerEntry(
+            .init(
+                windowID: windowID,
+                rawCurrentCategoryName: existing?.rawCurrentCategoryName ?? "COMMENTARY",
+                commentarySourceBookAndKey: sourceBookAndKey,
+                dictionaryAnchorOrdinal: existing?.dictionaryAnchorOrdinal,
+                generalBookAnchorOrdinal: existing?.generalBookAnchorOrdinal,
+                mapAnchorOrdinal: existing?.mapAnchorOrdinal
+            )
+        )
     }
 
     /**

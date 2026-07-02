@@ -129,7 +129,8 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         let modulePath = try makeTemporaryBundledSwordPath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        controller.settingsStore = try makeInMemorySettingsStore()
+        let settingsStore = try makeInMemorySettingsStore()
+        controller.settingsStore = settingsStore
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
@@ -150,6 +151,16 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.commentary.pageManagerKey)
         XCTAssertEqual(pageManager.commentaryDocument, "Memorize")
         XCTAssertEqual(pageManager.commentaryAnchorOrdinal, ordinal)
+        let sourceBookAndKey = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+            .pageManagerEntry(for: window.id)?
+            .commentarySourceBookAndKey
+        let sourceBookAndKeyData = try XCTUnwrap(sourceBookAndKey?.data(using: .utf8))
+        let sourceBookAndKeyPayload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: sourceBookAndKeyData) as? [String: Any]
+        )
+        XCTAssertEqual(sourceBookAndKeyPayload["document"] as? String, "KJV")
+        XCTAssertEqual(sourceBookAndKeyPayload["key"] as? String, "Gen.1.1")
+        XCTAssertTrue(sourceBookAndKeyPayload["ordinalRange"] is NSNull)
         XCTAssertFalse(controller.canUseBibleReferenceActions)
         XCTAssertFalse(controller.isCurrentPageSearchable)
         XCTAssertFalse(controller.isCurrentPageSpeakable)
@@ -205,6 +216,8 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
 
         let (targetBridge, targetScripts) = makeRecordingBridge()
         let targetController = BibleReaderController(bridge: targetBridge, swordManagerOverride: manager)
+        let targetSettingsStore = try makeInMemorySettingsStore()
+        targetController.settingsStore = targetSettingsStore
         let window = Window(isSynchronized: false, isLinksWindow: true)
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
@@ -225,6 +238,11 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.commentary.pageManagerKey)
         XCTAssertEqual(pageManager.commentaryDocument, "Memorize")
         XCTAssertEqual(pageManager.commentaryAnchorOrdinal, ordinal)
+        XCTAssertNotNil(
+            RemoteSyncWorkspaceFidelityStore(settingsStore: targetSettingsStore)
+                .pageManagerEntry(for: window.id)?
+                .commentarySourceBookAndKey
+        )
         XCTAssertFalse(targetController.canUseBibleReferenceActions)
         XCTAssertFalse(targetController.isCurrentPageSearchable)
         XCTAssertFalse(targetController.isCurrentPageSpeakable)
