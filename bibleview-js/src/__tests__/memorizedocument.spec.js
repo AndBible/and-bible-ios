@@ -15,6 +15,7 @@
  * If not, see http://www.gnu.org/licenses/.
  */
 
+import { readFileSync } from "node:fs";
 import { mount } from "@vue/test-utils";
 import MemorizeDocument from "@/components/documents/MemorizeDocument.vue";
 import WordBlur from "@/components/memorize/WordBlur.vue";
@@ -152,6 +153,38 @@ describe("MemorizeDocument.vue", () => {
       "Type",
       "Order",
     ]);
+  });
+
+  /**
+   * Protects the Android Memorize presentation contract after iOS routes Memorize into the links
+   * pane instead of a full-reader surface.
+   *
+   * Android's current bibleview bundle provides shared `.icon-button` sizing for Memorize controls
+   * and the iOS links pane needs Memorize-specific tab/content spacing so all four mode tabs and the
+   * trailing action menu remain visually balanced in a phone-width split window. These declarations
+   * are style-source contracts because jsdom cannot compute the SFC/SCSS cascade used by the
+   * installed WKWebView bundle.
+   */
+  it("keeps Android icon controls and compact links-pane tab spacing", () => {
+    const commonSource = readFileSync(`${process.cwd()}/src/common.scss`, "utf8");
+    const memorizeSource = readFileSync(
+      `${process.cwd()}/src/components/documents/MemorizeDocument.vue`,
+      "utf8"
+    );
+
+    expect(commonSource).toMatch(/\.icon-button\s*\{/);
+    expect(commonSource).toContain("min-width: 40px");
+    expect(commonSource).toContain("height: 40px");
+    expect(commonSource).toContain(".icon-badge");
+
+    expect(memorizeSource).toContain(".memorize-container .tab-content.memorize-content");
+    expect(memorizeSource).toContain("padding-top: 0");
+    expect(memorizeSource).toContain(".memorize-container .memorize-mode-selector .tab-button");
+    expect(memorizeSource).toContain("padding: 10px 8px");
+    expect(memorizeSource).toContain(".memorize-container .memorize-text");
+    expect(memorizeSource).toContain("line-height: 1.65");
+    expect(memorizeSource).toContain("min-width: 40px");
+    expect(memorizeSource).toContain("height: 40px");
   });
 
   it("passes reference-appended text items by default", () => {

@@ -332,8 +332,20 @@ function saveState() {
 
 <style lang="scss">
 
-.memorize-content {
-  margin-top: 0.8em;
+.memorize-container .tab-content.memorize-content {
+  padding-top: 0;
+  margin-top: 0.35rem;
+}
+
+.memorize-container .memorize-mode-selector .tab-button {
+  gap: 6px;
+  padding: 10px 8px;
+}
+
+.memorize-container .memorize-text {
+  line-height: 1.65;
+  margin-bottom: 1rem;
+  padding: 0.85rem;
 }
 
 </style>
@@ -380,8 +392,14 @@ h2 {
 }
 
 .menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 40px;
+  box-sizing: border-box;
   cursor: pointer;
-  padding: 8px 12px;
+  padding: 0;
   color: #666;
   font-size: 18px;
 
