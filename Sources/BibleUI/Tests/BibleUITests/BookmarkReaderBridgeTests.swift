@@ -11,7 +11,7 @@ import XCTest
 
  The suite exercises Android-compatible bridge payloads, label-assignment routing, StudyPad
  action events, bookmark-list reference text, and reader accessibility snapshots without the
- app-host XCTest bundle. It still uses the bundled SWORD fixture when payloads need real JSword
+ app-host XCTest bundle. It still uses the SWORD test fixture when payloads need real JSword
  ordinal and verse-range behavior.
  */
 final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
@@ -271,7 +271,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testReaderMyNotesDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -309,6 +309,59 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
             bridgeEmissionPayload(from: recordedScripts(), event: "setup_content") as? [String: Any]
         )
         XCTAssertEqual(setupPayload["jumpToOrdinal"] as? Int, 1)
+    }
+
+    /**
+     Verifies StudyPad requests made before the Vue client is ready replay after client-ready.
+
+     Android treats StudyPad as a reader document, so selecting a StudyPad label while the shared
+     reader surface is still bootstrapping must not drop the visible document intent. The controller
+     should expose the native StudyPad state immediately, defer bridge emission until Vue readiness,
+     then preserve the optional bookmark-row jump target in the replayed `setup_content` payload.
+     A failure means StudyPad selection can become a no-op during WebView recreation or slow
+     simulator launch, leaving the reader visible without the requested journal document.
+     */
+    @MainActor
+    func testReaderStudyPadDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+
+        let label = bookmarkService.createLabel(name: "Study Replay", color: Label.defaultColor)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        bookmark.book = "Genesis"
+        _ = bookmarkService.toggleLabel(bookmarkId: bookmark.id, labelId: label.id)
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Replay StudyPad note")
+
+        controller.loadStudyPadDocument(labelId: label.id, bookmarkId: bookmark.id)
+
+        XCTAssertFalse(recordedScripts().contains { $0.contains("emit('add_documents'") })
+        XCTAssertTrue(controller.studyPadAccessibilityState.contains("studyPadVisible=true"))
+        XCTAssertTrue(controller.studyPadAccessibilityState.contains("studyPadLabel=Study Replay"))
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "journal")
+        let bookmarks = try XCTUnwrap(payload["bookmarks"] as? [[String: Any]])
+        let bookmarkObject = try XCTUnwrap(bookmarks.first)
+        XCTAssertEqual(bookmarkObject["notes"] as? String, "Replay StudyPad note")
+
+        let setupPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(setupPayload["jumpToId"] as? String, bookmark.id.uuidString)
     }
 
     /**
@@ -359,18 +412,18 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      JSword-style verse range Android serializes through `ClientBibleBookmark`.
      *
      Data dependencies:
-     * - copies the bundled KJV SWORD module into a temporary module path
+     * - copies the KJV SWORD test fixture into a temporary module path
      * - creates one Bible bookmark that spans Genesis 1:31 through Genesis 2:2
      *
      * Failure modes:
-     * - throws if bundled KJV cannot be loaded or its ordinals cannot be resolved
+     * - throws if KJV test fixture cannot be loaded or its ordinals cannot be resolved
      * - fails if iOS collapses cross-chapter ranges to the start chapter, emits a non-JSword OSIS
      *   ref, or omits verse text from the end chapter
      */
     @MainActor
     func testReaderBookmarkBridgeUpdateEmitsJSwordCrossChapterRangePayload() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -418,7 +471,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testReaderStudyPadDocumentBridgeEmissionUsesJSwordCrossChapterRangePayload() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)

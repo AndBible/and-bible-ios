@@ -97,7 +97,6 @@
 "easy_start" = "Easy Start";
 "easy_start_title" = "Easy start";
 "easy_start_message" = "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on.";
-"startup_document_setup_prompt" = "Open Downloads to choose Bible modules and other documents. You can change these settings later on.";
 "startup_download_prompt" = "Download Bible modules to start reading.";
 "welcome_message" = "Thank you for downloading %@. There are currently no Bibles or documents installed. To continue, please install at least 1 document by downloading from the internet, or by loading from a zip file document backup.";
 "supported_formats" = "Supported formats for loading documents from a file: %@";

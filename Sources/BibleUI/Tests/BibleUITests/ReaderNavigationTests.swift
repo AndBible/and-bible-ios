@@ -198,7 +198,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testDownloadLinkRoutesInitialsToDownloadsPresentation() throws {
         let bridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         var requestedSearchText: String?
@@ -215,7 +215,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     func testBuildStrongsMultiDocJSONReturnsInstallFallbackWhenNoStrongsDictionaryIsInstalled() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let builder = BibleReaderStrongsDocumentBuilder(
             swordManager: manager,
@@ -250,7 +250,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testStrongsLinkEmitsVueDocumentInsteadOfNativeSheet() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
@@ -277,7 +277,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testStrongsLinkUsesLinksWindowRoutingCallbackWhenAvailable() throws {
         let bridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         var routedPayload: (json: String, book: String, key: String)?
@@ -326,7 +326,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testDefinitionDocumentUsesAndroidMultiPageIdentityForLinksWindowTarget() throws {
         let bridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window(isSynchronized: false, isLinksWindow: true)
@@ -635,7 +635,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testRestoredAndroidMultiDocumentRebuildsPayloadFromPersistedKey() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window(isSynchronized: false, isLinksWindow: true)
@@ -784,7 +784,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testDefinitionDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let documentJSON = try XCTUnwrap(
@@ -821,7 +821,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testLoadCurrentContentEmitsBookIntroAndChapterMarkerForSecondCorinthiansOne() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
 
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
@@ -854,7 +854,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testLoadCurrentContentEmitsRenderableChapterMarkerForSecondCorinthiansTwo() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
 
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
@@ -899,7 +899,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testLoadCurrentContentReappliesStrongsOptionsBeforeReadingChapter() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
 
         var displaySettings = TextDisplaySettings.appDefaults
@@ -927,7 +927,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testLoadCurrentContentDoesNotHighlightRestoredReadingPosition() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
 
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
@@ -958,13 +958,13 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      Verifies explicit verse navigation highlights the JSword/SWORD ordinal for the selected verse.
 
      Android stores the navigation target as the active versification's verse ordinal, including
-     intro slots. The bundled KJV module supplies the expected ordinal here so this test fails if
+     intro slots. The KJV test fixture module supplies the expected ordinal here so this test fails if
      iOS reverts to literal verse numbers while still emitting an `originalOrdinalRange` field.
      */
     @MainActor
     func testLoadCurrentContentHighlightsExplicitVerseNavigationTarget() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let expectedOrdinal = try XCTUnwrap(
@@ -999,7 +999,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testCommentaryMissingEntryUsesSelectedVerseKeyAndOrdinalRange() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawCommentaryModule(in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let bibleModule = try XCTUnwrap(manager.module(named: "KJV"))
@@ -1049,7 +1049,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     /**
      Verifies Android-style `multi://` links render as a Vue MultiDocument instead of a native sheet.
 
-     Setup uses a temporary bundled KJV module and a recording bridge, then invokes the production
+     Setup uses a temporary KJV test fixture module and a recording bridge, then invokes the production
      external-link bridge path with two OSIS parameters. The expected result is an `add_documents`
      payload containing a multi document and no cross-reference sheet callback. A failure means iOS
      regressed to an iOS-only presentation path for links Android handles as in-reader documents. The
@@ -1058,7 +1058,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testMultiReferenceLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         var showedCrossReferences = false
@@ -1092,7 +1092,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testMultiReferenceOsisLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         var showedCrossReferences = false
@@ -1118,13 +1118,13 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
      Android parses `osis://` references with JSword `PassageKeyFactory`, so
      `Gen.1.1-Gen.1.3` opens a multi-document containing verses 1, 2, and 3. The test drives the
-     native link handler with the bundled KJV module and inspects the emitted Vue `MultiDocument`;
+     native link handler with the KJV test fixture module and inspects the emitted Vue `MultiDocument`;
      a failure means cross-reference links can omit middle verses while appearing to open normally.
      */
     @MainActor
     func testOsisRangeLinkExpandsEveryVerseInVueMultiDocument() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         var showedCrossReferences = false
@@ -1157,7 +1157,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testOsisMixedListAndRangeLinkEmitsEveryParsedVerse() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         var showedCrossReferences = false
@@ -1694,7 +1694,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testClientReadyReplayRestoresStrongsLinksModeAndLexicalMarkup() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
 
         var displaySettings = TextDisplaySettings.appDefaults
@@ -2214,7 +2214,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
@@ -2256,7 +2256,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testRequestMoreToEndSendsDocumentResponseWithOriginalCallId() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
@@ -2314,7 +2314,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testParseRefSendsResponseWithOriginalCallId() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
@@ -2404,7 +2404,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      would otherwise normalize. A failure means the controller extraction changed reference parsing
      semantics or left this behavior coupled to `BibleReaderController` orchestration.
 
-     Setup uses the bundled temporary KJV SWORD module because Android validates these cases through
+     Setup uses the temporary KJV SWORD fixture because Android validates these cases through
      the active document's JSword versification rather than a static iOS table. The expected result is
      exact OSIS serialization for valid references and `nil` for invalid explicit coordinates. The
      test creates only temporary module files through the shared fixture helper, performs no persisted
@@ -2412,7 +2412,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      module.
      */
     func testReferenceResolverPreservesActiveModuleParseRefSemantics() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let books = BibleReaderSwordCoordinator().bookList(for: module)
@@ -2450,7 +2450,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      assumptions.
      */
     func testReferenceResolverRejectsStaticFallbackWhenActiveModuleBookListIsUnavailable() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let resolver = BibleReaderReferenceResolver(
@@ -2697,13 +2697,13 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      Protects visible-verse persistence against synthetic ordinal arithmetic.
 
      Android receives scroll ordinals that belong to the active JSword versification. This test
-     uses the bundled KJV SWORD module to derive the ordinal for Genesis 1:5, then expects the
+     uses the KJV SWORD test fixture to derive the ordinal for Genesis 1:5, then expects the
      native reader to reverse-map that ordinal back to verse 5 before debouncing persistence. A
      failure means reader state is deriving verses from fixed 40-verse chapter math.
      */
     func testDidScrollToOrdinalDebouncesPersistenceWithinCurrentChapter() throws {
         let bridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -2736,13 +2736,13 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      Protects Android-style visible-verse tracking when the web client cannot supply a document key.
 
      Android's Bible `scrolledToOrdinal` path ignores the key for Bible documents and resolves the
-     ordinal through JSword. The setup reports the bundled KJV ordinal for Genesis 2:3 with an empty
+     ordinal through JSword. The setup reports the KJV test fixture ordinal for Genesis 2:3 with an empty
      key and expects iOS to update/persist the native chapter and verse from the ordinal. A failure
      means valid scroll telemetry can be dropped whenever `dataset.osisRef` is missing.
      */
     func testDidScrollToOrdinalPersistsVisibleVerseWhenKeyIsEmpty() throws {
         let bridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -2784,7 +2784,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      */
     func testDidScrollToOrdinalParsesVerseQualifiedKeyAsChapter() throws {
         let bridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -2825,7 +2825,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     func testVerseQualifiedSynchronizedScrollUpdatesTargetOnceWithoutReverseBroadcast() throws {
         let sourceBridge = BibleBridge()
         let targetBridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let sourceController = BibleReaderController(bridge: sourceBridge, swordManagerOverride: manager)
         let targetController = BibleReaderController(bridge: targetBridge, swordManagerOverride: manager)
@@ -2894,7 +2894,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      Protects Android's target-local synchronized scroll anchor conversion.
 
      Android synchronizes a `Verse` key, then converts it to the inactive window's own
-     versification before emitting `scroll_to_verse`. This fixture uses a bundled KJV source
+     versification before emitting `scroll_to_verse`. This fixture uses a KJV test fixture source
      ordinal for Genesis 1:10, whose intro-inclusive SWORD ordinal differs from the placeholder
      target ordinal, and expects the target WebView payload to use the target ordinal. A failure
      means iOS is forwarding source ordinals directly and can land nearby instead of on the same
@@ -2904,7 +2904,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     func testSynchronizedScrollConvertsSourceVerseToTargetOrdinalSpace() throws {
         let sourceBridge = BibleBridge()
         let (targetBridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let sourceController = BibleReaderController(bridge: sourceBridge, swordManagerOverride: manager)
         let targetController = BibleReaderController(bridge: targetBridge, initializesSword: false)
@@ -2962,7 +2962,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testDuplicateVisibleVerseCallbackDoesNotRebroadcastSynchronizedPane() throws {
         let bridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -3048,7 +3048,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let bridge = BibleBridge()
         var emittedScripts: [String] = []
         bridge.javaScriptEvaluationObserver = { emittedScripts.append($0) }
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -3124,7 +3124,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let bridge = BibleBridge()
         var emittedScripts: [String] = []
         bridge.javaScriptEvaluationObserver = { emittedScripts.append($0) }
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -3186,7 +3186,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     func testSynchronizedScrollNativeDeltaDoesNotFocusUntilExplicitUserInteraction() throws {
         let bridge = BibleBridge()
         bridge.javaScriptEvaluationObserver = { _ in }
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -3246,7 +3246,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testDetachedSynchronizedScrollRemainsPassiveUntilExplicitInteraction() throws {
         let bridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -3317,7 +3317,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testInactiveSynchronizedScrollCallbackDoesNotFocusOrBroadcastWithoutInteraction() throws {
         let bridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -3370,7 +3370,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     func testSynchronizedNavigationCallbackDoesNotRefocusOrRebroadcastTargetPane() throws {
         let bridge = BibleBridge()
         bridge.javaScriptEvaluationObserver = { _ in }
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -3428,7 +3428,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let bridge = BibleBridge()
         var emittedScripts: [String] = []
         bridge.javaScriptEvaluationObserver = { emittedScripts.append($0) }
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -3494,7 +3494,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testUserScrollCallbackStillFocusesAndBroadcastsSynchronizedPane() throws {
         let bridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
@@ -3545,7 +3545,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      */
     func testDidScrollToOrdinalPersistsImmediatelyWhenChapterChanges() throws {
         let bridge = BibleBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))

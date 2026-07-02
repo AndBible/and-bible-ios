@@ -143,7 +143,7 @@ final class SearchIndexServiceQueryTests: XCTestCase {
      Android's JSword search uses the Lucene `strong` field for "find all occurrences" instead of
      walking every verse at interaction time. This test keeps the iOS `verse_strongs` contract in the
      BibleCore package lane with a deterministic fixture, so package CI does not need to rebuild the
-     full bundled KJV index to prove the same behavior.
+     full KJV fixture index to prove the same behavior.
 
      - Setup: Seeds cleaned verse-text rows plus explicit Strong's token rows for KJV.
      - Expected result: H0430 hits return only the tokenized verses, ordered by canonical entry order,

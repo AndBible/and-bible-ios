@@ -52,7 +52,7 @@ private final class SwordConcurrencyFailureRecorder: @unchecked Sendable {
 
  These tests protect Android-aligned Strong's query normalization, SWORD-backed Strong's search,
  dictionary rendering, restored MyBible dictionary handling, and related reader document builders.
- They run in the app-host-free BibleUI package lane while still using temporary bundled SWORD
+ They run in the app-host-free BibleUI package lane while still using temporary SWORD fixture
  fixtures through `BibleUISwordFixtureTestCase`.
  */
 final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
@@ -438,21 +438,21 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(parsed?.verse, 1)
     }
 
-    func testStrongsSearchFindAllOccurrencesReturnsBundledKJVMatches() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+    func testStrongsSearchFindAllOccurrencesReturnsKJVFixtureMatches() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(
             SwordManager(modulePath: modulePath),
-            "Expected SwordManager to initialize against a temporary bundled sword module path"
+            "Expected SwordManager to initialize against a temporary SWORD fixture path"
         )
         let installedModules = manager.installedModules()
         XCTAssertTrue(
             installedModules.contains(where: { $0.name == "KJV" && $0.features.contains(.strongsNumbers) }),
-            "Expected bundled KJV module with Strong's support to be installed for regression testing"
+            "Expected KJV test fixture module with Strong's support to be installed for regression testing"
         )
 
         let module = try XCTUnwrap(
             manager.module(named: "KJV"),
-            "Expected bundled KJV module to be available for Strong's regression testing"
+            "Expected KJV test fixture module to be available for Strong's regression testing"
         )
         let queryOptions = try XCTUnwrap(
             StrongsSearchSupport.normalizedQueryOptions(for: "H02022"),
@@ -463,7 +463,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
 
         XCTAssertFalse(
             hits.isEmpty,
-            "Expected the bundled KJV Strong's search for H02022 to return at least one verse"
+            "Expected the KJV test fixture Strong's search for H02022 to return at least one verse"
         )
         XCTAssertTrue(
             hits.allSatisfy { !$0.reference.isEmpty },
@@ -472,14 +472,14 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     func testStrongsSearchFindAllOccurrencesSupportsIntermediateZeroTrimVariant() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(
             SwordManager(modulePath: modulePath),
-            "Expected SwordManager to initialize against a temporary bundled sword module path"
+            "Expected SwordManager to initialize against a temporary SWORD fixture path"
         )
         let module = try XCTUnwrap(
             manager.module(named: "KJV"),
-            "Expected bundled KJV module to be available for Strong's regression testing"
+            "Expected KJV test fixture module to be available for Strong's regression testing"
         )
         let queryOptions = try XCTUnwrap(
             StrongsSearchSupport.normalizedQueryOptions(for: "H00430"),
@@ -490,7 +490,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
 
         XCTAssertFalse(
             hits.isEmpty,
-            "Expected the bundled KJV Strong's search for H00430 to return at least one verse"
+            "Expected the KJV test fixture Strong's search for H00430 to return at least one verse"
         )
         XCTAssertTrue(
             hits.contains { $0.book == "Genesis" && $0.chapter == 1 && $0.verse == 1 },
@@ -633,14 +633,14 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
      return entry-attribute hits that do not match JSword token semantics.
      */
     func testStrongsSearchEntryAttributeCandidatesAreCanonicallyValidated() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(
             SwordManager(modulePath: modulePath),
-            "Expected SwordManager to initialize against a temporary bundled sword module path"
+            "Expected SwordManager to initialize against a temporary SWORD fixture path"
         )
         let module = try XCTUnwrap(
             manager.module(named: "KJV"),
-            "Expected bundled KJV module to be available for Strong's candidate regression testing"
+            "Expected KJV test fixture module to be available for Strong's candidate regression testing"
         )
         let queryOptions = try XCTUnwrap(
             StrongsSearchSupport.normalizedQueryOptions(for: "H00430"),
@@ -666,21 +666,21 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     /**
      Verifies SWORD Bible book discovery exposes the full Protestant canon for a complete module.
 
-     The bundled KJV fixture contains content for all 66 books and exercises the same
+     The KJV test fixture contains content for all 66 books and exercises the same
      `SwordModule.getBookList()` path used by restored Android `.abmd.zip` Bible modules such as
      ESV. A failure means the reader's dynamic book picker can hide valid restored content even
-     though the module files and verse entries are present. The test copies bundled SWORD resources
+     though the module files and verse entries are present. The test copies SWORD test resources
      into a temporary directory and relies on the shared test cleanup to remove those files.
      */
-    func testBundledKJVBookListIncludesAllCanonicalBooks() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+    func testKJVFixtureBookListIncludesAllCanonicalBooks() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(
             SwordManager(modulePath: modulePath),
-            "Expected SwordManager to initialize against a temporary bundled sword module path"
+            "Expected SwordManager to initialize against a temporary SWORD fixture path"
         )
         let module = try XCTUnwrap(
             manager.module(named: "KJV"),
-            "Expected bundled KJV module to be available for book-list regression testing"
+            "Expected KJV test fixture module to be available for book-list regression testing"
         )
 
         let discoveredBookIds = module.getBookList().map(\.osisId)
@@ -708,18 +708,18 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
 
      Android uses JSword `PassageKeyFactory` for OSIS references, so a range such as
      `Gen.1.1-Gen.1.3` resolves to every verse in the range rather than only the textual endpoints.
-     The setup loads the bundled KJV fixture and asks the active SWORD module to parse the range;
+     The setup loads the KJV test fixture and asks the active SWORD module to parse the range;
      a failure means reader cross-reference links can silently omit middle verses.
      */
-    func testBundledKJVParseKeyListExpandsOsisRanges() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+    func testKJVFixtureParseKeyListExpandsOsisRanges() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(
             SwordManager(modulePath: modulePath),
-            "Expected SwordManager to initialize against a temporary bundled sword module path"
+            "Expected SwordManager to initialize against a temporary SWORD fixture path"
         )
         let module = try XCTUnwrap(
             manager.module(named: "KJV"),
-            "Expected bundled KJV module to be available for key-list parsing parity testing"
+            "Expected KJV test fixture module to be available for key-list parsing parity testing"
         )
 
         XCTAssertEqual(
@@ -736,15 +736,15 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
      is intentionally included because the previous fallback returned `30` for unknown chapters.
      A failure means the native verse picker can offer invalid verses or hide valid verses.
      */
-    func testBundledKJVVerseCountUsesModuleVersification() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+    func testKJVFixtureVerseCountUsesModuleVersification() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(
             SwordManager(modulePath: modulePath),
-            "Expected SwordManager to initialize against a temporary bundled sword module path"
+            "Expected SwordManager to initialize against a temporary SWORD fixture path"
         )
         let module = try XCTUnwrap(
             manager.module(named: "KJV"),
-            "Expected bundled KJV module to be available for verse-count parity testing"
+            "Expected KJV test fixture module to be available for verse-count parity testing"
         )
 
         XCTAssertEqual(module.verseCount(osisBookId: "Gen", chapter: 1), 31)
@@ -763,15 +763,15 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
      lookup assertion protects bookmark, memorization, and bridge code that must map persisted
      Android ordinals back to exact verse references.
      */
-    func testBundledKJVVerseOrdinalsUseIntroInclusiveVersification() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+    func testKJVFixtureVerseOrdinalsUseIntroInclusiveVersification() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(
             SwordManager(modulePath: modulePath),
-            "Expected SwordManager to initialize against a temporary bundled sword module path"
+            "Expected SwordManager to initialize against a temporary SWORD fixture path"
         )
         let module = try XCTUnwrap(
             manager.module(named: "KJV"),
-            "Expected bundled KJV module to be available for ordinal parity testing"
+            "Expected KJV test fixture module to be available for ordinal parity testing"
         )
 
         module.setKey("=Gen.1.1")
@@ -801,17 +801,17 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
      refreshes while other reader/search code is still reading existing modules. The local C bridge
      and libsword hold process-global pointer caches, so per-instance queues leave a race that can
      surface as the CI-only `SIGSEGV` seen in the ordinal test. This regression runs many managers
-     against the same bundled KJV fixture in parallel; success means every worker received stable
+     against the same KJV test fixture in parallel; success means every worker received stable
      JSword-parity verse ordinals, reverse references, verse counts, and parsed ranges.
 
-     - Setup: Copies the bundled SWORD fixture into one temporary module path shared by all workers.
+     - Setup: Copies the SWORD test fixture into one temporary module path shared by all workers.
      - Expected result: No worker records a missing manager/module or inconsistent SWORD result.
      - Failure meaning: Native SWORD access is not serialized at the process boundary, risking app
        crashes during restore/import refreshes or parallel reader/search activity.
      - Side effects: Creates temporary SWORD fixture files that shared test cleanup removes.
      */
-    func testBundledKJVNativeAccessSerializesAcrossConcurrentManagers() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+    func testKJVFixtureNativeAccessSerializesAcrossConcurrentManagers() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
         let failures = SwordConcurrencyFailureRecorder()
 
         DispatchQueue.concurrentPerform(iterations: 48) { index in
@@ -858,18 +858,18 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
 
      iOS must not collapse all text fields to the OSIS reference, because book discovery, chapter
      rendering, and reference validation consume the copied book name, abbreviation, and OSIS book
-     fields. The bundled KJV fixture exercises the same SWORD bridge used by imported Android
+     fields. The KJV test fixture exercises the same SWORD bridge used by imported Android
      backup modules.
      */
-    func testBundledKJVVerseKeyChildrenExposeBookMetadata() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+    func testKJVFixtureVerseKeyChildrenExposeBookMetadata() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(
             SwordManager(modulePath: modulePath),
-            "Expected SwordManager to initialize against a temporary bundled sword module path"
+            "Expected SwordManager to initialize against a temporary SWORD fixture path"
         )
         let module = try XCTUnwrap(
             manager.module(named: "KJV"),
-            "Expected bundled KJV module to be available for VerseKey metadata parity testing"
+            "Expected KJV test fixture module to be available for VerseKey metadata parity testing"
         )
 
         module.setKey("=Gen.1.1")
@@ -890,7 +890,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     func testBibleChapterDocumentBuilderPreservesSecondCorinthiansIntroAndChapterMarker() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let builder = BibleChapterDocumentBuilder(module: module, includeHeadings: true)
@@ -905,7 +905,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     func testBibleChapterDocumentBuilderStillEmitsChapterMarkerWhenSectionTitlesAreDisabled() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let builder = BibleChapterDocumentBuilder(module: module, includeHeadings: false)
@@ -918,7 +918,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     func testBibleChapterDocumentBuilderKeepsRenderableChapterStartMarkers() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let builder = BibleChapterDocumentBuilder(module: module, includeHeadings: true)
@@ -941,7 +941,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     func testSwordModuleRawChapterKeysExposeIntroStructure() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
 
@@ -1168,7 +1168,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
      features, and then includes it in Strong's dictionary tabs. iOS must scan those restored configs
      beside normal SWORD modules because libsword does not enumerate MyBibleDictionary modules.
 
-     - Setup: Adds a BDBT-style `.conf` and `module.SQLite3` to the temporary bundled SWORD path.
+     - Setup: Adds a BDBT-style `.conf` and `module.SQLite3` to the temporary SWORD fixture path.
      - Expected result: A Hebrew Strong's lookup produces a BDBT dictionary fragment using Android's
        `H430` topic variant while preserving Vue's canonical `00430` Strong's key name.
      - Failure meaning: Android backups can restore the files successfully while the dictionary still
@@ -1176,7 +1176,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
      - Side effects: Creates temporary module files under the test SWORD path.
      */
     func testStrongsDocumentBuilderIncludesRestoredMyBibleStrongDictionary() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         try installMyBibleStrongDictionaryFixture(
             named: "BDBT",
             modulePath: URL(fileURLWithPath: modulePath, isDirectory: true),

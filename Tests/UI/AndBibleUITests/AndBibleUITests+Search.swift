@@ -450,7 +450,7 @@ extension AndBibleUITests {
      * Search must open as an Android-style reader destination rather than an iOS sheet, preserve
      * the launch-seeded query, expose tappable scope and word-mode rows, update exported state, and
      * rerender the seeded result list after each option change. The same live Search route then
-     * enters a deterministic bundled query, verifies the live translation picker Cancel,
+     * enters a deterministic fixture query, verifies the live translation picker Cancel,
      * outside-dismiss, and empty-OK paths, commits a second translation through the live picker,
      * verifies grouped totals, and selects a result so reader-navigation handoff remains covered
      * without a second cold app launch.
@@ -460,7 +460,7 @@ extension AndBibleUITests {
      *   - opens Search through the reader entry and verifies destination/no-sheet chrome
      *   - switches Search scope between NT and OT
      *   - switches Search word mode from all words to phrase and then to any word
-     *   - enters a deterministic bundled query, exercises negative Search translation-picker
+     *   - enters a deterministic fixture query, exercises negative Search translation-picker
      *     dialog paths, commits the seeded two-module translation selection, and taps a grouped
      *     result row
      * - Failure modes:

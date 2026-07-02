@@ -57,7 +57,7 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testReaderMemorizeBridgeEmitsAndroidStyleDocumentPayload() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.settingsStore = try makeInMemorySettingsStore()
