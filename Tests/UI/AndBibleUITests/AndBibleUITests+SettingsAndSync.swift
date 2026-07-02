@@ -246,17 +246,20 @@ extension AndBibleUITests {
      data stack now." The old path is easy to regress because it is still preserved for previews
      and non-app hosts that do not install a runtime mode-change handler. This smoke test opens the
      real Sync Settings route, taps the iCloud toggle, and asserts the exported state never becomes
-     `restartRequired=true` / `.pendingRestart`. A live runtime rebuild can reset the reader shell
-     and dismiss this route, so the test accepts either an in-place enabled token or a clean return
-     to the reader after the tap. It intentionally does not require a signed-in iCloud account or
-     successful CloudKit adoption; those outcomes are separate service contracts, while this test
-     protects the production wiring to the live applier.
+     `restartRequired=true` / `.pendingRestart`. The live runtime rebuild must keep the settings
+     route open while refreshing data-bound reader panes underneath it. It intentionally does not
+     require a signed-in iCloud account or successful CloudKit adoption; those outcomes are separate
+     service contracts, while this test protects the production wiring to the live applier.
      */
     func testSyncSettingsICloudToggleDoesNotRequireRestart() {
         let app = makeApp()
         app.launch()
 
         _ = openSyncSettingsFromReaderAction(in: app)
+        XCTAssertTrue(
+            app.otherElements["appOwnedSyncSettingsRoute"].waitForExistence(timeout: 2),
+            "The production reader Sync Settings action must use the app-owned route so live runtime rebuilds cannot tear down reader-owned modal state."
+        )
         tapSyncBackend("ICLOUD", in: app)
         waitForSyncState(
             ["backend": "ICLOUD", "restartRequired": "false"],
@@ -266,8 +269,7 @@ extension AndBibleUITests {
 
         let toggle = requireElement("syncICloudEnabledToggle", in: app, timeout: 10)
         let initialState = resolvedElementSemanticText("syncSettingsState", in: app) ?? ""
-        let startedEnabled = syncStateToken(named: "icloudEnabled", in: initialState) == "true"
-        if !startedEnabled {
+        if syncStateToken(named: "icloudEnabled", in: initialState) != "true" {
             tapElementReliably(toggle, timeout: 10)
             RunLoop.current.run(until: Date().addingTimeInterval(1.0))
         }
@@ -285,14 +287,27 @@ extension AndBibleUITests {
                     "pendingRestart",
                     "iCloud toggle must not enter pending-restart fallback. State: '\(state)'."
                 )
-                if startedEnabled || syncStateToken(named: "icloudEnabled", in: state) == "true" {
+                if syncStateToken(named: "icloudState", in: state) != "syncing" {
+                    XCTAssertTrue(
+                        resolvedElement("syncSettingsScreen", in: app) != nil,
+                        "Live iCloud toggle must keep Sync Settings open after applying the runtime mode change. State: '\(state)'."
+                    )
+                    XCTAssertTrue(
+                        app.otherElements["appOwnedSyncSettingsRoute"].exists,
+                        "Live iCloud toggle must remain in the app-owned Sync Settings route after applying the runtime mode change."
+                    )
                     return
                 }
             }
-            if !app.otherElements["syncSettingsScreen"].exists {
-                XCTAssertTrue(
-                    waitForReaderShellReady(in: app, timeout: 1),
-                    "Live iCloud toggle dismissed Sync Settings but did not return to a ready reader shell."
+            if resolvedElement("syncSettingsScreen", in: app) == nil {
+                let lastState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
+                XCTFail(
+                    """
+                    Live iCloud toggle must keep Sync Settings open while applying the runtime mode change.
+                    Last syncSettingsState: '\(lastState)'.
+                    App state: \(app.state.rawValue).
+                    App debug: \(String(app.debugDescription.prefix(3000)))
+                    """
                 )
                 return
             }
@@ -301,7 +316,7 @@ extension AndBibleUITests {
 
         let finalState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
         XCTFail(
-            "Expected iCloud toggle to apply without restart-required fallback. Final syncSettingsState: '\(finalState)'."
+            "Expected iCloud toggle to settle without restart-required fallback while keeping Sync Settings open. Final syncSettingsState: '\(finalState)'."
         )
     }
 
