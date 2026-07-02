@@ -312,6 +312,59 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies StudyPad requests made before the Vue client is ready replay after client-ready.
+
+     Android treats StudyPad as a reader document, so selecting a StudyPad label while the shared
+     reader surface is still bootstrapping must not drop the visible document intent. The controller
+     should expose the native StudyPad state immediately, defer bridge emission until Vue readiness,
+     then preserve the optional bookmark-row jump target in the replayed `setup_content` payload.
+     A failure means StudyPad selection can become a no-op during WebView recreation or slow
+     simulator launch, leaving the reader visible without the requested journal document.
+     */
+    @MainActor
+    func testReaderStudyPadDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+
+        let label = bookmarkService.createLabel(name: "Study Replay", color: Label.defaultColor)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        bookmark.book = "Genesis"
+        _ = bookmarkService.toggleLabel(bookmarkId: bookmark.id, labelId: label.id)
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Replay StudyPad note")
+
+        controller.loadStudyPadDocument(labelId: label.id, bookmarkId: bookmark.id)
+
+        XCTAssertFalse(recordedScripts().contains { $0.contains("emit('add_documents'") })
+        XCTAssertTrue(controller.studyPadAccessibilityState.contains("studyPadVisible=true"))
+        XCTAssertTrue(controller.studyPadAccessibilityState.contains("studyPadLabel=Study Replay"))
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "journal")
+        let bookmarks = try XCTUnwrap(payload["bookmarks"] as? [[String: Any]])
+        let bookmarkObject = try XCTUnwrap(bookmarks.first)
+        XCTAssertEqual(bookmarkObject["notes"] as? String, "Replay StudyPad note")
+
+        let setupPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(setupPayload["jumpToId"] as? String, bookmark.id.uuidString)
+    }
+
+    /**
      Verifies native reader label assignment refreshes generic bookmarks as well as Bible
      bookmarks.
 

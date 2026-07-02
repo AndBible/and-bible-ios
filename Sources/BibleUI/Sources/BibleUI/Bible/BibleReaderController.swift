@@ -58,6 +58,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var activeStudyPadLabelId: UUID?
     /// The name of the currently active StudyPad label (for the header).
     private(set) var activeStudyPadLabelName: String?
+    /// Optional StudyPad row requested before the Vue client was ready.
+    private var pendingClientReadyStudyPadBookmarkId: UUID?
     /// Whether the WebView is in editing mode (Quill editor active).
     private(set) var editingInWebView = false
     /// Whether the Vue reader client currently reports an open modal for this pane.
@@ -2254,7 +2256,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         if showingStudyPad, let activeStudyPadLabelId {
-            loadStudyPadDocument(labelId: activeStudyPadLabelId)
+            let pendingBookmarkId = pendingClientReadyStudyPadBookmarkId
+            pendingClientReadyStudyPadBookmarkId = nil
+            loadStudyPadDocument(labelId: activeStudyPadLabelId, bookmarkId: pendingBookmarkId)
             return
         }
 
@@ -3855,9 +3859,35 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         myNotesMutationRevision += 1
     }
 
-    /// Load a StudyPad document for a label into the WebView.
+    /**
+     Loads a StudyPad document for a label into the WebView.
+
+     Android preserves a StudyPad document selection made while the shared reader client is still
+     bootstrapping, then emits the journal document once the client is ready. iOS follows the same
+     contract: valid pre-ready StudyPad selections update native visible state immediately and keep
+     the optional target bookmark for `setup_content` replay.
+
+     - Parameters:
+       - labelId: Persisted StudyPad label to render.
+       - bookmarkId: Optional bookmark row to scroll to after Vue renders the document.
+     - Side effects: Mutates visible StudyPad/My Notes state, may clear native selection, and emits
+       annotation document bridge events when `clientReady` is true.
+     - Failure modes: Missing bookmark persistence or a stale label leaves the current reader state
+       unchanged and emits no bridge event.
+     */
     public func loadStudyPadDocument(labelId: UUID, bookmarkId: UUID? = nil) {
-        guard clientReady else { return }
+        guard clientReady else {
+            guard let labelName = bookmarkService?.label(id: labelId)?.name else { return }
+            showingMyNotes = false
+            showingStudyPad = true
+            activeStudyPadLabelId = labelId
+            activeStudyPadLabelName = labelName
+            pendingClientReadyStudyPadBookmarkId = bookmarkId
+            editingInWebView = false
+            clearNativeSelectionState()
+            return
+        }
+        pendingClientReadyStudyPadBookmarkId = nil
         annotationDocumentLoader().loadStudyPadDocument(
             labelId: labelId,
             bookmarkId: bookmarkId,
