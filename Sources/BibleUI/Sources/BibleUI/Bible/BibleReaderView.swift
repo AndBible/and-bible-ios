@@ -959,6 +959,7 @@ public struct BibleReaderView: View {
             if shouldShowWindowTabBar {
                 WindowTabBar(
                     surfacePalette: surfacePalette,
+                    monochromeMode: monochromeModePref,
                     onShowToast: showWindowTabToast,
                     onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
                     onGoToTypedRef: navigateWindowTabReference
@@ -2912,6 +2913,7 @@ public struct BibleReaderView: View {
             window: window,
             displaySettings: resolvedDisplaySettings(for: window),
             nightMode: nightMode,
+            monochromeMode: monochromeModePref,
             disableTwoStepBookmarking: disableTwoStepBookmarkingPref,
             hideWindowButtons: hideWindowButtonsPref,
             speakService: speakService,

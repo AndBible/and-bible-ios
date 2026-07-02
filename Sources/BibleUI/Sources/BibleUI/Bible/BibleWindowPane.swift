@@ -19,7 +19,7 @@ private let logger = Logger(subsystem: "org.andbible", category: "BibleWindowPan
  workspace-level state from `WindowManager`.
 
  Data dependencies:
- - `window`, `displaySettings`, `nightMode`, `disableTwoStepBookmarking`, and
+ - `window`, `displaySettings`, `nightMode`, `monochromeMode`, `disableTwoStepBookmarking`, and
    `hideWindowButtons` drive pane rendering and controller updates
  - `WindowManager` is required from the environment for controller registration, layout actions,
    active-window coordination, and window-menu actions
@@ -41,6 +41,9 @@ struct BibleWindowPane: View {
 
     /// Whether the pane should render using night-mode colors and styling.
     let nightMode: Bool
+
+    /// Whether Android's monochrome/e-ink preference should affect native pane chrome.
+    let monochromeMode: Bool
 
     /// Android-parity bookmarking mode toggle for the selection action bar.
     let disableTwoStepBookmarking: Bool
@@ -180,7 +183,11 @@ struct BibleWindowPane: View {
 
     /// Reader-surface colors derived from this pane's resolved text-display settings.
     private var surfacePalette: ReaderThemeSurfacePalette {
-        ReaderThemeSurfacePalette(settings: displaySettings, nightMode: nightMode)
+        ReaderThemeSurfacePalette(
+            settings: displaySettings,
+            nightMode: nightMode,
+            monochromeMode: monochromeMode
+        )
     }
 
     var body: some View {
@@ -227,14 +234,31 @@ struct BibleWindowPane: View {
     /**
      Hamburger menu overlay providing pane-scoped content, layout, and sync actions.
      Opening the menu also marks this pane active, matching Android's pane menu behavior.
-     */
+    */
     private var windowMenuButton: some View {
-        let buttonPalette = AndroidWindowButtonPalette.resolved(for: surfacePalette)
+        let buttonPalette = AndroidWindowButtonPalette.resolved(
+            for: surfacePalette,
+            monochromeMode: monochromeMode
+        )
         let isActive = windowManager.activeWindow?.id == window.id
 
-        return Text(AndroidWindowButtonMetrics.paneMenuGlyph)
-            .font(.system(size: AndroidWindowButtonMetrics.paneMenuTextSize, weight: .bold))
-            .foregroundStyle(buttonPalette.paneButtonTextColor)
+        return ZStack(alignment: .topTrailing) {
+            Text(AndroidWindowButtonMetrics.paneMenuGlyph)
+                .font(.system(size: AndroidWindowButtonMetrics.paneMenuTextSize, weight: .bold))
+                .foregroundStyle(buttonPalette.paneButtonTextColor)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if window.isLinksWindow {
+                ToolbarAssetIcon(
+                    name: AndroidWindowButtonMetrics.paneLinksIconName,
+                    size: AndroidWindowButtonMetrics.paneLinksIconSize
+                )
+                .foregroundStyle(buttonPalette.paneLinksIconColor)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(.top, 2)
+                .padding(.trailing, 2)
+            }
+        }
             .frame(
                 width: AndroidWindowButtonMetrics.buttonSize,
                 height: AndroidWindowButtonMetrics.buttonSize
@@ -242,6 +266,13 @@ struct BibleWindowPane: View {
             .background(
                 buttonPalette.paneButtonBackgroundColor(isActive: isActive),
                 in: RoundedRectangle(cornerRadius: AndroidWindowButtonMetrics.cornerRadius)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AndroidWindowButtonMetrics.cornerRadius)
+                    .strokeBorder(
+                        buttonPalette.paneButtonStrokeColor,
+                        lineWidth: buttonPalette.paneButtonStrokeWidth(isActive: isActive)
+                    )
             )
             .contentShape(Rectangle())
             .gesture(windowMenuTapOrLongPressGesture)

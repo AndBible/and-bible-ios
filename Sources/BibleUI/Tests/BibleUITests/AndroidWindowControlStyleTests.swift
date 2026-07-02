@@ -23,6 +23,8 @@ final class AndroidWindowControlStyleTests: XCTestCase {
         XCTAssertEqual(AndroidWindowButtonMetrics.cornerRadius, 6)
         XCTAssertEqual(AndroidWindowButtonMetrics.paneMenuGlyph, "☰")
         XCTAssertEqual(AndroidWindowButtonMetrics.paneMenuTextSize, 22)
+        XCTAssertEqual(AndroidWindowButtonMetrics.paneLinksIconName, "SettingsIconLink")
+        XCTAssertEqual(AndroidWindowButtonMetrics.paneLinksIconSize, 14)
         XCTAssertEqual(WindowTabBarLayout.fixedButtonSize, AndroidWindowButtonMetrics.buttonSize)
     }
 
@@ -56,6 +58,47 @@ final class AndroidWindowControlStyleTests: XCTestCase {
         XCTAssertEqual(palette.paneButtonTextColor.argbInt, Int(Int32(bitPattern: 0x32FFFFFF)))
         XCTAssertEqual(palette.paneButtonBackgroundColor(isActive: true).argbInt, Int(Int32(bitPattern: 0xB7525252)))
         XCTAssertEqual(palette.paneButtonBackgroundColor(isActive: false).argbInt, Int(Int32(bitPattern: 0x118D8D8D)))
+    }
+
+    /**
+     Verifies Android monochrome mode rewrites top-right pane buttons to black-on-white.
+
+     Android's `WindowButtonWidget.applyMonochromeStyle` overrides the normal active/inactive
+     non-restore resources with a white fill, black foreground, and black stroke. A failure means
+     the iOS pane button is still using theme colors after the global e-ink mode is enabled.
+     */
+    func testMonochromePaneButtonPaletteMatchesAndroidWidgetRewrite() {
+        let palette = AndroidWindowButtonPalette.resolved(for: .standard, monochromeMode: true)
+
+        XCTAssertEqual(palette.paneButtonTextColor.argbInt, Int(Int32(bitPattern: 0xFF000000)))
+        XCTAssertEqual(palette.paneLinksIconColor.argbInt, Int(Int32(bitPattern: 0xFF000000)))
+        XCTAssertEqual(palette.paneButtonBackgroundColor(isActive: true).argbInt, Int(Int32(bitPattern: 0xFFFFFFFF)))
+        XCTAssertEqual(palette.paneButtonBackgroundColor(isActive: false).argbInt, Int(Int32(bitPattern: 0xFFFFFFFF)))
+        XCTAssertEqual(palette.paneButtonStrokeColor.argbInt, Int(Int32(bitPattern: 0xFF000000)))
+        XCTAssertEqual(palette.paneButtonStrokeWidth(isActive: true), 2)
+        XCTAssertEqual(palette.paneButtonStrokeWidth(isActive: false), 1)
+    }
+
+    /**
+     Verifies Android monochrome mode inverts visible restore-strip buttons.
+
+     Android restore buttons are black with white foreground while visible, but white with black
+     foreground when minimized/hidden. A failure means iOS is applying one flat monochrome color to
+     every restore button rather than preserving Android's per-window visibility contract.
+     */
+    func testMonochromeRestoreButtonPaletteInvertsVisibleButtons() {
+        let palette = AndroidWindowButtonPalette.resolved(for: .standard, monochromeMode: true)
+
+        XCTAssertEqual(palette.backgroundColor(isActive: false, isVisible: true).argbInt, Int(Int32(bitPattern: 0xFF000000)))
+        XCTAssertEqual(palette.backgroundColor(isActive: false, isVisible: false).argbInt, Int(Int32(bitPattern: 0xFFFFFFFF)))
+        XCTAssertEqual(palette.footerButtonForegroundColor(isVisible: true).argbInt, Int(Int32(bitPattern: 0xFFFFFFFF)))
+        XCTAssertEqual(palette.footerButtonForegroundColor(isVisible: false).argbInt, Int(Int32(bitPattern: 0xFF000000)))
+        XCTAssertEqual(
+            palette.footerIconColor(isLinksWindow: true, isVisible: true).argbInt,
+            Int(Int32(bitPattern: 0xFFFFFFFF))
+        )
+        XCTAssertEqual(palette.footerButtonStrokeWidth(isActive: true), 2)
+        XCTAssertEqual(palette.footerButtonStrokeWidth(isActive: false), 1)
     }
 
     /**

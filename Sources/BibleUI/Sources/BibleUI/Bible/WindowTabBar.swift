@@ -30,6 +30,9 @@ struct WindowTabBar: View {
     /// Reader-surface colors shared with the active WebView display settings.
     var surfacePalette: ReaderThemeSurfacePalette = .standard
 
+    /// Whether Android's monochrome/e-ink window-button override should be applied.
+    var monochromeMode = false
+
     /// Presents transient toast feedback in the parent reader.
     var onShowToast: ((String) -> Void)?
 
@@ -56,7 +59,10 @@ struct WindowTabBar: View {
     }
 
     var body: some View {
-        let tabPalette = AndroidWindowTabPalette.resolved(for: surfacePalette)
+        let tabPalette = AndroidWindowTabPalette.resolved(
+            for: surfacePalette,
+            monochromeMode: monochromeMode
+        )
         let restoreButtonsVisible = windowManager.activeWorkspace?.workspaceSettings?.restoreButtonsVisible ?? true
         let singleWindowFooterMode = isSingleWindowFooterMode
         let reservedHeight = WindowTabBarLayout.reservedHeight(
@@ -184,7 +190,10 @@ struct WindowTabBar: View {
             .frame(width: WindowTabBarLayout.fixedButtonSize, height: WindowTabBarLayout.fixedButtonSize)
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(tabPalette.strokeColor, lineWidth: 1)
+                    .strokeBorder(
+                        tabPalette.strokeColor,
+                        lineWidth: tabPalette.footerButtonStrokeWidth(isActive: false)
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -258,7 +267,9 @@ struct WindowTabBar: View {
      - Failure modes: None; unmaximize is idempotent when no maximized window exists.
      */
     private func unmaximizeButton(tabPalette: AndroidWindowTabPalette) -> some View {
-        Button {
+        let foregroundColor = tabPalette.footerButtonForegroundColor(isVisible: true)
+
+        return Button {
             windowManager.unmaximize()
         } label: {
             ZStack {
@@ -267,12 +278,15 @@ struct WindowTabBar: View {
 
                 Image(systemName: "arrow.down.right.and.arrow.up.left")
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(tabPalette.windowButtonTextColor)
+                    .foregroundStyle(foregroundColor)
             }
             .frame(width: WindowTabBarLayout.fixedButtonSize, height: WindowTabBarLayout.fixedButtonSize)
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(tabPalette.strokeColor, lineWidth: 1)
+                    .strokeBorder(
+                        tabPalette.strokeColor,
+                        lineWidth: tabPalette.footerButtonStrokeWidth(isActive: true)
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -305,10 +319,12 @@ struct WindowTabBar: View {
         let isMinimized = window.layoutState == "minimized"
         let isActive = !isMinimized && window.id == windowManager.activeWindow?.id
         let renderedState = renderedContentTabState(for: window)
+        let isVisible = !isMinimized
         let categoryName = renderedState?.categoryName ?? window.pageManager?.currentCategoryName ?? "bible"
         let icon = iconName(for: window, categoryName: categoryName)
         let moduleName = renderedState?.moduleName ?? persistedModuleName(for: window, categoryName: categoryName)
         let reference = renderedState?.reference ?? shortReference(for: window)
+        let buttonForegroundColor = tabPalette.footerButtonForegroundColor(isVisible: isVisible)
         let canCopyReference = !fullReference(for: window).isEmpty
         let canMoveWindow = !window.isLinksWindow && !windowManager.isMaximized
         let canSyncWindow = isWindowSyncable(window)
@@ -333,7 +349,7 @@ struct WindowTabBar: View {
         } label: {
             ZStack(alignment: .topLeading) {
                 tabShape
-                    .fill(tabPalette.backgroundColor(isActive: isActive, isVisible: !isMinimized))
+                    .fill(tabPalette.backgroundColor(isActive: isActive, isVisible: isVisible))
 
                 VStack(alignment: .leading, spacing: 0) {
                     Color.clear
@@ -341,14 +357,14 @@ struct WindowTabBar: View {
 
                     Text(reference.isEmpty ? " " : reference)
                         .font(.system(size: 8.5, weight: .medium))
-                        .foregroundStyle(tabPalette.windowButtonTextColor)
+                        .foregroundStyle(buttonForegroundColor)
                         .lineLimit(1)
                         .minimumScaleFactor(0.45)
                         .frame(height: 10, alignment: .leading)
 
                     Text(moduleName)
                         .font(.system(size: 12, weight: isMinimized ? .regular : .semibold))
-                        .foregroundStyle(tabPalette.windowButtonTextColor)
+                        .foregroundStyle(buttonForegroundColor)
                         .lineLimit(1)
                         .minimumScaleFactor(0.45)
                         .frame(height: 16, alignment: .leading)
@@ -358,7 +374,12 @@ struct WindowTabBar: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
 
                 ToolbarAssetIcon(name: icon, size: 14)
-                    .foregroundStyle(window.isLinksWindow ? tabPalette.linksIconColor : tabPalette.categoryIconColor)
+                    .foregroundStyle(
+                        tabPalette.footerIconColor(
+                            isLinksWindow: window.isLinksWindow,
+                            isVisible: isVisible
+                        )
+                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .padding(.top, 2)
                     .padding(.trailing, 2)
@@ -370,7 +391,7 @@ struct WindowTabBar: View {
                         Text("\(window.syncGroup + 1)")
                             .font(.system(size: 7, weight: .bold))
                     }
-                    .foregroundStyle(tabPalette.statusIconColor)
+                    .foregroundStyle(tabPalette.footerStatusIconColor(isVisible: isVisible))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.top, 2)
                     .padding(.leading, 1)
@@ -384,7 +405,7 @@ struct WindowTabBar: View {
                         isActive ? tabPalette.activeStrokeColor : tabPalette.strokeColor,
                         style: isMinimized
                             ? StrokeStyle(lineWidth: 1, dash: [4, 3])
-                            : StrokeStyle(lineWidth: isActive ? 3 : 1)
+                            : StrokeStyle(lineWidth: tabPalette.footerButtonStrokeWidth(isActive: isActive))
                     )
             )
             .opacity(isMinimized ? 0.62 : 1.0)

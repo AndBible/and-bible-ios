@@ -23,6 +23,12 @@ enum AndroidWindowButtonMetrics {
     /// Android pane-menu glyph text size in scalable pixels, mirrored as points.
     static let paneMenuTextSize: CGFloat = 22
 
+    /// Shared Android link-marker asset used for links-window controls.
+    static let paneLinksIconName = "SettingsIconLink"
+
+    /// Android links-window marker icon size used inside compact window buttons.
+    static let paneLinksIconSize: CGFloat = 14
+
     /// Android pane button sits directly on the pane corner rather than inside extra native inset.
     static let paneOverlayInset: CGFloat = 0
 }
@@ -107,6 +113,9 @@ struct AndroidWindowButtonPalette {
     /// Tint for Android links-window icons.
     let linksIconColor: Color
 
+    /// Tint for Android links-window icons inside top-right pane buttons.
+    let paneLinksIconColor: Color
+
     /// Tint for sync and pin overlays.
     let statusIconColor: Color
 
@@ -119,6 +128,12 @@ struct AndroidWindowButtonPalette {
     /// Fill used by inactive top-right non-restore pane buttons.
     let inactivePaneButtonBackgroundColor: Color
 
+    /// Stroke color used by top-right non-restore pane buttons.
+    let paneButtonStrokeColor: Color
+
+    /// Whether Android's monochrome widget override is active.
+    let usesMonochromeStyle: Bool
+
     /**
      Resolves Android day/night window-button colors from the active reader surface.
 
@@ -127,9 +142,13 @@ struct AndroidWindowButtonPalette {
      - Side effects: None.
      - Failure modes: None; color integer parsing is deterministic for all inputs.
      */
-    static func resolved(for surfacePalette: ReaderThemeSurfacePalette) -> AndroidWindowButtonPalette {
+    static func resolved(
+        for surfacePalette: ReaderThemeSurfacePalette,
+        monochromeMode: Bool = false
+    ) -> AndroidWindowButtonPalette {
+        let palette: AndroidWindowButtonPalette
         if isDarkSurface(surfacePalette.backgroundColorInt) {
-            return AndroidWindowButtonPalette(
+            palette = AndroidWindowButtonPalette(
                 visibleButtonBackgroundColor: color(argb: 0xFF6A6A6A),
                 hiddenButtonBackgroundColor: color(argb: 0xFF2E2E2E),
                 addButtonBackgroundColor: color(argb: 0xB7525252),
@@ -138,27 +157,35 @@ struct AndroidWindowButtonPalette {
                 windowButtonTextColor: color(argb: 0xFF939393),
                 categoryIconColor: color(argb: 0xFF939393),
                 linksIconColor: color(argb: 0xFF7088FF),
+                paneLinksIconColor: color(argb: 0xFF7088FF),
                 statusIconColor: color(argb: 0xFF939393),
                 paneButtonTextColor: color(argb: 0x32FFFFFF),
                 activePaneButtonBackgroundColor: color(argb: 0xB7525252),
-                inactivePaneButtonBackgroundColor: color(argb: 0x118D8D8D)
+                inactivePaneButtonBackgroundColor: color(argb: 0x118D8D8D),
+                paneButtonStrokeColor: .clear,
+                usesMonochromeStyle: false
+            )
+        } else {
+            palette = AndroidWindowButtonPalette(
+                visibleButtonBackgroundColor: color(argb: 0xFF535353),
+                hiddenButtonBackgroundColor: color(argb: 0xFF878787),
+                addButtonBackgroundColor: color(argb: 0xB7525252),
+                strokeColor: color(argb: 0xFF686868),
+                activeStrokeColor: color(argb: 0xFF002AFF),
+                windowButtonTextColor: color(argb: 0xFFE8E8E8),
+                categoryIconColor: color(argb: 0xFFAAAAAA),
+                linksIconColor: color(argb: 0xFF7088FF),
+                paneLinksIconColor: color(argb: 0xFF7088FF),
+                statusIconColor: color(argb: 0xFFE8E8E8),
+                paneButtonTextColor: color(argb: 0x86FFFFFF),
+                activePaneButtonBackgroundColor: color(argb: 0xB7525252),
+                inactivePaneButtonBackgroundColor: color(argb: 0x118D8D8D),
+                paneButtonStrokeColor: .clear,
+                usesMonochromeStyle: false
             )
         }
 
-        return AndroidWindowButtonPalette(
-            visibleButtonBackgroundColor: color(argb: 0xFF535353),
-            hiddenButtonBackgroundColor: color(argb: 0xFF878787),
-            addButtonBackgroundColor: color(argb: 0xB7525252),
-            strokeColor: color(argb: 0xFF686868),
-            activeStrokeColor: color(argb: 0xFF002AFF),
-            windowButtonTextColor: color(argb: 0xFFE8E8E8),
-            categoryIconColor: color(argb: 0xFFAAAAAA),
-            linksIconColor: color(argb: 0xFF7088FF),
-            statusIconColor: color(argb: 0xFFE8E8E8),
-            paneButtonTextColor: color(argb: 0x86FFFFFF),
-            activePaneButtonBackgroundColor: color(argb: 0xB7525252),
-            inactivePaneButtonBackgroundColor: color(argb: 0x118D8D8D)
-        )
+        return monochromeMode ? palette.applyingMonochromeStyle() : palette
     }
 
     /**
@@ -176,6 +203,70 @@ struct AndroidWindowButtonPalette {
     }
 
     /**
+     Returns the foreground color for a document footer button.
+
+     Android monochrome mode inverts visible restore buttons: visible buttons are black with white
+     foreground, while minimized buttons are white with black foreground. Non-monochrome mode keeps
+     the normal restore-strip text resource color.
+
+     - Parameter isVisible: Whether the represented window is visible rather than minimized.
+     - Returns: Android restore-button foreground color.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    func footerButtonForegroundColor(isVisible: Bool) -> Color {
+        guard usesMonochromeStyle else { return windowButtonTextColor }
+        return isVisible ? Self.color(argb: 0xFFFFFFFF) : Self.color(argb: 0xFF000000)
+    }
+
+    /**
+     Returns the icon tint for a document footer button.
+
+     - Parameters:
+       - isLinksWindow: Whether the represented window is Android's links target.
+       - isVisible: Whether the represented window is visible rather than minimized.
+     - Returns: Android restore-button icon tint.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    func footerIconColor(isLinksWindow: Bool, isVisible: Bool) -> Color {
+        guard usesMonochromeStyle else {
+            return isLinksWindow ? linksIconColor : categoryIconColor
+        }
+        return footerButtonForegroundColor(isVisible: isVisible)
+    }
+
+    /**
+     Returns the overlay icon tint for sync and pin status inside footer buttons.
+
+     - Parameter isVisible: Whether the represented window is visible rather than minimized.
+     - Returns: Android restore-button status tint.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    func footerStatusIconColor(isVisible: Bool) -> Color {
+        usesMonochromeStyle ? footerButtonForegroundColor(isVisible: isVisible) : statusIconColor
+    }
+
+    /**
+     Returns the border width for a document footer button.
+
+     Android monochrome mode uses a 2dp active stroke and 1dp inactive stroke. Non-monochrome iOS
+     retains the existing active emphasis used by the restore strip.
+
+     - Parameter isActive: Whether the represented window is active.
+     - Returns: Stroke width in logical points.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    func footerButtonStrokeWidth(isActive: Bool) -> CGFloat {
+        if usesMonochromeStyle {
+            return isActive ? 2 : 1
+        }
+        return isActive ? 3 : 1
+    }
+
+    /**
      Returns the fill color for a top-right non-restore pane button.
 
      - Parameter isActive: Whether the pane owns Android's active window.
@@ -185,6 +276,46 @@ struct AndroidWindowButtonPalette {
      */
     func paneButtonBackgroundColor(isActive: Bool) -> Color {
         isActive ? activePaneButtonBackgroundColor : inactivePaneButtonBackgroundColor
+    }
+
+    /**
+     Returns the border width for a top-right non-restore pane button.
+
+     - Parameter isActive: Whether the pane owns Android's active window.
+     - Returns: Stroke width in logical points.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    func paneButtonStrokeWidth(isActive: Bool) -> CGFloat {
+        guard usesMonochromeStyle else { return 0 }
+        return isActive ? 2 : 1
+    }
+
+    /**
+     Applies Android's global monochrome/e-ink override to the window-button widget family.
+
+     - Returns: A palette matching `WindowButtonWidget.applyMonochromeStyle`.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    private func applyingMonochromeStyle() -> AndroidWindowButtonPalette {
+        AndroidWindowButtonPalette(
+            visibleButtonBackgroundColor: Self.color(argb: 0xFF000000),
+            hiddenButtonBackgroundColor: Self.color(argb: 0xFFFFFFFF),
+            addButtonBackgroundColor: Self.color(argb: 0xFFFFFFFF),
+            strokeColor: Self.color(argb: 0xFF000000),
+            activeStrokeColor: Self.color(argb: 0xFF000000),
+            windowButtonTextColor: Self.color(argb: 0xFF000000),
+            categoryIconColor: Self.color(argb: 0xFF000000),
+            linksIconColor: Self.color(argb: 0xFF000000),
+            paneLinksIconColor: Self.color(argb: 0xFF000000),
+            statusIconColor: Self.color(argb: 0xFF000000),
+            paneButtonTextColor: Self.color(argb: 0xFF000000),
+            activePaneButtonBackgroundColor: Self.color(argb: 0xFFFFFFFF),
+            inactivePaneButtonBackgroundColor: Self.color(argb: 0xFFFFFFFF),
+            paneButtonStrokeColor: Self.color(argb: 0xFF000000),
+            usesMonochromeStyle: true
+        )
     }
 
     /**
