@@ -291,6 +291,15 @@ struct WindowTabBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("windowTabUnmaximizeButton")
+        .accessibilityLabel(
+            String(localized: "window_unmaximize_accessibility_label", defaultValue: "Restore window")
+        )
+        .accessibilityHint(
+            String(
+                localized: "window_unmaximize_accessibility_hint",
+                defaultValue: "Restores the maximized window to the workspace"
+            )
+        )
     }
 
     /**

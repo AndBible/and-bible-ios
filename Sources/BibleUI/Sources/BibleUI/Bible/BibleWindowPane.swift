@@ -277,11 +277,18 @@ struct BibleWindowPane: View {
             .contentShape(Rectangle())
             .gesture(windowMenuTapOrLongPressGesture)
             .simultaneousGesture(windowMenuDragGesture)
-        .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction {
-            performPaneWindowButtonAction(.openMenu)
-        }
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
+            .accessibilityLabel(
+                String(localized: "window_menu_accessibility_label", defaultValue: "Window menu")
+            )
+            .accessibilityHint(
+                String(localized: "window_menu_accessibility_hint", defaultValue: "Opens window actions")
+            )
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {
+                performPaneWindowButtonAction(.openMenu)
+            }
     }
 
     /**

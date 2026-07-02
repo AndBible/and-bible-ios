@@ -141,6 +141,45 @@ final class ReaderSourceGuardTests: XCTestCase {
     }
 
     /**
+     Verifies Android-style pane menu buttons retain stable iOS accessibility output.
+
+     The pane button intentionally renders Android's literal hamburger glyph instead of an iOS
+     system button. This guard keeps VoiceOver from deriving an unstable label from that glyph or
+     from the links-window marker icon. A failure means the Android visual parity control is no
+     longer exposed as a predictable iOS accessibility button.
+     */
+    func testAndroidPaneWindowButtonHasExplicitAccessibilityLabel() throws {
+        let paneSource = try bibleUISource(named: "BibleWindowPane.swift")
+
+        XCTAssertTrue(paneSource.contains(".accessibilityElement(children: .ignore)"))
+        XCTAssertTrue(paneSource.contains(".accessibilityLabel("))
+        XCTAssertTrue(paneSource.contains(".accessibilityHint("))
+        XCTAssertTrue(paneSource.contains("window_menu_accessibility_label"))
+        XCTAssertTrue(paneSource.contains("window_menu_accessibility_hint"))
+    }
+
+    /**
+     Verifies Android-style footer restore controls do not expose icon-derived accessibility text.
+
+     The maximized-window footer control is intentionally an Android restore affordance rendered
+     with an iOS symbol. Without an explicit label, VoiceOver can announce the symbol name instead
+     of the window action, which creates an accessibility-only drift from the window-control
+     contract while leaving the visual parity intact.
+     */
+    func testAndroidFooterUnmaximizeButtonHasExplicitAccessibilityLabel() throws {
+        let tabBarSource = try bibleUISource(named: "WindowTabBar.swift")
+        let unmaximizeSource = try BibleUITestSourceLocator.extractFunction(
+            named: "unmaximizeButton",
+            from: tabBarSource
+        )
+
+        XCTAssertTrue(unmaximizeSource.contains(".accessibilityLabel("))
+        XCTAssertTrue(unmaximizeSource.contains(".accessibilityHint("))
+        XCTAssertTrue(unmaximizeSource.contains("window_unmaximize_accessibility_label"))
+        XCTAssertTrue(unmaximizeSource.contains("window_unmaximize_accessibility_hint"))
+    }
+
+    /**
      Loads a Bible reader UI source file for source-level contract tests.
 
      Source assertions are used only where SwiftUI coordinator state is intentionally private and a
