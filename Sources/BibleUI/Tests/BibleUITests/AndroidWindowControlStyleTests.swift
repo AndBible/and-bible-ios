@@ -1,0 +1,86 @@
+import XCTest
+import BibleCore
+@testable import BibleUI
+
+/**
+ Protects the Android shared window-control style used by pane hamburgers and footer buttons.
+
+ Android renders both controls through the same `WindowButtonWidget` family, with the top-right
+ pane button using the non-restore style and the bottom strip using restore-button resources. These
+ tests keep iOS from drifting back to SF Symbol/iOS control styling for pane buttons while preserving
+ the existing footer semantics.
+ */
+final class AndroidWindowControlStyleTests: XCTestCase {
+    /**
+     Verifies the top-right pane hamburger uses Android's non-restore window-button metrics.
+
+     Android's `window_button.xml` resolves the control to a 40dp square, 6dp radius surface with
+     the literal hamburger glyph. A failure means iOS is likely rendering an iOS-native button
+     instead of the Android pane control.
+     */
+    func testPaneButtonMetricsMatchAndroidNonRestoreWindowButton() {
+        XCTAssertEqual(AndroidWindowButtonMetrics.buttonSize, 40)
+        XCTAssertEqual(AndroidWindowButtonMetrics.cornerRadius, 6)
+        XCTAssertEqual(AndroidWindowButtonMetrics.paneMenuGlyph, "☰")
+        XCTAssertEqual(AndroidWindowButtonMetrics.paneMenuTextSize, 22)
+        XCTAssertEqual(WindowTabBarLayout.fixedButtonSize, AndroidWindowButtonMetrics.buttonSize)
+    }
+
+    /**
+     Verifies day-mode pane button colors match Android resource values.
+
+     Android non-restore pane buttons use `window_button_active` for the active pane and
+     `window_button` for inactive visible panes, unlike restore buttons which use the footer
+     `bar_window_button*` colors. A failure here means iOS is conflating the two Android roles.
+     */
+    func testDayPaneButtonPaletteMatchesAndroidResources() {
+        let palette = AndroidWindowButtonPalette.resolved(for: .standard)
+
+        XCTAssertEqual(palette.paneButtonTextColor.argbInt, Int(Int32(bitPattern: 0x86FFFFFF)))
+        XCTAssertEqual(palette.paneButtonBackgroundColor(isActive: true).argbInt, Int(Int32(bitPattern: 0xB7525252)))
+        XCTAssertEqual(palette.paneButtonBackgroundColor(isActive: false).argbInt, Int(Int32(bitPattern: 0x118D8D8D)))
+    }
+
+    /**
+     Verifies night-mode pane button colors follow Android night resources.
+
+     Android night resources dim only `window_button_text_colour` for this non-restore control; the
+     background attributes remain the same. A failure means night pane buttons no longer match the
+     Android side-window affordance.
+    */
+    func testNightPaneButtonPaletteMatchesAndroidResources() {
+        let palette = AndroidWindowButtonPalette.resolved(
+            for: ReaderThemeSurfacePalette(settings: .appDefaults, nightMode: true)
+        )
+
+        XCTAssertEqual(palette.paneButtonTextColor.argbInt, Int(Int32(bitPattern: 0x32FFFFFF)))
+        XCTAssertEqual(palette.paneButtonBackgroundColor(isActive: true).argbInt, Int(Int32(bitPattern: 0xB7525252)))
+        XCTAssertEqual(palette.paneButtonBackgroundColor(isActive: false).argbInt, Int(Int32(bitPattern: 0x118D8D8D)))
+    }
+
+    /**
+     Verifies top-right pane-button drag gestures follow Android window-button actions.
+
+     Android maps vertical swipes on the pane button to maximize/minimize and ignores non-vertical
+     movement. A failure means the iOS pane button either lost Android gesture affordances or became
+     too eager to mutate window state for diagonal/horizontal drags.
+     */
+    func testPaneButtonVerticalDragClassifierMatchesAndroidActions() {
+        XCTAssertEqual(
+            AndroidPaneWindowButtonGestureAction.action(forDragTranslation: CGSize(width: 0, height: -44)),
+            .maximize
+        )
+        XCTAssertEqual(
+            AndroidPaneWindowButtonGestureAction.action(forDragTranslation: CGSize(width: 0, height: 44)),
+            .minimize
+        )
+        XCTAssertEqual(
+            AndroidPaneWindowButtonGestureAction.action(forDragTranslation: CGSize(width: 44, height: 8)),
+            .none
+        )
+        XCTAssertEqual(
+            AndroidPaneWindowButtonGestureAction.action(forDragTranslation: CGSize(width: 8, height: 10)),
+            .none
+        )
+    }
+}

@@ -198,7 +198,7 @@ struct BibleWindowPane: View {
             // Window menu button — matches Android's hamburger button in top-right of each pane
             if !hideWindowButtons && !windowManager.isMaximized {
                 windowMenuButton
-                    .padding(6)
+                    .padding(AndroidWindowButtonMetrics.paneOverlayInset)
             }
         }
         .overlay {
@@ -229,21 +229,89 @@ struct BibleWindowPane: View {
      Opening the menu also marks this pane active, matching Android's pane menu behavior.
      */
     private var windowMenuButton: some View {
-        Button {
-            windowManager.activeWindow = window
+        let buttonPalette = AndroidWindowButtonPalette.resolved(for: surfacePalette)
+        let isActive = windowManager.activeWindow?.id == window.id
+
+        return Text(AndroidWindowButtonMetrics.paneMenuGlyph)
+            .font(.system(size: AndroidWindowButtonMetrics.paneMenuTextSize, weight: .bold))
+            .foregroundStyle(buttonPalette.paneButtonTextColor)
+            .frame(
+                width: AndroidWindowButtonMetrics.buttonSize,
+                height: AndroidWindowButtonMetrics.buttonSize
+            )
+            .background(
+                buttonPalette.paneButtonBackgroundColor(isActive: isActive),
+                in: RoundedRectangle(cornerRadius: AndroidWindowButtonMetrics.cornerRadius)
+            )
+            .contentShape(Rectangle())
+            .gesture(windowMenuTapOrLongPressGesture)
+            .simultaneousGesture(windowMenuDragGesture)
+        .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            performPaneWindowButtonAction(.openMenu)
+        }
+    }
+
+    /**
+     Builds Android's mutually exclusive tap/long-press pane-button gesture.
+
+     - Returns: A gesture that opens the pane menu on tap and minimizes on long press.
+     - Side effects: Invokes the same window-state mutations as Android's `WindowButtonWidget`.
+     - Failure modes: Cancelled long presses do not mutate window state.
+     */
+    private var windowMenuTapOrLongPressGesture: some Gesture {
+        LongPressGesture().exclusively(before: TapGesture()).onEnded { value in
+            switch value {
+            case .first(true):
+                performPaneWindowButtonAction(.minimize)
+            case .second:
+                performPaneWindowButtonAction(.openMenu)
+            case .first(false):
+                break
+            }
+        }
+    }
+
+    /**
+     Builds Android's vertical swipe pane-button gesture.
+
+     - Returns: A drag gesture that maps upward swipes to maximize and downward swipes to minimize.
+     - Side effects: Invokes window layout mutations when the drag classifier accepts the gesture.
+     - Failure modes: Short, horizontal, diagonal, or non-finite translations are ignored.
+     */
+    private var windowMenuDragGesture: some Gesture {
+        DragGesture(minimumDistance: 12).onEnded { value in
+            performPaneWindowButtonAction(
+                AndroidPaneWindowButtonGestureAction.action(forDragTranslation: value.translation)
+            )
+        }
+    }
+
+    /**
+     Applies Android pane-window-button actions to this pane.
+
+     - Parameter action: Gesture action resolved from tap, long press, or drag.
+     - Side effects: Marks this pane active, opens the popup menu, or mutates window layout.
+     - Failure modes: `.none` is ignored; layout actions rely on `WindowManager` guards.
+     */
+    private func performPaneWindowButtonAction(_ action: AndroidPaneWindowButtonGestureAction) {
+        guard action != .none else { return }
+        windowManager.activeWindow = window
+        switch action {
+        case .openMenu:
             withAnimation(.easeOut(duration: 0.12)) {
                 isWindowMenuPresented.toggle()
             }
-        } label: {
-            Image(systemName: "line.3.horizontal")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(surfacePalette.foregroundColor)
-                .frame(width: 28, height: 28)
-                .background(surfacePalette.controlFillColor, in: RoundedRectangle(cornerRadius: 6))
+        case .minimize:
+            isWindowMenuPresented = false
+            windowManager.minimizeWindow(window)
+        case .maximize:
+            isWindowMenuPresented = false
+            windowManager.maximizeWindow(window)
+        case .none:
+            break
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
     }
 
     /**
