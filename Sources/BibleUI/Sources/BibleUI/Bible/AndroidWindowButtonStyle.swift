@@ -272,6 +272,21 @@ struct AndroidWindowButtonPalette {
     }
 
     /**
+     Returns the border width for Android's maximized-window restore button.
+
+     Android creates the unmaximize affordance as a restore button while the repository is
+     maximized. In that state `WindowButtonWidget` intentionally reports `isActive == false`, so
+     the control uses the visible-window border instead of the active-window border.
+
+     - Returns: Android restore-button stroke width for the maximized-window affordance.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    func unmaximizeButtonStrokeWidth() -> CGFloat {
+        footerButtonStrokeWidth(isActive: false)
+    }
+
+    /**
      Returns the fill color for a top-right non-restore pane button.
 
      - Parameter isActive: Whether the pane owns Android's active window.

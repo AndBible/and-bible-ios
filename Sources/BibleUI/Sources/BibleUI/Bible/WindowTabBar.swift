@@ -285,7 +285,7 @@ struct WindowTabBar: View {
                 RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(
                         tabPalette.strokeColor,
-                        lineWidth: tabPalette.footerButtonStrokeWidth(isActive: true)
+                        lineWidth: tabPalette.unmaximizeButtonStrokeWidth()
                     )
             )
         }

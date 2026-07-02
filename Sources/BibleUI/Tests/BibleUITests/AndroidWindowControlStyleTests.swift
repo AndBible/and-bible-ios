@@ -100,6 +100,7 @@ final class AndroidWindowControlStyleTests: XCTestCase {
         )
         XCTAssertEqual(palette.footerButtonStrokeWidth(isActive: true), 2)
         XCTAssertEqual(palette.footerButtonStrokeWidth(isActive: false), 1)
+        XCTAssertEqual(palette.unmaximizeButtonStrokeWidth(), 1)
     }
 
     /**
