@@ -295,6 +295,51 @@ final class RemoteSyncStateTests: XCTestCase {
     }
 
     /**
+     Verifies failed live iCloud mode changes preserve metadata for the still-active runtime.
+
+     The live mode-change handler throws before `SyncService` accepts a replacement SwiftData
+     container. In that path the existing runtime is still current, so rollback should restore the
+     persisted mode and expose an error without clearing timestamps that still describe the active
+     container.
+     */
+    @MainActor
+    func testSyncServicePreservesCurrentRuntimeMetadataWhenModeChangeFails() throws {
+        enum RuntimeModeChangeError: LocalizedError {
+            case rejected
+
+            var errorDescription: String? { "CloudKit runtime rebuild failed" }
+        }
+
+        let defaultsName = "org.andbible.tests.sync-toggle-failure-metadata.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        defaults.set(true, forKey: syncEnabledKey)
+        let service = SyncService(defaults: defaults, syncEnabledKey: syncEnabledKey)
+        service.setInitialState(enabled: true)
+        service.recordAccountDescription("Signed in before failed mode change")
+        let expectedLastSyncDate = Date(timeIntervalSince1970: 1_805_000_000)
+        service.recordRemoteChange(at: expectedLastSyncDate)
+        let lastSyncDateBeforeFailure = try XCTUnwrap(service.lastSyncDate)
+        let accountDescriptionBeforeFailure = try XCTUnwrap(service.accountDescription)
+        service.setModeChangeHandler { _ in
+            throw RuntimeModeChangeError.rejected
+        }
+
+        service.toggleSync()
+
+        XCTAssertTrue(service.isEnabled)
+        XCTAssertFalse(service.requiresRestart)
+        XCTAssertEqual(service.state, .error("CloudKit runtime rebuild failed"))
+        XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
+        XCTAssertEqual(service.lastSyncDate, lastSyncDateBeforeFailure)
+        XCTAssertEqual(service.accountDescription, accountDescriptionBeforeFailure)
+    }
+
+    /**
      Preserves the restart-required fallback for hosts that do not install a live runtime applier.
 
      Production app startup should install the handler, but previews or other test hosts may still

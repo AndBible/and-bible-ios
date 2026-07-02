@@ -28,7 +28,13 @@ public struct SyncModeChangeResult {
     /// Runtime mode that actually became active after the app rebuilt its data stack.
     public let effectiveEnabled: Bool
 
-    /// Container the service should monitor for CloudKit remote-change notifications.
+    /**
+     Container the service should monitor for CloudKit remote-change notifications.
+
+     Return `nil` when `effectiveEnabled` is false, or when a non-app host intentionally accepts
+     state-only behavior. If `effectiveEnabled` is true and this is `nil`, `SyncService` will update
+     visible state but will not restart remote-change monitoring.
+     */
     public let modelContainer: ModelContainer?
 
     /**
@@ -36,7 +42,8 @@ public struct SyncModeChangeResult {
 
      - Parameters:
        - effectiveEnabled: Runtime iCloud mode after the app attempted the change.
-       - modelContainer: Container to monitor when `effectiveEnabled` is true.
+       - modelContainer: Container to monitor when `effectiveEnabled` is true. Passing `nil` leaves
+         remote-change monitoring stopped for this result.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
@@ -163,9 +170,7 @@ public final class SyncService {
             queue: .main
         ) { [weak self] _ in
             guard let self, !self.requiresRestart else { return }
-            self.lastSyncDate = Date()
-            if case .error = self.state { return }
-            self.state = .idle
+            self.recordRemoteChange()
         }
 
         // Observe iCloud account changes (sign in/out)
@@ -189,6 +194,24 @@ public final class SyncService {
             NotificationCenter.default.removeObserver(obs)
             accountObserver = nil
         }
+    }
+
+    /**
+     Records that the active runtime received a remote-change notification.
+
+     Tests call this directly to validate sync state transitions without constructing a CloudKit
+     container; production reaches the same path from `NSPersistentStoreRemoteChangeNotification`.
+
+     - Parameter date: Timestamp to store as the latest sync event.
+     - Side effects:
+       - updates `lastSyncDate`
+       - returns non-error states to `.idle` after a remote change
+     - Failure modes: none.
+     */
+    func recordRemoteChange(at date: Date = Date()) {
+        lastSyncDate = date
+        if case .error = state { return }
+        state = .idle
     }
 
     // MARK: - Account Status
@@ -234,14 +257,28 @@ public final class SyncService {
         container.fetchUserRecordID { recordID, error in
             guard error == nil, recordID != nil else {
                 DispatchQueue.main.async {
-                    self.accountDescription = String(localized: "icloud_signed_in")
+                    self.recordAccountDescription(String(localized: "icloud_signed_in"))
                 }
                 return
             }
             DispatchQueue.main.async {
-                self.accountDescription = String(localized: "icloud_signed_in")
+                self.recordAccountDescription(String(localized: "icloud_signed_in"))
             }
         }
+    }
+
+    /**
+     Records the user-visible iCloud account description for the active runtime.
+
+     Tests call this directly to validate runtime rollback behavior without depending on CloudKit
+     account APIs. Production reaches the same path after account identity lookup.
+
+     - Parameter description: Display text for the current iCloud account, or `nil` when unavailable.
+     - Side effects: Updates `accountDescription`.
+     - Failure modes: none.
+     */
+    func recordAccountDescription(_ description: String?) {
+        accountDescription = description
     }
 
     // MARK: - Toggle
@@ -281,7 +318,9 @@ public final class SyncService {
             }
         } catch {
             defaults.set(previousMode, forKey: syncEnabledKey)
-            applyRuntimeMode(enabled: previousMode)
+            isEnabled = previousMode
+            activeMode = previousMode
+            requiresRestart = false
             state = .error(error.localizedDescription)
         }
     }
