@@ -399,7 +399,8 @@ struct BibleReaderAnnotationDocumentLoader {
        - request: Active reader state.
        - references: Concrete verse references in selected ordinal order.
      - Returns: Non-empty verse text rows when SWORD exposes text for the selected range.
-     - Side effects: Moves the module cursor through selected verse keys.
+     - Side effects: Moves the module cursor through selected verse keys and temporarily suppresses
+       SWORD Strong's/morphology global options while extracting plain canonical text.
      - Failure modes: Skips references whose exact SWORD key cannot be validated or has no text.
      */
     private func swordMemorizeTextItems(
@@ -407,19 +408,55 @@ struct BibleReaderAnnotationDocumentLoader {
         request: MemorizeDocumentRequest,
         references: [VerseKeyReference]
     ) -> [[String: String]] {
-        references.compactMap { reference in
-            module.setKey("=\(reference.osisRef)")
-            let key = module.currentKey()
-            guard let (_, parsedChapter, parsedVerse) = request.parseVerseKey(key),
-                  parsedChapter == reference.chapter,
-                  parsedVerse == reference.verse else { return nil }
-            let verseText = module.stripText().trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !verseText.isEmpty else { return nil }
-            return [
-                "key": reference.osisRef,
-                "text": verseText,
-            ]
+        withMarkupOptionsTemporarilyDisabled(swordManager: request.swordManager) {
+            references.compactMap { reference in
+                module.setKey("=\(reference.osisRef)")
+                let key = module.currentKey()
+                guard let (_, parsedChapter, parsedVerse) = request.parseVerseKey(key),
+                      parsedChapter == reference.chapter,
+                      parsedVerse == reference.verse else { return nil }
+                let verseText = module.stripText().trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !verseText.isEmpty else { return nil }
+                return [
+                    "key": reference.osisRef,
+                    "text": verseText,
+                ]
+            }
         }
+    }
+
+    /**
+     Runs Memorize text extraction with Strong's and morphology options temporarily suppressed.
+
+     `stripText()` includes SWORD markup tokens when these global options are enabled. Android's
+     Memorize document uses canonical text without markup, so iOS disables only this extraction's
+     markup options and restores the previous global state before returning.
+
+     - Parameters:
+       - swordManager: Manager that owns SWORD global display options; `nil` keeps extraction
+         unchanged for tests or fallback contexts without a live manager.
+       - operation: Plain-text extraction block to execute.
+     - Returns: The operation result.
+     - Side effects: Temporarily mutates SWORD Strong's/morphology global options and restores
+       their previous values.
+     - Failure modes: Does not throw; any extraction failures are handled by the operation.
+     */
+    private func withMarkupOptionsTemporarilyDisabled<Result>(
+        swordManager: SwordManager?,
+        _ operation: () -> Result
+    ) -> Result {
+        guard let swordManager else { return operation() }
+        let strongsWasOn = swordManager.isGlobalOptionEnabled(.strongsNumbers)
+        let morphWasOn = swordManager.isGlobalOptionEnabled(.morphology)
+
+        swordManager.setGlobalOption(.strongsNumbers, enabled: false)
+        swordManager.setGlobalOption(.morphology, enabled: false)
+        defer {
+            swordManager.setGlobalOption(.strongsNumbers, enabled: strongsWasOn)
+            swordManager.setGlobalOption(.morphology, enabled: morphWasOn)
+        }
+
+        return operation()
     }
 
     /**
@@ -551,6 +588,8 @@ struct MemorizeDocumentRequest {
     let osisBookId: String
     /// Active SWORD module, or `nil` for no-module placeholder behavior.
     let activeModule: SwordModule?
+    /// Active SWORD manager used to control markup options during canonical text extraction.
+    let swordManager: SwordManager?
     /// Saved Vue document state from the active page manager.
     let stateJSON: String?
     /// Optional concrete KJVA verse references for Reading Progress row launches.
@@ -577,6 +616,7 @@ struct MemorizeDocumentRequest {
         currentChapter: Int,
         osisBookId: String,
         activeModule: SwordModule?,
+        swordManager: SwordManager?,
         stateJSON: String?,
         directVerseReferences: [VerseKeyReference]? = nil,
         verseReference: @escaping BibleReaderAnnotationDocumentLoader.VerseReferenceProvider,
@@ -594,6 +634,7 @@ struct MemorizeDocumentRequest {
         self.currentChapter = currentChapter
         self.osisBookId = osisBookId
         self.activeModule = activeModule
+        self.swordManager = swordManager
         self.stateJSON = stateJSON
         self.directVerseReferences = directVerseReferences
         self.verseReference = verseReference

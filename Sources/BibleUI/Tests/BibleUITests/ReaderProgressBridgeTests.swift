@@ -90,6 +90,10 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         let texts = try XCTUnwrap(document["texts"] as? [[String: String]])
         XCTAssertEqual(texts.map { $0["key"] }, ["Gen.1.1", "Gen.1.2"])
         XCTAssertTrue(texts.first?["text"]?.contains("In the beginning") == true)
+        XCTAssertFalse(
+            texts.contains { ($0["text"] ?? "").contains("<H") },
+            "Memorize practice text should match Android canonical text and omit raw Strong's tags."
+        )
 
         let setupPayload = try XCTUnwrap(
             bridgeEmissionPayload(from: memorizeScripts, event: "setup_content") as? [String: Any]
@@ -151,9 +155,13 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
 
         let texts = try XCTUnwrap(document["texts"] as? [[String: String]])
         XCTAssertEqual(texts.map { $0["key"] }, ["Gen.1.31", "Gen.2.1", "Gen.2.2"])
-        XCTAssertTrue(texts[0]["text"]?.contains("saw <H07200> every thing") == true)
-        XCTAssertTrue(texts[1]["text"]?.contains("heavens <H08064> and the earth") == true)
-        XCTAssertTrue(texts[2]["text"]?.contains("seventh <H07637> day") == true)
+        XCTAssertTrue(texts[0]["text"]?.contains("saw every thing") == true)
+        XCTAssertTrue(texts[1]["text"]?.contains("heavens and the earth") == true)
+        XCTAssertTrue(texts[2]["text"]?.contains("seventh day") == true)
+        XCTAssertFalse(
+            texts.contains { ($0["text"] ?? "").contains("<H") },
+            "Cross-chapter Memorize payloads should not preserve SWORD Strong's markup."
+        )
     }
 
     /**
