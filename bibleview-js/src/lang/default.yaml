@@ -78,6 +78,14 @@ verseCompareLong: Compare verse
 verseMemorizeLong: Memorize Bible verses
 verseNoteLong: Write a note
 verseParagraphBreakLong: Paragraph break
+addMemorizationTarget: Goal +
+markAsMemorized: Mark as memorized
+markedAsMemorized: Memorized
+removeFromTargets: Remove from Goals
+viewReadingProgress: Read/Memory Progress
+viewReadingProgressSettings: Read/Memory Settings
+listenInLoop: Listen in Loop
+viewHelp: View help
 addBookmark: Bookmark
 selectCustomIconTitle: Select custom marker icon
 bookmarkSettingsTitle: Configure bookmark settings
@@ -104,8 +112,18 @@ unknownError: Unknown error
 blur: Blur
 reset: Reset
 peek: Peek
-wordBlur: Word Blur
-wordScramble: Word Scramble
+wordBlur: Blur
+wordScramble: Scramble
+wordType: Type
+wordOrder: Order
+typeEverything: Type full words
+tapToStartTyping: Tap here to start typing
+wordVisibility: Word visibility
+wordVisibilityLight: Light
+wordVisibilityDim: Dim
+wordVisibilityHidden: Hidden
+errorHeatmap: Error heatmap
+hideUsedButtons: Hide used word buttons
 more: More
 previousChapter: Previous chapter
 nextChapter: Next chapter

@@ -1,5 +1,5 @@
 <!--
-  - Copyright (c) 2021-2022 Martin Denham, Tuomas Airaksinen and the AndBible contributors.
+  - Copyright (c) 2021-2026 Sykerö Software / Tuomas Airaksinen and the AndBible contributors.
   -
   - This file is part of AndBible: Bible Study (http://github.com/AndBible/and-bible).
   -
@@ -18,8 +18,25 @@
 <template>
   <div>
     <div class="memorize-controls">
-      <div class="button" @click="increaseBlurLevel">{{ strings.blur }}</div>
-      <div class="button" @click="resetBlur">{{strings.reset}}</div>
+      <div class="icon-button" :class="{ disabled: blurLevel === 0 }"
+           @pointerdown.prevent="blurLevel > 0 && revealWords(true, false)"
+           @pointerup="revealWords(false, false)"
+           @pointerleave="revealWords(false, false)"
+      >
+        <FontAwesomeIcon :icon="faEye"/>
+      </div>
+      <div class="icon-button" :class="{ disabled: blurLevel <= 1 }"
+           @pointerdown.prevent="blurLevel > 1 && revealWords(true, true)"
+           @pointerup="revealWords(false, true)"
+           @pointerleave="revealWords(false, true)">
+        <FontAwesomeIcon :icon="faBackwardStep"/>
+      </div>
+      <div class="icon-button" @click="increaseBlurLevel">
+        <FontAwesomeIcon :icon="faPlus"/><span v-if="blurLevel > 0" class="icon-badge">{{ blurLevel }}</span>
+      </div>
+      <div class="icon-button" @click="resetBlur">
+        <FontAwesomeIcon :icon="faUndo"/>
+      </div>
     </div>
     <div class="memorize-text">
       <div v-for="item in textItems" :key="item.key">
@@ -29,7 +46,7 @@
             class="memorize-word"
             :class="{
               blurred: isWordBlurred(wordIndex),
-              revealed: revealedWords[`${item.key}-${wordIndex}`]
+              revealed: isWordBlurred(wordIndex) && revealedWords[`${item.key}-${wordIndex}`]
             }"
             @click="revealWord(item.key, wordIndex)"
         >
@@ -42,8 +59,9 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted } from "vue";
-import { useCommon } from "@/composables";
 import { MemorizeTextItem } from "@/types/documents";
+import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
+import {faBackwardStep, faEye, faPlus, faUndo} from "@fortawesome/free-solid-svg-icons";
 
 interface WordBlurConfig {
     blurConfig: {
@@ -61,7 +79,6 @@ const emit = defineEmits<{
     (e: 'save-mode-config', config: WordBlurConfig): void
 }>();
 
-const { strings } = useCommon();
 
 const blurLevel = ref(0);
 const revealedWords = ref<Record<string, boolean>>({});
@@ -74,6 +91,7 @@ onMounted(() => {
         revealedWords.value = config.revealedWords;
     }
 });
+
 
 watch([blurLevel, revealedWords], () => {
     emit('save-mode-config', {
@@ -88,26 +106,22 @@ const getWordsFromText = (text: string) => {
     return text.split(/\s+/).filter(word => word.length > 0);
 };
 
-function isWordBlurred(wordIndex: number) {
-    if (blurLevel.value === 0) return false;
-    if (blurLevel.value === 5) return true;
+function isWordBlurredAtLevel(wordIndex: number, level: number) {
+    if (level <= 0) return false;
+    if (level >= 5) return true;
 
-    // Ensure blur is progressive - once a word is blurred at a level,
-    // it remains blurred at higher levels
-    switch (blurLevel.value) {
-        case 1: // ~20% words blurred
-            return wordIndex % 5 === 0;
-        case 2: // ~40% words blurred
-            return wordIndex % 5 === 0 || wordIndex % 3 === 0;
-        case 3: // ~60% words blurred
-            return wordIndex % 5 === 0 || wordIndex % 3 === 0 || wordIndex % 2 === 0;
-        case 4: // ~80% words blurred
-            // Only show every 7th word that wasn't already blurred in level 3
-            return (wordIndex % 5 === 0 || wordIndex % 3 === 0 || wordIndex % 2 === 0) || 
-                   (wordIndex % 7 !== 0);
-        default:
-            return false;
+    switch (level) {
+        case 1: return wordIndex % 5 === 0;
+        case 2: return wordIndex % 5 === 0 || wordIndex % 3 === 0;
+        case 3: return wordIndex % 5 === 0 || wordIndex % 3 === 0 || wordIndex % 2 === 0;
+        case 4: return (wordIndex % 5 === 0 || wordIndex % 3 === 0 || wordIndex % 2 === 0) ||
+                       (wordIndex % 7 !== 0);
+        default: return false;
     }
+}
+
+function isWordBlurred(wordIndex: number) {
+    return isWordBlurredAtLevel(wordIndex, blurLevel.value);
 }
 
 function increaseBlurLevel() {
@@ -130,6 +144,28 @@ function resetBlur() {
     wordRevealTimer.value = {};
 }
 
+/** @param lastOnly - if true, only reveal words added in the current blur level */
+function revealWords(show: boolean, lastOnly: boolean) {
+    if (show) {
+        Object.keys(wordRevealTimer.value).forEach(key => {
+            clearTimeout(wordRevealTimer.value[key]);
+        });
+        wordRevealTimer.value = {};
+        const revealed: Record<string, boolean> = {};
+        for (const item of props.textItems) {
+            const words = getWordsFromText(item.text);
+            for (let i = 0; i < words.length; i++) {
+                if (isWordBlurred(i) && (!lastOnly || !isWordBlurredAtLevel(i, blurLevel.value - 1))) {
+                    revealed[`${item.key}-${i}`] = true;
+                }
+            }
+        }
+        revealedWords.value = revealed;
+    } else {
+        revealedWords.value = {};
+    }
+}
+
 function revealWord(textKey: string, wordIndex: number) {
     const key = `${textKey}-${wordIndex}`;
     if (!isWordBlurred(wordIndex)) return;
@@ -146,43 +182,49 @@ function revealWord(textKey: string, wordIndex: number) {
 <style scoped lang="scss">
 @use "@/common.scss" as *;
 
+.memorize-text {
+  .monochrome & {
+    background-color: white;
+    border: 1px solid black;
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .monochrome.night & {
+    background-color: black;
+    border-color: white;
+  }
+}
+
 .memorize-word {
+  padding: 2px 4px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+
   &.blurred {
-    padding: 2px 4px;
-    border-radius: 4px;
-    transition: color 0.2s ease;
+    background-color: #ccc;
+    color: transparent;
     user-select: none;
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
-    .noAnimation & {
-      transition: none;
+
+    .night & {
+      background-color: #555;
     }
-  }
-  
-  &.revealed {
-    animation: flash 1s;
-    .noAnimation & {
-      animation: none;
+    .monochrome & {
+      background-color: white;
+      border-color: black;
+    }
+    .monochrome.night & {
+      background-color: black;
+      border-color: white;
+    }
+
+    &.revealed {
+      color: inherit;
     }
   }
 }
 
-.memorize-controls {
-  .button {
-    min-width: 100px;
-    font-weight: 500;
-    margin-bottom: 4px;
-    
-    &:active {
-      transform: translateY(1px);
-      opacity: 0.9;
-    }
-  }
-}
 
-@keyframes flash {
-  0% { background-color: rgba(255, 255, 0, 0.5); }
-  100% { background-color: transparent; }
-}
 </style>

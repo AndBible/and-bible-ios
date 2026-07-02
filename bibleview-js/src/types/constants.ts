@@ -30,6 +30,7 @@ import {useCustomFeatures} from "@/composables/features";
 import {useReferenceCollector} from "@/composables";
 import {useKeyboard} from "@/composables/keyboard";
 import {useMemorization} from "@/composables/memorization";
+import {useReadingProgressSettings} from "@/composables/reading-progress-settings";
 import {useStudyPad} from "@/composables/journal";
 
 export const osisFragmentKey: InjectionKey<OsisFragment> = Symbol("osisFragment");
@@ -57,3 +58,4 @@ export const setActiveTabKey: InjectionKey<(tabId: string) => void> = Symbol("se
 export const journalKey: InjectionKey<ReturnType<typeof useStudyPad>> = Symbol("journal");
 export const hideTitlesKey: InjectionKey<boolean> = Symbol("hideTitles");
 export const memorizationKey: InjectionKey<ReturnType<typeof useMemorization>> = Symbol("memorization");
+export const readingProgressSettingsKey: InjectionKey<ReturnType<typeof useReadingProgressSettings>> = Symbol("readingProgressSettings");

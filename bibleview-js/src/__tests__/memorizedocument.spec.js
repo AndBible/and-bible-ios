@@ -1,16 +1,5 @@
 /*
- * Copyright (c) 2021-2022 Martin Denh// Mock the useCommon composable
-vi.mock("@/composables", () => ({
-  useCommon: () => ({
-    strings: {
-      wordBlur: "Word Blur",
-      wordScramble: "Word Scramble"
-    },
-    android: {
-      saveState: vi.fn()
-    }
-  })
-}));iraksinen and the AndBible contributors.
+ * Copyright (c) 2021-2026 Martin Denham, Tuomas Airaksinen and the AndBible contributors.
  *
  * This file is part of AndBible: Bible Study (http://github.com/AndBible/and-bible).
  *
@@ -29,37 +18,86 @@ vi.mock("@/composables", () => ({
 import { mount } from "@vue/test-utils";
 import MemorizeDocument from "@/components/documents/MemorizeDocument.vue";
 import WordBlur from "@/components/memorize/WordBlur.vue";
+import WordOrder from "@/components/memorize/WordOrder.vue";
 import WordScramble from "@/components/memorize/WordScramble.vue";
-import { describe, it, expect, vi } from 'vitest';
+import WordType from "@/components/memorize/WordType.vue";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { MemorizeStateModeEnum } from "@/types/documents";
+import { memorizationKey } from "@/types/constants";
 
-// Mock composables
+const androidMock = vi.hoisted(() => ({
+  saveState: vi.fn(),
+  markAsMemorized: vi.fn(),
+  addMemorizationTarget: vi.fn(),
+  unmarkMemorized: vi.fn(),
+  removeMemorizationTarget: vi.fn(),
+  openReadingProgress: vi.fn(),
+  openReadingProgressSettings: vi.fn(),
+  speakMemorizationLoop: vi.fn(),
+  helpDialog: vi.fn(),
+}));
+
 vi.mock("@/composables", () => ({
   useCommon: () => ({
     strings: {
       wordBlur: "Word Blur",
-      wordScramble: "Word Scramble"
+      wordScramble: "Word Scramble",
+      wordType: "Type",
+      wordOrder: "Order",
+      markAsMemorized: "Mark as memorized",
+      markedAsMemorized: "Marked as memorized",
+      removeFromTargets: "Remove from goals",
+      addMemorizationTarget: "Add memorization goal",
+      viewReadingProgress: "View reading progress",
+      viewReadingProgressSettings: "View reading progress settings",
+      listenInLoop: "Listen in loop",
+      viewHelp: "View help",
     },
-    android: {
-      saveState: vi.fn()
-    }
+    android: androidMock,
   })
 }));
 
+globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn(),
+}));
+
 describe("MemorizeDocument.vue", () => {
+  const verseItems = [
+    { key: "verse1", text: "For God so loved the world, that he gave his only Son," },
+    { key: "verse2", text: "that whoever believes in him should not perish but have eternal life." }
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   const createMockDocument = (overrides = {}) => ({
     id: "doc1",
     type: "memorize",
     title: "Memory Verse - John 3:16",
-    texts: [
-      { key: "verse1", text: "For God so loved the world, that he gave his only Son," },
-      { key: "verse2", text: "that whoever believes in him should not perish but have eternal life." }
-    ],
+    texts: verseItems,
     state: {
       memorize: {
         mode: MemorizeStateModeEnum.BLUR,
         modeConfig: {}
       }
+    },
+    bookInitials: "KJV",
+    v11n: "KJVA",
+    osisRef: "John.3.16-John.3.18",
+    startOrdinal: 10,
+    endOrdinal: 12,
+    memorizedOrdinals: [],
+    targetOrdinals: [],
+    readingProgressSettings: {
+      autoMarkMemorized: true,
+      memorizeTypeFullWords: false,
+      memorizeWordVisibility: "light",
+      memorizeErrorHeatmap: true,
+      memorizeScrambleHideUsed: false,
+      memorizeIncludeReference: true,
     },
     ...overrides
   });
@@ -70,134 +108,130 @@ describe("MemorizeDocument.vue", () => {
         document: createMockDocument(docOverrides)
       },
       global: {
+        provide: {
+          [memorizationKey]: {
+            memorized: new Set(),
+            targets: new Set(),
+            mergeData: vi.fn(),
+            setupIndicatorRendering: vi.fn(),
+          }
+        },
         stubs: {
+          FontAwesomeIcon: true,
           WordBlur: true,
-          WordScramble: true
+          WordOrder: true,
+          WordScramble: true,
+          WordType: true,
         }
       }
     });
   };
 
-  it("renders the document title correctly", () => {
+  it("hides the title by default when Android include-reference mode is enabled", () => {
     const wrapper = createWrapper();
-    expect(wrapper.find("h2").text()).toBe("Memory Verse - John 3:16");
+    expect(wrapper.find("h2").exists()).toBe(false);
   });
 
-  it("renders the mode selector buttons", () => {
+  it("renders the title link when include-reference mode is disabled", () => {
+    const wrapper = createWrapper({
+      readingProgressSettings: { memorizeIncludeReference: false }
+    });
+
+    const title = wrapper.find("h2 .title-link");
+    expect(title.text()).toBe("Memory Verse - John 3:16");
+    expect(title.attributes("href")).toBe("osis://?osis=John.3.16-John.3.18&v11n=KJVA");
+  });
+
+  it("renders all Android memorize mode selector buttons", () => {
     const wrapper = createWrapper();
     const buttons = wrapper.findAll(".memorize-mode-selector .tab-button");
-    
-    expect(buttons.length).toBe(2);
-    expect(buttons[0].text()).toBe("Word Blur");
-    expect(buttons[1].text()).toBe("Word Scramble");
-  });
 
-  it("shows the blur mode component by default", () => {
-    const wrapper = createWrapper();
-    expect(wrapper.findComponent(WordBlur).exists()).toBe(true);
-    // With TabContainer, inactive components might still exist in DOM but be hidden
-    // Check for the correct active panel instead
-    const blurPanel = wrapper.find('[id="tabpanel-blur"]');
-    const scramblePanel = wrapper.find('[id="tabpanel-scramble"]');
-    expect(blurPanel.isVisible()).toBe(true);
-    if (scramblePanel.exists()) {
-      expect(scramblePanel.isVisible()).toBe(false);
-    }
-  });
-
-  it("switches to scramble mode when button is clicked", async () => {
-    const wrapper = createWrapper();
-    
-    // Initially in blur mode
-    expect(wrapper.findComponent(WordBlur).exists()).toBe(true);
-    
-    // Click on the scramble mode button
-    const buttons = wrapper.findAll(".memorize-mode-selector .tab-button");
-    if (buttons.length > 1) {
-      await buttons[1].trigger("click");
-      
-      // Should switch to scramble mode
-      expect(wrapper.findComponent(WordBlur).exists()).toBe(true);
-      expect(wrapper.findComponent(WordScramble).exists()).toBe(true);
-      
-      // Check panel visibility
-      const blurPanel = wrapper.find('[id="tabpanel-blur"]');
-      const scramblePanel = wrapper.find('[id="tabpanel-scramble"]');
-      if (blurPanel.exists()) expect(blurPanel.isVisible()).toBe(false);
-      expect(scramblePanel.isVisible()).toBe(true);
-    }
-  });
-
-  it("provides the correct props to the child component", () => {
-    const wrapper = createWrapper();
-    const childComponent = wrapper.findComponent(WordBlur);
-    
-    // Should pass the text items
-    expect(childComponent.props('textItems')).toEqual([
-      { key: "verse1", text: "For God so loved the world, that he gave his only Son," },
-      { key: "verse2", text: "that whoever believes in him should not perish but have eternal life." }
+    expect(buttons.map(button => button.text())).toEqual([
+      "Word Blur",
+      "Word Scramble",
+      "Type",
+      "Order",
     ]);
-    
-    // Should pass the mode config
-    expect(childComponent.props('modeConfig')).toEqual({});
   });
 
-  it("saves state when mode is changed", async () => {
-    const wrapper = createWrapper();
-    
-    // Get the mock save function
-    const mockSaveState = wrapper.vm.android.saveState;
-    
-    // Change mode
-    const buttons = wrapper.findAll(".memorize-mode-selector .tab-button");
-    if (buttons.length > 1) {
-      await buttons[1].trigger("click");
-      
-      // Should save state
-      expect(mockSaveState).toHaveBeenCalled();
-    }
-  });
-
-  it("handles the save-mode-config event from child components", async () => {
+  it("passes reference-appended text items by default", () => {
     const wrapper = createWrapper();
     const childComponent = wrapper.findComponent(WordBlur);
-    
-    // Emit save-mode-config from child
-    const newConfig = { blurConfig: { blurLevel: 2, revealedWords: {} } };
-    await childComponent.vm.$emit('save-mode-config', newConfig);
-    
-    // Parent should update its modeConfig
-    // We can't directly check the refs, but we can verify it handles the event
-    // by checking if the saveState function was called
-    const mockAndroid = wrapper.vm.android;
-    expect(mockAndroid.saveState).toHaveBeenCalled();
+
+    expect(childComponent.props("textItems")).toEqual([
+      ...verseItems,
+      { key: "__reference__", text: "Memory Verse - John 3:16" },
+    ]);
+    expect(childComponent.props("modeConfig")).toEqual({});
   });
-  
-  it("restores previous mode from document state", () => {
-    // Create document with scramble mode selected
+
+  it("passes only verse text items when include-reference mode is disabled", () => {
+    const wrapper = createWrapper({
+      readingProgressSettings: { memorizeIncludeReference: false }
+    });
+    const childComponent = wrapper.findComponent(WordBlur);
+
+    expect(childComponent.props("textItems")).toEqual(verseItems);
+  });
+
+  it("restores type mode from document state", () => {
     const wrapper = createWrapper({
       state: {
         memorize: {
-          mode: MemorizeStateModeEnum.SCRAMBLE,
+          mode: MemorizeStateModeEnum.TYPE,
           modeConfig: {}
         }
       }
     });
-    
-    // Should start in scramble mode
-    expect(wrapper.findComponent(WordBlur).exists()).toBe(true);
-    expect(wrapper.findComponent(WordScramble).exists()).toBe(true);
-    
-    // Check panel visibility for scramble mode
-    const blurPanel = wrapper.find('[id="tabpanel-blur"]');
-    const scramblePanel = wrapper.find('[id="tabpanel-scramble"]');
-    if (blurPanel.exists()) expect(blurPanel.isVisible()).toBe(false);
-    expect(scramblePanel.isVisible()).toBe(true);
-    
-    // The scramble button should be active (not toggled since we're using TabContainer)
+
+    expect(wrapper.find('[id="tabpanel-type"]').isVisible()).toBe(true);
+    expect(wrapper.find('[id="tabpanel-blur"]').isVisible()).toBe(false);
+  });
+
+  it("restores order mode from document state", () => {
+    const wrapper = createWrapper({
+      state: {
+        memorize: {
+          mode: MemorizeStateModeEnum.ORDER,
+          modeConfig: {}
+        }
+      }
+    });
+
+    expect(wrapper.find('[id="tabpanel-order"]').isVisible()).toBe(true);
+    expect(wrapper.find('[id="tabpanel-blur"]').isVisible()).toBe(false);
+  });
+
+  it("saves Android mode state when order mode is selected", async () => {
+    const wrapper = createWrapper();
     const buttons = wrapper.findAll(".memorize-mode-selector .tab-button");
-    if (buttons.length > 1) {
-      expect(buttons[1].classes()).toContain("active");
-    }
+
+    await buttons[3].trigger("click");
+
+    expect(androidMock.saveState).toHaveBeenCalledWith(expect.objectContaining({
+      memorize: expect.objectContaining({
+        mode: MemorizeStateModeEnum.ORDER,
+      })
+    }));
+  });
+
+  it("auto-marks the verse range memorized when a completion-capable mode finishes", async () => {
+    const wrapper = createWrapper();
+    const childComponent = wrapper.findComponent(WordType);
+
+    await childComponent.vm.$emit("memorize-completed");
+
+    expect(androidMock.markAsMemorized).toHaveBeenCalledWith("KJV", 10, 12);
+  });
+
+  it("does not auto-mark completion when Android progress settings disable it", async () => {
+    const wrapper = createWrapper({
+      readingProgressSettings: { autoMarkMemorized: false }
+    });
+    const childComponent = wrapper.findComponent(WordOrder);
+
+    await childComponent.vm.$emit("memorize-completed");
+
+    expect(androidMock.markAsMemorized).not.toHaveBeenCalled();
   });
 });
