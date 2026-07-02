@@ -91,6 +91,7 @@ final class AndroidWindowControlStyleTests: XCTestCase {
 
         XCTAssertEqual(palette.backgroundColor(isActive: false, isVisible: true).argbInt, Int(Int32(bitPattern: 0xFF000000)))
         XCTAssertEqual(palette.backgroundColor(isActive: false, isVisible: false).argbInt, Int(Int32(bitPattern: 0xFFFFFFFF)))
+        XCTAssertEqual(palette.restoreStripBackgroundColor.argbInt, Int(Int32(bitPattern: 0xFFFFFFFF)))
         XCTAssertEqual(palette.footerButtonForegroundColor(isVisible: true).argbInt, Int(Int32(bitPattern: 0xFFFFFFFF)))
         XCTAssertEqual(palette.footerButtonForegroundColor(isVisible: false).argbInt, Int(Int32(bitPattern: 0xFF000000)))
         XCTAssertEqual(

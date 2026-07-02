@@ -98,6 +98,9 @@ struct AndroidWindowButtonPalette {
     /// Fill used by the add-window button.
     let addButtonBackgroundColor: Color
 
+    /// Fill used behind the footer restore-button strip.
+    let restoreStripBackgroundColor: Color
+
     /// Neutral restore-button border color.
     let strokeColor: Color
 
@@ -152,6 +155,7 @@ struct AndroidWindowButtonPalette {
                 visibleButtonBackgroundColor: color(argb: 0xFF6A6A6A),
                 hiddenButtonBackgroundColor: color(argb: 0xFF2E2E2E),
                 addButtonBackgroundColor: color(argb: 0xB7525252),
+                restoreStripBackgroundColor: surfacePalette.backgroundColor,
                 strokeColor: color(argb: 0xFF686868),
                 activeStrokeColor: color(argb: 0xFF002AFF),
                 windowButtonTextColor: color(argb: 0xFF939393),
@@ -170,6 +174,7 @@ struct AndroidWindowButtonPalette {
                 visibleButtonBackgroundColor: color(argb: 0xFF535353),
                 hiddenButtonBackgroundColor: color(argb: 0xFF878787),
                 addButtonBackgroundColor: color(argb: 0xB7525252),
+                restoreStripBackgroundColor: surfacePalette.backgroundColor,
                 strokeColor: color(argb: 0xFF686868),
                 activeStrokeColor: color(argb: 0xFF002AFF),
                 windowButtonTextColor: color(argb: 0xFFE8E8E8),
@@ -303,6 +308,7 @@ struct AndroidWindowButtonPalette {
             visibleButtonBackgroundColor: Self.color(argb: 0xFF000000),
             hiddenButtonBackgroundColor: Self.color(argb: 0xFFFFFFFF),
             addButtonBackgroundColor: Self.color(argb: 0xFFFFFFFF),
+            restoreStripBackgroundColor: Self.color(argb: 0xFFFFFFFF),
             strokeColor: Self.color(argb: 0xFF000000),
             activeStrokeColor: Self.color(argb: 0xFF000000),
             windowButtonTextColor: Self.color(argb: 0xFF000000),

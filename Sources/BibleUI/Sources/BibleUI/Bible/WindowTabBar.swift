@@ -148,7 +148,7 @@ struct WindowTabBar: View {
             height: WindowTabBarLayout.barHeight
         )
         .frame(maxWidth: isCollapsed ? nil : .infinity, alignment: .trailing)
-        .background(isCollapsed ? Color.clear : surfacePalette.backgroundColor)
+        .background(isCollapsed ? Color.clear : tabPalette.restoreStripBackgroundColor)
     }
 
     /// Whether Android would show only the add-window footer control.
