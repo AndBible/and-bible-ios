@@ -9,7 +9,7 @@ import XCTest
  Package-level reader bridge and document-payload tests migrated from the app-host bundle.
 
  These tests protect Android/Vue reader payload contracts that belong to BibleUI and its bridge
- collaborators. The suite extends `BibleUISwordFixtureTestCase` only for isolated bundled-SWORD
+ collaborators. The suite extends `BibleUISwordFixtureTestCase` only for isolated SWORD-fixture
  fixtures; it does not require app delegate, scene, or installed app bootstrap behavior.
  */
 final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
@@ -58,13 +58,13 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
 
      The web client sends verse ordinals into the native compare bridge. Android resolves those
      ordinals through JSword's active versification, whose values include intro slots and therefore
-     are not `(chapter - 1) * 40 + verse`. The bundled KJV module supplies the same SWORD
+     are not `(chapter - 1) * 40 + verse`. The KJV test fixture module supplies the same SWORD
      versification data here; a failure means compare links have drifted back toward synthetic
      ordinals and can open the wrong verse range.
      */
     func testReaderCompareBridgeRequestEmitsVueCompareDocument() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let secondCorinthians = try XCTUnwrap(
@@ -124,12 +124,12 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
      Protects the extracted compare document builder's Android `MultiDocument` contract.
 
      Android renders Compare through `FakeBookFactory.compareDocument` as a multi-fragment Bible
-     document with `compare=true`. This test exercises the builder directly against the bundled KJV
+     document with `compare=true`. This test exercises the builder directly against the KJV test fixture
      SWORD fixture so the controller can remain an orchestration boundary while the builder owns
      module ordering, verse extraction, range titles, and typed bridge JSON assembly.
      */
     func testCompareDocumentBuilderBuildsAndroidMultiDocumentPayload() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let moduleInfo = try XCTUnwrap(manager.installedModules().first { $0.name == "KJV" })
         let builder = BibleReaderCompareDocumentBuilder(

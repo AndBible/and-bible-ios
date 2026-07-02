@@ -3,10 +3,9 @@ import Foundation
 /**
  Selects the startup document-setup prompt reason independently from SWORD module discovery.
 
- Android keeps its first-download screen visible until the user has at least one Bible, while iOS
- also ships a bundled fallback Bible. This policy keeps the no-Bible prompt as the highest-priority
- blocking state, then separately surfaces the one-time first-run setup path when a fallback Bible is
- already present.
+ Android keeps its first-download screen visible only while the installed module store has no
+ Bibles. iOS follows the same predicate directly so app upgrades do not show Easy Start again when
+ users already have Bible modules installed.
 
  Failure modes:
  - malformed or missing persistence should be normalized by the caller before invoking this policy
@@ -18,31 +17,49 @@ struct StartupDocumentSetupPromptPolicy {
     enum PromptReason: Equatable {
         /// No installed Bible module is available, so reading setup is required.
         case noBibleModules
+    }
 
-        /// A fallback Bible exists, but the user has not seen the recommended setup path.
-        case firstRunSetup
+    /// Startup prompt decision plus whether installed-module inventory was resolved.
+    struct Evaluation: Equatable {
+        /// Prompt reason to present after inventory resolves, or `nil` when setup is not due.
+        let promptReason: PromptReason?
+
+        /// Whether the caller supplied a resolved installed-module inventory snapshot.
+        let didEvaluateInventory: Bool
+    }
+
+    /**
+     Resolves startup prompt state while preserving unresolved inventory as pending.
+
+     Android's first-download gate is based on a resolved `SwordDocumentFacade.bibles` snapshot.
+     iOS keeps the same contract: temporary reader-controller or SWORD-manager unavailability
+     should not mark startup evaluation complete because a later controller registration can
+     provide the installed-module inventory.
+
+     - Parameter hasNoBibleModules: `true` when resolved inventory contains no Bible modules,
+       `false` when it contains at least one Bible, or `nil` while inventory is unavailable.
+     - Returns: Prompt decision plus whether inventory was resolved.
+     */
+    static func evaluation(hasNoBibleModules: Bool?) -> Evaluation {
+        guard let hasNoBibleModules else {
+            return Evaluation(promptReason: nil, didEvaluateInventory: false)
+        }
+        return Evaluation(
+            promptReason: promptReason(hasNoBibleModules: hasNoBibleModules),
+            didEvaluateInventory: true
+        )
     }
 
     /**
      Resolves which startup prompt, if any, should be presented.
 
-     - Parameters:
-       - hasNoBibleModules: Whether the installed module store currently lacks Bible modules.
-       - hasHandledFirstRunSetup: Whether the user has already entered or skipped first-run setup.
-     - Returns: `.noBibleModules` when reading cannot start from installed modules,
-       `.firstRunSetup` for the one-time recommended setup prompt, or `nil` when no prompt is due.
+     - Parameter hasNoBibleModules: Whether the installed module store currently lacks Bible
+       modules.
+     - Returns: `.noBibleModules` when reading cannot start from installed Bible modules, or `nil`
+       when no startup setup is due.
      */
-    static func promptReason(
-        hasNoBibleModules: Bool,
-        hasHandledFirstRunSetup: Bool
-    ) -> PromptReason? {
-        if hasNoBibleModules {
-            return .noBibleModules
-        }
-        if !hasHandledFirstRunSetup {
-            return .firstRunSetup
-        }
-        return nil
+    static func promptReason(hasNoBibleModules: Bool) -> PromptReason? {
+        hasNoBibleModules ? .noBibleModules : nil
     }
 }
 
@@ -55,7 +72,6 @@ struct StartupDocumentSetupPromptPolicy {
 
  Failure modes:
  - unsupported locales simply omit Easy Start because Android exposes it for English only
- - first-run setup may be skipped because iOS can already show a bundled fallback Bible
  - no-Bible setup intentionally cannot be skipped because Android blocks on first-download setup
  */
 struct StartupDocumentSetupPresentation: Equatable {
@@ -73,9 +89,6 @@ struct StartupDocumentSetupPresentation: Equatable {
         /// Open database restore.
         case restoreDatabase
 
-        /// Skip the non-blocking first-run setup prompt.
-        case skip
-
         /// Startup-specific BackupActivity category target, when the action opens a file picker.
         var restoreImportTarget: RestoreWorkflowTarget? {
             switch self {
@@ -83,7 +96,7 @@ struct StartupDocumentSetupPresentation: Equatable {
                 return .database
             case .loadDocumentsFromFiles:
                 return .documents
-            case .easyStart, .downloadDocuments, .skip:
+            case .easyStart, .downloadDocuments:
                 return nil
             }
         }
@@ -100,12 +113,12 @@ struct StartupDocumentSetupPresentation: Equatable {
         true
     }
 
-    /// Skip is allowed only for iOS's non-blocking first-run setup path.
+    /// Startup setup is blocking until a Bible is installed, matching Android first-download.
     var allowsSkip: Bool {
-        reason == .firstRunSetup
+        false
     }
 
-    /// Ordered actions matching Android's first-download layout with iOS's skip extension last.
+    /// Ordered actions matching Android's first-download layout.
     var actions: [Action] {
         var startupActions: [Action] = []
         if isEasyStartAvailable {
@@ -114,9 +127,6 @@ struct StartupDocumentSetupPresentation: Equatable {
         startupActions.append(.downloadDocuments)
         startupActions.append(.restoreDatabase)
         startupActions.append(.loadDocumentsFromFiles)
-        if allowsSkip {
-            startupActions.append(.skip)
-        }
         return startupActions
     }
 }

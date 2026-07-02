@@ -89,9 +89,6 @@ struct ReaderWindowControlsAvoidanceMetrics {
    display updates into active pane controllers
  */
 public struct BibleReaderView: View {
-    /// Local-only flag recording whether the user entered or skipped first-run document setup.
-    private static let firstRunDocumentSetupPromptHandledKey = "startup_document_setup_prompt_handled"
-
     /// Identity used to recreate data-bound reader panes after the app swaps persistence runtimes.
     private let readerContentIdentity: UUID?
 
@@ -845,6 +842,9 @@ public struct BibleReaderView: View {
             dismissCommentaryQuickSelector()
             syncActiveDisplaySettings()
         }
+        .onChange(of: windowManager.controllerVersion) { _, _ in
+            evaluateStartupDownloadPromptIfNeeded()
+        }
         #if os(iOS)
         .onAppear {
             // Auto-start tilt scroll if workspace has it enabled
@@ -1304,8 +1304,7 @@ public struct BibleReaderView: View {
                     onEasyStart: presentStartupDefaultDownloads,
                     onDownloadDocuments: presentStartupDownloadDocuments,
                     onLoadDocumentsFromFiles: presentStartupLoadDocumentsFromFiles,
-                    onRestoreDatabase: presentStartupRestoreDatabase,
-                    onSkip: handleStartupDownloadPromptCancelled
+                    onRestoreDatabase: presentStartupRestoreDatabase
                 )
                 #if os(iOS)
                 .toolbar(.visible, for: .navigationBar)
@@ -1779,7 +1778,6 @@ public struct BibleReaderView: View {
      - installation failures are handled inside `ModuleBrowserView`
      */
     private func presentStartupDefaultDownloads() {
-        markFirstRunDocumentSetupPromptHandled()
         startupDownloadPromptReason = nil
         startupDefaultDownloadsInFlight = true
         presentDownloads(
@@ -1792,14 +1790,9 @@ public struct BibleReaderView: View {
      Opens the standard document download route from startup setup.
 
      Side effects:
-     - marks the one-time first-run setup as handled when applicable
      - presents Downloads on the reader destination stack
      */
     private func presentStartupDownloadDocuments() {
-        if startupDownloadPromptReason == .firstRunSetup {
-            markFirstRunDocumentSetupPromptHandled()
-            startupDownloadPromptReason = nil
-        }
         presentDownloads(from: windowManager.activeWindow?.id)
     }
 
@@ -1810,7 +1803,6 @@ public struct BibleReaderView: View {
      behind the Android-aligned Backup & Restore screen so startup does not fork file-import logic.
 
      Side effects:
-     - marks the one-time first-run setup as handled when applicable
      - presents Backup & Restore on the reader destination stack with the Documents target
      */
     private func presentStartupLoadDocumentsFromFiles() {
@@ -1821,7 +1813,6 @@ public struct BibleReaderView: View {
      Opens the database restore picker from startup setup.
 
      Side effects:
-     - marks the one-time first-run setup as handled when applicable
      - presents Backup & Restore on the reader destination stack with the Database target
      */
     private func presentStartupRestoreDatabase() {
@@ -1832,62 +1823,12 @@ public struct BibleReaderView: View {
      Routes startup import/restore actions through the existing Android-compatible picker surface.
 
      Side effects:
-     - marks the one-time first-run setup as handled when applicable
      - stores the startup restore/import target for the next Backup & Restore route
      - pushes `.importExport` as the active reader destination
      */
     private func presentStartupImportExport(for restoreImportTarget: RestoreWorkflowTarget) {
-        if startupDownloadPromptReason == .firstRunSetup {
-            markFirstRunDocumentSetupPromptHandled()
-            startupDownloadPromptReason = nil
-        }
         startupRestoreImportTarget = restoreImportTarget
         presentReaderDestination(.importExport, from: windowManager.activeWindow?.id)
-    }
-
-    /**
-     Handles the startup setup prompt's explicit cancel/skip action.
-
-     Side effects:
-     - persists the first-run setup skip when the prompt is informational
-     - clears the current prompt reason for the active reader session
-     */
-    private func handleStartupDownloadPromptCancelled() {
-        if startupDownloadPromptReason == .firstRunSetup {
-            markFirstRunDocumentSetupPromptHandled()
-        }
-        startupDownloadPromptReason = nil
-        if activeReaderDestination == .startupDocumentSetup {
-            activeReaderDestination = nil
-        }
-    }
-
-    /**
-     Reads the durable first-run setup marker.
-
-     - Returns: `true` when the user has opened Downloads/Easy Start or skipped setup.
-     - Side effects: Reads SwiftData settings through `SettingsStore` outside UI-test harnesses.
-     */
-    private func hasHandledFirstRunDocumentSetupPrompt() -> Bool {
-        if UITestRuntimeConfiguration.treatsFirstRunDocumentSetupAsHandled {
-            return true
-        }
-        return SettingsStore(modelContext: modelContext).getBool(Self.firstRunDocumentSetupPromptHandledKey)
-    }
-
-    /**
-     Persists that the user has handled first-run document setup.
-
-     Side effects:
-     - writes a local-only SwiftData setting
-     - intentionally does not use `AppPreferenceKey` because Android has no matching global
-       preference; this marker only compensates for iOS shipping a bundled fallback Bible.
-     */
-    private func markFirstRunDocumentSetupPromptHandled() {
-        SettingsStore(modelContext: modelContext).setBool(
-            Self.firstRunDocumentSetupPromptHandledKey,
-            value: true
-        )
     }
 
     /// Closes the currently active top-level reader sheet.
@@ -1964,23 +1905,15 @@ public struct BibleReaderView: View {
      Handles an unexpected close of the startup setup route.
 
      The no-Bible setup screen is blocking in Android, so if SwiftUI reports that it was closed
-     without a setup action, iOS immediately re-evaluates startup state. The first-run setup route is
-     optional because iOS can already display the bundled fallback Bible, so closing it marks the
-     prompt handled like Skip.
+     without a setup action, iOS immediately re-evaluates startup state.
 
      Side effects:
-     - may mark first-run setup handled
      - may re-present startup setup when no Bible is installed
      */
     private func handleStartupDocumentSetupClosed() {
-        switch startupDownloadPromptReason {
-        case .firstRunSetup:
-            handleStartupDownloadPromptCancelled()
-        case .noBibleModules:
+        if startupDownloadPromptReason == .noBibleModules {
             didEvaluateStartupDownloadPrompt = false
             evaluateStartupDownloadPromptIfNeeded()
-        case nil:
-            break
         }
     }
 
@@ -2049,7 +1982,7 @@ public struct BibleReaderView: View {
         for (_, ctrl) in windowManager.controllers {
             (ctrl as? BibleReaderController)?.refreshInstalledModules()
         }
-        if startupDownloadPromptReason == .noBibleModules, !startupHasNoBibleModules() {
+        if startupDownloadPromptReason == .noBibleModules, startupHasNoBibleModules() == false {
             startupDownloadPromptReason = nil
             if activeReaderDestination == .startupDocumentSetup {
                 activeReaderDestination = nil
@@ -2585,16 +2518,16 @@ public struct BibleReaderView: View {
      Shows the startup document-setup prompt once when setup requires user attention.
 
      Android `StartupActivity` stops on its first-download layout whenever `SwordDocumentFacade`
-     has no Bibles. iOS also ships a bundled fallback Bible, so this coordinator separates that
-     required no-Bible state from a one-time recommended setup path for first-run users.
+     has no Bibles. iOS mirrors that predicate directly and does not create a separate bundled-KJV
+     fallback or first-run marker path.
 
      Side effects:
      - reads installed modules through the focused controller or a temporary `SwordManager`
-     - reads the durable first-run setup marker
      - mutates `didEvaluateStartupDownloadPrompt` and `startupDownloadPromptReason`
 
      Failure modes:
-     - if `SwordManager` cannot be created, no prompt is shown and normal reader fallback remains
+     - if installed-module inventory is unavailable, evaluation remains pending for a later
+       controller-registration pass
      */
     private func evaluateStartupDownloadPromptIfNeeded() {
         guard !didEvaluateStartupDownloadPrompt,
@@ -2603,11 +2536,12 @@ public struct BibleReaderView: View {
               activeReaderModal == nil else {
             return
         }
-        didEvaluateStartupDownloadPrompt = true
-        let promptReason = StartupDocumentSetupPromptPolicy.promptReason(
-            hasNoBibleModules: startupHasNoBibleModules(),
-            hasHandledFirstRunSetup: hasHandledFirstRunDocumentSetupPrompt()
+        let evaluation = StartupDocumentSetupPromptPolicy.evaluation(
+            hasNoBibleModules: startupHasNoBibleModules()
         )
+        guard evaluation.didEvaluateInventory else { return }
+        didEvaluateStartupDownloadPrompt = true
+        let promptReason = evaluation.promptReason
         startupDownloadPromptReason = promptReason
         if promptReason != nil {
             presentReaderDestination(.startupDocumentSetup, from: windowManager.activeWindow?.id)
@@ -2626,10 +2560,14 @@ public struct BibleReaderView: View {
      - may show the required no-Bible startup prompt again
 
      Failure modes:
-     - if module discovery fails, the prompt is not shown
+     - if installed-module inventory is unavailable, evaluation remains pending
      */
     private func reevaluateStartupDownloadPromptAfterDownloads() {
-        guard startupHasNoBibleModules() else {
+        guard let hasNoBibleModules = startupHasNoBibleModules() else {
+            didEvaluateStartupDownloadPrompt = false
+            return
+        }
+        guard hasNoBibleModules else {
             startupDownloadPromptReason = nil
             if activeReaderDestination == .startupDocumentSetup {
                 activeReaderDestination = nil
@@ -2667,21 +2605,41 @@ public struct BibleReaderView: View {
     }
 
     /**
+     Returns the current local module inventory used for startup setup decisions.
+
+     - Returns: Focused-controller `SwordManager` modules when available, temporary
+       `SwordManager` modules otherwise, or the focused controller's Bible cache as a final
+       fallback when module discovery fails.
+     - Side effects: May create a temporary `SwordManager` if the focused controller has not
+       registered yet.
+     - Failure modes: Returns `nil` if no focused controller exists and `SwordManager` creation
+       fails.
+     */
+    private func startupInstalledModules() -> [ModuleInfo]? {
+        if let manager = focusedController?.swordManager {
+            return manager.installedModules()
+        }
+        if let manager = SwordManager() {
+            return manager.installedModules()
+        }
+        return focusedController?.installedBibleModules
+    }
+
+    /**
      Tests whether the current local module store lacks installed Bible modules.
 
-     - Returns: `true` when no installed Bible module is known.
+     - Returns: `true` when resolved inventory has no installed Bible module, `false` when it has
+       at least one Bible module, or `nil` when inventory cannot be resolved yet.
      - Side effects: may create a temporary `SwordManager` if the focused controller has not
        registered yet.
-     - Failure modes: returns `false` if `SwordManager` creation fails.
+     - Failure modes: returns `nil` if `SwordManager` creation fails and no focused-controller
+       cache is available.
      */
-    private func startupHasNoBibleModules() -> Bool {
-        if let focusedController {
-            return focusedController.installedBibleModules.isEmpty
+    private func startupHasNoBibleModules() -> Bool? {
+        guard let modules = startupInstalledModules() else {
+            return nil
         }
-        guard let manager = SwordManager() else {
-            return false
-        }
-        return !manager.installedModules().contains { $0.category == .bible }
+        return !modules.contains { $0.category == .bible }
     }
 
     /// Loads persisted display, behavior, and fullscreen preferences used by the reader shell.

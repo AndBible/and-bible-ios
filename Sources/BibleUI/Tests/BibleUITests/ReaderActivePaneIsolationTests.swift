@@ -131,7 +131,7 @@ final class ReaderActivePaneIsolationTests: BibleUISwordFixtureTestCase {
      */
     @MainActor
     func testBookmarkNavigationUsesCapturedPaneControllerWithoutMutatingFocusedPane() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let sourceWindow = windowWithPageManager(orderNumber: 0)
         let targetWindow = windowWithPageManager(orderNumber: 2)
@@ -174,7 +174,7 @@ final class ReaderActivePaneIsolationTests: BibleUISwordFixtureTestCase {
      */
     @MainActor
     func testDocumentSwitchMutatesOnlyCapturedPaneDocumentState() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         try seedBibleAliasModule(named: "WEB", description: "World English Bible", in: modulePath)
         try seedEmptyRawCommentaryModule(named: "UITestComm", in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))

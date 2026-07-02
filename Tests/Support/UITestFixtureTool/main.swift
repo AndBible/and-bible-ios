@@ -135,7 +135,7 @@ private struct ToolArguments {
 private enum FixtureToolError: LocalizedError {
     case usage(String)
     case sqlite(String)
-    case missingBundledSwordResources(String)
+    case missingSwordFixtureResources(String)
     case missingSwordModule(String)
     case unresolvedVerse(String)
     case missingWorkspace
@@ -148,8 +148,8 @@ private enum FixtureToolError: LocalizedError {
             return message
         case .sqlite(let message):
             return message
-        case .missingBundledSwordResources(let path):
-            return "Fixture seeding could not find bundled SWORD resources at '\(path)'."
+        case .missingSwordFixtureResources(let path):
+            return "Fixture seeding could not find SWORD fixture resources at '\(path)'."
         case .missingSwordModule(let moduleName):
             return "Fixture seeding could not load required SWORD module '\(moduleName)'."
         case .unresolvedVerse(let reference):
@@ -286,8 +286,8 @@ private struct FixtureTool {
     /**
      Removes deterministic SWORD modules written by UI-test scenarios.
 
-     Baseline fixture resets intentionally leave bundled KJV in place, but scenario-local modules
-     must not leak into later grouped test runs that use the same simulator.
+     Baseline fixture resets intentionally leave the seeded KJV fixture module in place, but
+     scenario-local modules must not leak into later grouped test runs that use the same simulator.
      */
     private func removeUITestSwordModules(from paths: FixturePaths) throws {
         let fileManager = FileManager.default
@@ -417,7 +417,7 @@ private final class FixtureContext {
             try ensureVisibleBibleWindowCount(3, baseline: baseline)
             try seedUITestCommentaryModule()
         case .searchIndexed:
-            try seedBundledSearchIndex()
+            try seedKJVFixtureSearchIndex()
         case .searchMultiTranslation:
             try seedUITestBibleModule()
             try seedMultiTranslationSearchIndex()
@@ -630,16 +630,16 @@ private final class FixtureContext {
     }
 
     /**
-     Seeds a minimal bundled KJV FTS index so Search UI tests start from a ready state.
+     Seeds a minimal KJV fixture FTS index so Search UI tests start from a ready state.
      *
      * The seeded rows are intentionally narrow: they cover the current Search UI assertions for
-     * bundled queries (`earth`, `earth void`, `jesus`, and `noah`) without forcing UI tests to
+     * fixture queries (`earth`, `earth void`, `jesus`, and `noah`) without forcing UI tests to
      * wait for runtime index creation on fresh simulators.
      *
      * - Throws: `FixtureToolError.sqlite` when the search-index database cannot be created or
      *   written.
      */
-    private func seedBundledSearchIndex() throws {
+    private func seedKJVFixtureSearchIndex() throws {
         let databaseURL = paths.documentsURL.appendingPathComponent("search_indexes.sqlite")
         try fileManager.createDirectory(
             at: databaseURL.deletingLastPathComponent(),
@@ -933,7 +933,7 @@ private final class FixtureContext {
     }
 
     /**
-     SQLite row set preseeded into the bundled KJV search index.
+     SQLite row set preseeded into the KJV fixture search index.
      */
     private static let seededSearchRows: [(verseKey: String, plainText: String, moduleName: String)] = [
         (
@@ -954,7 +954,7 @@ private final class FixtureContext {
     ]
 
     /**
-     SQLite rows preseeded into the bundled KJV Strong's index facet.
+     SQLite rows preseeded into the KJV fixture Strong's index facet.
 
      The token is attached to `Genesis 1:2`, which already exists in `seededSearchRows`; this keeps
      Strong's fixture coverage without changing the deterministic ordinary-text result totals for
@@ -995,7 +995,7 @@ private final class FixtureContext {
 
      Search assertions read deterministic FTS rows from `search_indexes.sqlite`, but production
      module discovery and book-list generation now require normal SWORD zText semantics. The fixture
-     therefore clones the bundled KJV module data under deterministic `AATESTWEB` metadata instead of
+     therefore clones the KJV test fixture data under deterministic `AATESTWEB` metadata instead of
      publishing an empty RawText shell that Android/JSword-style discovery would reject.
      */
     private func seedUITestBibleModule() throws {
@@ -1005,7 +1005,7 @@ private final class FixtureContext {
             "modules/texts/ztext/aatestweb",
             isDirectory: true
         )
-        let sourceDataURL = try bundledSwordResourceURL()
+        let sourceDataURL = try swordFixtureResourceURL()
             .appendingPathComponent("modules", isDirectory: true)
             .appendingPathComponent("texts", isDirectory: true)
             .appendingPathComponent("ztext", isDirectory: true)
@@ -1038,8 +1038,8 @@ private final class FixtureContext {
     /**
      Seeds a minimal SWORD commentary module used by document-switching UI tests.
 
-     The production bundle currently contains only KJV. Tests that exercise commentary switching
-     need a deterministic installed commentary row without redistributing another real module.
+     Tests that exercise commentary switching need a deterministic installed commentary row without
+     redistributing another real module.
      */
     private func seedUITestCommentaryModule() throws {
         let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
@@ -1086,50 +1086,56 @@ private final class FixtureContext {
     }
 
     /**
-     Resolves the repo-bundled SWORD resource directory used by the app at first launch.
+     Resolves the repository SWORD test fixture directory.
 
-     The host fixture tool runs outside the app bundle, so it cannot use `Bundle.main`. Resolving from
-     `#filePath` keeps the fixture tied to the checked-out resources that Xcode also packages into
-     the app.
+     The host fixture tool runs outside the app bundle, so it cannot use `Bundle.main`. Resolving
+     from `#filePath` keeps the fixture tied to checked-out test resources without requiring the app
+     target to package KJV.
 
-     - Returns: Repository `AndBible/Resources/sword` directory.
-     - Throws: `FixtureToolError.missingBundledSwordResources` when the resources are unavailable.
+     - Returns: Repository `Sources/BibleUI/Tests/BibleUITests/Fixtures/sword` directory.
+     - Throws: `FixtureToolError.missingSwordFixtureResources` when the resources are unavailable.
      */
-    private func bundledSwordResourceURL() throws -> URL {
+    private func swordFixtureResourceURL() throws -> URL {
         var candidateRootURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         while candidateRootURL.path != candidateRootURL.deletingLastPathComponent().path {
-            let bundledSwordURL = candidateRootURL
-                .appendingPathComponent("AndBible", isDirectory: true)
-                .appendingPathComponent("Resources", isDirectory: true)
+            let fixtureSwordURL = candidateRootURL
+                .appendingPathComponent("Sources", isDirectory: true)
+                .appendingPathComponent("BibleUI", isDirectory: true)
+                .appendingPathComponent("Tests", isDirectory: true)
+                .appendingPathComponent("BibleUITests", isDirectory: true)
+                .appendingPathComponent("Fixtures", isDirectory: true)
                 .appendingPathComponent("sword", isDirectory: true)
-            if fileManager.fileExists(atPath: bundledSwordURL.path) {
-                return bundledSwordURL
+            if fileManager.fileExists(atPath: fixtureSwordURL.path) {
+                return fixtureSwordURL
             }
             candidateRootURL.deleteLastPathComponent()
         }
 
         let fallbackPath = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
-            .appendingPathComponent("AndBible", isDirectory: true)
-            .appendingPathComponent("Resources", isDirectory: true)
+            .appendingPathComponent("Sources", isDirectory: true)
+            .appendingPathComponent("BibleUI", isDirectory: true)
+            .appendingPathComponent("Tests", isDirectory: true)
+            .appendingPathComponent("BibleUITests", isDirectory: true)
+            .appendingPathComponent("Fixtures", isDirectory: true)
             .appendingPathComponent("sword", isDirectory: true)
             .path
-        throw FixtureToolError.missingBundledSwordResources(fallbackPath)
+        throw FixtureToolError.missingSwordFixtureResources(fallbackPath)
     }
 
     /**
-     Ensures the simulator SWORD directory contains the bundled KJV module.
+     Ensures the simulator SWORD directory contains the KJV test fixture module.
 
-     UI fixture commands can run before app launch has copied bundled modules. Bookmark fixtures need
-     KJV available immediately so their persisted ordinals are produced by SWORD instead of by a
-     static approximation.
+     UI fixture commands seed reader state before the app launches. Bookmark fixtures need KJV
+     available immediately so their persisted ordinals are produced by SWORD instead of by a static
+     approximation.
 
      - Returns: Simulator document `sword` directory.
-     - Throws: Filesystem errors or `FixtureToolError.missingBundledSwordResources`.
+     - Throws: Filesystem errors or `FixtureToolError.missingSwordFixtureResources`.
      */
     @discardableResult
-    private func ensureBundledKJVSwordModuleAvailable() throws -> URL {
-        let sourceSwordURL = try bundledSwordResourceURL()
+    private func ensureKJVSwordFixtureModuleAvailable() throws -> URL {
+        let sourceSwordURL = try swordFixtureResourceURL()
         let destinationSwordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
         let sourceConfURL = sourceSwordURL
             .appendingPathComponent("mods.d", isDirectory: true)
@@ -1152,6 +1158,7 @@ private final class FixtureContext {
             try fileManager.copyItem(at: sourceConfURL, to: destinationConfURL)
         }
         try copyDirectoryContents(from: sourceDataURL, to: destinationDataURL, replacingExisting: false)
+        try removeCachedSwordModuleConfig(in: destinationModsDURL)
         return destinationSwordURL
     }
 
@@ -1198,6 +1205,7 @@ private final class FixtureContext {
      * - Throws: `FixtureToolError` when the baseline graph cannot be created.
      */
     private func ensureBaseline() throws -> BaselineState {
+        try ensureKJVSwordFixtureModuleAvailable()
         bookmarkService.ensureSystemLabels()
 
         let workspace: Workspace
@@ -1556,7 +1564,7 @@ private final class FixtureContext {
        - chapter: One-based chapter number.
        - verse: One-based verse number.
      - Returns: Native SWORD verse-key ordinal.
-     - Throws: `FixtureToolError` when the bundled KJV module or verse cannot be resolved.
+     - Throws: `FixtureToolError` when the KJV test fixture module or verse cannot be resolved.
      */
     private func resolveKJVOrdinal(bookName: String, chapter: Int, verse: Int) throws -> Int {
         let module = try kjvSwordModule()
@@ -1570,16 +1578,16 @@ private final class FixtureContext {
     }
 
     /**
-     Loads the bundled KJV module from the simulator SWORD directory.
+     Loads the KJV test fixture module from the simulator SWORD directory.
 
      The returned module borrows handles owned by `SwordManager`, so the manager is cached for the
      lifetime of the fixture context.
 
-     - Returns: Loaded bundled KJV SWORD module.
+     - Returns: Loaded KJV SWORD module.
      - Throws: `FixtureToolError.missingSwordModule` if SWORD cannot load KJV.
      */
     private func kjvSwordModule() throws -> SwordModule {
-        let swordURL = try ensureBundledKJVSwordModuleAvailable()
+        let swordURL = try ensureKJVSwordFixtureModuleAvailable()
         let manager: SwordManager
         if let existingManager = swordManager {
             manager = existingManager
@@ -1634,7 +1642,7 @@ private final class FixtureContext {
 
      JSword ordinals include the Bible introduction, testament introductions, one book introduction
      per book, and one chapter introduction per real chapter. This mirrors the iOS reader contract
-     protected by `testBundledKJVVerseOrdinalsUseIntroInclusiveVersification` while avoiding the
+     protected by `testKJVFixtureVerseOrdinalsUseIntroInclusiveVersification` while avoiding the
      previous fixture-only `chapter * 40` approximation.
 
      - Parameters:

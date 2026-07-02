@@ -4,85 +4,98 @@ import XCTest
 /**
  Verifies the reader startup setup prompt policy independently from the app-host lifecycle.
 
- These tests protect the Android-parity startup contract: no-Bible setup remains blocking and
- repeatable, while iOS' bundled fallback Bible does not suppress the one-time recommended setup
- entry point. Failures mean first-run users can again lose the discoverable Easy Start/Downloads
- path because module presence and setup completion were conflated.
+ These tests protect the Android-parity startup contract: setup appears only while no Bible module
+ is installed, and iOS must not ship a bundled KJV module that creates a separate first-run path.
+ Failures mean iOS has drifted back toward bundled-content or setup-marker behavior that Android
+ does not have.
  */
 final class StartupDocumentSetupPromptPolicyTests: XCTestCase {
     /**
-     No-Bible module state must take priority over the informational first-run setup marker.
+     Unresolved Bible inventory does not complete startup setup evaluation.
+
+     Android's first-download gate is based on a resolved `SwordDocumentFacade.bibles` snapshot. If
+     iOS cannot yet resolve module inventory because the reader controller is still registering or
+     `SwordManager` is temporarily unavailable, the startup evaluator must stay pending so a later
+     controller-registration pass can retry.
+     */
+    func testUnresolvedBibleInventoryKeepsStartupEvaluationPending() {
+        let evaluation = StartupDocumentSetupPromptPolicy.evaluation(hasNoBibleModules: nil)
+
+        XCTAssertNil(evaluation.promptReason)
+        XCTAssertFalse(evaluation.didEvaluateInventory)
+    }
+
+    /**
+     Resolved no-Bible inventory completes evaluation with Android's blocking setup reason.
+
+     This keeps the no-Bible state distinct from unresolved inventory: both have no usable Bible at
+     the moment, but only a resolved empty Bible list should present setup.
+     */
+    func testResolvedNoBibleInventoryCompletesEvaluationWithSetupPrompt() {
+        let evaluation = StartupDocumentSetupPromptPolicy.evaluation(hasNoBibleModules: true)
+
+        XCTAssertEqual(evaluation.promptReason, .noBibleModules)
+        XCTAssertTrue(evaluation.didEvaluateInventory)
+    }
+
+    /**
+     Resolved installed-Bible inventory completes evaluation without a prompt.
+
+     Android goes straight to the reader when at least one Bible is installed. iOS mirrors that
+     resolved state without retrying or showing an informational first-run setup prompt.
+     */
+    func testResolvedBibleInventoryCompletesEvaluationWithoutPrompt() {
+        let evaluation = StartupDocumentSetupPromptPolicy.evaluation(hasNoBibleModules: false)
+
+        XCTAssertNil(evaluation.promptReason)
+        XCTAssertTrue(evaluation.didEvaluateInventory)
+    }
+
+    /**
+     No-Bible module state opens Android's first-download setup route.
 
      Android keeps users on its first-download setup surface while no Bible is installed. iOS mirrors
-     that as a startup prompt even if the user previously skipped the recommended setup message.
+     that predicate directly instead of relying on bundled fallback content.
      */
-    func testNoBiblePromptTakesPriorityOverHandledFirstRunSetup() {
+    func testNoBiblePromptMatchesAndroidFirstDownloadGate() {
         XCTAssertEqual(
             StartupDocumentSetupPromptPolicy.promptReason(
-                hasNoBibleModules: true,
-                hasHandledFirstRunSetup: true
+                hasNoBibleModules: true
             ),
             .noBibleModules
         )
     }
 
     /**
-     A bundled fallback Bible must not count as completing first-run setup.
+     Existing Bible modules suppress startup setup even when no iOS first-run marker exists.
 
-     Fresh iOS installs include KJV so the reader can render immediately, but issue #320 requires a
-     discoverable recommended setup path until the user explicitly enters setup or skips it.
+     Android does not have a one-time "first-run setup handled" flag for users who already have a
+     Bible; it goes straight to the main reader when `SwordDocumentFacade.bibles` is not empty.
+
+     Failure means existing users who already installed documents will see Easy Start again when an
+     app update adds or resets an iOS-only handled flag.
      */
-    func testFirstRunSetupPromptAppearsWhenBibleExistsButSetupNotHandled() {
-        XCTAssertEqual(
-            StartupDocumentSetupPromptPolicy.promptReason(
-                hasNoBibleModules: false,
-                hasHandledFirstRunSetup: false
-            ),
-            .firstRunSetup
-        )
-    }
-
-    /**
-     The startup setup prompt is suppressed after the user has handled first-run setup.
-
-     This keeps the first-run prompt durable and one-time after the user opens setup/downloads or
-     explicitly skips it, while leaving the no-Bible prompt covered by the priority test above.
-     */
-    func testPromptIsSuppressedWhenBibleExistsAndFirstRunSetupHandled() {
+    func testBiblePresenceSuppressesStartupSetupEvenWhenFirstRunMarkerAbsent() {
         XCTAssertNil(
             StartupDocumentSetupPromptPolicy.promptReason(
-                hasNoBibleModules: false,
-                hasHandledFirstRunSetup: true
+                hasNoBibleModules: false
             )
         )
     }
 
     /**
-     UI tests can explicitly keep their existing seeded-reader startup contract.
+     The app target must not copy bundled SWORD modules into the application bundle.
 
-     The flag is intentionally opt-in and test-namespaced so production launches still show the
-     first-run setup prompt, while hosted route tests that seed reader state do not get blocked by
-     the informational prompt.
+     Android ships without KJV Bible text and Easy Start downloads recommended defaults only after
+     the user chooses that route. The iOS project file is source-inspected here because the SWORD
+     files would otherwise be copied by Xcode before runtime code can observe the app bundle.
+
+     Failure means iOS is again installing KJV by packaging `AndBible/Resources/sword`.
      */
-    func testUITestRuntimeCanTreatFirstRunSetupAsHandledOnlyWhenExplicit() {
-        XCTAssertTrue(
-            UITestRuntimeConfiguration.isFirstRunDocumentSetupHandled(
-                environment: ["UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED": "1"],
-                arguments: []
-            )
-        )
-        XCTAssertTrue(
-            UITestRuntimeConfiguration.isFirstRunDocumentSetupHandled(
-                environment: [:],
-                arguments: ["-UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED"]
-            )
-        )
-        XCTAssertFalse(
-            UITestRuntimeConfiguration.isFirstRunDocumentSetupHandled(
-                environment: ["UITEST_FIRST_RUN_DOCUMENT_SETUP_HANDLED": "0"],
-                arguments: []
-            )
-        )
+    func testAppProjectDoesNotBundleSwordModules() throws {
+        let project = try BibleUITestSourceLocator.source(at: "AndBible.xcodeproj/project.pbxproj")
+        XCTAssertFalse(project.contains("Resources/sword"))
+        XCTAssertFalse(project.contains("sword in Resources"))
     }
 
     /**
@@ -135,23 +148,22 @@ final class StartupDocumentSetupPromptPolicyTests: XCTestCase {
     }
 
     /**
-     English first-run setup exposes Android's setup actions without using a transient dialog.
+     English no-Bible setup exposes Android's setup actions without using a transient dialog.
 
      Android's first-download surface exposes English-only Easy Start, Download, database restore,
-     and file import actions as a setup screen. iOS keeps the same discoverable action set while
-     adding Skip only for the non-blocking bundled-Bible first-run case.
+     and file import actions as a setup screen.
      */
-    func testFirstRunEnglishPresentationUsesAndroidSetupActionsWithSkip() {
+    func testNoBibleEnglishPresentationUsesAndroidSetupActionsWithoutSkip() {
         let presentation = StartupDocumentSetupPresentation(
-            reason: .firstRunSetup,
+            reason: .noBibleModules,
             isEasyStartAvailable: true
         )
 
         XCTAssertEqual(
             presentation.actions,
-            [.easyStart, .downloadDocuments, .restoreDatabase, .loadDocumentsFromFiles, .skip]
+            [.easyStart, .downloadDocuments, .restoreDatabase, .loadDocumentsFromFiles]
         )
-        XCTAssertTrue(presentation.allowsSkip)
+        XCTAssertFalse(presentation.allowsSkip)
         XCTAssertTrue(presentation.usesReaderStackSurface)
     }
 
@@ -187,6 +199,5 @@ final class StartupDocumentSetupPromptPolicyTests: XCTestCase {
         XCTAssertEqual(StartupDocumentSetupPresentation.Action.loadDocumentsFromFiles.restoreImportTarget, .documents)
         XCTAssertNil(StartupDocumentSetupPresentation.Action.downloadDocuments.restoreImportTarget)
         XCTAssertNil(StartupDocumentSetupPresentation.Action.easyStart.restoreImportTarget)
-        XCTAssertNil(StartupDocumentSetupPresentation.Action.skip.restoreImportTarget)
     }
 }

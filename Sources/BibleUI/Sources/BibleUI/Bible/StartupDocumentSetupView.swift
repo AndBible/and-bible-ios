@@ -34,9 +34,6 @@ struct StartupDocumentSetupView: View {
     /// Opens database restore.
     let onRestoreDatabase: () -> Void
 
-    /// Skips iOS's non-blocking first-run setup prompt.
-    let onSkip: () -> Void
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -104,7 +101,7 @@ struct StartupDocumentSetupView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Welcome or first-run setup message for the current startup reason.
+    /// Welcome message for the current startup reason.
     private var welcomeText: some View {
         Text(welcomeMessage)
             .font(.body)
@@ -115,21 +112,13 @@ struct StartupDocumentSetupView: View {
 
     /// Localized welcome message matching Android's no-Bible copy when setup is required.
     private var welcomeMessage: String {
-        switch presentation.reason {
-        case .noBibleModules:
-            return String(
-                format: String(
-                    localized: "welcome_message",
-                    defaultValue: "Thank you for downloading %@. There are currently no Bibles or documents installed. To continue, please install at least 1 document by downloading from the internet, or by loading from a zip file document."
-                ),
-                String(localized: "app_name_long", defaultValue: "AndBible: Bible Study")
-            )
-        case .firstRunSetup:
-            return String(
-                localized: "startup_document_setup_prompt",
-                defaultValue: "Open Downloads to choose Bible modules and other documents. You can change these settings later on."
-            )
-        }
+        String(
+            format: String(
+                localized: "welcome_message",
+                defaultValue: "Thank you for downloading %@. There are currently no Bibles or documents installed. To continue, please install at least 1 document by downloading from the internet, or by loading from a zip file document."
+            ),
+            String(localized: "app_name_long", defaultValue: "AndBible: Bible Study")
+        )
     }
 
     /// Supported-file text copied from Android's first-download page.
@@ -187,8 +176,6 @@ struct StartupDocumentSetupView: View {
             String(localized: "install_zip", defaultValue: "Load Documents From Files")
         case .restoreDatabase:
             String(localized: "restore_database", defaultValue: "Restore Database File")
-        case .skip:
-            String(localized: "skip", defaultValue: "Skip")
         }
     }
 
@@ -203,8 +190,6 @@ struct StartupDocumentSetupView: View {
             onLoadDocumentsFromFiles
         case .restoreDatabase:
             onRestoreDatabase
-        case .skip:
-            onSkip
         }
     }
 
@@ -219,8 +204,6 @@ struct StartupDocumentSetupView: View {
             "startupSetupAction.loadDocumentsFromFiles"
         case .restoreDatabase:
             "startupSetupAction.restoreDatabase"
-        case .skip:
-            "startupSetupAction.skip"
         }
     }
 }

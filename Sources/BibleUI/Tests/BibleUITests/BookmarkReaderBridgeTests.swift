@@ -11,7 +11,7 @@ import XCTest
 
  The suite exercises Android-compatible bridge payloads, label-assignment routing, StudyPad
  action events, bookmark-list reference text, and reader accessibility snapshots without the
- app-host XCTest bundle. It still uses the bundled SWORD fixture when payloads need real JSword
+ app-host XCTest bundle. It still uses the SWORD test fixture when payloads need real JSword
  ordinal and verse-range behavior.
  */
 final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
@@ -271,7 +271,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testReaderMyNotesDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -359,18 +359,18 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      JSword-style verse range Android serializes through `ClientBibleBookmark`.
      *
      Data dependencies:
-     * - copies the bundled KJV SWORD module into a temporary module path
+     * - copies the KJV SWORD test fixture into a temporary module path
      * - creates one Bible bookmark that spans Genesis 1:31 through Genesis 2:2
      *
      * Failure modes:
-     * - throws if bundled KJV cannot be loaded or its ordinals cannot be resolved
+     * - throws if KJV test fixture cannot be loaded or its ordinals cannot be resolved
      * - fails if iOS collapses cross-chapter ranges to the start chapter, emits a non-JSword OSIS
      *   ref, or omits verse text from the end chapter
      */
     @MainActor
     func testReaderBookmarkBridgeUpdateEmitsJSwordCrossChapterRangePayload() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -418,7 +418,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testReaderStudyPadDocumentBridgeEmissionUsesJSwordCrossChapterRangePayload() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)

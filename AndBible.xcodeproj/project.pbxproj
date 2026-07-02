@@ -19,7 +19,6 @@
 		7F60442468E70DF184FADD66 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ABFA8AEBF4A6CA89CDD4AF5 /* ContentView.swift */; };
 		844D6C1B224755D5DC20DE2D /* BibleView in Frameworks */ = {isa = PBXBuildFile; productRef = 13AB356C315B63B952461B92 /* BibleView */; };
 		922A18D6672F9B4B3AAAD26C /* BibleUI in Frameworks */ = {isa = PBXBuildFile; productRef = 28DDAC55D2C87E9CB1F31A12 /* BibleUI */; };
-		B7A2824A96F5AFC2D2782AB2 /* sword in Resources */ = {isa = PBXBuildFile; fileRef = 18BBEF9CC00D16220C3B43AB /* sword */; };
 		CA1C01A1D3E74B1F00A1B001 /* CalculatorIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C001 /* CalculatorIcon.png */; };
 		CA1C01A1D3E74B1F00A1B002 /* CalculatorIcon@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C002 /* CalculatorIcon@2x.png */; };
 		CA1C01A1D3E74B1F00A1B003 /* CalculatorIcon@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C003 /* CalculatorIcon@3x.png */; };
@@ -53,7 +52,6 @@
 
 /* Begin PBXFileReference section */
 		0ABFA8AEBF4A6CA89CDD4AF5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		18BBEF9CC00D16220C3B43AB /* sword */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/sword; sourceTree = "<group>"; };
 		1CA144AB77AEE518F1465DCC /* SwordSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwordSetup.swift; sourceTree = "<group>"; };
 		2B69CC001BC44A35C57BF455 /* and-bible-ios */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "and-bible-ios"; path = .; sourceTree = SOURCE_ROOT; };
 		AA0B1C2D3E4F506172839406 /* AndBible-Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "AndBible-Debug.xcconfig"; sourceTree = "<group>"; };
@@ -188,7 +186,6 @@
 				0ABFA8AEBF4A6CA89CDD4AF5 /* ContentView.swift */,
 				451FFBBE453EACF1547FF4B6 /* Localizable.strings */,
 				F57750A41A385FA784921EB2 /* Info.plist */,
-				18BBEF9CC00D16220C3B43AB /* sword */,
 				1CA144AB77AEE518F1465DCC /* SwordSetup.swift */,
 			);
 			path = AndBible;
@@ -413,7 +410,6 @@
 				CA1C01A1D3E74B1F00A1B003 /* CalculatorIcon@3x.png in Resources */,
 				CA1C01A1D3E74B1F00A1B004 /* CalculatorIcon-76.png in Resources */,
 				CA1C01A1D3E74B1F00A1B005 /* CalculatorIcon-76@2x.png in Resources */,
-				B7A2824A96F5AFC2D2782AB2 /* sword in Resources */,
 				5126013EC1173F5B6609881C /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

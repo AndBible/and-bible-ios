@@ -27,7 +27,7 @@ final class ReaderSwordCoordinatorTests: BibleUISwordFixtureTestCase {
      no longer matches the app-hosted behavior this test replaced.
      */
     func testBuildsCatalogSelectionsAndBookList() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         try seedBibleAliasModule(named: "WEB", description: "World English Bible", in: modulePath)
         try seedEmptyRawCommentaryModule(named: "UITestComm", in: modulePath)
         try seedEmptyRawDictionaryModule(named: "UITestDict", in: modulePath)
@@ -73,7 +73,7 @@ final class ReaderSwordCoordinatorTests: BibleUISwordFixtureTestCase {
      SWORD layer must keep lemma output enabled while Vue decides whether to draw the underline.
      */
     func testAppliesBaseAndDisplayGlobalOptions() throws {
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         var settings = TextDisplaySettings()
         settings.strongsMode = 1

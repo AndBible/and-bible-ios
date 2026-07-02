@@ -26,7 +26,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
     @MainActor
     func testBibleQuickModuleSelectorSelectionUsesControllerSwitchPathAndPersistsPaneDocument() throws {
         let (bridge, _) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         try seedBibleAliasModule(
             named: "WEB",
             description: "World English Bible",
@@ -66,7 +66,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
     @MainActor
     func testCommentaryDocumentSwitchPersistsModuleAndCategoryTogether() throws {
         let (bridge, _) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawCommentaryModule(named: "UITestComm", in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
@@ -97,7 +97,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
     @MainActor
     func testDictionaryDocumentSwitchPersistsModuleCategoryAndClearsKeyTogether() throws {
         let (bridge, _) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawDictionaryModule(named: "UITestDict", in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
@@ -130,7 +130,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
     @MainActor
     func testGeneralBookDocumentSwitchPersistsModuleCategoryAndClearsKeyTogether() throws {
         let (bridge, _) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawGeneralBookModule(named: "UITestGB", in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
@@ -163,7 +163,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
     @MainActor
     func testMapDocumentSwitchPersistsModuleCategoryAndClearsKeyTogether() throws {
         let (bridge, _) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawMapModule(named: "UITestMap", in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
@@ -197,7 +197,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
     @MainActor
     func testBibleDocumentSwitchFromCommentaryReloadsSelectedBibleOnce() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         try seedBibleAliasModule(
             named: "WEB",
             description: "World English Bible",
@@ -248,7 +248,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
     @MainActor
     func testBibleDocumentSwitchRejectsNonBibleModulesWithoutStateMutation() throws {
         let (bridge, _) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawCommentaryModule(in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
