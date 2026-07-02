@@ -165,6 +165,51 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies Memorize canonical text extraction suppresses Greek Strong's tokens too.
+
+     Android uses JSword canonical text for Memorize documents across both testaments. This setup
+     opens a New Testament range through the same bridge path users trigger from the reader. A
+     failure means iOS may have fixed only Hebrew-looking markup while leaving Greek Strong's noise
+     visible.
+     */
+    @MainActor
+    func testReaderMemorizeBridgeEmitsCanonicalGreekStrongText() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "John", chapter: 1, verse: 1))
+        controller.navigateTo(book: "John", chapter: 1)
+
+        controller.bridgeDidSetClientReady(bridge)
+        let initialScriptCount = recordedScripts().count
+
+        controller.bridge(
+            bridge,
+            memorize: "KJV",
+            startOrdinal: ordinal,
+            endOrdinal: ordinal
+        )
+
+        let memorizeScripts = Array(recordedScripts().dropFirst(initialScriptCount))
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: memorizeScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "memorize")
+        XCTAssertEqual(document["title"] as? String, "John 1:1")
+
+        let texts = try XCTUnwrap(document["texts"] as? [[String: String]])
+        XCTAssertEqual(texts.map { $0["key"] }, ["John.1.1"])
+        XCTAssertTrue(texts.first?["text"]?.contains("In the beginning was the Word") == true)
+        XCTAssertFalse(
+            texts.contains { ($0["text"] ?? "").contains("<G") },
+            "New Testament Memorize payloads should not preserve Greek Strong's markup."
+        )
+    }
+
+    /**
      Verifies reading-progress bridge messages update native history and emit chapter-count changes.
 
      The setup navigates the controller to Exodus 2, dispatches Vue bridge messages for automatic,
