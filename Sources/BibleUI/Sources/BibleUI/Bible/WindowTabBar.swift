@@ -30,6 +30,9 @@ struct WindowTabBar: View {
     /// Reader-surface colors shared with the active WebView display settings.
     var surfacePalette: ReaderThemeSurfacePalette = .standard
 
+    /// Whether Android's monochrome/e-ink window-button override should be applied.
+    var monochromeMode = false
+
     /// Presents transient toast feedback in the parent reader.
     var onShowToast: ((String) -> Void)?
 
@@ -56,7 +59,10 @@ struct WindowTabBar: View {
     }
 
     var body: some View {
-        let tabPalette = AndroidWindowTabPalette.resolved(for: surfacePalette)
+        let tabPalette = AndroidWindowTabPalette.resolved(
+            for: surfacePalette,
+            monochromeMode: monochromeMode
+        )
         let restoreButtonsVisible = windowManager.activeWorkspace?.workspaceSettings?.restoreButtonsVisible ?? true
         let singleWindowFooterMode = isSingleWindowFooterMode
         let reservedHeight = WindowTabBarLayout.reservedHeight(
@@ -142,7 +148,7 @@ struct WindowTabBar: View {
             height: WindowTabBarLayout.barHeight
         )
         .frame(maxWidth: isCollapsed ? nil : .infinity, alignment: .trailing)
-        .background(isCollapsed ? Color.clear : surfacePalette.backgroundColor)
+        .background(isCollapsed ? Color.clear : tabPalette.restoreStripBackgroundColor)
     }
 
     /// Whether Android would show only the add-window footer control.
@@ -184,7 +190,10 @@ struct WindowTabBar: View {
             .frame(width: WindowTabBarLayout.fixedButtonSize, height: WindowTabBarLayout.fixedButtonSize)
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(tabPalette.strokeColor, lineWidth: 1)
+                    .strokeBorder(
+                        tabPalette.strokeColor,
+                        lineWidth: tabPalette.footerButtonStrokeWidth(isActive: false)
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -258,7 +267,9 @@ struct WindowTabBar: View {
      - Failure modes: None; unmaximize is idempotent when no maximized window exists.
      */
     private func unmaximizeButton(tabPalette: AndroidWindowTabPalette) -> some View {
-        Button {
+        let foregroundColor = tabPalette.footerButtonForegroundColor(isVisible: true)
+
+        return Button {
             windowManager.unmaximize()
         } label: {
             ZStack {
@@ -267,16 +278,28 @@ struct WindowTabBar: View {
 
                 Image(systemName: "arrow.down.right.and.arrow.up.left")
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(tabPalette.windowButtonTextColor)
+                    .foregroundStyle(foregroundColor)
             }
             .frame(width: WindowTabBarLayout.fixedButtonSize, height: WindowTabBarLayout.fixedButtonSize)
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(tabPalette.strokeColor, lineWidth: 1)
+                    .strokeBorder(
+                        tabPalette.strokeColor,
+                        lineWidth: tabPalette.unmaximizeButtonStrokeWidth()
+                    )
             )
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("windowTabUnmaximizeButton")
+        .accessibilityLabel(
+            String(localized: "window_unmaximize_accessibility_label", defaultValue: "Restore window")
+        )
+        .accessibilityHint(
+            String(
+                localized: "window_unmaximize_accessibility_hint",
+                defaultValue: "Restores the maximized window to the workspace"
+            )
+        )
     }
 
     /**
@@ -305,10 +328,12 @@ struct WindowTabBar: View {
         let isMinimized = window.layoutState == "minimized"
         let isActive = !isMinimized && window.id == windowManager.activeWindow?.id
         let renderedState = renderedContentTabState(for: window)
+        let isVisible = !isMinimized
         let categoryName = renderedState?.categoryName ?? window.pageManager?.currentCategoryName ?? "bible"
         let icon = iconName(for: window, categoryName: categoryName)
         let moduleName = renderedState?.moduleName ?? persistedModuleName(for: window, categoryName: categoryName)
         let reference = renderedState?.reference ?? shortReference(for: window)
+        let buttonForegroundColor = tabPalette.footerButtonForegroundColor(isVisible: isVisible)
         let canCopyReference = !fullReference(for: window).isEmpty
         let canMoveWindow = !window.isLinksWindow && !windowManager.isMaximized
         let canSyncWindow = isWindowSyncable(window)
@@ -333,7 +358,7 @@ struct WindowTabBar: View {
         } label: {
             ZStack(alignment: .topLeading) {
                 tabShape
-                    .fill(tabPalette.backgroundColor(isActive: isActive, isVisible: !isMinimized))
+                    .fill(tabPalette.backgroundColor(isActive: isActive, isVisible: isVisible))
 
                 VStack(alignment: .leading, spacing: 0) {
                     Color.clear
@@ -341,14 +366,14 @@ struct WindowTabBar: View {
 
                     Text(reference.isEmpty ? " " : reference)
                         .font(.system(size: 8.5, weight: .medium))
-                        .foregroundStyle(tabPalette.windowButtonTextColor)
+                        .foregroundStyle(buttonForegroundColor)
                         .lineLimit(1)
                         .minimumScaleFactor(0.45)
                         .frame(height: 10, alignment: .leading)
 
                     Text(moduleName)
                         .font(.system(size: 12, weight: isMinimized ? .regular : .semibold))
-                        .foregroundStyle(tabPalette.windowButtonTextColor)
+                        .foregroundStyle(buttonForegroundColor)
                         .lineLimit(1)
                         .minimumScaleFactor(0.45)
                         .frame(height: 16, alignment: .leading)
@@ -358,7 +383,12 @@ struct WindowTabBar: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
 
                 ToolbarAssetIcon(name: icon, size: 14)
-                    .foregroundStyle(window.isLinksWindow ? tabPalette.linksIconColor : tabPalette.categoryIconColor)
+                    .foregroundStyle(
+                        tabPalette.footerIconColor(
+                            isLinksWindow: window.isLinksWindow,
+                            isVisible: isVisible
+                        )
+                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .padding(.top, 2)
                     .padding(.trailing, 2)
@@ -370,7 +400,7 @@ struct WindowTabBar: View {
                         Text("\(window.syncGroup + 1)")
                             .font(.system(size: 7, weight: .bold))
                     }
-                    .foregroundStyle(tabPalette.statusIconColor)
+                    .foregroundStyle(tabPalette.footerStatusIconColor(isVisible: isVisible))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.top, 2)
                     .padding(.leading, 1)
@@ -384,7 +414,7 @@ struct WindowTabBar: View {
                         isActive ? tabPalette.activeStrokeColor : tabPalette.strokeColor,
                         style: isMinimized
                             ? StrokeStyle(lineWidth: 1, dash: [4, 3])
-                            : StrokeStyle(lineWidth: isActive ? 3 : 1)
+                            : StrokeStyle(lineWidth: tabPalette.footerButtonStrokeWidth(isActive: isActive))
                     )
             )
             .opacity(isMinimized ? 0.62 : 1.0)
@@ -730,132 +760,5 @@ struct WindowTabBar: View {
         let categoryName = pm.currentCategoryName
         return categoryName != DocumentCategory.generalBook.pageManagerKey
             && categoryName != DocumentCategory.epub.pageManagerKey
-    }
-}
-
-/**
- Maps Android window-button resource colors into SwiftUI colors for the reader footer.
-
- Android defines separate day/night resource values for bottom restore buttons and the add-window
- button. This helper resolves the same colors from the active reader surface brightness so the iOS
- footer follows Android's visual semantics without hard-coding unrelated SwiftUI accent colors.
-
- Inputs:
- - `ReaderThemeSurfacePalette`: active reader background/foreground pair used to infer whether the
-   Android day or night resource tuple should be used.
-
- Outputs:
- - button fill, stroke, text, category-icon, link-icon, and sync/status-icon colors
-
- Side effects: none.
- Failure modes: malformed ARGB inputs are handled by truncating to the same 32-bit representation
-   used elsewhere in the app's Android color bridge.
- Determinism: pure color derivation; no user defaults, file I/O, or environment reads.
- */
-private struct AndroidWindowTabPalette {
-    /// Fill used by visible window restore buttons.
-    let visibleButtonBackgroundColor: Color
-
-    /// Fill used by minimized or otherwise non-visible restore buttons.
-    let hiddenButtonBackgroundColor: Color
-
-    /// Fill used by the add-window button.
-    let addButtonBackgroundColor: Color
-
-    /// Neutral restore-button border color.
-    let strokeColor: Color
-
-    /// Active restore-button border color.
-    let activeStrokeColor: Color
-
-    /// Text color for compact title/document labels.
-    let windowButtonTextColor: Color
-
-    /// Tint for ordinary document category icons.
-    let categoryIconColor: Color
-
-    /// Tint for Android links-window icons.
-    let linksIconColor: Color
-
-    /// Tint for sync and pin overlays.
-    let statusIconColor: Color
-
-    /**
-     Resolves Android day/night window-button colors from the active reader surface.
-
-     - Parameter surfacePalette: Reader chrome palette derived from text display settings.
-     - Returns: An Android resource color tuple represented as SwiftUI colors.
-     - Side effects: None.
-     - Failure modes: None; color integer parsing is deterministic for all inputs.
-     */
-    static func resolved(for surfacePalette: ReaderThemeSurfacePalette) -> AndroidWindowTabPalette {
-        if isDarkSurface(surfacePalette.backgroundColorInt) {
-            return AndroidWindowTabPalette(
-                visibleButtonBackgroundColor: color(argb: 0xFF6A6A6A),
-                hiddenButtonBackgroundColor: color(argb: 0xFF2E2E2E),
-                addButtonBackgroundColor: color(argb: 0xB7525252),
-                strokeColor: color(argb: 0xFF686868),
-                activeStrokeColor: color(argb: 0xFF002AFF),
-                windowButtonTextColor: color(argb: 0xFF939393),
-                categoryIconColor: color(argb: 0xFF939393),
-                linksIconColor: color(argb: 0xFF7088FF),
-                statusIconColor: color(argb: 0xFF939393)
-            )
-        }
-
-        return AndroidWindowTabPalette(
-            visibleButtonBackgroundColor: color(argb: 0xFF535353),
-            hiddenButtonBackgroundColor: color(argb: 0xFF878787),
-            addButtonBackgroundColor: color(argb: 0xB7525252),
-            strokeColor: color(argb: 0xFF686868),
-            activeStrokeColor: color(argb: 0xFF002AFF),
-            windowButtonTextColor: color(argb: 0xFFE8E8E8),
-            categoryIconColor: color(argb: 0xFFAAAAAA),
-            linksIconColor: color(argb: 0xFF7088FF),
-            statusIconColor: color(argb: 0xFFE8E8E8)
-        )
-    }
-
-    /**
-     Returns the fill color for a document window button.
-
-     - Parameters:
-       - isActive: Whether the represented window is the active reader window.
-       - isVisible: Whether the represented window is currently visible rather than minimized.
-     - Returns: Android visible or hidden button fill color.
-     - Side effects: None.
-     - Failure modes: None.
-     */
-    func backgroundColor(isActive: Bool, isVisible: Bool) -> Color {
-        isActive || isVisible ? visibleButtonBackgroundColor : hiddenButtonBackgroundColor
-    }
-
-    /**
-     Converts an Android unsigned ARGB resource value into SwiftUI `Color`.
-
-     - Parameter argb: Android ARGB resource value, including alpha.
-     - Returns: SwiftUI color using the app's signed-ARGB bridge initializer.
-     - Side effects: None.
-     - Failure modes: None; bit-pattern conversion preserves all 32 bits.
-     */
-    private static func color(argb: UInt32) -> Color {
-        Color(argbInt: Int(Int32(bitPattern: argb)))
-    }
-
-    /**
-     Classifies the active reader surface as dark or light for Android resource selection.
-
-     - Parameter argbInt: Signed Android ARGB integer from `ReaderThemeSurfacePalette`.
-     - Returns: `true` when relative luminance is below the midpoint.
-     - Side effects: None.
-     - Failure modes: None; invalid sign-extension cases are normalized by truncating to 32 bits.
-     */
-    private static func isDarkSurface(_ argbInt: Int) -> Bool {
-        let value = UInt32(bitPattern: Int32(truncatingIfNeeded: argbInt))
-        let red = Double((value >> 16) & 0xFF)
-        let green = Double((value >> 8) & 0xFF)
-        let blue = Double(value & 0xFF)
-        let luminance = ((0.2126 * red) + (0.7152 * green) + (0.0722 * blue)) / 255
-        return luminance < 0.5
     }
 }

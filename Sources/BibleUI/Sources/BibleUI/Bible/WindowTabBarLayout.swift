@@ -27,7 +27,7 @@ import CoreGraphics
  */
 enum WindowTabBarLayout {
     /// Android `windowButtonHeight`, mirrored as a logical iOS point size.
-    static let fixedButtonSize: CGFloat = 40
+    static let fixedButtonSize: CGFloat = AndroidWindowButtonMetrics.buttonSize
 
     /// Smallest supported document tab width; equal to Android's fixed button width.
     static let minimumTabWidth: CGFloat = fixedButtonSize

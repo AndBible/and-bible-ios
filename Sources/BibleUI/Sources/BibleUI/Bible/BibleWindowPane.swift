@@ -19,7 +19,7 @@ private let logger = Logger(subsystem: "org.andbible", category: "BibleWindowPan
  workspace-level state from `WindowManager`.
 
  Data dependencies:
- - `window`, `displaySettings`, `nightMode`, `disableTwoStepBookmarking`, and
+ - `window`, `displaySettings`, `nightMode`, `monochromeMode`, `disableTwoStepBookmarking`, and
    `hideWindowButtons` drive pane rendering and controller updates
  - `WindowManager` is required from the environment for controller registration, layout actions,
    active-window coordination, and window-menu actions
@@ -41,6 +41,9 @@ struct BibleWindowPane: View {
 
     /// Whether the pane should render using night-mode colors and styling.
     let nightMode: Bool
+
+    /// Whether Android's monochrome/e-ink preference should affect native pane chrome.
+    let monochromeMode: Bool
 
     /// Android-parity bookmarking mode toggle for the selection action bar.
     let disableTwoStepBookmarking: Bool
@@ -180,7 +183,11 @@ struct BibleWindowPane: View {
 
     /// Reader-surface colors derived from this pane's resolved text-display settings.
     private var surfacePalette: ReaderThemeSurfacePalette {
-        ReaderThemeSurfacePalette(settings: displaySettings, nightMode: nightMode)
+        ReaderThemeSurfacePalette(
+            settings: displaySettings,
+            nightMode: nightMode,
+            monochromeMode: monochromeMode
+        )
     }
 
     var body: some View {
@@ -198,7 +205,7 @@ struct BibleWindowPane: View {
             // Window menu button — matches Android's hamburger button in top-right of each pane
             if !hideWindowButtons && !windowManager.isMaximized {
                 windowMenuButton
-                    .padding(6)
+                    .padding(AndroidWindowButtonMetrics.paneOverlayInset)
             }
         }
         .overlay {
@@ -227,23 +234,122 @@ struct BibleWindowPane: View {
     /**
      Hamburger menu overlay providing pane-scoped content, layout, and sync actions.
      Opening the menu also marks this pane active, matching Android's pane menu behavior.
-     */
+    */
     private var windowMenuButton: some View {
-        Button {
-            windowManager.activeWindow = window
+        let buttonPalette = AndroidWindowButtonPalette.resolved(
+            for: surfacePalette,
+            monochromeMode: monochromeMode
+        )
+        let isActive = windowManager.activeWindow?.id == window.id
+
+        return ZStack(alignment: .topTrailing) {
+            Text(AndroidWindowButtonMetrics.paneMenuGlyph)
+                .font(.system(size: AndroidWindowButtonMetrics.paneMenuTextSize, weight: .bold))
+                .foregroundStyle(buttonPalette.paneButtonTextColor)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if window.isLinksWindow {
+                ToolbarAssetIcon(
+                    name: AndroidWindowButtonMetrics.paneLinksIconName,
+                    size: AndroidWindowButtonMetrics.paneLinksIconSize
+                )
+                .foregroundStyle(buttonPalette.paneLinksIconColor)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(.top, 2)
+                .padding(.trailing, 2)
+            }
+        }
+            .frame(
+                width: AndroidWindowButtonMetrics.buttonSize,
+                height: AndroidWindowButtonMetrics.buttonSize
+            )
+            .background(
+                buttonPalette.paneButtonBackgroundColor(isActive: isActive),
+                in: RoundedRectangle(cornerRadius: AndroidWindowButtonMetrics.cornerRadius)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AndroidWindowButtonMetrics.cornerRadius)
+                    .strokeBorder(
+                        buttonPalette.paneButtonStrokeColor,
+                        lineWidth: buttonPalette.paneButtonStrokeWidth(isActive: isActive)
+                    )
+            )
+            .contentShape(Rectangle())
+            .gesture(windowMenuTapOrLongPressGesture)
+            .simultaneousGesture(windowMenuDragGesture)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
+            .accessibilityLabel(
+                String(localized: "window_menu_accessibility_label", defaultValue: "Window menu")
+            )
+            .accessibilityHint(
+                String(localized: "window_menu_accessibility_hint", defaultValue: "Opens window actions")
+            )
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {
+                performPaneWindowButtonAction(.openMenu)
+            }
+    }
+
+    /**
+     Builds Android's mutually exclusive tap/long-press pane-button gesture.
+
+     - Returns: A gesture that opens the pane menu on tap and minimizes on long press.
+     - Side effects: Invokes the same window-state mutations as Android's `WindowButtonWidget`.
+     - Failure modes: Cancelled long presses do not mutate window state.
+     */
+    private var windowMenuTapOrLongPressGesture: some Gesture {
+        LongPressGesture().exclusively(before: TapGesture()).onEnded { value in
+            switch value {
+            case .first(true):
+                performPaneWindowButtonAction(.minimize)
+            case .second:
+                performPaneWindowButtonAction(.openMenu)
+            case .first(false):
+                break
+            }
+        }
+    }
+
+    /**
+     Builds Android's vertical swipe pane-button gesture.
+
+     - Returns: A drag gesture that maps upward swipes to maximize and downward swipes to minimize.
+     - Side effects: Invokes window layout mutations when the drag classifier accepts the gesture.
+     - Failure modes: Short, horizontal, diagonal, or non-finite translations are ignored.
+     */
+    private var windowMenuDragGesture: some Gesture {
+        DragGesture(minimumDistance: 12).onEnded { value in
+            performPaneWindowButtonAction(
+                AndroidPaneWindowButtonGestureAction.action(forDragTranslation: value.translation)
+            )
+        }
+    }
+
+    /**
+     Applies Android pane-window-button actions to this pane.
+
+     - Parameter action: Gesture action resolved from tap, long press, or drag.
+     - Side effects: Marks this pane active, opens the popup menu, or mutates window layout.
+     - Failure modes: `.none` is ignored; layout actions rely on `WindowManager` guards.
+     */
+    private func performPaneWindowButtonAction(_ action: AndroidPaneWindowButtonGestureAction) {
+        guard action != .none else { return }
+        windowManager.activeWindow = window
+        switch action {
+        case .openMenu:
             withAnimation(.easeOut(duration: 0.12)) {
                 isWindowMenuPresented.toggle()
             }
-        } label: {
-            Image(systemName: "line.3.horizontal")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(surfacePalette.foregroundColor)
-                .frame(width: 28, height: 28)
-                .background(surfacePalette.controlFillColor, in: RoundedRectangle(cornerRadius: 6))
+        case .minimize:
+            isWindowMenuPresented = false
+            windowManager.minimizeWindow(window)
+        case .maximize:
+            isWindowMenuPresented = false
+            windowManager.maximizeWindow(window)
+        case .none:
+            break
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
     }
 
     /**
