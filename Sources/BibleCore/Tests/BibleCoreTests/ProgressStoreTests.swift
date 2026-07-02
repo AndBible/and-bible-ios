@@ -8,6 +8,17 @@ import XCTest
  the lowest owning target is `BibleCoreTests`.
  */
 final class ProgressStoreTests: XCTestCase {
+    /**
+     Verifies memorization targets follow Android's independent-row range semantics.
+
+     Android skips only exact duplicate `MemorizationTarget` rows in
+     `ProgressControl.addMemorizationTargetIfNeeded`; nested ranges remain independent targets and
+     are later split by overlapping removals. The test persists through `SettingsStore` so it
+     covers both mutation behavior and JSON reload compatibility for the native store.
+
+     Failure means iOS has reintroduced collapsed or containment-based target behavior that changes
+     Android backup rows, target totals, and removal deltas.
+     */
     func testMemorizationProgressStorePersistsRangesAndSplitsTargets() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let store = MemorizationProgressStore(settingsStore: settingsStore)
@@ -15,7 +26,15 @@ final class ProgressStoreTests: XCTestCase {
         store.addMemorizationTarget(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 5)
         let rawAfterInitialTarget = try XCTUnwrap(settingsStore.getString(MemorizationProgressStore.settingsKey))
         store.addMemorizationTargetIfNeeded(bookInitials: "KJV", startOrdinal: 2, endOrdinal: 4)
-        XCTAssertEqual(settingsStore.getString(MemorizationProgressStore.settingsKey), rawAfterInitialTarget)
+        let rawAfterNestedTarget = try XCTUnwrap(settingsStore.getString(MemorizationProgressStore.settingsKey))
+        XCTAssertNotEqual(rawAfterNestedTarget, rawAfterInitialTarget)
+        XCTAssertEqual(Set(store.snapshot().targetRanges), Set([
+            MemorizationProgressRange(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 5),
+            MemorizationProgressRange(bookInitials: "KJV", startOrdinal: 2, endOrdinal: 4),
+        ]))
+
+        store.addMemorizationTargetIfNeeded(bookInitials: "KJV", startOrdinal: 2, endOrdinal: 4)
+        XCTAssertEqual(settingsStore.getString(MemorizationProgressStore.settingsKey), rawAfterNestedTarget)
 
         store.removeMemorizationTarget(bookInitials: "KJV", startOrdinal: 2, endOrdinal: 4)
         store.markAsMemorized(bookInitials: "KJV", startOrdinal: 3, endOrdinal: 5)

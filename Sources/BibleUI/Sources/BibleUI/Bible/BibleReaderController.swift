@@ -791,11 +791,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     chapter: chapter
                 )
             },
-            resolveMemorizationOrdinals: { [weak self] startOrdinal, endOrdinal in
-                self?.memorizationOrdinalProjections(
+            resolveMemorizationRange: { [weak self] startOrdinal, endOrdinal in
+                self?.memorizationOrdinalResolution(
                     startOrdinal: startOrdinal,
                     endOrdinal: endOrdinal
-                ) ?? []
+                )
             },
             loadMemorizeDocument: { [weak self] bookInitials, startOrdinal, endOrdinal in
                 self?.loadMemorizeDocument(
@@ -5508,16 +5508,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     chapter: chapter
                 )
             },
-            memorizedOrdinals: { [memorizationProgressStore] bookInitials, startOrdinal, endOrdinal in
-                memorizationProgressStore?.memorizedOrdinals(
-                    bookInitials: bookInitials,
+            memorizedOrdinals: { [weak self] _, startOrdinal, endOrdinal in
+                self?.memorizedRenderedOrdinals(
                     startOrdinal: startOrdinal,
                     endOrdinal: endOrdinal
                 ) ?? []
             },
-            targetOrdinals: { [memorizationProgressStore] bookInitials, startOrdinal, endOrdinal in
-                memorizationProgressStore?.targetOrdinals(
-                    bookInitials: bookInitials,
+            targetOrdinals: { [weak self] _, startOrdinal, endOrdinal in
+                self?.targetRenderedOrdinals(
                     startOrdinal: startOrdinal,
                     endOrdinal: endOrdinal
                 ) ?? []
@@ -5684,18 +5682,71 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Projects rendered reader ordinals into Android's KJVA memorization-progress domain.
+     Resolves a rendered reader selection into Android's inclusive KJVA storage span.
 
      Android persists memorization rows as global KJVA ordinals. The embedded reader still reports
-     ordinals in the active document's versification, so each bridge mutation and Memorize document
-     payload must resolve the visible verse reference first, then convert that reference to KJVA.
+     ordinals in the active document's versification, so bridge mutations resolve the selected
+     endpoint references first and keep the complete KJVA span, including chapter-intro ordinals
+     that are not visible in Vue. Visible projections are carried alongside the storage span so
+     bridge events can still update the open document using rendered ordinals.
 
      - Parameters:
        - startOrdinal: First rendered ordinal reported by Vue.
        - endOrdinal: Last rendered ordinal reported by Vue.
-     - Returns: Ordered rendered-to-KJVA projections for resolvable verse ordinals.
+     - Returns: KJVA storage span plus rendered-to-KJVA projections, or `nil` if the selection
+       cannot be represented in KJVA.
      - Side effects: May temporarily move the active SWORD module cursor through `verseReference`.
-     - Failure modes: Invalid ordinals, chapter-intro rows, or references outside KJVA are skipped.
+     - Failure modes: Returns `nil` for invalid endpoints or references outside KJVA.
+     */
+    private func memorizationOrdinalResolution(
+        startOrdinal: Int,
+        endOrdinal: Int
+    ) -> BibleReaderProgressBridgeCoordinator.MemorizationOrdinalResolution? {
+        guard startOrdinal > 0,
+              endOrdinal >= startOrdinal,
+              let startReference = memorizationVerseReference(renderedOrdinal: startOrdinal),
+              let endReference = memorizationVerseReference(renderedOrdinal: endOrdinal),
+              let kjvaStart = JSwordKJVAVersification.verseOrdinal(
+                  osisId: startReference.osisBookId,
+                  chapter: startReference.chapter,
+                  verse: startReference.verse
+              ),
+              let kjvaEnd = JSwordKJVAVersification.verseOrdinal(
+                  osisId: endReference.osisBookId,
+                  chapter: endReference.chapter,
+                  verse: endReference.verse
+              ) else {
+            return nil
+        }
+        let projections = memorizationOrdinalProjections(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+        guard !projections.isEmpty else { return nil }
+        return BibleReaderProgressBridgeCoordinator.MemorizationOrdinalResolution(
+            startOrdinal: min(kjvaStart, kjvaEnd),
+            endOrdinal: max(kjvaStart, kjvaEnd),
+            projections: projections
+        )
+    }
+
+    /**
+     Resolves one rendered memorization ordinal to a verse reference.
+
+     - Parameter ordinal: Ordinal from the currently rendered Vue document.
+     - Returns: Active-module verse reference when a SWORD module is loaded, otherwise the default
+       reader fallback reference for the current book.
+     - Side effects: May temporarily move the active SWORD module cursor.
+     - Failure modes: Returns `nil` when the active module or fallback catalog rejects the ordinal.
+     */
+    private func memorizationVerseReference(renderedOrdinal ordinal: Int) -> VerseKeyReference? {
+        activeModule?.verseReference(ordinal: ordinal) ??
+            verseReference(book: currentBook, ordinal: ordinal)
+    }
+
+    /**
+     Projects visible rendered reader ordinals into Android's KJVA memorization-progress domain.
+
+     This projection intentionally skips rendered ordinals that are not visible KJVA verses, such
+     as chapter-intro ordinals. Storage callers must use `memorizationOrdinalResolution` so those
+     skipped ordinals remain inside the persisted Android range.
      */
     private func memorizationOrdinalProjections(
         startOrdinal: Int,
@@ -5703,8 +5754,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     ) -> [BibleReaderProgressBridgeCoordinator.MemorizationOrdinalProjection] {
         guard startOrdinal > 0, endOrdinal >= startOrdinal else { return [] }
         return (startOrdinal...endOrdinal).compactMap { ordinal in
-            let reference = activeModule?.verseReference(ordinal: ordinal) ??
-                verseReference(book: currentBook, ordinal: ordinal)
+            let reference = memorizationVerseReference(renderedOrdinal: ordinal)
             guard let reference,
                   let kjvaOrdinal = JSwordKJVAVersification.verseOrdinal(
                       osisId: reference.osisBookId,
@@ -5738,13 +5788,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         storedOrdinals: (MemorizationProgressStore, (startOrdinal: Int, endOrdinal: Int)) -> [Int]
     ) -> [Int] {
         guard let store = memorizationProgressStore else { return [] }
-        let projections = memorizationOrdinalProjections(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
-        guard let minKJVAOrdinal = projections.map(\.kjvaOrdinal).min(),
-              let maxKJVAOrdinal = projections.map(\.kjvaOrdinal).max() else {
-            return []
-        }
-        let stored = Set(storedOrdinals(store, (startOrdinal: minKJVAOrdinal, endOrdinal: maxKJVAOrdinal)))
-        return projections
+        guard let resolution = memorizationOrdinalResolution(
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        ) else { return [] }
+        let stored = Set(storedOrdinals(
+            store,
+            (startOrdinal: resolution.startOrdinal, endOrdinal: resolution.endOrdinal)
+        ))
+        return resolution.projections
             .filter { stored.contains($0.kjvaOrdinal) }
             .map(\.renderedOrdinal)
             .sorted()

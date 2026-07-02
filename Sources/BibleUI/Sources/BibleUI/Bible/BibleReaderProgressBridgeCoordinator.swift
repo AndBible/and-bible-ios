@@ -54,14 +54,31 @@ struct BibleReaderProgressBridgeCoordinator {
         let kjvaOrdinal: Int
     }
 
+    /**
+     Describes one Android KJVA storage span and the visible verses it intersects.
+
+     Android stores memorization progress as one inclusive KJVA ordinal range, including ordinals
+     that do not render as selectable Bible verses, while Vue updates can only mention rendered
+     ordinals. The controller supplies both pieces so persistence keeps Android parity and bridge
+     events stay meaningful to the open document.
+     */
+    struct MemorizationOrdinalResolution {
+        /// Inclusive Android KJVA storage start ordinal.
+        let startOrdinal: Int
+        /// Inclusive Android KJVA storage end ordinal.
+        let endOrdinal: Int
+        /// Visible rendered verses inside the selected range that can receive Vue update events.
+        let projections: [MemorizationOrdinalProjection]
+    }
+
     /// Supplies the active memorization store.
     private let memorizationStore: () -> MemorizationProgressStore?
     /// Supplies the active reading-progress store.
     private let readingStore: () -> ReadingProgressStore?
     /// Resolves and validates a bridge chapter target against the current reader document.
     private let resolveReadingTarget: (String, Int, Int) -> ReadingProgressBridgeTarget?
-    /// Projects rendered verse ordinals into Android's KJVA memorization domain.
-    private let resolveMemorizationOrdinals: (Int, Int) -> [MemorizationOrdinalProjection]
+    /// Resolves rendered verse ordinals into Android's KJVA memorization storage domain.
+    private let resolveMemorizationRange: (Int, Int) -> MemorizationOrdinalResolution?
     /// Opens the bundled Memorize Vue document for a selected verse range.
     private let loadMemorizeDocument: (String, Int, Int) -> Void
     /// Presents the native reading-progress UI using Android tab indexes.
@@ -82,7 +99,7 @@ struct BibleReaderProgressBridgeCoordinator {
        - memorizationStore: Supplier for local memorization persistence.
        - readingStore: Supplier for local reading-progress persistence.
        - resolveReadingTarget: Closure that validates bridge chapter identity and returns KJVA data.
-       - resolveMemorizationOrdinals: Closure projecting rendered ordinals into Android KJVA ordinals.
+       - resolveMemorizationRange: Closure projecting rendered ordinals into Android KJVA storage.
        - loadMemorizeDocument: Closure opening the Memorize document for a selected range.
        - showReadingProgress: Native progress UI callback.
        - showReadingProgressSettings: Native settings UI callback.
@@ -96,7 +113,7 @@ struct BibleReaderProgressBridgeCoordinator {
         memorizationStore: @escaping () -> MemorizationProgressStore?,
         readingStore: @escaping () -> ReadingProgressStore?,
         resolveReadingTarget: @escaping (String, Int, Int) -> ReadingProgressBridgeTarget?,
-        resolveMemorizationOrdinals: @escaping (Int, Int) -> [MemorizationOrdinalProjection],
+        resolveMemorizationRange: @escaping (Int, Int) -> MemorizationOrdinalResolution?,
         loadMemorizeDocument: @escaping (String, Int, Int) -> Void,
         showReadingProgress: @escaping (Int) -> Void,
         showReadingProgressSettings: @escaping () -> Void,
@@ -107,7 +124,7 @@ struct BibleReaderProgressBridgeCoordinator {
         self.memorizationStore = memorizationStore
         self.readingStore = readingStore
         self.resolveReadingTarget = resolveReadingTarget
-        self.resolveMemorizationOrdinals = resolveMemorizationOrdinals
+        self.resolveMemorizationRange = resolveMemorizationRange
         self.loadMemorizeDocument = loadMemorizeDocument
         self.showReadingProgress = showReadingProgress
         self.showReadingProgressSettings = showReadingProgressSettings
@@ -282,37 +299,16 @@ struct BibleReaderProgressBridgeCoordinator {
         let effectiveEnd = endOrdinal > 0 ? endOrdinal : startOrdinal
         let lower = min(startOrdinal, effectiveEnd)
         let upper = max(startOrdinal, effectiveEnd)
-        let projections = resolveMemorizationOrdinals(lower, upper)
-            .sorted { $0.renderedOrdinal < $1.renderedOrdinal }
+        guard let resolution = resolveMemorizationRange(lower, upper) else { return }
+        let projections = resolution.projections.sorted { $0.renderedOrdinal < $1.renderedOrdinal }
         guard !projections.isEmpty else { return }
 
-        var renderedDelta = MemorizationProgressDelta.empty
-        for range in Self.contiguousKJVARanges(from: projections) {
-            let kjvaDelta = operation(store, range)
-            renderedDelta.merge(Self.renderedDelta(from: kjvaDelta, using: projections))
-        }
+        let kjvaDelta = operation(
+            store,
+            (startOrdinal: resolution.startOrdinal, endOrdinal: resolution.endOrdinal)
+        )
+        let renderedDelta = Self.renderedDelta(from: kjvaDelta, using: projections)
         emitMemorizationData(renderedDelta)
-    }
-
-    private static func contiguousKJVARanges(
-        from projections: [MemorizationOrdinalProjection]
-    ) -> [MemorizationKJVARange] {
-        let ordinals = Array(Set(projections.map(\.kjvaOrdinal))).sorted()
-        guard var start = ordinals.first else { return [] }
-        var previous = start
-        var ranges: [MemorizationKJVARange] = []
-
-        for ordinal in ordinals.dropFirst() {
-            if ordinal == previous + 1 {
-                previous = ordinal
-                continue
-            }
-            ranges.append((startOrdinal: start, endOrdinal: previous))
-            start = ordinal
-            previous = ordinal
-        }
-        ranges.append((startOrdinal: start, endOrdinal: previous))
-        return ranges
     }
 
     private static func renderedDelta(

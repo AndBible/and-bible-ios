@@ -536,6 +536,83 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies cross-chapter bridge targets persist Android's complete KJVA ordinal span.
+
+     Android's `ProgressControl.addMemorizationTarget` converts the selected `VerseRange` to KJVA,
+     stores one inclusive `kjvOrdinalStart...kjvOrdinalEnd` row, and posts UI updates from that
+     same range. The KJVA span between Genesis 1:31 and Genesis 2:2 includes a chapter-intro
+     ordinal that is not a rendered verse; iOS must keep that storage ordinal while emitting only
+     visible rendered ordinals back to Vue.
+
+     Failure means iOS is preserving a visible-verse-only storage shape, which changes Android
+     target totals, backup rows, duplicate-target detection, and removal behavior.
+     */
+    func testMemorizationBridgePersistsInclusiveKJVASpanAcrossChapterIntroOrdinals() throws {
+        let (bridge, recordedScripts) = makeMemorizeParityRecordingBridge()
+        let modulePath = try makeMemorizeParityTemporarySwordPath()
+        defer { try? FileManager.default.removeItem(atPath: modulePath) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeMemorizeParitySettingsStore()
+        let store = try XCTUnwrap(controller.memorizationProgressStore)
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let renderedStart = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31))
+        let renderedMiddle = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 1))
+        let renderedEnd = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2))
+        let kjvaStart = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 31))
+        let kjvaEnd = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 2, verse: 2))
+
+        XCTAssertGreaterThan(kjvaEnd - kjvaStart, 2)
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "addMemorizationTarget", args: ["KJV", renderedStart, renderedEnd]),
+            .handled
+        )
+
+        XCTAssertEqual(
+            store.snapshot().targetRanges,
+            [MemorizationProgressRange(bookInitials: "", startOrdinal: kjvaStart, endOrdinal: kjvaEnd)]
+        )
+        XCTAssertEqual(
+            try memorizationParityPayloads(from: recordedScripts()).last?["addedTargets"] as? [Int],
+            [renderedStart, renderedMiddle, renderedEnd]
+        )
+    }
+
+    /**
+     Verifies normal Bible documents project global KJVA progress back to rendered ordinals.
+
+     The bridge stores Android-compatible global KJVA rows, but Vue's Bible document payload still
+     consumes ordinals in the currently rendered document domain. The no-module fallback makes the
+     two domains intentionally different: rendered Genesis 1:1-2 are stored as KJVA ordinals 4-5.
+
+     Failure means a reload can highlight the wrong visible verses even though the bridge mutation
+     itself wrote Android-parity persistence rows.
+     */
+    func testBibleDocumentPayloadProjectsKJVAGlobalProgressToRenderedOrdinals() throws {
+        let (bridge, recordedScripts) = makeMemorizeParityRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        controller.settingsStore = try makeMemorizeParitySettingsStore()
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "addMemorizationTarget", args: ["KJV", 1, 2]),
+            .handled
+        )
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "markAsMemorized", args: ["KJV", 1, 1]),
+            .handled
+        )
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        let document = try XCTUnwrap(
+            memorizeParityBridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "bible")
+        XCTAssertEqual(document["targetOrdinals"] as? [Int], [1, 2])
+        XCTAssertEqual(document["memorizedOrdinals"] as? [Int], [1])
+    }
+
+    /**
      Verifies Memorize document payloads reuse saved page-manager state.
 
      Android stores the full Vue state blob on `PageManager.jsState` through `saveState`, then passes
