@@ -66,6 +66,14 @@ verseCompareLong: 比较经文
 verseMemorizeLong: ""
 verseNoteLong: 增加笔记
 verseParagraphBreakLong: ""
+addMemorizationTarget: 目标 +
+markAsMemorized: 标记为已记忆
+markedAsMemorized: 已记忆
+removeFromTargets: 目标 -
+viewReadingProgress: 阅读/记忆进度
+viewReadingProgressSettings: 阅读/记忆设置
+listenInLoop: 循环收听
+viewHelp: 查看帮助
 addBookmark: 书签
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: 重置
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: 模糊
+wordScramble: 打乱
+wordType: 输入
+wordOrder: 顺序
+typeEverything: 输入完整单词
+tapToStartTyping: 点击此处开始输入
+wordVisibility: 单词可见性
+wordVisibilityLight: 亮
+wordVisibilityDim: 暗
+wordVisibilityHidden: 隐藏
+errorHeatmap: 错误热图
+hideUsedButtons: 隐藏已用单词按钮
 more: 更多

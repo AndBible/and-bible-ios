@@ -66,6 +66,14 @@ verseCompareLong: Lyginti eilutę
 verseMemorizeLong: Išmokti mintinai Biblijos eilutes
 verseNoteLong: Rašyti pastabą
 verseParagraphBreakLong: ""
+addMemorizationTarget: Tikslas +
+markAsMemorized: Pažymėti kaip įsimintą
+markedAsMemorized: Įsiminta
+removeFromTargets: Tikslas -
+viewReadingProgress: Skaitymo/Įsiminimo pažanga
+viewReadingProgressSettings: Skaitymo/Įsiminimo nustatymai
+listenInLoop: Klausyti kilpa
+viewHelp: Peržiūrėti pagalbą
 addBookmark: Pridėti žymę
 selectCustomIconTitle: Pasirinkti tinkintą žymeklio piktogramą
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: Nežinoma klaida
 blur: ""
 reset: Atstatyti
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: Suliejimas
+wordScramble: Sumaišymas
+wordType: Tipas
+wordOrder: Tvarka
+typeEverything: Rinkti visus žodžius
+tapToStartTyping: "Bakstelėkite čia, kad pradėtumėte rinkti"
+wordVisibility: Žodžių matomumas
+wordVisibilityLight: Šviesus
+wordVisibilityDim: Pritemdytas
+wordVisibilityHidden: Paslėptas
+errorHeatmap: Klaidų šilumos žemėlapis
+hideUsedButtons: Slėpti panaudotus žodžių mygtukus
 more: Daugiau

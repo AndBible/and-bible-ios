@@ -66,6 +66,14 @@ verseCompareLong: Сравнить стих
 verseMemorizeLong: ""
 verseNoteLong: Написать заметку
 verseParagraphBreakLong: ""
+addMemorizationTarget: Цель +
+markAsMemorized: Отметить как выученное
+markedAsMemorized: Выучено
+removeFromTargets: Цель -
+viewReadingProgress: Прогресс чтения/заучивания
+viewReadingProgressSettings: Настройки чтения/заучивания
+listenInLoop: Слушать по кругу
+viewHelp: Просмотр справки
 addBookmark: Закладка
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: Сброс настроек
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: Размытие
+wordScramble: Перемешать
+wordType: Ввод
+wordOrder: Порядок
+typeEverything: Вводить слова полностью
+tapToStartTyping: "Нажмите здесь, чтобы начать ввод"
+wordVisibility: Видимость слов
+wordVisibilityLight: Слабая
+wordVisibilityDim: Приглушённая
+wordVisibilityHidden: Скрытая
+errorHeatmap: Тепловая карта ошибок
+hideUsedButtons: Скрыть использованные кнопки слов
 more: Еще

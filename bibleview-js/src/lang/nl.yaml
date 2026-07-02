@@ -66,6 +66,14 @@ verseCompareLong: Vers vergelijken
 verseMemorizeLong: ""
 verseNoteLong: Schrijf een notitie
 verseParagraphBreakLong: ""
+addMemorizationTarget: Doel +
+markAsMemorized: Markeren als gememoriseerd
+markedAsMemorized: Gememoriseerd
+removeFromTargets: Doel -
+viewReadingProgress: Lees-/geheugenvoortgang
+viewReadingProgressSettings: Lees-/geheugeninstellingen
+listenInLoop: Luisteren in lus
+viewHelp: Hulp bekijken
 addBookmark: Bladwijzer
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: Reset
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: Vervagen
+wordScramble: Door elkaar
+wordType: Type
+wordOrder: Volgorde
+typeEverything: Volledige woorden typen
+tapToStartTyping: Tik hier om te beginnen met typen
+wordVisibility: Woordzichtbaarheid
+wordVisibilityLight: Licht
+wordVisibilityDim: Gedimd
+wordVisibilityHidden: Verborgen
+errorHeatmap: Foutenkaart
+hideUsedButtons: Gebruikte woordknoppen verbergen
 more: Meer

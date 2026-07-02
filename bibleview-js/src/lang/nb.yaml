@@ -63,3 +63,24 @@ verseCompareLong: ""
 verseNoteLong: ""
 addBookmark: Bokmerke
 selectCustomIconTitle: ""
+
+addMemorizationTarget: Mål +
+markAsMemorized: Merk som memorert
+markedAsMemorized: Memorert
+removeFromTargets: Mål -
+viewReadingProgress: Lese-/memoreringsfremdrift
+viewReadingProgressSettings: Lese-/memoreringsinnstillinger
+listenInLoop: Hør i løkke
+viewHelp: Vis hjelp
+wordBlur: Uskarphet
+wordScramble: Stokk
+wordType: Skriv
+wordOrder: Rekkefølge
+typeEverything: Skriv hele ord
+tapToStartTyping: Trykk her for å begynne å skrive
+wordVisibility: Ordsynlighet
+wordVisibilityLight: Lys
+wordVisibilityDim: Dempet
+wordVisibilityHidden: Skjult
+errorHeatmap: Feilkart
+hideUsedButtons: Skjul brukte ordknapper

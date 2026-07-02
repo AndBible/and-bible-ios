@@ -66,6 +66,14 @@ verseCompareLong: Порівняти вірш
 verseMemorizeLong: Завчити Біблійні вірші
 verseNoteLong: Написати нотатку
 verseParagraphBreakLong: Абзац
+addMemorizationTarget: Мета +
+markAsMemorized: Позначити як завчене
+markedAsMemorized: Завчено
+removeFromTargets: Мета -
+viewReadingProgress: Прогрес читання/завчення
+viewReadingProgressSettings: Налаштування читання/завчення
+listenInLoop: Слухати в циклі
+viewHelp: Переглянути довідку
 addBookmark: Закладка
 selectCustomIconTitle: Обрати власну іконку маркера
 bookmarkSettingsTitle: Підлаштувати закладки
@@ -94,4 +102,14 @@ reset: Скинути
 peek: Підглянути
 wordBlur: Замилення слів
 wordScramble: Перемішка слів
+wordType: Тип
+wordOrder: Порядок
+typeEverything: Вводити повні слова
+tapToStartTyping: "Натисніть тут, щоб почати вводити"
+wordVisibility: Видимість слів
+wordVisibilityLight: Світла
+wordVisibilityDim: Тьмяна
+wordVisibilityHidden: Прихована
+errorHeatmap: Теплова карта помилок
+hideUsedButtons: Приховати використані кнопки слів
 more: Більше

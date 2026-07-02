@@ -66,6 +66,14 @@ verseCompareLong: Kompari verson
 verseMemorizeLong: Parkerigi bibliajn versojn
 verseNoteLong: Skribi noton
 verseParagraphBreakLong: Aldoni novan linion
+addMemorizationTarget: Celo +
+markAsMemorized: Marki kiel parkerigitan
+markedAsMemorized: Parkerigita
+removeFromTargets: Forigi el celoj
+viewReadingProgress: Lega/parkeriga progreso
+viewReadingProgressSettings: Agordoj pri lego/parkerigo
+listenInLoop: Aŭskulti en ciklo
+viewHelp: Montri helpon
 addBookmark: Legosigno
 selectCustomIconTitle: Elekti propran emblemon de markilo
 bookmarkSettingsTitle: Alĝustigi legosignon
@@ -92,6 +100,16 @@ unknownError: Nekonata eraro
 blur: Kovri
 reset: Nuligi
 peek: Ŝtelrigardi
-wordBlur: Kovri vortojn
-wordScramble: Malordigi vortojn
+wordBlur: Kovritaj vortoj
+wordScramble: Miksitaj vortoj
+wordType: Tajpi
+wordOrder: Ordigi
+typeEverything: Tajpi plenajn vortojn
+tapToStartTyping: Frapetu tie ĉi por komenci tajpi
+wordVisibility: Videblo de vortoj
+wordVisibilityLight: malklara
+wordVisibilityDim: apenaǔa
+wordVisibilityHidden: nenia
+errorHeatmap: Oftecmapo de eraroj
+hideUsedButtons: Malaktivigi uzitajn vortojn
 more: Pli

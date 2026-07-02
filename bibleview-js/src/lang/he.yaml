@@ -66,6 +66,14 @@ verseCompareLong: השוואת פסוק
 verseMemorizeLong: שינון פסוקים
 verseNoteLong: כתיבת הערה
 verseParagraphBreakLong: ""
+addMemorizationTarget: יעד +
+markAsMemorized: סמן כנשנן
+markedAsMemorized: נשנן
+removeFromTargets: יעד -
+viewReadingProgress: התקדמות קריאה/שינון
+viewReadingProgressSettings: הגדרות קריאה/שינון
+listenInLoop: האזן בלולאה
+viewHelp: צפה בעזרה
 addBookmark: סימניה
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: איפוס
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: טשטוש
+wordScramble: ערבול
+wordType: הקלדה
+wordOrder: סדר
+typeEverything: הקלד מילים שלמות
+tapToStartTyping: הקש כאן להתחלת הקלדה
+wordVisibility: נראות מילים
+wordVisibilityLight: קל
+wordVisibilityDim: מעומעם
+wordVisibilityHidden: מוסתר
+errorHeatmap: מפת חום שגיאות
+hideUsedButtons: הסתר כפתורי מילים משומשים
 more: עוד

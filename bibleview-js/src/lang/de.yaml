@@ -66,6 +66,14 @@ verseCompareLong: Vers vergleichen
 verseMemorizeLong: Bibelverse auswendig lernen
 verseNoteLong: Eine Notiz schreiben
 verseParagraphBreakLong: Absatzumbruch
+addMemorizationTarget: Ziel +
+markAsMemorized: Als auswendig gelernt markieren
+markedAsMemorized: Auswendig gelernt
+removeFromTargets: Aus den Zielen entfernen
+viewReadingProgress: Lese-/Lernfortschritt
+viewReadingProgressSettings: Lese-/Lerneinstellungen
+listenInLoop: In Schleife anhören
+viewHelp: Hilfe anzeigen
 addBookmark: Lesezeichen
 selectCustomIconTitle: Benutzerdefiniertes Markierungssymbol auswählen
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: Zurücksetzen
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: Unschärfe
+wordScramble: Durchmischen
+wordType: Typ
+wordOrder: Reihenfolge
+typeEverything: Vollständige Wörter eingeben
+tapToStartTyping: "Hier tippen, um zu beginnen"
+wordVisibility: Wortsichtbarkeit
+wordVisibilityLight: Hell
+wordVisibilityDim: Gedimmt
+wordVisibilityHidden: Ausgeblendet
+errorHeatmap: Fehlerheatmap
+hideUsedButtons: Verwendete Wortschaltflächen ausblenden
 more: Mehr

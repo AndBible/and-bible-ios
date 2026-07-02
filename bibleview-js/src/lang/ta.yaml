@@ -66,6 +66,14 @@ verseCompareLong: வசனத்தை ஒப்பிட
 verseMemorizeLong: ""
 verseNoteLong: குறிப்பு எழுதுக
 verseParagraphBreakLong: ""
+addMemorizationTarget: இலக்கு +
+markAsMemorized: மனனம் செய்யப்பட்டதாக குறி
+markedAsMemorized: மனனம் செய்யப்பட்டது
+removeFromTargets: இலக்கு -
+viewReadingProgress: வாசிப்பு/மனன முன்னேற்றம்
+viewReadingProgressSettings: வாசிப்பு/மனன அமைப்புகள்
+listenInLoop: சுழற்சியில் கேளு
+viewHelp: உதவியைக் காண்க
 addBookmark: புக்மார்க்
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: மீட்டமை
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: மங்கல்
+wordScramble: கலைப்பு
+wordType: தட்டச்சு
+wordOrder: வரிசை
+typeEverything: முழு சொற்களை தட்டச்சு செய்
+tapToStartTyping: தட்டச்சு தொடங்க இங்கே தட்டவும்
+wordVisibility: சொல் தெரிவு
+wordVisibilityLight: மங்கலான குறிப்பு
+wordVisibilityDim: மங்கல்
+wordVisibilityHidden: மறைக்கப்பட்டது
+errorHeatmap: பிழை வெப்ப வரைபடம்
+hideUsedButtons: பயன்படுத்திய சொல் பொத்தான்களை மறை
 more: மேலும்

@@ -66,6 +66,14 @@ verseCompareLong: 比較經文
 verseMemorizeLong: ""
 verseNoteLong: 增加筆記
 verseParagraphBreakLong: ""
+addMemorizationTarget: 目標 +
+markAsMemorized: 標記為已記憶
+markedAsMemorized: 已記憶
+removeFromTargets: 目標 -
+viewReadingProgress: 閱讀/記憶進度
+viewReadingProgressSettings: 閱讀/記憶設定
+listenInLoop: 循環收聽
+viewHelp: 查看說明
 addBookmark: 書籤
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: 重設
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: 模糊
+wordScramble: 打亂
+wordType: 輸入
+wordOrder: 順序
+typeEverything: 輸入完整單字
+tapToStartTyping: 點擊此處開始輸入
+wordVisibility: 單字可見性
+wordVisibilityLight: 亮
+wordVisibilityDim: 暗
+wordVisibilityHidden: 隱藏
+errorHeatmap: 錯誤熱圖
+hideUsedButtons: 隱藏已用單字按鈕
 more: 更多

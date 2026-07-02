@@ -66,6 +66,14 @@ verseCompareLong: Ayet karşılaştırması
 verseMemorizeLong: Kutsal Kitap ayetlerini ezberleyin<br>
 verseNoteLong: Bir not yazın
 verseParagraphBreakLong: Paragraf sonu
+addMemorizationTarget: Hedef +
+markAsMemorized: Ezberlenmiş olarak işaretle
+markedAsMemorized: Ezberlenmiş
+removeFromTargets: Hedef -
+viewReadingProgress: Okuma/Ezberleme İlerlemesi
+viewReadingProgressSettings: Okuma/Ezberleme Ayarları
+listenInLoop: Döngüde dinle
+viewHelp: Yardımı görüntüle
 addBookmark: Yer imi
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: Sıfırla
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: Bulanıklaştır
+wordScramble: Karıştır
+wordType: Tür
+wordOrder: Sıra
+typeEverything: Tam kelimeleri yaz
+tapToStartTyping: Yazmaya başlamak için buraya dokunun
+wordVisibility: Kelime görünürlüğü
+wordVisibilityLight: Açık
+wordVisibilityDim: Soluk
+wordVisibilityHidden: Gizli
+errorHeatmap: Hata ısı haritası
+hideUsedButtons: Kullanılan kelime düğmelerini gizle
 more: Daha fazla

@@ -66,6 +66,14 @@ verseCompareLong: వచనం సరిపోల్చండి
 verseMemorizeLong: ""
 verseNoteLong: ఒక నోట్ వ్రాయండి
 verseParagraphBreakLong: ""
+addMemorizationTarget: లక్ష్యం +
+markAsMemorized: కంఠస్థమైనట్లు గుర్తించు
+markedAsMemorized: కంఠస్థమైంది
+removeFromTargets: లక్ష్యం -
+viewReadingProgress: చదవడం/కంఠస్థం ప్రోగ్రెస్
+viewReadingProgressSettings: చదవడం/కంఠస్థం సెట్టింగులు
+listenInLoop: లూప్‌లో వినండి
+viewHelp: సహాయం వీక్షించండి
 addBookmark: బుక్మార్క్
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: రీసెట్
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: మసక
+wordScramble: కలపడం
+wordType: రకం
+wordOrder: క్రమం
+typeEverything: పూర్తి పదాలు టైప్ చేయండి
+tapToStartTyping: టైప్ చేయడం ప్రారంభించడానికి ఇక్కడ తాకండి
+wordVisibility: పద దృశ్యత
+wordVisibilityLight: తేలికగా
+wordVisibilityDim: మసకగా
+wordVisibilityHidden: దాచబడింది
+errorHeatmap: లోపం హీట్‌మ్యాప్
+hideUsedButtons: ఉపయోగించిన పద బటన్లను దాచు
 more: మరిన్ని
