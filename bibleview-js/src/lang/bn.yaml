@@ -66,6 +66,14 @@ verseCompareLong: পদ তুলনা করুন
 verseMemorizeLong: ""
 verseNoteLong: একটি নোট লিখুন
 verseParagraphBreakLong: ""
+addMemorizationTarget: লক্ষ্য +
+markAsMemorized: মুখস্থ হিসেবে চিহ্নিত করুন
+markedAsMemorized: মুখস্থ
+removeFromTargets: লক্ষ্য -
+viewReadingProgress: পঠন/স্মৃতি অগ্রগতি
+viewReadingProgressSettings: পঠন/স্মৃতি সেটিংস
+listenInLoop: লুপে শুনুন
+viewHelp: সাহায্য দেখুন
 addBookmark: বুকমার্ক
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: রিসেট
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: ঝাপসা
+wordScramble: এলোমেলো
+wordType: টাইপ
+wordOrder: ক্রম
+typeEverything: সম্পূর্ণ শব্দ টাইপ করুন
+tapToStartTyping: টাইপিং শুরু করতে এখানে ট্যাপ করুন
+wordVisibility: শব্দের দৃশ্যমানতা
+wordVisibilityLight: হালকা
+wordVisibilityDim: ম্লান
+wordVisibilityHidden: লুকানো
+errorHeatmap: ভুলের হিটম্যাপ
+hideUsedButtons: ব্যবহৃত শব্দ বোতাম লুকান
 more: আরও

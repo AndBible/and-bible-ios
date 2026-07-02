@@ -82,7 +82,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
         let ordinalFunctionStart = try XCTUnwrap(source.range(of: "public static func verseOrdinal("))
         let ordinalFunctionEnd = try XCTUnwrap(
-            source.range(of: "public static func verseOrdinalRange(osisId: String, chapter: Int)", range: ordinalFunctionStart.upperBound..<source.endIndex)
+            source.range(of: "\n    public static func ", range: ordinalFunctionStart.upperBound..<source.endIndex)
         )
         let ordinalFunctionSource = source[ordinalFunctionStart.lowerBound..<ordinalFunctionEnd.lowerBound]
 

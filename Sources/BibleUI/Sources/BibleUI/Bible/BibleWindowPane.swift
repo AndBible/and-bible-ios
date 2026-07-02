@@ -807,6 +807,26 @@ struct BibleWindowPane: View {
             }
         }
 
+        ctrl.onOpenMemorizeDocumentInLinksWindow = { [weak ctrl, weak windowManager] emission in
+            guard let ctrl else { return }
+            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            guard useLinksWindow else {
+                ctrl.renderMemorizeDocument(emission)
+                return
+            }
+
+            guard let wm = windowManager,
+                  let linksWindow = prepareLinksWindow(using: wm) else { return }
+
+            withLinksController(
+                for: linksWindow,
+                using: wm,
+                fallback: { ctrl.renderMemorizeDocument(emission) }
+            ) { targetController in
+                targetController.renderMemorizeDocument(emission)
+            }
+        }
+
         ctrl.onOpenDefinitionDocumentInLinksWindow = {
             [weak ctrl, weak windowManager] documentJSON, renderedBook, renderedKey in
             guard let ctrl else { return }

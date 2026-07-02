@@ -492,6 +492,138 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Protects restoration of Android's synthetic Memorize document identity.
+
+     Android persists Memorize as `FakeBookFactory.memorizeDocument`, a commentary-category fake
+     document, not as an installed commentary module and not as Bible content. The setup restores a
+     pane from only the local PageManager fields iOS currently owns. The expected result is that
+     native state still reports `commentary/Memorize` and suppresses ordinary Bible/commentary
+     actions. A failure means a restored Memorize links window can fall back to an installed
+     commentary or to regular Bible chrome because the fake document is not a SWORD module.
+     */
+    @MainActor
+    func testRestoreSavedPositionRecognizesAndroidMemorizeDocumentIdentity() {
+        let controller = BibleReaderController(bridge: BibleBridge())
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.commentary.pageManagerKey)
+        pageManager.commentaryDocument = "Memorize"
+        pageManager.commentaryAnchorOrdinal = 1
+        window.pageManager = pageManager
+        controller.activeWindow = window
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.currentCategory, .commentary)
+        XCTAssertEqual(controller.activeModuleName(for: .commentary), "Memorize")
+        XCTAssertTrue(controller.isShowingAndroidMemorizeDocument)
+        XCTAssertFalse(controller.canUseBibleReferenceActions)
+        XCTAssertFalse(controller.isCurrentPageSearchable)
+        XCTAssertFalse(controller.isCurrentPageSpeakable)
+        XCTAssertFalse(controller.isCurrentPageSyncable)
+    }
+
+    /**
+     Protects restored Memorize content from falling through to missing-commentary placeholders.
+
+     Android restores Memorize from a commentary fake document plus source `BookAndKey`. iOS does
+     not yet store the full source range locally, but it does persist a commentary anchor ordinal.
+     This setup restores from that local state and asks the controller to load current content. The
+     expected result is a real single-anchor Vue Memorize document with `commentary/Memorize` native
+     identity. A failure means a process-recreated links window can keep the right tab label while
+     rendering ordinary no-commentary content.
+     */
+    @MainActor
+    func testRestoredAndroidMemorizeDocumentRebuildsPayloadFromPersistedAnchor() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.commentary.pageManagerKey)
+        pageManager.commentaryDocument = "Memorize"
+        pageManager.commentaryAnchorOrdinal = ordinal
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.restoreSavedPosition()
+
+        controller.loadCurrentContent()
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "memorize")
+        XCTAssertEqual(payload["title"] as? String, "Genesis 1:1")
+        XCTAssertEqual(payload["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(payload["startOrdinal"] as? Int, ordinal)
+        XCTAssertEqual(payload["endOrdinal"] as? Int, ordinal)
+        XCTAssertEqual(controller.currentCategory, .commentary)
+        XCTAssertEqual(controller.activeModuleName(for: .commentary), "Memorize")
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=commentary;module=Memorize;book=Genesis 1:1;chapter=none;key=memorize:KJV:\(ordinal)-\(ordinal)"
+        )
+    }
+
+    /**
+     Protects Android's full Memorize restore source range.
+
+     Android persists Memorize as `commentary/Memorize` plus a serialized `BookAndKey` source range
+     in `commentary_sourceBookAndKey`. The setup mirrors a process restart after a multi-verse
+     Memorize links-window load. The expected result is that iOS rebuilds the original full range,
+     not only the anchor verse. A failure means iOS can preserve the fake-document tab while losing
+     the user's selected Memorize passage.
+     */
+    @MainActor
+    func testRestoredAndroidMemorizeDocumentRebuildsPayloadFromSerializedSourceBookAndKey() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let settingsStore = try makeInMemorySettingsStore()
+        controller.settingsStore = settingsStore
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+        let endOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 3))
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.commentary.pageManagerKey)
+        pageManager.commentaryDocument = "Memorize"
+        pageManager.commentaryAnchorOrdinal = startOrdinal
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore).setPageManagerEntry(
+            .init(
+                windowID: window.id,
+                rawCurrentCategoryName: "COMMENTARY",
+                commentarySourceBookAndKey: #"{"document":"KJV","htmlId":null,"key":"Gen.1.1-Gen.1.3","ordinalRange":null}"#,
+                dictionaryAnchorOrdinal: nil,
+                generalBookAnchorOrdinal: nil,
+                mapAnchorOrdinal: nil
+            )
+        )
+        controller.restoreSavedPosition()
+
+        controller.loadCurrentContent()
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "memorize")
+        XCTAssertEqual(payload["title"] as? String, "Genesis 1:1-3")
+        XCTAssertEqual(payload["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(payload["osisRef"] as? String, "Gen.1.1-Gen.1.3")
+        XCTAssertEqual(payload["startOrdinal"] as? Int, startOrdinal)
+        XCTAssertEqual(payload["endOrdinal"] as? Int, endOrdinal)
+        XCTAssertEqual((payload["texts"] as? [[String: Any]])?.count, 3)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=commentary;module=Memorize;book=Genesis 1:1-3;chapter=none;key=memorize:KJV:\(startOrdinal)-\(endOrdinal)"
+        )
+    }
+
+    /**
      Protects Android's durable restore behavior for links-window `Multi` result pages.
 
      Android restores `FakeBookFactory.multiDocument` by parsing the persisted `BookAndKeyList` OSIS

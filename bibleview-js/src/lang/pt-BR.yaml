@@ -66,6 +66,14 @@ verseCompareLong: Comparar versículo
 verseMemorizeLong: Memorizar versículos bíblicos
 verseNoteLong: Escrever uma nota
 verseParagraphBreakLong: Quebra de parágrafo
+addMemorizationTarget: Meta +
+markAsMemorized: Marcar como memorizado
+markedAsMemorized: Memorizado
+removeFromTargets: Meta -
+viewReadingProgress: Progresso de Leitura/Memorização
+viewReadingProgressSettings: Configurações de Leitura/Memorização
+listenInLoop: Ouvir em loop
+viewHelp: Ver ajuda
 addBookmark: Marcador
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: Redefinir
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: Desfoque
+wordScramble: Embaralhar
+wordType: Digitar
+wordOrder: Ordem
+typeEverything: Digitar palavras completas
+tapToStartTyping: Toque aqui para começar a digitar
+wordVisibility: Visibilidade da palavra
+wordVisibilityLight: Claro
+wordVisibilityDim: Escuro
+wordVisibilityHidden: Oculto
+errorHeatmap: Mapa de erros
+hideUsedButtons: Ocultar botões de palavras usadas
 more: Mais

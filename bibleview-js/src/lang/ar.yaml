@@ -66,6 +66,14 @@ verseCompareLong: مقارنة الآية
 verseMemorizeLong: ""
 verseNoteLong: كتابة ملاحظة
 verseParagraphBreakLong: ""
+addMemorizationTarget: هدف +
+markAsMemorized: وضع علامة محفوظ
+markedAsMemorized: محفوظ
+removeFromTargets: هدف -
+viewReadingProgress: تقدم القراءة والحفظ
+viewReadingProgressSettings: إعدادات القراءة والحفظ
+listenInLoop: الاستماع في حلقة
+viewHelp: عرض المساعدة
 addBookmark: إشارة مرجعية
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: اعادة تهيئة
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: تعتيم
+wordScramble: خلط
+wordType: كتابة
+wordOrder: ترتيب
+typeEverything: كتابة الكلمات كاملةً
+tapToStartTyping: انقر هنا لبدء الكتابة
+wordVisibility: ظهور الكلمات
+wordVisibilityLight: خفيف
+wordVisibilityDim: ضعيف
+wordVisibilityHidden: مخفي
+errorHeatmap: خريطة الأخطاء الحرارية
+hideUsedButtons: إخفاء أزرار الكلمات المستخدمة
 more: المزيد

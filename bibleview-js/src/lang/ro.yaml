@@ -66,6 +66,14 @@ verseCompareLong: Compară versetele
 verseMemorizeLong: Memorează versete biblice
 verseNoteLong: Scrie o notiță
 verseParagraphBreakLong: Întrerupere de paragraf
+addMemorizationTarget: Obiectiv +
+markAsMemorized: Marchează ca memorat
+markedAsMemorized: Memorat
+removeFromTargets: Obiectiv -
+viewReadingProgress: Progres citire/memorare
+viewReadingProgressSettings: Setări citire/memorare
+listenInLoop: Ascultă în buclă
+viewHelp: Vizualizează ajutorul
 addBookmark: Semn de carte
 selectCustomIconTitle: Alege simbolul de evidențiere
 bookmarkSettingsTitle: Opțiuni pentru Semne de carte
@@ -94,4 +102,14 @@ reset: Restabilește
 peek: Vezi
 wordBlur: Cuvinte neclare
 wordScramble: Cuvinte amestecate
+wordType: Tip
+wordOrder: Ordine
+typeEverything: Tastează cuvinte complete
+tapToStartTyping: Apasă aici pentru a începe să tastezi
+wordVisibility: Vizibilitate cuvinte
+wordVisibilityLight: Ușor
+wordVisibilityDim: Estompat
+wordVisibilityHidden: Ascuns
+errorHeatmap: Hartă erori
+hideUsedButtons: Ascunde butoanele utilizate
 more: Mai mult

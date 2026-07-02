@@ -66,6 +66,14 @@ verseCompareLong: Porównaj werset
 verseMemorizeLong: Ucz się wersetów biblijnych na pamięć
 verseNoteLong: Napisz notatkę
 verseParagraphBreakLong: Dodaj nową linię
+addMemorizationTarget: Cel +
+markAsMemorized: Oznacz jako zapamiętane
+markedAsMemorized: Zapamiętane
+removeFromTargets: Cel -
+viewReadingProgress: Postęp czytania/nauki
+viewReadingProgressSettings: Ustawienia czytania/nauki
+listenInLoop: Słuchaj w pętli
+viewHelp: Wyświetl pomoc
 addBookmark: Zakładka
 selectCustomIconTitle: Wybór własnej ikony znacznika
 bookmarkSettingsTitle: Dostosowywanie zakładki
@@ -94,4 +102,14 @@ reset: Reset
 peek: Podglądnij
 wordBlur: Zasłoń słowa
 wordScramble: Pomieszaj słowa
+wordType: Typ
+wordOrder: Kolejność
+typeEverything: Wpisz całe słowa
+tapToStartTyping: "Dotknij tutaj, aby rozpocząć pisanie"
+wordVisibility: Widoczność słów
+wordVisibilityLight: Jasne
+wordVisibilityDim: Przyciemnione
+wordVisibilityHidden: Ukryte
+errorHeatmap: Mapa błędów
+hideUsedButtons: Ukryj użyte przyciski słów
 more: Więcej

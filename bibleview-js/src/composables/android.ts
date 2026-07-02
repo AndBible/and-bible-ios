@@ -644,6 +644,10 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         android.helpBookmarks();
     }
 
+    function showHelpDialog(scopeKey: string) {
+        android.helpDialog(scopeKey, null);
+    }
+
     function setLimitAmbiguousModalSize(value: boolean) {
         android.setLimitAmbiguousModalSize(value);
     }
@@ -743,6 +747,7 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         speakGeneric,
         speakMemorizationLoop,
         helpDialog,
+        showHelpDialog,
         onKeyDown,
         parseRef,
         saveState,

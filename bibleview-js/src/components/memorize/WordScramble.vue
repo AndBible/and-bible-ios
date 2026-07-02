@@ -1,5 +1,5 @@
 <!--
-  - Copyright (c) 2021-2022 Martin Denham, Tuomas Airaksinen and the AndBible contributors.
+  - Copyright (c) 2021-2026 Sykerö Software / Tuomas Airaksinen and the AndBible contributors.
   -
   - This file is part of AndBible: Bible Study (http://github.com/AndBible/and-bible).
   -
@@ -17,15 +17,29 @@
 
 <template>
   <div class="memorize-controls">
-    <div class="button"
-         @touchstart="isPeeking = true"
-         @touchend="isPeeking = false"
-         @mousedown="isPeeking = true"
-         @mouseup="isPeeking = false"
-    >
-      {{ strings.peek }}
+    <div class="controls-right">
+      <div class="icon-button"
+           @pointerdown.prevent="isPeeking = true"
+           @pointerup="isPeeking = false"
+           @pointerleave="isPeeking = false"
+      >
+        <FontAwesomeIcon :icon="faEye"/>
+      </div>
+      <div @click="resetWords()" class="icon-button">
+        <FontAwesomeIcon :icon="faUndo"/>
+      </div>
+      <div class="settings-wrapper" ref="settingsWrapper">
+        <div class="settings-trigger" @click="toggleSettings">
+          <FontAwesomeIcon :icon="faGear"/>
+        </div>
+        <div v-if="settingsOpen" class="settings-popup">
+          <div class="settings-item" @click="hideUsedButtons = !hideUsedButtons">
+            <FontAwesomeIcon :icon="hideUsedButtons ? faSquareCheck : faSquare"/>
+            {{ strings.hideUsedButtons }}
+          </div>
+        </div>
+      </div>
     </div>
-    <div @click="resetWords()" class="button">{{ strings.reset }}</div>
   </div>
       
   <!-- Text area with revealed words or full preview -->
@@ -56,9 +70,10 @@
   <div class="word-buttons">
     <div
         v-for="(wordObj, buttonIndex) in scrambledWords"
+        v-show="!(hideUsedButtons && wordObj.used)"
         :key="`button-${buttonIndex}`"
         class="button small memorize-button"
-        :class="{ 
+        :class="{
           incorrect: wordObj.incorrect,
           disabled: wordObj.used,
         }"
@@ -70,9 +85,13 @@
 </template>
 
 <script setup lang="ts">
-import {ref, onMounted, computed} from "vue";
-import { useCommon } from "@/composables";
+import {ref, onMounted, onBeforeUnmount, computed, watch, inject} from "vue";
 import {MemorizeTextItem} from "@/types/documents";
+import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
+import {faEye, faGear, faSquareCheck, faUndo} from "@fortawesome/free-solid-svg-icons";
+import {faSquare} from "@fortawesome/free-regular-svg-icons";
+import {readingProgressSettingsKey} from "@/types/constants";
+import {useCommon} from "@/composables";
 
 interface WordObject {
     word: string;
@@ -96,18 +115,45 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: 'save-mode-config', config: WordScrambleConfig): void;
+    (e: 'memorize-completed'): void;
 }>();
 
-const { strings } = useCommon();
+const {settings: globalSettings, updateSettings} = inject(readingProgressSettingsKey)!;
+const {strings} = useCommon();
 
 const scrambledWords = ref<WordObject[]>([]);
 const currentWordIndex = ref<number>(0);
 const isPeeking = ref<boolean>(false);
+const hideUsedButtons = ref(false);
+const settingsOpen = ref(false);
+const settingsWrapper = ref<HTMLElement | null>(null);
 
 const isCompleted = computed(() => {
   if (scrambledWords.value.length === 0) return false;
   return scrambledWords.value.every(word => word.used);
 });
+
+watch(isCompleted, (completed) => {
+  if (completed) emit('memorize-completed');
+});
+
+watch(hideUsedButtons, (val) => {
+    updateSettings({memorizeScrambleHideUsed: val});
+});
+
+watch(globalSettings, (globals) => {
+    hideUsedButtons.value = globals.memorizeScrambleHideUsed;
+});
+
+function toggleSettings() {
+    settingsOpen.value = !settingsOpen.value;
+}
+
+function onClickOutsideSettings(e: Event) {
+    if (settingsWrapper.value && !settingsWrapper.value.contains(e.target as Node)) {
+        settingsOpen.value = false;
+    }
+}
 
 // Convert item and word indices to a global word index
 function getGlobalWordIndex(itemIndex: number, wordIndex: number): number {
@@ -154,6 +200,7 @@ function isPunctuation(word: string): boolean {
 }
 
 onMounted(() => {
+    hideUsedButtons.value = globalSettings.memorizeScrambleHideUsed;
     const config = props.modeConfig?.scrambleConfig;
     if (config) {
         scrambledWords.value = config.scrambledWords ?? [];
@@ -161,10 +208,14 @@ onMounted(() => {
     } else {
         resetWords();
     }
-    
-    // Make sure we're not starting on a punctuation token
     skipPunctuationTokens();
+    window.addEventListener('click', onClickOutsideSettings);
 });
+
+onBeforeUnmount(() => {
+    window.removeEventListener('click', onClickOutsideSettings);
+});
+
 
 function skipPunctuationTokens() {
     while (currentWordIndex.value < getWordsFromText(props.textItems.map(item => item.text).join(' ')).length) {
@@ -282,6 +333,16 @@ function resetWords() {
   .noAnimation & {
     transition: none;
   }
+  .monochrome & {
+    background-color: white;
+    border: 1px solid black;
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .monochrome.night & {
+    background-color: black;
+    border-color: white;
+  }
   .memorize-word {
     margin-right: 4px;
     min-width: 1.5em;
@@ -303,12 +364,20 @@ function resetWords() {
   &.preview {
     border: 1px dashed var(--primary-color);
     background-color: rgba(0, 0, 0, 0.03);
+    .monochrome & {
+      background-color: transparent;
+      border-color: black;
+    }
     .night & {
       background-color: rgba(255, 255, 255, 0.03);
     }
+    .monochrome.night & {
+      background-color: transparent;
+      border-color: white;
+    }
     padding: 1rem;
   }
-  
+
   &.completed {
     margin-top: 0.5rem;
     margin-bottom: 0.5rem;
@@ -316,8 +385,16 @@ function resetWords() {
     border-radius: 8px;
     padding: 1rem;
     background-color: rgba(40, 167, 69, 0.05);
+    .monochrome & {
+      background-color: transparent;
+      border-color: black;
+    }
     .night & {
       background-color: rgba(40, 167, 69, 0.1);
+    }
+    .monochrome.night & {
+      background-color: transparent;
+      border-color: white;
     }
     animation: completionPulse 2s;
     .noAnimation & {
@@ -342,6 +419,9 @@ function resetWords() {
     padding: 8px 12px;
     border-radius: $button-border-radius;
     font-weight: 500;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
     transition: all 0.2s ease;
     .noAnimation & {
       transition: none;
@@ -353,6 +433,14 @@ function resetWords() {
     
     &.incorrect {
       background-color: #e74c3c;
+      .monochrome & {
+        background-color: black;
+        color: white;
+      }
+      .monochrome.night & {
+        background-color: white;
+        color: black;
+      }
       animation: shake 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
       .noAnimation & {
         animation: none;
@@ -361,21 +449,13 @@ function resetWords() {
     
     &.disabled {
       opacity: 0.5;
+      .monochrome & {
+        opacity: 1;
+      }
     }
   }
 }
 
-.memorize-controls {
-  .button {
-    min-width: 100px;
-    font-weight: 500;
-    
-    &:active {
-      transform: translateY(1px);
-      opacity: 0.9;
-    }
-  }
-}
 
 @keyframes shake {
   10%, 90% {
@@ -396,5 +476,69 @@ function resetWords() {
   0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4); }
   70% { box-shadow: 0 0 0 10px rgba(40, 167, 69, 0); }
   100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+}
+
+.controls-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.settings-wrapper {
+  position: relative;
+}
+
+.settings-trigger {
+  cursor: pointer;
+  padding: 6px 10px;
+  color: #666;
+  font-size: 16px;
+  .night & { color: #999; }
+  .monochrome & { color: black; }
+  .monochrome.night & { color: white; }
+}
+
+.settings-popup {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: var(--background-color);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  min-width: 180px;
+  padding: 8px 0;
+  animation: settings-fade 0.15s ease;
+  .night & {
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+  .monochrome & {
+    border-color: black;
+    box-shadow: none;
+  }
+  .monochrome.night & {
+    border-color: white;
+  }
+  .noAnimation & {
+    animation: none;
+  }
+}
+
+@keyframes settings-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.settings-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 0.9em;
+  user-select: none;
 }
 </style>

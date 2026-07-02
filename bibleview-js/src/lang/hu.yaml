@@ -66,6 +66,14 @@ verseCompareLong: Vers összehasonlítása
 verseMemorizeLong: ""
 verseNoteLong: Jegyzet hozzáadása
 verseParagraphBreakLong: ""
+addMemorizationTarget: Cél +
+markAsMemorized: Megjelölés memorizáltként
+markedAsMemorized: Memorizálva
+removeFromTargets: Cél -
+viewReadingProgress: Olvasási/memorizálási haladás
+viewReadingProgressSettings: Olvasási/memorizálási beállítások
+listenInLoop: Ismételt lejátszás
+viewHelp: Súgó megnyitása
 addBookmark: Könyvjelző
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: Visszaállítás
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: Elmosás
+wordScramble: Összekeverés
+wordType: Típus
+wordOrder: Sorrend
+typeEverything: Teljes szavak gépelése
+tapToStartTyping: Koppintson ide a gépelés megkezdéséhez
+wordVisibility: Szó láthatósága
+wordVisibilityLight: Halvány
+wordVisibilityDim: Fakó
+wordVisibilityHidden: Rejtett
+errorHeatmap: Hibatérkép
+hideUsedButtons: Használt szógombok elrejtése
 more: Tovább

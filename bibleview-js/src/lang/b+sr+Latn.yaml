@@ -66,6 +66,14 @@ verseCompareLong: Uporedi stih
 verseMemorizeLong: ""
 verseNoteLong: Napiši belešku
 verseParagraphBreakLong: ""
+addMemorizationTarget: Cilj +
+markAsMemorized: Označi kao memorisano
+markedAsMemorized: Memorisano
+removeFromTargets: Cilj -
+viewReadingProgress: Napredak čitanja/memorisanja
+viewReadingProgressSettings: Podešavanja čitanja/memorisanja
+listenInLoop: Slušaj u petlji
+viewHelp: Prikaži pomoć
 addBookmark: Obeleživač
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: Povrati
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: Zamagljenost
+wordScramble: Mešanje
+wordType: Kucanje
+wordOrder: Redosled
+typeEverything: Upiši cele reči
+tapToStartTyping: Dodirnite ovde za početak kucanja
+wordVisibility: Vidljivost reči
+wordVisibilityLight: Svetlo
+wordVisibilityDim: Prigušeno
+wordVisibilityHidden: Skriveno
+errorHeatmap: Mapa grešaka
+hideUsedButtons: Sakrij korišćena dugmad reči
 more: Više

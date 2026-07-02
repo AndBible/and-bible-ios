@@ -1,6 +1,64 @@
 // JSwordKJVAVersification.swift - Android JSword KJVA ordinal compatibility contract
 
 /**
+ One real book in Android's JSword `SystemKJVA` scripture domain.
+
+ Android Reading Progress iterates `KJVA.bookIterator` and filters real scripture books. This value
+ exposes the same source-derived table to iOS callers so native progress views do not fall back to a
+ smaller active-module or Protestant-only book catalog.
+ */
+public struct JSwordKJVABookSummary: Equatable, Identifiable, Sendable {
+    public let osisId: String
+    public let longName: String
+    public let shortName: String
+    public let bibleBookOrdinal: Int
+    public let chapterCount: Int
+    public let verseCount: Int
+    public let isNewTestament: Bool
+
+    public var id: String { osisId }
+
+    public init(
+        osisId: String,
+        longName: String,
+        shortName: String,
+        bibleBookOrdinal: Int,
+        chapterCount: Int,
+        verseCount: Int,
+        isNewTestament: Bool
+    ) {
+        self.osisId = osisId
+        self.longName = longName
+        self.shortName = shortName
+        self.bibleBookOrdinal = bibleBookOrdinal
+        self.chapterCount = chapterCount
+        self.verseCount = verseCount
+        self.isNewTestament = isNewTestament
+    }
+}
+
+/**
+ One concrete verse reference resolved from an Android KJVA progress ordinal.
+ */
+public struct JSwordKJVAVerseReference: Equatable, Sendable {
+    public let osisId: String
+    public let chapter: Int
+    public let verse: Int
+    public let ordinal: Int
+
+    public var osisRef: String {
+        "\(osisId).\(chapter).\(verse)"
+    }
+
+    public init(osisId: String, chapter: Int, verse: Int, ordinal: Int) {
+        self.osisId = osisId
+        self.chapter = chapter
+        self.verse = verse
+        self.ordinal = ordinal
+    }
+}
+
+/**
  JSword `SystemKJVA` ordinal metadata used by Android database compatibility code.
 
  Android progress and bookmark data is normalized through JSword's `KJVA` versification. iOS does
@@ -49,6 +107,20 @@ public enum JSwordKJVAVersification {
 
     /// First KJVA table index that belongs to the New Testament, before which JSword inserts `INTRO_NT`.
     private static let firstNewTestamentTableIndex = 53
+
+    /// Real books in JSword `SystemKJVA` order, including deuterocanonical books.
+    public static let books: [JSwordKJVABookSummary] = JSwordKJVAVersificationData.bookTable.enumerated().map { index, book in
+        let names = JSwordKJVAVersificationData.displayNamesByOsisId[book.osisId]
+        return JSwordKJVABookSummary(
+            osisId: book.osisId,
+            longName: names?.long ?? book.osisId,
+            shortName: names?.short ?? book.osisId,
+            bibleBookOrdinal: book.bibleBookOrdinal,
+            chapterCount: book.chapterVerseCounts.count,
+            verseCount: book.chapterVerseCounts.reduce(0, +),
+            isNewTestament: index >= firstNewTestamentTableIndex
+        )
+    }
 
     /// Lookup from canonical or accepted alias OSIS id to the KJVA table index.
     private static let bookIndexByOsisId: [String: Int] = {
@@ -144,6 +216,37 @@ public enum JSwordKJVAVersification {
     }
 
     /**
+     Returns JSword's long display name for a KJVA book.
+
+     Android Reading Progress calls `kjva.getLongName(book)` for memorization chapter detail titles
+     and KJVA range labels. The source-derived names live beside the ordinal table so iOS does not
+     fall back to the active SWORD module or a 66-book catalog.
+
+     - Parameter osisId: Canonical OSIS id or supported alias.
+     - Returns: JSword long book name, or `nil` when the id is outside `SystemKJVA`.
+     - Side effects: none.
+     - Failure modes: Unknown ids return `nil`.
+     */
+    public static func longBookName(osisId: String) -> String? {
+        bookSummary(forOsisId: osisId)?.longName
+    }
+
+    /**
+     Returns JSword's short display name for a KJVA book.
+
+     Android Reading Progress calls `kjva.getShortName(book)` for memorization overview book cells.
+     This lookup follows the same KJVA book domain and accepted OSIS aliases as ordinal resolution.
+
+     - Parameter osisId: Canonical OSIS id or supported alias.
+     - Returns: JSword short book name, or `nil` when the id is outside `SystemKJVA`.
+     - Side effects: none.
+     - Failure modes: Unknown ids return `nil`.
+     */
+    public static func shortBookName(osisId: String) -> String? {
+        bookSummary(forOsisId: osisId)?.shortName
+    }
+
+    /**
      Returns the last one-based chapter number for a KJVA book.
 
      - Parameter osisId: Canonical OSIS id or supported alias.
@@ -177,7 +280,9 @@ public enum JSwordKJVAVersification {
     /**
      Returns the number of real verses in a KJVA book.
 
-     Android book-level memorization progress divides memorized verse ordinals by this count.
+     This is the sum of real chapter verse counts. Android whole-book memorization progress uses
+     `verseOrdinalRange(osisId:)?.count`, which also includes JSword chapter-introduction ordinals
+     between the first and last real verse.
 
      - Parameter osisId: Canonical OSIS id or supported alias.
      - Returns: Sum of all chapter verse counts, or `nil` for unsupported ids.
@@ -221,6 +326,47 @@ public enum JSwordKJVAVersification {
     }
 
     /**
+     Resolves a concrete verse reference from a JSword KJVA progress ordinal.
+
+     Android Reading Progress stores memorized verses and target ranges as KJVA ordinals and then
+     reconstructs `Verse`/`VerseRange` instances for display. This reverse lookup gives iOS the same
+     display and navigation foundation without depending on an active SWORD module.
+
+     - Parameter ordinal: Stored Android KJVA progress ordinal.
+     - Returns: Concrete OSIS/chapter/verse reference, or `nil` for introduction/out-of-domain
+       ordinals.
+     - Side effects: none.
+     - Failure modes: Unknown ordinals return `nil`.
+     */
+    public static func verseReference(ordinal: Int) -> JSwordKJVAVerseReference? {
+        guard containsProgressOrdinal(ordinal) else {
+            return nil
+        }
+
+        for (index, book) in JSwordKJVAVersificationData.bookTable.enumerated() {
+            guard let ordinalIndex = ordinalIndexByBookIndex[index] else {
+                continue
+            }
+            for (chapterIndex, chapterStart) in ordinalIndex.chapterStartOrdinals.enumerated() {
+                let chapter = chapterIndex + 1
+                let lastVerse = book.chapterVerseCounts[chapterIndex]
+                let chapterEnd = chapterStart + lastVerse - 1
+                guard ordinal >= chapterStart, ordinal <= chapterEnd else {
+                    continue
+                }
+                return JSwordKJVAVerseReference(
+                    osisId: book.osisId,
+                    chapter: chapter,
+                    verse: ordinal - chapterStart + 1,
+                    ordinal: ordinal
+                )
+            }
+        }
+
+        return nil
+    }
+
+    /**
      Computes the JSword KJVA ordinal range for a chapter's real verses.
 
      - Parameters:
@@ -244,10 +390,15 @@ public enum JSwordKJVAVersification {
     }
 
     /**
-     Computes the JSword KJVA ordinal range for a whole book's real verses.
+     Computes the inclusive JSword KJVA ordinal span for a whole book.
+
+     Android book-level memorization progress asks JSword for the ordinal of the first real verse
+     and the ordinal of the last real verse, then subtracts those ordinals. That span includes the
+     chapter-introduction ordinals JSword stores between real chapters.
 
      - Parameter osisId: Canonical OSIS id or supported alias.
-     - Returns: Closed range from the first verse through the last verse, or `nil` when invalid.
+     - Returns: Closed ordinal span from the first real verse through the last real verse, or `nil`
+       when invalid.
      - Side effects: none.
      - Failure modes: Unknown ids or books without chapters return `nil`.
      */
@@ -261,6 +412,21 @@ public enum JSwordKJVAVersification {
         }
         let end = lastChapterStart + lastVerse - 1
         return start...end
+    }
+
+    /**
+     Resolves a source-derived KJVA book summary.
+
+     - Parameter osisId: Canonical OSIS id or supported alias.
+     - Returns: KJVA public summary row, or `nil` when unsupported.
+     - Side effects: none.
+     - Failure modes: Unknown ids return `nil`.
+     */
+    private static func bookSummary(forOsisId osisId: String) -> JSwordKJVABookSummary? {
+        guard let index = bookIndexByOsisId[osisId] else {
+            return nil
+        }
+        return books[index]
     }
 
     /**

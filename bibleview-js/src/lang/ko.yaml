@@ -66,6 +66,14 @@ verseCompareLong: 절 비교
 verseMemorizeLong: ""
 verseNoteLong: 노트 쓰기
 verseParagraphBreakLong: ""
+addMemorizationTarget: 목표 +
+markAsMemorized: 암송 완료로 표시
+markedAsMemorized: 암송 완료
+removeFromTargets: 목표 -
+viewReadingProgress: 읽기/암송 진행 상황
+viewReadingProgressSettings: 읽기/암송 설정
+listenInLoop: 반복 듣기
+viewHelp: 도움말 보기
 addBookmark: 북마크
 selectCustomIconTitle: ""
 bookmarkSettingsTitle: ""
@@ -92,6 +100,16 @@ unknownError: ""
 blur: ""
 reset: 재설정
 peek: ""
-wordBlur: ""
-wordScramble: ""
+wordBlur: 흐리게
+wordScramble: 뒤섞기
+wordType: 타이핑
+wordOrder: 순서
+typeEverything: 전체 단어 입력
+tapToStartTyping: 여기를 탭하여 입력 시작
+wordVisibility: 단어 가시성
+wordVisibilityLight: 밝게
+wordVisibilityDim: 어둡게
+wordVisibilityHidden: 숨김
+errorHeatmap: 오류 히트맵
+hideUsedButtons: 사용한 단어 버튼 숨기기
 more: 기타
