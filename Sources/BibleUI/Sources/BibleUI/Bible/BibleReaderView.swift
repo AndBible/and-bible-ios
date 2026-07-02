@@ -92,6 +92,9 @@ public struct BibleReaderView: View {
     /// Local-only flag recording whether the user entered or skipped first-run document setup.
     private static let firstRunDocumentSetupPromptHandledKey = "startup_document_setup_prompt_handled"
 
+    /// Identity used to recreate data-bound reader panes after the app swaps persistence runtimes.
+    private let readerContentIdentity: UUID?
+
     /// Top-level sheets launched from the reader shell or its global shortcuts.
     enum ReaderSheet: String, Identifiable {
         case history
@@ -230,6 +233,9 @@ public struct BibleReaderView: View {
 
     /// SwiftData context used to persist workspace settings and display-configuration changes.
     @Environment(\.modelContext) private var modelContext
+
+    /// App-owned Sync Settings presenter that can survive runtime data-stack replacement.
+    @Environment(\.presentSyncSettings) private var presentSyncSettings
 
     /// System color scheme used to resolve automatic night-mode behavior.
     @Environment(\.colorScheme) private var colorScheme
@@ -759,7 +765,9 @@ public struct BibleReaderView: View {
      - Note: This initializer performs no work directly. The view resolves its dependencies from
        the SwiftUI environment when rendered.
      */
-    public init() {}
+    public init(readerContentIdentity: UUID? = nil) {
+        self.readerContentIdentity = readerContentIdentity
+    }
 
     /**
      Builds the reader content plus always-on reader overlays.
@@ -935,6 +943,7 @@ public struct BibleReaderView: View {
 
             // Split content — one BibleWindowPane per visible window
             splitContent
+                .id(readerContentIdentity)
 
             // Persistent mini-player when speaking (visible even in fullscreen)
             if speakService.isSpeaking {
@@ -3427,7 +3436,11 @@ public struct BibleReaderView: View {
         case .importExport:
             dismissReaderNavigationDrawerAndPerform { presentReaderModal(.importExport) }
         case .syncSettings:
-            dismissReaderNavigationDrawerAndPerform { presentReaderModal(.syncSettings) }
+            dismissReaderNavigationDrawerAndPerform {
+                if !presentSyncSettings() {
+                    presentReaderModal(.syncSettings)
+                }
+            }
         case .settings:
             dismissReaderNavigationDrawerAndPerform {
                 presentSettings(from: windowManager.activeWindow?.id)

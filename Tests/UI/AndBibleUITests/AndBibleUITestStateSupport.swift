@@ -1845,6 +1845,83 @@ extension AndBibleUITests {
     }
 
     /**
+     Taps one adopt-versus-create Sync alert choice and waits for the exported Sync state to change.
+     *
+     * - Parameters:
+     *   - title: Visible alert button title to choose.
+     *   - expectedTokens: Sync screen token values expected after the alert action.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the action and state transition.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - taps the real native alert button for the visible Sync bootstrap prompt
+     *   - retries only while the same first-prompt button remains visible after XCTest reports a tap
+     * - Failure modes:
+     *   - records an XCTest failure if the alert choice disappears without producing the expected
+     *     state or if the prompt remains visible until timeout
+     */
+    func chooseSyncBootstrapPromptOption(
+        _ title: String,
+        expecting expectedTokens: [String: String],
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
+
+        func expectedStateIsVisible() -> Bool {
+            guard let state = resolvedElementSemanticText("syncSettingsState", in: app) else {
+                return false
+            }
+            lastState = state
+            return expectedTokens.allSatisfy { syncStateToken(named: $0.key, in: state) == $0.value }
+        }
+
+        XCTAssertTrue(
+            app.alerts.firstMatch.buttons[title].waitForExistence(timeout: min(timeout, 10)),
+            "Expected the adopt-versus-create alert to expose '\(title)'.",
+            file: file,
+            line: line
+        )
+
+        repeat {
+            if expectedStateIsVisible() {
+                return
+            }
+
+            let button = app.alerts.firstMatch.buttons[title].firstMatch
+            if button.exists {
+                tapElementReliably(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)), file: file, line: line)
+            }
+
+            let settleDeadline = Date().addingTimeInterval(min(1.5, max(0.2, deadline.timeIntervalSinceNow)))
+            repeat {
+                if expectedStateIsVisible() {
+                    return
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            } while Date() < settleDeadline
+
+            if !button.exists {
+                break
+            }
+        } while Date() < deadline
+
+        let expectedDescription = expectedTokens
+            .sorted(by: { $0.key < $1.key })
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ";")
+        XCTFail(
+            "Expected alert choice '\(title)' to drive syncSettingsState to '\(expectedDescription)' within \(timeout) seconds. Final state: '\(lastState)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Toggles the real justify-text setting and treats the screen-level exported state as the
      authoritative mutation signal.
      *

@@ -601,11 +601,13 @@ extension AndBibleUITests {
         }
 
         if let controlFrame = snapshotFrame(of: unresolvedElement(controlIdentifier, in: app)) {
+            let offsetX = controlFrame.midX - appSnapshot.frame.minX
+            let offsetY = controlFrame.midY - appSnapshot.frame.minY
+            guard offsetX.isFinite, offsetY.isFinite else {
+                return false
+            }
             app.coordinate(withNormalizedOffset: .zero).withOffset(
-                CGVector(
-                    dx: controlFrame.midX - appSnapshot.frame.minX,
-                    dy: controlFrame.midY - appSnapshot.frame.minY
-                )
+                CGVector(dx: offsetX, dy: offsetY)
             ).tap()
             return true
         }
@@ -618,8 +620,13 @@ extension AndBibleUITests {
             guard tapX.isFinite, tapY.isFinite else {
                 return false
             }
+            let offsetX = tapX - appSnapshot.frame.minX
+            let offsetY = tapY - appSnapshot.frame.minY
+            guard offsetX.isFinite, offsetY.isFinite else {
+                return false
+            }
             app.coordinate(withNormalizedOffset: .zero).withOffset(
-                CGVector(dx: tapX - appSnapshot.frame.minX, dy: tapY - appSnapshot.frame.minY)
+                CGVector(dx: offsetX, dy: offsetY)
             ).tap()
             return true
         }

@@ -110,6 +110,33 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Guards shared UI-test coordinate helpers against XCTest frames whose origin and size are finite
+     but whose derived activation point overflows.
+     *
+     * Setup:
+     * - builds a synthetic frame matching the unstable XCTest geometry class observed in CI
+     *
+     * Expected result:
+     * - the frame is rejected before any helper tries to synthesize a tap coordinate from it
+     *
+     * Failure meaning:
+     * - reader chrome and menu helpers can still crash a shard with an infinite tap coordinate
+     *   instead of falling back to another stable surface.
+     *
+     * Side effects: none.
+     */
+    func testElementFrameGuardRejectsOverflowedDerivedCoordinates() {
+        let overflowedMidpointFrame = CGRect(
+            x: CGFloat.greatestFiniteMagnitude,
+            y: 1,
+            width: CGFloat.greatestFiniteMagnitude,
+            height: 44
+        )
+
+        XCTAssertFalse(elementFrameIsUsable(overflowedMidpointFrame))
+    }
+
+    /**
      Protects host-side `xcrun simctl` calls from inheriting simulator/XCTest user-directory values
      or stale command-line-tool selections.
      *

@@ -24,7 +24,9 @@ import BibleCore
  - editing WebDAV credentials updates local state and can be persisted to SwiftData plus Keychain
  - testing a NextCloud/WebDAV connection builds a transient `WebDAVClient` and performs a network
    request against the configured server
- - toggling iCloud sync calls back into `SyncService` and can persist a restart-required sync mode
+ - toggling iCloud sync calls back into `SyncService`; the production app applies it live, while
+   preview or test hosts without an installed runtime handler can still surface restart-required
+   fallback state
  - disabling iCloud sync first presents a confirmation dialog before mutating the service state
  */
 public struct SyncSettingsView: View {
@@ -36,9 +38,6 @@ public struct SyncSettingsView: View {
 
     /// Whether the destructive disable-sync confirmation dialog is presented.
     @State private var showDisableConfirmation = false
-
-    /// Whether the restart-required informational alert is presented.
-    @State private var showRestartAlert = false
 
     /// Currently selected sync backend shown in the backend picker.
     @State private var selectedBackend: RemoteSyncBackend = .iCloud
@@ -285,15 +284,9 @@ public struct SyncSettingsView: View {
         ) {
             Button(String(localized: "disable_sync"), role: .destructive) {
                 syncService.toggleSync()
-                showRestartAlert = true
             }
         } message: {
             Text(String(localized: "disable_sync_warning"))
-        }
-        .alert(String(localized: "restart_required"), isPresented: $showRestartAlert) {
-            Button(String(localized: "ok")) {}
-        } message: {
-            Text(String(localized: "restart_to_apply_sync"))
         }
         .alert(
             String(localized: "cloud_sync_title"),
@@ -348,11 +341,13 @@ public struct SyncSettingsView: View {
                 Toggle(isOn: Binding(
                     get: { syncService.isEnabled },
                     set: { newValue in
+                        guard newValue != syncService.isEnabled else {
+                            return
+                        }
                         if !newValue {
                             showDisableConfirmation = true
                         } else {
                             syncService.toggleSync()
-                            showRestartAlert = true
                         }
                     }
                 )) {
@@ -360,10 +355,10 @@ public struct SyncSettingsView: View {
                         SyncSettingsPresentation.backend,
                         title: String(localized: "icloud_sync_enabled"),
                         summary: String(localized: "icloud_sync_description"),
-                        isEnabled: !syncService.requiresRestart
+                        isEnabled: isICloudToggleEnabled
                     )
                 }
-                .disabled(syncService.requiresRestart)
+                .disabled(!isICloudToggleEnabled)
                 .accessibilityIdentifier("syncICloudEnabledToggle")
             } header: {
                 syncSettingsSectionHeader(String(localized: "icloud_sync"))
@@ -416,6 +411,17 @@ public struct SyncSettingsView: View {
                 }
             }
         }
+    }
+
+    /**
+     Returns whether the iCloud toggle should accept another user change.
+
+     Live runtime rebuilds complete synchronously from the settings screen, but the transient
+     `.syncing` state still protects the control from repeated taps while SwiftUI is reconciling
+     the updated data stack.
+     */
+    private var isICloudToggleEnabled: Bool {
+        !syncService.requiresRestart && syncService.state != .syncing
     }
 
     /**
@@ -782,6 +788,9 @@ public struct SyncSettingsView: View {
         return [
             "backend=\(selectedBackend.rawValue)",
             "enabled=\(enabledToken)",
+            "icloudEnabled=\(syncService.isEnabled)",
+            "restartRequired=\(syncService.requiresRestart)",
+            "icloudState=\(syncStateAccessibilityToken)",
             "visible=\(visibleRemoteCategoryRowsAccessibilityToken)",
             "deferred=\(deferredRemoteCategoryRowsAccessibilityToken)",
             "remoteStatus=\(remoteStatusAccessibilityValue)",
@@ -791,6 +800,33 @@ public struct SyncSettingsView: View {
             "lastConfirmation=\(lastRemoteConfirmationAction ?? "none")",
         ]
         .joined(separator: ";")
+    }
+
+    /**
+     Accessibility-exported token for the CloudKit runtime state shown in the iCloud section.
+
+     UI smoke tests use this token to distinguish the production no-restart path from the fallback
+     `.pendingRestart` state without matching localized status strings or SF Symbol names.
+
+     - Returns: Stable state token for the current `SyncService.state`.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private var syncStateAccessibilityToken: String {
+        switch syncService.state {
+        case .disabled:
+            return "disabled"
+        case .noAccount:
+            return "noAccount"
+        case .idle:
+            return "idle"
+        case .syncing:
+            return "syncing"
+        case .pendingRestart:
+            return "pendingRestart"
+        case .error:
+            return "error"
+        }
     }
 
     /**

@@ -1775,13 +1775,13 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - taps the real add-window control in the reader tab bar
-     *   - waits for the new tab pill to appear, become active, and export the matching
-     *     `readerRenderedContentState` window order before returning
-     *   - retries the add tap once when the expected new tab never materializes
+     *   - waits for the real add-window control to finish any pane-registration disabled state
+     *   - taps the enabled add-window control in the reader tab bar once
+     *   - waits for the expected new tab/window order to appear
+     *   - activates the expected tab through the same tab-tap helper used by multi-window tests
      * - Failure modes:
-     *   - fails if the add control or the expected tab does not appear
-     *   - fails if the new tab appears but never becomes the active rendered window
+     *   - fails if the add control does not appear, never becomes enabled, the expected window
+     *     never materializes, or the expected tab cannot be activated
      */
     func addWindowTab(
         expectingOrder order: Int,
@@ -1791,42 +1791,56 @@ extension AndBibleUITests {
         line: UInt = #line
     ) {
         let identifier = "windowTabButton::\(order)"
-        var sawExpectedTab = false
+        let addButtonIdentifier = "windowTabAddButton"
+        var lastAddButtonValue = "nil"
+        var lastAddButtonEnabled = false
         var lastTabValue = "nil"
         var lastRenderedState = "nil"
 
-        for attempt in 1...2 {
-            tapElementReliably(
-                requireWindowTabBarButton("windowTabAddButton", in: app, timeout: timeout, file: file, line: line),
-                timeout: timeout,
+        _ = requireWindowTabBarButton(addButtonIdentifier, in: app, timeout: timeout, file: file, line: line)
+        let addButtonDeadline = Date().addingTimeInterval(timeout)
+        var tappedAddButton = false
+        repeat {
+            if let addButton = resolvedWindowTabBarButton(addButtonIdentifier, in: app) {
+                lastAddButtonValue = addButton.value.map { "\($0)" } ?? "nil"
+                lastAddButtonEnabled = addButton.isEnabled
+                if addButton.isEnabled && waitForElementToBecomeHittable(addButton, timeout: 0.2) {
+                    addButton.tap()
+                    tappedAddButton = true
+                    break
+                }
+            }
+            lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < addButtonDeadline
+
+        guard tappedAddButton else {
+            XCTFail(
+                "Expected add-window control to become enabled within \(timeout) seconds; last add value was '\(lastAddButtonValue)', enabled=\(lastAddButtonEnabled), and last reader state was '\(lastRenderedState)'.",
                 file: file,
                 line: line
             )
-
-            let deadline = Date().addingTimeInterval(timeout)
-            repeat {
-                if let tabButton = resolvedWindowTabBarButton(identifier, in: app) {
-                    sawExpectedTab = true
-                    lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
-                    lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
-                    if lastTabValue.contains("state=active") && lastRenderedState.contains("windowOrder=\(order)") {
-                        return
-                    }
-                } else {
-                    lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            } while Date() < deadline
-
-            if sawExpectedTab || attempt == 2 {
-                break
-            }
-
-            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            return
         }
 
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let tabButton = resolvedWindowTabBarButton(identifier, in: app) {
+                lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
+                tapWindowTab(order, in: app, timeout: timeout, file: file, line: line)
+                return
+            }
+
+            lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
+            if windowTabOrdersFromReaderState(in: app)?.contains(order) == true {
+                tapWindowTab(order, in: app, timeout: timeout, file: file, line: line)
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
         XCTFail(
-            "Expected added window tab \(order) to become the active rendered window within \(timeout) seconds; last tab value was '\(lastTabValue)' and last reader state was '\(lastRenderedState)'.",
+            "Expected added window tab \(order) to materialize within \(timeout) seconds; last tab value was '\(lastTabValue)' and last reader state was '\(lastRenderedState)'.",
             file: file,
             line: line
         )

@@ -15,6 +15,10 @@ extension AndBibleUITests {
 
     /**
      Returns true when one already sampled frame is finite and usable for coordinate taps.
+     *
+     * XCTest can occasionally expose frames whose stored origin and size are finite but whose
+     * derived edges or midpoint overflow. Coordinate helpers synthesize taps from those derived
+     * values, so the guard rejects the entire frame before any caller reaches XCTest's event path.
      */
     func elementFrameIsUsable(_ frame: CGRect) -> Bool {
         return !frame.isNull &&
@@ -22,7 +26,13 @@ extension AndBibleUITests {
             frame.origin.x.isFinite &&
             frame.origin.y.isFinite &&
             frame.width.isFinite &&
-            frame.height.isFinite
+            frame.height.isFinite &&
+            frame.minX.isFinite &&
+            frame.minY.isFinite &&
+            frame.midX.isFinite &&
+            frame.midY.isFinite &&
+            frame.maxX.isFinite &&
+            frame.maxY.isFinite
     }
 
     /**

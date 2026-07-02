@@ -3,6 +3,7 @@
 import SwiftUI
 import SwiftData
 import Darwin
+import Observation
 import BibleCore
 import BibleUI
 import SwordKit
@@ -133,10 +134,137 @@ private enum PendingRemoteSyncConfirmation: Identifiable, Equatable {
     }
 }
 
+/**
+ Holds the current lifecycle-sync service behind a stable reference for background refresh.
+
+ `BGTaskScheduler` registers its launch handler once, but issue #322 lets the app rebuild the
+ SwiftData stack in-session when iCloud sync is toggled. Keeping this indirection means a later
+ background-refresh launch delegates to the current lifecycle service instead of the instance that
+ existed when the scheduler was first registered.
+ */
+private final class RemoteSyncLifecycleRuntimeReference {
+    /// Current lifecycle service for the active SwiftData container.
+    @MainActor
+    private var service: RemoteSyncLifecycleService?
+
+    /**
+     Replaces the service used by future background-refresh launches.
+     *
+     * - Parameter service: Lifecycle service bound to the current app data stack.
+     * - Side effects: Updates the service reference used by `synchronizeIfNeeded(force:)`.
+     * - Failure modes: none.
+     */
+    @MainActor
+    func update(_ service: RemoteSyncLifecycleService) {
+        self.service = service
+    }
+
+    /**
+     Runs lifecycle synchronization through the current service.
+     *
+     * - Parameter force: Whether throttling should be bypassed.
+     * - Returns: `false` when no service has been installed yet; otherwise the service result.
+     * - Side effects: Delegates to `RemoteSyncLifecycleService`.
+     * - Failure modes: Service failures are handled by the service itself and reported as `false`.
+     */
+    @MainActor
+    func synchronizeIfNeeded(force: Bool) async -> Bool {
+        guard let service else {
+            return false
+        }
+        return await service.synchronizeIfNeeded(force: force)
+    }
+}
+
+/**
+ Process-owned presentation state for the app-level Sync Settings route.
+
+ The iCloud toggle can rebuild the SwiftData container while Sync Settings is visible. Keeping the
+ route intent in a stable observable reference, rather than in reader-owned sheet state, lets the
+ window remain open while the data-bound reader subtree refreshes underneath it.
+
+ Side effects:
+ - `present(modelContainer:)` retains the active SwiftData container used by the route's settings
+   store
+ - `dismiss()` releases that captured container after the user explicitly closes Sync Settings
+
+ Failure modes: none; callers choose whether to surface container-loading failures before updating
+ this route state.
+ */
+@MainActor
+@Observable
+private final class SyncSettingsRouteState {
+    /// Shared route state used by every recreated `AndBibleApp` value in the process.
+    static let shared = SyncSettingsRouteState()
+
+    /// Whether Sync Settings should currently be visible above the reader shell.
+    private(set) var isPresented = false
+
+    /// SwiftData container that backs the visible Sync Settings route.
+    private(set) var modelContainer: ModelContainer?
+
+    /**
+     Creates the process-owned route state.
+
+     The initializer is private because the route must survive SwiftUI app-value recreation inside
+     this process. Callers use `shared`.
+     */
+    private init() {}
+
+    /**
+     Opens Sync Settings above the app shell.
+
+     - Parameter modelContainer: Container used by the route's SwiftData environment.
+     - Side effects: Marks the route visible and retains `modelContainer` until dismissal.
+     - Failure modes: none.
+     */
+    func present(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+        isPresented = true
+    }
+
+    /**
+     Closes Sync Settings after explicit user dismissal.
+
+     - Side effects: Marks the route hidden and releases the retained settings container.
+     - Failure modes: none.
+     */
+    func dismiss() {
+        isPresented = false
+        modelContainer = nil
+    }
+}
+
+/**
+ Runtime objects prepared for an iCloud sync mode transition.
+
+ Container construction can happen while Sync Settings is open, but rebinding the app shell to the
+ new SwiftData container recreates data-bound reader panes. Holding the prepared runtime lets the
+ app defer that visible shell refresh until the user closes Sync Settings, while `SyncService` can
+ still observe the effective container immediately.
+ */
+@MainActor
+private struct ICloudRuntimeModeChange {
+    /// Effective SwiftData container for the requested iCloud mode.
+    let modelContainer: ModelContainer
+
+    /// Window manager rebuilt against `modelContainer`.
+    let windowManager: WindowManager
+
+    /// Lifecycle sync service rebuilt against `modelContainer`.
+    let remoteSyncLifecycleService: RemoteSyncLifecycleService
+
+    /// Effective iCloud mode after startup recovery and fallback handling.
+    let effectiveICloudEnabled: Bool
+
+    /// Whether CloudKit startup failed and local fallback recovered the app.
+    let didRecoverFromCloudKitFailure: Bool
+}
+
 @main
 struct AndBibleApp: App {
     /// SwiftData model container for all persisted entities.
-    let modelContainer: ModelContainer
+    @State private var modelContainer: ModelContainer
 
     /// Core services shared across the app.
     @State private var windowManager: WindowManager
@@ -144,6 +272,11 @@ struct AndBibleApp: App {
     @State private var syncService: SyncService
     @State private var searchIndexService = SearchIndexService()
     @State private var remoteSyncLifecycleService: RemoteSyncLifecycleService
+    @State private var contentIdentity = UUID()
+    /// App-owned Sync Settings route state that survives live SwiftData runtime replacement.
+    @State private var syncSettingsRouteState = SyncSettingsRouteState.shared
+    /// Prepared iCloud runtime swap waiting for explicit Sync Settings dismissal.
+    @State private var pendingICloudRuntimeModeChange: ICloudRuntimeModeChange?
     @State private var pendingRemoteAdoption: RemoteSyncBootstrapCandidate?
     @State private var queuedRemoteAdoptions: [RemoteSyncBootstrapCandidate] = []
     @State private var pendingRemoteConfirmation: PendingRemoteSyncConfirmation?
@@ -161,6 +294,7 @@ struct AndBibleApp: App {
     /// Scheduled dismissal for the current external document install-success toast.
     @State private var externalDocumentImportToastWorkItem: DispatchWorkItem?
     private let remoteSyncNetworkMonitor: RemoteSyncNetworkMonitor
+    private let remoteSyncLifecycleRuntimeReference = RemoteSyncLifecycleRuntimeReference()
     #if os(iOS)
     private let remoteSyncBackgroundRefreshCoordinator: RemoteSyncBackgroundRefreshCoordinator
     @UIApplicationDelegateAdaptor(AndBibleApplicationDelegate.self) private var appDelegate
@@ -195,19 +329,9 @@ struct AndBibleApp: App {
         )
     }
 
-    init() {
-        let networkMonitor = RemoteSyncNetworkMonitor()
-        self.remoteSyncNetworkMonitor = networkMonitor
-
-        // Repair any stale migration state before creating the ModelContainer.
-        DataMigration.migrateIfNeeded()
-
-        // Read iCloud sync preference from UserDefaults (before container creation)
-        let requestedICloudEnabled = UserDefaults.standard.bool(forKey: Self.iCloudSyncEnabledKey)
-
-        // -- User data models: keep config name "AndBible" so existing store file is reused.
-        // When iCloud sync is enabled, these models sync via CloudKit. --
-        let cloudModels: [any PersistentModel.Type] = [
+    /// User-data models that live in the CloudKit-capable `AndBible` store.
+    private static var cloudModels: [any PersistentModel.Type] {
+        [
             Workspace.self,
             Window.self,
             PageManager.self,
@@ -228,24 +352,144 @@ struct AndBibleApp: App {
             ReadingPlan.self,
             ReadingPlanDay.self,
         ]
+    }
 
-        // -- Device-local models: never sync, separate store. --
-        let localModels: [any PersistentModel.Type] = [
+    /// Device-local models that are intentionally excluded from CloudKit sync.
+    private static var localModels: [any PersistentModel.Type] {
+        [
             Repository.self,
             Setting.self,
         ]
+    }
 
+    /**
+     Builds the SwiftData model container for the requested iCloud mode.
+
+     This is shared by app startup and live Settings changes so both paths use the same store names,
+     schemas, CloudKit identifier, and startup-recovery behavior.
+
+     - Parameter requestedICloudEnabled: User-requested CloudKit mode.
+     - Returns: Loaded container plus the effective mode after CloudKit recovery, if any.
+     - Side effects:
+       - may clear `icloud_sync_enabled` through `ICloudModelContainerStartupRecovery` if CloudKit
+         startup fails and local fallback succeeds
+     - Failure modes: Re-throws if neither the requested nor fallback container can be created.
+     */
+    private static func loadModelContainer(
+        requestedICloudEnabled: Bool
+    ) throws -> ICloudModelContainerStartupRecovery.Result<ModelContainer> {
+        let cloudModels = Self.cloudModels
+        let localModels = Self.localModels
         let allModels = cloudModels + localModels
         let schema = Schema(allModels)
-
-        // Keep the original config name "AndBible" so SwiftData reuses the existing
-        // "AndBible.store" file. Changing the name would break PersistentIdentifiers.
         let localConfig = ModelConfiguration(
             "LocalStore",
             schema: Schema(localModels),
             isStoredInMemoryOnly: false,
             cloudKitDatabase: .none
         )
+
+        return try ICloudModelContainerStartupRecovery.loadContainer(
+            iCloudEnabled: requestedICloudEnabled,
+            syncEnabledKey: Self.iCloudSyncEnabledKey,
+            loadCloudKitContainer: {
+                let cloudConfig = ModelConfiguration(
+                    "AndBible",
+                    schema: Schema(cloudModels),
+                    isStoredInMemoryOnly: false,
+                    cloudKitDatabase: .private("iCloud.org.andbible.ios")
+                )
+                return try ModelContainer(for: schema, configurations: [cloudConfig, localConfig])
+            },
+            loadLocalContainer: {
+                let cloudConfig = ModelConfiguration(
+                    "AndBible",
+                    schema: Schema(cloudModels),
+                    isStoredInMemoryOnly: false,
+                    cloudKitDatabase: .none
+                )
+                return try ModelContainer(for: schema, configurations: [cloudConfig, localConfig])
+            }
+        )
+    }
+
+    /**
+     Creates the lifecycle service for the current SwiftData container.
+
+     - Parameters:
+       - container: SwiftData container used for remote-sync model contexts.
+       - windowManager: Window manager that should refresh after workspace sync completes.
+       - networkMonitor: Best-effort network availability source.
+     - Returns: Configured lifecycle service with app-shell callbacks attached.
+     - Side effects: none until the returned service is invoked.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func makeRemoteSyncLifecycleService(
+        modelContainer container: ModelContainer,
+        windowManager: WindowManager,
+        networkMonitor: RemoteSyncNetworkMonitor
+    ) -> RemoteSyncLifecycleService {
+        let remoteSyncLifecycleService = RemoteSyncLifecycleService(
+            modelContainer: container,
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "org.andbible.ios",
+            synchronizationServiceFactory: { remoteSettingsStore in
+                try RemoteSyncSynchronizationServiceFactory(
+                    bundleIdentifier: Bundle.main.bundleIdentifier ?? "org.andbible.ios"
+                )
+                .makeSynchronizationService(using: remoteSettingsStore)
+            },
+            networkAvailableProvider: { [networkMonitor] in
+                networkMonitor.isNetworkAvailable
+            }
+        )
+        remoteSyncLifecycleService.onCategorySynchronized = { report in
+            guard report.category == .workspaces else {
+                return
+            }
+            Self.restoreActiveWorkspace(windowManager: windowManager, modelContainer: container)
+        }
+        return remoteSyncLifecycleService
+    }
+
+    /**
+     Ensures first-launch app data exists for a newly loaded container.
+
+     - Parameters:
+       - container: SwiftData container to prepare.
+       - windowManager: Window manager that receives the active workspace.
+     - Side effects:
+       - creates a default workspace when no workspace exists
+       - seeds Android-compatible default/system labels
+     - Failure modes: Label seeding currently swallows persistence failures through its service.
+     */
+    private static func prepareContainerForUse(
+        _ container: ModelContainer,
+        windowManager: WindowManager
+    ) {
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        Self.restoreActiveWorkspace(
+            windowManager: windowManager,
+            modelContainer: container,
+            workspaceStore: workspaceStore,
+            settingsStore: SettingsStore(modelContext: context)
+        )
+
+        let bookmarkStore = BookmarkStore(modelContext: context)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        bookmarkService.prepareDefaultLabels()
+        bookmarkService.ensureSystemLabels()
+    }
+
+    init() {
+        let networkMonitor = RemoteSyncNetworkMonitor()
+        self.remoteSyncNetworkMonitor = networkMonitor
+
+        // Repair any stale migration state before creating the ModelContainer.
+        DataMigration.migrateIfNeeded()
+
+        // Read iCloud sync preference from UserDefaults (before container creation)
+        let requestedICloudEnabled = UserDefaults.standard.bool(forKey: Self.iCloudSyncEnabledKey)
 
         // Set up SWORD module directory before creating any SwordManager
         SwordSetup.ensureModulesReady()
@@ -254,27 +498,8 @@ struct AndBibleApp: App {
         let sync = SyncService()
 
         do {
-            let startupResult = try ICloudModelContainerStartupRecovery.loadContainer(
-                iCloudEnabled: requestedICloudEnabled,
-                syncEnabledKey: Self.iCloudSyncEnabledKey,
-                loadCloudKitContainer: {
-                    let cloudConfig = ModelConfiguration(
-                        "AndBible",
-                        schema: Schema(cloudModels),
-                        isStoredInMemoryOnly: false,
-                        cloudKitDatabase: .private("iCloud.org.andbible.ios")
-                    )
-                    return try ModelContainer(for: schema, configurations: [cloudConfig, localConfig])
-                },
-                loadLocalContainer: {
-                    let cloudConfig = ModelConfiguration(
-                        "AndBible",
-                        schema: Schema(cloudModels),
-                        isStoredInMemoryOnly: false,
-                        cloudKitDatabase: .none
-                    )
-                    return try ModelContainer(for: schema, configurations: [cloudConfig, localConfig])
-                }
+            let startupResult = try Self.loadModelContainer(
+                requestedICloudEnabled: requestedICloudEnabled
             )
             let container = startupResult.container
             sync.setInitialState(enabled: startupResult.effectiveICloudEnabled)
@@ -282,7 +507,7 @@ struct AndBibleApp: App {
             if startupResult.didRecoverFromCloudKitFailure {
                 self._remoteSyncErrorMessage = State(initialValue: Self.iCloudStartupRecoveryMessage)
             }
-            self.modelContainer = container
+            self._modelContainer = State(initialValue: container)
 
             // Initialize services that need ModelContext
             let context = ModelContext(container)
@@ -290,51 +515,25 @@ struct AndBibleApp: App {
             let windowMgr = WindowManager(workspaceStore: workspaceStore)
             self._windowManager = State(initialValue: windowMgr)
 
-            let remoteSyncLifecycleService = RemoteSyncLifecycleService(
+            let remoteSyncLifecycleService = Self.makeRemoteSyncLifecycleService(
                 modelContainer: container,
-                bundleIdentifier: Bundle.main.bundleIdentifier ?? "org.andbible.ios",
-                synchronizationServiceFactory: { remoteSettingsStore in
-                    try RemoteSyncSynchronizationServiceFactory(
-                        bundleIdentifier: Bundle.main.bundleIdentifier ?? "org.andbible.ios"
-                    )
-                    .makeSynchronizationService(using: remoteSettingsStore)
-                },
-                networkAvailableProvider: { [networkMonitor] in
-                    networkMonitor.isNetworkAvailable
-                }
+                windowManager: windowMgr,
+                networkMonitor: networkMonitor
             )
-            remoteSyncLifecycleService.onCategorySynchronized = { report in
-                guard report.category == .workspaces else {
-                    return
-                }
-                Self.restoreActiveWorkspace(windowManager: windowMgr, modelContainer: container)
-            }
             self._remoteSyncLifecycleService = State(initialValue: remoteSyncLifecycleService)
+            self.remoteSyncLifecycleRuntimeReference.update(remoteSyncLifecycleService)
             #if os(iOS)
             let remoteSyncBackgroundRefreshCoordinator = RemoteSyncBackgroundRefreshCoordinator(
                 modelContainer: container,
-                synchronizeIfNeeded: { force in
-                    await remoteSyncLifecycleService.synchronizeIfNeeded(force: force)
+                synchronizeIfNeeded: { [remoteSyncLifecycleRuntimeReference] force in
+                    await remoteSyncLifecycleRuntimeReference.synchronizeIfNeeded(force: force)
                 }
             )
             remoteSyncBackgroundRefreshCoordinator.register()
             self.remoteSyncBackgroundRefreshCoordinator = remoteSyncBackgroundRefreshCoordinator
             #endif
 
-            // Ensure at least one workspace exists
-            Self.restoreActiveWorkspace(
-                windowManager: windowMgr,
-                modelContainer: container,
-                workspaceStore: workspaceStore,
-                settingsStore: SettingsStore(modelContext: context)
-            )
-
-            // Seed default labels on first launch (matches Android)
-            let bookmarkStore = BookmarkStore(modelContext: context)
-            let bookmarkService = BookmarkService(store: bookmarkStore)
-            bookmarkService.prepareDefaultLabels()
-            // Ensure system labels use deterministic UUIDs for CloudKit dedup
-            bookmarkService.ensureSystemLabels()
+            Self.prepareContainerForUse(container, windowManager: windowMgr)
 
             // Start monitoring iCloud account status
             sync.startMonitoring(container: container)
@@ -350,47 +549,98 @@ struct AndBibleApp: App {
         }
     }
 
-    var body: some Scene {
-        WindowGroup {
-            Group {
-                if showCalculator && !isUnlocked {
-                    CalculatorView {
-                        withAnimation {
-                            isUnlocked = true
-                        }
-                    }
-                } else {
-                    ContentView()
-                        .environment(windowManager)
-                        .environment(syncService)
-                        .environment(searchIndexService)
+    /// Root app content before scene-level lifecycle, alert, and route modifiers are attached.
+    @ViewBuilder
+    private var rootContent: some View {
+        if showCalculator && !isUnlocked {
+            CalculatorView {
+                withAnimation {
+                    isUnlocked = true
                 }
             }
+        } else {
+            ContentView(readerContentIdentity: contentIdentity)
+                .environment(windowManager)
+                .environment(syncService)
+                .environment(searchIndexService)
+                .environment(
+                    \.presentSyncSettings,
+                    SyncSettingsPresentationAction {
+                        syncSettingsRouteState.present(modelContainer: modelContainer)
+                    }
+                )
+        }
+    }
+
+    /// App-owned Sync Settings route content that survives live SwiftData container replacement.
+    private var syncSettingsRouteContent: some View {
+        NavigationStack {
+            SyncSettingsView()
+                .environment(syncService)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(String(localized: "done")) {
+                            dismissSyncSettingsRoute()
+                        }
+                        .accessibilityIdentifier("syncSettingsDoneButton")
+                    }
+                }
+        }
+    }
+
+    /**
+     Dismisses the app-owned Sync Settings route and releases its captured model container.
+
+     - Side effects: Mutates app-level presentation state. Clearing the captured container ensures
+       the next Sync Settings opening uses the app's current SwiftData runtime.
+     - Failure modes: none.
+     */
+    @MainActor
+    private func dismissSyncSettingsRoute() {
+        syncSettingsRouteState.dismiss()
+        activatePendingICloudRuntimeModeChangeIfNeeded()
+    }
+
+    /**
+     Handles scene lifecycle events that affect icons, remote sync, and background refresh.
+
+     - Parameter newPhase: SwiftUI scene phase emitted by the root scene.
+     - Side effects: Starts/stops lifecycle sync, schedules background refresh, and reconciles the
+       alternate app icon when the app becomes active.
+     */
+    private func handleScenePhaseChange(_ newPhase: ScenePhase) {
+        if newPhase == .active {
+            // Reconcile icon state when app becomes active
+            // (setAlternateIconName fails if called before app is fully active)
+            updateAppIcon(discrete: isDiscreteMode)
+            Task {
+                await remoteSyncLifecycleService.sceneDidBecomeActive()
+                #if os(iOS)
+                remoteSyncBackgroundRefreshCoordinator.scheduleNextRefreshIfNeeded()
+                #endif
+            }
+        } else if newPhase == .background {
+            #if os(iOS)
+            remoteSyncBackgroundRefreshCoordinator.scheduleNextRefreshIfNeeded()
+            #endif
+            runRemoteSyncBackgroundPass()
+        } else if newPhase == .inactive {
+            remoteSyncLifecycleService.stopPeriodicSync()
+        }
+    }
+
+    /// Root content with lifecycle and non-alert scene modifiers applied.
+    private var sceneContent: some View {
+        rootContent
             .task {
+                installICloudModeChangeHandler()
                 configureRemoteSyncLifecycleCallbacks()
                 #if os(iOS)
                 remoteSyncBackgroundRefreshCoordinator.scheduleNextRefreshIfNeeded()
                 #endif
             }
             .onChange(of: scenePhase) { _, newPhase in
-                if newPhase == .active {
-                    // Reconcile icon state when app becomes active
-                    // (setAlternateIconName fails if called before app is fully active)
-                    updateAppIcon(discrete: isDiscreteMode)
-                    Task {
-                        await remoteSyncLifecycleService.sceneDidBecomeActive()
-                        #if os(iOS)
-                        remoteSyncBackgroundRefreshCoordinator.scheduleNextRefreshIfNeeded()
-                        #endif
-                    }
-                } else if newPhase == .background {
-                    #if os(iOS)
-                    remoteSyncBackgroundRefreshCoordinator.scheduleNextRefreshIfNeeded()
-                    #endif
-                    runRemoteSyncBackgroundPass()
-                } else if newPhase == .inactive {
-                    remoteSyncLifecycleService.stopPeriodicSync()
-                }
+                handleScenePhaseChange(newPhase)
             }
             .onChange(of: isDiscreteMode) { _, newValue in
                 updateAppIcon(discrete: newValue)
@@ -405,6 +655,11 @@ struct AndBibleApp: App {
                 handleExternalDocumentURL(url)
             }
             .androidToastFeedback(externalDocumentImportToastMessage, bottomPadding: 96)
+    }
+
+    /// Scene content plus lifecycle remote-sync prompts.
+    private var sceneContentWithRemoteSyncAlerts: some View {
+        sceneContent
             .alert(
                 String(localized: "cloud_sync_title"),
                 isPresented: Binding(
@@ -484,6 +739,11 @@ struct AndBibleApp: App {
             } message: {
                 Text(remoteSyncErrorMessage ?? String(localized: "sync_error"))
             }
+    }
+
+    /// Scene content plus external document import prompts.
+    private var sceneContentWithAlerts: some View {
+        sceneContentWithRemoteSyncAlerts
             .alert(
                 String(localized: "import_from_file", defaultValue: "Import from File"),
                 isPresented: Binding(
@@ -526,8 +786,156 @@ struct AndBibleApp: App {
             } message: {
                 Text(externalDocumentImportMessage ?? "")
             }
+    }
+
+    /// Stable scene presentation host that keeps app-owned routes above data-stack replacement.
+    private var scenePresentationHost: some View {
+        ZStack {
+            sceneContentWithAlerts
+                .modelContainer(modelContainer)
+
+            if syncSettingsRouteState.isPresented {
+                syncSettingsRouteContent
+                    .modelContainer(syncSettingsRouteState.modelContainer ?? modelContainer)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemBackground))
+                    .accessibilityIdentifier("appOwnedSyncSettingsRoute")
+                    .zIndex(1)
+            }
         }
-        .modelContainer(modelContainer)
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            scenePresentationHost
+        }
+    }
+
+    /**
+     Installs the live iCloud mode-change hook used by Sync Settings.
+
+     `SyncService` is owned by BibleCore and cannot rebuild the app's SwiftData stack directly.
+     The app shell supplies that missing operation here so enabling or disabling iCloud sync can
+     take effect without asking the user to relaunch.
+     *
+     - Side effects: Stores a mode-change callback on the shared `SyncService`.
+     - Failure modes: The callback itself can throw if the requested data stack cannot be loaded.
+     */
+    @MainActor
+    private func installICloudModeChangeHandler() {
+        syncService.setModeChangeHandler { requestedEnabled in
+            try applyICloudRuntimeMode(requestedEnabled)
+        }
+    }
+
+    /**
+     Builds a complete runtime for a requested iCloud sync mode without rebinding the scene.
+
+     - Parameter requestedEnabled: User-requested CloudKit mode from Sync Settings.
+     - Returns: Prepared runtime objects plus the effective iCloud mode after startup recovery.
+     - Side effects:
+       - loads a new SwiftData container using the same startup recovery path as app launch
+       - seeds required workspace/bookmark data in the prepared container
+       - may clear the persisted iCloud preference through startup recovery when CloudKit fails
+     - Failure modes: Re-throws if the requested/fallback SwiftData container cannot be loaded.
+     */
+    @MainActor
+    private func makeICloudRuntimeModeChange(_ requestedEnabled: Bool) throws -> ICloudRuntimeModeChange {
+        let startupResult = try Self.loadModelContainer(requestedICloudEnabled: requestedEnabled)
+        let container = startupResult.container
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowMgr = WindowManager(workspaceStore: workspaceStore)
+        let lifecycleService = Self.makeRemoteSyncLifecycleService(
+            modelContainer: container,
+            windowManager: windowMgr,
+            networkMonitor: remoteSyncNetworkMonitor
+        )
+        Self.prepareContainerForUse(container, windowManager: windowMgr)
+
+        return ICloudRuntimeModeChange(
+            modelContainer: container,
+            windowManager: windowMgr,
+            remoteSyncLifecycleService: lifecycleService,
+            effectiveICloudEnabled: startupResult.effectiveICloudEnabled,
+            didRecoverFromCloudKitFailure: startupResult.didRecoverFromCloudKitFailure
+        )
+    }
+
+    /**
+     Rebinds the visible app shell to a prepared iCloud runtime.
+
+     - Parameter change: Runtime prepared by `makeICloudRuntimeModeChange(_:)`.
+     - Side effects:
+       - stops sync work tied to the previous runtime
+       - swaps the app's SwiftData container, window manager, lifecycle service, and background
+         refresh coordinator
+       - resets reader panes so they recreate stores/controllers from the new model context
+       - may surface the CloudKit startup recovery message when no Sync Settings route is open
+     - Failure modes: none; container construction already completed before this helper runs.
+     */
+    @MainActor
+    private func activateICloudRuntimeModeChange(_ change: ICloudRuntimeModeChange) {
+        remoteSyncLifecycleService.stopPeriodicSync()
+        modelContainer = change.modelContainer
+        windowManager = change.windowManager
+        remoteSyncLifecycleService = change.remoteSyncLifecycleService
+        remoteSyncLifecycleRuntimeReference.update(change.remoteSyncLifecycleService)
+        contentIdentity = UUID()
+        configureRemoteSyncLifecycleCallbacks()
+
+        if change.didRecoverFromCloudKitFailure, !syncSettingsRouteState.isPresented {
+            remoteSyncErrorMessage = Self.iCloudStartupRecoveryMessage
+        }
+
+        #if os(iOS)
+        remoteSyncBackgroundRefreshCoordinator.updateModelContainer(change.modelContainer)
+        remoteSyncBackgroundRefreshCoordinator.scheduleNextRefreshIfNeeded()
+        #endif
+    }
+
+    /**
+     Applies any iCloud runtime swap deferred while Sync Settings was visible.
+
+     - Side effects: Mutates app-level runtime state and clears the pending swap after activation.
+     - Failure modes: none; pending changes are already fully constructed.
+     */
+    @MainActor
+    private func activatePendingICloudRuntimeModeChangeIfNeeded() {
+        guard let change = pendingICloudRuntimeModeChange else {
+            return
+        }
+        pendingICloudRuntimeModeChange = nil
+        activateICloudRuntimeModeChange(change)
+    }
+
+    /**
+     Rebuilds the app runtime for a requested iCloud sync mode.
+
+     When Sync Settings is open, the container is loaded immediately and returned to `SyncService`,
+     but the reader/app-shell rebind is deferred until explicit Sync Settings dismissal so the
+     current settings window does not close under the user's finger.
+
+     - Parameter requestedEnabled: User-requested CloudKit mode from Sync Settings.
+     - Returns: Effective runtime sync mode and the container that should be monitored.
+     - Side effects:
+       - loads a new SwiftData container using the same startup recovery path as app launch
+       - either activates the prepared runtime immediately or records it for dismissal-time
+         activation while Sync Settings stays open
+     - Failure modes: Re-throws if the requested/fallback SwiftData container cannot be loaded.
+     */
+    @MainActor
+    private func applyICloudRuntimeMode(_ requestedEnabled: Bool) throws -> SyncModeChangeResult {
+        let change = try makeICloudRuntimeModeChange(requestedEnabled)
+        if syncSettingsRouteState.isPresented {
+            pendingICloudRuntimeModeChange = change
+        } else {
+            activateICloudRuntimeModeChange(change)
+        }
+        return SyncModeChangeResult(
+            effectiveEnabled: change.effectiveICloudEnabled,
+            modelContainer: change.modelContainer
+        )
     }
 
     /**

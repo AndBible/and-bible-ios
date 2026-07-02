@@ -221,6 +221,151 @@ final class RemoteSyncStateTests: XCTestCase {
         XCTAssertFalse(defaults.bool(forKey: syncEnabledKey))
     }
 
+    /**
+     Verifies iCloud toggle changes can be applied to the live runtime without entering the
+     restart-required state.
+
+     Issue #322 tracks the old behavior where `SyncService` only persisted the requested toggle
+     and pinned the UI to `.pendingRestart`. The app now installs a runtime mode-change applier
+     that rebuilds the SwiftData stack in-session; the service contract is that a successful
+     applier result becomes the active mode immediately and keeps the toggle usable.
+     */
+    @MainActor
+    func testSyncServiceAppliesRuntimeModeChangeWithoutPendingRestart() throws {
+        let defaultsName = "org.andbible.tests.sync-toggle-live.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        let service = SyncService(defaults: defaults, syncEnabledKey: syncEnabledKey)
+        service.setInitialState(enabled: false)
+        var requestedModes: [Bool] = []
+        service.setModeChangeHandler { requestedMode in
+            requestedModes.append(requestedMode)
+            return SyncModeChangeResult(effectiveEnabled: requestedMode)
+        }
+
+        service.toggleSync()
+
+        XCTAssertEqual(requestedModes, [true])
+        XCTAssertTrue(service.isEnabled)
+        XCTAssertFalse(service.requiresRestart)
+        XCTAssertEqual(service.state, .idle)
+        XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
+    }
+
+    /**
+     Verifies failed live iCloud mode changes do not leave persisted preferences or UI state in an
+     impossible half-applied state.
+
+     The runtime applier is responsible for rebuilding the SwiftData container. When that rebuild
+     throws, the service must restore the previous preference and expose an error instead of
+     requiring a restart or claiming the requested CloudKit mode is active.
+     */
+    @MainActor
+    func testSyncServiceRevertsPreferenceWhenRuntimeModeChangeFails() throws {
+        enum RuntimeModeChangeError: LocalizedError {
+            case rejected
+
+            var errorDescription: String? { "CloudKit runtime rebuild failed" }
+        }
+
+        let defaultsName = "org.andbible.tests.sync-toggle-failure.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        defaults.set(false, forKey: syncEnabledKey)
+        let service = SyncService(defaults: defaults, syncEnabledKey: syncEnabledKey)
+        service.setInitialState(enabled: false)
+        service.setModeChangeHandler { _ in
+            throw RuntimeModeChangeError.rejected
+        }
+
+        service.toggleSync()
+
+        XCTAssertFalse(service.isEnabled)
+        XCTAssertFalse(service.requiresRestart)
+        XCTAssertEqual(service.state, .error("CloudKit runtime rebuild failed"))
+        XCTAssertFalse(defaults.bool(forKey: syncEnabledKey))
+    }
+
+    /**
+     Verifies failed live iCloud mode changes preserve metadata for the still-active runtime.
+
+     The live mode-change handler throws before `SyncService` accepts a replacement SwiftData
+     container. In that path the existing runtime is still current, so rollback should restore the
+     persisted mode and expose an error without clearing timestamps that still describe the active
+     container.
+     */
+    @MainActor
+    func testSyncServicePreservesCurrentRuntimeMetadataWhenModeChangeFails() throws {
+        enum RuntimeModeChangeError: LocalizedError {
+            case rejected
+
+            var errorDescription: String? { "CloudKit runtime rebuild failed" }
+        }
+
+        let defaultsName = "org.andbible.tests.sync-toggle-failure-metadata.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        defaults.set(true, forKey: syncEnabledKey)
+        let service = SyncService(defaults: defaults, syncEnabledKey: syncEnabledKey)
+        service.setInitialState(enabled: true)
+        service.recordAccountDescription("Signed in before failed mode change")
+        let expectedLastSyncDate = Date(timeIntervalSince1970: 1_805_000_000)
+        service.recordRemoteChange(at: expectedLastSyncDate)
+        let lastSyncDateBeforeFailure = try XCTUnwrap(service.lastSyncDate)
+        let accountDescriptionBeforeFailure = try XCTUnwrap(service.accountDescription)
+        service.setModeChangeHandler { _ in
+            throw RuntimeModeChangeError.rejected
+        }
+
+        service.toggleSync()
+
+        XCTAssertTrue(service.isEnabled)
+        XCTAssertFalse(service.requiresRestart)
+        XCTAssertEqual(service.state, .error("CloudKit runtime rebuild failed"))
+        XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
+        XCTAssertEqual(service.lastSyncDate, lastSyncDateBeforeFailure)
+        XCTAssertEqual(service.accountDescription, accountDescriptionBeforeFailure)
+    }
+
+    /**
+     Preserves the restart-required fallback for hosts that do not install a live runtime applier.
+
+     Production app startup should install the handler, but previews or other test hosts may still
+     use `SyncService` directly. Keeping the fallback makes those callers explicit and avoids a
+     silent no-op when no runtime stack can be rebuilt.
+     */
+    @MainActor
+    func testSyncServiceFallsBackToPendingRestartWithoutRuntimeModeHandler() throws {
+        let defaultsName = "org.andbible.tests.sync-toggle-fallback.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        let service = SyncService(defaults: defaults, syncEnabledKey: syncEnabledKey)
+        service.setInitialState(enabled: false)
+
+        service.toggleSync()
+
+        XCTAssertTrue(service.isEnabled)
+        XCTAssertTrue(service.requiresRestart)
+        XCTAssertEqual(service.state, .pendingRestart)
+        XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
+    }
+
     func testRemoteSyncSettingsStoreDefaultsToICloudWhenBackendMissing() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let secretStore = InMemorySecretStore()

@@ -1877,6 +1877,57 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         )
     }
 
+    /**
+     Verifies background-refresh scheduling reads from the replacement data stack after a live
+     iCloud mode change.
+
+     Issue #322 rebuilds the SwiftData container in-session. The old container is configured as
+     iCloud-only, which should cancel background refresh, while the replacement container enables
+     NextCloud bookmark sync with a stored interval. A submitted request proves the coordinator
+     no longer reads remote-sync settings from stale startup state.
+     */
+    @MainActor
+    func testRemoteSyncBackgroundRefreshCoordinatorUsesUpdatedContainerForScheduling() throws {
+        let oldContainer = try makeInMemorySettingsContainer()
+        let oldSettingsStore = RemoteSyncSettingsStore(
+            settingsStore: SettingsStore(modelContext: ModelContext(oldContainer)),
+            secretStore: InMemorySecretStore()
+        )
+        oldSettingsStore.selectedBackend = .iCloud
+
+        let replacementContainer = try makeInMemorySettingsContainer()
+        let replacementSettingsStore = RemoteSyncSettingsStore(
+            settingsStore: SettingsStore(modelContext: ModelContext(replacementContainer)),
+            secretStore: InMemorySecretStore()
+        )
+        replacementSettingsStore.selectedBackend = .nextCloud
+        replacementSettingsStore.setSyncEnabled(true, for: .bookmarks)
+        SettingsStore(modelContext: ModelContext(replacementContainer))
+            .setString("gdrive_sync_interval", value: "1800")
+
+        let scheduler = FakeRemoteSyncBackgroundRefreshScheduler()
+        let now = Date(timeIntervalSince1970: 2_000)
+        let coordinator = RemoteSyncBackgroundRefreshCoordinator(
+            modelContainer: oldContainer,
+            scheduler: scheduler,
+            nowProvider: { now },
+            synchronizeIfNeeded: { _ in true }
+        )
+
+        coordinator.updateModelContainer(replacementContainer)
+        coordinator.scheduleNextRefreshIfNeeded()
+
+        XCTAssertEqual(
+            scheduler.submittedRequests,
+            [
+                RemoteSyncBackgroundRefreshRequest(
+                    identifier: RemoteSyncBackgroundRefreshCoordinator.defaultTaskIdentifier,
+                    earliestBeginDate: now.addingTimeInterval(1_800)
+                ),
+            ]
+        )
+    }
+
     @MainActor
     func testRemoteSyncBackgroundRefreshCoordinatorCancelsWhenNoRemoteCategoriesAreEnabled() throws {
         let container = try makeInMemorySettingsContainer()

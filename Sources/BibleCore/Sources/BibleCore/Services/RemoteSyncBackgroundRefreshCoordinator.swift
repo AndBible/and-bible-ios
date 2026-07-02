@@ -244,12 +244,17 @@ actor RemoteSyncBackgroundRefreshCompletionState {
    best-effort and must not block the foreground app
  - disabled or incomplete remote-sync configuration cancels pending requests instead of scheduling
  - expired tasks complete with `success = false` and rely on the next schedule attempt
+
+ - Important: The coordinator is main-actor isolated because issue #322 allows its model
+   container to be replaced after startup. All scheduling reads and container rebinding must stay
+   serialized with the app's SwiftData runtime swap.
  */
+@MainActor
 public final class RemoteSyncBackgroundRefreshCoordinator {
     /// Stable app-refresh identifier declared in `Info.plist`.
-    public static let defaultTaskIdentifier = "org.andbible.ios.remote-sync-refresh"
+    public nonisolated static let defaultTaskIdentifier = "org.andbible.ios.remote-sync-refresh"
 
-    private let modelContainer: ModelContainer
+    private var modelContainer: ModelContainer
     private let taskIdentifier: String
     private let scheduler: any RemoteSyncBackgroundRefreshScheduling
     private let nowProvider: () -> Date
@@ -327,10 +332,26 @@ public final class RemoteSyncBackgroundRefreshCoordinator {
                 return
             }
 
-            Task {
+            Task { @MainActor in
                 await self.handle(task: task)
             }
         }
+    }
+
+    /**
+     Rebinds scheduling reads to the current app model container.
+
+     Issue #322 allows the app to rebuild its SwiftData stack after a live iCloud sync toggle. The
+     background-refresh registration itself remains stable, but future scheduling decisions must
+     read remote-sync settings from the replacement container instead of the startup container.
+     Launched tasks are already routed through the injected `synchronizeIfNeeded` closure.
+
+     - Parameter modelContainer: Replacement container backing current app state.
+     - Side effects: Future `scheduleNextRefreshIfNeeded()` calls read settings from this container.
+     - Failure modes: none.
+     */
+    public func updateModelContainer(_ modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
     }
 
     /**

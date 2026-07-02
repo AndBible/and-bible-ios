@@ -139,12 +139,22 @@ public final class WindowManager {
 
     // MARK: - Workspace Management
 
-    /// Set the active workspace and load its windows.
+    /**
+     Sets the active workspace and loads its windows through this manager's store context.
+
+     - Parameter workspace: Workspace selected by the app, possibly resolved through another
+       `ModelContext`.
+     - Side Effects: Clears registered pane controllers, rebinds the workspace by ID into the
+       manager-owned store when possible, refreshes visible/all window lists, and updates active
+       window fallback.
+     - Failure Modes: If the workspace cannot be resolved through the manager store, the supplied
+       instance is retained and refresh may expose no windows until the store can fetch it.
+     */
     public func setActiveWorkspace(_ workspace: Workspace) {
         // Clear controllers from the previous workspace to prevent stale entries
         controllers.removeAll()
         controllerPendingWindowIds.removeAll()
-        activeWorkspace = workspace
+        activeWorkspace = workspaceStore.workspace(id: workspace.id) ?? workspace
         refreshWindows()
     }
 
@@ -298,8 +308,8 @@ public final class WindowManager {
             workspace.maximizedWindowId = nil
         }
 
-        refreshWindows()
         activeWindow = window
+        refreshWindows()
         return window
     }
 
