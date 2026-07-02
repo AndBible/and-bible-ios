@@ -129,6 +129,34 @@ describe("WordOrder.vue", () => {
       const tiles = wrapper.findAll(".order-tile");
       expect(tiles.length).toBe(5);
     });
+
+    /**
+     * Protects persisted Word Order state from corrupted Android/iOS bridge payloads.
+     *
+     * The saved order must be a complete permutation of the current word indices. Length-only
+     * validation can restore duplicate or out-of-range indices, producing undefined tile words and
+     * runtime crashes when correctness is computed.
+     */
+    it("resets if saved config is not a valid permutation of word indices", async () => {
+      const wrapper = await createWrapper({
+        modeConfig: {
+          orderConfig: {
+            currentOrder: [0, 0, 2, 3, 99],
+          }
+        }
+      });
+
+      const emitted = wrapper.emitted("save-mode-config");
+      const tiles = wrapper.findAll(".order-tile");
+      const displayedWords = tiles.map(t => t.text().trim());
+      const lastConfig = emitted?.[emitted.length - 1][0];
+
+      expect(displayedWords).toEqual(expect.arrayContaining(["In", "the", "beginning", "God", "created"]));
+      expect(displayedWords).not.toContain("");
+      expect(lastConfig.orderConfig.currentOrder).toHaveLength(5);
+      expect(new Set(lastConfig.orderConfig.currentOrder).size).toBe(5);
+      expect(lastConfig.orderConfig.currentOrder.every(index => index >= 0 && index < 5)).toBe(true);
+    });
   });
 
   describe("Correct position feedback", () => {

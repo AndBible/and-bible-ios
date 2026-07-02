@@ -150,6 +150,18 @@ function buildTilesFromOrder(order: number[]): TileItem[] {
     return order.map(origIdx => ({origIdx, word: words.value[origIdx]}));
 }
 
+function isValidOrder(order: number[], wordCount: number): boolean {
+    if (order.length !== wordCount) return false;
+    const seen = new Set<number>();
+    return order.every(origIdx => {
+        if (!Number.isInteger(origIdx) || origIdx < 0 || origIdx >= wordCount || seen.has(origIdx)) {
+            return false;
+        }
+        seen.add(origIdx);
+        return true;
+    });
+}
+
 function shuffle(arr: number[]): number[] {
     const result = [...arr];
     for (let i = result.length - 1; i > 0; i--) {
@@ -182,7 +194,7 @@ function resetWords() {
 onMounted(() => {
     buildWordList();
     const config = props.modeConfig?.orderConfig;
-    if (config && config.currentOrder?.length === words.value.length) {
+    if (config && isValidOrder(config.currentOrder, words.value.length)) {
         tiles.value = buildTilesFromOrder(config.currentOrder);
     } else {
         resetWords();
