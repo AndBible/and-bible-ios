@@ -1885,14 +1885,36 @@ extension AndBibleUITests {
         line: UInt = #line
     ) {
         let deadline = Date().addingTimeInterval(timeout)
-        var lastState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
+        let expectedDescription = expectedTokens
+            .sorted(by: { $0.key < $1.key })
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ";")
+        var lastState = semanticStateExportValue("syncSettingsState", in: app) ?? "nil"
 
         func expectedStateIsVisible() -> Bool {
-            guard let state = resolvedElementSemanticText("syncSettingsState", in: app) else {
+            guard let state = semanticStateExportValue("syncSettingsState", in: app) else {
                 return false
             }
             lastState = state
             return expectedTokens.allSatisfy { syncStateToken(named: $0.key, in: state) == $0.value }
+        }
+
+        func waitForExpectedState(timeout settleTimeout: TimeInterval) -> Bool {
+            waitForResolvedSemanticState(
+                named: "syncSettingsState.bootstrapPromptChoice",
+                timeout: settleTimeout,
+                valueProvider: { self.semanticStateExportValue("syncSettingsState", in: app) },
+                success: { state in
+                    lastState = state
+                    return expectedTokens.allSatisfy { self.syncStateToken(named: $0.key, in: state) == $0.value }
+                },
+                recordsFailure: false,
+                failureDescription: { state in
+                    "Expected alert choice '\(title)' to drive syncSettingsState to '\(expectedDescription)'. Final state: '\(state)'."
+                },
+                file: file,
+                line: line
+            )
         }
 
         XCTAssertTrue(
@@ -1912,23 +1934,15 @@ extension AndBibleUITests {
                 tapElementReliably(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)), file: file, line: line)
             }
 
-            let settleDeadline = Date().addingTimeInterval(min(1.5, max(0.2, deadline.timeIntervalSinceNow)))
-            repeat {
-                if expectedStateIsVisible() {
-                    return
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            } while Date() < settleDeadline
+            if waitForExpectedState(timeout: min(1.5, max(0.2, deadline.timeIntervalSinceNow))) {
+                return
+            }
 
             if !button.exists {
                 break
             }
         } while Date() < deadline
 
-        let expectedDescription = expectedTokens
-            .sorted(by: { $0.key < $1.key })
-            .map { "\($0.key)=\($0.value)" }
-            .joined(separator: ";")
         XCTFail(
             "Expected alert choice '\(title)' to drive syncSettingsState to '\(expectedDescription)' within \(timeout) seconds. Final state: '\(lastState)'.",
             file: file,

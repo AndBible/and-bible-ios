@@ -296,6 +296,17 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotIn("RunLoop.current.run", body)
         self.assertNotIn("while Date() < deadline", body)
 
+    def test_sync_bootstrap_prompt_option_waits_on_semantic_state_not_run_loop(self) -> None:
+        """Keep Sync adopt/create prompt settling on the exported Sync Settings state."""
+        source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(source, "chooseSyncBootstrapPromptOption")
+
+        self.assertIn("waitForResolvedSemanticState", body)
+        self.assertIn("recordsFailure: false", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
     def test_resolved_semantic_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
         """Ensure the shared pure-observation wait is backed by XCTest wait primitives."""
         state_source = (
