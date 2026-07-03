@@ -377,6 +377,22 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
             self.assertIn("waitForResolvedSemanticState", body)
             self.assertNotIn("RunLoop.current.run", body)
 
+    def test_search_boolean_state_waits_use_shared_semantic_waiter(self) -> None:
+        """Keep Search boolean state probes on the shared waiter without recording failures."""
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+
+        migrated_waits = [
+            swift_function_body(search_source, "searchTranslationPickerStateIsOpen"),
+            swift_function_body(search_source, "waitForSearchFieldFocusToClear"),
+        ]
+
+        for body in migrated_waits:
+            self.assertIn("waitForResolvedSemanticState", body)
+            self.assertIn("recordsFailure: false", body)
+            self.assertNotIn("RunLoop.current.run", body)
+
 
 if __name__ == "__main__":
     unittest.main()
