@@ -805,25 +805,26 @@ extension AndBibleUITests {
      *   - app: Running application under test.
      *   - timeout: Maximum time to poll the Search state export.
      * - Returns: `true` when the Search state export contains `translationPicker=open`.
-     * - Side effects: none.
+     * - Side effects: samples the Search state export through the shared semantic-state waiter.
      * - Failure modes: This helper does not fail directly.
      */
     func searchTranslationPickerStateIsOpen(
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(max(0, timeout))
-        repeat {
-            if searchStateCandidateValues(in: app).contains(where: { $0.contains("translationPicker=open") }) {
-                return true
+        return waitForResolvedSemanticState(
+            named: "searchStateExport.translationPicker",
+            timeout: max(0, timeout),
+            valueProvider: {
+                let values = self.searchStateCandidateValues(in: app)
+                return values.isEmpty ? nil : values.joined(separator: " || ")
+            },
+            success: { $0.contains("translationPicker=open") },
+            recordsFailure: false,
+            failureDescription: {
+                "Expected Search translation picker state to open within \(timeout) seconds. Last state: '\($0)'."
             }
-            if timeout <= 0 {
-                return false
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        } while Date() < deadline
-
-        return searchStateCandidateValues(in: app).contains { $0.contains("translationPicker=open") }
+        )
     }
 
     /// Returns stable picker descendants that prove the Search translation picker overlay is open.
@@ -1109,7 +1110,7 @@ extension AndBibleUITests {
      *     wait for localized fallback controls that do not expose the stable test value.
      *   - app: Running application under test.
      *   - timeout: Maximum time to wait for the semantic state change.
-     * - Side effects: polls the live picker button only.
+     * - Side effects: samples the live picker button through the shared semantic-state waiter.
      * - Failure modes: fails when the stable picker button remains visible but does not reach the
      *   expected value before the timeout.
      */
@@ -1120,20 +1121,18 @@ extension AndBibleUITests {
     ) {
         guard let expectedValue else { return }
 
-        let deadline = Date().addingTimeInterval(timeout)
         let toggle = app.buttons["searchTranslationSelectAllButton"].firstMatch
-        var lastValue = toggle.value as? String
-
-        repeat {
-            if toggle.exists, toggle.value as? String == expectedValue {
-                return
+        waitForResolvedSemanticState(
+            named: "searchTranslationSelectAllButton",
+            timeout: timeout,
+            valueProvider: {
+                guard toggle.exists else { return nil }
+                return toggle.value as? String
+            },
+            success: { $0 == expectedValue },
+            failureDescription: {
+                "Expected Search translation select toggle value '\(expectedValue)' within \(timeout) seconds; last value was '\($0)'."
             }
-            lastValue = toggle.value as? String
-            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
-        } while Date() < deadline
-
-        XCTFail(
-            "Expected Search translation select toggle value '\(expectedValue)' within \(timeout) seconds; last value was '\(lastValue ?? "nil")'."
         )
     }
 
@@ -1563,7 +1562,7 @@ extension AndBibleUITests {
        - timeout: Maximum number of seconds to poll the Search state export.
      - Returns: `true` when an exported Search state explicitly reports
        `searchFieldFocused=false`.
-     - Side effects: none.
+     - Side effects: samples the Search state export through the shared semantic-state waiter.
      - Failure modes: returns `false` when the state export continues reporting focused input until
        timeout or becomes temporarily unavailable.
      */
@@ -1571,15 +1570,19 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if searchFieldFocusState(in: app) == false {
-                return true
+        return waitForResolvedSemanticState(
+            named: "searchStateExport.searchFieldFocused",
+            timeout: max(0, timeout),
+            valueProvider: {
+                let values = self.searchStateCandidateValues(in: app)
+                return values.isEmpty ? nil : values.joined(separator: " || ")
+            },
+            success: { $0.contains("searchFieldFocused=false") },
+            recordsFailure: false,
+            failureDescription: {
+                "Expected Search field focus to clear within \(timeout) seconds. Last state: '\($0)'."
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        } while Date() < deadline
-
-        return searchFieldFocusState(in: app) == false
+        )
     }
 
     /**

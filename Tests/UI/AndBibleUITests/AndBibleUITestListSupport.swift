@@ -553,16 +553,16 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let currentValue = resolvedReadingPlanListStateValue(in: app),
-               !currentValue.contains(token) {
-                return true
+        return waitForResolvedSemanticState(
+            named: "readingPlanListStateExport",
+            timeout: timeout,
+            valueProvider: { self.resolvedReadingPlanListStateValue(in: app) },
+            success: { !$0.contains(token) },
+            recordsFailure: false,
+            failureDescription: {
+                "Expected Reading Plans state to stop containing '\(token)' within \(timeout) seconds. Last state: '\($0)'."
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        return resolvedReadingPlanListStateValue(in: app)?.contains(token) == false
+        )
     }
 
     /// Sanitizes one reading-plan code to match the production accessibility export.

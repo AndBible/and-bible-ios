@@ -401,6 +401,8 @@ extension AndBibleUITests {
         case "syncSettingsState":
             return screenRootCandidates("syncSettingsScreen", in: app)
                 + screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
+        case "settingsForm":
+            return screenRootCandidates("settingsForm", in: app)
         default:
             return semanticStateCandidates(for: identifier, in: app)
         }
@@ -1276,7 +1278,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The current non-empty reader reference string from `bookChooserButton`.
      * - Side effects:
-     *   - polls the live reader toolbar until the reference control exports one non-empty value
+     *   - samples the live reader toolbar through the shared semantic-state waiter until the
+     *     reference control exports one non-empty value
      * - Failure modes:
      *   - records an XCTest failure if the reader reference never becomes non-empty
      */
@@ -1293,22 +1296,22 @@ extension AndBibleUITests {
             file: file,
             line: line
         )
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let value = referenceButton.value as? String, !value.isEmpty {
-                return value
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let fallbackValue = referenceButton.value as? String ?? ""
-        XCTAssertFalse(
-            fallbackValue.isEmpty,
-            "Expected bookChooserButton to expose a non-empty reader reference within \(timeout) seconds.",
+        var latestValue = referenceButton.value as? String ?? ""
+        _ = waitForResolvedSemanticState(
+            named: "bookChooserButton.value",
+            timeout: timeout,
+            valueProvider: {
+                latestValue = referenceButton.value as? String ?? ""
+                return latestValue
+            },
+            success: { !$0.isEmpty },
+            failureDescription: {
+                "Expected bookChooserButton to expose a non-empty reader reference within \(timeout) seconds; last value was '\($0)'."
+            },
             file: file,
             line: line
         )
-        return fallbackValue
+        return latestValue
     }
 
     /**
@@ -1321,18 +1324,14 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let value = readerRenderedContentStateValue(in: app),
-               value.contains(token) {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let lastValue = readerRenderedContentStateValue(in: app) ?? "nil"
-        XCTFail(
-            "Expected reader rendered-content state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'.",
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: {
+                "Expected reader rendered-content state to contain '\(token)' within \(timeout) seconds; last value was '\($0)'."
+            },
             file: file,
             line: line
         )
@@ -1418,15 +1417,16 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if readerRenderedContentStateContains(token, in: app) {
-                return true
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
+            success: { $0.contains(token) },
+            recordsFailure: false,
+            failureDescription: {
+                "Expected optional reader rendered-content state to contain '\(token)' within \(timeout) seconds; last value was '\($0)'."
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        return readerRenderedContentStateContains(token, in: app)
+        )
     }
 
     /// Reads a boolean key from the compact reader state export.
@@ -1503,7 +1503,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The first non-empty reader reference value different from `initialValue`.
      * - Side effects:
-     *   - polls the live reader toolbar until `bookChooserButton` exports a different value
+     *   - samples the live reader toolbar through the shared semantic-state waiter until
+     *     `bookChooserButton` exports a different value
      * - Failure modes:
      *   - records an XCTest failure if the reader reference never changes before the timeout
      */
@@ -1521,25 +1522,22 @@ extension AndBibleUITests {
             file: file,
             line: line
         )
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let value = referenceButton.value as? String,
-               !value.isEmpty,
-               value != initialValue {
-                return value
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let fallbackValue = referenceButton.value as? String ?? ""
-        XCTAssertNotEqual(
-            fallbackValue,
-            initialValue,
-            "Expected bookChooserButton to change away from '\(initialValue)' within \(timeout) seconds.",
+        var latestValue = referenceButton.value as? String ?? ""
+        _ = waitForResolvedSemanticState(
+            named: "bookChooserButton.value",
+            timeout: timeout,
+            valueProvider: {
+                latestValue = referenceButton.value as? String ?? ""
+                return latestValue
+            },
+            success: { !$0.isEmpty && $0 != initialValue },
+            failureDescription: {
+                "Expected bookChooserButton to change away from '\(initialValue)' within \(timeout) seconds; last value was '\($0)'."
+            },
             file: file,
             line: line
         )
-        return fallbackValue
+        return latestValue
     }
 
     /**

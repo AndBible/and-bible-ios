@@ -842,7 +842,7 @@ jobs:
 
   ios-simulator-unit-tests:
     name: Unit Tests (Simulator)
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     runs-on: ${{ needs.repo-standards.outputs.required_checks_only == 'true' && 'ubuntu-latest' || 'macos-15' }}
     needs:
       - repo-standards

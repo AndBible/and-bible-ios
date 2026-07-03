@@ -315,6 +315,94 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("waitForResolvedSemanticState", bookmark_rows_body)
         self.assertNotIn("RunLoop.current.run", bookmark_rows_body)
 
+    def test_reader_and_sync_state_waits_use_shared_semantic_waiter(self) -> None:
+        """Keep exported reader/sync state checks hook-driven instead of run-loop polling."""
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        state_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
+        ).read_text(encoding="utf-8")
+
+        migrated_waits = [
+            swift_function_body(element_source, "waitForReaderRenderedContentState"),
+            swift_function_body(element_source, "waitForReaderRenderedContentStateIfPresent"),
+            swift_function_body(state_source, "waitForSyncState"),
+        ]
+
+        for body in migrated_waits:
+            self.assertIn("waitForResolvedSemanticState", body)
+            self.assertNotIn("RunLoop.current.run", body)
+
+    def test_settings_and_reading_plan_state_waits_use_shared_semantic_waiter(self) -> None:
+        """Keep Settings and Reading Plan exported state waits off manual polling loops."""
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        list_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
+        ).read_text(encoding="utf-8")
+
+        reading_plan_exclusion_body = swift_function_body(
+            list_source,
+            "waitForReadingPlanListStateToExclude",
+        )
+        migrated_waits = [
+            swift_function_body(interaction_source, "waitForSettingsState"),
+            reading_plan_exclusion_body,
+        ]
+
+        for body in migrated_waits:
+            self.assertIn("waitForResolvedSemanticState", body)
+            self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotIn("missingCountsAsSuccess: true", reading_plan_exclusion_body)
+
+        candidates_body = swift_function_body(element_source, "semanticStateValueCandidates")
+        self.assertIn('case "settingsForm":', candidates_body)
+        self.assertIn('screenRootCandidates("settingsForm", in: app)', candidates_body)
+
+    def test_value_state_waits_use_shared_semantic_waiter(self) -> None:
+        """Keep pure accessibility-value waits on XCTest predicates, not run-loop polling."""
+        state_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
+        ).read_text(encoding="utf-8")
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+
+        migrated_waits = [
+            swift_function_body(state_source, "waitForSwitchValue"),
+            swift_function_body(search_source, "waitForSearchTranslationSelectToggleValue"),
+            swift_function_body(element_source, "requireReaderReferenceValue"),
+            swift_function_body(element_source, "waitForReaderReferenceValueToChange"),
+        ]
+
+        for body in migrated_waits:
+            self.assertIn("waitForResolvedSemanticState", body)
+            self.assertNotIn("RunLoop.current.run", body)
+
+    def test_search_boolean_state_waits_use_shared_semantic_waiter(self) -> None:
+        """Keep Search boolean state probes on the shared waiter without recording failures."""
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+
+        migrated_waits = [
+            swift_function_body(search_source, "searchTranslationPickerStateIsOpen"),
+            swift_function_body(search_source, "waitForSearchFieldFocusToClear"),
+        ]
+
+        for body in migrated_waits:
+            self.assertIn("waitForResolvedSemanticState", body)
+            self.assertIn("recordsFailure: false", body)
+            self.assertNotIn("RunLoop.current.run", body)
+
 
 if __name__ == "__main__":
     unittest.main()
