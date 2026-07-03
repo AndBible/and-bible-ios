@@ -638,3 +638,6 @@
 "workspace_text_display_settings_title" = "Параметры текста - %@";
 "workspace_text_options_link" = "Параметры текста рабочей области — %@";
 "workspace_text_options_link_summary" = "Изменить настройки отображения текста для этой рабочей области";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "В SDCard есть план чтения jsword/readingplan с тем же именем, что и внутренний план. Невозможно перечислить здесь. Пожалуйста, переименуйте файл в другое, оставив его расширение .properties";

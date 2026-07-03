@@ -639,3 +639,6 @@
 "workspace_text_display_settings_title" = "Teks opsies - %@";
 "workspace_text_options_link" = "Werkspasie teksopsies — %@";
 "workspace_text_options_link_summary" = "Wysig teks-vertoningsinstellings vir hierdie werkspasie";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Daar is 'n gebruikers leesplan in sdcard jsword / leesplan met dieselfde naam as 'n interne plan. Dit kan nie hier gelys word nie. Herbenoem die lêer na iets anders, en laat die lêer uitbreiding as. eienskappe";

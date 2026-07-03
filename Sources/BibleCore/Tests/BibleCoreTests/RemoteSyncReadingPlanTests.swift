@@ -83,7 +83,11 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
         2=Matt.1, Mark.1
         day3=Ignored
         3 = 1Cor.13, 2Tim.1-2Tim.2
-        6 = Rev.21-Rev.22
+        4: Luke.1
+        5 Matt.1,\\
+          Mark.2
+        6 = Rev.\\u0032\\u0031-Rev.\\u0032\\u0032
+        ! ignored Android comment
         """
 
         let parsedReadings = ReadingPlanService.parseProperties(propertiesText)
@@ -94,6 +98,8 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
                 1: "Gen.1-Gen.2",
                 2: "Matt.1, Mark.1",
                 3: "1Cor.13, 2Tim.1-2Tim.2",
+                4: "Luke.1",
+                5: "Matt.1,Mark.2",
                 6: "Rev.21-Rev.22",
             ]
         )
@@ -113,7 +119,8 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
         XCTAssertEqual(template.readingsForDay(1), "Gen.1-Gen.2")
         XCTAssertEqual(template.readingsForDay(2), "Matt.1, Mark.1")
         XCTAssertEqual(template.readingsForDay(3), "1Cor.13, 2Tim.1-2Tim.2")
-        XCTAssertEqual(template.readingsForDay(4), "")
+        XCTAssertEqual(template.readingsForDay(4), "Luke.1")
+        XCTAssertEqual(template.readingsForDay(5), "Matt.1,Mark.2")
         XCTAssertEqual(template.readingsForDay(6), "Rev.21-Rev.22")
     }
 
@@ -144,6 +151,135 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
         XCTAssertEqual(planCodes.count, 7)
         XCTAssertFalse(planCodes.contains("nt_90"))
         XCTAssertFalse(planCodes.contains("psalms_proverbs"))
+    }
+
+    /**
+     Protects Android `ReadingPlanTextFileDao` discovery parity for user and add-on plan files.
+
+     Android orders built-in plans first, then appends unique files from `jsword/readingplan`, then
+     appends unique `AndBibleProvidesReadingPlan` add-on files. User files with built-in names do
+     not add duplicate rows, but they do trigger the selector warning and supply the plan content
+     when that code is loaded. Add-on files win over same-code user files without adding another
+     row. The setup writes one duplicate user file, one unique user file, one user/add-on shared
+     code, and one add-on-only file. A failure means iOS is either preserving the old bundled-only
+     catalog or has introduced iOS-only duplicate/shadowing behavior.
+     */
+    func testReadingPlanCatalogDiscoversAndroidUserAndAddonPlans() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let userPlanDir = tempDir.appendingPathComponent("jsword/readingplan", isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        let modsDir = swordDir.appendingPathComponent("mods.d", isDirectory: true)
+        let addonDir = swordDir
+            .appendingPathComponent("modules/genbook/rawgenbook/planaddon", isDirectory: true)
+        try FileManager.default.createDirectory(at: userPlanDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: modsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: addonDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        try """
+        # Duplicate User Plan
+        # This description should not replace Android's built-in display metadata.
+        1=Exod.1
+        2=Exod.2
+        """.write(
+            to: userPlanDir.appendingPathComponent("y1ot1nt1_OTthenNT.properties"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        # User Supplied Plan
+        # User plan description.
+        1=Mark.1
+        """.write(
+            to: userPlanDir.appendingPathComponent("user_supplied.properties"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        # User Shared Plan
+        # This metadata must lose to the add-on provider.
+        1=John.1
+        """.write(
+            to: userPlanDir.appendingPathComponent("shared_code.properties"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        # Add-on ignored comments
+        1=Luke.1
+        """.write(
+            to: addonDir.appendingPathComponent("addon_plan.properties"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        # Shared add-on ignored comments
+        1=Acts.1
+        """.write(
+            to: addonDir.appendingPathComponent("shared_code.properties"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [PLANADDON]
+        Description=Add-on Reading Plans
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./modules/genbook/rawgenbook/planaddon/
+        ShortPromo=Plans supplied by an add-on module.
+        AndBibleReadingPlanDateBased=True
+        AndBibleProvidesReadingPlan=addon_plan.properties
+        AndBibleProvidesReadingPlan=shared_code.properties
+        """.write(
+            to: modsDir.appendingPathComponent("planaddon.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let catalog = ReadingPlanService.catalog(
+            userPlanDirectory: userPlanDir,
+            modulePath: swordDir.path
+        )
+
+        let planCodes = catalog.templates.map(\.code)
+        let builtInCodes = [
+            "y1ot1nt1_OTthenNT",
+            "y1ot1nt1_OTandNT",
+            "y1ot1nt1_chronological",
+            "y1ot1nt2_mcheyne",
+            "y1ot6nt4_profHorner",
+            "y1ntpspr",
+            "y2ot1ntps2",
+        ]
+        XCTAssertEqual(Array(planCodes.prefix(builtInCodes.count)), builtInCodes)
+        XCTAssertEqual(Set(planCodes.dropFirst(builtInCodes.count).prefix(2)), ["user_supplied", "shared_code"])
+        XCTAssertEqual(planCodes.last, "addon_plan")
+        XCTAssertEqual(catalog.duplicateUserPlanCodes, ["y1ot1nt1_OTthenNT"])
+
+        let duplicateBuiltIn = try XCTUnwrap(
+            catalog.templates.first { $0.code == "y1ot1nt1_OTthenNT" }
+        )
+        XCTAssertEqual(duplicateBuiltIn.name, "1-Year through Bible")
+        XCTAssertEqual(duplicateBuiltIn.readingsForDay(1), "Exod.1")
+        XCTAssertEqual(duplicateBuiltIn.totalDays, 2)
+
+        let userPlan = try XCTUnwrap(catalog.templates.first { $0.code == "user_supplied" })
+        XCTAssertEqual(userPlan.name, "User Supplied Plan")
+        XCTAssertEqual(userPlan.description, "User plan description.")
+        XCTAssertEqual(userPlan.readingsForDay(1), "Mark.1")
+
+        let sharedPlan = try XCTUnwrap(catalog.templates.first { $0.code == "shared_code" })
+        XCTAssertEqual(sharedPlan.name, "Add-on Reading Plans")
+        XCTAssertEqual(sharedPlan.description, "Plans supplied by an add-on module.")
+        XCTAssertEqual(sharedPlan.readingsForDay(1), "Acts.1")
+        XCTAssertTrue(sharedPlan.isDateBased)
+
+        let addonPlan = try XCTUnwrap(catalog.templates.first { $0.code == "addon_plan" })
+        XCTAssertEqual(addonPlan.name, "Add-on Reading Plans")
+        XCTAssertEqual(addonPlan.description, "Plans supplied by an add-on module.")
+        XCTAssertEqual(addonPlan.readingsForDay(1), "Luke.1")
+        XCTAssertTrue(addonPlan.isDateBased)
     }
 
     /**

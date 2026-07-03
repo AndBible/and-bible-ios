@@ -638,3 +638,6 @@
 "workspace_text_display_settings_title" = "Ustawienia tekstu – %@";
 "workspace_text_options_link" = "Opcje tekstu obszaru roboczego — %@";
 "workspace_text_options_link_summary" = "Edytuj ustawienia wyświetlania tekstu dla tego obszaru roboczego";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Istnieje plan czytania użytkownika w katalogu „jsword/readingplan” na karcie SD o tej samej nazwie co plan wewnętrzny, Nie można go tutaj wyświetlić. Prosimy zmienić nazwę pliku, pozostawiając jego rozszerzenie „.properties”.";

@@ -620,3 +620,6 @@
 "window_pin_mode" = "Бекіту";
 "window_text_display_settings_title" = "Текст опциялары - Терезе %d";
 "workspace_text_display_settings_title" = "Текст опциялары - %@";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "SD картасында пайдаланушының оқу жоспары бар, jsword/ оқу жоспарының аталуы ішкі жоспарының аталуымен бірдей. Оны мұнда тізімдеуге болмайды. Файлдың атын басқасына өзгертіңіз, файл байланыс кеңейтілімін .properties ретінде қалдырыңыз";

@@ -638,3 +638,6 @@
 "workspace_text_display_settings_title" = "Textinställningar - %@";
 "workspace_text_options_link" = "Arbetsytans textalternativ — %@";
 "workspace_text_options_link_summary" = "Redigera textvisningsinställningar för den här arbetsytan";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Det finns en användarplanering i SD-kortet jsword/readningplan med samma namn som en som finns internt. Den kan inte listas här. Var god byt namn på filen och lämna filtypen som .properties";

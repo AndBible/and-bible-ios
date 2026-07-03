@@ -638,3 +638,6 @@
 "workspace_text_display_settings_title" = "Teksti valikud - %@";
 "workspace_text_options_link" = "Tööala teksti valikud — %@";
 "workspace_text_options_link_summary" = "Muuda selle tööala teksti näitamise seadeid";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "SD-kaardi peale on kasutaja lugemisplaan, mis on kaustas jsword/readingplan sama nimega kui rakendusesisene plaan. Seda pole võimalik siin näidata. Palun nimeta fail millekski muuks ümber, jättes faili laienduseks .properties";

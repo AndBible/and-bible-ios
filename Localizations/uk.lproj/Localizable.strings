@@ -621,3 +621,6 @@
 "workspace_text_display_settings_title" = "Параметри тексту - %@";
 "workspace_text_options_link" = "Параметри тексту робочої області — %@";
 "workspace_text_options_link_summary" = "Змінити налаштування відображення тексту для цієї робочої області";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "SD картка містить план читання користувача jsword/readingplan з тією ж назвою, що і внутрішній план. Неможливо показати тут. Перейменуйте файл на щось інше, залишивши його розширення як .properties";

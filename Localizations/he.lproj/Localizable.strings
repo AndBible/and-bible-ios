@@ -621,3 +621,6 @@
 "workspace_text_display_settings_title" = "אפשרויות טקסט - %@";
 "workspace_text_options_link" = "אפשרויות טקסט של סביבת עבודה — %@";
 "workspace_text_options_link_summary" = "ערוך הגדרות תצוגת טקסט לסביבת עבודה זו";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "ישנה תוכנית קריאה בכרטיס הזכרון jsword/readingplan באותו השם כמו התחוכנית הפנימית, ולכן לא ניתן להציג אותה. יש לשנות את שם הקובץ, אבל להשאיר את הסיומת .properties";

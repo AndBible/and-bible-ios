@@ -390,6 +390,7 @@
 "reading_plan_available" = "Available Plans";
 "reading_plan_import_error_read" = "Could not read file";
 "reading_plan_import_error_format" = "Invalid reading plan format";
+"plan_duplicate_user_plan" = "There is a user reading plan in sdcard jsword/readingplan with the same name as an internal plan. It can not be listed here. Please rename the file to something else, leaving it's file extension as .properties";
 
 /* Daily Reading */
 "daily_reading" = "Daily Reading";

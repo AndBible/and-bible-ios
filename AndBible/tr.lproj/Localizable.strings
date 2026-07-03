@@ -638,3 +638,6 @@
 "workspace_text_display_settings_title" = "Metin ayarları - %@";
 "workspace_text_options_link" = "Çalışma alanı metin seçenekleri — %@";
 "workspace_text_options_link_summary" = "Bu çalışma alanı için metin görüntüleme ayarlarını düzenle";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Hafız kartta jsword/readingplan içinde dahili bir planla aynı ada sahip bir kullanıcı okuma planı var. Burada listelenemez. Lütfen dosyanın dosya uzantısını .properties olarak bırakarak dosyayı başka bir adla yeniden adlandırın";

@@ -622,3 +622,6 @@
 "workspace_text_display_settings_title" = "文字選項 - %@";
 "workspace_text_options_link" = "工作區文字選項 — %@";
 "workspace_text_options_link_summary" = "編輯此工作區的文字顯示設定";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "SD卡中有使用者jsword/readingplan的讀經計劃 它與內部讀經計劃名稱相同，不能在此列舉。 請重新命名至其他名稱，並將副檔名轉為 *.properties";

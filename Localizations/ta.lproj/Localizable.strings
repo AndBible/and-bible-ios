@@ -622,3 +622,6 @@
 "workspace_text_display_settings_title" = "உரை விருப்பத்தேர்வுகள் - %@";
 "workspace_text_options_link" = "பணியிட உரை விருப்பங்கள் — %@";
 "workspace_text_options_link_summary" = "இந்த பணியிடத்திற்கான உரை காட்சி அமைப்புகளை மாற்று";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "sdcard இல் பயனர் வாசிப்புத் திட்டம் உள்ளது உள்ளே அதே பெயரில் jsword/readingplan உள்ளது. ஆகவே இதனை இங்கே பட்டியலிட முடியாது. கோப்பு நீட்டிப்பை .properties என விட்டுவிட்டு, கோப்புக்கு வேறு பெயரிடவும்";
