@@ -399,8 +399,8 @@ extension AndBibleUITests {
         case "moduleBrowserStateExport":
             return screenScopedStateCandidates(identifier, within: "moduleBrowserScreen", in: app)
         case "syncSettingsState":
-            return screenRootCandidates("syncSettingsScreen", in: app)
-                + screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
+            return screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
+                + screenRootCandidates("syncSettingsScreen", in: app)
         case "settingsForm":
             return screenRootCandidates("settingsForm", in: app)
         default:

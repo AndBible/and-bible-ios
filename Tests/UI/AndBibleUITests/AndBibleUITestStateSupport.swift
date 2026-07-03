@@ -2399,6 +2399,108 @@ extension AndBibleUITests {
     }
 
     /**
+     Waits for iCloud runtime mode application to settle through the Sync Settings state export.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to wait for `icloudState` to leave `syncing`.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - samples only the compact `syncSettingsState` export and route sentinels while the
+     *     production runtime applier rebuilds app data stores
+     * - Failure modes:
+     *   - fails immediately if the state export reports the legacy restart-required fallback
+     *   - fails immediately if the app-owned Sync Settings route disappears during runtime apply
+     *   - fails on timeout if the iCloud state never leaves `syncing`
+     */
+    func waitForICloudSyncRuntimeApplyToSettle(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 30,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        var fallbackState: String?
+        var closedRouteState: String?
+
+        let completed = waitForResolvedSemanticState(
+            named: "syncSettingsState.iCloudRuntimeApply",
+            timeout: timeout,
+            valueProvider: {
+                if let state = self.semanticStateExportValue("syncSettingsState", in: app) {
+                    return state
+                }
+                if self.resolvedElement("syncSettingsScreen", in: app) == nil {
+                    return "syncSettingsState=missing;syncSettingsScreen=missing"
+                }
+                return nil
+            },
+            success: { state in
+                if self.syncStateToken(named: "restartRequired", in: state) == "true" ||
+                    self.syncStateToken(named: "icloudState", in: state) == "pendingRestart" {
+                    fallbackState = state
+                    return true
+                }
+
+                guard self.syncStateToken(named: "syncSettingsScreen", in: state) != "missing" else {
+                    closedRouteState = state
+                    return true
+                }
+
+                guard self.resolvedElement("syncSettingsScreen", in: app) != nil,
+                      app.otherElements["appOwnedSyncSettingsRoute"].exists else {
+                    closedRouteState = state
+                    return true
+                }
+
+                guard let iCloudState = self.syncStateToken(named: "icloudState", in: state) else {
+                    return false
+                }
+                return iCloudState != "syncing"
+            },
+            recordsFailure: false,
+            failureDescription: { finalState in
+                "Expected iCloud runtime apply to settle without restart-required fallback while keeping Sync Settings open. Final state: '\(finalState)'."
+            },
+            file: file,
+            line: line
+        )
+
+        if let fallbackState {
+            XCTFail(
+                "iCloud toggle must not enter restart-required fallback. State: '\(fallbackState)'.",
+                file: file,
+                line: line
+            )
+            return
+        }
+
+        if let closedRouteState {
+            XCTFail(
+                """
+                Live iCloud toggle must keep Sync Settings open while applying the runtime mode change.
+                Last syncSettingsState: '\(closedRouteState)'.
+                App state: \(app.state.rawValue).
+                App debug: \(String(app.debugDescription.prefix(3000)))
+                """,
+                file: file,
+                line: line
+            )
+            return
+        }
+
+        guard completed else {
+            let finalState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
+            XCTFail(
+                "Expected iCloud toggle to settle without restart-required fallback while keeping Sync Settings open. Final syncSettingsState: '\(finalState)'.",
+                file: file,
+                line: line
+            )
+            return
+        }
+    }
+
+    /**
      Polls until one accessibility-identified element appears above another in the visible UI.
      *
      * - Parameters:

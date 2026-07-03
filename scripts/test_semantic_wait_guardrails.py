@@ -160,6 +160,30 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
             search_case.find(root_candidate),
         )
 
+    def test_sync_settings_state_candidates_prefer_hidden_export_before_screen_root(self) -> None:
+        """Keep Sync Settings polling on the compact export before the screen root."""
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "semanticStateValueCandidates")
+        sync_case_start = body.find('case "syncSettingsState":')
+        settings_case_start = body.find('case "settingsForm":')
+        self.assertNotEqual(sync_case_start, -1)
+        self.assertNotEqual(settings_case_start, -1)
+
+        sync_case = body[sync_case_start:settings_case_start]
+        root_candidate = 'screenRootCandidates("syncSettingsScreen", in: app)'
+        hidden_export_candidate = (
+            'screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)'
+        )
+
+        self.assertIn(root_candidate, sync_case)
+        self.assertIn(hidden_export_candidate, sync_case)
+        self.assertLess(
+            sync_case.find(hidden_export_candidate),
+            sync_case.find(root_candidate),
+        )
+
     def test_search_interaction_ready_does_not_read_state_before_poll_loop(self) -> None:
         """Keep the Search readiness timeout from being consumed by a pre-loop XCTest snapshot."""
         search_source = (
@@ -259,6 +283,18 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("windowTabOrders=", body)
         self.assertIn("windowManager.allWindows", body)
         self.assertIn('return "\\(windowToken);\\(contentToken);\\(tabOrdersToken);', body)
+
+    def test_icloud_sync_toggle_waits_on_semantic_state_not_manual_run_loop(self) -> None:
+        """Keep the iCloud live-apply smoke tied to exported Sync Settings state."""
+        source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITests+SettingsAndSync.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(source, "testSyncSettingsICloudToggleDoesNotRequireRestart")
+
+        self.assertIn("waitForICloudSyncRuntimeApplyToSettle", body)
+        self.assertNotIn("Date().addingTimeInterval(30)", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotIn("while Date() < deadline", body)
 
     def test_resolved_semantic_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
         """Ensure the shared pure-observation wait is backed by XCTest wait primitives."""
