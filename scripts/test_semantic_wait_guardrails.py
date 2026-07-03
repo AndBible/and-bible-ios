@@ -465,6 +465,17 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("recordsFailure: false", body)
         self.assertNotIn("RunLoop.current.run", body)
 
+    def test_keyboard_focus_wait_uses_xctest_predicate_waiter(self) -> None:
+        """Keep keyboard-focus observation on XCTest predicates, not manual run-loop polling."""
+        state_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(state_source, "waitForElementKeyboardFocus")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
 
 if __name__ == "__main__":
     unittest.main()

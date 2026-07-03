@@ -1614,7 +1614,7 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to keep polling before giving up.
      * - Returns: `true` when the element reports keyboard focus, otherwise `false`.
      * - Side effects:
-     *   - repeatedly samples the element-scoped `hasKeyboardFocus` predicate so the helper can
+     *   - waits on XCTest's element-scoped `hasKeyboardFocus` predicate so the helper can
      *     distinguish a visible prompt field from one that is still unfocused
      * - Failure modes: This helper cannot fail.
      */
@@ -1623,15 +1623,10 @@ extension AndBibleUITests {
         timeout: TimeInterval = 1
     ) -> Bool {
         let predicate = NSPredicate(format: "hasKeyboardFocus == true")
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if predicate.evaluate(with: element) {
-                return true
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        } while Date() < deadline
-
-        return predicate.evaluate(with: element)
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        expectation.expectationDescription = "Wait for \(element.identifier) keyboard focus"
+        let result = XCTWaiter().wait(for: [expectation], timeout: max(0, timeout))
+        return result == .completed || predicate.evaluate(with: element)
     }
 
     /**
