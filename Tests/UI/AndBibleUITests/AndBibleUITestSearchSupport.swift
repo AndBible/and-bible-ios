@@ -1109,7 +1109,7 @@ extension AndBibleUITests {
      *     wait for localized fallback controls that do not expose the stable test value.
      *   - app: Running application under test.
      *   - timeout: Maximum time to wait for the semantic state change.
-     * - Side effects: polls the live picker button only.
+     * - Side effects: samples the live picker button through the shared semantic-state waiter.
      * - Failure modes: fails when the stable picker button remains visible but does not reach the
      *   expected value before the timeout.
      */
@@ -1120,20 +1120,18 @@ extension AndBibleUITests {
     ) {
         guard let expectedValue else { return }
 
-        let deadline = Date().addingTimeInterval(timeout)
         let toggle = app.buttons["searchTranslationSelectAllButton"].firstMatch
-        var lastValue = toggle.value as? String
-
-        repeat {
-            if toggle.exists, toggle.value as? String == expectedValue {
-                return
+        waitForResolvedSemanticState(
+            named: "searchTranslationSelectAllButton",
+            timeout: timeout,
+            valueProvider: {
+                guard toggle.exists else { return nil }
+                return toggle.value as? String
+            },
+            success: { $0 == expectedValue },
+            failureDescription: {
+                "Expected Search translation select toggle value '\(expectedValue)' within \(timeout) seconds; last value was '\($0)'."
             }
-            lastValue = toggle.value as? String
-            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
-        } while Date() < deadline
-
-        XCTFail(
-            "Expected Search translation select toggle value '\(expectedValue)' within \(timeout) seconds; last value was '\(lastValue ?? "nil")'."
         )
     }
 

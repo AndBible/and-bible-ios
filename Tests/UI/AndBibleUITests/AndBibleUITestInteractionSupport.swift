@@ -880,7 +880,8 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - repeatedly reads the production `settingsForm` accessibility value
+     *   - evaluates the production `settingsForm` accessibility value through the shared semantic
+     *     state waiter
      * - Failure modes:
      *   - records an XCTest failure if the requested token never appears before timeout
      */
@@ -891,19 +892,14 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let settingsForm = requireElement("settingsForm", in: app, timeout: timeout, file: file, line: line)
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            if let state = settingsForm.value as? String, state.contains(expectedToken) {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let finalState = settingsForm.value as? String ?? ""
-        XCTFail(
-            "Expected Settings state to contain '\(expectedToken)' within \(timeout) seconds. Last state: '\(finalState)'.",
+        waitForResolvedSemanticState(
+            named: "settingsForm",
+            timeout: timeout,
+            valueProvider: { self.semanticStateExportValue("settingsForm", in: app) },
+            success: { $0.contains(expectedToken) },
+            failureDescription: {
+                "Expected Settings state to contain '\(expectedToken)' within \(timeout) seconds. Last state: '\($0)'."
+            },
             file: file,
             line: line
         )

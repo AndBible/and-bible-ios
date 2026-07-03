@@ -401,6 +401,8 @@ extension AndBibleUITests {
         case "syncSettingsState":
             return screenRootCandidates("syncSettingsScreen", in: app)
                 + screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
+        case "settingsForm":
+            return screenRootCandidates("settingsForm", in: app)
         default:
             return semanticStateCandidates(for: identifier, in: app)
         }
@@ -1321,18 +1323,14 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let value = readerRenderedContentStateValue(in: app),
-               value.contains(token) {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let lastValue = readerRenderedContentStateValue(in: app) ?? "nil"
-        XCTFail(
-            "Expected reader rendered-content state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'.",
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: {
+                "Expected reader rendered-content state to contain '\(token)' within \(timeout) seconds; last value was '\($0)'."
+            },
             file: file,
             line: line
         )
@@ -1418,15 +1416,16 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if readerRenderedContentStateContains(token, in: app) {
-                return true
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
+            success: { $0.contains(token) },
+            recordsFailure: false,
+            failureDescription: {
+                "Expected optional reader rendered-content state to contain '\(token)' within \(timeout) seconds; last value was '\($0)'."
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        return readerRenderedContentStateContains(token, in: app)
+        )
     }
 
     /// Reads a boolean key from the compact reader state export.

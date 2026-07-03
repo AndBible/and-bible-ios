@@ -785,24 +785,29 @@ extension AndBibleUITests {
      *   - valueProvider: Closure returning the currently exported semantic state.
      *   - success: Predicate that should become true before the timeout.
      *   - missingCountsAsSuccess: When true, treats a missing export as success.
+     *   - recordsFailure: When false, returns `false` on timeout instead of recording an XCTest
+     *     failure so optional probes can share the same waiter.
      *   - failureDescription: Closure that formats the final failure message from the last value.
      * - Side effects:
      *   - evaluates a dedicated state export through `XCTNSPredicateExpectation` and `XCTWaiter`
      *     until the predicate succeeds
      * - Failure modes:
-     *   - records an XCTest failure with elapsed wait time, final observed state, and last observed
-     *     state if the predicate never succeeds before the timeout expires
+     *   - returns `false` when the predicate never succeeds and `recordsFailure` is false
+     *   - otherwise records an XCTest failure with elapsed wait time, final observed state, and
+     *     last observed state if the predicate never succeeds before the timeout expires
      */
+    @discardableResult
     func waitForResolvedSemanticState(
         named name: String,
         timeout: TimeInterval,
         valueProvider: @escaping () -> String?,
         success: @escaping (String) -> Bool,
         missingCountsAsSuccess: Bool = false,
+        recordsFailure: Bool = true,
         failureDescription: (String) -> String,
         file: StaticString = #filePath,
         line: UInt = #line
-    ) {
+    ) -> Bool {
         let startedAt = Date()
         var lastObservedValue: String?
         let predicate = NSPredicate(block: { _, _ in
@@ -821,13 +826,16 @@ extension AndBibleUITests {
         let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
 
         if result == .completed {
-            return
+            return true
         }
 
         let lastObservedBeforeFinalRead = lastObservedValue
         if let finalValue = valueProvider() {
             if success(finalValue) {
-                return
+                return true
+            }
+            guard recordsFailure else {
+                return false
             }
             let elapsed = String(format: "%.2f", Date().timeIntervalSince(startedAt))
             let lastObservedState = lastObservedBeforeFinalRead ?? "<none>"
@@ -838,10 +846,14 @@ extension AndBibleUITests {
                 file: file,
                 line: line
             )
+            return false
         } else if missingCountsAsSuccess {
-            return
+            return true
         } else {
             let missingValue = "<missing \(name)>"
+            guard recordsFailure else {
+                return false
+            }
             let elapsed = String(format: "%.2f", Date().timeIntervalSince(startedAt))
             let lastObservedState = lastObservedBeforeFinalRead ?? "<none>"
             XCTFail(
@@ -851,6 +863,7 @@ extension AndBibleUITests {
                 file: file,
                 line: line
             )
+            return false
         }
     }
 
@@ -1703,7 +1716,8 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to keep polling before giving up.
      * - Returns: `true` when the switch reaches `expectedValue`, otherwise `false`.
      * - Side effects:
-     *   - repeatedly samples the live XCUI switch value so delayed SwiftUI updates can settle
+     *   - samples the live XCUI switch value through the shared semantic-state waiter so delayed
+     *     SwiftUI updates can settle
      * - Failure modes: This helper cannot fail.
      */
     func waitForSwitchValue(
@@ -1711,15 +1725,16 @@ extension AndBibleUITests {
         toEqual expectedValue: String,
         timeout: TimeInterval = 2
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if (element.value as? String) == expectedValue {
-                return true
+        return waitForResolvedSemanticState(
+            named: "switchValue:\(element.identifier)",
+            timeout: timeout,
+            valueProvider: { element.value as? String },
+            success: { $0 == expectedValue },
+            recordsFailure: false,
+            failureDescription: {
+                "Expected switch '\(element.identifier)' to report value '\(expectedValue)' within \(timeout) seconds. Last value: '\($0)'."
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        return (element.value as? String) == expectedValue
+        )
     }
 
     /**
@@ -2364,25 +2379,20 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let stateElement = requireElement("syncSettingsState", in: app, timeout: timeout, file: file, line: line)
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            if let state = stateElement.value as? String,
-               expectedTokens.allSatisfy({ syncStateToken(named: $0.key, in: state) == $0.value })
-            {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let finalState = stateElement.value as? String ?? "nil"
         let expectedDescription = expectedTokens
             .sorted(by: { $0.key < $1.key })
             .map { "\($0.key)=\($0.value)" }
             .joined(separator: ";")
-        XCTFail(
-            "Expected syncSettingsState to match '\(expectedDescription)' within \(timeout) seconds. Final state: '\(finalState)'.",
+        waitForResolvedSemanticState(
+            named: "syncSettingsState",
+            timeout: timeout,
+            valueProvider: { self.semanticStateExportValue("syncSettingsState", in: app) },
+            success: { state in
+                expectedTokens.allSatisfy { self.syncStateToken(named: $0.key, in: state) == $0.value }
+            },
+            failureDescription: {
+                "Expected syncSettingsState to match '\(expectedDescription)' within \(timeout) seconds. Final state: '\($0)'."
+            },
             file: file,
             line: line
         )
