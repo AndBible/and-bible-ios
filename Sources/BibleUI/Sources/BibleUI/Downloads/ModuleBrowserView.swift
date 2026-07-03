@@ -675,10 +675,8 @@ public struct ModuleBrowserView: View {
             allowsMultipleSelection: false,
             onCompletion: handleInstallZipSelection
         )
-        .sheet(item: $selectedModuleDetails) { details in
-            NavigationStack {
-                ModuleBrowserModuleDetailsView(details: details)
-            }
+        .moduleBrowserModuleDetailsDialog(details: selectedModuleDetails) {
+            selectedModuleDetails = nil
         }
         .alert(
             String(localized: "download_errors", defaultValue: "Download errors"),
@@ -1961,7 +1959,8 @@ public struct ModuleBrowserView: View {
        - status: Current Android-equivalent install status.
        - rowActions: Precomputed secondary actions from `ModuleDownloadRowActionPlanner`.
      - Returns: SwiftUI controls for About plus the primary install/update/progress affordance.
-     - Side effects: Produced controls may mutate view state when tapped.
+     - Side effects: Produced controls may mutate view state when tapped, including opening the shared
+       Android-style module details dialog.
      - Failure modes: Action failures are handled by `installModule(_:)`, `cancelInstall(_:)`, or
        the confirmation alert handlers.
      */
