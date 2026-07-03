@@ -367,10 +367,15 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         search_source = (
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
         ).read_text(encoding="utf-8")
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
 
         migrated_waits = [
             swift_function_body(state_source, "waitForSwitchValue"),
             swift_function_body(search_source, "waitForSearchTranslationSelectToggleValue"),
+            swift_function_body(element_source, "requireReaderReferenceValue"),
+            swift_function_body(element_source, "waitForReaderReferenceValueToChange"),
         ]
 
         for body in migrated_waits:
