@@ -68,7 +68,7 @@ struct BibleReaderModulePicker: View {
     /// Free-text filter applied to module initials, descriptions, category labels, and language.
     @State private var searchText = ""
 
-    /// Details sheet payload for Android's About row action.
+    /// Details dialog payload for Android's About row action.
     @State private var selectedModuleDetails: ModuleBrowserModuleDetails?
 
     /// Confirmation payload for destructive Android document actions.
@@ -175,10 +175,8 @@ struct BibleReaderModulePicker: View {
      */
     var body: some View {
         androidDocumentChooserScreen
-        .sheet(item: $selectedModuleDetails) { details in
-            NavigationStack {
-                ModuleBrowserModuleDetailsView(details: details)
-            }
+        .moduleBrowserModuleDetailsDialog(details: selectedModuleDetails) {
+            selectedModuleDetails = nil
         }
         .alert(
             pendingRowActionConfirmation?.title ?? "",
@@ -793,7 +791,7 @@ struct BibleReaderModulePicker: View {
 
      - Parameter module: Installed module whose details should be shown.
      - Returns: Template info icon matching Android's `aboutButton` column.
-     - Side effects: Sets `selectedModuleDetails`, presenting the shared details sheet.
+     - Side effects: Sets `selectedModuleDetails`, presenting the shared details dialog.
      - Failure modes: Details payload falls back to installed-module metadata when repository source
        metadata is unavailable.
      */
@@ -1011,10 +1009,10 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Builds the shared About sheet payload for an installed module.
+     Builds the shared About dialog payload for an installed module.
 
      - Parameter module: Installed module selected from the chooser.
-     - Returns: Details payload compatible with the Downloads About sheet.
+     - Returns: Details payload compatible with the Downloads About dialog.
      */
     private func moduleDetails(for module: ModuleInfo) -> ModuleBrowserModuleDetails {
         ModuleBrowserModuleDetails(

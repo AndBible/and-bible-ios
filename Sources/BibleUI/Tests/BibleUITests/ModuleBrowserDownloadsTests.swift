@@ -19,6 +19,122 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
+     Verifies module About metadata remains a shared Android-dialog payload rather than a sheet-local
+     form.
+
+     Android builds the About dialog from the selected document's real metadata and omits unavailable
+     fields. This test covers the iOS payload boundary directly: Downloads and the reader picker both
+     consume `ModuleBrowserModuleDetails`, so every available remote and installed field must be
+     present before SwiftUI renders it.
+     */
+    func testModuleBrowserModuleDetailsRowsPreserveAvailableRemoteAndInstalledMetadata() {
+        let details = ModuleBrowserModuleDetails(
+            module: RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "2.1",
+                installSizeBytes: 2_500_000
+            ),
+            installedModule: ModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                version: "2.0",
+                isEncrypted: true,
+                isUnlocked: false
+            )
+        )
+
+        XCTAssertEqual(
+            details.androidAboutRows.map(\.kind),
+            [
+                .initials,
+                .name,
+                .category,
+                .language,
+                .source,
+                .latestVersion,
+                .installedVersion,
+                .installSize,
+                .installedState,
+                .encryptionState
+            ]
+        )
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .initials }?.value, "KJV")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .name }?.value, "King James Version")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .category }?.value, "Bibles")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .language }?.value, "English")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .source }?.value, "CrossWire")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .latestVersion }?.value, "2.1")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .installedVersion }?.value, "2.0")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .installSize }?.value, "2.5 MB")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .installedState }?.value, "Installed")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .encryptionState }?.value, "Locked")
+    }
+
+    /**
+     Verifies unavailable About metadata is omitted instead of rendered as empty iOS-only rows.
+
+     Android's About dialog only includes fields backed by actual `BookMetaData` values. The iOS
+     payload must follow the same rule for optional remote metadata so the dialog stays honest when
+     a repository catalog has sparse SWORD fields.
+     */
+    func testModuleBrowserModuleDetailsRowsOmitUnavailableOptionalMetadata() {
+        let details = ModuleBrowserModuleDetails(
+            module: RemoteModuleInfo(
+                name: "EMPTY",
+                description: "   ",
+                category: .dictionary,
+                language: "",
+                sourceName: "   ",
+                version: "   ",
+                installSizeBytes: nil
+            ),
+            installedModule: nil
+        )
+
+        XCTAssertEqual(
+            details.androidAboutRows.map(\.kind),
+            [
+                .initials,
+                .category
+            ]
+        )
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .initials }?.value, "EMPTY")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .category }?.value, "Dictionaries")
+    }
+
+    /**
+     Guards Downloads row About against regressing to native iOS sheet chrome.
+
+     Android invokes `CommonUtils.showAbout(...)`, which displays a non-cancelable `AlertDialog`
+     message from the row About action. A failure means the Downloads path has drifted back to a
+     SwiftUI sheet or stopped using the shared dialog presenter.
+     */
+    func testModuleBrowserAboutUsesSharedAndroidDialogInsteadOfSheet() throws {
+        let downloadsSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift"
+        )
+        let detailsSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserRowActionPresentation.swift"
+        )
+
+        XCTAssertTrue(downloadsSource.contains(".moduleBrowserModuleDetailsDialog("))
+        XCTAssertFalse(downloadsSource.contains(".sheet(item: $selectedModuleDetails)"))
+        XCTAssertTrue(detailsSource.contains("struct ModuleBrowserModuleDetailsDialog: View"))
+        XCTAssertTrue(detailsSource.contains("AndroidDialogSurfacePalette"))
+        XCTAssertTrue(detailsSource.contains("moduleDetailsDialogScreen"))
+        XCTAssertTrue(detailsSource.contains("moduleDetailsOKButton"))
+        XCTAssertFalse(detailsSource.contains("@Environment(\\.dismiss) private var dismiss"))
+        XCTAssertFalse(detailsSource.contains("Form {"))
+        XCTAssertFalse(detailsSource.contains(".navigationTitle(String(localized: \"about\"))"))
+    }
+
+    /**
      Verifies destructive Downloads row confirmations use module descriptions instead of initials.
 
      Android confirms removal/index deletion with the visible document name. The iOS row model must

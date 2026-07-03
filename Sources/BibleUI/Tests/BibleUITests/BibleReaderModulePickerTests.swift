@@ -347,4 +347,22 @@ final class BibleReaderModulePickerTests: XCTestCase {
         XCTAssertFalse(pickerSource.contains("Section(String(localized: \"document_filter_results"))
     }
 
+    /**
+     Guards reader document-picker About against preserving the shared iOS sheet route.
+
+     Android's `DocumentSelectionBase` row menu invokes `CommonUtils.showAbout(...)` and keeps the user
+     inside the chooser while a dialog is visible. The iOS picker must therefore use the same shared
+     module details dialog presenter as Downloads instead of wrapping `ModuleBrowserModuleDetailsView`
+     in a `NavigationStack` sheet.
+     */
+    func testBibleReaderModulePickerAboutUsesSharedAndroidDialogInsteadOfSheet() throws {
+        let pickerSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
+        )
+
+        XCTAssertTrue(pickerSource.contains(".moduleBrowserModuleDetailsDialog("))
+        XCTAssertFalse(pickerSource.contains(".sheet(item: $selectedModuleDetails)"))
+        XCTAssertFalse(pickerSource.contains("NavigationStack {\n                ModuleBrowserModuleDetailsView"))
+    }
+
 }
