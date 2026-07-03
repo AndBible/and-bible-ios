@@ -271,53 +271,9 @@ extension AndBibleUITests {
         let initialState = resolvedElementSemanticText("syncSettingsState", in: app) ?? ""
         if syncStateToken(named: "icloudEnabled", in: initialState) != "true" {
             tapElementReliably(toggle, timeout: 10)
-            RunLoop.current.run(until: Date().addingTimeInterval(1.0))
         }
 
-        let deadline = Date().addingTimeInterval(30)
-        repeat {
-            if let state = resolvedElementSemanticText("syncSettingsState", in: app) {
-                XCTAssertNotEqual(
-                    syncStateToken(named: "restartRequired", in: state),
-                    "true",
-                    "iCloud toggle must not enter restart-required fallback. State: '\(state)'."
-                )
-                XCTAssertNotEqual(
-                    syncStateToken(named: "icloudState", in: state),
-                    "pendingRestart",
-                    "iCloud toggle must not enter pending-restart fallback. State: '\(state)'."
-                )
-                if syncStateToken(named: "icloudState", in: state) != "syncing" {
-                    XCTAssertTrue(
-                        resolvedElement("syncSettingsScreen", in: app) != nil,
-                        "Live iCloud toggle must keep Sync Settings open after applying the runtime mode change. State: '\(state)'."
-                    )
-                    XCTAssertTrue(
-                        app.otherElements["appOwnedSyncSettingsRoute"].exists,
-                        "Live iCloud toggle must remain in the app-owned Sync Settings route after applying the runtime mode change."
-                    )
-                    return
-                }
-            }
-            if resolvedElement("syncSettingsScreen", in: app) == nil {
-                let lastState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
-                XCTFail(
-                    """
-                    Live iCloud toggle must keep Sync Settings open while applying the runtime mode change.
-                    Last syncSettingsState: '\(lastState)'.
-                    App state: \(app.state.rawValue).
-                    App debug: \(String(app.debugDescription.prefix(3000)))
-                    """
-                )
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let finalState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
-        XCTFail(
-            "Expected iCloud toggle to settle without restart-required fallback while keeping Sync Settings open. Final syncSettingsState: '\(finalState)'."
-        )
+        waitForICloudSyncRuntimeApplyToSettle(in: app, timeout: 30)
     }
 
     /**
