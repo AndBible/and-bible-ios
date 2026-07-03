@@ -614,22 +614,19 @@ public final class RemoteSyncReadingPlanRestoreService {
     }
 
     /**
-     Detects whether one bundled reading-plan template uses Android's date-prefixed reading format.
+     Detects whether one reading-plan template uses Android's date-prefixed reading format.
 
      Android stores some plans with a leading `Mon-1;`-style prefix before the actual reading list.
      Completion semantics differ for these plans because earlier days are not auto-completed solely
      from `currentDay`.
 
-     - Parameter template: Bundled iOS reading-plan template under evaluation.
-     - Returns: `true` when the template's first-day reading string matches Android's date-prefixed format.
+     - Parameter template: iOS reading-plan template under evaluation.
+     - Returns: `true` when catalog discovery marked the template as Android date-based.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
     private static func isDateBasedPlan(_ template: ReadingPlanTemplate) -> Bool {
-        let firstDay = template.readingsForDay(1)
-        let regex = try! NSRegularExpression(pattern: #"^[A-Za-z]{3}-\d{1,2};"#)
-        let range = NSRange(firstDay.startIndex..<firstDay.endIndex, in: firstDay)
-        return regex.firstMatch(in: firstDay, options: [], range: range) != nil
+        template.isDateBased
     }
 
     /**

@@ -622,3 +622,6 @@
 "workspace_text_display_settings_title" = "Nastavitve besedila - %@";
 "workspace_text_options_link" = "Možnosti besedila delovnega prostora — %@";
 "workspace_text_options_link_summary" = "Uredi nastavitve prikaza besedila za ta delovni prostor";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Na SD kartici je uporabnikov načrt branja z istim imenom kot notranji načrt. Tega ni mogoče izpisati. Preimenujte datoteko, pri čemer ohranite pripono .properties";

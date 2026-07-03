@@ -621,3 +621,6 @@
 "workspace_text_display_settings_title" = "Teksto parinktys - %@";
 "workspace_text_options_link" = "Darbo srities teksto parinktys — %@";
 "workspace_text_options_link_summary" = "Redaguoti teksto rodymo nustatymus šiai darbo sričiai";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Yra skaitymo planas, esantis sdcard jsword/readingplan tokiu pačiu pavadinimu kaip ir vidinis planas. Jis negali būti čia išvardytas. Pervadinkite failą kitaip, palikdami jo failo prievardį kaip .properties";

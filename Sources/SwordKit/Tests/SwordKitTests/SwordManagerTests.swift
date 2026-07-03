@@ -330,6 +330,66 @@ final class SwordManagerTests: XCTestCase {
     }
 
     /**
+     Verifies installed And Bible add-on modules expose Android-compatible reading-plan providers.
+
+     Android's `AndBibleAddons.providedReadingPlans` reads repeated
+     `AndBibleProvidesReadingPlan` config values, resolves those files relative to the installed
+     book location, and carries `AndBibleReadingPlanDateBased`, `Versification`, and `ShortPromo`
+     metadata into `ReadingPlanTextFileDao`. This test writes a minimal add-on config plus one
+     readable `.properties` file under the SWORD root. The expected result proves iOS can discover
+     the same provider contract while ignoring unsafe or missing provider entries.
+     */
+    func testReadingPlanProvidersExposeReadableAddonPlansAndMetadata() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        let modsDir = swordDir.appendingPathComponent("mods.d", isDirectory: true)
+        let addonDir = swordDir
+            .appendingPathComponent("modules/genbook/rawgenbook/planaddon", isDirectory: true)
+        try FileManager.default.createDirectory(at: modsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: addonDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        try """
+        # Add-on plan
+        Versification=NRSVA
+        1=Matt.1
+        """.write(
+            to: addonDir.appendingPathComponent("addon_plan.properties"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [PLANADDON]
+        Description=Add-on Reading Plans
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./modules/genbook/rawgenbook/planaddon/
+        Lang=en
+        ShortPromo=Plans supplied by an add-on module.
+        Versification=NRSVA
+        AndBibleReadingPlanDateBased=True
+        AndBibleProvidesReadingPlan=addon_plan.properties
+        AndBibleProvidesReadingPlan=missing.properties
+        AndBibleProvidesReadingPlan=../escape.properties
+        """.write(
+            to: modsDir.appendingPathComponent("planaddon.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let providers = SwordManager.readingPlanProviders(modulePath: swordDir.path)
+
+        XCTAssertEqual(providers.map(\.planCode), ["addon_plan"])
+        let provider = try XCTUnwrap(providers.first)
+        XCTAssertEqual(provider.name, "Add-on Reading Plans")
+        XCTAssertEqual(provider.description, "Plans supplied by an add-on module.")
+        XCTAssertEqual(provider.fileURL, addonDir.appendingPathComponent("addon_plan.properties").standardizedFileURL)
+        XCTAssertEqual(provider.versification, "NRSVA")
+        XCTAssertTrue(provider.isDateBased)
+    }
+
+    /**
      Verifies manifest-installed MyBible packages use the same inventory contract as SWORD modules.
 
      Android adds downloaded MyBible packages to `Books.installed().books`. iOS stores those packages

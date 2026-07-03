@@ -604,3 +604,6 @@
 "window_pin_mode" = "တွဲပါ";
 "window_text_display_settings_title" = "စာသား ရွေးချယ်စရာများ - ဝင်းဒိုး %d";
 "workspace_text_display_settings_title" = "စာသား ရွေးချယ်စရာများ %@";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Internal plan နှင့် အမည်တူသည့် sdcard Jsword/readingplan ထဲတွင် အသုံးပြုသူ ဖတ်စာအစီအစဉ်တစ်ခုရှိသည်။ ၎င်းစာရင်းကို ဤနေရာတွင် မဖော်ပြနိုင်ပါ။ ကျေးဇူးပြုပြီး အခြားအမည်ဖြင့် ဖိုင်အမည် ထပ်ပေးပြီး တိုးချဲ့ဖိုင်များအား properties အဖြစ်ထားရှိပါ။";

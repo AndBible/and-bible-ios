@@ -639,3 +639,6 @@
 "workspace_text_display_settings_title" = "पाठ विकल्प - %@";
 "workspace_text_options_link" = "कार्यक्षेत्र टेक्स्ट विकल्प — %@";
 "workspace_text_options_link_summary" = "इस कार्यक्षेत्र के लिए टेक्स्ट प्रदर्शन सेटिंग्स संपादित करें";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "एसडी कार्ड jsword/readingplan में एक यूजर रीडिंग प्लान है, जिसका नाम किसी आंतरिक प्लान के समान है। इसे यहां प्रदर्शित नहीं किया जा सकता है। कृपया फ़ाइल को कोई और नाम दें, फ़ाइल एक्सटेंशन को .properties के रूप में छोड़ दें";

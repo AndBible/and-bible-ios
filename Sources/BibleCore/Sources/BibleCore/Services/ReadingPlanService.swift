@@ -2,6 +2,7 @@
 
 import Foundation
 import SwiftData
+import SwordKit
 
 /// Built-in reading plan template with daily reading assignments.
 public struct ReadingPlanTemplate: Identifiable, Sendable {
@@ -13,109 +14,462 @@ public struct ReadingPlanTemplate: Identifiable, Sendable {
     public let description: String
     /// Total number of days in the plan.
     public let totalDays: Int
+    /// Whether this template uses Android's date-prefixed reading-plan format.
+    public let isDateBased: Bool
     /// Generates the readings string for a given 1-based day number.
     public let readingsForDay: @Sendable (Int) -> String
 
     /// `Identifiable` conformance backed by the plan code.
     public var id: String { code }
+
+    /**
+     Creates one reading-plan template row.
+
+     - Parameters:
+       - code: Stable plan code used for persistence and lookup.
+       - name: User-visible plan name.
+       - description: User-visible plan description.
+       - totalDays: Total number of days encoded by the plan.
+       - isDateBased: Whether readings use Android's date-prefixed syntax.
+       - readingsForDay: Closure returning the readings string for a 1-based day number.
+     */
+    public init(
+        code: String,
+        name: String,
+        description: String,
+        totalDays: Int,
+        isDateBased: Bool = false,
+        readingsForDay: @escaping @Sendable (Int) -> String
+    ) {
+        self.code = code
+        self.name = name
+        self.description = description
+        self.totalDays = totalDays
+        self.isDateBased = isDateBased
+        self.readingsForDay = readingsForDay
+    }
 }
 
 /**
- Provides built-in reading plan templates and plan lifecycle helpers.
+ Android-parity reading-plan catalog with duplicate user-plan diagnostics.
 
- The built-in catalog mirrors Android's bundled `.properties` reading-plan assets. Custom imports
- remain transient templates created from user-selected `.properties` content; Android add-on and
- user-plan discovery is intentionally tracked separately from this bundled catalog.
+ Android lists built-in plans first, appends unique files from `jsword/readingplan`, and then appends
+ unique plans declared by add-on modules. User files whose codes match built-ins do not create a
+ duplicate row, but they do trigger a selector warning and supply the plan content when that code is
+ loaded.
+ */
+public struct ReadingPlanCatalog: Sendable {
+    /// Templates visible in the available-plan selector.
+    public let templates: [ReadingPlanTemplate]
+
+    /// User reading-plan file codes that duplicate built-in plan codes.
+    public let duplicateUserPlanCodes: [String]
+
+    /// Whether the catalog should surface Android's duplicate user-plan warning.
+    public var hasDuplicateUserPlans: Bool { !duplicateUserPlanCodes.isEmpty }
+
+    /**
+     Creates one catalog snapshot.
+
+     - Parameters:
+       - templates: Visible templates in Android selector order.
+       - duplicateUserPlanCodes: User file codes that duplicate built-in plan codes.
+     */
+    public init(templates: [ReadingPlanTemplate], duplicateUserPlanCodes: [String]) {
+        self.templates = templates
+        self.duplicateUserPlanCodes = duplicateUserPlanCodes
+    }
+}
+
+/**
+ Provides Android-compatible reading plan templates and plan lifecycle helpers.
+
+ The catalog mirrors Android's `ReadingPlanTextFileDao`: bundled `.properties` plans are listed
+ first, followed by unique user files from `jsword/readingplan`, followed by unique add-on-provided
+ plans declared through `AndBibleProvidesReadingPlan`.
 
  Day numbering is intentionally 1-based for plan templates and day rows. The persisted
  `ReadingPlan.currentDay` field is still stored separately and currently starts at `0` when a
  plan is created.
  */
 public final class ReadingPlanService {
+    private struct BundledPlanDefinition: Sendable {
+        let code: String
+        let name: String
+        let description: String
+    }
+
+    private struct UserPlanFile: Sendable {
+        let code: String
+        let url: URL
+    }
+
+    private enum PlanSource {
+        case bundled
+        case userFile(URL)
+        case addon(SwordReadingPlanProvider)
+    }
+
+    private static let bundledPlanDefinitions: [BundledPlanDefinition] = [
+        .init(
+            code: "y1ot1nt1_OTthenNT",
+            name: "1-Year through Bible",
+            description: "Read through the Bible in 1 year, starting in Genesis and finishing in Revelation."
+        ),
+        .init(
+            code: "y1ot1nt1_OTandNT",
+            name: "1-Year OT+NT Simultaneously",
+            description: "Read through the Bible in 1 year, with chapters in the OT and NT every day."
+        ),
+        .init(
+            code: "y1ot1nt1_chronological",
+            name: "Chronological 1-Year through Bible",
+            description: "Plan based on chronological events in the Bible. The chronological time-line is approximate."
+        ),
+        .init(
+            code: "y1ot1nt2_mcheyne",
+            name: "M'Cheyne 1-Year 4-chapter/day",
+            description: "Based on the M'Cheyne reading system with four different readings for family and personal devotions. OT once, NT and Psalms twice per year."
+        ),
+        .init(
+            code: "y1ot6nt4_profHorner",
+            name: "Prof. Horner 10-chapter/day",
+            description: "Read 10 chapters per day from 10 different lists that cycle at different rates."
+        ),
+        .init(
+            code: "y1ntpspr",
+            name: "NT, Psalms & Proverbs in a Year",
+            description: "Read through the New Testament, Psalms, and Proverbs in one year."
+        ),
+        .init(
+            code: "y2ot1ntps2",
+            name: "2-Year Through Bible, NT+PS twice",
+            description: "Read through the Bible in 2 years, reading the NT and Psalms twice."
+        ),
+    ]
 
     /**
-     All bundled Android reading-plan templates available to start in-app.
+     Android-compatible reading-plan templates available to start in-app.
 
-     The list is limited to plan codes backed by bundled `.properties` files so picker, sync,
-     and restore behavior stays aligned with Android's built-in catalog. Missing resource files
-     are skipped rather than represented by empty placeholder templates.
+     This compatibility view returns the current catalog templates. Call `catalog(...)` when the
+     caller also needs duplicate user-plan diagnostics.
      */
-    public static let availablePlans: [ReadingPlanTemplate] = {
-        var plans: [ReadingPlanTemplate] = []
+    public static var availablePlans: [ReadingPlanTemplate] {
+        catalog().templates
+    }
 
-        // Android-parity data-driven plans (loaded from .properties files)
-        let dataDrivenPlans: [(code: String, name: String, description: String)] = [
-            (
-                "y1ot1nt1_OTthenNT",
-                "1-Year through Bible",
-                "Read through the Bible in 1 year, starting in Genesis and finishing in Revelation."
-            ),
-            (
-                "y1ot1nt1_OTandNT",
-                "1-Year OT+NT Simultaneously",
-                "Read through the Bible in 1 year, with chapters in the OT and NT every day."
-            ),
-            (
-                "y1ot1nt1_chronological",
-                "Chronological 1-Year through Bible",
-                "Plan based on chronological events in the Bible. The chronological time-line is approximate."
-            ),
-            (
-                "y1ot1nt2_mcheyne",
-                "M'Cheyne 1-Year 4-chapter/day",
-                "Based on the M'Cheyne reading system with four different readings for family and personal devotions. OT once, NT and Psalms twice per year."
-            ),
-            (
-                "y1ot6nt4_profHorner",
-                "Prof. Horner 10-chapter/day",
-                "Read 10 chapters per day from 10 different lists that cycle at different rates."
-            ),
-            (
-                "y1ntpspr",
-                "NT, Psalms & Proverbs in a Year",
-                "Read through the New Testament, Psalms, and Proverbs in one year."
-            ),
-            (
-                "y2ot1ntps2",
-                "2-Year Through Bible, NT+PS twice",
-                "Read through the Bible in 2 years, reading the NT and Psalms twice."
-            ),
-        ]
+    /**
+     Default Android-compatible user reading-plan folder in the app sandbox.
 
-        for plan in dataDrivenPlans {
-            if let readings = loadPropertiesPlan(code: plan.code) {
-                let totalDays = readings.keys.max() ?? 0
-                plans.append(ReadingPlanTemplate(
-                    code: plan.code,
-                    name: plan.name,
-                    description: plan.description,
-                    totalDays: totalDays,
-                    readingsForDay: { day in
-                        readings[day] ?? ""
-                    }
-                ))
+     Android uses JSword's `jsword/readingplan` directory for user `.properties` files. iOS mirrors
+     that storage boundary under the application documents directory.
+     */
+    public static func defaultUserReadingPlanDirectory() -> URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return documents.appendingPathComponent("jsword/readingplan", isDirectory: true)
+    }
+
+    /**
+     Builds the Android-parity reading-plan catalog.
+
+     - Parameters:
+       - userPlanDirectory: Directory containing Android-compatible user `.properties` plans.
+       - modulePath: SWORD module root containing add-on module configs and provider files.
+     - Returns: Catalog templates plus duplicate user-plan diagnostics.
+     - Side effects: Reads bundled resources, user plan files, SWORD configs, and provider files.
+     - Failure modes: Missing or malformed plan files are skipped.
+     */
+    public static func catalog(
+        userPlanDirectory: URL? = ReadingPlanService.defaultUserReadingPlanDirectory(),
+        modulePath: String = SwordManager.defaultModulePath()
+    ) -> ReadingPlanCatalog {
+        let userPlans = userPlanFiles(in: userPlanDirectory)
+        let userPlansByCode = Dictionary(userPlans.map { ($0.code, $0.url) }) { first, _ in first }
+        let providers = SwordManager.readingPlanProviders(modulePath: modulePath)
+        let providersByCode = Dictionary(providers.map { ($0.planCode, $0) }) { _, last in last }
+        let bundledCodes = Set(bundledPlanDefinitions.map(\.code))
+        var duplicateUserPlanCodes: [String] = []
+        var duplicateSeen = Set<String>()
+        for userPlan in userPlans where bundledCodes.contains(userPlan.code) {
+            if duplicateSeen.insert(userPlan.code).inserted {
+                duplicateUserPlanCodes.append(userPlan.code)
             }
         }
 
-        return plans
-    }()
+        var templates: [ReadingPlanTemplate] = []
+        var emittedCodes = Set<String>()
+
+        for definition in bundledPlanDefinitions {
+            emittedCodes.insert(definition.code)
+            if let template = template(
+                code: definition.code,
+                bundledDefinition: definition,
+                userPlanFile: userPlansByCode[definition.code],
+                addonProvider: providersByCode[definition.code]
+            ) {
+                templates.append(template)
+            }
+        }
+
+        for userPlan in userPlans where !emittedCodes.contains(userPlan.code) {
+            emittedCodes.insert(userPlan.code)
+            if let template = template(
+                code: userPlan.code,
+                bundledDefinition: nil,
+                userPlanFile: userPlan.url,
+                addonProvider: providersByCode[userPlan.code]
+            ) {
+                templates.append(template)
+            }
+        }
+
+        for provider in providers where !emittedCodes.contains(provider.planCode) {
+            emittedCodes.insert(provider.planCode)
+            if let template = template(
+                code: provider.planCode,
+                bundledDefinition: nil,
+                userPlanFile: nil,
+                addonProvider: provider
+            ) {
+                templates.append(template)
+            }
+        }
+
+        return ReadingPlanCatalog(
+            templates: templates,
+            duplicateUserPlanCodes: duplicateUserPlanCodes
+        )
+    }
 
     // MARK: - .properties File Parser
 
     /**
-     Load a reading plan from a bundled .properties file.
-     Returns a dictionary mapping 1-based day number to the readings string.
+     Creates one template by selecting the Android-equivalent source for a plan code.
+
+     Android loads add-on provider files before user files before bundled assets for the same plan
+     code. Built-in display metadata remains attached to bundled codes even when an external file
+     supplies the readings.
+
+     - Parameters:
+       - code: Plan code being materialized.
+       - bundledDefinition: Built-in metadata when the code belongs to Android's internal catalog.
+       - userPlanFile: Matching user `.properties` file, when present.
+       - addonProvider: Matching add-on provider, when present.
+     - Returns: Template when a selected source can be parsed.
+     - Side effects: Reads at most one plan file.
+     - Failure modes: Missing or malformed selected sources return `nil`.
      */
-    private static func loadPropertiesPlan(code: String) -> [Int: String]? {
+    private static func template(
+        code: String,
+        bundledDefinition: BundledPlanDefinition?,
+        userPlanFile: URL?,
+        addonProvider: SwordReadingPlanProvider?
+    ) -> ReadingPlanTemplate? {
+        let source: PlanSource
+        let selectedPropertiesText: String
+
+        if let addonProvider,
+           let text = propertiesText(from: addonProvider.fileURL) {
+            source = .addon(addonProvider)
+            selectedPropertiesText = text
+        } else if let userPlanFile,
+                  let text = propertiesText(from: userPlanFile) {
+            source = .userFile(userPlanFile)
+            selectedPropertiesText = text
+        } else if let text = bundledPropertiesText(code: code) {
+            source = .bundled
+            selectedPropertiesText = text
+        } else {
+            return nil
+        }
+
+        let readings = parseProperties(selectedPropertiesText)
+        guard !readings.isEmpty else { return nil }
+
+        let totalDays = readings.keys.max() ?? 0
+        let display = displayMetadata(
+            code: code,
+            bundledDefinition: bundledDefinition,
+            source: source,
+            propertiesText: selectedPropertiesText
+        )
+        let isDateBased = isDateBased(source: source, firstDayReadings: readings[1] ?? "")
+
+        return ReadingPlanTemplate(
+            code: code,
+            name: display.name,
+            description: display.description,
+            totalDays: totalDays,
+            isDateBased: isDateBased,
+            readingsForDay: { day in
+                readings[day] ?? ""
+            }
+        )
+    }
+
+    /**
+     Lists Android-compatible user reading-plan files from one folder.
+
+     - Parameter directory: Folder equivalent to Android's `jsword/readingplan`.
+     - Returns: `.properties` files with plan codes derived from file names.
+     - Side effects: Reads the directory listing.
+     - Failure modes: Missing or unreadable directories return an empty list.
+     */
+    private static func userPlanFiles(in directory: URL?) -> [UserPlanFile] {
+        guard let directory,
+              let urls = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return []
+        }
+
+        return urls
+            .filter { $0.pathExtension.caseInsensitiveCompare("properties") == .orderedSame }
+            .compactMap { url -> UserPlanFile? in
+                let code = url.deletingPathExtension().lastPathComponent
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !code.isEmpty else { return nil }
+                return UserPlanFile(code: code, url: url)
+            }
+    }
+
+    /**
+     Reads a bundled Android plan resource as text.
+
+     - Parameter code: Bundled plan code.
+     - Returns: Decoded plan text.
+     - Side effects: Reads one bundled resource.
+     - Failure modes: Missing or undecodable resources return `nil`.
+     */
+    private static func bundledPropertiesText(code: String) -> String? {
         guard let url = moduleResourceURL(
             forResource: code,
             withExtension: "properties",
             subdirectories: ["readingplan", "Resources/readingplan"]
         ) else { return nil }
 
-        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        return propertiesText(from: url)
+    }
 
-        return parseProperties(contents)
+    /**
+     Reads one Android `.properties` file using the encodings accepted by local catalog sources.
+
+     - Parameter url: Local plan file URL.
+     - Returns: Decoded text.
+     - Side effects: Reads `url` from disk.
+     - Failure modes: Missing or undecodable files return `nil`.
+     */
+    private static func propertiesText(from url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return String(data: data, encoding: .utf8) ??
+            String(data: data, encoding: .isoLatin1)
+    }
+
+    /**
+     Resolves display metadata for a selected plan source.
+
+     - Parameters:
+       - code: Plan code used as fallback for user plans.
+       - bundledDefinition: Built-in metadata when this is an internal Android code.
+       - source: Source selected for the plan content.
+       - propertiesText: Raw selected plan text.
+     - Returns: User-visible name and description.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func displayMetadata(
+        code: String,
+        bundledDefinition: BundledPlanDefinition?,
+        source: PlanSource,
+        propertiesText: String
+    ) -> (name: String, description: String) {
+        if let bundledDefinition {
+            return (bundledDefinition.name, bundledDefinition.description)
+        }
+
+        switch source {
+        case .addon(let provider):
+            return (provider.name, provider.description)
+        case .userFile:
+            return userPlanMetadata(from: propertiesText, fallbackName: code)
+        case .bundled:
+            return (code, "")
+        }
+    }
+
+    /**
+     Reads Android custom-plan name and description comments.
+
+     Android uses up to the first five physical lines and treats leading `#` comments as name and
+     description text. The first comment becomes the name; remaining comments are joined as the
+     description.
+
+     - Parameters:
+       - text: Raw `.properties` content.
+       - fallbackName: Name used when no leading comment name exists.
+     - Returns: User-visible name and description.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func userPlanMetadata(
+        from text: String,
+        fallbackName: String
+    ) -> (name: String, description: String) {
+        var comments: [String] = []
+        for line in text.components(separatedBy: .newlines).prefix(5) {
+            guard line.hasPrefix("#") else { continue }
+            let comment = line
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(
+                    of: #"^(\s*#*\s*)"#,
+                    with: "",
+                    options: .regularExpression
+                )
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !comment.isEmpty else { continue }
+            comments.append(String(comment))
+        }
+
+        return (
+            comments.first ?? fallbackName,
+            comments.dropFirst().joined(separator: " ")
+        )
+    }
+
+    /**
+     Resolves whether the selected source uses Android's date-based plan semantics.
+
+     Add-on providers use the explicit `AndBibleReadingPlanDateBased` metadata, matching Android.
+     Bundled and user files fall back to Android's first-day prefix detection.
+
+     - Parameters:
+       - source: Plan source selected for content.
+       - firstDayReadings: Raw day-one readings string.
+     - Returns: `true` when the plan should use date-based completion semantics.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func isDateBased(source: PlanSource, firstDayReadings: String) -> Bool {
+        if case .addon(let provider) = source {
+            return provider.isDateBased
+        }
+        return hasDateBasedPrefix(firstDayReadings)
+    }
+
+    /**
+     Detects Android's date-prefixed reading-plan syntax.
+
+     - Parameter readings: Raw readings string from one day.
+     - Returns: `true` when the string starts with a `Mon-1;`-style prefix.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func hasDateBasedPrefix(_ readings: String) -> Bool {
+        let regex = try! NSRegularExpression(pattern: #"^[A-Za-z]{3}-\d{1,2};"#)
+        let range = NSRange(readings.startIndex..<readings.endIndex, in: readings)
+        return regex.firstMatch(in: readings, options: [], range: range) != nil
     }
 
     private static func moduleResourceURL(
@@ -142,19 +496,233 @@ public final class ReadingPlanService {
      */
     public static func parseProperties(_ text: String) -> [Int: String] {
         var readings: [Int: String] = [:]
-        for line in text.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-
-            guard let eqIndex = trimmed.firstIndex(of: "=") else { continue }
-            let key = String(trimmed[trimmed.startIndex..<eqIndex]).trimmingCharacters(in: .whitespaces)
-            let value = String(trimmed[trimmed.index(after: eqIndex)...]).trimmingCharacters(in: .whitespaces)
+        for line in logicalPropertiesLines(from: text) {
+            guard let entry = propertiesEntry(from: line) else { continue }
+            let key = unescapePropertyText(entry.key).trimmingCharacters(in: .whitespaces)
+            let value = unescapePropertyText(entry.value)
 
             // Skip non-numeric keys (e.g. "Versification=KJV")
             guard let dayNumber = Int(key) else { continue }
             readings[dayNumber] = value
         }
         return readings
+    }
+
+    /**
+     Builds Java `.properties` logical lines from physical text lines.
+
+     Android loads reading plans through `Properties.load`, where a trailing odd backslash joins the
+     next physical line and strips the continuation marker. Leading whitespace on the continued
+     line is ignored.
+
+     - Parameter text: Raw `.properties` file content.
+     - Returns: Logical property lines ready for key/value parsing.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func logicalPropertiesLines(from text: String) -> [String] {
+        var logicalLines: [String] = []
+        var current = ""
+
+        for physicalLine in text.components(separatedBy: .newlines) {
+            if current.isEmpty {
+                current = physicalLine
+            } else {
+                current += physicalLine.trimmingCharacters(in: .whitespaces)
+            }
+
+            if hasOddTrailingBackslashes(current) {
+                current.removeLast()
+                continue
+            }
+
+            logicalLines.append(current)
+            current = ""
+        }
+
+        if !current.isEmpty {
+            logicalLines.append(current)
+        }
+
+        return logicalLines
+    }
+
+    /**
+     Parses one Java `.properties` logical line into a raw key/value pair.
+
+     Separators match Android's `Properties.load` behavior: the first unescaped `=`, `:`, or
+     whitespace ends the key, then optional separator characters and leading value whitespace are
+     skipped. Blank lines and `#`/`!` comments are ignored.
+
+     - Parameter line: One logical property line.
+     - Returns: Raw key and value before escape decoding, or `nil` for ignored lines.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func propertiesEntry(from line: String) -> (key: String, value: String)? {
+        let text = String(line.drop(while: isPropertyWhitespace))
+        guard let first = text.first, first != "#", first != "!" else { return nil }
+
+        var index = text.startIndex
+        var keyEnd = text.endIndex
+        var escaped = false
+        while index < text.endIndex {
+            let character = text[index]
+            if escaped {
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == "=" || character == ":" || isPropertyWhitespace(character) {
+                keyEnd = index
+                break
+            }
+            index = text.index(after: index)
+        }
+
+        guard keyEnd < text.endIndex else {
+            return (text, "")
+        }
+
+        var valueStart = keyEnd
+        while valueStart < text.endIndex, isPropertyWhitespace(text[valueStart]) {
+            valueStart = text.index(after: valueStart)
+        }
+        if valueStart < text.endIndex, text[valueStart] == "=" || text[valueStart] == ":" {
+            valueStart = text.index(after: valueStart)
+        }
+        while valueStart < text.endIndex, isPropertyWhitespace(text[valueStart]) {
+            valueStart = text.index(after: valueStart)
+        }
+
+        return (
+            String(text[..<keyEnd]),
+            String(text[valueStart...])
+        )
+    }
+
+    /**
+     Decodes Java `.properties` escape sequences used by Android reading-plan files.
+
+     - Parameter text: Raw key or value text.
+     - Returns: Text with common Java properties escapes and `\uXXXX` sequences decoded.
+     - Side effects: none.
+     - Failure modes: Malformed unicode escapes are left as literal escaped text.
+     */
+    private static func unescapePropertyText(_ text: String) -> String {
+        var result = ""
+        var index = text.startIndex
+
+        while index < text.endIndex {
+            let character = text[index]
+            guard character == "\\" else {
+                result.append(character)
+                index = text.index(after: index)
+                continue
+            }
+
+            let escapedIndex = text.index(after: index)
+            guard escapedIndex < text.endIndex else {
+                index = escapedIndex
+                continue
+            }
+
+            let escaped = text[escapedIndex]
+            switch escaped {
+            case "t":
+                result.append("\t")
+                index = text.index(after: escapedIndex)
+            case "n":
+                result.append("\n")
+                index = text.index(after: escapedIndex)
+            case "r":
+                result.append("\r")
+                index = text.index(after: escapedIndex)
+            case "f":
+                result.append("\u{000C}")
+                index = text.index(after: escapedIndex)
+            case "u":
+                var unicodeIndex = text.index(after: escapedIndex)
+                var scalarValue = 0
+                var digitCount = 0
+                while digitCount < 4,
+                      unicodeIndex < text.endIndex,
+                      let digitValue = hexValue(of: text[unicodeIndex]) {
+                    scalarValue = scalarValue * 16 + digitValue
+                    digitCount += 1
+                    unicodeIndex = text.index(after: unicodeIndex)
+                }
+                if digitCount == 4, let scalar = UnicodeScalar(scalarValue) {
+                    result.unicodeScalars.append(scalar)
+                    index = unicodeIndex
+                } else {
+                    result.append(escaped)
+                    index = text.index(after: escapedIndex)
+                }
+            default:
+                result.append(escaped)
+                index = text.index(after: escapedIndex)
+            }
+        }
+
+        return result
+    }
+
+    /**
+     Detects Java `.properties` key/value whitespace.
+
+     - Parameter character: Character to test.
+     - Returns: `true` for space, tab, or form-feed.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func isPropertyWhitespace(_ character: Character) -> Bool {
+        character == " " || character == "\t" || character == "\u{000C}"
+    }
+
+    /**
+     Checks whether a logical line should continue into the next physical line.
+
+     - Parameter text: Current accumulated line.
+     - Returns: `true` when the line ends in an odd number of backslashes.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func hasOddTrailingBackslashes(_ text: String) -> Bool {
+        var count = 0
+        var index = text.endIndex
+        while index > text.startIndex {
+            let previous = text.index(before: index)
+            guard text[previous] == "\\" else { break }
+            count += 1
+            index = previous
+        }
+        return count % 2 == 1
+    }
+
+    /**
+     Converts one hexadecimal character to its integer value.
+
+     - Parameter character: Candidate hexadecimal digit.
+     - Returns: Integer value for `0...9`, `a...f`, and `A...F`, otherwise `nil`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func hexValue(of character: Character) -> Int? {
+        guard character.unicodeScalars.count == 1,
+              let value = character.unicodeScalars.first?.value else {
+            return nil
+        }
+
+        switch value {
+        case 48...57:
+            return Int(value - 48)
+        case 65...70:
+            return Int(value - 55)
+        case 97...102:
+            return Int(value - 87)
+        default:
+            return nil
+        }
     }
 
     // MARK: - Custom Plan Import
@@ -178,6 +746,7 @@ public final class ReadingPlanService {
             name: name,
             description: "Custom imported reading plan (\(totalDays) days).",
             totalDays: totalDays,
+            isDateBased: hasDateBasedPrefix(readings[1] ?? ""),
             readingsForDay: { day in
                 readings[day] ?? ""
             }

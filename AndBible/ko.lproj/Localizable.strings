@@ -638,3 +638,6 @@
 "workspace_text_display_settings_title" = "텍스트 옵션 - %@";
 "workspace_text_options_link" = "워크스페이스 텍스트 옵션 — %@";
 "workspace_text_options_link_summary" = "이 워크스페이스의 텍스트 표시 설정 편집";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "사용자 읽기 계획이 SD 카드에 있습니다 내부 계획과 같은 이름의 jsword/readingplan 이 있습니다. 여기에는 나타나지 않습니다. 확장자는 .properties로 남기고 파일 이름을 다른 것으로 바꿔주세요";

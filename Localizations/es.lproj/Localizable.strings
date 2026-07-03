@@ -622,3 +622,6 @@
 "workspace_text_display_settings_title" = "Opciones de texto - %@";
 "workspace_text_options_link" = "Opciones de texto del espacio de trabajo — %@";
 "workspace_text_options_link_summary" = "Editar ajustes de visualización de texto para este espacio de trabajo";
+
+/* Android shared translations */
+"plan_duplicate_user_plan" = "Hay un plan de lectura de usuario en la tarjeta SD jsword/readingplan con el mismo nombre que un plan interno. No se puede enumerar aquí. Cambie el nombre del archivo a otra cosa, dejando su extensión de archivo como .properties";
