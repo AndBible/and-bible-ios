@@ -28,6 +28,50 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertTrue(info.isUnlocked)
     }
 
+    /**
+     Verifies installed module rows retain Android `CommonUtils.showAbout` metadata from SWORD config.
+
+     JSword reloads `SwordBookMetaData` before opening About and exposes fields such as `About`,
+     copyright, version history, versification, OSIS ID, bad-document state, and version date. iOS must
+     project those config values into `ModuleInfo` so reader-picker and Downloads About dialogs show
+     real metadata instead of iOS-only substitutes.
+     */
+    func testSwordModuleConfigProjectsAndroidAboutMetadataIntoModuleInfo() throws {
+        let config = try XCTUnwrap(SwordModuleConfig.parse("""
+        [TEST]
+        Description=Test Bible
+        Category=Biblical Texts
+        ModDrv=zText
+        Lang=en
+        Version=2.0
+        SwordVersionDate=2024-01-02
+        About=First line\\par Second line
+        ShortPromo=Short promo
+        ShortCopyright=Short copyright
+        Copyright=Long copyright
+        DistributionLicense=GPL
+        UnlockInfo=Request a key
+        History_1.0=First release
+        History_2.0=Second release
+        Versification=KJVA
+        BadDocument=true
+        """))
+
+        let info = config.moduleInfo
+
+        XCTAssertEqual(info.aboutMetadata.about, "First line\\par Second line")
+        XCTAssertEqual(info.aboutMetadata.shortPromo, "Short promo")
+        XCTAssertEqual(info.aboutMetadata.shortCopyright, "Short copyright")
+        XCTAssertEqual(info.aboutMetadata.copyright, "Long copyright")
+        XCTAssertEqual(info.aboutMetadata.distributionLicense, "GPL")
+        XCTAssertEqual(info.aboutMetadata.unlockInfo, "Request a key")
+        XCTAssertEqual(info.aboutMetadata.history, ["1.0 First release", "2.0 Second release"])
+        XCTAssertEqual(info.aboutMetadata.versification, "KJVA")
+        XCTAssertEqual(info.aboutMetadata.osisId, "TEST")
+        XCTAssertTrue(info.aboutMetadata.isBadDocument)
+        XCTAssertEqual(info.aboutMetadata.swordVersionDate, "2024-01-02")
+    }
+
     func testRemoteModuleInfoDefaultsToInstallable() {
         let info = RemoteModuleInfo(
             name: "KJV",

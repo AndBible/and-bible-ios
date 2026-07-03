@@ -41,6 +41,9 @@ struct SwordModuleConfig: Sendable {
     /// Feature flags collected from repeated `Feature` and `GlobalOptionFilter` lines.
     let features: ModuleFeatures
 
+    /// JSword-compatible version history values collected from `History` and `History_x.y` lines.
+    let history: [String]
+
     /// Case-insensitive config values keyed by lowercased property name.
     let values: [String: [String]]
 
@@ -50,6 +53,24 @@ struct SwordModuleConfig: Sendable {
     /// Category resolved through Android custom-driver and SWORD fallback rules.
     var category: ModuleCategory {
         ModuleCategory(typeString: categoryString, modDrv: modDrv)
+    }
+
+    /// Android `CommonUtils.showAbout(...)` metadata projected from config values.
+    var aboutMetadata: ModuleAboutMetadata {
+        ModuleAboutMetadata(
+            about: Self.firstValue("about", in: values) ?? "",
+            shortPromo: Self.firstValue("shortpromo", in: values) ?? "",
+            shortCopyright: Self.firstValue("shortcopyright", in: values) ?? "",
+            copyright: Self.firstValue("copyright", in: values) ?? "",
+            distributionLicense: Self.firstValue("distributionlicense", in: values) ?? "",
+            unlockInfo: Self.firstValue("unlockinfo", in: values) ?? "",
+            history: history,
+            versification: Self.firstValue("versification", in: values) ?? "",
+            osisId: name,
+            repository: Self.firstValue("repository", in: values) ?? "",
+            isBadDocument: Self.firstValue("baddocument", in: values) != nil,
+            swordVersionDate: Self.firstValue("swordversiondate", in: values) ?? ""
+        )
     }
 
     /// Whether the config belongs to an Android custom book driver that libsword does not expose.
@@ -80,7 +101,8 @@ struct SwordModuleConfig: Sendable {
             language: language,
             version: version,
             features: features,
-            isRightToLeft: direction.caseInsensitiveCompare("RtoL") == .orderedSame
+            isRightToLeft: direction.caseInsensitiveCompare("RtoL") == .orderedSame,
+            aboutMetadata: aboutMetadata
         )
     }
 
@@ -95,6 +117,7 @@ struct SwordModuleConfig: Sendable {
     static func parse(_ content: String) -> SwordModuleConfig? {
         var name = ""
         var values: [String: [String]] = [:]
+        var history: [String] = []
 
         for line in content.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -111,12 +134,19 @@ struct SwordModuleConfig: Sendable {
                 continue
             }
 
-            let key = String(trimmed[..<equalsIndex])
+            let rawKey = String(trimmed[..<equalsIndex])
                 .trimmingCharacters(in: .whitespaces)
-                .lowercased()
+            let key = rawKey.lowercased()
             let value = String(trimmed[trimmed.index(after: equalsIndex)...])
                 .trimmingCharacters(in: .whitespaces)
             values[key, default: []].append(value)
+
+            if key == "history" {
+                history.append(value)
+            } else if key.hasPrefix("history_") {
+                let version = String(rawKey.dropFirst("history_".count))
+                history.append("\(version) \(value)")
+            }
         }
 
         guard !name.isEmpty,
@@ -138,6 +168,7 @@ struct SwordModuleConfig: Sendable {
             features: ModuleFeatures.fromConfigValues(
                 (values["feature"] ?? []) + (values["globaloptionfilter"] ?? [])
             ),
+            history: history,
             values: values,
             content: content
         )

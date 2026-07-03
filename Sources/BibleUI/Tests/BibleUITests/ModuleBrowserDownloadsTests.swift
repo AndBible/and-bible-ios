@@ -19,6 +19,320 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
+     Verifies module About metadata remains a shared Android-dialog payload rather than a sheet-local
+     form.
+
+     Android builds the About dialog from the selected document's real metadata and omits unavailable
+     fields. This test covers the iOS payload boundary directly: Downloads and the reader picker both
+     consume `ModuleBrowserModuleDetails`, so SWORD About fields, version rows, repository, and OSIS ID
+     must be present while iOS-only category/language/install-state rows stay absent.
+     */
+    func testModuleBrowserModuleDetailsRowsPreserveAvailableRemoteAndInstalledMetadata() {
+        let details = ModuleBrowserModuleDetails(
+            module: RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "2.1",
+                installSizeBytes: 2_500_000
+            ),
+            installedModule: ModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                version: "2.0",
+                isEncrypted: true,
+                isUnlocked: false,
+                aboutMetadata: ModuleAboutMetadata(
+                    about: "Installed about text",
+                    shortCopyright: "Short copyright",
+                    history: ["1.0 First release", "2.0 Second release"],
+                    versification: "KJVA",
+                    osisId: "KJV",
+                    repository: "CrossWire",
+                    swordVersionDate: "2023-07-19"
+                )
+            )
+        )
+
+        XCTAssertEqual(
+            details.androidAboutRows.map(\.kind),
+            [
+                .about,
+                .copyright,
+                .latestVersion,
+                .installedVersion,
+                .versionHistory,
+                .versification,
+                .osisId,
+                .repository
+            ]
+        )
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .about }?.value, "Installed about text")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .copyright }?.value, "Short copyright")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .latestVersion }?.value, "2.1 (-)")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .installedVersion }?.value, "2.0 (2023-07-19)")
+        XCTAssertEqual(
+            details.androidAboutRows.first { $0.kind == .versionHistory }?.value,
+            "2.0 Second release\n1.0 First release"
+        )
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .versification }?.value, "KJVA")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .osisId }?.value, "KJV")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .repository }?.value, "CrossWire")
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .category })
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .language })
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .installSize })
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .installedState })
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .encryptionState })
+    }
+
+    /**
+     Verifies the rendered About body follows Android's `CommonUtils.showAbout(...)` message shape.
+
+     Android does not render a form/table for About metadata; it builds one message beginning with the
+     document name, then appends available metadata sections with blank-line separation and adjacent
+     latest/installed version lines. A failure means iOS can have the right fields but still present a
+     materially different About dialog.
+     */
+    func testModuleBrowserModuleDetailsMessageUsesAndroidAboutBodyShape() {
+        let details = ModuleBrowserModuleDetails(
+            module: RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "2.1"
+            ),
+            installedModule: ModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                version: "2.0",
+                aboutMetadata: ModuleAboutMetadata(
+                    about: "Installed\\par about text",
+                    shortPromo: "Short promo",
+                    shortCopyright: "Short copyright",
+                    distributionLicense: "GPL",
+                    unlockInfo: "Request a key",
+                    history: ["1.0 First release", "2.0 Second release"],
+                    versification: "KJVA",
+                    osisId: "KJV",
+                    repository: "CrossWire",
+                    isBadDocument: true,
+                    swordVersionDate: "2023-07-19"
+                )
+            )
+        )
+
+        XCTAssertEqual(
+            details.androidAboutMessage,
+            """
+            King James Version
+
+            Warning: This document might be (at least partially) bad technical quality.
+
+            Installed
+             about text
+
+            Short promo
+
+            Copyright: Short copyright
+
+            GPL
+
+            Encrypted module unlock info
+
+            Request a key
+
+            Latest version: 2.1 (-)
+            Installed version: 2.0 (2023-07-19)
+
+            Version history:\(" ")
+            2.0 Second release
+            1.0 First release
+
+            Versification: KJVA
+
+            OSIS ID: KJV
+
+            Distribution server: CrossWire
+            """
+        )
+        XCTAssertEqual(
+            details.androidAboutHTMLMessage,
+            "<b>King James Version</b><br><br><b>Warning: This document might be (at least partially) bad technical quality.</b><br><br>Installed<br> about text<br><br>Short promo<br><br>Copyright: Short copyright<br><br>GPL<br><br><b>Encrypted module unlock info</b><br><br>Request a key<br><br>Latest version: 2.1 (-)<br>Installed version: 2.0 (2023-07-19)<br><br>Version history: <br>2.0 Second release<br>1.0 First release<br><br>Versification: KJVA<br><br>OSIS ID: KJV<br><br>Distribution server: CrossWire"
+        )
+    }
+
+    /**
+     Verifies long copyright-only metadata keeps Android's paragraph spacing.
+
+     Android's `CommonUtils.showAbout(...)` prefixes long `Copyright` and `DistributionLicense`
+     fragments with blank paragraphs when `ShortCopyright` is absent. The iOS message assembly must
+     preserve that shape instead of normalizing it into a cleaner iOS-only single-line copyright row.
+     A failure means the dialog text can drift even though the same source-backed metadata fields are
+     present.
+     */
+    func testModuleBrowserModuleDetailsMessagePreservesAndroidCopyrightSpacingWithoutShortCopyright() {
+        let details = ModuleBrowserModuleDetails(
+            module: RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire"
+            ),
+            installedModule: ModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                aboutMetadata: ModuleAboutMetadata(
+                    copyright: "Long copyright",
+                    distributionLicense: "GPL"
+                )
+            )
+        )
+
+        XCTAssertEqual(
+            details.androidAboutRows.first { $0.kind == .copyright }?.message,
+            """
+            Copyright:\(" ")
+
+            Long copyright
+
+            GPL
+            """
+        )
+    }
+
+    /**
+     Verifies SWORD `History_*` metadata preserves the original config suffix before About rendering.
+
+     JSword projects `History_1.0=value` as `1.0 value`; iOS must avoid lowercasing the raw suffix
+     while keeping config lookup case-insensitive. A failure means version-history rows can drift from
+     Android for non-numeric suffixes even when the dialog assembly is correct.
+     */
+    func testModuleBrowserAboutMetadataPreservesHistorySuffixCase() throws {
+        let config = try XCTUnwrap(SwordModuleConfig.parse("""
+        [TEST]
+        Description=Test Bible
+        Category=Biblical Texts
+        ModDrv=zText
+        Lang=en
+        History_Beta=Beta release
+        History_1.0=First release
+        """))
+
+        XCTAssertEqual(config.moduleInfo.aboutMetadata.history, ["Beta Beta release", "1.0 First release"])
+    }
+
+    /**
+     Verifies unavailable About metadata is omitted instead of rendered as empty iOS-only rows.
+
+     Android's About dialog only includes fields backed by actual `BookMetaData` values. The iOS
+     payload must follow the same rule for optional metadata so the dialog stays honest when a
+     repository catalog has sparse SWORD fields.
+     */
+    func testModuleBrowserModuleDetailsRowsOmitUnavailableOptionalMetadata() {
+        let details = ModuleBrowserModuleDetails(
+            module: RemoteModuleInfo(
+                name: "EMPTY",
+                description: "   ",
+                category: .dictionary,
+                language: "",
+                sourceName: "   ",
+                version: "   ",
+                installSizeBytes: nil
+            ),
+            installedModule: nil
+        )
+
+        XCTAssertEqual(
+            details.androidAboutRows.map(\.kind),
+            [
+                .osisId
+            ]
+        )
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .osisId }?.value, "EMPTY")
+    }
+
+    /**
+     Verifies installed document About details do not pass through a fake Downloads catalog row.
+
+     Android reader-picker About uses the installed `BookMetaData` directly and does not invent a
+     repository source or latest-version row. The iOS reader picker must therefore build an installed-only
+     payload; failures here mean installed modules can show artificial metadata or duplicate version rows.
+     */
+    func testModuleBrowserModuleDetailsRowsForInstalledDocumentDoNotInventRemoteMetadata() {
+        let details = ModuleBrowserModuleDetails(
+            installedModule: ModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                version: "2.0",
+                isEncrypted: false,
+                isUnlocked: true
+            )
+        )
+
+        XCTAssertEqual(
+            details.androidAboutRows.map(\.kind),
+            [
+                .latestVersion,
+                .osisId
+            ]
+        )
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .latestVersion }?.value, "2.0 (-)")
+        XCTAssertEqual(details.androidAboutRows.first { $0.kind == .osisId }?.value, "KJV")
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .source })
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .installedVersion })
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .category })
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .language })
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .installSize })
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .installedState })
+        XCTAssertNil(details.androidAboutRows.first { $0.kind == .encryptionState })
+    }
+
+    /**
+     Guards Downloads row About against regressing to native iOS sheet chrome.
+
+     Android invokes `CommonUtils.showAbout(...)`, which displays a non-cancelable `AlertDialog`
+     message from the row About action. A failure means the Downloads path has drifted back to a
+     SwiftUI sheet or stopped using the shared dialog presenter.
+     */
+    func testModuleBrowserAboutUsesSharedAndroidDialogInsteadOfSheet() throws {
+        let downloadsSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift"
+        )
+        let detailsSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserRowActionPresentation.swift"
+        )
+
+        XCTAssertTrue(downloadsSource.contains(".moduleBrowserModuleDetailsDialog("))
+        XCTAssertFalse(downloadsSource.contains(".sheet(item: $selectedModuleDetails)"))
+        XCTAssertTrue(detailsSource.contains("struct ModuleBrowserModuleDetailsDialog: View"))
+        XCTAssertTrue(detailsSource.contains("AndroidDialogSurfacePalette"))
+        XCTAssertTrue(detailsSource.contains("moduleDetailsDialogScreen"))
+        XCTAssertTrue(detailsSource.contains("moduleDetailsOKButton"))
+        XCTAssertTrue(detailsSource.contains(".accessibilityAddTraits(.isModal)"))
+        XCTAssertTrue(detailsSource.contains("Text(details.androidAboutAttributedMessage)"))
+        XCTAssertTrue(detailsSource.contains("NSAttributedString.DocumentType.html"))
+        XCTAssertTrue(detailsSource.contains(".onTapGesture {}"))
+        XCTAssertFalse(detailsSource.contains("ForEach(details.androidAboutRows)"))
+        XCTAssertFalse(detailsSource.contains("private func detailRow("))
+        XCTAssertFalse(detailsSource.contains("@Environment(\\.dismiss) private var dismiss"))
+        XCTAssertFalse(detailsSource.contains("Form {"))
+        XCTAssertFalse(detailsSource.contains(".navigationTitle(String(localized: \"about\"))"))
+    }
+
+    /**
      Verifies destructive Downloads row confirmations use module descriptions instead of initials.
 
      Android confirms removal/index deletion with the visible document name. The iOS row model must
