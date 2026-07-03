@@ -126,6 +126,155 @@ public struct ModuleFeatures: OptionSet, Sendable {
     public static let dailyDevotion = ModuleFeatures(rawValue: 1 << 9)
 }
 
+/**
+ Android-compatible metadata used by module About dialogs.
+
+ Android reloads `SwordBookMetaData` before opening `CommonUtils.showAbout(...)` and reads these
+ optional config fields from the installed document. iOS carries the same values alongside
+ `ModuleInfo` so UI code can render real metadata and omit unavailable fields instead of inventing
+ Downloads-only substitutes.
+
+ Side effects:
+ - none; this is an immutable value type
+
+ Failure modes:
+ - none; missing metadata is represented by empty strings or an empty history array
+ */
+public struct ModuleAboutMetadata: Sendable, Equatable {
+    /// Raw SWORD `About` text.
+    public let about: String
+
+    /// SWORD `ShortPromo` text.
+    public let shortPromo: String
+
+    /// SWORD `ShortCopyright` text.
+    public let shortCopyright: String
+
+    /// SWORD `Copyright` text.
+    public let copyright: String
+
+    /// SWORD `DistributionLicense` text.
+    public let distributionLicense: String
+
+    /// SWORD `UnlockInfo` text for encrypted modules.
+    public let unlockInfo: String
+
+    /// JSword-style `History` values, preserving config order.
+    public let history: [String]
+
+    /// SWORD versification name.
+    public let versification: String
+
+    /// OSIS/module identifier shown by Android About.
+    public let osisId: String
+
+    /// Distribution repository/source name when known.
+    public let repository: String
+
+    /// Whether Android metadata marks this as a bad document.
+    public let isBadDocument: Bool
+
+    /// SWORD `SwordVersionDate` value.
+    public let swordVersionDate: String
+
+    /**
+     Creates an About metadata value.
+
+     - Parameters:
+       - about: Raw SWORD `About` text.
+       - shortPromo: SWORD `ShortPromo` text.
+       - shortCopyright: SWORD `ShortCopyright` text.
+       - copyright: SWORD `Copyright` text.
+       - distributionLicense: SWORD `DistributionLicense` text.
+       - unlockInfo: SWORD `UnlockInfo` text.
+       - history: JSword-style version history values in config order.
+       - versification: SWORD versification name.
+       - osisId: OSIS/module identifier.
+       - repository: Distribution repository/source name.
+       - isBadDocument: Whether Android should show the bad-document warning.
+       - swordVersionDate: SWORD version date value.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    public init(
+        about: String = "",
+        shortPromo: String = "",
+        shortCopyright: String = "",
+        copyright: String = "",
+        distributionLicense: String = "",
+        unlockInfo: String = "",
+        history: [String] = [],
+        versification: String = "",
+        osisId: String = "",
+        repository: String = "",
+        isBadDocument: Bool = false,
+        swordVersionDate: String = ""
+    ) {
+        self.about = about
+        self.shortPromo = shortPromo
+        self.shortCopyright = shortCopyright
+        self.copyright = copyright
+        self.distributionLicense = distributionLicense
+        self.unlockInfo = unlockInfo
+        self.history = history
+        self.versification = versification
+        self.osisId = osisId
+        self.repository = repository
+        self.isBadDocument = isBadDocument
+        self.swordVersionDate = swordVersionDate
+    }
+
+    /**
+     Applies honest fallback identifiers to metadata that came from a smaller source.
+
+     Module sidecars and test fixtures can omit OSIS ID or repository while the caller still knows those
+     values from the selected installed or remote row. This method fills only blank values and preserves
+     all source-backed fields.
+
+     - Parameters:
+       - fallbackOsisId: Module initials to use when `osisId` is blank.
+       - fallbackRepository: Repository/source name to use when `repository` is blank.
+     - Returns: Metadata with missing identifier fields filled.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    public func withFallbacks(
+        osisId fallbackOsisId: String,
+        repository fallbackRepository: String? = nil
+    ) -> ModuleAboutMetadata {
+        ModuleAboutMetadata(
+            about: about,
+            shortPromo: shortPromo,
+            shortCopyright: shortCopyright,
+            copyright: copyright,
+            distributionLicense: distributionLicense,
+            unlockInfo: unlockInfo,
+            history: history,
+            versification: versification,
+            osisId: Self.nonEmpty(osisId) ?? fallbackOsisId,
+            repository: Self.nonEmpty(repository) ?? Self.nonEmpty(fallbackRepository) ?? "",
+            isBadDocument: isBadDocument,
+            swordVersionDate: swordVersionDate
+        )
+    }
+
+    /**
+     Trims optional metadata text before fallback decisions.
+
+     - Parameter value: Optional raw metadata text.
+     - Returns: Trimmed non-empty text, otherwise `nil`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+}
+
 extension ModuleFeatures {
     /**
      Builds a feature set from SWORD/JSword config values.
@@ -245,6 +394,9 @@ public struct ModuleInfo: Sendable, Identifiable {
     /// Module text direction.
     public let isRightToLeft: Bool
 
+    /// Android-compatible module About metadata.
+    public let aboutMetadata: ModuleAboutMetadata
+
     /// Unique identifier (uses module name).
     public var id: String { name }
 
@@ -257,7 +409,8 @@ public struct ModuleInfo: Sendable, Identifiable {
         isEncrypted: Bool = false,
         isUnlocked: Bool = true,
         features: ModuleFeatures = [],
-        isRightToLeft: Bool = false
+        isRightToLeft: Bool = false,
+        aboutMetadata: ModuleAboutMetadata = ModuleAboutMetadata()
     ) {
         self.name = name
         self.description = description
@@ -268,5 +421,6 @@ public struct ModuleInfo: Sendable, Identifiable {
         self.isUnlocked = isUnlocked
         self.features = features
         self.isRightToLeft = isRightToLeft
+        self.aboutMetadata = aboutMetadata.withFallbacks(osisId: name)
     }
 }

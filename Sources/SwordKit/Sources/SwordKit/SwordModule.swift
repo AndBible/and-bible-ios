@@ -93,13 +93,14 @@ public final class SwordModule: @unchecked Sendable {
             let language = String(cString: SWModule_getLanguage(handle))
             let modDrvPtr = SWModule_getConfigEntry(handle, "ModDrv")
             let modDrv = modDrvPtr != nil ? String(cString: modDrvPtr!) : ""
+            let config = modulePath.flatMap { SwordModuleConfig.read(name: name, modulePath: $0) }
 
             // Detect features by parsing the .conf file directly from disk.
             // SWORD's flat API getConfigEntry() only returns the FIRST value for
             // multi-value keys (Feature, GlobalOptionFilter), so modules like KJV
             // where StrongsNumbers isn't the first entry are missed. Reading the
             // .conf file catches ALL entries.
-            let features = SwordModule.detectFeatures(
+            let features = config?.features ?? SwordModule.detectFeatures(
                 name: name, handle: handle, modulePath: modulePath
             )
 
@@ -109,6 +110,22 @@ public final class SwordModule: @unchecked Sendable {
             let direction = directionPtr != nil ? String(cString: directionPtr!) : "LtoR"
             let versionPtr = SWModule_getConfigEntry(handle, "Version")
             let versionStr = versionPtr != nil ? String(cString: versionPtr!) : ""
+            func configValue(_ key: String) -> String {
+                guard let value = SWModule_getConfigEntry(handle, key) else { return "" }
+                return String(cString: value)
+            }
+            let aboutMetadata = config?.aboutMetadata ?? ModuleAboutMetadata(
+                about: configValue("About"),
+                shortPromo: configValue("ShortPromo"),
+                shortCopyright: configValue("ShortCopyright"),
+                copyright: configValue("Copyright"),
+                distributionLicense: configValue("DistributionLicense"),
+                unlockInfo: configValue("UnlockInfo"),
+                versification: configValue("Versification"),
+                osisId: name,
+                isBadDocument: SWModule_getConfigEntry(handle, "BadDocument") != nil,
+                swordVersionDate: configValue("SwordVersionDate")
+            )
 
             return ModuleInfo(
                 name: name,
@@ -119,7 +136,8 @@ public final class SwordModule: @unchecked Sendable {
                 isEncrypted: isEncrypted,
                 isUnlocked: !isEncrypted || (cipherKey.map { String(cString: $0) } ?? "").isEmpty == false,
                 features: features,
-                isRightToLeft: direction == "RtoL"
+                isRightToLeft: direction == "RtoL",
+                aboutMetadata: aboutMetadata
             )
         }
     }

@@ -353,7 +353,7 @@ final class BibleReaderModulePickerTests: XCTestCase {
      Android's `DocumentSelectionBase` row menu invokes `CommonUtils.showAbout(...)` and keeps the user
      inside the chooser while a dialog is visible. The iOS picker must therefore use the same shared
      module details dialog presenter as Downloads instead of wrapping `ModuleBrowserModuleDetailsView`
-     in a `NavigationStack` sheet.
+     in a `NavigationStack` sheet or synthesizing Downloads-only metadata for installed documents.
      */
     func testBibleReaderModulePickerAboutUsesSharedAndroidDialogInsteadOfSheet() throws {
         let pickerSource = try BibleUITestSourceLocator.source(
@@ -361,8 +361,10 @@ final class BibleReaderModulePickerTests: XCTestCase {
         )
 
         XCTAssertTrue(pickerSource.contains(".moduleBrowserModuleDetailsDialog("))
+        XCTAssertTrue(pickerSource.contains("ModuleBrowserModuleDetails(installedModule: module)"))
         XCTAssertFalse(pickerSource.contains(".sheet(item: $selectedModuleDetails)"))
         XCTAssertFalse(pickerSource.contains("NavigationStack {\n                ModuleBrowserModuleDetailsView"))
+        XCTAssertFalse(pickerSource.contains("sourceName: String(localized: \"installed\""))
     }
 
 }

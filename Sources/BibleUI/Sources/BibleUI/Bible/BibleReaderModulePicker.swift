@@ -1012,13 +1012,10 @@ struct BibleReaderModulePicker: View {
      Builds the shared About dialog payload for an installed module.
 
      - Parameter module: Installed module selected from the chooser.
-     - Returns: Details payload compatible with the Downloads About dialog.
+     - Returns: Installed-only details payload compatible with Android's reader-picker About dialog.
      */
     private func moduleDetails(for module: ModuleInfo) -> ModuleBrowserModuleDetails {
-        ModuleBrowserModuleDetails(
-            module: Self.remoteModuleInfo(for: module),
-            installedModule: module
-        )
+        ModuleBrowserModuleDetails(installedModule: module)
     }
 
     /**
@@ -1035,7 +1032,7 @@ struct BibleReaderModulePicker: View {
     ) -> ModuleBrowserRowActionConfirmation {
         ModuleBrowserRowActionConfirmation(
             kind: kind,
-            module: Self.remoteModuleInfo(for: module)
+            installedModule: module
         )
     }
 
@@ -1450,23 +1447,6 @@ struct BibleReaderModulePicker: View {
         default:
             return 7
         }
-    }
-
-    /**
-     Builds a Downloads-compatible remote metadata payload from an installed module snapshot.
-
-     - Parameter module: Installed module metadata.
-     - Returns: Minimal remote row used by the shared About and confirmation presentation helpers.
-     */
-    private static func remoteModuleInfo(for module: ModuleInfo) -> RemoteModuleInfo {
-        RemoteModuleInfo(
-            name: module.name,
-            description: module.description,
-            category: module.category,
-            language: module.language,
-            sourceName: String(localized: "installed", defaultValue: "Installed"),
-            version: module.version
-        )
     }
 
     /**

@@ -1,5 +1,6 @@
 // ModuleBrowserRowActionPresentation.swift - Downloads row action presentation helpers
 
+import Foundation
 import SwiftUI
 import SwordKit
 
@@ -134,39 +135,60 @@ struct ModuleBrowserModuleDetailRow: Identifiable, Equatable {
     /**
      Stable field identifiers for the module About dialog.
 
-     Cases are intentionally limited to metadata iOS currently owns. Android-only `BookMetaData`
-     fields such as copyright, history, unlock info text, repository raw properties, and versification
-     are not represented until iOS stores those values honestly.
+     Current rendered cases mirror Android `CommonUtils.showAbout(...)`. The older category/language
+     and install-state cases remain only as regression sentinels in tests so those iOS-only fields are
+     not reintroduced as visible rows.
      */
     enum Kind: String, Equatable {
-        /// SWORD module initials.
-        case initials
+        /// Bad-document warning from Android metadata.
+        case warning
 
-        /// User-facing module name/description.
-        case name
+        /// Main SWORD `About` text.
+        case about
 
-        /// SWORD module category.
-        case category
+        /// SWORD `ShortPromo` text.
+        case shortPromo
 
-        /// Module language display name.
-        case language
+        /// Copyright and distribution license text.
+        case copyright
 
-        /// Remote or installed source label.
-        case source
+        /// Encrypted module unlock information.
+        case unlockInfo
 
-        /// Latest remote catalog version.
+        /// Latest/catalog version row.
         case latestVersion
 
-        /// Installed local module version.
+        /// Installed/local version row.
         case installedVersion
 
-        /// Remote install size when the catalog reports it.
+        /// Version history values.
+        case versionHistory
+
+        /// SWORD versification name.
+        case versification
+
+        /// Android OSIS ID row.
+        case osisId
+
+        /// Android distribution server/repository row.
+        case repository
+
+        /// Deprecated iOS-only module category row.
+        case category
+
+        /// Deprecated iOS-only module language row.
+        case language
+
+        /// Deprecated iOS-only source row.
+        case source
+
+        /// Deprecated iOS-only install-size row.
         case installSize
 
-        /// Local installed-state marker.
+        /// Deprecated iOS-only installed-state row.
         case installedState
 
-        /// Local encrypted module lock state.
+        /// Deprecated iOS-only encrypted lock-state row.
         case encryptionState
     }
 
@@ -179,8 +201,29 @@ struct ModuleBrowserModuleDetailRow: Identifiable, Equatable {
     /// User-visible metadata value.
     let value: String
 
+    /// Android-style message fragment rendered in the About dialog body.
+    let message: String
+
     /// Stable row identity for SwiftUI and tests.
     var id: Kind { kind }
+
+    /**
+     Creates one typed About row and its Android message fragment.
+
+     - Parameters:
+       - kind: Stable metadata field identity.
+       - title: Field label retained for tests and future accessibility affordances.
+       - value: Raw user-visible metadata value.
+       - message: Formatted Android-style message fragment. Defaults to `value`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    init(kind: Kind, title: String, value: String, message: String? = nil) {
+        self.kind = kind
+        self.title = title
+        self.value = value
+        self.message = message ?? value
+    }
 }
 
 /**
@@ -188,104 +231,330 @@ struct ModuleBrowserModuleDetailRow: Identifiable, Equatable {
 
  Android expands SWORD metadata for the selected row and displays the available details in
  `CommonUtils.showAbout(...)`. iOS currently has a smaller remote/installed metadata model, so this
- payload preserves every available local field while deliberately omitting values iOS does not store.
+ payload preserves every available local field while keeping catalog-only and installed-only metadata
+ separate. Reader-picker About actions must not synthesize a repository row because Android reads the
+ installed document metadata directly.
 
  Side effects:
  - none; this value only drives SwiftUI dialog presentation
 
  Failure modes:
- - missing installed metadata is represented by `nil` and omitted from the dialog
+ - missing remote or installed metadata is represented by `nil` and omitted from the dialog
  - empty optional fields are omitted rather than shown as placeholders
  */
 struct ModuleBrowserModuleDetails: Identifiable {
-    /// Remote catalog row selected from Downloads, or a remote-shaped installed snapshot in picker.
-    let module: RemoteModuleInfo
+    /// Stable dialog identity scoped to the source row that opened the dialog.
+    let id: String
 
-    /// Matching installed module metadata, when the module exists locally.
-    let installedModule: ModuleInfo?
+    /// SWORD module initials used as the fallback heading and OSIS identity.
+    let moduleName: String
 
-    /// Stable dialog identity scoped to the repository row.
-    var id: String { module.id }
+    /// User-facing module description used as Android's `document.name` equivalent when available.
+    let moduleDescription: String
+
+    /// Installed or remote metadata that backs Android About rows.
+    let aboutMetadata: ModuleAboutMetadata
+
+    /// Android row kind used for the primary version line.
+    let primaryVersionKind: ModuleBrowserModuleDetailRow.Kind
+
+    /// Primary version value from the selected document/catalog row.
+    let primaryVersion: String?
+
+    /// Date paired with the primary version, when known.
+    let primaryVersionDate: String?
+
+    /// Secondary installed version shown only for Downloads rows with a matching installed module.
+    let installedVersion: String?
+
+    /// Date paired with the secondary installed version, when known.
+    let installedVersionDate: String?
+
+    /// Android-style dialog heading.
+    var displayName: String {
+        Self.nonEmpty(moduleDescription) ?? moduleName
+    }
+
+    /**
+     Single Android-style About message rendered by the shared dialog.
+
+     Android's `CommonUtils.showAbout(...)` builds one AlertDialog message instead of a form/table.
+     This property keeps that presentation contract visible to tests while `androidAboutRows`
+     preserves typed row identities for semantic parity checks.
+
+     - Returns: Message text with blank-line section separation and adjacent version rows.
+     - Side effects: none.
+     - Failure modes: Empty optional metadata rows are omitted before message assembly.
+     */
+    var androidAboutMessage: String {
+        androidAboutSections(renderingHTML: false)
+            .compactMap(Self.nonEmpty)
+            .joined(separator: "\n\n")
+    }
+
+    /**
+     Android-style About message after Android's final HTML newline conversion.
+
+     Android wraps the document name, bad-document warning, and unlock-info heading in `<b>` tags,
+     appends raw module metadata, then replaces line breaks with `<br>` before displaying the span.
+     This property preserves that presentation contract so links and simple metadata markup render
+     instead of appearing as literal HTML in iOS.
+
+     - Returns: HTML body passed to the Swift attributed-string importer.
+     - Side effects: none.
+     - Failure modes: Empty optional metadata rows are omitted before message assembly.
+     */
+    var androidAboutHTMLMessage: String {
+        androidAboutSections(renderingHTML: true)
+            .compactMap(Self.nonEmpty)
+            .joined(separator: "\n\n")
+            .replacingOccurrences(of: "\n", with: "<br>")
+    }
+
+    /**
+     Attributed About body used by the SwiftUI dialog.
+
+     Android displays the About message through `htmlToSpan(...)`, so iOS imports the same HTML body
+     into an attributed string. If Foundation rejects malformed module metadata HTML, the dialog falls
+     back to the plain Android message rather than dropping the About content.
+
+     - Returns: Attributed message suitable for `Text`.
+     - Side effects: Parses the in-memory HTML string.
+     - Failure modes: Malformed HTML falls back to plain text.
+     */
+    var androidAboutAttributedMessage: AttributedString {
+        Self.attributedHTMLString(from: androidAboutHTMLMessage) ?? AttributedString(androidAboutMessage)
+    }
+
+    /**
+     Builds the ordered About message sections in plain or Android-HTML form.
+
+     - Parameter renderingHTML: Whether section values should include Android's bold wrappers.
+     - Returns: Ordered message sections before blank-line joining and final newline conversion.
+     - Side effects: none.
+     - Failure modes: Empty optional metadata rows are omitted by `androidAboutRows`.
+     */
+    private func androidAboutSections(renderingHTML: Bool) -> [String] {
+        var sections = [displayName]
+        var versionMessages: [String] = []
+
+        if renderingHTML {
+            sections = ["<b>\(displayName)</b>"]
+        }
+
+        func flushVersionMessages() {
+            guard !versionMessages.isEmpty else {
+                return
+            }
+            sections.append(versionMessages.joined(separator: "\n"))
+            versionMessages.removeAll()
+        }
+
+        for row in androidAboutRows {
+            switch row.kind {
+            case .latestVersion, .installedVersion:
+                versionMessages.append(row.message)
+            case .warning:
+                flushVersionMessages()
+                sections.append(renderingHTML ? "<b>\(row.message)</b>" : row.message)
+            case .unlockInfo:
+                flushVersionMessages()
+                sections.append(renderingHTML ? "<b>\(row.title)</b>\n\n\(row.value)" : row.message)
+            default:
+                flushVersionMessages()
+                sections.append(row.message)
+            }
+        }
+        flushVersionMessages()
+        return sections
+    }
+
+    /**
+     Creates a dialog payload for a Downloads catalog row.
+
+     - Parameters:
+       - module: Remote catalog row selected from Downloads.
+       - installedModule: Matching local module metadata, when the module exists locally.
+     - Side effects: none.
+     - Failure modes: Missing installed metadata leaves installed-only rows absent.
+     */
+    init(module: RemoteModuleInfo, installedModule: ModuleInfo?) {
+        id = module.id
+        moduleName = module.name
+        moduleDescription = module.description
+        aboutMetadata = installedModule?.aboutMetadata.withFallbacks(
+            osisId: module.name,
+            repository: module.sourceName
+        ) ?? ModuleAboutMetadata(
+            osisId: module.name,
+            repository: module.sourceName
+        )
+        primaryVersionKind = installedModule == nil ? .installedVersion : .latestVersion
+        primaryVersion = module.version
+        primaryVersionDate = nil
+        installedVersion = installedModule?.version
+        installedVersionDate = installedModule?.aboutMetadata.swordVersionDate
+    }
+
+    /**
+     Creates a dialog payload for a reader-picker installed document.
+
+     Android's reader document picker calls `CommonUtils.showAbout(...)` on the installed document
+     metadata and does not add Downloads-only source/latest/install-size rows. This initializer keeps
+     that boundary explicit so installed modules never gain artificial repository metadata.
+
+     - Parameter installedModule: Installed module selected from the reader document picker.
+     - Side effects: none.
+     - Failure modes: Empty installed metadata fields are omitted by `androidAboutRows`.
+     */
+    init(installedModule: ModuleInfo) {
+        id = installedModule.id
+        moduleName = installedModule.name
+        moduleDescription = installedModule.description
+        aboutMetadata = installedModule.aboutMetadata
+        primaryVersionKind = .latestVersion
+        primaryVersion = installedModule.version
+        primaryVersionDate = installedModule.aboutMetadata.swordVersionDate
+        installedVersion = nil
+        installedVersionDate = nil
+    }
 
     /**
      Android About rows assembled from the metadata iOS can honestly provide.
 
-     - Returns: Ordered dialog rows matching Android's message-first About contract while preserving
-       every available remote and installed iOS field.
+     - Returns: Ordered dialog rows matching Android's message-first About contract.
      - Side effects: none.
      - Failure modes: Empty optional metadata is omitted.
      */
     var androidAboutRows: [ModuleBrowserModuleDetailRow] {
-        var rows: [ModuleBrowserModuleDetailRow] = [
-            row(
-                kind: .initials,
-                title: String(localized: "module_initials", defaultValue: "Initials"),
-                value: module.name
+        var rows: [ModuleBrowserModuleDetailRow] = []
+
+        if aboutMetadata.isBadDocument {
+            let warning = String(
+                localized: "warn_bad_document",
+                defaultValue: "Warning: This document might be (at least partially) bad technical quality."
             )
-        ]
-
-        if let description = Self.nonEmpty(module.description) {
             rows.append(row(
-                kind: .name,
-                title: String(localized: "module_name", defaultValue: "Name"),
-                value: description
-            ))
-        }
-        rows.append(row(
-            kind: .category,
-            title: String(localized: "module_category", defaultValue: "Category"),
-            value: Self.categoryTitle(module.category)
-        ))
-        if let language = Self.nonEmpty(module.language) {
-            rows.append(row(
-                kind: .language,
-                title: String(localized: "module_language", defaultValue: "Language"),
-                value: Self.displayName(for: language)
+                kind: .warning,
+                title: String(localized: "warning", defaultValue: "Warning"),
+                value: warning
             ))
         }
 
-        if let source = Self.nonEmpty(module.sourceName) {
+        if let about = Self.nonEmpty(Self.cleanedAboutText(aboutMetadata.about)) {
             rows.append(row(
-                kind: .source,
-                title: String(localized: "module_source", defaultValue: "Source"),
-                value: source
+                kind: .about,
+                title: String(localized: "about", defaultValue: "About"),
+                value: about
             ))
         }
-        if let latestVersion = Self.nonEmpty(module.version) {
+
+        if let shortPromo = Self.nonEmpty(aboutMetadata.shortPromo) {
             rows.append(row(
-                kind: .latestVersion,
-                title: String(localized: "module_latest_version", defaultValue: "Latest version"),
-                value: latestVersion
+                kind: .shortPromo,
+                title: String(localized: "module_short_promo", defaultValue: "Summary"),
+                value: shortPromo
             ))
         }
-        if let installedVersion = installedModule.flatMap({ Self.nonEmpty($0.version) }) {
+
+        if let copyright = Self.copyrightText(from: aboutMetadata) {
+            rows.append(row(
+                kind: .copyright,
+                title: String(localized: "copyright", defaultValue: "Copyright"),
+                value: copyright,
+                message: Self.formattedAndroidString(
+                    key: "module_about_copyright",
+                    defaultValue: "Copyright: %@",
+                    arguments: [copyright]
+                )
+            ))
+        }
+
+        if let unlockInfo = Self.nonEmpty(aboutMetadata.unlockInfo) {
+            let title = String(localized: "unlock_info", defaultValue: "Encrypted module unlock info")
+            rows.append(row(
+                kind: .unlockInfo,
+                title: title,
+                value: unlockInfo,
+                message: "\(title)\n\n\(unlockInfo)"
+            ))
+        }
+
+        if let primaryVersion = Self.versionParts(primaryVersion, date: primaryVersionDate) {
+            rows.append(row(
+                kind: primaryVersionKind,
+                title: Self.versionTitle(for: primaryVersionKind),
+                value: primaryVersion.value,
+                message: Self.versionMessage(
+                    kind: primaryVersionKind,
+                    version: primaryVersion.version,
+                    date: primaryVersion.date
+                )
+            ))
+        }
+
+        if let installedVersion = Self.versionParts(installedVersion, date: installedVersionDate) {
             rows.append(row(
                 kind: .installedVersion,
-                title: String(localized: "module_installed_version", defaultValue: "Installed version"),
-                value: installedVersion
+                title: Self.versionTitle(for: .installedVersion),
+                value: installedVersion.value,
+                message: Self.versionMessage(
+                    kind: .installedVersion,
+                    version: installedVersion.version,
+                    date: installedVersion.date
+                )
             ))
         }
-        if let installSize = Self.installSizeText(for: module.installSizeBytes) {
+
+        if let history = Self.versionHistoryText(aboutMetadata.history) {
             rows.append(row(
-                kind: .installSize,
-                title: String(localized: "module_install_size", defaultValue: "Install size"),
-                value: installSize
+                kind: .versionHistory,
+                title: String(localized: "module_about_version_history_label", defaultValue: "Version history"),
+                value: history,
+                message: Self.formattedAndroidString(
+                    key: "about_version_history",
+                    defaultValue: "Version history: %@",
+                    arguments: ["\n\(history)"]
+                )
             ))
         }
-        if installedModule != nil {
+
+        if let versification = Self.nonEmpty(aboutMetadata.versification) {
             rows.append(row(
-                kind: .installedState,
-                title: String(localized: "module_installed", defaultValue: "Installed"),
-                value: String(localized: "module_installed", defaultValue: "Installed")
+                kind: .versification,
+                title: String(localized: "module_about_versification_label", defaultValue: "Versification"),
+                value: versification,
+                message: Self.formattedAndroidString(
+                    key: "module_about_versification",
+                    defaultValue: "Versification: %@",
+                    arguments: [versification]
+                )
             ))
         }
-        if let installedModule, installedModule.isEncrypted {
+
+        if let osisId = Self.nonEmpty(aboutMetadata.osisId) {
             rows.append(row(
-                kind: .encryptionState,
-                title: String(localized: "module_encrypted", defaultValue: "Encrypted"),
-                value: installedModule.isUnlocked
-                    ? String(localized: "module_unlocked", defaultValue: "Unlocked")
-                    : String(localized: "module_locked", defaultValue: "Locked")
+                kind: .osisId,
+                title: String(localized: "module_about_osisId_label", defaultValue: "OSIS ID"),
+                value: osisId,
+                message: Self.formattedAndroidString(
+                    key: "module_about_osisId",
+                    defaultValue: "OSIS ID: %@",
+                    arguments: [osisId]
+                )
+            ))
+        }
+
+        if let repository = Self.nonEmpty(aboutMetadata.repository) {
+            rows.append(row(
+                kind: .repository,
+                title: String(localized: "module_about_repository_label", defaultValue: "Distribution server"),
+                value: repository,
+                message: Self.formattedAndroidString(
+                    key: "module_about_repository",
+                    defaultValue: "Distribution server: %@",
+                    arguments: [repository]
+                )
             ))
         }
 
@@ -299,76 +568,210 @@ struct ModuleBrowserModuleDetails: Identifiable {
        - kind: Stable metadata field identity.
        - title: Localized field label.
        - value: User-visible metadata value.
+       - message: Android-style message fragment, or `nil` to use `value`.
      - Returns: Row value consumed by the shared dialog.
      - Side effects: none.
      - Failure modes: none.
      */
-    private func row(kind: ModuleBrowserModuleDetailRow.Kind, title: String, value: String) -> ModuleBrowserModuleDetailRow {
-        ModuleBrowserModuleDetailRow(kind: kind, title: title, value: value)
+    private func row(
+        kind: ModuleBrowserModuleDetailRow.Kind,
+        title: String,
+        value: String,
+        message: String? = nil
+    ) -> ModuleBrowserModuleDetailRow {
+        ModuleBrowserModuleDetailRow(kind: kind, title: title, value: value, message: message)
     }
 
     /**
-     Resolves a module category to the same user-facing buckets used by the Downloads filter.
+     Resolves Android version row parts.
 
-     - Parameter category: SWORD module category.
-     - Returns: Localized category title.
+     - Parameters:
+       - version: Raw SWORD version.
+       - date: Raw SWORD version date.
+     - Returns: Parsed row parts, or `nil` when the version is empty.
      - Side effects: none.
-     - Failure modes: Unknown categories fall back to the raw category value.
+     - Failure modes: Missing dates use Android's `-` placeholder.
      */
-    private static func categoryTitle(_ category: ModuleCategory) -> String {
-        switch category {
-        case .bible:
-            return String(localized: "bibles", defaultValue: "Bibles")
-        case .commentary:
-            return String(localized: "commentaries", defaultValue: "Commentaries")
-        case .dictionary:
-            return String(localized: "dictionaries", defaultValue: "Dictionaries")
-        case .generalBook:
-            return String(localized: "category_books", defaultValue: "Books")
-        case .map:
-            return String(localized: "maps", defaultValue: "Maps")
-        case .addon:
-            return String(localized: "doc_type_addons", defaultValue: "Add-ons")
+    private static func versionParts(_ version: String?, date: String?) -> (
+        version: String,
+        date: String,
+        value: String
+    )? {
+        guard let version = nonEmpty(version) else {
+            return nil
+        }
+        let date = nonEmpty(date) ?? "-"
+        return (version: version, date: date, value: "\(version) (\(date))")
+    }
+
+    /**
+     Resolves Android's localized label for one version row kind.
+
+     - Parameter kind: Version row kind.
+     - Returns: Localized row label.
+     - Side effects: none.
+     - Failure modes: Non-version kinds fall back to latest-version wording.
+     */
+    private static func versionTitle(for kind: ModuleBrowserModuleDetailRow.Kind) -> String {
+        switch kind {
+        case .installedVersion:
+            return String(localized: "module_about_installed_version_label", defaultValue: "Installed version")
         default:
-            return category.rawValue
+            return String(localized: "module_about_latest_version_label", defaultValue: "Latest version")
         }
     }
 
     /**
-     Resolves a language code to localized display text.
+     Formats one Android version line.
 
-     - Parameter languageCode: ISO-style language code from remote or installed metadata.
-     - Returns: Localized language name when available, otherwise the uppercased code.
-     - Side effects: none.
-     - Failure modes: Invalid or unknown codes fall back to uppercased input.
+     - Parameters:
+       - kind: Version row kind controlling latest-versus-installed wording.
+       - version: Version value to interpolate.
+       - date: Version date value to interpolate.
+     - Returns: Localized Android-compatible version line.
+     - Side effects: Reads localized strings from the app bundle.
+     - Failure modes: Android `%s` placeholders are normalized before Swift formatting.
      */
-    private static func displayName(for languageCode: String) -> String {
-        let baseCode = languageCode.components(separatedBy: "-").first ?? languageCode
-        if let name = Locale.current.localizedString(forLanguageCode: baseCode),
-           name.lowercased() != baseCode.lowercased() {
-            if languageCode.contains("-") {
-                let suffix = languageCode.components(separatedBy: "-").dropFirst().joined(separator: "-")
-                return "\(name) (\(suffix))"
-            }
-            return name
+    private static func versionMessage(
+        kind: ModuleBrowserModuleDetailRow.Kind,
+        version: String,
+        date: String
+    ) -> String {
+        switch kind {
+        case .installedVersion:
+            return formattedAndroidString(
+                key: "module_about_installed_version",
+                defaultValue: "Installed version: %1$@ (%2$@)",
+                arguments: [version, date]
+            )
+        default:
+            return formattedAndroidString(
+                key: "module_about_latest_version",
+                defaultValue: "Latest version: %1$@ (%2$@)",
+                arguments: [version, date]
+            )
         }
-        return languageCode.uppercased()
     }
 
     /**
-     Formats the SWORD install-size value shown in Android's download rows.
+     Formats Android string resources with Swift-safe placeholder handling.
 
-     - Parameter bytes: Install-size byte count from remote catalog metadata.
-     - Returns: One-decimal megabyte text, or `nil` when metadata is absent.
+     Android translations use `%s`, `%1$s`, and `%2$s` placeholders. Swift's formatter expects object
+     placeholders (`%@`) for `String` arguments, so this helper normalizes Android string resources
+     before interpolation while preserving the translated wording.
+
+     - Parameters:
+       - key: Android/iOS localization key.
+       - defaultValue: English fallback format.
+       - arguments: Format arguments.
+     - Returns: Interpolated localized text.
+     - Side effects: Reads localized strings from the app bundle.
+     - Failure modes: Missing keys use `defaultValue`.
+     */
+    private static func formattedAndroidString(
+        key: String,
+        defaultValue: String,
+        arguments: [CVarArg]
+    ) -> String {
+        let localizedFormat = Bundle.main.localizedString(forKey: key, value: defaultValue, table: nil)
+        let format = iosStringFormat(fromAndroidFormat: localizedFormat)
+        guard !arguments.isEmpty else {
+            return format
+        }
+        return String(format: format, locale: Locale.current, arguments: arguments)
+    }
+
+    /**
+     Converts Android `%s` string placeholders into Swift object placeholders.
+
+     - Parameter format: Localized Android-format string.
+     - Returns: Swift `String(format:)` compatible format string.
+     - Side effects: none.
+     - Failure modes: Non-string placeholders are left unchanged.
+     */
+    private static func iosStringFormat(fromAndroidFormat format: String) -> String {
+        var normalized = format
+        for index in 1...9 {
+            normalized = normalized.replacingOccurrences(of: "%\(index)$s", with: "%\(index)$@")
+        }
+        return normalized.replacingOccurrences(of: "%s", with: "%@")
+    }
+
+    /**
+     Imports Android-style HTML into a Swift attributed string.
+
+     - Parameter html: HTML message body produced by `androidAboutHTMLMessage`.
+     - Returns: Attributed text when Foundation can parse the HTML, otherwise `nil`.
+     - Side effects: none.
+     - Failure modes: Invalid UTF-8 or malformed HTML returns `nil`.
+     */
+    private static func attributedHTMLString(from html: String) -> AttributedString? {
+        guard let data = html.data(using: .utf8) else {
+            return nil
+        }
+        let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
+            .documentType: NSAttributedString.DocumentType.html,
+            .characterEncoding: String.Encoding.utf8.rawValue
+        ]
+        guard let attributed = try? NSAttributedString(
+            data: data,
+            options: options,
+            documentAttributes: nil
+        ) else {
+            return nil
+        }
+        return AttributedString(attributed)
+    }
+
+    /**
+     Merges copyright fields using Android's `CommonUtils.showAbout(...)` precedence.
+
+     - Parameter metadata: Source-backed About metadata.
+     - Returns: Copyright/distribution text, or `nil` when both fields are empty.
      - Side effects: none.
      - Failure modes: none.
      */
-    private static func installSizeText(for bytes: Int64?) -> String? {
-        guard let bytes else {
+    private static func copyrightText(from metadata: ModuleAboutMetadata) -> String? {
+        var merged = ""
+        if let shortCopyright = nonEmpty(metadata.shortCopyright) {
+            merged += shortCopyright
+        } else if let copyright = nonEmpty(metadata.copyright) {
+            merged += "\n\n\(copyright)"
+        }
+        if let distributionLicense = nonEmpty(metadata.distributionLicense) {
+            merged += "\n\n\(distributionLicense)"
+        }
+        return nonEmpty(merged) == nil ? nil : merged
+    }
+
+    /**
+     Formats JSword version history values in Android display order.
+
+     - Parameter history: Config-order history values.
+     - Returns: Newest-first history text, or `nil` when no values exist.
+     - Side effects: none.
+     - Failure modes: Empty history entries are dropped.
+     */
+    private static func versionHistoryText(_ history: [String]) -> String? {
+        let values = history.compactMap(nonEmpty)
+        guard !values.isEmpty else {
             return nil
         }
-        let megabytes = Double(bytes) / 1_000_000
-        return String(format: "%.1f MB", megabytes)
+        return values.reversed().joined(separator: "\n")
+    }
+
+    /**
+     Applies Android's simple `About` text cleanup before rendering.
+
+     - Parameter value: Raw SWORD About text.
+     - Returns: Text with Android-removed RTF paragraph tokens normalized.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func cleanedAboutText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\pard", with: "")
+            .replacingOccurrences(of: "\\par", with: "\n")
     }
 
     /**
@@ -450,9 +853,36 @@ struct ModuleBrowserRowActionConfirmation: Identifiable {
      - Failure modes: none.
      */
     init(kind: Kind, module: RemoteModuleInfo) {
+        self.init(kind: kind, moduleName: module.name, moduleDescription: module.description)
+    }
+
+    /**
+     Creates a confirmation payload for an installed reader-picker action.
+
+     - Parameters:
+       - kind: Android-equivalent destructive operation.
+       - installedModule: Installed module that supplied the action.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    init(kind: Kind, installedModule: ModuleInfo) {
+        self.init(kind: kind, moduleName: installedModule.name, moduleDescription: installedModule.description)
+    }
+
+    /**
+     Creates a confirmation payload from the normalized user-visible module labels.
+
+     - Parameters:
+       - kind: Android-equivalent destructive operation.
+       - moduleName: SWORD module initials used for repository actions.
+       - moduleDescription: User-facing module title used in confirmation copy.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private init(kind: Kind, moduleName: String, moduleDescription: String) {
         self.kind = kind
-        self.moduleName = module.name
-        self.moduleDescription = module.description
+        self.moduleName = moduleName
+        self.moduleDescription = moduleDescription
     }
 
     /**
@@ -517,7 +947,7 @@ struct ModuleBrowserModuleDetailsDialog: View {
     /// Current system color scheme used by the shared Android dialog palette.
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Remote and installed module metadata to display.
+    /// Normalized module metadata to display.
     let details: ModuleBrowserModuleDetails
 
     /// Callback that clears the owning screen's selected details state.
@@ -532,29 +962,18 @@ struct ModuleBrowserModuleDetailsDialog: View {
      */
     var body: some View {
         VStack(spacing: 0) {
-            Text(details.module.name)
-                .font(.headline)
-                .foregroundStyle(dialogPrimaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 22)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
-
-            Divider()
-                .background(dialogSecondaryText.opacity(0.25))
-
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(details.androidAboutRows) { row in
-                        detailRow(row)
-                    }
-                }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 16)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(details.androidAboutAttributedMessage)
+                    .font(.body)
+                    .foregroundStyle(dialogPrimaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("moduleDetailsDialogMessage")
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 420)
-            .accessibilityIdentifier("moduleDetailsDialogRows")
 
             Divider()
                 .background(dialogSecondaryText.opacity(0.25))
@@ -583,30 +1002,9 @@ struct ModuleBrowserModuleDetailsDialog: View {
         )
         .shadow(color: .black.opacity(0.22), radius: 20, x: 0, y: 12)
         .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
         .accessibilityIdentifier("moduleDetailsDialogScreen")
         .tint(dialogAccent)
-    }
-
-    /**
-     Renders one field/value row in the dialog message.
-
-     - Parameter row: Metadata row assembled from the shared About payload.
-     - Returns: Vertically stacked label and value text.
-     - Side effects: none.
-     - Failure modes: Long values wrap within the dialog width.
-     */
-    private func detailRow(_ row: ModuleBrowserModuleDetailRow) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(row.title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(dialogSecondaryText)
-            Text(row.value)
-                .font(.body)
-                .foregroundStyle(dialogPrimaryText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityIdentifier("moduleDetailsRow::\(row.kind.rawValue)")
     }
 
     /// Android-dialog background color for the current system appearance.

@@ -45,7 +45,11 @@ struct InstalledMyBibleModule: Codable, Sendable {
             description: description,
             category: ModuleCategory(typeString: category),
             language: language,
-            version: version
+            version: version,
+            aboutMetadata: ModuleAboutMetadata(
+                osisId: name,
+                repository: sourceName
+            )
         )
     }
 
