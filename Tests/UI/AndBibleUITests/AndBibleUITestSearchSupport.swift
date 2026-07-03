@@ -107,16 +107,25 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> XCUIElement? {
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            if let searchScreen = resolvedElement("searchScreen", in: app) {
-                return searchScreen
+        let didResolve = waitForResolvedSemanticState(
+            named: "searchScreen.seededPresentation",
+            timeout: max(0, timeout),
+            valueProvider: {
+                if self.resolvedSearchScreenElement(in: app) != nil {
+                    let state = self.resolvedSearchStateValue(in: app) ?? "<state missing>"
+                    return "searchScreen=visible;\(state)"
+                }
+                return self.resolvedSearchStateValue(in: app).map {
+                    "searchScreen=missing;\($0)"
+                }
+            },
+            success: { $0.contains("searchScreen=visible") },
+            recordsFailure: false,
+            failureDescription: {
+                "Expected launch-seeded Search screen within \(timeout) seconds. Last state: '\($0)'."
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        return nil
+        )
+        return didResolve ? resolvedSearchScreenElement(in: app) : nil
     }
 
     /**

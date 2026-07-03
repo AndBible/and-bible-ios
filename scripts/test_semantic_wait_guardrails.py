@@ -454,6 +454,17 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
             self.assertIn("recordsFailure: false", body)
             self.assertNotIn("RunLoop.current.run", body)
 
+    def test_search_screen_seeded_wait_uses_shared_semantic_waiter(self) -> None:
+        """Keep launch-seeded Search presentation checks on semantic state, not run-loop polling."""
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(search_source, "waitForSearchScreenIfAlreadySeeded")
+
+        self.assertIn("waitForResolvedSemanticState", body)
+        self.assertIn("recordsFailure: false", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
 
 if __name__ == "__main__":
     unittest.main()
