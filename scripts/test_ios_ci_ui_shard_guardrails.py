@@ -111,6 +111,18 @@ def step_offsets(workflow_text: str, step_name: str) -> list[int]:
     return [match.start() for match in pattern.finditer(workflow_text)]
 
 
+def workflow_job_block(workflow_text: str, job_name: str) -> str:
+    """Return one top-level GitHub Actions job block by job id."""
+    match = re.search(
+        rf"^  {re.escape(job_name)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
+        workflow_text,
+        re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError(f"Unable to find workflow job {job_name!r}.")
+    return match.group("body")
+
+
 class IOSCIUIShardGuardrailsTests(unittest.TestCase):
     """Checks the workflow-level guardrail around dynamic UI shard counts."""
 
@@ -163,6 +175,20 @@ class IOSCIUIShardGuardrailsTests(unittest.TestCase):
             ],
             workflow_step_run_blocks(workflow_text, "Checkout Android reference"),
         )
+
+    def test_unit_test_aggregate_gate_does_not_fail_cancelled_runs(self) -> None:
+        """Keep canceled superseded workflow runs from publishing red aggregate checks."""
+        workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
+        unit_job = workflow_job_block(workflow_text, "ios-simulator-unit-tests")
+        verify_gate = workflow_step_run_block(workflow_text, "Verify package-test gate results")
+
+        self.assertIn("name: Unit Tests (Simulator)", unit_job)
+        self.assertRegex(unit_job, re.compile(r"^\s+if:\s+\$\{\{\s*!cancelled\(\)\s*\}\}\s*$", re.MULTILINE))
+        self.assertNotRegex(unit_job, re.compile(r"^\s+if:\s+\$\{\{\s*always\(\)\s*\}\}\s*$", re.MULTILINE))
+        self.assertIn("needs.ios-swordkit-package-tests.result", verify_gate)
+        self.assertIn("needs.ios-biblecore-package-tests.result", verify_gate)
+        self.assertIn("needs.ios-bibleview-package-tests.result", verify_gate)
+        self.assertIn("needs.ios-bibleui-package-tests.result", verify_gate)
 
     def test_upload_artifact_retention_guardrail_handles_name_less_steps(self) -> None:
         """Ensure the retention guardrail classifies valid `- uses:` upload steps."""
