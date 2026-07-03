@@ -29,7 +29,25 @@ if git_root="$(git -C "${android_root}" rev-parse --show-toplevel 2>/dev/null)";
     exit 2
   fi
 
-  echo "Android reference checkout already available: ${android_root}"
+  update_ref="${ANDBIBLE_ANDROID_REF:-}"
+  if [[ -z "${update_ref}" ]] && git -C "${android_root}" config --get remote.origin.url >/dev/null; then
+    update_ref="HEAD"
+  fi
+
+  if [[ -n "${update_ref}" ]]; then
+    if ! git -C "${android_root}" diff --quiet || ! git -C "${android_root}" diff --cached --quiet; then
+      echo "Android reference checkout has local modifications: ${android_root}" >&2
+      echo "Commit, stash, or point ANDBIBLE_ANDROID_ROOT at a clean reference checkout." >&2
+      exit 2
+    fi
+
+    echo "Updating Android reference checkout to ${update_ref}: ${android_root}"
+    git -C "${android_root}" fetch --depth 1 "${android_repo_url}" "${update_ref}"
+    git -C "${android_root}" checkout --detach --quiet FETCH_HEAD
+    echo "Android reference checkout ready: ${android_root}"
+  else
+    echo "Android reference checkout already available: ${android_root}"
+  fi
   exit 0
 fi
 

@@ -126,7 +126,7 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testReaderMemorizeBridgeUsesAndroidCommentaryFakeDocumentIdentity() throws {
         let (bridge, _) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let settingsStore = try makeInMemorySettingsStore()
@@ -182,7 +182,7 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testReaderMemorizeBridgeUsesLinksWindowRoutingCallbackWhenAvailable() throws {
         let (sourceBridge, sourceScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let sourceController = BibleReaderController(bridge: sourceBridge, swordManagerOverride: manager)
         sourceController.settingsStore = try makeInMemorySettingsStore()
@@ -264,7 +264,7 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testReaderMemorizeBridgeEmitsCrossChapterAndroidRangePayload() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.settingsStore = try makeInMemorySettingsStore()
@@ -316,7 +316,7 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testReaderMemorizeBridgeEmitsCanonicalGreekStrongText() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let modulePath = try makeTemporaryBundledSwordPath()
+        let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.settingsStore = try makeInMemorySettingsStore()
