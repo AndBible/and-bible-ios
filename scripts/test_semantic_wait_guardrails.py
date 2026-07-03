@@ -370,11 +370,15 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         state_source = (
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
         ).read_text(encoding="utf-8")
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITests+Search.swift"
+        ).read_text(encoding="utf-8")
 
         migrated_waits = [
             swift_function_body(element_source, "waitForReaderRenderedContentState"),
             swift_function_body(element_source, "waitForReaderRenderedContentStateIfPresent"),
             swift_function_body(state_source, "waitForSyncState"),
+            swift_function_body(search_source, "waitForClosedWindowOrder"),
         ]
 
         for body in migrated_waits:

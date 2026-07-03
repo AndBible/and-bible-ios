@@ -252,26 +252,32 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        var lastState = readerRenderedContentStateValue(in: app) ?? "nil"
         var lastOrders = windowTabOrdersFromReaderState(in: app)
-        repeat {
-            lastState = readerRenderedContentStateValue(in: app) ?? "nil"
-            lastOrders = windowTabOrdersFromReaderState(in: app)
-            if let lastOrders,
-               !lastOrders.contains(order),
-               !lastState.contains("windowOrder=none") {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let failureMessage = """
-            Expected window order \(order) to be removed within \(timeout) seconds; \
-            orders=\(String(describing: lastOrders)), state=\(lastState)
-            """
-        XCTFail(
-            failureMessage,
+        waitForResolvedSemanticState(
+            named: "readerClosedWindowOrder",
+            timeout: timeout,
+            valueProvider: { self.readerRenderedContentStateValue(in: app) ?? "nil" },
+            success: { state in
+                if let rawOrders = self.readerRenderedContentStateToken("windowTabOrders", in: state) {
+                    lastOrders = rawOrders == "none"
+                        ? []
+                        : rawOrders
+                            .split(separator: ",")
+                            .compactMap { Int($0) }
+                } else {
+                    lastOrders = nil
+                }
+                guard let lastOrders else {
+                    return false
+                }
+                return !lastOrders.contains(order) && !state.contains("windowOrder=none")
+            },
+            failureDescription: { state in
+                """
+                Expected window order \(order) to be removed within \(timeout) seconds; \
+                orders=\(String(describing: lastOrders)), state=\(state)
+                """
+            },
             file: file,
             line: line
         )
