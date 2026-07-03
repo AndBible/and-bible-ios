@@ -346,14 +346,19 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
         ).read_text(encoding="utf-8")
 
+        reading_plan_exclusion_body = swift_function_body(
+            list_source,
+            "waitForReadingPlanListStateToExclude",
+        )
         migrated_waits = [
             swift_function_body(interaction_source, "waitForSettingsState"),
-            swift_function_body(list_source, "waitForReadingPlanListStateToExclude"),
+            reading_plan_exclusion_body,
         ]
 
         for body in migrated_waits:
             self.assertIn("waitForResolvedSemanticState", body)
             self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotIn("missingCountsAsSuccess: true", reading_plan_exclusion_body)
 
         candidates_body = swift_function_body(element_source, "semanticStateValueCandidates")
         self.assertIn('case "settingsForm":', candidates_body)

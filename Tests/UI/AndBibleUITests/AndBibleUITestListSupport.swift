@@ -558,7 +558,6 @@ extension AndBibleUITests {
             timeout: timeout,
             valueProvider: { self.resolvedReadingPlanListStateValue(in: app) },
             success: { !$0.contains(token) },
-            missingCountsAsSuccess: true,
             recordsFailure: false,
             failureDescription: {
                 "Expected Reading Plans state to stop containing '\(token)' within \(timeout) seconds. Last state: '\($0)'."
