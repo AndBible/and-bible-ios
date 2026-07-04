@@ -206,19 +206,17 @@ extension AndBibleUITests {
             return
         }
 
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if !control.frame.isEmpty {
-                let dx = (CGFloat(index) + 0.5) / CGFloat(segmentCount)
-                control.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5)).tap()
-                return
-            }
-            let remaining = deadline.timeIntervalSinceNow
-            if remaining > 0 {
-                _ = control.waitForExistence(timeout: min(0.2, remaining))
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+        let predicate = NSPredicate(block: { _, _ in
+            control.exists && !control.frame.isEmpty
+        })
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription = "Wait for segmented control frame"
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        if result == .completed || (control.exists && !control.frame.isEmpty) {
+            let dx = (CGFloat(index) + 0.5) / CGFloat(segmentCount)
+            control.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5)).tap()
+            return
+        }
 
         XCTAssertTrue(
             !control.frame.isEmpty,
@@ -399,49 +397,38 @@ extension AndBibleUITests {
         from candidates: [XCUIElement],
         waitTimeout: TimeInterval = 0
     ) -> XCUIElement? {
-        let deadline = Date().addingTimeInterval(waitTimeout)
-        repeat {
+        func visibleCandidate() -> XCUIElement? {
             for candidate in candidates where candidate.exists {
                 if isElementHittable(candidate) || elementHasUsableFrame(candidate) {
                     return candidate
                 }
             }
-            if waitTimeout <= 0 {
-                return nil
+            return nil
+        }
+
+        if let candidate = visibleCandidate() {
+            return candidate
+        }
+
+        guard waitTimeout > 0 else {
+            return nil
+        }
+
+        var resolvedCandidate: XCUIElement?
+        let predicate = NSPredicate(block: { _, _ in
+            if let candidate = visibleCandidate() {
+                resolvedCandidate = candidate
+                return true
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        return nil
-    }
-
-    /// Resolves the bookmark-list search field through explicit titled queries.
-    func requireBookmarkListSearchField(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> XCUIElement {
-        let candidates = [
-            app.textFields["bookmarkListSearchField"].firstMatch,
-            app.searchFields["Search bookmarks"].firstMatch,
-            app.textFields["Search bookmarks"].firstMatch,
-        ]
-
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let field = firstVisibleCandidate(from: candidates, waitTimeout: 0.2) {
-                return field
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        XCTFail(
-            "Expected bookmark search field to exist.",
-            file: file,
-            line: line
-        )
-        return candidates.first ?? app.searchFields["Search bookmarks"].firstMatch
+            return false
+        })
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription = "Wait for visible candidate"
+        let result = XCTWaiter().wait(for: [expectation], timeout: waitTimeout)
+        if result == .completed {
+            return resolvedCandidate ?? visibleCandidate()
+        }
+        return visibleCandidate()
     }
 
     /// Returns explicit Search input candidates without falling back to broad first-match scans.

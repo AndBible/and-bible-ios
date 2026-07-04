@@ -318,6 +318,30 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotIn("RunLoop.current.run", body)
         self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
 
+    def test_visible_candidate_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
+        """Keep small candidate waits on XCTest predicates instead of nested run-loop polling."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "firstVisibleCandidate")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_segmented_control_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
+        """Keep segmented-control geometry waits on XCTest predicates."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "tapSegmentedControlSegment")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
     def test_resolved_semantic_wait_failure_reports_elapsed_and_final_state(self) -> None:
         """Keep timeout failures actionable without reintroducing custom polling loops."""
         state_source = (
