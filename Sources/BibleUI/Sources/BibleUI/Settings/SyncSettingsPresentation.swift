@@ -154,8 +154,6 @@ public enum RemoteSyncCategoryLocalization {
                     defaultValue: "AI prompts and provider configurations"
                 )
             )
-        case .progress:
-            return text(for: .progress)
         }
     }
 }
@@ -227,7 +225,7 @@ enum SyncSettingsPresentation {
         .active(.workspaces),
         .active(.myDocuments),
         .deferred(.aiSettings),
-        .deferred(.progress),
+        .active(.progress),
     ]
 
     /**
@@ -269,8 +267,6 @@ enum SyncSettingsPresentation {
         switch category {
         case .aiSettings:
             return Row(androidKey: "sync_ai")
-        case .progress:
-            return Row(androidKey: "sync_reading_progress")
         }
     }
 }
@@ -278,9 +274,9 @@ enum SyncSettingsPresentation {
 /**
  Android-visible sync categories that iOS intentionally displays as disabled deferred rows.
 
- Android exposes AI Settings and Reading Progress toggles in `sync_settings.xml` and wires both
- through `SyncSettings.kt`. iOS does not yet have those category-specific sync engines, so these
- values preserve the visible parity surface without letting users start unsupported sync streams.
+ Android exposes AI Settings in `sync_settings.xml` and wires it through `SyncSettings.kt`. iOS
+ does not yet have that category-specific sync engine, so this value preserves the visible parity
+ surface without letting users start an unsupported sync stream.
 
  - Returns: Value semantics for visible settings rows and tests.
  - Side effects: none.
@@ -290,9 +286,6 @@ enum SyncSettingsPresentation {
 enum RemoteSyncDeferredCategory: String, CaseIterable, Sendable {
     /// Android `sync_enable_ai_settings`; iOS implementation tracked by issue #74.
     case aiSettings = "ai_settings"
-
-    /// Android `sync_enable_progress`; iOS implementation tracked by issue #73.
-    case progress
 
     /// Stable Android-compatible toggle key reserved for the future category implementation.
     var androidSyncEnabledKey: String {
@@ -304,8 +297,6 @@ enum RemoteSyncDeferredCategory: String, CaseIterable, Sendable {
         switch self {
         case .aiSettings:
             return 74
-        case .progress:
-            return 73
         }
     }
 }

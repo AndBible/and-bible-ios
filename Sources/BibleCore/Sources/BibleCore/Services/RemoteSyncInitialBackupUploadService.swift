@@ -102,9 +102,31 @@ public struct RemoteSyncInitialBackupUploadReport: Sendable, Equatable {
    `ModelContext` and `SettingsStore`
  */
 public final class RemoteSyncInitialBackupUploadService {
+    /**
+     Carries the staged database and any category-specific bookkeeping needed after upload acceptance.
+
+     - Parameters:
+       - databaseURL: Temporary SQLite database that will be archived and uploaded.
+       - workspaceHistoryAliases: Workspace history alias mappings emitted by workspace export.
+       - acceptedBaselineTimestamp: Optional timestamp already written into uploaded baseline rows; callers reuse it
+         for local accepted-baseline state to avoid introducing a newer local patch watermark than the upload contains.
+     - Side effects: none.
+     - Failure modes: This value type cannot fail to initialize.
+     */
     private struct BuiltInitialBackup {
         let databaseURL: URL
         let workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias]
+        let acceptedBaselineTimestamp: Int64?
+
+        init(
+            databaseURL: URL,
+            workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias],
+            acceptedBaselineTimestamp: Int64? = nil
+        ) {
+            self.databaseURL = databaseURL
+            self.workspaceHistoryAliases = workspaceHistoryAliases
+            self.acceptedBaselineTimestamp = acceptedBaselineTimestamp
+        }
     }
 
     private let adapter: (any RemoteSyncAdapting)?
@@ -263,7 +285,8 @@ public final class RemoteSyncInitialBackupUploadService {
             uploadedFile: uploadedFile,
             settingsStore: settingsStore,
             modelContext: modelContext,
-            workspaceHistoryAliases: builtBackup.workspaceHistoryAliases
+            workspaceHistoryAliases: builtBackup.workspaceHistoryAliases,
+            acceptedBaselineTimestamp: builtBackup.acceptedBaselineTimestamp
         )
 
         let patchZeroStatus = RemoteSyncPatchStatus(
@@ -324,7 +347,10 @@ public final class RemoteSyncInitialBackupUploadService {
                 schemaVersion: schemaVersion
             )
         case .progress:
-            throw RemoteSyncInitialBackupUploadError.unsupportedCategory(category)
+            return try buildProgressInitialBackup(
+                settingsStore: settingsStore,
+                schemaVersion: schemaVersion
+            )
         }
     }
 
@@ -337,6 +363,8 @@ public final class RemoteSyncInitialBackupUploadService {
        - settingsStore: Local-only settings store backing sync bookkeeping.
        - modelContext: SwiftData context used to refresh outbound fingerprints.
        - workspaceHistoryAliases: Synthesized workspace history aliases that should be persisted after a workspace export.
+       - acceptedBaselineTimestamp: Optional timestamp captured while building the uploaded baseline; when supplied,
+         local `LogEntry` rows and `lastPatchWritten` reuse that value instead of taking a second clock sample.
      - Side effects:
        - clears category log-entry and patch-status rows
        - records patch zero with the uploaded archive metadata
@@ -350,7 +378,8 @@ public final class RemoteSyncInitialBackupUploadService {
         uploadedFile: RemoteSyncFile,
         settingsStore: SettingsStore,
         modelContext: ModelContext,
-        workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias]
+        workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias],
+        acceptedBaselineTimestamp: Int64? = nil
     ) {
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         logEntryStore.clearCategory(category)
@@ -368,9 +397,10 @@ public final class RemoteSyncInitialBackupUploadService {
         )
 
         let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+        let acceptedAt = acceptedBaselineTimestamp ?? nowProvider()
         stateStore.setProgressState(
             RemoteSyncProgressState(
-                lastPatchWritten: nowProvider(),
+                lastPatchWritten: acceptedAt,
                 lastSynchronized: nil,
                 disabledForVersion: nil
             ),
@@ -400,7 +430,16 @@ public final class RemoteSyncInitialBackupUploadService {
                 settingsStore: settingsStore
             )
         case .progress:
-            break
+            let progressSnapshotService = RemoteSyncProgressSnapshotService()
+            logEntryStore.replaceEntries(
+                progressSnapshotService.acceptedBaselineLogEntries(
+                    settingsStore: settingsStore,
+                    sourceDevice: deviceIdentifier,
+                    lastUpdated: acceptedAt
+                ),
+                for: .progress
+            )
+            progressSnapshotService.refreshBaselineFingerprints(settingsStore: settingsStore)
         }
     }
 
@@ -519,6 +558,87 @@ public final class RemoteSyncInitialBackupUploadService {
             }
 
             return BuiltInitialBackup(databaseURL: databaseURL, workspaceHistoryAliases: [])
+        } catch {
+            try? fileManager.removeItem(at: databaseURL)
+            throw error
+        }
+    }
+
+    /**
+     Builds one full Android Progress database from the current local reading and memorization state.
+
+     - Parameters:
+       - settingsStore: Local-only settings store containing the progress JSON snapshots.
+       - schemaVersion: SQLite user-version written into the exported database.
+     - Returns: Temporary SQLite database containing the current Progress baseline and the timestamp
+       used for its accepted baseline `LogEntry` rows.
+     - Side effects: writes one temporary SQLite database beneath the configured temporary directory.
+     - Failure modes: rethrows SQLite failures from the Android progress mapper or metadata schema creation.
+     */
+    private func buildProgressInitialBackup(
+        settingsStore: SettingsStore,
+        schemaVersion: Int
+    ) throws -> BuiltInitialBackup {
+        let databaseURL = temporaryURL(prefix: "remote-sync-progress-initial-", suffix: ".sqlite3")
+        let acceptedBaselineTimestamp = nowProvider()
+        let baselineLogEntries = RemoteSyncProgressSnapshotService().acceptedBaselineLogEntries(
+            settingsStore: settingsStore,
+            sourceDevice: deviceIdentifier,
+            lastUpdated: acceptedBaselineTimestamp
+        )
+        do {
+            try AndroidDatabaseBackupProgressMapper.writeDatabase(
+                at: databaseURL,
+                settingsStore: settingsStore
+            )
+            var database: OpaquePointer?
+            guard sqlite3_open_v2(databaseURL.path, &database, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+                  let database else {
+                throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+            }
+            defer { sqlite3_close(database) }
+
+            try execute(
+                """
+                PRAGMA user_version = \(schemaVersion);
+                CREATE TABLE LogEntry (
+                    tableName TEXT NOT NULL,
+                    entityId1 BLOB NOT NULL,
+                    entityId2 BLOB NOT NULL DEFAULT '',
+                    type TEXT NOT NULL,
+                    lastUpdated INTEGER NOT NULL DEFAULT 0,
+                    sourceDevice TEXT NOT NULL,
+                    PRIMARY KEY(tableName, entityId1, entityId2)
+                );
+                CREATE TABLE SyncConfiguration (
+                    keyName TEXT NOT NULL,
+                    stringValue TEXT,
+                    longValue INTEGER,
+                    booleanValue INTEGER,
+                    PRIMARY KEY(keyName)
+                );
+                CREATE TABLE SyncStatus (
+                    sourceDevice TEXT NOT NULL,
+                    patchNumber INTEGER NOT NULL,
+                    sizeBytes INTEGER NOT NULL,
+                    appliedDate INTEGER NOT NULL,
+                    PRIMARY KEY(sourceDevice, patchNumber)
+                );
+                CREATE INDEX index_LogEntry_tableName_entityId1 ON LogEntry (tableName, entityId1);
+                CREATE INDEX index_LogEntry_lastUpdated ON LogEntry (lastUpdated);
+                """,
+                in: database
+            )
+
+            for entry in baselineLogEntries {
+                try insertLogEntry(entry, in: database)
+            }
+
+            return BuiltInitialBackup(
+                databaseURL: databaseURL,
+                workspaceHistoryAliases: [],
+                acceptedBaselineTimestamp: acceptedBaselineTimestamp
+            )
         } catch {
             try? fileManager.removeItem(at: databaseURL)
             throw error
@@ -1431,6 +1551,39 @@ public final class RemoteSyncInitialBackupUploadService {
     }
 
     /**
+     Inserts one Android `LogEntry` row into the open initial-backup database.
+
+     - Parameters:
+       - entry: Android sync log entry to insert.
+       - database: Open SQLite database handle.
+     - Side effects: writes one row into the `LogEntry` table.
+     - Failure modes:
+       - throws `RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase` when SQLite rejects prepare, bind, or step work
+     */
+    private func insertLogEntry(_ entry: RemoteSyncLogEntry, in database: OpaquePointer) throws {
+        let sql = """
+        INSERT INTO LogEntry (tableName, entityId1, entityId2, type, lastUpdated, sourceDevice)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        bindText(entry.tableName, to: statement, index: 1)
+        bindSQLiteValue(entry.entityID1, to: statement, index: 2)
+        bindSQLiteValue(entry.entityID2, to: statement, index: 3)
+        bindText(entry.type.rawValue, to: statement, index: 4)
+        sqlite3_bind_int64(statement, 5, entry.lastUpdated)
+        bindText(entry.sourceDevice, to: statement, index: 6)
+
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+    }
+
+    /**
      Inserts one Android `ReadingPlan` row into the open initial-backup database.
 
      - Parameters:
@@ -2298,6 +2451,35 @@ public final class RemoteSyncInitialBackupUploadService {
      */
     private func bindText(_ value: String, to statement: OpaquePointer?, index: Int32) {
         sqlite3_bind_text(statement, index, value, -1, remoteSyncInitialBackupUploadSQLiteTransient)
+    }
+
+    /**
+     Binds one Android sync metadata value into a prepared SQLite statement parameter.
+
+     - Parameters:
+       - value: Typed SQLite payload from a preserved or synthesized Android metadata row.
+       - statement: Prepared SQLite statement receiving the bound value.
+       - index: One-based SQLite bind parameter index.
+     - Side effects: mutates the prepared SQLite statement's bound-parameter state.
+     - Failure modes: This helper cannot fail; SQLite binding errors are surfaced by the caller's
+       later `sqlite3_step` check.
+     */
+    private func bindSQLiteValue(_ value: RemoteSyncSQLiteValue, to statement: OpaquePointer?, index: Int32) {
+        switch value.kind {
+        case .null:
+            sqlite3_bind_null(statement, index)
+        case .integer:
+            sqlite3_bind_int64(statement, index, value.integerValue ?? 0)
+        case .real:
+            sqlite3_bind_double(statement, index, value.realValue ?? 0)
+        case .text:
+            sqlite3_bind_text(statement, index, value.textValue ?? "", -1, remoteSyncInitialBackupUploadSQLiteTransient)
+        case .blob:
+            let data = value.blobData ?? Data()
+            _ = data.withUnsafeBytes {
+                sqlite3_bind_blob(statement, index, $0.baseAddress, Int32(data.count), remoteSyncInitialBackupUploadSQLiteTransient)
+            }
+        }
     }
 
     /**

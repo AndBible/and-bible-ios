@@ -108,6 +108,32 @@ enum AndroidDatabaseBackupProgressMapper {
         return report(for: snapshot, settingsStore: settingsStore)
     }
 
+    /**
+     Replaces local progress stores from an already decoded Android-shaped snapshot.
+
+     Remote patch replay validates sparse Android progress rows into the same in-memory models used
+     by database backup restore. This helper keeps the final JSON rewrite, normalization, and report
+     generation in one place.
+
+     - Parameters:
+       - reading: Final reading-progress snapshot to persist.
+       - memorization: Final memorization-progress snapshot to persist.
+       - settingsStore: Local store backing iOS progress JSON snapshots.
+     - Returns: Counts present after replacement.
+     - Side effects: Rewrites local reading and memorization progress snapshots in `SettingsStore`.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidSQLiteDatabase` when JSON encoding fails.
+     */
+    @discardableResult
+    static func replaceLocalSnapshots(
+        reading: ReadingProgressSnapshot,
+        memorization: MemorizationProgressSnapshot,
+        settingsStore: SettingsStore
+    ) throws -> AndroidDatabaseBackupProgressReport {
+        let snapshot = Snapshot(reading: reading, memorization: memorization)
+        try save(snapshot, settingsStore: settingsStore)
+        return report(for: snapshot, settingsStore: settingsStore)
+    }
+
     private static func readSnapshot(from databaseURL: URL) throws -> Snapshot {
         try AndroidDatabaseBackupSQLite.withDatabase(at: databaseURL) { database in
             let fileName = databaseURL.lastPathComponent
@@ -190,7 +216,7 @@ enum AndroidDatabaseBackupProgressMapper {
         fileName: String
     ) throws -> [MemorizedVerseProgress] {
         let statement = try AndroidDatabaseBackupSQLite.prepare(
-            "SELECT kjvOrdinal, memorizedAt FROM MemorizedVerse ORDER BY kjvOrdinal;",
+            "SELECT id, kjvOrdinal, memorizedAt FROM MemorizedVerse ORDER BY kjvOrdinal;",
             on: database,
             fileName: fileName
         )
@@ -206,14 +232,15 @@ enum AndroidDatabaseBackupProgressMapper {
                 throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
             }
             let ordinal = try validatedKJVAOrdinal(
-                AndroidDatabaseBackupSQLite.int(statement, column: 0),
+                AndroidDatabaseBackupSQLite.int(statement, column: 1),
                 fileName: fileName
             )
             verses.append(
                 MemorizedVerseProgress(
+                    id: try AndroidDatabaseBackupSQLite.uuidFromBlob(statement, column: 0, fileName: fileName),
                     bookInitials: "",
                     kjvOrdinal: ordinal,
-                    memorizedAt: AndroidDatabaseBackupSQLite.int64(statement, column: 1)
+                    memorizedAt: AndroidDatabaseBackupSQLite.int64(statement, column: 2)
                 )
             )
         }
@@ -356,7 +383,7 @@ enum AndroidDatabaseBackupProgressMapper {
             fileName: fileName
         )
         defer { sqlite3_finalize(statement) }
-        AndroidDatabaseBackupSQLite.bindUUIDBlob(UUID(), to: statement, index: 1)
+        AndroidDatabaseBackupSQLite.bindUUIDBlob(verse.id, to: statement, index: 1)
         sqlite3_bind_int(statement, 2, Int32(verse.kjvOrdinal))
         sqlite3_bind_int64(statement, 3, verse.memorizedAt)
         try AndroidDatabaseBackupSQLite.stepDone(statement, fileName: fileName)
@@ -529,6 +556,7 @@ enum AndroidDatabaseBackupProgressMapper {
                 continue
             }
             rowByOrdinal[verse.kjvOrdinal] = MemorizedVerseProgress(
+                id: verse.id,
                 bookInitials: "",
                 kjvOrdinal: verse.kjvOrdinal,
                 memorizedAt: verse.memorizedAt

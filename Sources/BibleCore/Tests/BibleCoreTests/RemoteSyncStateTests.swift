@@ -652,7 +652,7 @@ final class RemoteSyncStateTests: XCTestCase {
     func testRemoteSyncCategoryActiveSyncCasesExposeMyDocuments() {
         XCTAssertEqual(
             RemoteSyncCategory.activeSyncCases,
-            [.bookmarks, .workspaces, .readingPlans, .myDocuments]
+            [.bookmarks, .workspaces, .readingPlans, .myDocuments, .progress]
         )
     }
 

@@ -1,5 +1,6 @@
 // MemorizationProgressStore.swift - Local memorization state persistence
 
+import CryptoKit
 import Foundation
 
 /**
@@ -30,14 +31,56 @@ public struct MemorizationProgressRange: Codable, Equatable, Hashable {
  * be decoded and queried until they are rewritten by normal user actions.
  */
 public struct MemorizedVerseProgress: Codable, Equatable, Hashable {
+    public let id: UUID
     public let bookInitials: String
     public let kjvOrdinal: Int
     public let memorizedAt: Int64
 
-    public init(bookInitials: String = "", kjvOrdinal: Int, memorizedAt: Int64 = 0) {
+    public init(id: UUID? = nil, bookInitials: String = "", kjvOrdinal: Int, memorizedAt: Int64 = 0) {
+        self.id = id ?? Self.stableID(bookInitials: bookInitials, kjvOrdinal: kjvOrdinal)
         self.bookInitials = bookInitials
         self.kjvOrdinal = kjvOrdinal
         self.memorizedAt = memorizedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case bookInitials
+        case kjvOrdinal
+        case memorizedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let bookInitials = try container.decodeIfPresent(String.self, forKey: .bookInitials) ?? ""
+        let kjvOrdinal = try container.decode(Int.self, forKey: .kjvOrdinal)
+        let memorizedAt = try container.decodeIfPresent(Int64.self, forKey: .memorizedAt) ?? 0
+        self.init(
+            id: try container.decodeIfPresent(UUID.self, forKey: .id),
+            bookInitials: bookInitials,
+            kjvOrdinal: kjvOrdinal,
+            memorizedAt: memorizedAt
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(bookInitials, forKey: .bookInitials)
+        try container.encode(kjvOrdinal, forKey: .kjvOrdinal)
+        try container.encode(memorizedAt, forKey: .memorizedAt)
+    }
+
+    private static func stableID(bookInitials: String, kjvOrdinal: Int) -> UUID {
+        let seed = "memorized-verse|\(bookInitials)|\(kjvOrdinal)"
+        let digest = SHA256.hash(data: Data(seed.utf8))
+        let bytes = Array(digest.prefix(16))
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
     }
 }
 
