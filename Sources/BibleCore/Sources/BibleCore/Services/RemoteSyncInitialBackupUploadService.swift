@@ -102,9 +102,31 @@ public struct RemoteSyncInitialBackupUploadReport: Sendable, Equatable {
    `ModelContext` and `SettingsStore`
  */
 public final class RemoteSyncInitialBackupUploadService {
+    /**
+     Carries the staged database and any category-specific bookkeeping needed after upload acceptance.
+
+     - Parameters:
+       - databaseURL: Temporary SQLite database that will be archived and uploaded.
+       - workspaceHistoryAliases: Workspace history alias mappings emitted by workspace export.
+       - acceptedBaselineTimestamp: Optional timestamp already written into uploaded baseline rows; callers reuse it
+         for local accepted-baseline state to avoid introducing a newer local patch watermark than the upload contains.
+     - Side effects: none.
+     - Failure modes: This value type cannot fail to initialize.
+     */
     private struct BuiltInitialBackup {
         let databaseURL: URL
         let workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias]
+        let acceptedBaselineTimestamp: Int64?
+
+        init(
+            databaseURL: URL,
+            workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias],
+            acceptedBaselineTimestamp: Int64? = nil
+        ) {
+            self.databaseURL = databaseURL
+            self.workspaceHistoryAliases = workspaceHistoryAliases
+            self.acceptedBaselineTimestamp = acceptedBaselineTimestamp
+        }
     }
 
     private let adapter: (any RemoteSyncAdapting)?
@@ -263,7 +285,8 @@ public final class RemoteSyncInitialBackupUploadService {
             uploadedFile: uploadedFile,
             settingsStore: settingsStore,
             modelContext: modelContext,
-            workspaceHistoryAliases: builtBackup.workspaceHistoryAliases
+            workspaceHistoryAliases: builtBackup.workspaceHistoryAliases,
+            acceptedBaselineTimestamp: builtBackup.acceptedBaselineTimestamp
         )
 
         let patchZeroStatus = RemoteSyncPatchStatus(
@@ -340,6 +363,8 @@ public final class RemoteSyncInitialBackupUploadService {
        - settingsStore: Local-only settings store backing sync bookkeeping.
        - modelContext: SwiftData context used to refresh outbound fingerprints.
        - workspaceHistoryAliases: Synthesized workspace history aliases that should be persisted after a workspace export.
+       - acceptedBaselineTimestamp: Optional timestamp captured while building the uploaded baseline; when supplied,
+         local `LogEntry` rows and `lastPatchWritten` reuse that value instead of taking a second clock sample.
      - Side effects:
        - clears category log-entry and patch-status rows
        - records patch zero with the uploaded archive metadata
@@ -353,7 +378,8 @@ public final class RemoteSyncInitialBackupUploadService {
         uploadedFile: RemoteSyncFile,
         settingsStore: SettingsStore,
         modelContext: ModelContext,
-        workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias]
+        workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias],
+        acceptedBaselineTimestamp: Int64? = nil
     ) {
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         logEntryStore.clearCategory(category)
@@ -371,7 +397,7 @@ public final class RemoteSyncInitialBackupUploadService {
         )
 
         let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
-        let acceptedAt = nowProvider()
+        let acceptedAt = acceptedBaselineTimestamp ?? nowProvider()
         stateStore.setProgressState(
             RemoteSyncProgressState(
                 lastPatchWritten: acceptedAt,
@@ -544,7 +570,8 @@ public final class RemoteSyncInitialBackupUploadService {
      - Parameters:
        - settingsStore: Local-only settings store containing the progress JSON snapshots.
        - schemaVersion: SQLite user-version written into the exported database.
-     - Returns: Temporary SQLite database containing the current Progress baseline.
+     - Returns: Temporary SQLite database containing the current Progress baseline and the timestamp
+       used for its accepted baseline `LogEntry` rows.
      - Side effects: writes one temporary SQLite database beneath the configured temporary directory.
      - Failure modes: rethrows SQLite failures from the Android progress mapper or metadata schema creation.
      */
@@ -553,10 +580,11 @@ public final class RemoteSyncInitialBackupUploadService {
         schemaVersion: Int
     ) throws -> BuiltInitialBackup {
         let databaseURL = temporaryURL(prefix: "remote-sync-progress-initial-", suffix: ".sqlite3")
+        let acceptedBaselineTimestamp = nowProvider()
         let baselineLogEntries = RemoteSyncProgressSnapshotService().acceptedBaselineLogEntries(
             settingsStore: settingsStore,
             sourceDevice: deviceIdentifier,
-            lastUpdated: nowProvider()
+            lastUpdated: acceptedBaselineTimestamp
         )
         do {
             try AndroidDatabaseBackupProgressMapper.writeDatabase(
@@ -606,7 +634,11 @@ public final class RemoteSyncInitialBackupUploadService {
                 try insertLogEntry(entry, in: database)
             }
 
-            return BuiltInitialBackup(databaseURL: databaseURL, workspaceHistoryAliases: [])
+            return BuiltInitialBackup(
+                databaseURL: databaseURL,
+                workspaceHistoryAliases: [],
+                acceptedBaselineTimestamp: acceptedBaselineTimestamp
+            )
         } catch {
             try? fileManager.removeItem(at: databaseURL)
             throw error

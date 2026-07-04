@@ -1,11 +1,96 @@
 import Foundation
 import SQLite3
+import SwiftData
 import XCTest
 @testable import BibleCore
 
 private let progressSyncTestSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 final class RemoteSyncProgressTests: XCTestCase {
+    /**
+     Protects the Progress initial-backup contract that the uploaded Android `LogEntry` rows and the local accepted
+     baseline share the same timestamp.
+
+     Setup uses a deterministic clock that increments on each read so a second clock sample is observable. The test
+     materializes the uploaded gzip archive, compares uploaded and local Progress log-entry timestamps by Android
+     key, and verifies `lastPatchWritten` uses the same accepted baseline. A failure means patch replay can skip a
+     legitimate remote row because the local baseline was advanced past the uploaded initial backup.
+     */
+    func testProgressInitialBackupUsesSingleAcceptedBaselineTimestamp() async throws {
+        let container = try makeInMemorySettingsContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let memorizedID = UUID(uuidString: "15000000-0000-0000-0000-000000000101")!
+        seedProgress(
+            settingsStore: settingsStore,
+            memorizedVerses: [
+                .init(id: memorizedID, kjvOrdinal: 15, memorizedAt: 1_700_000_100),
+            ],
+            chapterHistory: [],
+            targets: [],
+            settings: ReadingProgressSettingsSnapshot(autoTrackReading: true, activeCycle: 2)
+        )
+
+        let syncFolderID = "/org.andbible.ios-sync-progress"
+        let adapter = RemoteSyncMockAdapter()
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "\(syncFolderID)/initial.sqlite3.gz",
+                name: "initial.sqlite3.gz",
+                size: 0,
+                timestamp: 2_000,
+                parentID: syncFolderID,
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
+        var nextTimestamp: Int64 = 1_900
+        let service = RemoteSyncInitialBackupUploadService(
+            adapter: adapter,
+            deviceIdentifier: "ios-device",
+            nowProvider: {
+                defer { nextTimestamp += 1 }
+                return nextTimestamp
+            }
+        )
+
+        _ = try await service.uploadInitialBackup(
+            for: .progress,
+            bootstrapState: RemoteSyncBootstrapState(syncFolderID: syncFolderID),
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            schemaVersion: 9
+        )
+
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        let uploaded = try XCTUnwrap(uploadedFiles.first)
+        let databaseURL = try materializeProgressArchive(uploaded.data)
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let uploadedEntries = try RemoteSyncInitialBackupMetadataRestoreService()
+            .readSnapshot(from: databaseURL)
+            .logEntries
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let localEntries = logEntryStore.entries(for: .progress)
+        let uploadedEntriesByKey = Dictionary(
+            uniqueKeysWithValues: uploadedEntries.map {
+                (logEntryStore.key(for: .progress, entry: $0), $0)
+            }
+        )
+        let localEntriesByKey = Dictionary(
+            uniqueKeysWithValues: localEntries.map {
+                (logEntryStore.key(for: .progress, entry: $0), $0)
+            }
+        )
+
+        XCTAssertEqual(Set(localEntriesByKey.keys), Set(uploadedEntriesByKey.keys))
+        for key in uploadedEntriesByKey.keys {
+            let uploadedEntry = try XCTUnwrap(uploadedEntriesByKey[key])
+            let localEntry = try XCTUnwrap(localEntriesByKey[key])
+            XCTAssertEqual(localEntry.lastUpdated, uploadedEntry.lastUpdated)
+        }
+        XCTAssertEqual(RemoteSyncStateStore(settingsStore: settingsStore).progressState(for: .progress).lastPatchWritten, 1_900)
+    }
+
     func testProgressPatchUploadWritesSparseAndroidPatchAndRefreshesBaseline() async throws {
         let settingsStore = try makeInMemorySettingsStore()
         let memorizedID = UUID(uuidString: "15000000-0000-0000-0000-000000001001")!
