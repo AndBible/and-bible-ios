@@ -50,26 +50,28 @@ extension AndBibleUITests {
      *   - timeout: Maximum number of seconds to poll.
      * - Returns: `true` when XCTest reports the element as hittable before the timeout.
      * - Side effects:
-     *   - repeatedly samples the element while allowing pending UI transitions to settle
+     *   - observes the element through XCTest's predicate waiter while pending UI transitions settle
      * - Failure modes: This helper does not fail directly.
      */
     func waitForElementToBecomeHittable(
         _ element: XCUIElement,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if isElementHittable(element) {
-                return true
-            }
-            let remaining = deadline.timeIntervalSinceNow
-            if remaining > 0, !element.exists {
-                _ = element.waitForExistence(timeout: min(0.2, remaining))
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+        if isElementHittable(element) {
+            return true
+        }
+        guard timeout > 0 else {
+            return false
+        }
 
-        return isElementHittable(element)
+        let predicate = NSPredicate { [weak self] _, _ in
+            self?.isElementHittable(element) ?? false
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription =
+            "Wait for element \(element.identifier) to become hittable"
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        return result == .completed || isElementHittable(element)
     }
 
     /**

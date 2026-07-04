@@ -122,6 +122,35 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("XCTWaiter", body)
         self.assertNotIn("RunLoop.current.run", body)
 
+    def test_hittability_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
+        """Keep shared hittability waits on XCTest predicates instead of manual sleeps."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "waitForElementToBecomeHittable")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_settings_navigation_reveal_uses_existing_row_frame(self) -> None:
+        """Keep Settings row navigation from timing out on offscreen-but-existing rows."""
+        list_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(list_source, "requireSettingsNavigationControl")
+
+        self.assertIn("firstExistingControl()", body)
+        self.assertIn("settingsScrollDirection(toward:", body)
+        self.assertIn("scrollSettingsForm(toward:", body)
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("waitForElementToBecomeHittable($0, timeout: 0.5)", body)
+        self.assertNotIn("settingsForm.swipeUp()", body)
+        self.assertNotIn("settingsForm.swipeDown()", body)
+        self.assertNotIn("settings-control-diagnostics", body)
+
     def test_workspace_prompt_button_candidates_prefer_prompt_scope_and_titles(self) -> None:
         """Keep workspace prompt button lookup off expensive app-wide identifier queries first."""
         element_source = (
