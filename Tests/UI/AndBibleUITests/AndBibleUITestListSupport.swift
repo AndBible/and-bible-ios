@@ -245,19 +245,21 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if waitForReaderShellReady(in: app, timeout: 0) {
+        let didDismiss = waitForUITestCondition(
+            "Wait for bookmark list dismissal",
+            timeout: max(0, timeout)
+        ) {
+            if self.waitForReaderShellReady(in: app, timeout: 0) {
                 return true
             }
-            if readerDocumentHeaderStateValue(in: app) != nil,
-               !bookmarkListSurfaceIsVisible(in: app) {
+            if self.readerDocumentHeaderStateValue(in: app) != nil,
+               !self.bookmarkListSurfaceIsVisible(in: app) {
                 return true
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+            return false
+        }
 
-        if waitForReaderShellReady(in: app, timeout: 0.5) {
+        if didDismiss || waitForReaderShellReady(in: app, timeout: 0.5) {
             return true
         }
         let bookmarkListHidden = !bookmarkListSurfaceIsVisible(in: app)
@@ -729,10 +731,17 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
         var lastListState = resolvedReadingPlanListStateValue(in: app) ?? "<missing>"
 
+        func resolvedAvailablePlansScreen() -> XCUIElement? {
+            guard let picker = resolvedElement("availablePlansScreen", in: app),
+                  elementHasUsableFrame(picker)
+            else {
+                return nil
+            }
+            return picker
+        }
+
         repeat {
-            if let picker = resolvedElement("availablePlansScreen", in: app),
-               elementHasUsableFrame(picker)
-            {
+            if let picker = resolvedAvailablePlansScreen() {
                 return picker
             }
 
@@ -744,7 +753,21 @@ extension AndBibleUITests {
                 }
             }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            var resolvedPicker: XCUIElement?
+            let didResolvePicker = waitForUITestCondition(
+                "Wait for Available Plans picker",
+                timeout: min(1, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                if let picker = resolvedAvailablePlansScreen() {
+                    resolvedPicker = picker
+                    return true
+                }
+                lastListState = self.resolvedReadingPlanListStateValue(in: app) ?? "<missing>"
+                return false
+            }
+            if didResolvePicker, let resolvedPicker {
+                return resolvedPicker
+            }
         } while Date() < deadline
 
         let fallback = unresolvedElement("availablePlansScreen", in: app)
@@ -775,31 +798,42 @@ extension AndBibleUITests {
     ) -> XCUIElement {
         let scrollSurface = resolvedElement("availablePlansScreen", in: app)
             ?? unresolvedElement("availablePlansScreen", in: app)
-        if elementHasUsableFrame(scrollSurface) {
-            scrollSurface.swipeUp()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        }
-
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
+        func resolvedImportButton(waitTimeout: TimeInterval = 0) -> XCUIElement? {
             let directCandidates = [
                 app.buttons["readingPlanImportButton"].firstMatch,
                 app.collectionViews.buttons["readingPlanImportButton"].firstMatch,
                 app.cells.buttons["readingPlanImportButton"].firstMatch,
                 app.otherElements["readingPlanImportButton"].firstMatch,
             ]
-            if let button = directCandidates.first(where: {
-                $0.exists && waitForElementToBecomeHittable($0, timeout: 0.2)
-            }) {
+            return directCandidates.first(where: {
+                $0.exists && waitForElementToBecomeHittable($0, timeout: waitTimeout)
+            })
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let button = resolvedImportButton(waitTimeout: 0.2) {
                 return button
             }
-
             if elementHasUsableFrame(scrollSurface) {
                 scrollSurface.swipeUp()
             } else {
                 app.swipeUp()
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            var revealedButton: XCUIElement?
+            let didRevealButton = waitForUITestCondition(
+                "Wait for reading-plan import button reveal",
+                timeout: min(0.5, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                if let button = resolvedImportButton(waitTimeout: 0) {
+                    revealedButton = button
+                    return true
+                }
+                return false
+            }
+            if didRevealButton, let revealedButton {
+                return revealedButton
+            }
         } while Date() < deadline
 
         return requireElement("readingPlanImportButton", in: app, timeout: 1)
@@ -1073,18 +1107,30 @@ extension AndBibleUITests {
             app.otherElements[backendLabel].firstMatch,
         ]
 
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
+        func resolvedBackendOption() -> XCUIElement? {
             if let visible = candidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
                 return visible
             }
-            if let existing = candidates.first(where: { $0.exists }) {
-                return existing
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+            return candidates.first(where: { $0.exists })
+        }
 
-        return candidates[0]
+        if let option = resolvedBackendOption() {
+            return option
+        }
+
+        var resolvedOption: XCUIElement?
+        _ = waitForUITestCondition(
+            "Wait for Sync backend option \(backendLabel)",
+            timeout: max(0, timeout)
+        ) {
+            if let option = resolvedBackendOption() {
+                resolvedOption = option
+                return true
+            }
+            return false
+        }
+
+        return resolvedOption ?? resolvedBackendOption() ?? candidates[0]
     }
 
     /**
