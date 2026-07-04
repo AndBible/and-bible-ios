@@ -46,17 +46,21 @@ extension AndBibleUITests {
 
         app.typeText(text)
 
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            let submitCandidates = workspaceNamePromptButtonCandidates(
+        func confirmButtonIsEnabled() -> Bool {
+            let candidates = workspaceNamePromptButtonCandidates(
                 "workspaceNamePromptConfirmButton",
                 in: app
             )
-            for submitButton in submitCandidates where submitButton.exists && submitButton.isEnabled {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+            return candidates.contains(where: { $0.exists && $0.isEnabled })
+        }
+
+        let predicate = NSPredicate(block: { _, _ in confirmButtonIsEnabled() })
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription = "Wait for workspace name prompt confirm button"
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        if result == .completed || confirmButtonIsEnabled() {
+            return
+        }
 
         XCTFail(
             "Expected the workspace name prompt confirm button to enable within \(timeout) seconds after typing.",

@@ -111,6 +111,17 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotIn('"workspaceNamePromptTextField"', body)
         self.assertNotIn("currentTextEntryValue", body)
 
+    def test_workspace_prompt_confirm_wait_uses_xctest_waiter(self) -> None:
+        """Keep prompt confirm enablement on XCTest predicates instead of run-loop polling."""
+        list_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(list_source, "typeWorkspaceNamePromptText")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
     def test_workspace_prompt_button_candidates_prefer_prompt_scope_and_titles(self) -> None:
         """Keep workspace prompt button lookup off expensive app-wide identifier queries first."""
         element_source = (
@@ -272,6 +283,17 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("isWindowTabBarButtonIdentifier", existence_body)
         self.assertIn("resolvedWindowTabBarButton", existence_body)
 
+    def test_window_tab_bar_required_button_uses_xctest_waiter(self) -> None:
+        """Keep tab-bar control existence on XCTest predicates rather than run-loop polling."""
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "requireWindowTabBarButton")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
     def test_reader_state_export_includes_window_tab_orders_for_tab_fallback(self) -> None:
         """Expose tab order metadata so tests can tap the real footer without stale queries."""
         source = (
@@ -341,6 +363,19 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("XCTWaiter", body)
         self.assertNotIn("RunLoop.current.run", body)
         self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_pane_menu_surface_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
+        """Keep pane-menu surface appearance on XCTest predicates between real tap attempts."""
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITests+Search.swift"
+        ).read_text(encoding="utf-8")
+        surface_body = swift_function_body(search_source, "waitForPaneMenuSurface")
+        open_body = swift_function_body(search_source, "openPaneMenu")
+
+        self.assertIn("XCTNSPredicateExpectation", surface_body)
+        self.assertIn("XCTWaiter", surface_body)
+        self.assertNotIn("RunLoop.current.run", surface_body)
+        self.assertNotIn("RunLoop.current.run", open_body)
 
     def test_resolved_semantic_wait_failure_reports_elapsed_and_final_state(self) -> None:
         """Keep timeout failures actionable without reintroducing custom polling loops."""

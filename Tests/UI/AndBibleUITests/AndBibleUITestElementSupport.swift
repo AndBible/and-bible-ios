@@ -316,7 +316,7 @@ extension AndBibleUITests {
        - file: Source file used for XCTest failure attribution.
        - line: Source line used for XCTest failure attribution.
      - Returns: The resolved tab-bar button.
-     - Side effects: polls only the tab-bar subtree until the control appears.
+     - Side effects: waits on an XCTest predicate scoped to the tab-bar subtree.
      - Failure modes: records an XCTest failure when the tab bar never exposes the requested control.
      */
     func requireWindowTabBarButton(
@@ -326,13 +326,23 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let element = resolvedWindowTabBarButton(identifier, in: app) {
-                return element
+        var resolvedElement: XCUIElement?
+        let predicate = NSPredicate(block: { _, _ in
+            if let element = self.resolvedWindowTabBarButton(identifier, in: app) {
+                resolvedElement = element
+                return true
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+            return false
+        })
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription = "Wait for window tab-bar control \(identifier)"
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        if result == .completed, let resolvedElement {
+            return resolvedElement
+        }
+        if let element = resolvedWindowTabBarButton(identifier, in: app) {
+            return element
+        }
 
         let element = windowTabBarButtonCandidates(identifier, in: app).first ??
             app.otherElements["windowTabBar"].firstMatch
