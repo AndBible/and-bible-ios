@@ -1416,7 +1416,7 @@ extension AndBibleUITests {
      *   - swipes the Search results container or another visible scrollable Search surface
      *     downward to bring scope controls back into view
      * - Failure modes:
-     *   - falls back to a brief run-loop advance when no visible Search scroll surface exists
+     *   - falls back to a brief predicate wait when no visible Search scroll surface exists
      */
     func revealSearchControls(in app: XCUIApplication) {
         let searchScreen = unresolvedElement("searchScreen", in: app)
