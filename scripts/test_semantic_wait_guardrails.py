@@ -415,6 +415,18 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotIn("RunLoop.current.run", surface_body)
         self.assertNotIn("RunLoop.current.run", open_body)
 
+    def test_downloads_overflow_item_wait_uses_xctest_candidate_wait(self) -> None:
+        """Keep Downloads overflow row waits on the shared XCTest-backed candidate helper."""
+        downloads_source = (
+            REPO_ROOT
+            / "Tests/UI/AndBibleUITests/AndBibleUITests+PlansDownloadsWorkspace.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(downloads_source, "openDownloadsOverflowItem")
+
+        self.assertIn("firstVisibleCandidate", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
     def test_resolved_semantic_wait_failure_reports_elapsed_and_final_state(self) -> None:
         """Keep timeout failures actionable without reintroducing custom polling loops."""
         state_source = (
