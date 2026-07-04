@@ -252,26 +252,32 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        var lastState = readerRenderedContentStateValue(in: app) ?? "nil"
         var lastOrders = windowTabOrdersFromReaderState(in: app)
-        repeat {
-            lastState = readerRenderedContentStateValue(in: app) ?? "nil"
-            lastOrders = windowTabOrdersFromReaderState(in: app)
-            if let lastOrders,
-               !lastOrders.contains(order),
-               !lastState.contains("windowOrder=none") {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let failureMessage = """
-            Expected window order \(order) to be removed within \(timeout) seconds; \
-            orders=\(String(describing: lastOrders)), state=\(lastState)
-            """
-        XCTFail(
-            failureMessage,
+        waitForResolvedSemanticState(
+            named: "readerClosedWindowOrder",
+            timeout: timeout,
+            valueProvider: { self.readerRenderedContentStateValue(in: app) ?? "nil" },
+            success: { state in
+                if let rawOrders = self.readerRenderedContentStateToken("windowTabOrders", in: state) {
+                    lastOrders = rawOrders == "none"
+                        ? []
+                        : rawOrders
+                            .split(separator: ",")
+                            .compactMap { Int($0) }
+                } else {
+                    lastOrders = nil
+                }
+                guard let lastOrders else {
+                    return false
+                }
+                return !lastOrders.contains(order) && !state.contains("windowOrder=none")
+            },
+            failureDescription: { state in
+                """
+                Expected window order \(order) to be removed within \(timeout) seconds; \
+                orders=\(String(describing: lastOrders)), state=\(state)
+                """
+            },
             file: file,
             line: line
         )
@@ -307,10 +313,9 @@ extension AndBibleUITests {
             }
 
             _ = tapElementIfPossible(paneMenu, timeout: 1)
-            if waitForPaneMenuSurface(in: app, timeout: 0.8) {
+            if waitForPaneMenuSurface(in: app, timeout: min(0.8, max(0, deadline.timeIntervalSinceNow))) {
                 return
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
         XCTAssertTrue(
@@ -384,28 +389,24 @@ extension AndBibleUITests {
     }
 
     /**
-     Polls for the custom pane menu surface without recording an assertion failure.
+     Waits for the custom pane menu surface without recording an assertion failure.
 
      - Parameters:
      *   - app: Running application under test.
      *   - timeout: Maximum time to wait for any accessibility surface that represents the popup.
      * - Returns: `true` when a usable popup container appears before the timeout.
-     * - Side effects: repeatedly queries the live accessibility hierarchy.
+     * - Side effects: waits on an XCTest predicate over the live accessibility hierarchy.
      * - Failure modes: This helper cannot fail directly.
      */
     private func waitForPaneMenuSurface(
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if resolvedPaneMenuSurface(in: app) != nil {
-                return true
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        } while Date() < deadline
-
-        return resolvedPaneMenuSurface(in: app) != nil
+        let predicate = NSPredicate(block: { _, _ in self.resolvedPaneMenuSurface(in: app) != nil })
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription = "Wait for pane menu surface"
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        return result == .completed || resolvedPaneMenuSurface(in: app) != nil
     }
 
     /**

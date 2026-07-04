@@ -1,101 +1,8 @@
 import Foundation
 import Darwin
 import XCTest
-#if canImport(UIKit)
-import UIKit
-#endif
 
 extension AndBibleUITests {
-    func openWorkspaceSelector(in app: XCUIApplication) -> XCUIElement {
-        tapReaderAction("readerOpenWorkspacesAction", in: app)
-        return requireElement("workspaceSelectorAddButton", in: app, timeout: 15)
-    }
-
-    /**
-     Opens the workspace-name prompt from the workspace selector.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait for prompt controls to appear.
-     * - Returns: The first visible prompt control.
-     * - Side effects:
-     *   - taps the production Add toolbar button in the workspace selector
-     *   - waits for prompt-specific controls instead of relying on one container type
-     * - Failure modes:
-     *   - records an XCTest failure if the prompt never becomes visible
-     */
-    @discardableResult
-    func openWorkspaceCreatePrompt(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 15
-    ) -> XCUIElement {
-        tapElementReliably(
-            requireElement("workspaceSelectorAddButton", in: app, timeout: timeout),
-            timeout: timeout
-        )
-        if let promptElement = waitForAnyElement(
-            [
-                "workspaceNamePromptTextField",
-                "workspaceNamePromptConfirmButton",
-                "workspaceNamePromptCancelButton",
-            ],
-            in: app,
-            timeout: timeout
-        ) {
-            return promptElement
-        }
-
-        let promptField = unresolvedElement("workspaceNamePromptTextField", in: app)
-        XCTAssertTrue(
-            promptField.exists,
-            "Expected the workspace name prompt to appear within \(timeout) seconds."
-        )
-        return promptField
-    }
-
-    /**
-     Resolves the workspace-name prompt field using prompt-scoped fallbacks when SwiftUI does not
-     export the text-field accessibility identifier reliably.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait for the prompt field to appear.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Returns: The prompt text field used to enter the workspace name.
-     * - Side effects:
-     *   - polls the custom prompt and system modal surfaces for one owned text field
-     * - Failure modes:
-     *   - records an XCTest failure when no prompt text field becomes available in time
-     */
-    func requireWorkspaceNamePromptField(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> XCUIElement {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let promptField = firstExistingElement(
-                workspaceNamePromptTextFieldCandidates(in: app),
-                timeout: 0.2
-            ) {
-                return promptField
-            }
-
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let fallbackField = unresolvedElement("workspaceNamePromptTextField", in: app)
-        XCTAssertTrue(
-            fallbackField.exists,
-            "Expected the workspace name field to appear within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-        return fallbackField
-    }
-
     /**
      Types a workspace name into the selector-owned prompt without broad text-field queries.
      *
@@ -139,17 +46,21 @@ extension AndBibleUITests {
 
         app.typeText(text)
 
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            let submitCandidates = workspaceNamePromptButtonCandidates(
+        func confirmButtonIsEnabled() -> Bool {
+            let candidates = workspaceNamePromptButtonCandidates(
                 "workspaceNamePromptConfirmButton",
                 in: app
             )
-            for submitButton in submitCandidates where submitButton.exists && submitButton.isEnabled {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+            return candidates.contains(where: { $0.exists && $0.isEnabled })
+        }
+
+        let predicate = NSPredicate(block: { _, _ in confirmButtonIsEnabled() })
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription = "Wait for workspace name prompt confirm button"
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        if result == .completed || confirmButtonIsEnabled() {
+            return
+        }
 
         XCTFail(
             "Expected the workspace name prompt confirm button to enable within \(timeout) seconds after typing.",

@@ -15,24 +15,27 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 class WorkspacePromptUITestContractTests(unittest.TestCase):
     """Guards the CI-stable workspace prompt lookup path used by UI tests."""
 
-    def test_workspace_prompt_open_waits_for_controls_without_root_probe(self) -> None:
-        """The create flow waits for prompt-owned controls before fallback field resolution.
+    def test_workspace_prompt_entry_waits_for_controls_without_root_probe(self) -> None:
+        """The create flow types through prompt-owned controls instead of root/field probing.
 
         The failing CI shard showed root prompt-surface lookup can hang before the actual controls
-        are considered. The opener should prefer prompt-owned controls and avoid using the root
-        surface as a readiness signal.
+        are considered. The live entry helper should prefer prompt-owned action controls, use the
+        prompt's autofocus for keyboard input, and avoid using the root surface or field value as a
+        readiness signal.
         """
         source = (
             REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestListSupport.swift"
         ).read_text()
-        open_prompt_start = source.index("func openWorkspaceCreatePrompt(")
-        open_prompt_end = source.index("func requireWorkspaceNamePromptField(", open_prompt_start)
+        open_prompt_start = source.index("func typeWorkspaceNamePromptText(")
+        open_prompt_end = source.index("/**", open_prompt_start)
         open_prompt_body = source[open_prompt_start:open_prompt_end]
 
         self.assertIn('"workspaceNamePromptConfirmButton"', open_prompt_body)
         self.assertIn('"workspaceNamePromptCancelButton"', open_prompt_body)
-        self.assertIn('"workspaceNamePromptTextField"', open_prompt_body)
+        self.assertIn("app.typeText(text)", open_prompt_body)
         self.assertNotIn('"workspaceNamePromptScreen"', open_prompt_body)
+        self.assertNotIn('"workspaceNamePromptTextField"', open_prompt_body)
+        self.assertNotIn("currentTextEntryValue", open_prompt_body)
 
     def test_workspace_prompt_field_candidates_avoid_custom_identifier_and_focus_queries(self) -> None:
         """The prompt field lookup stays on title candidates instead of custom identifier queries.
@@ -94,7 +97,7 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
             REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
         ).read_text()
         state_source = (
-            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestListSupport.swift"
         ).read_text()
         prompt_candidates_start = source.index("func workspaceNamePromptScreenCandidates")
         prompt_candidates_end = source.index(
@@ -105,18 +108,18 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         element_candidates_start = source.index("func elementCandidates(")
         element_candidates_end = source.index("func resolvedElement(", element_candidates_start)
         element_candidates_body = source[element_candidates_start:element_candidates_end]
-        coordinate_start = state_source.index("func promptOwnedTextEntryTapCoordinate")
-        coordinate_end = state_source.index("func observedPromptTextValue", coordinate_start)
-        coordinate_body = state_source[coordinate_start:coordinate_end]
+        typing_start = state_source.index("func typeWorkspaceNamePromptText(")
+        typing_end = state_source.index("/**", typing_start)
+        typing_body = state_source[typing_start:typing_end]
 
         self.assertIn("app.otherElements[identifier].firstMatch", prompt_candidates_body)
         self.assertNotIn("app.collectionViews[identifier]", prompt_candidates_body)
         self.assertNotIn("app.scrollViews[identifier]", prompt_candidates_body)
-        self.assertNotIn("workspaceNamePromptScreenCandidates(in: app)", coordinate_body)
-        self.assertNotIn('app.collectionViews["workspaceNamePromptScreen"]', coordinate_body)
-        self.assertNotIn('app.scrollViews["workspaceNamePromptScreen"]', coordinate_body)
-        self.assertNotIn('case "workspaceNamePromptTextField"', coordinate_body)
-        self.assertNotIn("CGVector(dx: 0.5, dy: 0.46)", coordinate_body)
+        self.assertNotIn("workspaceNamePromptScreenCandidates(in: app)", typing_body)
+        self.assertNotIn('app.collectionViews["workspaceNamePromptScreen"]', typing_body)
+        self.assertNotIn('app.scrollViews["workspaceNamePromptScreen"]', typing_body)
+        self.assertNotIn('case "workspaceNamePromptTextField"', typing_body)
+        self.assertNotIn("CGVector(dx: 0.5, dy: 0.46)", typing_body)
         self.assertIn(
             'case "workspaceNamePromptScreen":\n'
             "            return workspaceNamePromptScreenCandidates(in: app)",
@@ -137,26 +140,22 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         and by the later workspace-row assertions, not by re-sampling the transient field.
         """
         state_source = (
-            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestListSupport.swift"
         ).read_text()
-        typing_start = state_source.index("func typePromptText(")
-        typing_end = state_source.index("func dismissLabelAssignment", typing_start)
+        typing_start = state_source.index("func typeWorkspaceNamePromptText(")
+        typing_end = state_source.index("/**", typing_start)
         typing_body = state_source[typing_start:typing_end]
-        submit_helper_start = typing_body.index("func waitForWorkspacePromptSubmitButtonToEnable")
-        submit_helper_end = typing_body.index("func clearObservedPromptTextValue", submit_helper_start)
-        submit_helper_body = typing_body[submit_helper_start:submit_helper_end]
-        workspace_branch_start = typing_body.index("if skipsPromptValueObservation")
-        workspace_branch_end = typing_body.index("focusResolvedPromptTextEntryElement", workspace_branch_start)
-        workspace_branch = typing_body[workspace_branch_start:workspace_branch_end]
 
-        self.assertIn('resolvedIdentifier == "workspaceNamePromptTextField"', typing_body)
-        self.assertIn("waitForWorkspacePromptSubmitButtonToEnable", typing_body)
-        self.assertIn('"workspaceNamePromptConfirmButton"', submit_helper_body)
-        self.assertIn("promptTextField.typeText(text)", workspace_branch)
-        self.assertNotIn("app.typeText(text)", workspace_branch)
-        self.assertNotIn("focusResolvedPromptTextEntryElement", workspace_branch)
-        self.assertNotIn("observedPromptTextValue", workspace_branch)
-        self.assertNotIn("currentTextEntryValue", workspace_branch)
+        self.assertIn('"workspaceNamePromptConfirmButton"', typing_body)
+        self.assertIn('"workspaceNamePromptCancelButton"', typing_body)
+        self.assertIn("app.typeText(text)", typing_body)
+        self.assertIn("workspaceNamePromptButtonCandidates", typing_body)
+        self.assertNotIn("func typePromptText(", state_source)
+        self.assertNotIn("promptField.typeText(text)", typing_body)
+        self.assertNotIn("requireWorkspaceNamePromptField", typing_body)
+        self.assertNotIn("focusResolvedPromptTextEntryElement", typing_body)
+        self.assertNotIn("observedPromptTextValue", typing_body)
+        self.assertNotIn("currentTextEntryValue", typing_body)
 
     def test_workspace_prompt_requests_focus_after_attachment(self) -> None:
         """The workspace name prompt owns focus like Android's `EditText` dialog.

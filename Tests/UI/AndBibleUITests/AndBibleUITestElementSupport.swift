@@ -316,7 +316,7 @@ extension AndBibleUITests {
        - file: Source file used for XCTest failure attribution.
        - line: Source line used for XCTest failure attribution.
      - Returns: The resolved tab-bar button.
-     - Side effects: polls only the tab-bar subtree until the control appears.
+     - Side effects: waits on an XCTest predicate scoped to the tab-bar subtree.
      - Failure modes: records an XCTest failure when the tab bar never exposes the requested control.
      */
     func requireWindowTabBarButton(
@@ -326,13 +326,23 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let element = resolvedWindowTabBarButton(identifier, in: app) {
-                return element
+        var resolvedElement: XCUIElement?
+        let predicate = NSPredicate(block: { _, _ in
+            if let element = self.resolvedWindowTabBarButton(identifier, in: app) {
+                resolvedElement = element
+                return true
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+            return false
+        })
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription = "Wait for window tab-bar control \(identifier)"
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        if result == .completed, let resolvedElement {
+            return resolvedElement
+        }
+        if let element = resolvedWindowTabBarButton(identifier, in: app) {
+            return element
+        }
 
         let element = windowTabBarButtonCandidates(identifier, in: app).first ??
             app.otherElements["windowTabBar"].firstMatch
@@ -399,8 +409,8 @@ extension AndBibleUITests {
         case "moduleBrowserStateExport":
             return screenScopedStateCandidates(identifier, within: "moduleBrowserScreen", in: app)
         case "syncSettingsState":
-            return screenRootCandidates("syncSettingsScreen", in: app)
-                + screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
+            return screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
+                + screenRootCandidates("syncSettingsScreen", in: app)
         case "settingsForm":
             return screenRootCandidates("settingsForm", in: app)
         default:
@@ -1158,114 +1168,6 @@ extension AndBibleUITests {
         ]
         return candidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) })
             ?? app.otherElements[fragment].firstMatch
-    }
-
-    /**
-     Waits for the visible reader chrome to expose a reference label containing the requested token.
-     *
-     * - Parameters:
-     *   - fragment: Case-insensitive substring expected inside the rendered reader reference.
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait before failing.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Returns: Matching UI element.
-     * - Side effects:
-     *   - queries the live XCUI hierarchy until a matching element appears
-     * - Failure modes:
-     *   - records an XCTest failure when no matching visible reference appears in time
-     */
-    func requireReaderReferenceContaining(
-        _ fragment: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> XCUIElement {
-        let referenceButton = app.buttons["bookChooserButton"].firstMatch
-        if referenceButton.exists || referenceButton.waitForExistence(timeout: min(timeout, 1)) {
-            let deadline = Date().addingTimeInterval(timeout)
-            repeat {
-                if let value = referenceButton.value as? String,
-                   value.localizedCaseInsensitiveContains(fragment)
-                {
-                    return referenceButton
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            } while Date() < deadline
-
-            let finalValue = referenceButton.value as? String ?? ""
-            XCTAssertTrue(
-                finalValue.localizedCaseInsensitiveContains(fragment),
-                "Expected the reader reference to contain '\(fragment)' within \(timeout) seconds, but saw '\(finalValue)'.",
-                file: file,
-                line: line
-            )
-            return referenceButton
-        }
-
-        let element = readerReferenceElement(containing: fragment, in: app)
-        XCTAssertTrue(
-            element.waitForExistence(timeout: timeout),
-            "Expected a visible reader reference containing '\(fragment)' within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-        return element
-    }
-
-    /**
-     Waits for the visible reader chrome to stop exposing a stale reference label.
-     *
-     * - Parameters:
-     *   - fragment: Case-insensitive substring expected to disappear after navigation.
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait before failing.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Side effects:
-     *   - polls the matching UI element until it no longer exists
-     * - Failure modes:
-     *   - records an XCTest failure when the stale reference remains visible after the timeout
-     */
-    func waitForReaderReferenceToDisappear(
-        _ fragment: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let referenceButton = app.buttons["bookChooserButton"].firstMatch
-        if referenceButton.exists || referenceButton.waitForExistence(timeout: min(timeout, 1)) {
-            let deadline = Date().addingTimeInterval(timeout)
-            repeat {
-                let value = referenceButton.value as? String ?? ""
-                if !value.localizedCaseInsensitiveContains(fragment) {
-                    return
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            } while Date() < deadline
-
-            let finalValue = referenceButton.value as? String ?? ""
-            XCTAssertFalse(
-                finalValue.localizedCaseInsensitiveContains(fragment),
-                "Expected the reader reference to stop containing '\(fragment)' within \(timeout) seconds, but saw '\(finalValue)'.",
-                file: file,
-                line: line
-            )
-            return
-        }
-
-        let element = readerReferenceElement(containing: fragment, in: app)
-        let predicate = NSPredicate(format: "exists == false")
-        expectation(for: predicate, evaluatedWith: element)
-        waitForExpectations(timeout: timeout)
-        XCTAssertFalse(
-            element.exists,
-            "Expected reader reference containing '\(fragment)' to disappear within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
     }
 
     /**

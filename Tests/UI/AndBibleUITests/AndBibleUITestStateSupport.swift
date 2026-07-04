@@ -1,9 +1,6 @@
 import Foundation
 import Darwin
 import XCTest
-#if canImport(UIKit)
-import UIKit
-#endif
 
 extension AndBibleUITests {
     func tapSettingsElement(
@@ -68,372 +65,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Types text into a prompt field and waits for XCTest to observe the committed value.
-
-     Prompt-specific callers pass a field that was already resolved from a known modal/sheet.
-     Those flows intentionally avoid app-wide focused-field probes and focus-predicate gates because
-     hosted XCTest can hang while proving unrelated text fields do not exist or while rebuilding a
-     native prompt snapshot.
-
-     - Parameters:
-       - text: Final text expected in the prompt-owned field.
-       - element: Prompt text field resolved by a modal-specific helper.
-       - app: Running application under test.
-       - timeout: Maximum number of seconds to retry focus/type verification.
-       - accessibilityIdentifier: Stable identifier for the field when resolving XCUI metadata is
-         unsafe or unnecessarily expensive.
-       - file: Source file used for XCTest failure attribution.
-       - line: Source line used for XCTest failure attribution.
-     - Returns: `true` when the prompt field reports the expected value before submission.
-     - Side effects:
-       - taps the resolved prompt field, verifies or clears any existing prompt value, emits
-         keyboard input, and clears/retries if CI drops the input without appending duplicate text
-       - for the workspace creation prompt, relies on the prompt's Android-parity autofocus and
-         verifies text entry through the prompt-owned submit button because hosted XCTest can lose
-         the SwiftUI text-field snapshot after focus
-     - Failure modes:
-       - records an XCTest failure when the field value or prompt-owned submit readiness never
-         reflects `text`
-     */
-    @discardableResult
-    func typePromptText(
-        _ text: String,
-        into element: XCUIElement,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        accessibilityIdentifier: String? = nil,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> Bool {
-        let resolvedIdentifier = accessibilityIdentifier ?? element.identifier
-        let placeholderHints = textEntryPlaceholderHints(for: resolvedIdentifier)
-        let includeElementMetadata = accessibilityIdentifier == nil
-        let deadline = Date().addingTimeInterval(timeout)
-
-        let usesPromptScopedResolvedField = [
-            "labelManagerNewLabelNameField",
-            "workspaceNamePromptTextField",
-        ].contains(resolvedIdentifier)
-        let skipsPromptValueObservation = resolvedIdentifier == "workspaceNamePromptTextField"
-
-        func promptFocusedTextEntryCandidates() -> [XCUIElement] {
-            usesPromptScopedResolvedField ? [] : focusedTextEntryCandidates(in: app)
-        }
-
-        func appCoordinate(for frame: CGRect, normalizedOffset: CGVector) -> XCUICoordinate? {
-            let appFrame = app.frame
-            guard elementFrameIsUsable(frame),
-                  elementFrameIsUsable(appFrame),
-                  appFrame.width > 0,
-                  appFrame.height > 0
-            else {
-                return nil
-            }
-
-            let absoluteX = frame.minX + frame.width * normalizedOffset.dx
-            let absoluteY = frame.minY + frame.height * normalizedOffset.dy
-            return app.coordinate(
-                withNormalizedOffset: CGVector(
-                    dx: absoluteX / appFrame.width,
-                    dy: absoluteY / appFrame.height
-                )
-            )
-        }
-
-        func resolvedPromptTextField() -> XCUIElement {
-            if usesPromptScopedResolvedField {
-                return element
-            }
-
-            if let prompt = resolvedModalPrompt(in: app, timeout: 0.2) {
-                let promptCandidates: [XCUIElement]
-                promptCandidates = modalTextFieldCandidates(
-                    in: prompt,
-                    identifiers: accessibilityIdentifier.map { [$0] } ?? [],
-                    titles: placeholderHints
-                )
-                if let promptField = firstExistingElement(promptCandidates, timeout: 0.2) {
-                    return promptField
-                }
-            }
-
-            if let focusedField = firstExistingElement(promptFocusedTextEntryCandidates(), timeout: 0.2) {
-                return focusedField
-            }
-
-            return element
-        }
-
-        func promptTextEntryCandidates(preferred preferredCandidates: [XCUIElement]) -> [XCUIElement] {
-            if usesPromptScopedResolvedField {
-                return preferredCandidates.isEmpty ? [element] : preferredCandidates
-            }
-
-            var candidates = preferredCandidates
-            if preferredCandidates.isEmpty {
-                candidates.append(resolvedPromptTextField())
-            }
-            candidates.append(element)
-            candidates += promptFocusedTextEntryCandidates()
-            return candidates
-        }
-
-        func promptOwnedTextEntryTapCoordinate() -> XCUICoordinate? {
-            switch resolvedIdentifier {
-            case "labelManagerNewLabelNameField":
-                guard let prompt = resolvedLabelCreationPrompt(in: app),
-                      elementFrameIsUsable(prompt.frame) else {
-                    return nil
-                }
-                return appCoordinate(
-                    for: prompt.frame,
-                    normalizedOffset: CGVector(dx: 0.5, dy: 0.52)
-                )
-            default:
-                return nil
-            }
-        }
-
-        func observedPromptTextValue(preferred preferredCandidates: [XCUIElement] = []) -> String {
-            let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
-            var fallbackValue = ""
-            for candidate in candidates where usesPromptScopedResolvedField || candidate.exists {
-                let candidateValue = currentTextEntryValue(
-                    in: candidate,
-                    placeholderHints: placeholderHints,
-                    includeElementMetadata: includeElementMetadata
-                )
-                if candidateValue == text {
-                    return candidateValue
-                }
-                if fallbackValue.isEmpty, !candidateValue.isEmpty {
-                    fallbackValue = candidateValue
-                }
-            }
-            return fallbackValue
-        }
-
-        func waitForObservedPromptTextValue(
-            preferred preferredCandidates: [XCUIElement] = [],
-            timeout: TimeInterval
-        ) -> Bool {
-            let valueDeadline = Date().addingTimeInterval(timeout)
-            repeat {
-                if observedPromptTextValue(preferred: preferredCandidates) == text {
-                    return true
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            } while Date() < valueDeadline
-            return observedPromptTextValue(preferred: preferredCandidates) == text
-        }
-
-        func waitForObservedPromptTextValueToClear(
-            preferred preferredCandidates: [XCUIElement],
-            timeout: TimeInterval
-        ) -> Bool {
-            let clearDeadline = Date().addingTimeInterval(timeout)
-            repeat {
-                if observedPromptTextValue(preferred: preferredCandidates).isEmpty {
-                    return true
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-            } while Date() < clearDeadline
-            return observedPromptTextValue(preferred: preferredCandidates).isEmpty
-        }
-
-        func waitForWorkspacePromptSubmitButtonToEnable(timeout: TimeInterval) -> Bool {
-            let submitDeadline = Date().addingTimeInterval(timeout)
-            repeat {
-                let submitCandidates = workspaceNamePromptButtonCandidates(
-                    "workspaceNamePromptConfirmButton",
-                    in: app
-                )
-                for submitButton in submitCandidates where submitButton.exists {
-                    if submitButton.isEnabled {
-                        return true
-                    }
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            } while Date() < submitDeadline
-
-            let submitCandidates = workspaceNamePromptButtonCandidates(
-                "workspaceNamePromptConfirmButton",
-                in: app
-            )
-            return submitCandidates.contains { submitButton in
-                submitButton.exists && submitButton.isEnabled
-            }
-        }
-
-        func clearObservedPromptTextValue(
-            preferred preferredCandidates: [XCUIElement],
-            forceKeyboardDelete: Bool = false
-        ) -> Bool {
-            func focusCandidateForKeyboardDelete(_ candidate: XCUIElement) {
-                if usesPromptScopedResolvedField {
-                    focusResolvedPromptTextEntryElement(
-                        candidate,
-                        in: app,
-                        preferTrailingEdge: true,
-                        promptTapCoordinate: promptOwnedTextEntryTapCoordinate,
-                        timeout: 1,
-                        file: file,
-                        line: line
-                    )
-                } else {
-                    focusTextEntryElement(candidate, preferTrailingEdge: true, timeout: 1)
-                }
-            }
-
-            let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
-            for candidate in candidates where usesPromptScopedResolvedField || candidate.exists {
-                let scopedPreferredCandidates = preferredCandidates + [candidate]
-                if usesPromptScopedResolvedField,
-                   observedPromptTextValue(preferred: scopedPreferredCandidates).isEmpty {
-                    return true
-                }
-
-                if forceKeyboardDelete {
-                    focusCandidateForKeyboardDelete(candidate)
-                    if usesPromptScopedResolvedField {
-                        app.typeText(
-                            String(repeating: XCUIKeyboardKey.delete.rawValue, count: max(text.count * 2, 32))
-                        )
-                        if waitForObservedPromptTextValueToClear(
-                            preferred: scopedPreferredCandidates,
-                            timeout: 0.5
-                        ) {
-                            return true
-                        }
-                    } else if waitForElementKeyboardFocus(candidate, timeout: 0.3) {
-                        app.typeText(
-                            String(repeating: XCUIKeyboardKey.delete.rawValue, count: max(text.count * 2, 32))
-                        )
-                        if waitForObservedPromptTextValueToClear(
-                            preferred: scopedPreferredCandidates,
-                            timeout: 0.5
-                        ) {
-                            return true
-                        }
-                    }
-                }
-
-                if usesPromptScopedResolvedField {
-                    continue
-                }
-
-                if clearTextEntryElement(
-                    candidate,
-                    app: app,
-                    placeholderHints: placeholderHints,
-                    includeElementMetadata: includeElementMetadata
-                ) && waitForObservedPromptTextValueToClear(
-                    preferred: scopedPreferredCandidates,
-                    timeout: 0.5
-                ) {
-                    return true
-                }
-            }
-
-            return observedPromptTextValue(preferred: preferredCandidates).isEmpty
-        }
-
-        repeat {
-            let promptTextField = resolvedPromptTextField()
-            let preferredPromptCandidates = [promptTextField]
-            if skipsPromptValueObservation {
-                promptTextField.typeText(text)
-                if waitForWorkspacePromptSubmitButtonToEnable(
-                    timeout: min(5, max(0.5, deadline.timeIntervalSinceNow))
-                ) {
-                    return true
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                continue
-            }
-            focusResolvedPromptTextEntryElement(
-                promptTextField,
-                in: app,
-                promptTapCoordinate: promptOwnedTextEntryTapCoordinate,
-                timeout: min(5, max(1, deadline.timeIntervalSinceNow)),
-                file: file,
-                line: line
-            )
-            let existingValue = observedPromptTextValue(preferred: preferredPromptCandidates)
-            if existingValue == text {
-                return true
-            }
-            guard clearObservedPromptTextValue(preferred: preferredPromptCandidates, forceKeyboardDelete: true) else {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                continue
-            }
-
-            if usesPromptScopedResolvedField {
-                app.typeText(text)
-            } else {
-                promptTextField.typeText(text)
-            }
-            if waitForObservedPromptTextValue(
-                preferred: preferredPromptCandidates,
-                timeout: min(5, max(0.5, deadline.timeIntervalSinceNow))
-            ) {
-                return true
-            }
-
-            if !usesPromptScopedResolvedField,
-               waitForElementKeyboardFocus(promptTextField, timeout: 0.5) {
-                let currentValue = observedPromptTextValue(preferred: preferredPromptCandidates)
-                if currentValue == text {
-                    return true
-                }
-                if !currentValue.isEmpty {
-                    _ = clearObservedPromptTextValue(preferred: preferredPromptCandidates, forceKeyboardDelete: true)
-                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                    continue
-                }
-
-                guard clearObservedPromptTextValue(
-                    preferred: preferredPromptCandidates,
-                    forceKeyboardDelete: true
-                ) else {
-                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                    continue
-                }
-
-                app.typeText(text)
-                if waitForObservedPromptTextValue(
-                    preferred: preferredPromptCandidates,
-                    timeout: min(3, max(0.5, deadline.timeIntervalSinceNow))
-                ) {
-                    return true
-                }
-            }
-
-            _ = clearObservedPromptTextValue(preferred: preferredPromptCandidates, forceKeyboardDelete: true)
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        if skipsPromptValueObservation {
-            XCTAssertTrue(
-                waitForWorkspacePromptSubmitButtonToEnable(timeout: 0),
-                "Expected workspace prompt submit button to become enabled after typing '\(text)'.",
-                file: file,
-                line: line
-            )
-            return false
-        }
-
-        XCTAssertEqual(
-            observedPromptTextValue(),
-            text,
-            "Expected prompt text input '\(resolvedIdentifier)' to contain '\(text)' before submitting.",
-            file: file,
-            line: line
-        )
-        return false
-    }
-
-    /**
      Dismisses Label Assignment back to the bookmark list and waits for the parent state to settle.
      *
      * - Parameters:
@@ -476,79 +107,6 @@ extension AndBibleUITests {
         XCTAssertTrue(
             finalState.contains("labelAssignment=false"),
             "Expected Label Assignment to dismiss within \(timeout) seconds. Final bookmark-list state: '\(finalState)'.",
-            file: file,
-            line: line
-        )
-    }
-
-    /**
-     Opens the create-label prompt from Label Assignment and waits for its field or action to
-     surface before returning.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to keep retrying the production create-label control.
-     * - Side effects:
-     *   - taps the real create-label button and polls the live accessibility hierarchy for the
-     *     prompt field/button until one appears
-     * - Failure modes:
-     *   - records an XCTest failure if the prompt never becomes reachable within the timeout
-     */
-    func presentLabelCreationPrompt(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10
-    ) {
-        let trigger = requireElement("labelAssignmentCreateNewLabelButton", in: app, timeout: timeout)
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            tapElementReliably(trigger, timeout: 5)
-            if resolveLabelCreationPromptTextField(in: app) != nil
-                || resolveLabelCreationPromptCreateButton(in: app) != nil
-            {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        XCTFail("Expected the Label Manager create prompt to appear within \(timeout) seconds.")
-    }
-
-    /**
-     Submits the native create-label alert without repeatedly snapshotting its action button.
-
-     Hosted simulators can wedge XCTest while evaluating the alert's `Create` button after text
-     entry. Once the prompt and committed text are already observed, tapping the alert's trailing
-     action area exercises the same visible control while avoiding that unstable query path.
-
-     - Parameters:
-       - app: Running application under test.
-       - timeout: Maximum time to wait for the prompt surface to expose a usable frame.
-       - file: Source file used for XCTest failure attribution.
-       - line: Source line used for XCTest failure attribution.
-     - Side effects:
-       - taps the native alert action area that confirms label creation
-     - Failure modes:
-       - records an XCTest failure if the prompt never exposes a tappable frame
-     */
-    func tapLabelCreationPromptCreateButton(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let prompt = resolvedLabelCreationPrompt(in: app),
-               elementFrameIsUsable(prompt.frame) {
-                prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.86)).tap()
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        XCTFail(
-            "Expected the create-label prompt to expose a usable frame within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -632,38 +190,6 @@ extension AndBibleUITests {
             prompt.buttons["labelManagerCreateButton"].firstMatch,
             prompt.buttons["Create"].firstMatch,
         ]
-    }
-
-    /// Resolves the create-label prompt text field by scoping queries to the visible prompt.
-    func resolveLabelCreationPromptTextField(in app: XCUIApplication) -> XCUIElement? {
-        if let prompt = resolvedLabelCreationPrompt(in: app) {
-            if let field = firstExistingElement(
-                labelCreationPromptTextFieldCandidates(in: prompt),
-                timeout: 0.2
-            ) {
-                return field
-            }
-        }
-        return firstExistingElement(
-            appScopedLabelCreationPromptTextFieldCandidates(in: app),
-            timeout: 0
-        )
-    }
-
-    /// Resolves the create-label prompt action button by scoping queries to the visible prompt.
-    func resolveLabelCreationPromptCreateButton(in app: XCUIApplication) -> XCUIElement? {
-        if let prompt = resolvedLabelCreationPrompt(in: app) {
-            if let button = firstExistingElement(
-                labelCreationPromptCreateButtonCandidates(in: prompt),
-                timeout: 0.2
-            ) {
-                return button
-            }
-        }
-        return firstExistingElement(
-            appScopedLabelCreationPromptCreateButtonCandidates(in: app),
-            timeout: 0
-        )
     }
 
     /// Resolves the Search root element that owns the canonical UI-test state value.
@@ -1080,48 +606,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Waits for a label row to appear and records a precise failure if it does not.
-     *
-     * - Parameters:
-     *   - name: User-visible label name expected on the row.
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait before failing.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Returns: The resolved label-row UI element.
-     * - Side effects:
-     *   - polls the live accessibility hierarchy until the requested row exists or the timeout
-     *     expires
-     * - Failure modes:
-     *   - records an XCTest failure if the row never appears within the requested timeout
-     */
-    func requireLabelRow(
-        named name: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> XCUIElement {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            let element = labelRow(named: name, in: app)
-            if element.exists {
-                return element
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let fallback = labelRow(named: name, in: app)
-        XCTAssertTrue(
-            fallback.exists,
-            "Expected label row '\(name)' to exist within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-        return fallback
-    }
-
-    /**
      Resolves one label inline action by button identifier and label name.
      *
      * - Parameters:
@@ -1403,53 +887,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Pastes text through the system edit menu into a focused text-entry control.
-     */
-    func pasteTextIntoFocusedElement(
-        _ text: String,
-        in app: XCUIApplication,
-        sourceElement element: XCUIElement,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-#if canImport(UIKit)
-        let previousPasteboardText = UIPasteboard.general.string
-        UIPasteboard.general.string = text
-        defer {
-            UIPasteboard.general.string = previousPasteboardText
-        }
-
-        let pasteMenuItem = app.menuItems["Paste"].firstMatch
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if pasteMenuItem.waitForExistence(timeout: 0.5) {
-                pasteMenuItem.tap()
-                return
-            }
-
-            if element.exists && !element.frame.isEmpty {
-                element.press(forDuration: 0.8)
-                if pasteMenuItem.waitForExistence(timeout: 0.5) {
-                    pasteMenuItem.tap()
-                    return
-                }
-            }
-
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        XCTFail(
-            "Expected Paste edit-menu action for text entry '\(element.identifier)' within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-#else
-        XCTFail("Paste-driven text entry requires UIKit pasteboard access.", file: file, line: line)
-#endif
-    }
-
-    /**
      Focuses one text-entry control through XCTest's native tap path without coordinate fallback.
      *
      * - Parameters:
@@ -1614,7 +1051,7 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to keep polling before giving up.
      * - Returns: `true` when the element reports keyboard focus, otherwise `false`.
      * - Side effects:
-     *   - repeatedly samples the element-scoped `hasKeyboardFocus` predicate so the helper can
+     *   - waits on XCTest's element-scoped `hasKeyboardFocus` predicate so the helper can
      *     distinguish a visible prompt field from one that is still unfocused
      * - Failure modes: This helper cannot fail.
      */
@@ -1623,15 +1060,10 @@ extension AndBibleUITests {
         timeout: TimeInterval = 1
     ) -> Bool {
         let predicate = NSPredicate(format: "hasKeyboardFocus == true")
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if predicate.evaluate(with: element) {
-                return true
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        } while Date() < deadline
-
-        return predicate.evaluate(with: element)
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        expectation.expectationDescription = "Wait for \(element.identifier) keyboard focus"
+        let result = XCTWaiter().wait(for: [expectation], timeout: max(0, timeout))
+        return result == .completed || predicate.evaluate(with: element)
     }
 
     /**
@@ -1885,14 +1317,36 @@ extension AndBibleUITests {
         line: UInt = #line
     ) {
         let deadline = Date().addingTimeInterval(timeout)
-        var lastState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
+        let expectedDescription = expectedTokens
+            .sorted(by: { $0.key < $1.key })
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ";")
+        var lastState = semanticStateExportValue("syncSettingsState", in: app) ?? "nil"
 
         func expectedStateIsVisible() -> Bool {
-            guard let state = resolvedElementSemanticText("syncSettingsState", in: app) else {
+            guard let state = semanticStateExportValue("syncSettingsState", in: app) else {
                 return false
             }
             lastState = state
             return expectedTokens.allSatisfy { syncStateToken(named: $0.key, in: state) == $0.value }
+        }
+
+        func waitForExpectedState(timeout settleTimeout: TimeInterval) -> Bool {
+            waitForResolvedSemanticState(
+                named: "syncSettingsState.bootstrapPromptChoice",
+                timeout: settleTimeout,
+                valueProvider: { self.semanticStateExportValue("syncSettingsState", in: app) },
+                success: { state in
+                    lastState = state
+                    return expectedTokens.allSatisfy { self.syncStateToken(named: $0.key, in: state) == $0.value }
+                },
+                recordsFailure: false,
+                failureDescription: { state in
+                    "Expected alert choice '\(title)' to drive syncSettingsState to '\(expectedDescription)'. Final state: '\(state)'."
+                },
+                file: file,
+                line: line
+            )
         }
 
         XCTAssertTrue(
@@ -1912,23 +1366,15 @@ extension AndBibleUITests {
                 tapElementReliably(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)), file: file, line: line)
             }
 
-            let settleDeadline = Date().addingTimeInterval(min(1.5, max(0.2, deadline.timeIntervalSinceNow)))
-            repeat {
-                if expectedStateIsVisible() {
-                    return
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            } while Date() < settleDeadline
+            if waitForExpectedState(timeout: min(1.5, max(0.2, deadline.timeIntervalSinceNow))) {
+                return
+            }
 
             if !button.exists {
                 break
             }
         } while Date() < deadline
 
-        let expectedDescription = expectedTokens
-            .sorted(by: { $0.key < $1.key })
-            .map { "\($0.key)=\($0.value)" }
-            .joined(separator: ";")
         XCTFail(
             "Expected alert choice '\(title)' to drive syncSettingsState to '\(expectedDescription)' within \(timeout) seconds. Final state: '\(lastState)'.",
             file: file,
@@ -2244,70 +1690,6 @@ extension AndBibleUITests {
         }
     }
 
-    /**
-     Taps the NextCloud connection-test control until the exported status leaves the idle state.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to keep retrying the production button.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Side effects:
-     *   - scrolls the Sync Settings form until the real test-connection button is visible
-     *   - taps the visible button and polls the compact Sync Settings export until the remote
-     *     status changes
-     * - Failure modes:
-     *   - records an XCTest failure if the button never drives the exported remote status away
-     *     from `idle`
-     */
-    func triggerSyncConnectionTest(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 15,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let button = requireReachableSyncSettingsButton(
-            "syncNextCloudTestConnectionButton",
-            in: app,
-            timeout: timeout,
-            file: file,
-            line: line
-        )
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            if let syncState = resolvedElementSemanticText("syncSettingsState", in: app),
-               let statusValue = syncStateToken(named: "remoteStatus", in: syncState),
-               statusValue != "idle"
-            {
-                return
-            }
-
-            tapElementReliably(button, timeout: 1, file: file, line: line)
-
-            let settleDeadline = Date().addingTimeInterval(2)
-            repeat {
-                if let syncState = resolvedElementSemanticText("syncSettingsState", in: app),
-                   let statusValue = syncStateToken(named: "remoteStatus", in: syncState),
-                   statusValue != "idle"
-                {
-                    return
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            } while Date() < settleDeadline
-        } while Date() < deadline
-
-        let finalState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
-        let finalStatus = syncStateToken(named: "remoteStatus", in: finalState) ?? "nil"
-        XCTAssertNotEqual(
-            finalStatus,
-            "idle",
-            "Expected syncSettingsState to report a non-idle remoteStatus within \(timeout) seconds after triggering a connection test. Final state: '\(finalState)'.",
-            file: file,
-            line: line
-        )
-    }
-
     /// Reads one named token out of the compact sync-settings accessibility export.
     func syncStateToken(named tokenName: String, in state: String) -> String? {
         state
@@ -2399,51 +1781,105 @@ extension AndBibleUITests {
     }
 
     /**
-     Polls until one accessibility-identified element appears above another in the visible UI.
+     Waits for iCloud runtime mode application to settle through the Sync Settings state export.
      *
      * - Parameters:
-     *   - upperIdentifier: Accessibility identifier expected to resolve to the higher row.
-     *   - lowerIdentifier: Accessibility identifier expected to resolve to the lower row.
      *   - app: Running application under test.
-     *   - timeout: Maximum time to keep polling before failing.
+     *   - timeout: Maximum number of seconds to wait for `icloudState` to leave `syncing`.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - repeatedly re-queries the live XCUI hierarchy for both identifiers until their visible
-     *     frames settle into the requested vertical order
-     *   - records an XCTest failure when the requested order never appears before timeout
+     *   - samples only the compact `syncSettingsState` export and route sentinels while the
+     *     production runtime applier rebuilds app data stores
      * - Failure modes:
-     *   - fails when either element disappears or when the requested vertical ordering never
-     *     materializes within the timeout window
+     *   - fails immediately if the state export reports the legacy restart-required fallback
+     *   - fails immediately if the app-owned Sync Settings route disappears during runtime apply
+     *   - fails on timeout if the iCloud state never leaves `syncing`
      */
-    func waitForElement(
-        _ upperIdentifier: String,
-        toAppearAbove lowerIdentifier: String,
+    func waitForICloudSyncRuntimeApplyToSettle(
         in app: XCUIApplication,
-        timeout: TimeInterval = 10,
+        timeout: TimeInterval = 30,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            let upperElement = unresolvedElement(upperIdentifier, in: app)
-            let lowerElement = unresolvedElement(lowerIdentifier, in: app)
-            if upperElement.exists,
-               lowerElement.exists,
-               upperElement.frame.minY < lowerElement.frame.minY {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+        var fallbackState: String?
+        var closedRouteState: String?
 
-        let finalUpperElement = unresolvedElement(upperIdentifier, in: app)
-        let finalLowerElement = unresolvedElement(lowerIdentifier, in: app)
-        XCTAssertTrue(
-            finalUpperElement.exists && finalLowerElement.exists &&
-                finalUpperElement.frame.minY < finalLowerElement.frame.minY,
-            "Expected '\(upperIdentifier)' to appear above '\(lowerIdentifier)' within \(timeout) seconds.",
+        let completed = waitForResolvedSemanticState(
+            named: "syncSettingsState.iCloudRuntimeApply",
+            timeout: timeout,
+            valueProvider: {
+                if let state = self.semanticStateExportValue("syncSettingsState", in: app) {
+                    return state
+                }
+                if self.resolvedElement("syncSettingsScreen", in: app) == nil {
+                    return "syncSettingsState=missing;syncSettingsScreen=missing"
+                }
+                return nil
+            },
+            success: { state in
+                if self.syncStateToken(named: "restartRequired", in: state) == "true" ||
+                    self.syncStateToken(named: "icloudState", in: state) == "pendingRestart" {
+                    fallbackState = state
+                    return true
+                }
+
+                guard self.syncStateToken(named: "syncSettingsScreen", in: state) != "missing" else {
+                    closedRouteState = state
+                    return true
+                }
+
+                guard self.resolvedElement("syncSettingsScreen", in: app) != nil,
+                      app.otherElements["appOwnedSyncSettingsRoute"].exists else {
+                    closedRouteState = state
+                    return true
+                }
+
+                guard let iCloudState = self.syncStateToken(named: "icloudState", in: state) else {
+                    return false
+                }
+                return iCloudState != "syncing"
+            },
+            recordsFailure: false,
+            failureDescription: { finalState in
+                "Expected iCloud runtime apply to settle without restart-required fallback while keeping Sync Settings open. Final state: '\(finalState)'."
+            },
             file: file,
             line: line
         )
+
+        if let fallbackState {
+            XCTFail(
+                "iCloud toggle must not enter restart-required fallback. State: '\(fallbackState)'.",
+                file: file,
+                line: line
+            )
+            return
+        }
+
+        if let closedRouteState {
+            XCTFail(
+                """
+                Live iCloud toggle must keep Sync Settings open while applying the runtime mode change.
+                Last syncSettingsState: '\(closedRouteState)'.
+                App state: \(app.state.rawValue).
+                App debug: \(String(app.debugDescription.prefix(3000)))
+                """,
+                file: file,
+                line: line
+            )
+            return
+        }
+
+        guard completed else {
+            let finalState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
+            XCTFail(
+                "Expected iCloud toggle to settle without restart-required fallback while keeping Sync Settings open. Final syncSettingsState: '\(finalState)'.",
+                file: file,
+                line: line
+            )
+            return
+        }
     }
+
 }

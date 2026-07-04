@@ -114,23 +114,22 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
         self.assertNotIn("become hittable within", resolver_body)
         self.assertIn("revealPasses < minimumRevealPasses", resolver_body)
 
-    def test_sync_connection_trigger_does_not_recheck_hittability_after_resolution(self) -> None:
-        """Triggering the connection test uses the resolved row instead of a second hittability wait.
+    def test_sync_connection_trigger_helper_stays_retired(self) -> None:
+        """The invalid-URL path must not reintroduce the old connection-test trigger.
 
-        `requireReachableSyncSettingsButton` owns the scroll/reachability contract. Requiring the
-        returned Form row to stay `isHittable` before every tap recreates the shard failure when
-        XCTest marks a visible SwiftUI row non-hittable.
+        Android validates malformed server URLs at the edit boundary. The retired UI helper tapped
+        a lower Form row and carried extra reachability polling for a behavior the invalid-URL test
+        no longer needs. A failure here means the shard can regress to the old iOS-only path.
         """
         source = (
             REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
         ).read_text()
-        trigger_start = source.index("func triggerSyncConnectionTest(")
-        trigger_end = source.index("func syncStateToken(", trigger_start)
-        trigger_body = source[trigger_start:trigger_end]
+        settings_source = (
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITests+SettingsAndSync.swift"
+        ).read_text()
 
-        self.assertIn("tapElementReliably(button, timeout: 1", trigger_body)
-        self.assertNotIn("waitForElementToBecomeHittable(button, timeout: 5)", trigger_body)
-        self.assertNotIn("stay hittable while triggering", trigger_body)
+        self.assertNotIn("func triggerSyncConnectionTest(", source)
+        self.assertNotIn("triggerSyncConnectionTest(", settings_source)
 
 
 if __name__ == "__main__":

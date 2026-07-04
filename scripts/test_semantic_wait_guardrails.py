@@ -93,24 +93,34 @@ def swift_property_body(source: str, name: str) -> str:
 class SemanticWaitGuardrailsTests(unittest.TestCase):
     """Protects pure semantic-state waits from regressing to ad hoc run-loop polling."""
 
-    def test_workspace_create_prompt_waits_on_prompt_controls_without_root_probe(self) -> None:
+    def test_workspace_prompt_entry_waits_on_prompt_controls_without_root_probe(self) -> None:
         """Avoid hosted XCTest stalls from probing the prompt root before controls."""
         list_source = (
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
         ).read_text(encoding="utf-8")
-        body = swift_function_body(list_source, "openWorkspaceCreatePrompt")
+        body = swift_function_body(list_source, "typeWorkspaceNamePromptText")
 
         prompt_root = '"workspaceNamePromptScreen"'
-        prompt_field = '"workspaceNamePromptTextField"'
         confirm_button = '"workspaceNamePromptConfirmButton"'
         cancel_button = '"workspaceNamePromptCancelButton"'
 
-        for identifier in [prompt_field, confirm_button, cancel_button]:
+        for identifier in [confirm_button, cancel_button]:
             self.assertIn(identifier, body)
+        self.assertIn("app.typeText(text)", body)
         self.assertNotIn(prompt_root, body)
+        self.assertNotIn('"workspaceNamePromptTextField"', body)
+        self.assertNotIn("currentTextEntryValue", body)
 
-        self.assertLess(body.find(prompt_field), body.find(confirm_button))
-        self.assertLess(body.find(prompt_field), body.find(cancel_button))
+    def test_workspace_prompt_confirm_wait_uses_xctest_waiter(self) -> None:
+        """Keep prompt confirm enablement on XCTest predicates instead of run-loop polling."""
+        list_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(list_source, "typeWorkspaceNamePromptText")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
 
     def test_workspace_prompt_button_candidates_prefer_prompt_scope_and_titles(self) -> None:
         """Keep workspace prompt button lookup off expensive app-wide identifier queries first."""
@@ -158,6 +168,30 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertLess(
             search_case.find(hidden_export_candidate),
             search_case.find(root_candidate),
+        )
+
+    def test_sync_settings_state_candidates_prefer_hidden_export_before_screen_root(self) -> None:
+        """Keep Sync Settings polling on the compact export before the screen root."""
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "semanticStateValueCandidates")
+        sync_case_start = body.find('case "syncSettingsState":')
+        settings_case_start = body.find('case "settingsForm":')
+        self.assertNotEqual(sync_case_start, -1)
+        self.assertNotEqual(settings_case_start, -1)
+
+        sync_case = body[sync_case_start:settings_case_start]
+        root_candidate = 'screenRootCandidates("syncSettingsScreen", in: app)'
+        hidden_export_candidate = (
+            'screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)'
+        )
+
+        self.assertIn(root_candidate, sync_case)
+        self.assertIn(hidden_export_candidate, sync_case)
+        self.assertLess(
+            sync_case.find(hidden_export_candidate),
+            sync_case.find(root_candidate),
         )
 
     def test_search_interaction_ready_does_not_read_state_before_poll_loop(self) -> None:
@@ -249,6 +283,17 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("isWindowTabBarButtonIdentifier", existence_body)
         self.assertIn("resolvedWindowTabBarButton", existence_body)
 
+    def test_window_tab_bar_required_button_uses_xctest_waiter(self) -> None:
+        """Keep tab-bar control existence on XCTest predicates rather than run-loop polling."""
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "requireWindowTabBarButton")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
     def test_reader_state_export_includes_window_tab_orders_for_tab_fallback(self) -> None:
         """Expose tab order metadata so tests can tap the real footer without stale queries."""
         source = (
@@ -259,6 +304,29 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("windowTabOrders=", body)
         self.assertIn("windowManager.allWindows", body)
         self.assertIn('return "\\(windowToken);\\(contentToken);\\(tabOrdersToken);', body)
+
+    def test_icloud_sync_toggle_waits_on_semantic_state_not_manual_run_loop(self) -> None:
+        """Keep the iCloud live-apply smoke tied to exported Sync Settings state."""
+        source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITests+SettingsAndSync.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(source, "testSyncSettingsICloudToggleDoesNotRequireRestart")
+
+        self.assertIn("waitForICloudSyncRuntimeApplyToSettle", body)
+        self.assertNotIn("Date().addingTimeInterval(30)", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotIn("while Date() < deadline", body)
+
+    def test_sync_bootstrap_prompt_option_waits_on_semantic_state_not_run_loop(self) -> None:
+        """Keep Sync adopt/create prompt settling on the exported Sync Settings state."""
+        source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(source, "chooseSyncBootstrapPromptOption")
+
+        self.assertIn("waitForResolvedSemanticState", body)
+        self.assertIn("recordsFailure: false", body)
+        self.assertNotIn("RunLoop.current.run", body)
 
     def test_resolved_semantic_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
         """Ensure the shared pure-observation wait is backed by XCTest wait primitives."""
@@ -271,6 +339,43 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("XCTWaiter", body)
         self.assertNotIn("RunLoop.current.run", body)
         self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_visible_candidate_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
+        """Keep small candidate waits on XCTest predicates instead of nested run-loop polling."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "firstVisibleCandidate")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_segmented_control_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
+        """Keep segmented-control geometry waits on XCTest predicates."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "tapSegmentedControlSegment")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_pane_menu_surface_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
+        """Keep pane-menu surface appearance on XCTest predicates between real tap attempts."""
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITests+Search.swift"
+        ).read_text(encoding="utf-8")
+        surface_body = swift_function_body(search_source, "waitForPaneMenuSurface")
+        open_body = swift_function_body(search_source, "openPaneMenu")
+
+        self.assertIn("XCTNSPredicateExpectation", surface_body)
+        self.assertIn("XCTWaiter", surface_body)
+        self.assertNotIn("RunLoop.current.run", surface_body)
+        self.assertNotIn("RunLoop.current.run", open_body)
 
     def test_resolved_semantic_wait_failure_reports_elapsed_and_final_state(self) -> None:
         """Keep timeout failures actionable without reintroducing custom polling loops."""
@@ -323,11 +428,15 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         state_source = (
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
         ).read_text(encoding="utf-8")
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITests+Search.swift"
+        ).read_text(encoding="utf-8")
 
         migrated_waits = [
             swift_function_body(element_source, "waitForReaderRenderedContentState"),
             swift_function_body(element_source, "waitForReaderRenderedContentStateIfPresent"),
             swift_function_body(state_source, "waitForSyncState"),
+            swift_function_body(search_source, "waitForClosedWindowOrder"),
         ]
 
         for body in migrated_waits:
@@ -402,6 +511,28 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
             self.assertIn("waitForResolvedSemanticState", body)
             self.assertIn("recordsFailure: false", body)
             self.assertNotIn("RunLoop.current.run", body)
+
+    def test_search_screen_seeded_wait_uses_shared_semantic_waiter(self) -> None:
+        """Keep launch-seeded Search presentation checks on semantic state, not run-loop polling."""
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(search_source, "waitForSearchScreenIfAlreadySeeded")
+
+        self.assertIn("waitForResolvedSemanticState", body)
+        self.assertIn("recordsFailure: false", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
+    def test_keyboard_focus_wait_uses_xctest_predicate_waiter(self) -> None:
+        """Keep keyboard-focus observation on XCTest predicates, not manual run-loop polling."""
+        state_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(state_source, "waitForElementKeyboardFocus")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
 
 
 if __name__ == "__main__":
