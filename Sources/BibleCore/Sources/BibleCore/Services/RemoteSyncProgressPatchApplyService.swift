@@ -25,6 +25,8 @@ public struct RemoteSyncProgressPatchApplyReport: Sendable, Equatable {
  Replays sparse Android Progress patch archives into local reading and memorization progress stores.
  */
 public final class RemoteSyncProgressPatchApplyService {
+    private static let progressOrdinalRange = JSwordKJVAVersification.progressOrdinalRange
+
     private let metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService
     private let snapshotService: RemoteSyncProgressSnapshotService
     private let fileManager: FileManager
@@ -298,9 +300,13 @@ public final class RemoteSyncProgressPatchApplyService {
         defer { sqlite3_finalize(statement) }
         bindUUIDBlob(id, to: statement, index: 1)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let kjvOrdinal = Int(sqlite3_column_int(statement, 1))
+        guard Self.progressOrdinalRange.contains(kjvOrdinal) else {
+            throw RemoteSyncProgressPatchApplyError.invalidSQLiteDatabase
+        }
         return RemoteSyncCurrentProgressMemorizedVerseRow(
             id: try uuidFromBlob(statement: statement, column: 0),
-            kjvOrdinal: Int(sqlite3_column_int(statement, 1)),
+            kjvOrdinal: kjvOrdinal,
             memorizedAt: sqlite3_column_int64(statement, 2)
         )
     }
@@ -343,10 +349,17 @@ public final class RemoteSyncProgressPatchApplyService {
         defer { sqlite3_finalize(statement) }
         bindUUIDBlob(id, to: statement, index: 1)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let startOrdinal = Int(sqlite3_column_int(statement, 1))
+        let endOrdinal = Int(sqlite3_column_int(statement, 2))
+        guard Self.progressOrdinalRange.contains(startOrdinal),
+              Self.progressOrdinalRange.contains(endOrdinal),
+              endOrdinal >= startOrdinal else {
+            throw RemoteSyncProgressPatchApplyError.invalidSQLiteDatabase
+        }
         return RemoteSyncCurrentProgressMemorizationTargetRow(
             id: try uuidFromBlob(statement: statement, column: 0),
-            kjvOrdinalStart: Int(sqlite3_column_int(statement, 1)),
-            kjvOrdinalEnd: Int(sqlite3_column_int(statement, 2)),
+            kjvOrdinalStart: startOrdinal,
+            kjvOrdinalEnd: endOrdinal,
             createdAt: sqlite3_column_int64(statement, 3)
         )
     }

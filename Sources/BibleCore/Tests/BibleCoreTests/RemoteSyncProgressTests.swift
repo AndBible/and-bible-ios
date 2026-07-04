@@ -223,6 +223,46 @@ final class RemoteSyncProgressTests: XCTestCase {
         XCTAssertEqual(RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .progress).map(\.patchNumber), [1])
         XCTAssertEqual(RemoteSyncLogEntryStore(settingsStore: settingsStore).entries(for: .progress).count, 4)
     }
+
+    func testProgressPatchApplyRejectsInvalidMemorizationTargetOrdinals() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let targetID = UUID(uuidString: "15000000-0000-0000-0000-000000003001")!
+        let patchDatabaseURL = try makeProgressPatchDatabase(
+            memorizedVerses: [],
+            chapterHistory: [],
+            targets: [
+                .init(id: targetID, kjvOrdinalStart: 0, kjvOrdinalEnd: 2, createdAt: 700),
+            ],
+            settings: ReadingProgressSettingsSnapshot(),
+            logEntries: [
+                .init(
+                    tableName: RemoteSyncProgressSnapshotService.memorizationTargetTable,
+                    entityID1: .blob(RemoteSyncProgressSnapshotService.uuidBlob(targetID)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: 701,
+                    sourceDevice: "android"
+                ),
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: patchDatabaseURL) }
+        let stagedArchive = try makeProgressPatchArchive(
+            patchDatabaseURL: patchDatabaseURL,
+            sourceDevice: "android",
+            patchNumber: 1,
+            fileTimestamp: 900
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        XCTAssertThrowsError(
+            try RemoteSyncProgressPatchApplyService().applyPatchArchives(
+                [stagedArchive],
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(error as? RemoteSyncProgressPatchApplyError, .invalidSQLiteDatabase)
+        }
+    }
 }
 
 private struct ProgressMemorizedVerseFixture {
