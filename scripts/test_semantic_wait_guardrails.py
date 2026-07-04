@@ -93,24 +93,23 @@ def swift_property_body(source: str, name: str) -> str:
 class SemanticWaitGuardrailsTests(unittest.TestCase):
     """Protects pure semantic-state waits from regressing to ad hoc run-loop polling."""
 
-    def test_workspace_create_prompt_waits_on_prompt_controls_without_root_probe(self) -> None:
+    def test_workspace_prompt_entry_waits_on_prompt_controls_without_root_probe(self) -> None:
         """Avoid hosted XCTest stalls from probing the prompt root before controls."""
         list_source = (
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
         ).read_text(encoding="utf-8")
-        body = swift_function_body(list_source, "openWorkspaceCreatePrompt")
+        body = swift_function_body(list_source, "typeWorkspaceNamePromptText")
 
         prompt_root = '"workspaceNamePromptScreen"'
-        prompt_field = '"workspaceNamePromptTextField"'
         confirm_button = '"workspaceNamePromptConfirmButton"'
         cancel_button = '"workspaceNamePromptCancelButton"'
 
-        for identifier in [prompt_field, confirm_button, cancel_button]:
+        for identifier in [confirm_button, cancel_button]:
             self.assertIn(identifier, body)
+        self.assertIn("app.typeText(text)", body)
         self.assertNotIn(prompt_root, body)
-
-        self.assertLess(body.find(prompt_field), body.find(confirm_button))
-        self.assertLess(body.find(prompt_field), body.find(cancel_button))
+        self.assertNotIn('"workspaceNamePromptTextField"', body)
+        self.assertNotIn("currentTextEntryValue", body)
 
     def test_workspace_prompt_button_candidates_prefer_prompt_scope_and_titles(self) -> None:
         """Keep workspace prompt button lookup off expensive app-wide identifier queries first."""

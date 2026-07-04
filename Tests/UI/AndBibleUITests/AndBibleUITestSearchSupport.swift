@@ -247,50 +247,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Resolves the root Search screen element without forcing XCTest through incorrect typed queries.
-     *
-     * SwiftUI can expose this surface as different automation classes across runtimes, so Search
-     * must not go through the generic identifier resolver that still reasons in terms of buttons,
-     * links, or scroll views. This helper only asks XCTest for any element carrying the stable
-     * `searchScreen` identifier and returns the first live match.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait before failing.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Returns: The first live Search root node exporting the `searchScreen` identifier.
-     * - Side effects:
-     *   - polls the live accessibility hierarchy until Search is presented
-     * - Failure modes:
-     *   - records an XCTest failure if Search never presents a root node within the timeout
-     */
-    func requireSearchScreen(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 20,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> XCUIElement {
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            if let screen = resolvedSearchScreenElement(in: app) {
-                return screen
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let screen = unresolvedElement("searchScreen", in: app)
-        XCTAssertTrue(
-            screen.exists,
-            "Expected Search to present its root state element within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-        return screen
-    }
-
-    /**
      Waits for the Search screen to report that its current query is no longer in flight.
      *
      * - Parameters:
@@ -559,38 +515,6 @@ extension AndBibleUITests {
         let suffix = state[range.upperBound...]
         let token = suffix.prefix { $0 != ";" }
         return Set(token.split(separator: ",").map(String.init).filter { !$0.isEmpty })
-    }
-
-    /// Taps the first visible module row inside the real module picker sheet.
-    func tapFirstModulePickerRow(
-        in app: XCUIApplication,
-        timeout: TimeInterval,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        _ = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
-        let predicate = NSPredicate(format: "identifier BEGINSWITH %@", "modulePickerRow::")
-        let candidates = [
-            app.buttons.matching(predicate).firstMatch,
-            app.collectionViews.buttons.matching(predicate).firstMatch,
-            app.collectionViews.cells.matching(predicate).firstMatch,
-            app.cells.matching(predicate).firstMatch,
-            app.otherElements.matching(predicate).firstMatch,
-        ]
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let row = candidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) }) {
-                tapElementReliably(row, timeout: timeout, file: file, line: line)
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        XCTFail(
-            "Expected module picker to expose at least one 'modulePickerRow::' row within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
     }
 
     /**
@@ -1682,44 +1606,6 @@ extension AndBibleUITests {
             return -1
         }
         return Int(resultsToken.dropFirst("results=".count)) ?? -1
-    }
-
-    /**
-     Resolves the first tappable Search result row exported by the current Search screen.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the first result row to materialize.
-     * - Returns: First matching Search result row element.
-     * - Side effects:
-     *   - queries the live accessibility hierarchy for any identifier prefixed with
-     *     `searchResultRow::`
-     * - Failure modes:
-     *   - fails when the Search screen exports no tappable result rows before the timeout
-     */
-    func requireFirstSearchResultRow(
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) -> XCUIElement {
-        let predicate = NSPredicate(format: "identifier BEGINSWITH %@", "searchResultRow::")
-        let candidates = [
-            app.collectionViews.buttons.matching(predicate).firstMatch,
-            app.collectionViews.cells.matching(predicate).firstMatch,
-            app.buttons.matching(predicate).firstMatch,
-            app.cells.matching(predicate).firstMatch,
-            app.otherElements.matching(predicate).firstMatch,
-        ]
-
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let result = candidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) }) {
-                return result
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        XCTFail("Expected at least one search result row within \(timeout) seconds.")
-        return candidates.first ?? app.otherElements["searchResultRow::missing"].firstMatch
     }
 
     /**
