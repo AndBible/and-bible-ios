@@ -294,6 +294,18 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("XCTWaiter", body)
         self.assertNotIn("RunLoop.current.run", body)
 
+    def test_any_element_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
+        """Keep multi-identifier element waits on XCTest predicates."""
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "waitForAnyElement")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
     def test_element_existence_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
         """Keep lightweight element existence checks on XCTest predicates."""
         reader_source = (
