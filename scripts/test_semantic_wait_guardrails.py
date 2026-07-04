@@ -294,6 +294,18 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("XCTWaiter", body)
         self.assertNotIn("RunLoop.current.run", body)
 
+    def test_any_element_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
+        """Keep multi-identifier element waits on XCTest predicates."""
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "waitForAnyElement")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
     def test_element_existence_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
         """Keep lightweight element existence checks on XCTest predicates."""
         reader_source = (
@@ -402,6 +414,18 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("XCTWaiter", surface_body)
         self.assertNotIn("RunLoop.current.run", surface_body)
         self.assertNotIn("RunLoop.current.run", open_body)
+
+    def test_downloads_overflow_item_wait_uses_xctest_candidate_wait(self) -> None:
+        """Keep Downloads overflow row waits on the shared XCTest-backed candidate helper."""
+        downloads_source = (
+            REPO_ROOT
+            / "Tests/UI/AndBibleUITests/AndBibleUITests+PlansDownloadsWorkspace.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(downloads_source, "openDownloadsOverflowItem")
+
+        self.assertIn("firstVisibleCandidate", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
 
     def test_resolved_semantic_wait_failure_reports_elapsed_and_final_state(self) -> None:
         """Keep timeout failures actionable without reintroducing custom polling loops."""

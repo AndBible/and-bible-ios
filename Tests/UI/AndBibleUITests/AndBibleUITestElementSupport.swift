@@ -1037,7 +1037,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The first matching visible element, or `nil` when none appear before timeout.
      * - Side effects:
-     *   - repeatedly re-queries the live XCUI hierarchy across the provided identifiers
+     *   - observes the live XCUI hierarchy across the provided identifiers with an XCTest
+     *     predicate
      * - Failure modes: This helper does not fail directly.
      */
     func waitForAnyElement(
@@ -1047,15 +1048,38 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement? {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
+        let resolveCurrentMatch: () -> XCUIElement? = {
             for identifier in identifiers {
-                if let candidate = resolvedElement(identifier, in: app) {
+                if let candidate = self.resolvedElement(identifier, in: app) {
                     return candidate
                 }
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+            return nil
+        }
+
+        if let candidate = resolveCurrentMatch() {
+            return candidate
+        }
+        guard timeout > 0 else {
+            return nil
+        }
+
+        var resolvedMatch: XCUIElement?
+        let predicate = NSPredicate { _, _ in
+            if let candidate = resolveCurrentMatch() {
+                resolvedMatch = candidate
+                return true
+            }
+            return false
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        let candidateDescription = identifiers.joined(separator: ", ")
+        expectation.expectationDescription =
+            "Wait for any element in candidates \(candidateDescription)"
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        if result == .completed {
+            return resolvedMatch ?? resolveCurrentMatch()
+        }
 
         return nil
     }

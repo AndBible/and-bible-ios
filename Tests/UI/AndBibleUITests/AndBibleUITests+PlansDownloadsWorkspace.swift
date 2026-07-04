@@ -96,7 +96,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The resolved overflow row once it exposes a usable frame.
      * - Side effects:
-     *   - taps the real Downloads overflow toolbar button until the requested row appears
+     *   - taps the real Downloads overflow toolbar button and waits for the requested row through
+     *     XCTest-backed candidate waits
      * - Failure modes:
      *   - records an XCTest failure when the toolbar button or requested row never becomes visible
      */
@@ -107,24 +108,31 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
+        let itemCandidates = [
+            unresolvedElement(itemIdentifier, in: app),
+            app.buttons[itemIdentifier].firstMatch,
+            app.cells[itemIdentifier].firstMatch,
+            app.otherElements[itemIdentifier].firstMatch,
+        ]
         let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let item = resolvedElement(itemIdentifier, in: app),
-               elementHasUsableFrame(item) {
-                return item
-            }
+        if let item = firstVisibleCandidate(from: itemCandidates, waitTimeout: min(1, timeout)) {
+            return item
+        }
 
+        for attempt in 0..<2 {
             let overflowButton = unresolvedElement("moduleBrowserOverflowButton", in: app)
-            if !tapElementIfPossible(overflowButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            }
+            let tapTimeout = min(1, max(0.1, deadline.timeIntervalSinceNow))
+            _ = tapElementIfPossible(overflowButton, timeout: tapTimeout)
 
-            if let item = resolvedElement(itemIdentifier, in: app),
-               elementHasUsableFrame(item) {
+            let remaining = max(0, deadline.timeIntervalSinceNow)
+            guard remaining > 0 else {
+                break
+            }
+            let waitTimeout = attempt == 0 ? min(2, remaining) : remaining
+            if let item = firstVisibleCandidate(from: itemCandidates, waitTimeout: waitTimeout) {
                 return item
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+        }
 
         let item = unresolvedElement(itemIdentifier, in: app)
         XCTAssertTrue(
