@@ -43,6 +43,62 @@ extension AndBibleUITests {
     }
 
     /**
+     Returns a stable, non-empty element name for XCTest wait diagnostics.
+     *
+     * - Parameter element: UI element whose identifier or label should describe the wait target.
+     * - Returns: the accessibility identifier, visible label, or a generic placeholder.
+     * - Side effects: none
+     * - Failure modes: Falls back to a placeholder when XCTest exposes neither identifier nor label.
+     */
+    func uiTestElementDiagnosticName(_ element: XCUIElement) -> String {
+        let identifier = element.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !identifier.isEmpty {
+            return identifier
+        }
+
+        let label = element.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !label.isEmpty {
+            return label
+        }
+
+        return "unidentified UI element"
+    }
+
+    /**
+     Waits for a UI-test condition through XCTest's predicate waiter.
+
+     - Parameters:
+       - description: Human-readable condition name used in XCTest diagnostics.
+       - timeout: Maximum number of seconds to wait after an initial immediate probe.
+       - condition: Predicate closure that reads current UI state and returns true once ready.
+     - Returns: `true` when the condition succeeds immediately or before the timeout.
+     - Side effects:
+       - samples `condition` through `XCTNSPredicateExpectation` while XCTest waits
+     - Failure modes: This helper does not fail directly.
+     */
+    @discardableResult
+    func waitForUITestCondition(
+        _ description: String,
+        timeout: TimeInterval,
+        condition: @escaping () -> Bool
+    ) -> Bool {
+        if condition() {
+            return true
+        }
+        guard timeout > 0 else {
+            return false
+        }
+
+        let predicate = NSPredicate { _, _ in
+            condition()
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription = description
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        return result == .completed || condition()
+    }
+
+    /**
      Waits for one live XCUI element to become hittable.
      *
      * - Parameters:
@@ -57,21 +113,12 @@ extension AndBibleUITests {
         _ element: XCUIElement,
         timeout: TimeInterval
     ) -> Bool {
-        if isElementHittable(element) {
-            return true
-        }
-        guard timeout > 0 else {
-            return false
-        }
-
-        let predicate = NSPredicate { [weak self] _, _ in
+        waitForUITestCondition(
+            "Wait for \(uiTestElementDiagnosticName(element)) to become hittable",
+            timeout: max(0, timeout)
+        ) { [weak self] in
             self?.isElementHittable(element) ?? false
         }
-        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
-        expectation.expectationDescription =
-            "Wait for element \(element.identifier) to become hittable"
-        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
-        return result == .completed || isElementHittable(element)
     }
 
     /**

@@ -435,16 +435,32 @@ extension AndBibleUITests {
         _ candidates: [XCUIElement],
         timeout: TimeInterval = 0
     ) -> XCUIElement? {
+        guard !candidates.isEmpty else {
+            return nil
+        }
+
         let boundedTimeout = max(0, timeout)
-        for candidate in candidates {
-            if candidate.exists {
-                return candidate
+        func firstCurrentMatch() -> XCUIElement? {
+            candidates.first(where: { $0.exists })
+        }
+
+        if let candidate = firstCurrentMatch() {
+            return candidate
+        }
+
+        var resolvedCandidate: XCUIElement?
+        let didResolve = waitForUITestCondition(
+            "Wait for first existing element from \(candidates.count) candidates",
+            timeout: boundedTimeout
+        ) {
+            if let candidate = firstCurrentMatch() {
+                resolvedCandidate = candidate
+                return true
             }
-            if boundedTimeout > 0,
-               candidate.waitForExistence(timeout: boundedTimeout)
-            {
-                return candidate
-            }
+            return false
+        }
+        if didResolve {
+            return resolvedCandidate ?? firstCurrentMatch()
         }
         return nil
     }
@@ -1008,13 +1024,20 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let element = resolvedElement(identifier, in: app) {
-                return element
+        var resolvedMatch: XCUIElement?
+        let didResolve = waitForUITestCondition(
+            "Wait for element \(identifier)",
+            timeout: timeout
+        ) {
+            if let element = self.resolvedElement(identifier, in: app) {
+                resolvedMatch = element
+                return true
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+            return false
+        }
+        if didResolve {
+            return resolvedMatch ?? resolvedElement(identifier, in: app) ?? unresolvedElement(identifier, in: app)
+        }
 
         let element = unresolvedElement(identifier, in: app)
         XCTAssertTrue(
@@ -1147,13 +1170,24 @@ extension AndBibleUITests {
             app.otherElements.matching(predicate).firstMatch,
         ]
 
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let element = candidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) }) {
-                return element
+        func currentMatch() -> XCUIElement? {
+            candidates.first(where: { $0.exists })
+        }
+
+        var resolvedMatch: XCUIElement?
+        let didResolve = waitForUITestCondition(
+            "Wait for History row containing \(fragment)",
+            timeout: timeout
+        ) {
+            if let element = currentMatch() {
+                resolvedMatch = element
+                return true
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+            return false
+        }
+        if didResolve {
+            return resolvedMatch ?? currentMatch() ?? candidates.first ?? app.otherElements["historyRow::missing"].firstMatch
+        }
 
         XCTAssertTrue(
             false,

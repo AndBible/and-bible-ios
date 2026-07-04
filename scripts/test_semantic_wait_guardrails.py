@@ -129,8 +129,65 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         body = swift_function_body(interaction_source, "waitForElementToBecomeHittable")
 
+        self.assertIn("waitForUITestCondition", body)
+        self.assertIn("uiTestElementDiagnosticName(element)", body)
+        self.assertIn("max(0, timeout)", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_hittability_wait_diagnostics_fall_back_to_label_or_placeholder(self) -> None:
+        """Keep label-only XCUI elements from producing empty wait diagnostics."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "uiTestElementDiagnosticName")
+
+        self.assertIn("element.identifier", body)
+        self.assertIn("element.label", body)
+        self.assertIn('"unidentified UI element"', body)
+
+    def test_shared_condition_wait_uses_xctest_predicate_waiter(self) -> None:
+        """Keep reusable UI-test condition waits on XCTest instead of ad hoc polling."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "waitForUITestCondition")
+
         self.assertIn("XCTNSPredicateExpectation", body)
         self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_first_existing_element_uses_one_bounded_predicate_wait(self) -> None:
+        """Prevent candidate lookup from spending the timeout once per candidate."""
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "firstExistingElement")
+
+        self.assertIn("waitForUITestCondition", body)
+        self.assertNotIn("waitForExistence", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
+    def test_require_element_uses_predicate_waiter_not_run_loop_polling(self) -> None:
+        """Keep generic element resolution from manual sleep polling."""
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "requireElement")
+
+        self.assertIn("waitForUITestCondition", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_search_translation_row_mutation_uses_predicate_waiter(self) -> None:
+        """Keep Search picker row-settle waits state-driven after row taps."""
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(search_source, "waitForSearchTranslationRowMutation")
+
+        self.assertIn("waitForUITestCondition", body)
         self.assertNotIn("RunLoop.current.run", body)
         self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
 
