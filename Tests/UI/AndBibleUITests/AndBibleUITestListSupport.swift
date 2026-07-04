@@ -1191,7 +1191,7 @@ extension AndBibleUITests {
         let settingsForm = requireElement("settingsForm", in: app, timeout: timeout, file: file, line: line)
         let visibleTitle = settingsNavigationTitle(for: identifier)
         let deadline = Date().addingTimeInterval(timeout)
-        func resolvedVisibleControl() -> XCUIElement? {
+        func candidateElements() -> [XCUIElement] {
             var candidates = [
                 settingsForm.links[identifier].firstMatch,
                 settingsForm.buttons[identifier].firstMatch,
@@ -1218,13 +1218,88 @@ extension AndBibleUITests {
                 ], at: 0)
             }
 
-            if let control = candidates.first(where: { $0.exists && waitForElementToBecomeHittable($0, timeout: 0.5) }) {
+            return candidates
+        }
+
+        enum SettingsScrollDirection {
+            case higherRows
+            case lowerRows
+        }
+
+        func firstExistingControl() -> XCUIElement? {
+            candidateElements().first(where: { $0.exists && elementHasUsableFrame($0) })
+        }
+
+        func immediateVisibleControl() -> XCUIElement? {
+            let candidates = candidateElements()
+
+            if let control = candidates.first(where: { isElementHittable($0) }) {
                 return control
             }
             if let control = candidates.first(where: { $0.exists && isElementVisible($0, within: settingsForm) }) {
                 return control
             }
             return nil
+        }
+
+        func resolvedVisibleControl() -> XCUIElement? {
+            immediateVisibleControl()
+        }
+
+        func settingsScrollDirection(toward control: XCUIElement) -> SettingsScrollDirection? {
+            guard elementHasUsableFrame(control), elementHasUsableFrame(settingsForm) else {
+                return nil
+            }
+
+            let verticalInset = min(24, max(0, settingsForm.frame.height * 0.08))
+            let visibleFrame = settingsForm.frame.insetBy(dx: 0, dy: verticalInset)
+            if control.frame.minY >= visibleFrame.maxY {
+                return .lowerRows
+            }
+            if control.frame.maxY <= visibleFrame.minY {
+                return .higherRows
+            }
+            return nil
+        }
+
+        func scrollSettingsForm(toward direction: SettingsScrollDirection) {
+            guard elementHasUsableFrame(settingsForm) else {
+                return
+            }
+
+            let startOffset: CGVector
+            let endOffset: CGVector
+            switch direction {
+            case .higherRows:
+                startOffset = CGVector(dx: 0.5, dy: 0.28)
+                endOffset = CGVector(dx: 0.5, dy: 0.82)
+            case .lowerRows:
+                startOffset = CGVector(dx: 0.5, dy: 0.82)
+                endOffset = CGVector(dx: 0.5, dy: 0.28)
+            }
+            settingsForm.coordinate(withNormalizedOffset: startOffset).press(
+                forDuration: 0.01,
+                thenDragTo: settingsForm.coordinate(withNormalizedOffset: endOffset)
+            )
+        }
+
+        func waitForControlAfterScroll(previousFrame: CGRect?) -> XCUIElement? {
+            let predicate = NSPredicate { _, _ in
+                if immediateVisibleControl() != nil {
+                    return true
+                }
+                guard let previousFrame,
+                      let control = firstExistingControl(),
+                      self.elementHasUsableFrame(control)
+                else {
+                    return false
+                }
+                return abs(control.frame.midY - previousFrame.midY) > 2
+            }
+            let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+            expectation.expectationDescription = "Wait for Settings row reveal after scroll"
+            _ = XCTWaiter().wait(for: [expectation], timeout: 0.6)
+            return resolvedVisibleControl()
         }
 
         if let control = resolvedVisibleControl() {
@@ -1248,8 +1323,13 @@ extension AndBibleUITests {
                 break
             }
 
-            settingsForm.swipeUp()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            let existingControl = firstExistingControl()
+            let direction = existingControl.flatMap { settingsScrollDirection(toward: $0) } ?? .lowerRows
+            let previousFrame = existingControl?.frame
+            scrollSettingsForm(toward: direction)
+            if let control = waitForControlAfterScroll(previousFrame: previousFrame) {
+                return control
+            }
         } while Date() < deadline
 
         let recoveryDeadline = Date().addingTimeInterval(min(3, max(1, timeout / 4)))
@@ -1261,8 +1341,13 @@ extension AndBibleUITests {
                 break
             }
 
-            settingsForm.swipeDown()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            let existingControl = firstExistingControl()
+            let direction = existingControl.flatMap { settingsScrollDirection(toward: $0) } ?? .higherRows
+            let previousFrame = existingControl?.frame
+            scrollSettingsForm(toward: direction)
+            if let control = waitForControlAfterScroll(previousFrame: previousFrame) {
+                return control
+            }
         } while Date() < recoveryDeadline
 
         if let control = resolveSettingsNavigationControlViaSearch(
