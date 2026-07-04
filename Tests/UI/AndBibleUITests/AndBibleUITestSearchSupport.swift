@@ -600,13 +600,14 @@ extension AndBibleUITests {
                     && waitForElementToBecomeHittable($0, timeout: 0.5)
             }) {
                 tapElementReliably(identifierElement, timeout: 3)
-                let activationDeadline = min(Date().addingTimeInterval(2), deadline)
-                repeat {
-                    if isExpectedScopeSelected() {
-                        return
-                    }
-                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                } while Date() < activationDeadline
+                let activationTimeout = min(2, max(0, deadline.timeIntervalSinceNow))
+                if waitForUITestCondition(
+                    "Wait for Search scope \(scopeToken.rawValue) activation",
+                    timeout: activationTimeout,
+                    condition: isExpectedScopeSelected
+                ) {
+                    return
+                }
                 continue
             }
 
@@ -707,23 +708,21 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(max(0, timeout))
-
-        repeat {
-            if searchTranslationPickerStateIsOpen(in: app, timeout: 0) {
+        waitForUITestCondition(
+            "Wait for Search translation picker to open",
+            timeout: max(0, timeout)
+        ) {
+            if self.searchTranslationPickerStateIsOpen(in: app, timeout: 0) {
                 return true
             }
-            if firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: 0) != nil {
+            if self.firstExistingElement(
+                self.searchTranslationPickerOpenCandidates(in: app),
+                timeout: 0
+            ) != nil {
                 return true
             }
-            if timeout <= 0 {
-                return false
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        } while Date() < deadline
-
-        return searchTranslationPickerStateIsOpen(in: app, timeout: 0)
-            || firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: 0) != nil
+            return false
+        }
     }
 
     /**
@@ -949,28 +948,29 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) {
-        let deadline = Date().addingTimeInterval(max(0, timeout))
-
-        repeat {
-            if let row = firstExistingElement(
-                searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
-                timeout: 0.1
+        waitForUITestCondition(
+            "Wait for Search translation row \(moduleName) mutation",
+            timeout: max(0, timeout)
+        ) {
+            if let row = self.firstExistingElement(
+                self.searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
+                timeout: 0
             ) {
                 if let expectedValue, row.value as? String == expectedValue {
-                    return
+                    return true
                 }
-                if expectedValue == nil, elementHasUsableFrame(row) {
-                    return
+                if expectedValue == nil, self.elementHasUsableFrame(row) {
+                    return true
                 }
             }
 
             if expectedValue == nil,
-               firstExistingElement(searchTranslationPickerListCandidates(in: app), timeout: 0.1) != nil {
-                return
+               self.firstExistingElement(self.searchTranslationPickerListCandidates(in: app), timeout: 0) != nil {
+                return true
             }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
-        } while Date() < deadline
+            return false
+        }
     }
 
     /// Returns row candidates for one Search translation picker module.
@@ -1202,13 +1202,11 @@ extension AndBibleUITests {
         }
 
         func waitForExpectedWordModeActivation(until activationDeadline: Date) -> Bool {
-            repeat {
-                if isExpectedWordModeSelected() {
-                    return true
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            } while Date() < activationDeadline
-            return isExpectedWordModeSelected()
+            waitForUITestCondition(
+                "Wait for Search word mode \(expectedToken) activation",
+                timeout: max(0, activationDeadline.timeIntervalSinceNow),
+                condition: isExpectedWordModeSelected
+            )
         }
 
         repeat {
