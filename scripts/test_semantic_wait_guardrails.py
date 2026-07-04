@@ -130,8 +130,21 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         body = swift_function_body(interaction_source, "waitForElementToBecomeHittable")
 
         self.assertIn("waitForUITestCondition", body)
+        self.assertIn("uiTestElementDiagnosticName(element)", body)
+        self.assertIn("max(0, timeout)", body)
         self.assertNotIn("RunLoop.current.run", body)
         self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_hittability_wait_diagnostics_fall_back_to_label_or_placeholder(self) -> None:
+        """Keep label-only XCUI elements from producing empty wait diagnostics."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "uiTestElementDiagnosticName")
+
+        self.assertIn("element.identifier", body)
+        self.assertIn("element.label", body)
+        self.assertIn('"unidentified UI element"', body)
 
     def test_shared_condition_wait_uses_xctest_predicate_waiter(self) -> None:
         """Keep reusable UI-test condition waits on XCTest instead of ad hoc polling."""

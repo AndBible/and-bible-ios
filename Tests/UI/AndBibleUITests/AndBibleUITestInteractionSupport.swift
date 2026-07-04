@@ -43,6 +43,28 @@ extension AndBibleUITests {
     }
 
     /**
+     Returns a stable, non-empty element name for XCTest wait diagnostics.
+     *
+     * - Parameter element: UI element whose identifier or label should describe the wait target.
+     * - Returns: the accessibility identifier, visible label, or a generic placeholder.
+     * - Side effects: none
+     * - Failure modes: Falls back to a placeholder when XCTest exposes neither identifier nor label.
+     */
+    func uiTestElementDiagnosticName(_ element: XCUIElement) -> String {
+        let identifier = element.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !identifier.isEmpty {
+            return identifier
+        }
+
+        let label = element.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !label.isEmpty {
+            return label
+        }
+
+        return "unidentified UI element"
+    }
+
+    /**
      Waits for a UI-test condition through XCTest's predicate waiter.
 
      - Parameters:
@@ -92,8 +114,8 @@ extension AndBibleUITests {
         timeout: TimeInterval
     ) -> Bool {
         waitForUITestCondition(
-            "Wait for element \(element.identifier) to become hittable",
-            timeout: timeout
+            "Wait for \(uiTestElementDiagnosticName(element)) to become hittable",
+            timeout: max(0, timeout)
         ) { [weak self] in
             self?.isElementHittable(element) ?? false
         }
