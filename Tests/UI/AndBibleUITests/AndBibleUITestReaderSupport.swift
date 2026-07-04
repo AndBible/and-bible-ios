@@ -144,8 +144,8 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - repeatedly samples the live XCUI hierarchy until the requested element exists or
-     *     disappears
+     *   - observes the live XCUI hierarchy with an XCTest predicate until the requested element
+     *     exists or disappears
      *   - keeps reader tab-bar controls scoped to `windowTabBar` so negative waits do not snapshot
      *     the full reader hierarchy
      * - Failure modes:
@@ -159,20 +159,22 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
         let resolveElement: () -> XCUIElement? = {
             if self.isWindowTabBarButtonIdentifier(identifier) {
                 return self.resolvedWindowTabBarButton(identifier, in: app)
             }
             return self.resolvedElement(identifier, in: app)
         }
-        repeat {
-            let currentExists = resolveElement() != nil
-            if currentExists == shouldExist {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+        let predicate = NSPredicate { _, _ in
+            (resolveElement() != nil) == shouldExist
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription =
+            "Wait for element '\(identifier)' existence to become \(shouldExist)"
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        if result == .completed {
+            return
+        }
 
         let currentExists = resolveElement() != nil
         XCTAssertEqual(
@@ -193,8 +195,8 @@ extension AndBibleUITests {
      *   - timeout: Maximum number of seconds to wait before giving up.
      * - Returns: `true` when the element appears before the timeout, otherwise `false`.
      * - Side effects:
-     *   - repeatedly re-resolves the live XCUI hierarchy without triggering `waitForExistence`
-     *     debug capture when the element is legitimately absent
+     *   - observes the live XCUI hierarchy with an XCTest predicate without triggering
+     *     `waitForExistence` debug capture when the element is legitimately absent
      * - Failure modes: This helper cannot fail.
      */
     func waitForResolvedElementAppearance(
@@ -202,15 +204,13 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval = 1
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if resolvedElement(identifier, in: app) != nil {
-                return true
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        } while Date() < deadline
-
-        return resolvedElement(identifier, in: app) != nil
+        let predicate = NSPredicate { _, _ in
+            self.resolvedElement(identifier, in: app) != nil
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription = "Wait for resolved element '\(identifier)' appearance"
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        return result == .completed || resolvedElement(identifier, in: app) != nil
     }
 
 

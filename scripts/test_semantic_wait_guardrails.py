@@ -294,6 +294,32 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("XCTWaiter", body)
         self.assertNotIn("RunLoop.current.run", body)
 
+    def test_element_existence_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
+        """Keep lightweight element existence checks on XCTest predicates."""
+        reader_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestReaderSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(reader_source, "waitForElementExistence")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_resolved_element_appearance_wait_uses_xctest_waiter_not_run_loop_polling(
+        self,
+    ) -> None:
+        """Keep optional resolved-element appearance checks on XCTest predicates."""
+        reader_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestReaderSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(reader_source, "waitForResolvedElementAppearance")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertNotIn("RunLoop.current.run", body)
+        self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
     def test_reader_state_export_includes_window_tab_orders_for_tab_fallback(self) -> None:
         """Expose tab order metadata so tests can tap the real footer without stale queries."""
         source = (
