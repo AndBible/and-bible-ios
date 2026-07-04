@@ -136,4 +136,47 @@ final class ProgressStoreTests: XCTestCase {
         XCTAssertFalse(store.applySettingsBundle(json: #"{"autoMarkMemorized":null}"#))
         XCTAssertEqual(store.snapshot().settings, updated)
     }
+
+    /**
+     Verifies memorized-verse rows preserve Android row identity while still decoding legacy JSON.
+
+     Android sync keys `MemorizedVerse` mutations by row UUID, not by KJVA ordinal alone. Existing
+     iOS JSON did not have an `id` field, so those rows need deterministic identities rather than a
+     new random UUID each time the snapshot is decoded.
+
+     Failure means iOS remote progress sync could emit unstable Android `LogEntry` keys or lose the
+     UUID Android wrote for an imported memorized verse.
+     */
+    func testMemorizedVerseProgressPreservesAndroidIdentityAndStabilizesLegacyRows() throws {
+        let importedID = UUID(uuidString: "15000000-0000-0000-0000-000000000901")!
+        let settingsStore = try makeInMemorySettingsStore()
+        settingsStore.setString(
+            MemorizationProgressStore.settingsKey,
+            value: """
+            {
+              "memorizedVerses": [
+                {
+                  "id": "\(importedID.uuidString)",
+                  "bookInitials": "",
+                  "kjvOrdinal": 15,
+                  "memorizedAt": 1700000100
+                },
+                {
+                  "bookInitials": "ESV",
+                  "kjvOrdinal": 16,
+                  "memorizedAt": 1700000200
+                }
+              ],
+              "targetRows": []
+            }
+            """
+        )
+
+        let firstSnapshot = MemorizationProgressStore(settingsStore: settingsStore).snapshot()
+        let secondSnapshot = MemorizationProgressStore(settingsStore: settingsStore).snapshot()
+
+        XCTAssertEqual(firstSnapshot.memorizedVerses[0].id, importedID)
+        XCTAssertEqual(firstSnapshot.memorizedVerses[1].id, secondSnapshot.memorizedVerses[1].id)
+        XCTAssertEqual(Set(firstSnapshot.memorizedVerses.map(\.kjvOrdinal)), [15, 16])
+    }
 }

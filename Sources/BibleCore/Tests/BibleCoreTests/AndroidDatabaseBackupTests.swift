@@ -1462,6 +1462,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         XCTAssertEqual(readingSnapshot.settings.activeCycle, 3)
         XCTAssertTrue(readingSnapshot.settings.autoTrackReading)
         XCTAssertFalse(readingSnapshot.settings.autoMarkMemorized)
+        XCTAssertEqual(memorizationStore.snapshot().memorizedVerses.map(\.id), [memorizedID])
         XCTAssertEqual(memorizationStore.memorizedOrdinals(bookInitials: "ESV", startOrdinal: 15, endOrdinal: 15), [15])
         XCTAssertEqual(memorizationStore.memorizedOrdinals(bookInitials: "KJV", startOrdinal: 15, endOrdinal: 15), [15])
         XCTAssertEqual(memorizationStore.targetOrdinals(bookInitials: "FinRK", startOrdinal: 20, endOrdinal: 22), [20, 21, 22])
