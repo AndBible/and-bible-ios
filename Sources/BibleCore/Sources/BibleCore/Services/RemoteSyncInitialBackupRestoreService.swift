@@ -21,6 +21,9 @@ public enum RemoteSyncInitialBackupRestoreReport: Sendable, Equatable {
 
     /// Successful restore report for the My Documents sync category.
     case myDocuments(RemoteSyncMyDocumentRestoreReport)
+
+    /// Successful restore report for the Progress sync category.
+    case progress(AndroidDatabaseBackupProgressReport)
 }
 
 /**
@@ -74,6 +77,7 @@ public final class RemoteSyncInitialBackupRestoreService {
     private let workspaceSnapshotService: RemoteSyncWorkspaceSnapshotService
     private let readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService
     private let myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService
+    private let progressSnapshotService: RemoteSyncProgressSnapshotService
 
     /**
      Creates a category-level initial-backup restore dispatcher.
@@ -93,6 +97,8 @@ public final class RemoteSyncInitialBackupRestoreService {
          fingerprint baselines after successful remote restores.
        - myDocumentSnapshotService: Snapshot service used to refresh outbound My Documents
          fingerprint baselines after successful remote restores.
+       - progressSnapshotService: Snapshot service used to refresh outbound Progress fingerprint
+         baselines after successful remote restores.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
@@ -105,7 +111,8 @@ public final class RemoteSyncInitialBackupRestoreService {
         bookmarkSnapshotService: RemoteSyncBookmarkSnapshotService = RemoteSyncBookmarkSnapshotService(),
         workspaceSnapshotService: RemoteSyncWorkspaceSnapshotService = RemoteSyncWorkspaceSnapshotService(),
         readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService(),
-        myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService = RemoteSyncMyDocumentSnapshotService()
+        myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService = RemoteSyncMyDocumentSnapshotService(),
+        progressSnapshotService: RemoteSyncProgressSnapshotService = RemoteSyncProgressSnapshotService()
     ) {
         self.bookmarkRestoreService = bookmarkRestoreService
         self.readingPlanRestoreService = readingPlanRestoreService
@@ -116,6 +123,7 @@ public final class RemoteSyncInitialBackupRestoreService {
         self.workspaceSnapshotService = workspaceSnapshotService
         self.readingPlanSnapshotService = readingPlanSnapshotService
         self.myDocumentSnapshotService = myDocumentSnapshotService
+        self.progressSnapshotService = progressSnapshotService
     }
 
     /**
@@ -179,7 +187,12 @@ public final class RemoteSyncInitialBackupRestoreService {
             )
             report = .myDocuments(myDocumentReport)
         case .progress:
-            throw RemoteSyncSynchronizationError.unsupportedCategory(category)
+            let progressReport = try AndroidDatabaseBackupProgressMapper.apply(
+                from: stagedBackup.databaseFileURL,
+                mode: .restore,
+                settingsStore: settingsStore
+            )
+            report = .progress(progressReport)
         }
 
         _ = metadataRestoreService.replaceLocalMetadata(
@@ -207,6 +220,8 @@ public final class RemoteSyncInitialBackupRestoreService {
                 modelContext: modelContext,
                 settingsStore: settingsStore
             )
+        } else if category == .progress {
+            progressSnapshotService.refreshBaselineFingerprints(settingsStore: settingsStore)
         }
         return report
     }

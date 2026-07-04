@@ -218,7 +218,7 @@ final class SettingsIconsTests: XCTestCase {
                 .active(.workspaces),
                 .active(.myDocuments),
                 .deferred(.aiSettings),
-                .deferred(.progress),
+                .active(.progress),
             ]
         )
     }
@@ -253,11 +253,11 @@ final class SettingsIconsTests: XCTestCase {
             "icon_robot"
         )
         XCTAssertEqual(
-            SyncSettingsPresentation.deferredCategory(.progress).androidKey,
+            SyncSettingsPresentation.category(.progress).androidKey,
             "sync_reading_progress"
         )
         XCTAssertEqual(
-            SyncSettingsPresentation.deferredCategory(.progress).icon?.androidDrawableName,
+            SyncSettingsPresentation.category(.progress).icon?.androidDrawableName,
             "ic_baseline_check_circle_24"
         )
     }
@@ -274,7 +274,7 @@ final class SettingsIconsTests: XCTestCase {
      Expected result:
      - the title remains "Reading Progress"
      - the content description uses "Memorized verses and chapter reading records"
-     - active and deferred Progress rows share the same Android string contract
+     - the active Progress row uses the same Android string contract surfaced by lifecycle copy
 
      Failure meaning:
      - iOS duplicated category string switches have drifted from Android and may show a row title
@@ -282,21 +282,17 @@ final class SettingsIconsTests: XCTestCase {
      */
     func testSyncSettingsProgressTextUsesAndroidTitleAndContentsKeys() {
         let active = RemoteSyncCategoryLocalization.text(for: .progress)
-        let deferred = RemoteSyncCategoryLocalization.deferredText(for: .progress)
 
         XCTAssertEqual(active.title.key, "progress_sync_title")
         XCTAssertEqual(active.title.defaultValue, "Reading Progress")
         XCTAssertEqual(active.contents.key, "progress_sync_contents")
         XCTAssertEqual(active.contents.defaultValue, "Memorized verses and chapter reading records")
-        XCTAssertEqual(active, deferred)
         XCTAssertNotEqual(active.title.key, active.contents.key)
     }
 
     func testDeferredSyncCategoriesReserveAndroidCompatibleKeysAndTrackingIssues() {
         XCTAssertEqual(RemoteSyncDeferredCategory.aiSettings.androidSyncEnabledKey, "sync_enable_ai_settings")
         XCTAssertEqual(RemoteSyncDeferredCategory.aiSettings.trackingIssueNumber, 74)
-        XCTAssertEqual(RemoteSyncDeferredCategory.progress.androidSyncEnabledKey, "sync_enable_progress")
-        XCTAssertEqual(RemoteSyncDeferredCategory.progress.trackingIssueNumber, 73)
     }
 
     func testTextDisplayIconsComeFromAndroidOptionsMenuItems() {

@@ -33,7 +33,7 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
      syncable, so visible settings rows are curated separately by the UI presentation layer.
      */
     public static var activeSyncCases: [RemoteSyncCategory] {
-        [.bookmarks, .workspaces, .readingPlans, .myDocuments]
+        [.bookmarks, .workspaces, .readingPlans, .myDocuments, .progress]
     }
 
     /// Highest Android SQLite schema version iOS can currently read and write for this category.

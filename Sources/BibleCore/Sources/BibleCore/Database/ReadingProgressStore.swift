@@ -2,7 +2,7 @@
 
 import Foundation
 
-public enum ReadingProgressSource: String, Codable, Equatable, Hashable {
+public enum ReadingProgressSource: String, Codable, Equatable, Hashable, Sendable {
     case manual = "MANUAL"
     case autoScroll = "AUTO_SCROLL"
     case autoTts = "AUTO_TTS"

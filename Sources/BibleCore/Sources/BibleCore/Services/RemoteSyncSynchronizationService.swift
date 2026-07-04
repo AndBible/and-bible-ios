@@ -37,6 +37,9 @@ public enum RemoteSyncCategoryPatchReplayReport: Sendable, Equatable {
 
     /// My Documents-category patch replay summary.
     case myDocuments(RemoteSyncMyDocumentPatchApplyReport)
+
+    /// Progress-category patch replay summary.
+    case progress(RemoteSyncProgressPatchApplyReport)
 }
 
 /**
@@ -57,6 +60,9 @@ public enum RemoteSyncCategoryPatchUploadReport: Sendable, Equatable {
 
     /// My Documents-category outbound patch upload summary.
     case myDocuments(RemoteSyncMyDocumentPatchUploadReport)
+
+    /// Progress-category outbound patch upload summary.
+    case progress(RemoteSyncProgressPatchUploadReport)
 }
 
 /**
@@ -212,6 +218,8 @@ public final class RemoteSyncSynchronizationService {
     private let workspacePatchUploadService: RemoteSyncWorkspacePatchUploadService
     private let myDocumentPatchApplyService: RemoteSyncMyDocumentPatchApplyService
     private let myDocumentPatchUploadService: RemoteSyncMyDocumentPatchUploadService
+    private let progressPatchApplyService: RemoteSyncProgressPatchApplyService
+    private let progressPatchUploadService: RemoteSyncProgressPatchUploadService
     private let fileManager: FileManager
     private let temporaryDirectory: URL?
     private let nowProvider: () -> Int64
@@ -233,6 +241,8 @@ public final class RemoteSyncSynchronizationService {
        - workspacePatchUploadService: Workspace outbound patch upload service.
        - myDocumentPatchApplyService: My Documents patch replay service.
        - myDocumentPatchUploadService: My Documents outbound patch upload service.
+       - progressPatchApplyService: Progress patch replay service.
+       - progressPatchUploadService: Progress outbound patch upload service.
        - fileManager: File manager used for staging cleanup.
        - temporaryDirectory: Optional staging directory override.
        - nowProvider: Millisecond clock used for Android-aligned sync progress timestamps.
@@ -253,6 +263,8 @@ public final class RemoteSyncSynchronizationService {
         workspacePatchUploadService: RemoteSyncWorkspacePatchUploadService? = nil,
         myDocumentPatchApplyService: RemoteSyncMyDocumentPatchApplyService = RemoteSyncMyDocumentPatchApplyService(),
         myDocumentPatchUploadService: RemoteSyncMyDocumentPatchUploadService? = nil,
+        progressPatchApplyService: RemoteSyncProgressPatchApplyService = RemoteSyncProgressPatchApplyService(),
+        progressPatchUploadService: RemoteSyncProgressPatchUploadService? = nil,
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil,
         nowProvider: @escaping () -> Int64 = {
@@ -290,6 +302,12 @@ public final class RemoteSyncSynchronizationService {
         self.myDocumentPatchApplyService = myDocumentPatchApplyService
         self.myDocumentPatchUploadService = myDocumentPatchUploadService
             ?? RemoteSyncMyDocumentPatchUploadService(
+                adapter: adapter,
+                nowProvider: nowProvider
+            )
+        self.progressPatchApplyService = progressPatchApplyService
+        self.progressPatchUploadService = progressPatchUploadService
+            ?? RemoteSyncProgressPatchUploadService(
                 adapter: adapter,
                 nowProvider: nowProvider
             )
@@ -708,7 +726,12 @@ public final class RemoteSyncSynchronizationService {
                 )
             )
         case .progress:
-            throw RemoteSyncSynchronizationError.unsupportedCategory(category)
+            return .progress(
+                try progressPatchApplyService.applyPatchArchives(
+                    stagedArchives,
+                    settingsStore: settingsStore
+                )
+            )
         }
     }
 
@@ -773,6 +796,12 @@ public final class RemoteSyncSynchronizationService {
             }
             return nil
         case .progress:
+            if let report = try await progressPatchUploadService.uploadPendingPatch(
+                bootstrapState: bootstrapState,
+                settingsStore: settingsStore
+            ) {
+                return .progress(report)
+            }
             return nil
         }
     }
