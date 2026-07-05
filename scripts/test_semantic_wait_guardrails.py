@@ -158,6 +158,31 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotIn("RunLoop.current.run", body)
         self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
 
+    def test_keyboard_focus_wait_does_not_reprobe_element_after_timeout(self) -> None:
+        """Avoid turning recoverable text-field focus misses into XCUI snapshot timeouts."""
+        state_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(state_source, "waitForElementKeyboardFocus")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertIn("result == .completed", body)
+        self.assertNotIn("predicate.evaluate(with: element)", body)
+
+    def test_text_entry_focus_uses_keyboard_focus_as_hint_not_gate(self) -> None:
+        """Let typed values prove text-entry readiness when hasKeyboardFocus is unreliable."""
+        state_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(state_source, "focusTextEntryElement")
+
+        self.assertIn("didDeliverFocusTap", body)
+        self.assertIn("waitForElementKeyboardFocus", body)
+        self.assertIn("return", body)
+        self.assertIn("at least one focus tap", body)
+        self.assertNotIn("gain keyboard focus", body)
+
     def test_first_existing_element_uses_one_bounded_predicate_wait(self) -> None:
         """Prevent candidate lookup from spending the timeout once per candidate."""
         element_source = (

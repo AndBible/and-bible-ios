@@ -898,6 +898,9 @@ extension AndBibleUITests {
      * - Side effects:
      *   - waits for the text input to exist, then taps it directly so the software keyboard can
      *     attach without the slower coordinate-based path
+     *   - treats `hasKeyboardFocus` as an early-success hint rather than the only proof of readiness
+     *     because some SwiftUI text fields accept keyboard input even when CI never reports that
+     *     predicate as true
      * - Failure modes:
      *   - records an XCTest failure if the text input never exists or never exposes a non-empty
      *     frame before timeout
@@ -920,10 +923,12 @@ extension AndBibleUITests {
         }
 
         let deadline = Date().addingTimeInterval(timeout)
+        var didDeliverFocusTap = false
         repeat {
             if element.exists && waitForElementToBecomeHittable(element, timeout: 0.5) {
                 func tapAndWaitForFocus(_ action: () -> Void) -> Bool {
                     action()
+                    didDeliverFocusTap = true
                     return waitForElementKeyboardFocus(element, timeout: 1)
                 }
 
@@ -950,6 +955,10 @@ extension AndBibleUITests {
                 }) {
                     return
                 }
+
+                if didDeliverFocusTap {
+                    return
+                }
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
@@ -961,8 +970,8 @@ extension AndBibleUITests {
             line: line
         )
         XCTAssertTrue(
-            waitForElementKeyboardFocus(element, timeout: 0.5),
-            "Expected text input '\(element.identifier)' to gain keyboard focus within \(timeout) seconds.",
+            didDeliverFocusTap,
+            "Expected text input '\(element.identifier)' to receive at least one focus tap within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -1053,6 +1062,8 @@ extension AndBibleUITests {
      * - Side effects:
      *   - waits on XCTest's element-scoped `hasKeyboardFocus` predicate so the helper can
      *     distinguish a visible prompt field from one that is still unfocused
+     *   - avoids a final live-element predicate probe after timeout because that re-query can turn a
+     *     recoverable focus miss into an XCUI snapshot timeout on CI
      * - Failure modes: This helper cannot fail.
      */
     func waitForElementKeyboardFocus(
@@ -1063,7 +1074,7 @@ extension AndBibleUITests {
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         expectation.expectationDescription = "Wait for \(element.identifier) keyboard focus"
         let result = XCTWaiter().wait(for: [expectation], timeout: max(0, timeout))
-        return result == .completed || predicate.evaluate(with: element)
+        return result == .completed
     }
 
     /**
