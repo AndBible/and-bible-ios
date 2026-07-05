@@ -32,6 +32,46 @@ def swift_function_body(source: str, name: str) -> str:
     raise AssertionError(f"Expected Swift function {name} body to close.")
 
 
+def swift_first_trailing_closure_body(source: str, call_name: str) -> str:
+    """Return the first trailing closure body attached to a Swift function call."""
+    match = re.search(rf"\b{re.escape(call_name)}\s*\(", source)
+    if match is None:
+        raise AssertionError(f"Expected Swift call {call_name} to exist.")
+
+    depth = 0
+    paren_end = -1
+    for index in range(match.end() - 1, len(source)):
+        char = source[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                paren_end = index
+                break
+
+    if paren_end == -1:
+        raise AssertionError(f"Expected Swift call {call_name} arguments to close.")
+
+    brace_index = paren_end + 1
+    while brace_index < len(source) and source[brace_index].isspace():
+        brace_index += 1
+    if brace_index >= len(source) or source[brace_index] != "{":
+        raise AssertionError(f"Expected Swift call {call_name} to have a trailing closure.")
+
+    depth = 0
+    for index in range(brace_index, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[brace_index + 1 : index]
+
+    raise AssertionError(f"Expected Swift call {call_name} trailing closure to close.")
+
+
 def swift_function_bodies(source: str, name: str) -> list[str]:
     """Return every Swift function body with a matching overloaded function name."""
     bodies: list[str] = []
@@ -226,6 +266,18 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("waitForUITestCondition", body)
         self.assertIn('"Wait for Settings ready"', body)
         self.assertNotIn("RunLoop.current.run", body)
+
+    def test_settings_ready_dismisses_restart_alert_outside_predicate(self) -> None:
+        """Keep Settings readiness predicates observation-only while still dismissing alerts."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "waitForSettingsReady")
+        closure_body = swift_first_trailing_closure_body(body, "waitForUITestCondition")
+
+        self.assertIn("dismissRestartAlertIfReady()", body)
+        self.assertIn("settingsFormIsReady()", closure_body)
+        self.assertNotIn("dismissRestartAlertIfReady", closure_body)
 
     def test_search_input_resolution_reveals_without_run_loop_sleep(self) -> None:
         """Keep Search field reveal attempts bounded by predicate waits, not fixed sleeps."""

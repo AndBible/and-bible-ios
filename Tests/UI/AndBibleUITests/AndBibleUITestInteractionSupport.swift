@@ -600,7 +600,7 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: `true` when Settings is ready for interaction, otherwise `false`.
      * - Side effects:
-     *   - dismisses the language restart confirmation when it appears during navigation
+     *   - attempts to dismiss the language restart confirmation between bounded readiness waits
      *   - waits on the Settings form root through XCTest's predicate waiter
      * - Failure modes: This helper does not fail directly.
      */
@@ -637,15 +637,31 @@ extension AndBibleUITests {
             }
         }
 
-        return waitForUITestCondition(
-            "Wait for Settings ready",
-            timeout: max(0, timeout)
-        ) {
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+        let waitInterval: TimeInterval = 0.5
+
+        while true {
+            dismissRestartAlertIfReady()
+
+            let remaining = max(0, deadline.timeIntervalSinceNow)
+            let didResolveSettings = waitForUITestCondition(
+                "Wait for Settings ready",
+                timeout: min(waitInterval, remaining)
+            ) {
+                settingsFormIsReady()
+            }
+            if didResolveSettings {
+                return true
+            }
+
+            dismissRestartAlertIfReady()
             if settingsFormIsReady() {
                 return true
             }
-            dismissRestartAlertIfReady()
-            return settingsFormIsReady()
+
+            guard Date() < deadline else {
+                return false
+            }
         }
     }
 
