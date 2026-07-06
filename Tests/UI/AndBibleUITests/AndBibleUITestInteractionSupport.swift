@@ -518,11 +518,17 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
 
         while Date() < deadline {
-            if let field = resolveVisibleSearchInput(in: app, waitTimeout: 0.2) {
+            let remaining = max(0, deadline.timeIntervalSinceNow)
+            if let field = resolveVisibleSearchInput(in: app, waitTimeout: min(0.5, remaining)) {
                 return field
             }
             revealSearchControls(in: app)
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            if let field = resolveVisibleSearchInput(
+                in: app,
+                waitTimeout: min(0.5, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                return field
+            }
         }
 
         XCTFail(
@@ -594,8 +600,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: `true` when Settings is ready for interaction, otherwise `false`.
      * - Side effects:
-     *   - dismisses the language restart confirmation when it appears during navigation
-     *   - polls the Settings screen for both the form root and stable row identifiers
+     *   - attempts to dismiss the language restart confirmation between bounded readiness waits
+     *   - waits on the Settings form root through XCTest's predicate waiter
      * - Failure modes: This helper does not fail directly.
      */
     func waitForSettingsReady(
@@ -604,9 +610,7 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
+        func settingsFormIsReady() -> Bool {
             if let settingsForm = resolvedElement("settingsForm", in: app),
                settingsForm.exists,
                !settingsForm.frame.isEmpty
@@ -614,20 +618,51 @@ extension AndBibleUITests {
                 return true
             }
 
-            if resolvedElement("settingsForm", in: app) != nil {
+            return resolvedElement("settingsForm", in: app) != nil
+        }
+
+        func dismissRestartAlertIfReady() {
+            let alert = app.alerts.firstMatch
+            let okButton = alert.buttons["OK"].firstMatch
+            guard alert.exists,
+                  okButton.exists,
+                  elementHasUsableFrame(okButton)
+            else {
+                return
+            }
+            if okButton.isHittable {
+                okButton.tap()
+            } else {
+                okButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
+        }
+
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+        let waitInterval: TimeInterval = 0.5
+
+        while true {
+            dismissRestartAlertIfReady()
+
+            let remaining = max(0, deadline.timeIntervalSinceNow)
+            let didResolveSettings = waitForUITestCondition(
+                "Wait for Settings ready",
+                timeout: min(waitInterval, remaining)
+            ) {
+                settingsFormIsReady()
+            }
+            if didResolveSettings {
                 return true
             }
 
-            let alert = app.alerts.firstMatch
-            let okButton = alert.buttons["OK"].firstMatch
-            if alert.exists && okButton.exists && !okButton.frame.isEmpty {
-                tapElementReliably(okButton, timeout: 2, file: file, line: line)
-                continue
+            dismissRestartAlertIfReady()
+            if settingsFormIsReady() {
+                return true
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
 
-        return false
+            guard Date() < deadline else {
+                return false
+            }
+        }
     }
 
     /**

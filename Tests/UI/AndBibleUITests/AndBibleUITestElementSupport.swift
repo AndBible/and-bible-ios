@@ -1422,8 +1422,7 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
+        func readerShellIsReady() -> Bool {
             let readerState = readerRenderedContentStateValue(in: app)
             let readerSurfacesClosed = readerState.map { state in
                 let drawerClosed = state.contains("drawerVisible=false") || !state.contains("drawerVisible=")
@@ -1445,11 +1444,14 @@ extension AndBibleUITests {
                readerSurfacesClosed {
                 return true
             }
+            return false
+        }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        return false
+        return waitForUITestCondition(
+            "Wait for reader shell ready",
+            timeout: max(0, timeout),
+            condition: readerShellIsReady
+        )
     }
 
     /**

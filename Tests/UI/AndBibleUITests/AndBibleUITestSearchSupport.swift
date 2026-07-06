@@ -185,7 +185,19 @@ extension AndBibleUITests {
                 attemptedDrawerFallback = true
             }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            _ = waitForUITestCondition(
+                "Wait for Search presentation",
+                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                if self.resolvedSearchScreenElement(in: app) != nil {
+                    return true
+                }
+                if self.readerRenderedContentStateContains("searchVisible=true", in: app) {
+                    observedSearchVisibleState = true
+                    return true
+                }
+                return false
+            }
         } while Date() < deadline
 
         let searchScreen = unresolvedElement("searchScreen", in: app)
@@ -381,7 +393,25 @@ extension AndBibleUITests {
                 tapElementReliably(createButton, timeout: 10, file: file, line: line)
                 continue
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            _ = waitForUITestCondition(
+                "Wait for Search readiness state",
+                timeout: min(0.5, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                let state = self.resolvedSearchStateValue(in: app) ?? ""
+                if !state.isEmpty {
+                    lastState = state
+                }
+                if state.contains("state=ready") || state.contains("state=needsIndex") {
+                    observedNeedsIndex = observedNeedsIndex || state.contains("state=needsIndex")
+                    return true
+                }
+                let createButton = self.resolveSearchCreateIndexButton(in: app)
+                if createButton.exists {
+                    observedCreatePrompt = true
+                    return true
+                }
+                return false
+            }
         }
 
         let indexCreationRequested = observedNeedsIndex || observedCreatePrompt
@@ -624,7 +654,13 @@ extension AndBibleUITests {
                 }
             }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            _ = waitForUITestCondition(
+                "Wait for Search scope \(scopeToken.rawValue) controls",
+                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                isExpectedScopeSelected()
+                    || candidates.contains { $0.exists && !$0.frame.isEmpty }
+            }
         }
 
         let finalValues = searchStateCandidateValues(in: app)
@@ -682,7 +718,13 @@ extension AndBibleUITests {
                 }
             }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            _ = waitForUITestCondition(
+                "Wait for Search translation picker affordance",
+                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                self.searchTranslationPickerStateIsOpen(in: app, timeout: 0)
+                    || candidates.contains { $0.exists && !$0.frame.isEmpty }
+            }
         } while Date() < deadline
 
         let finalState = resolvedSearchStateValue(in: app) ?? "nil"
@@ -818,7 +860,12 @@ extension AndBibleUITests {
                         pickerList.swipeUp()
                     }
                 }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                _ = waitForUITestCondition(
+                    "Wait for Search translation row \(moduleName) to settle after scroll",
+                    timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
+                ) {
+                    !row.exists || self.waitForElementToBecomeHittable(row, timeout: 0)
+                }
                 continue
             }
 
@@ -826,7 +873,15 @@ extension AndBibleUITests {
                pickerList.exists {
                 pickerList.swipeUp()
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            _ = waitForUITestCondition(
+                "Wait for Search translation row \(moduleName)",
+                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                self.firstExistingElement(
+                    self.searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
+                    timeout: 0
+                ) != nil
+            }
         } while Date() < deadline
 
         XCTFail("Expected Search translation row '\(moduleName)' to exist within \(timeout) seconds.")
@@ -1094,7 +1149,12 @@ extension AndBibleUITests {
                 }
             }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            _ = waitForUITestCondition(
+                "Wait for Search translation OK action",
+                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                self.firstExistingElement(self.searchTranslationOKCandidates(in: app), timeout: 0) != nil
+            }
         } while Date() < deadline
 
         XCTFail("Expected Search translation OK button to exist within \(timeout) seconds.")
@@ -1125,7 +1185,12 @@ extension AndBibleUITests {
                 }
             }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            _ = waitForUITestCondition(
+                "Wait for Search translation Cancel action",
+                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                self.firstExistingElement(self.searchTranslationCancelCandidates(in: app), timeout: 0) != nil
+            }
         } while Date() < deadline
 
         XCTFail("Expected Search translation Cancel button to exist within \(timeout) seconds.")
@@ -1277,7 +1342,14 @@ extension AndBibleUITests {
                 continue
             }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            _ = waitForUITestCondition(
+                "Wait for Search word mode \(expectedToken) controls",
+                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                isExpectedWordModeSelected()
+                    || identifierCandidates.contains { $0.exists && !$0.frame.isEmpty }
+                    || fallbackCandidates.contains { $0.exists && !$0.frame.isEmpty }
+            }
         } while Date() < deadline
 
         let finalValues = searchStateCandidateValues(in: app)
@@ -1344,7 +1416,7 @@ extension AndBibleUITests {
      *   - swipes the Search results container or another visible scrollable Search surface
      *     downward to bring scope controls back into view
      * - Failure modes:
-     *   - falls back to a brief run-loop advance when no visible Search scroll surface exists
+     *   - falls back to a brief predicate wait when no visible Search scroll surface exists
      */
     func revealSearchControls(in app: XCUIApplication) {
         let searchScreen = unresolvedElement("searchScreen", in: app)
@@ -1381,7 +1453,12 @@ extension AndBibleUITests {
             }
         }
 
-        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        _ = waitForUITestCondition(
+            "Wait for Search controls after reveal",
+            timeout: 0.2
+        ) {
+            optionsPanel.exists
+        }
     }
 
     /**
@@ -1663,7 +1740,18 @@ extension AndBibleUITests {
                 rowWasVisible = false
             }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            _ = waitForUITestCondition(
+                "Wait for Search result \(identifier) navigation",
+                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
+            ) {
+                guard let reference = self.resolvedElementSemanticText("bookChooserButton", in: app),
+                      !reference.isEmpty
+                else {
+                    return false
+                }
+                lastReference = reference
+                return reference != initialReference
+            }
         } while Date() < deadline
 
         XCTAssertNotEqual(

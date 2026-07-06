@@ -32,6 +32,46 @@ def swift_function_body(source: str, name: str) -> str:
     raise AssertionError(f"Expected Swift function {name} body to close.")
 
 
+def swift_first_trailing_closure_body(source: str, call_name: str) -> str:
+    """Return the first trailing closure body attached to a Swift function call."""
+    match = re.search(rf"\b{re.escape(call_name)}\s*\(", source)
+    if match is None:
+        raise AssertionError(f"Expected Swift call {call_name} to exist.")
+
+    depth = 0
+    paren_end = -1
+    for index in range(match.end() - 1, len(source)):
+        char = source[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                paren_end = index
+                break
+
+    if paren_end == -1:
+        raise AssertionError(f"Expected Swift call {call_name} arguments to close.")
+
+    brace_index = paren_end + 1
+    while brace_index < len(source) and source[brace_index].isspace():
+        brace_index += 1
+    if brace_index >= len(source) or source[brace_index] != "{":
+        raise AssertionError(f"Expected Swift call {call_name} to have a trailing closure.")
+
+    depth = 0
+    for index in range(brace_index, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[brace_index + 1 : index]
+
+    raise AssertionError(f"Expected Swift call {call_name} trailing closure to close.")
+
+
 def swift_function_bodies(source: str, name: str) -> list[str]:
     """Return every Swift function body with a matching overloaded function name."""
     bodies: list[str] = []
@@ -158,6 +198,31 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotIn("RunLoop.current.run", body)
         self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
 
+    def test_keyboard_focus_wait_does_not_reprobe_element_after_timeout(self) -> None:
+        """Avoid turning recoverable text-field focus misses into XCUI snapshot timeouts."""
+        state_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(state_source, "waitForElementKeyboardFocus")
+
+        self.assertIn("XCTNSPredicateExpectation", body)
+        self.assertIn("XCTWaiter", body)
+        self.assertIn("result == .completed", body)
+        self.assertNotIn("predicate.evaluate(with: element)", body)
+
+    def test_text_entry_focus_uses_keyboard_focus_as_hint_not_gate(self) -> None:
+        """Let typed values prove text-entry readiness when hasKeyboardFocus is unreliable."""
+        state_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestStateSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(state_source, "focusTextEntryElement")
+
+        self.assertIn("didDeliverFocusTap", body)
+        self.assertIn("waitForElementKeyboardFocus", body)
+        self.assertIn("return", body)
+        self.assertIn("at least one focus tap", body)
+        self.assertNotIn("gain keyboard focus", body)
+
     def test_first_existing_element_uses_one_bounded_predicate_wait(self) -> None:
         """Prevent candidate lookup from spending the timeout once per candidate."""
         element_source = (
@@ -180,6 +245,95 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotIn("RunLoop.current.run", body)
         self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
 
+    def test_reader_shell_ready_uses_predicate_waiter_not_run_loop_polling(self) -> None:
+        """Keep reader shell readiness synchronized on state exports instead of sleeps."""
+        element_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "waitForReaderShellReady")
+
+        self.assertIn("waitForUITestCondition", body)
+        self.assertIn("readerRenderedContentStateValue", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
+    def test_settings_ready_uses_predicate_waiter_not_run_loop_polling(self) -> None:
+        """Keep Settings presentation waits off manual run-loop sleeps."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "waitForSettingsReady")
+
+        self.assertIn("waitForUITestCondition", body)
+        self.assertIn('"Wait for Settings ready"', body)
+        self.assertNotIn("RunLoop.current.run", body)
+
+    def test_settings_ready_dismisses_restart_alert_outside_predicate(self) -> None:
+        """Keep Settings readiness predicates observation-only while still dismissing alerts."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "waitForSettingsReady")
+        closure_body = swift_first_trailing_closure_body(body, "waitForUITestCondition")
+
+        self.assertIn("dismissRestartAlertIfReady()", body)
+        self.assertIn("settingsFormIsReady()", closure_body)
+        self.assertNotIn("dismissRestartAlertIfReady", closure_body)
+
+    def test_search_input_resolution_reveals_without_run_loop_sleep(self) -> None:
+        """Keep Search field reveal attempts bounded by predicate waits, not fixed sleeps."""
+        interaction_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(interaction_source, "requireSearchInput")
+
+        self.assertIn("resolveVisibleSearchInput", body)
+        self.assertIn("revealSearchControls", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
+    def test_search_control_reveal_uses_predicate_waiter_for_fallback(self) -> None:
+        """Keep Search option reveal fallback off raw run-loop sleeps."""
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(search_source, "revealSearchControls")
+
+        self.assertIn("waitForUITestCondition", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
+    def test_bookmark_list_dismissal_wait_uses_predicate_waiter(self) -> None:
+        """Keep bookmark-list dismissal synchronized on reader state exports."""
+        list_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(list_source, "waitForBookmarkListDismissal")
+
+        self.assertIn("waitForUITestCondition", body)
+        self.assertIn("waitForReaderShellReady", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
+    def test_sync_backend_option_uses_predicate_waiter(self) -> None:
+        """Keep Sync backend picker-option resolution on one bounded waiter."""
+        list_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(list_source, "resolveSyncBackendOption")
+
+        self.assertIn("waitForUITestCondition", body)
+        self.assertNotIn("RunLoop.current.run", body)
+
+    def test_available_plan_helpers_use_predicate_waiters_after_ui_actions(self) -> None:
+        """Keep reading-plan picker reveal waits off fixed run-loop sleeps."""
+        list_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
+        ).read_text(encoding="utf-8")
+        open_body = swift_function_body(list_source, "openAvailableReadingPlans")
+        reveal_body = swift_function_body(list_source, "revealAvailablePlansImportButton")
+
+        self.assertIn("waitForUITestCondition", open_body)
+        self.assertNotIn("RunLoop.current.run", open_body)
+        self.assertIn("waitForUITestCondition", reveal_body)
+        self.assertNotIn("RunLoop.current.run", reveal_body)
+
     def test_search_translation_row_mutation_uses_predicate_waiter(self) -> None:
         """Keep Search picker row-settle waits state-driven after row taps."""
         search_source = (
@@ -190,6 +344,41 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("waitForUITestCondition", body)
         self.assertNotIn("RunLoop.current.run", body)
         self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
+
+    def test_search_presentation_and_readiness_waits_use_predicate_waiters(self) -> None:
+        """Keep Search launch waits on state exports instead of fixed sleeps."""
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+        presentation_body = swift_function_body(search_source, "presentSearchFromReader")
+        readiness_body = swift_function_body(search_source, "waitForSearchInteractionReady")
+
+        self.assertIn("waitForUITestCondition", presentation_body)
+        self.assertIn("readerRenderedContentStateContains", presentation_body)
+        self.assertNotIn("RunLoop.current.run", presentation_body)
+        self.assertIn("waitForUITestCondition", readiness_body)
+        self.assertIn("resolvedSearchStateValue", readiness_body)
+        self.assertNotIn("RunLoop.current.run", readiness_body)
+
+    def test_search_option_control_waits_use_predicate_waiters(self) -> None:
+        """Keep Search scope, mode, and translation controls off fixed sleeps."""
+        search_source = (
+            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+        helper_names = [
+            "tapSearchScope",
+            "tapSearchTranslationPicker",
+            "tapSearchTranslationRow",
+            "tapSearchTranslationOK",
+            "tapSearchTranslationCancel",
+            "tapSearchWordMode",
+            "tapSearchResultRowAndWaitForReaderReferenceChange",
+        ]
+
+        for helper_name in helper_names:
+            body = swift_function_body(search_source, helper_name)
+            self.assertIn("waitForUITestCondition", body, helper_name)
+            self.assertNotIn("RunLoop.current.run", body, helper_name)
 
     def test_settings_navigation_reveal_uses_existing_row_frame(self) -> None:
         """Keep Settings row navigation from timing out on offscreen-but-existing rows."""
