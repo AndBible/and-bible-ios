@@ -1280,7 +1280,8 @@ public final class ModuleRepository: @unchecked Sendable {
        - progress: Optional callback receiving normalized completion in the range `0.0...1.0`.
      - Side effects:
        - creates a temporary staging directory next to the target module directory
-       - downloads and installs Android package ZIPs before raw files when package metadata exists
+       - downloads and installs Android package ZIPs before raw files when package metadata exists;
+         non-strict package failures continue into raw fallback while strict package failures abort
        - streams downloaded data files into staging so large modules are not fully buffered in memory
        - skips absent optional OT/NT file groups for raw-only sources so single-testament modules
          can install
@@ -1291,7 +1292,8 @@ public final class ModuleRepository: @unchecked Sendable {
        - `ModuleRepositoryError.moduleNotFound` when the source catalog does not contain the module
        - `ModuleRepositoryError.invalidURL` when the source cannot produce a base URL
        - `ModuleRepositoryError.downloadFailed` when any required data file returns a non-200 HTTP
-         response, no optional data group is available, or transport fails
+         response, no optional data group is available, transport fails, or strict package install
+         cannot complete
        - `CancellationError` when the surrounding task is cancelled before the install completes
        - file-system errors from directory creation, data writes, or config writes
      - Important: The `.conf` file is the installed marker consumed by `SwordManager`, and updates
@@ -1331,24 +1333,37 @@ public final class ModuleRepository: @unchecked Sendable {
         let localParentURL = localDirURL.deletingLastPathComponent()
         try fm.createDirectory(at: localParentURL, withIntermediateDirectories: true)
 
-        let packageInstallResult = try await installModulePackage(
-            named: moduleName,
-            entry: entry,
-            source: source,
-            localDirURL: localDirURL,
-            useCatalogDirectoryHeuristic: false,
-            progress: progress
-        )
-        let didAttemptAndroidPackageInstall = packageInstallResult.didAttemptDownload
-        switch packageInstallResult {
-        case .installed:
-            return
-        case .unavailable, .noCandidates:
-            if packageInstallPolicy == .requirePackage {
-                throw ModuleRepositoryError.downloadFailed(
-                    "Package ZIP was unavailable for \(moduleName)"
-                )
+        var didAttemptAndroidPackageInstall = false
+        do {
+            let packageInstallResult = try await installModulePackage(
+                named: moduleName,
+                entry: entry,
+                source: source,
+                localDirURL: localDirURL,
+                useCatalogDirectoryHeuristic: false,
+                progress: progress
+            )
+            didAttemptAndroidPackageInstall = packageInstallResult.didAttemptDownload
+            switch packageInstallResult {
+            case .installed:
+                return
+            case .unavailable, .noCandidates:
+                if packageInstallPolicy == .requirePackage {
+                    throw ModuleRepositoryError.downloadFailed(
+                        "Package ZIP was unavailable for \(moduleName)"
+                    )
+                }
             }
+        } catch let error as CancellationError {
+            throw error
+        } catch {
+            didAttemptAndroidPackageInstall = true
+            if packageInstallPolicy == .requirePackage {
+                throw error
+            }
+            logger.warning(
+                "Package install failed for \(moduleName, privacy: .public); falling back to raw data files: \(error.localizedDescription, privacy: .public)"
+            )
         }
 
         let stagingDirURL = localParentURL.appendingPathComponent(
