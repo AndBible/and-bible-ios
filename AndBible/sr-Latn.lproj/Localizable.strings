@@ -641,3 +641,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Na SD kartici postoji plan čitanja jsword/readingplan sa istim imenom kao i interni plan. Ne može biti ovde prikazan. Molim preimenujte datoteku, ostavljajući njenu ekstenziju kao .properties";
+"error_no_content" = "Nema sadržaja u označenom stihu";

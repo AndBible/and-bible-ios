@@ -252,23 +252,31 @@ public enum ModuleBrowserDefaultDownloadMode: Sendable, Equatable {
     }
 
     /**
-     SWORD package-install policy used by this download mode.
+     SWORD package-install policy for one requested module.
 
-     Normal Downloads follows Android package-first behavior but still allows iOS raw fallback for
-     legacy/raw-compatible sources. Startup defaults require Android package ZIPs so a missing KJV or
-     NASB package cannot publish only the NT raw files and leave Genesis unavailable.
+     Normal Downloads follows Android package-first behavior while retaining iOS raw fallback for
+     legacy/raw-compatible sources. Startup defaults require Android package ZIPs only for modules
+     selected by the Easy Start default-document planner, so later manual installs in the same
+     Downloads session keep the normal fallback behavior.
 
-     - Returns: Repository install policy for SWORD modules requested by this mode.
+     - Parameters:
+       - moduleName: Module initials about to be installed.
+       - installingDefaultModules: Current Easy Start default modules still owned by the startup
+         flow.
+     - Returns: Strict package policy only for active Easy Start default modules; otherwise the
+       normal package-then-raw policy.
      - Side effects: none.
      - Failure modes: none.
      */
-    var modulePackageInstallPolicy: ModulePackageInstallPolicy {
-        switch self {
-        case .disabled:
+    func modulePackageInstallPolicy(
+        for moduleName: String,
+        installingDefaultModules: Set<String>
+    ) -> ModulePackageInstallPolicy {
+        guard self == .englishStartup,
+              installingDefaultModules.contains(moduleName) else {
             return .preferPackageThenRaw
-        case .englishStartup:
-            return .requirePackage
         }
+        return .requirePackage
     }
 
     /**
@@ -3231,8 +3239,8 @@ public struct ModuleBrowserView: View {
      - records the module name in `downloadActivities` so the UI can show progress and cancel
      - performs repository installation work and, on success, rebuilds local SWORD state before
        refreshing the installed-module list
-     - startup default-document installs require Android package ZIPs instead of raw SWORD file
-       probes
+     - active startup default-document modules require Android package ZIPs instead of raw SWORD
+       file probes; manual installs in the same session keep normal raw fallback
      - stores installation failures in the row activity and surfaces the latest failure in
        `errorMessage`
 
@@ -3278,13 +3286,18 @@ public struct ModuleBrowserView: View {
             return
         }
 
+        let packageInstallPolicy = defaultDownloadMode.modulePackageInstallPolicy(
+            for: module.name,
+            installingDefaultModules: defaultDownloadInstallingModules
+        )
+
         let task = Task {
             await Task.yield()
             do {
                 try await repository.installModule(
                     named: module.name,
                     from: source,
-                    packageInstallPolicy: defaultDownloadMode.modulePackageInstallPolicy
+                    packageInstallPolicy: packageInstallPolicy
                 ) { progress in
                     Task { @MainActor in
                         guard installTaskIDs[module.name] == installID else { return }

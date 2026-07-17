@@ -641,3 +641,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Estas legplano de uzanto en la dosierujo “jsword/readingplan” kun la samo nomo kiel interna plano. Ĝi ne montriĝas tie ĉi. Alinomu la dosieron kaj lasu ĝian dosiersufikson kiel “.properties”.";
+"error_no_content" = "Neniu enhavo por elektita verso";

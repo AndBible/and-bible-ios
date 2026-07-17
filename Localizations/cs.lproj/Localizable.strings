@@ -624,3 +624,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Na SD kartě je uživatelský plán čtení jsword/readingplan se stejným jménem jako interní plán. Nelze ho zde zobrazit. Prosím přejmenujte soubor na něco jiného a příponu souboru ponechte .properties";
+"error_no_content" = "Žádný obsah pro vybraný verš";

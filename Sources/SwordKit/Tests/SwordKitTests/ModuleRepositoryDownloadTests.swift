@@ -857,6 +857,106 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
+     Verifies package-backed single-testament Bibles survive a missing package ZIP.
+
+     Repositories can publish legitimate NT-only Bibles with the same optional OT/NT raw file groups
+     as full Bibles. When a package ZIP 404s, the raw fallback must recheck the skipped OT group and
+     allow the install only when that group still returns 404. A failure means package-first fallback
+     has regressed legitimate single-testament modules that installed on the old raw path.
+     */
+    func testModuleRepositoryInstallsPackageBackedSingleTestamentModuleWhenSkippedGroupStillMissing() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Package Repo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "NTONLY",
+            category: "Biblical Texts",
+            modDrv: "zText",
+            dataPath: "./modules/texts/ztext/ntonly/"
+        )
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/NTONLY.zip",
+                "/raw/modules/texts/ztext/ntonly/ot.bzs":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            case "/raw/modules/texts/ztext/ntonly/nt.bzs",
+                "/raw/modules/texts/ztext/ntonly/nt.bzz",
+                "/raw/modules/texts/ztext/ntonly/nt.bzv":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data("new-testament-data-\(request.url!.lastPathComponent)".utf8)
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "NTONLY", from: source)
+
+        XCTAssertEqual(
+            requestedPaths.filter { $0 == "/raw/modules/texts/ztext/ntonly/ot.bzs" }.count,
+            2,
+            "Package-backed single-testament installs should recheck a skipped OT group before accepting it."
+        )
+
+        let confPath = swordDir
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("ntonly.conf")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: confPath.path),
+            "A package-backed NT-only Bible should still publish after the skipped OT group remains absent."
+        )
+    }
+
+    /**
      Verifies chapter-block compressed commentaries request and publish commentary file extensions.
 
      Android derives zCom data filenames from commentary block type. A chapter-block commentary must
@@ -1593,12 +1693,12 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
-     Verifies package-backed Bible raw fallback cannot publish only one testament.
+     Verifies package-backed Bible raw fallback cannot publish after a transient testament 404.
 
-     Normal Downloads may fall back to raw files when a package ZIP is missing, but package-backed
-     full Bible rows must not commit an NT-only raw fallback. This protects the same user-visible
-     contract as Android package installs: a selected full Bible is either fully installed or not
-     installed.
+     Normal Downloads may fall back to raw files when a package ZIP is missing, but a skipped
+     testament group must be rechecked before publishing. This fixture makes the first OT request
+     return 404 and the recheck return 200. A failure means a transient mirror miss can still commit
+     an NT-only full Bible.
      */
     func testModuleRepositoryRejectsPartialRawBibleFallbackWhenPackageZipIsMissing() async throws {
         let tempDir = FileManager.default.temporaryDirectory
@@ -1621,6 +1721,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             dataPath: "./modules/texts/ztext/full/"
         )
         var requestedPaths: [String] = []
+        var oldTestamentProbeCount = 0
 
         ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
             requestedPaths.append(request.url?.path ?? "")
@@ -1635,8 +1736,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/packages/FULL.zip",
-                "/raw/modules/texts/ztext/full/ot.bzs":
+            case "/packages/FULL.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
                     statusCode: 404,
@@ -1644,6 +1744,15 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = Data()
+            case "/raw/modules/texts/ztext/full/ot.bzs":
+                oldTestamentProbeCount += 1
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: oldTestamentProbeCount == 1 ? 404 : 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = oldTestamentProbeCount == 1 ? Data() : Data("old-testament-data-ot.bzs".utf8)
             case "/raw/modules/texts/ztext/full/nt.bzs",
                 "/raw/modules/texts/ztext/full/nt.bzz",
                 "/raw/modules/texts/ztext/full/nt.bzv":
@@ -1681,6 +1790,11 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         } catch {
             XCTAssertTrue(requestedPaths.contains("/packages/FULL.zip"))
             XCTAssertTrue(requestedPaths.contains("/raw/modules/texts/ztext/full/nt.bzs"))
+            XCTAssertEqual(
+                requestedPaths.filter { $0 == "/raw/modules/texts/ztext/full/ot.bzs" }.count,
+                2,
+                "A package-backed partial Bible fallback should recheck the skipped OT group before failing."
+            )
         }
 
         let confPath = swordDir

@@ -642,3 +642,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Existe um plano de leitura do utilizador no cartão SD jsword/readingplan com o mesmo nome que um plano interno. Não pode ser listado aqui. Mude o nome do ficheiro, deixando sua extensão como .properties";
+"error_no_content" = "Nenhum conteúdo para o versículo selecionado";

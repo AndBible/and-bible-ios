@@ -641,3 +641,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "SD-kaardi peale on kasutaja lugemisplaan, mis on kaustas jsword/readingplan sama nimega kui rakendusesisene plaan. Seda pole võimalik siin näidata. Palun nimeta fail millekski muuks ümber, jättes faili laienduseks .properties";
+"error_no_content" = "Valitud salmi jaoks sisu pole";

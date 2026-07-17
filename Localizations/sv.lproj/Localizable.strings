@@ -624,3 +624,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Det finns en användarplanering i SD-kortet jsword/readningplan med samma namn som en som finns internt. Den kan inte listas här. Var god byt namn på filen och lämna filtypen som .properties";
+"error_no_content" = "Innehåll saknas för den markerade versen";

@@ -626,3 +626,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Er staat een gebruikers leesplan op de SD-kaart jsword/readingplan met dezelfde naam als het interne leesplan. Het kan hier niet in de lijst gezet worden . Verander de naam van het bestand naar iets anders, maar laat de bestandsextensie hetzelfde als .properties";
+"error_no_content" = "Het geselecteerde vers bevat geen inhoud";

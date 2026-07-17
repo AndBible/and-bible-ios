@@ -5194,7 +5194,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             bridge.emit(event: "clear_document")
             if let document = documentPayloadFactory().errorDocumentJSON(
                 message: String(
-                    localized: "reader_no_content_selected_verse",
+                    localized: "error_no_content",
                     defaultValue: "No content for selected verse"
                 )
             ) {

@@ -640,3 +640,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Un plan de lecture existe sur la sdcard jsword/readingplan du même nom qu'un plan interne. Il ne peut pas être listé. Veuillez renommer le fichier en laissant son extension .properties";
+"error_no_content" = "Aucun contenu pour le verset sélectionné";

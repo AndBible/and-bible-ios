@@ -641,3 +641,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "ישנה תוכנית קריאה בכרטיס הזכרון jsword/readingplan באותו השם כמו התחוכנית הפנימית, ולכן לא ניתן להציג אותה. יש לשנות את שם הקובץ, אבל להשאיר את הסיומת .properties";
+"error_no_content" = "אין תוכן עבור הפסוק הנבחר";

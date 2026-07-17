@@ -640,3 +640,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Există un plan de citire jsword/readingplan în cardul sd cu același nume ca un plan intern. Acesta nu poate fi inclus aici. Dă alt nume fișierului, lăsînd extensia fișierului ca .properties.";
+"error_no_content" = "Niciun conținut pentru versetul ales";

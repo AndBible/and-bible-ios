@@ -1284,7 +1284,7 @@ public final class ModuleRepository: @unchecked Sendable {
          non-strict package failures continue into raw fallback while strict package failures abort
        - streams downloaded data files into staging so large modules are not fully buffered in memory
        - skips absent optional OT/NT file groups for raw-only sources so single-testament modules
-         can install
+         can install, after rechecking skipped Bible groups before accepting a partial raw install
        - replaces the target module directory only after all required files have downloaded
        - writes the module `.conf` file only after staged data is ready to publish
        - invalidates SWORD's module cache after a successful install
@@ -1292,8 +1292,8 @@ public final class ModuleRepository: @unchecked Sendable {
        - `ModuleRepositoryError.moduleNotFound` when the source catalog does not contain the module
        - `ModuleRepositoryError.invalidURL` when the source cannot produce a base URL
        - `ModuleRepositoryError.downloadFailed` when any required data file returns a non-200 HTTP
-         response, no optional data group is available, transport fails, or strict package install
-         cannot complete
+         response, no optional data group is available, a skipped Bible group becomes available on
+         recheck, transport fails, or strict package install cannot complete
        - `CancellationError` when the surrounding task is cancelled before the install completes
        - file-system errors from directory creation, data writes, or config writes
      - Important: The `.conf` file is the installed marker consumed by `SwordManager`, and updates
@@ -1387,6 +1387,7 @@ public final class ModuleRepository: @unchecked Sendable {
         var downloaded = 0
         var stagedFileCount = 0
         var completedOptionalGroupCount = 0
+        var skippedOptionalGroupProbes: [SkippedOptionalModuleFileGroup] = []
 
         for group in fileGroups {
             var downloadedInGroup = 0
@@ -1417,6 +1418,9 @@ public final class ModuleRepository: @unchecked Sendable {
                 } catch let statusError as ModuleFileHTTPStatusError
                     where !group.required && downloadedInGroup == 0 && index == 0 && statusError.statusCode == 404 {
                     plannedFileCount -= group.files.count
+                    skippedOptionalGroupProbes.append(
+                        SkippedOptionalModuleFileGroup(firstFileURL: remoteURL, firstFileName: fileName)
+                    )
                     if downloaded > 0 {
                         progress?(Double(downloaded) / Double(max(plannedFileCount, 1)))
                     }
@@ -1466,13 +1470,17 @@ public final class ModuleRepository: @unchecked Sendable {
             throw ModuleRepositoryError.downloadFailed("No module data files were available for \(moduleName)")
         }
         let optionalGroupCount = fileGroups.filter { !$0.required }.count
-        if didAttemptAndroidPackageInstall,
-           entry.category == .bible,
+        if entry.category == .bible,
            optionalGroupCount > 1,
            completedOptionalGroupCount < optionalGroupCount {
-            throw ModuleRepositoryError.downloadFailed(
-                "Package ZIP was unavailable and raw fallback did not include every testament data group for \(moduleName)"
+            let skippedGroupsRemainUnavailable = try await skippedOptionalGroupsRemainUnavailable(
+                skippedOptionalGroupProbes
             )
+            guard skippedGroupsRemainUnavailable else {
+                throw ModuleRepositoryError.downloadFailed(
+                    "Raw install did not include every testament data group for \(moduleName)"
+                )
+            }
         }
         try Task.checkCancellation()
 
@@ -3030,6 +3038,88 @@ public final class ModuleRepository: @unchecked Sendable {
 
         /// Whether a missing first file fails the install instead of skipping the group.
         let required: Bool
+    }
+
+    /**
+     Records the first file of an optional raw data group skipped after a 404.
+
+     Bible installs can legitimately contain only one testament, but a transient mirror 404 can
+     produce the same first-pass shape. The installer rechecks these probes before accepting a raw
+     install that staged fewer testament groups than it planned.
+     */
+    private struct SkippedOptionalModuleFileGroup {
+        /// Fully resolved repository URL for the skipped group's first file.
+        let firstFileURL: URL
+
+        /// File name used in diagnostics when the recheck cannot prove a persistent 404.
+        let firstFileName: String
+    }
+
+    /**
+     Rechecks skipped optional raw groups before accepting a partial Bible install.
+
+     - Parameter groups: First-file probes recorded when optional raw groups returned 404.
+     - Returns: `true` only when at least one group was checked and every skipped group still
+       returns 404.
+     - Side effects: performs one small ranged HTTP GET per skipped group through the repository
+       session; no files are written.
+     - Failure modes:
+       - throws `CancellationError` if the surrounding install is cancelled
+       - throws `ModuleRepositoryError.downloadFailed` for non-404 HTTP failures during recheck
+       - propagates URLSession transport errors
+     */
+    private func skippedOptionalGroupsRemainUnavailable(
+        _ groups: [SkippedOptionalModuleFileGroup]
+    ) async throws -> Bool {
+        guard !groups.isEmpty else { return false }
+
+        for group in groups {
+            let stillMissing = try await optionalModuleFileStillMissing(group)
+            if !stillMissing {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    /**
+     Checks whether one skipped optional raw data file still returns 404.
+
+     - Parameter group: Skipped group probe carrying the first file URL and diagnostic file name.
+     - Returns: `true` for a confirmed 404, `false` for any successful 2xx response.
+     - Side effects: performs a ranged GET request through `session` and discards the response body.
+     - Failure modes:
+       - throws `CancellationError` if cancelled before or after the request
+       - throws `ModuleRepositoryError.downloadFailed` for non-2xx/non-404 HTTP responses
+       - propagates URLSession transport errors
+     */
+    private func optionalModuleFileStillMissing(
+        _ group: SkippedOptionalModuleFileGroup
+    ) async throws -> Bool {
+        try Task.checkCancellation()
+        var request = URLRequest(url: group.firstFileURL)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+
+        let (_, response) = try await session.data(for: request)
+        try Task.checkCancellation()
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ModuleRepositoryError.downloadFailed(
+                "\(group.firstFileName) availability recheck returned a non-HTTP response"
+            )
+        }
+
+        if httpResponse.statusCode == 404 {
+            return true
+        }
+        if (200...299).contains(httpResponse.statusCode) {
+            return false
+        }
+        throw ModuleRepositoryError.downloadFailed(
+            "\(group.firstFileName) availability recheck failed (HTTP \(httpResponse.statusCode))"
+        )
     }
 
     /**
