@@ -252,6 +252,26 @@ public enum ModuleBrowserDefaultDownloadMode: Sendable, Equatable {
     }
 
     /**
+     SWORD package-install policy used by this download mode.
+
+     Normal Downloads follows Android package-first behavior but still allows iOS raw fallback for
+     legacy/raw-compatible sources. Startup defaults require Android package ZIPs so a missing KJV or
+     NASB package cannot publish only the NT raw files and leave Genesis unavailable.
+
+     - Returns: Repository install policy for SWORD modules requested by this mode.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var modulePackageInstallPolicy: ModulePackageInstallPolicy {
+        switch self {
+        case .disabled:
+            return .preferPackageThenRaw
+        case .englishStartup:
+            return .requirePackage
+        }
+    }
+
+    /**
      Android metadata language bucket consumed by this mode.
      - Returns: The metadata language code, or `nil` when defaults are disabled.
      - Side effects: none.
@@ -3211,6 +3231,8 @@ public struct ModuleBrowserView: View {
      - records the module name in `downloadActivities` so the UI can show progress and cancel
      - performs repository installation work and, on success, rebuilds local SWORD state before
        refreshing the installed-module list
+     - startup default-document installs require Android package ZIPs instead of raw SWORD file
+       probes
      - stores installation failures in the row activity and surfaces the latest failure in
        `errorMessage`
 
@@ -3259,7 +3281,11 @@ public struct ModuleBrowserView: View {
         let task = Task {
             await Task.yield()
             do {
-                try await repository.installModule(named: module.name, from: source) { progress in
+                try await repository.installModule(
+                    named: module.name,
+                    from: source,
+                    packageInstallPolicy: defaultDownloadMode.modulePackageInstallPolicy
+                ) { progress in
                     Task { @MainActor in
                         guard installTaskIDs[module.name] == installID else { return }
                         downloadActivities[module.name] = .inProgress(progress)

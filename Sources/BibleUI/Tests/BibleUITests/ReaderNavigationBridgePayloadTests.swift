@@ -287,6 +287,43 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Protects the Vue `ErrorDocument` bridge contract used for installed reader content gaps.
+
+     Download failures must fail module installation before a module is published. This payload is
+     only for reader-time empty content from an already installed module, and uses normal severity so
+     Vue shows the message without the unexpected-error reporting affordance.
+     */
+    func testReaderDocumentPayloadFactoryBuildsNoContentErrorDocument() throws {
+        let factory = BibleReaderDocumentPayloadFactory(
+            activeModuleName: "KJV",
+            hasStrongs: false,
+            bookmarkPayload: { _ in
+                XCTFail("Error documents do not project Bible bookmarks")
+                return self.emptyBibleBookmarkDataForFactoryTest()
+            },
+            chapterOrdinalRange: { _, _, _ in
+                XCTFail("Error documents should not resolve Bible ordinal ranges")
+                return nil
+            },
+            kjvBookOrdinal: { _ in nil },
+            chapterReadCount: { _, _ in nil },
+            memorizedOrdinals: { _, _, _ in [] },
+            targetOrdinals: { _, _, _ in [] }
+        )
+
+        let json = try XCTUnwrap(
+            factory.errorDocumentJSON(message: "No content for selected verse")
+        )
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(document["id"] as? String, "doc-1")
+        XCTAssertEqual(document["type"] as? String, "error")
+        XCTAssertEqual(document["errorMessage"] as? String, "No content for selected verse")
+        XCTAssertEqual(document["severity"] as? String, "NORMAL")
+    }
+
+    /**
      Protects the EPUB document path used by the shared Vue reader.
 
      EPUB sections are rendered as native HTML through `OsisDocument`, not the Bible document path.

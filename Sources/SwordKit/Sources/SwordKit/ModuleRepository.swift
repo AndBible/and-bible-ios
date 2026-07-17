@@ -32,6 +32,28 @@ private struct ModuleFileHTTPStatusError: Error, LocalizedError, Sendable {
 }
 
 /**
+ Controls how SWORD module installs use Android package ZIPs before raw data-file fallback.
+
+ Android's installer receives a repository package directory and installs the selected book from a
+ module ZIP. iOS keeps raw-file fallback for legacy/raw-compatible sources, but startup default
+ installs can require the package path so a missing ZIP never publishes partial raw Bible data.
+
+ Side effects:
+ - none; values only select installer branch behavior
+
+ Failure modes:
+ - `.requirePackage` causes `ModuleRepository.installModule` to fail before raw fallback when the
+   Android package ZIP is unavailable
+ */
+public enum ModulePackageInstallPolicy: Sendable, Equatable {
+    /// Try Android's package ZIP when the source has an Android package directory, then allow raw fallback.
+    case preferPackageThenRaw
+
+    /// Require Android's package ZIP and fail without publishing raw fallback data when it is missing.
+    case requirePackage
+}
+
+/**
  Downloads one file with native URLSession streaming and progress callbacks.
 
  The delegate moves the completed temporary download into the caller's staging path only after a
@@ -1252,11 +1274,16 @@ public final class ModuleRepository: @unchecked Sendable {
      - Parameters:
        - moduleName: Module abbreviation from the refreshed catalog, such as `KJV`.
        - source: Remote source whose in-memory catalog entry supplies URLs and module metadata.
+       - packageInstallPolicy: Package ZIP behavior for SWORD modules. Normal installs prefer
+         Android's package path when the source has one, then allow raw fallback. Startup defaults
+         can require the package path to avoid publishing partial raw Bible data.
        - progress: Optional callback receiving normalized completion in the range `0.0...1.0`.
      - Side effects:
        - creates a temporary staging directory next to the target module directory
+       - downloads and installs Android package ZIPs before raw files when package metadata exists
        - streams downloaded data files into staging so large modules are not fully buffered in memory
-       - skips absent optional OT/NT file groups so single-testament modules can install
+       - skips absent optional OT/NT file groups for raw-only sources so single-testament modules
+         can install
        - replaces the target module directory only after all required files have downloaded
        - writes the module `.conf` file only after staged data is ready to publish
        - invalidates SWORD's module cache after a successful install
@@ -1272,6 +1299,7 @@ public final class ModuleRepository: @unchecked Sendable {
        rollback path so failed or cancelled installs do not corrupt an existing module.
      */
     public func installModule(named moduleName: String, from source: SourceConfig,
+                              packageInstallPolicy: ModulePackageInstallPolicy = .preferPackageThenRaw,
                               progress: ((Double) -> Void)? = nil) async throws {
         guard let entries = cachedCatalogEntries(for: source.name),
               let entry = entries.first(where: { $0.name == moduleName }) else {
@@ -1302,6 +1330,27 @@ public final class ModuleRepository: @unchecked Sendable {
         let localDirURL = URL(fileURLWithPath: localDir, isDirectory: true)
         let localParentURL = localDirURL.deletingLastPathComponent()
         try fm.createDirectory(at: localParentURL, withIntermediateDirectories: true)
+
+        let packageInstallResult = try await installModulePackage(
+            named: moduleName,
+            entry: entry,
+            source: source,
+            localDirURL: localDirURL,
+            useCatalogDirectoryHeuristic: false,
+            progress: progress
+        )
+        let didAttemptAndroidPackageInstall = packageInstallResult.didAttemptDownload
+        switch packageInstallResult {
+        case .installed:
+            return
+        case .unavailable, .noCandidates:
+            if packageInstallPolicy == .requirePackage {
+                throw ModuleRepositoryError.downloadFailed(
+                    "Package ZIP was unavailable for \(moduleName)"
+                )
+            }
+        }
+
         let stagingDirURL = localParentURL.appendingPathComponent(
             ".\(localDirURL.lastPathComponent)-\(UUID().uuidString).installing",
             isDirectory: true
@@ -1322,6 +1371,7 @@ public final class ModuleRepository: @unchecked Sendable {
         var plannedFileCount = fileGroups.reduce(0) { $0 + $1.files.count }
         var downloaded = 0
         var stagedFileCount = 0
+        var completedOptionalGroupCount = 0
 
         for group in fileGroups {
             var downloadedInGroup = 0
@@ -1359,15 +1409,16 @@ public final class ModuleRepository: @unchecked Sendable {
                     break
                 } catch let statusError as ModuleFileHTTPStatusError {
                     logger.warning("Download failed for \(fileName): \(statusError.localizedDescription)")
-                    if statusError.statusCode == 404 {
-                        let installedFromPackage = try await installModulePackageFallback(
+                    if statusError.statusCode == 404 && !didAttemptAndroidPackageInstall {
+                        let packageResult = try await installModulePackage(
                             named: moduleName,
                             entry: entry,
                             source: source,
                             localDirURL: localDirURL,
+                            useCatalogDirectoryHeuristic: true,
                             progress: progress
                         )
-                        if installedFromPackage {
+                        if packageResult == .installed {
                             return
                         }
                     }
@@ -1377,20 +1428,36 @@ public final class ModuleRepository: @unchecked Sendable {
                     throw error
                 }
             }
+
+            if !group.required && downloadedInGroup == group.files.count {
+                completedOptionalGroupCount += 1
+            }
         }
 
         guard stagedFileCount > 0 else {
-            let installedFromPackage = try await installModulePackageFallback(
-                named: moduleName,
-                entry: entry,
-                source: source,
-                localDirURL: localDirURL,
-                progress: progress
-            )
-            if installedFromPackage {
-                return
+            if !didAttemptAndroidPackageInstall {
+                let packageResult = try await installModulePackage(
+                    named: moduleName,
+                    entry: entry,
+                    source: source,
+                    localDirURL: localDirURL,
+                    useCatalogDirectoryHeuristic: true,
+                    progress: progress
+                )
+                if packageResult == .installed {
+                    return
+                }
             }
             throw ModuleRepositoryError.downloadFailed("No module data files were available for \(moduleName)")
+        }
+        let optionalGroupCount = fileGroups.filter { !$0.required }.count
+        if didAttemptAndroidPackageInstall,
+           entry.category == .bible,
+           optionalGroupCount > 1,
+           completedOptionalGroupCount < optionalGroupCount {
+            throw ModuleRepositoryError.downloadFailed(
+                "Package ZIP was unavailable and raw fallback did not include every testament data group for \(moduleName)"
+            )
         }
         try Task.checkCancellation()
 
@@ -1901,22 +1968,59 @@ public final class ModuleRepository: @unchecked Sendable {
     }
 
     /**
-     Installs a module from a repository ZIP package when raw data-file probing cannot find usable
-     files.
+     Result of attempting a SWORD package ZIP install.
 
-     Android's installer can use package directories such as `zip/` or `packages/rawzip/` for
-     repositories that do not expose raw module data files. The Swift installer first tries raw file
-     paths so it can preserve streaming progress, then calls this fallback only when no module data
-     has been staged.
+     The installer needs to distinguish sources with no Android package directory from package-backed
+     sources whose ZIP returned 404. That distinction decides whether raw fallback is a legacy source
+     path or a recovery path after Android's package installer failed.
+
+     Side effects:
+     - none; values summarize work performed by `installModulePackage`
+
+     Failure modes:
+     - none
+     */
+    private enum ModulePackageInstallResult: Equatable {
+        /// A package ZIP was downloaded, extracted, and committed.
+        case installed
+
+        /// At least one package URL was attempted, but every candidate returned 404.
+        case unavailable
+
+        /// No package URL could be built for the selected source and heuristic mode.
+        case noCandidates
+
+        /**
+         Whether the package installer attempted an HTTP download.
+
+         - Returns: `true` for `.installed` and `.unavailable`, `false` when no candidate URL
+           existed.
+         - Side effects: none.
+         - Failure modes: none.
+         */
+        var didAttemptDownload: Bool {
+            self != .noCandidates
+        }
+    }
+
+    /**
+     Installs a module from an Android-compatible repository ZIP package.
+
+     Android installs SWORD modules through repository package ZIPs while iOS keeps raw data-file
+     fallback for legacy/raw-compatible sources. Package-first installs use only Android's
+     explicit/default package directory; raw-failure fallback may opt into the legacy
+     `catalogPath/packages` heuristic for sources that do not carry Android package metadata.
 
      - Parameters:
        - moduleName: Catalog module abbreviation whose package should be downloaded.
        - entry: Parsed catalog entry providing `DataPath`, `ModDrv`, and `.conf` content.
        - source: Repository source used to derive package ZIP candidate URLs.
        - localDirURL: Final module data directory that will receive the extracted package data.
+       - useCatalogDirectoryHeuristic: Whether to derive `catalogPath/packages` when Android did
+         not provide a package directory.
        - progress: Optional normalized progress callback shared with the caller.
-     - Returns: `true` when a candidate package was downloaded, extracted, and committed; `false`
-       when no package candidate was available.
+     - Returns: `.installed` when a package was committed, `.unavailable` when package URLs existed
+       but returned 404, or `.noCandidates` when no package URL could be built.
      - Side effects:
        - downloads a candidate ZIP into a temporary file
        - extracts only `modules/` entries into a temporary staging tree
@@ -1928,15 +2032,20 @@ public final class ModuleRepository: @unchecked Sendable {
          catalog data directory
        - file-system errors from temporary extraction or final publish
      */
-    private func installModulePackageFallback(
+    private func installModulePackage(
         named moduleName: String,
         entry: CatalogModule,
         source: SourceConfig,
         localDirURL: URL,
+        useCatalogDirectoryHeuristic: Bool,
         progress: ((Double) -> Void)?
-    ) async throws -> Bool {
-        let candidates = packageZipCandidateURLs(for: moduleName, source: source)
-        guard !candidates.isEmpty else { return false }
+    ) async throws -> ModulePackageInstallResult {
+        let candidates = packageZipCandidateURLs(
+            for: moduleName,
+            source: source,
+            useCatalogDirectoryHeuristic: useCatalogDirectoryHeuristic
+        )
+        guard !candidates.isEmpty else { return .noCandidates }
 
         let fm = FileManager.default
         let packageDownloadURL = fm.temporaryDirectory
@@ -1949,7 +2058,7 @@ public final class ModuleRepository: @unchecked Sendable {
         for candidate in candidates {
             try Task.checkCancellation()
             do {
-                logger.info("Trying package fallback \(candidate.absoluteString)")
+                logger.info("Trying package install \(candidate.absoluteString)")
                 try await downloadRequiredModuleFile(
                     from: candidate,
                     to: packageDownloadURL,
@@ -1961,12 +2070,12 @@ public final class ModuleRepository: @unchecked Sendable {
                 downloadedPackageURL = candidate
                 break
             } catch let statusError as ModuleFileHTTPStatusError where statusError.statusCode == 404 {
-                logger.info("Skipping missing package fallback \(candidate.absoluteString)")
+                logger.info("Skipping missing package install \(candidate.absoluteString)")
                 try? fm.removeItem(at: packageDownloadURL)
             }
         }
 
-        guard let downloadedPackageURL else { return false }
+        guard let downloadedPackageURL else { return .unavailable }
 
         let entries = try readFileBackedZipEntries(from: packageDownloadURL)
         guard !entries.isEmpty else {
@@ -2014,24 +2123,33 @@ public final class ModuleRepository: @unchecked Sendable {
         )
         invalidateModuleCache()
         progress?(1.0)
-        return true
+        return .installed
     }
 
     /**
      Builds the repository package ZIP URL that matches Android's installer source model.
 
      - Parameters:
-     - moduleName: Catalog module abbreviation used as the package filename.
-     - source: Repository source whose host and catalog path anchor package locations.
-     - Returns: The single authoritative package URL for the source, or an empty array when no
-       package directory can be resolved.
+       - moduleName: Catalog module abbreviation used as the package filename.
+       - source: Repository source whose host and catalog path anchor package locations.
+       - useCatalogDirectoryHeuristic: Whether to derive `catalogPath/packages` when Android has
+         no explicit/default package directory for the source.
+     - Returns: The package URL for the source, or an empty array when no package directory can be
+       resolved for the requested mode.
      - Side effects: none.
      - Failure modes: malformed host/path combinations are skipped rather than thrown because raw
        file installation remains the primary path.
      */
-    private func packageZipCandidateURLs(for moduleName: String, source: SourceConfig) -> [URL] {
+    private func packageZipCandidateURLs(
+        for moduleName: String,
+        source: SourceConfig,
+        useCatalogDirectoryHeuristic: Bool
+    ) -> [URL] {
         let packageFileName = "\(moduleName).zip"
-        guard let packageDirectory = packageDirectory(for: source) else { return [] }
+        guard let packageDirectory = packageDirectory(
+            for: source,
+            useCatalogDirectoryHeuristic: useCatalogDirectoryHeuristic
+        ) else { return [] }
         let path = appendingPathComponent(packageFileName, toPath: packageDirectory)
         guard let url = URL(string: "https://\(source.host)\(path)") else { return [] }
         return [url]
@@ -2045,14 +2163,20 @@ public final class ModuleRepository: @unchecked Sendable {
      restored through `InstallManager` before falling back to Android's direct custom-repository
      `catalogDirectory/packages` rule.
 
-     - Parameter source: Repository source loaded from `InstallMgr.conf`.
+     - Parameters:
+       - source: Repository source loaded from `InstallMgr.conf`.
+       - useCatalogDirectoryHeuristic: Whether to derive `catalogPath/packages` when Android has
+         no explicit/default package directory for the source.
      - Returns: Package directory path from Android's `repositories.txt` when the source matches a
        built-in repository, an explicit custom package directory, or the direct-catalog custom
-       fallback `catalogPath/packages`.
+       fallback `catalogPath/packages` when the heuristic is enabled.
      - Side effects: none.
      - Failure modes: none.
      */
-    private func packageDirectory(for source: SourceConfig) -> String? {
+    private func packageDirectory(
+        for source: SourceConfig,
+        useCatalogDirectoryHeuristic: Bool
+    ) -> String? {
         if let packageDirectory = source.packageDirectory,
            !packageDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return normalizedRepositoryPath(packageDirectory)
@@ -2062,7 +2186,8 @@ public final class ModuleRepository: @unchecked Sendable {
             return normalizedRepositoryPath(packageDirectory)
         }
 
-        guard !source.isMyBibleRepository else { return nil }
+        guard useCatalogDirectoryHeuristic,
+              !source.isMyBibleRepository else { return nil }
         return appendingPathComponent("packages", toPath: source.catalogPath)
     }
 

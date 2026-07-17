@@ -5189,7 +5189,30 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             verseCount = fallbackChapter.1
             addChapter = true
         } else {
-            logger.error("Failed to load SWORD chapter for \(osisBookId, privacy: .public).\(self.currentChapter)")
+            let renderedOsisBookId = osisBookId.isEmpty ? Self.osisBookId(for: currentBook) : osisBookId
+            logger.error("Failed to load SWORD chapter for \(renderedOsisBookId, privacy: .public).\(self.currentChapter)")
+            bridge.emit(event: "clear_document")
+            if let document = documentPayloadFactory().errorDocumentJSON(
+                message: String(
+                    localized: "reader_no_content_selected_verse",
+                    defaultValue: "No content for selected verse"
+                )
+            ) {
+                bridge.emit(event: "add_documents", data: document)
+            }
+            bridge.emit(event: "setup_content", data: """
+            {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":"top","topOffset":0,"bottomOffset":0}
+            """)
+            setRenderedContentState(
+                category: .bible,
+                moduleName: activeModuleName,
+                book: currentBook,
+                chapter: currentChapter,
+                key: "\(renderedOsisBookId).\(currentChapter)"
+            )
+            emitActiveState()
+            bridge.clearSelection()
+            applyNightModeBackground()
             return
         }
 

@@ -977,6 +977,24 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
+     Verifies default-download mode selects the expected repository package policy.
+
+     Normal Downloads must follow Android's package-first installer while retaining iOS raw-file
+     fallback for legacy repositories. Startup Easy Start defaults require package ZIPs so a missing
+     default Bible cannot publish a partial raw install.
+     */
+    func testModuleBrowserDefaultDownloadModeSelectsPackageInstallPolicy() {
+        XCTAssertEqual(
+            ModuleBrowserDefaultDownloadMode.disabled.modulePackageInstallPolicy,
+            .preferPackageThenRaw
+        )
+        XCTAssertEqual(
+            ModuleBrowserDefaultDownloadMode.englishStartup.modulePackageInstallPolicy,
+            .requirePackage
+        )
+    }
+
+    /**
      Verifies Downloads default language selection follows Android's priority order.
 
      Android `DocumentSelectionBase.defaultLanguage` first reuses a valid sticky language, then the

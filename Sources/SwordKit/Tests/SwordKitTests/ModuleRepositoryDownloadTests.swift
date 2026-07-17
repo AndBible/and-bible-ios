@@ -966,13 +966,13 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
-     Verifies package-backed repositories fall back to module ZIP downloads when raw files are absent.
+     Verifies built-in package-backed repositories install from Android's package directory first.
 
-     Android repositories can serve modules as package ZIPs even when individual data paths return
-     404. iOS must attempt the package URL and stage the package contents through the same installed
-     marker path.
+     Android gives the SWORD installer a package ZIP location for built-in repositories. iOS should
+     use that package before raw data-file probes so full packaged modules are installed atomically
+     and do not depend on optional OT/NT raw-file availability.
      */
-    func testModuleRepositoryFallsBackToPackageZipWhenRawDataFilesAreUnavailable() async throws {
+    func testModuleRepositoryPrefersBuiltInPackageZipBeforeRawDataFiles() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
@@ -1064,9 +1064,10 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         _ = try await repository.refreshCatalog(for: source)
         try await repository.installModule(named: "Augustin", from: source)
 
-        XCTAssertTrue(
-            requestedPaths.contains("/andbible-extra/zip/Augustin.zip"),
-            "Package-backed repositories should fall back to the module ZIP when raw data files are unavailable."
+        XCTAssertEqual(
+            requestedPaths.filter { $0 != "/andbible-extra/mods.d.tar.gz" },
+            ["/andbible-extra/zip/Augustin.zip"],
+            "Package-backed repositories should use Android's package ZIP before raw data files."
         )
 
         let localDir = swordDir
@@ -1084,7 +1085,407 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             .appendingPathComponent("augustin.conf")
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: confPath.path),
-            "A package ZIP fallback should still publish the catalog .conf marker through the staged installer."
+            "A package ZIP install should still publish the catalog .conf marker through the staged installer."
+        )
+    }
+
+    /**
+     Verifies SWORD installs request an explicit package before raw testament files by default.
+
+     Android's SWORD installer receives one package directory per repository. When custom metadata
+     has that directory, iOS should follow the same package-first path for normal Downloads instead
+     of reserving package-first behavior for startup Easy Start.
+     */
+    func testModuleRepositoryPrefersExplicitPackageZipBeforeRawDataFilesByDefault() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Package Repo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "FULL",
+            category: "Biblical Texts",
+            modDrv: "zText",
+            dataPath: "./modules/texts/ztext/full/"
+        )
+        let zipData = makeModuleRepositoryZip([
+            ("mods.d/full.conf", Data("placeholder".utf8)),
+            ("modules/texts/ztext/full/ot.bzs", Data("old-testament-zs".utf8)),
+            ("modules/texts/ztext/full/ot.bzz", Data("old-testament-zz".utf8)),
+            ("modules/texts/ztext/full/ot.bzv", Data("old-testament-zv".utf8)),
+            ("modules/texts/ztext/full/nt.bzs", Data("new-testament-zs".utf8)),
+            ("modules/texts/ztext/full/nt.bzz", Data("new-testament-zz".utf8)),
+            ("modules/texts/ztext/full/nt.bzv", Data("new-testament-zv".utf8))
+        ])
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/FULL.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "FULL", from: source)
+
+        XCTAssertEqual(
+            requestedPaths.filter { $0 != "/raw/mods.d.tar.gz" },
+            ["/packages/FULL.zip"],
+            "Package-preferred installs should not probe raw OT/NT files after the package succeeds."
+        )
+
+        let localDir = moduleRepositoryTextDir(for: "FULL", under: swordDir)
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("ot.bzs")),
+            Data("old-testament-zs".utf8)
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("nt.bzs")),
+            Data("new-testament-zs".utf8)
+        )
+    }
+
+    /**
+     Verifies package-backed SWORD installs still use complete raw data files when no package exists.
+
+     Package directories are authoritative for Android defaults but not universal across all
+     repositories. If the package ZIP is missing, iOS must retain the existing raw-file installer so
+     full raw modules and single-testament modules remain installable.
+     */
+    func testModuleRepositoryFallsBackToCompleteRawDataFilesWhenPackageZipIsMissing() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Package Repo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "FULL",
+            category: "Biblical Texts",
+            modDrv: "zText",
+            dataPath: "./modules/texts/ztext/full/"
+        )
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/FULL.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            case "/raw/modules/texts/ztext/full/ot.bzs",
+                "/raw/modules/texts/ztext/full/ot.bzz",
+                "/raw/modules/texts/ztext/full/ot.bzv",
+                "/raw/modules/texts/ztext/full/nt.bzs",
+                "/raw/modules/texts/ztext/full/nt.bzz",
+                "/raw/modules/texts/ztext/full/nt.bzv":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data("raw-data-\(request.url!.lastPathComponent)".utf8)
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "FULL", from: source)
+
+        let packageRequestIndex = try XCTUnwrap(requestedPaths.firstIndex(of: "/packages/FULL.zip"))
+        let firstRawRequestIndex = try XCTUnwrap(
+            requestedPaths.firstIndex(of: "/raw/modules/texts/ztext/full/ot.bzs")
+        )
+        XCTAssertLessThan(
+            packageRequestIndex,
+            firstRawRequestIndex,
+            "Package-preferred installs should try the package URL before raw data files."
+        )
+
+        let localDir = moduleRepositoryTextDir(for: "FULL", under: swordDir)
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("ot.bzs")),
+            Data("raw-data-ot.bzs".utf8)
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("nt.bzs")),
+            Data("raw-data-nt.bzs".utf8)
+        )
+    }
+
+    /**
+     Verifies strict startup/default installs fail before raw fallback when the package ZIP is absent.
+
+     Easy Start default Bibles are full Android package-backed modules. If the package is missing,
+     iOS must fail visibly instead of probing optional raw testament files and risking a module that
+     opens Matthew but cannot open Genesis.
+     */
+    func testModuleRepositoryRequiredPackageInstallDoesNotProbeRawDataFilesWhenZipIsMissing() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Package Repo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "FULL",
+            category: "Biblical Texts",
+            modDrv: "zText",
+            dataPath: "./modules/texts/ztext/full/"
+        )
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/FULL.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            default:
+                XCTFail("Strict package installs should not request raw fallback: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        do {
+            try await repository.installModule(
+                named: "FULL",
+                from: source,
+                packageInstallPolicy: .requirePackage
+            )
+            XCTFail("Expected strict package install to fail when the package ZIP is missing.")
+        } catch {
+            XCTAssertEqual(
+                requestedPaths.filter { $0 != "/raw/mods.d.tar.gz" },
+                ["/packages/FULL.zip"]
+            )
+        }
+
+        let confPath = swordDir
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("full.conf")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: confPath.path),
+            "A strict package failure must not leave an installed marker."
+        )
+    }
+
+    /**
+     Verifies package-backed Bible raw fallback cannot publish only one testament.
+
+     Normal Downloads may fall back to raw files when a package ZIP is missing, but package-backed
+     full Bible rows must not commit an NT-only raw fallback. This protects the same user-visible
+     contract as Android package installs: a selected full Bible is either fully installed or not
+     installed.
+     */
+    func testModuleRepositoryRejectsPartialRawBibleFallbackWhenPackageZipIsMissing() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Package Repo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "FULL",
+            category: "Biblical Texts",
+            modDrv: "zText",
+            dataPath: "./modules/texts/ztext/full/"
+        )
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/FULL.zip",
+                "/raw/modules/texts/ztext/full/ot.bzs":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            case "/raw/modules/texts/ztext/full/nt.bzs",
+                "/raw/modules/texts/ztext/full/nt.bzz",
+                "/raw/modules/texts/ztext/full/nt.bzv":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data("new-testament-data-\(request.url!.lastPathComponent)".utf8)
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        do {
+            try await repository.installModule(named: "FULL", from: source)
+            XCTFail("Expected partial raw Bible fallback to fail after the package ZIP was unavailable.")
+        } catch {
+            XCTAssertTrue(requestedPaths.contains("/packages/FULL.zip"))
+            XCTAssertTrue(requestedPaths.contains("/raw/modules/texts/ztext/full/nt.bzs"))
+        }
+
+        let confPath = swordDir
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("full.conf")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: confPath.path),
+            "A package-backed Bible must not be marked installed with only NT raw files."
         )
     }
 
@@ -1717,6 +2118,25 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             .appendingPathComponent("modules", isDirectory: true)
             .appendingPathComponent("lexdict", isDirectory: true)
             .appendingPathComponent("rawld", isDirectory: true)
+            .appendingPathComponent(moduleKey, isDirectory: true)
+    }
+
+    /**
+     Builds the local zText data directory for a test module.
+
+     - Parameters:
+       - moduleName: Catalog abbreviation used as the zText directory name.
+       - swordDir: Test SWORD home containing the `modules/` tree.
+     - Returns: The expected installed data directory for the module.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func moduleRepositoryTextDir(for moduleName: String, under swordDir: URL) -> URL {
+        let moduleKey = moduleName.lowercased()
+        return swordDir
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("texts", isDirectory: true)
+            .appendingPathComponent("ztext", isDirectory: true)
             .appendingPathComponent(moduleKey, isDirectory: true)
     }
 
