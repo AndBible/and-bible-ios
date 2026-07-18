@@ -5,16 +5,16 @@
    ======================================== */
 "app_name" = "AndBible";
 "app_name_andbible" = "AndBible";
-"app_name_long" = "AndBible: Bible Study";
-"done" = "Done";
-"cancel" = "Cancel";
-"delete" = "Delete";
-"save" = "Save";
-"edit" = "Edit";
+"app_name_long" = "AndBible: Estudi Bíblic";
+"done" = "Fet";
+"cancel" = "Cancel·la";
+"delete" = "Suprimeix";
+"save" = "Desa";
+"edit" = "Edita";
 "add" = "Add";
-"search" = "Find";
-"settings" = "Application preferences";
-"close" = "Close";
+"search" = "Cerca";
+"settings" = "Preferències de l'aplicació";
+"close" = "Tanca";
 "copy_reference" = "Copy Reference";
 "go_to_reference" = "Go to Reference";
 "go_to_reference_placeholder" = "e.g. Genesis 1, Matt 5:3, Gen.1.1";
@@ -25,62 +25,62 @@
 "move_up" = "Move Up";
 "move_down" = "Move Down";
 "reference_copied" = "Reference copied";
-"ok" = "OK";
-"yes" = "Yes";
+"ok" = "D'acord";
+"yes" = "Sí";
 "no" = "No";
 "error" = "Error";
 "loading" = "Loading...";
-"create" = "Create";
-"new_window" = "New window";
+"create" = "Crea";
+"new_window" = "Finestra nova";
 "clear" = "Clear";
-"reset" = "Reset";
+"reset" = "Restableix";
 "retry" = "Retry";
-"skip" = "Skip";
-"all" = "All";
+"skip" = "Omet";
+"all" = "Tot";
 "sort" = "Sort";
-"name" = "Name";
+"name" = "Nom";
 "untitled" = "Untitled";
-"compare" = "Compare";
-"translations" = "Translations";
+"compare" = "Compara";
+"translations" = "Traduccions";
 "auto" = "Auto";
 "off" = "Off";
 "inline" = "Inline";
-"links" = "Links";
+"links" = "Enllaços";
 "hidden" = "Hidden";
-"completed" = "Completed";
+"completed" = "Completat";
 "no_results" = "No Results";
 "searching" = "Searching...";
 
 /* ========================================
    Navigation / Bible Reader
    ======================================== */
-"bible" = "Bible";
-"deuterocanonical" = "Deuterocanonical";
-"bookmarks" = "Bookmarks";
-"reading_plans" = "Reading Plans";
+"bible" = "Bíblia";
+"deuterocanonical" = "Deuterocanònic";
+"bookmarks" = "Marcadors";
+"reading_plans" = "Plans de lectura";
 "downloads" = "Downloads";
-"history" = "History";
-"workspaces" = "Workspaces";
-"rename" = "Rename";
+"history" = "Historial";
+"workspaces" = "Espais de treball";
+"rename" = "Reanomena";
 "clone" = "Clone";
-"copy_of %@" = "Copy of %@";
+"copy_of %@" = "Còpia de %@";
 "definition" = "Definition";
-"dictionary" = "Dictionary";
-"general_book" = "Book";
-"map" = "Map";
+"dictionary" = "Diccionari";
+"general_book" = "Llibre";
+"map" = "Mapa";
 "locked" = "Locked";
 
 /* Bible Navigation */
-"choose_book" = "Choose Book";
+"choose_book" = "Trieu un llibre";
 "books" = "Books";
-"old_testament" = "Old Testament";
-"new_testament" = "New Testament";
+"old_testament" = "Antic Testament";
+"new_testament" = "Nou Testament";
 "previous_chapter" = "Previous chapter";
 "next_chapter" = "Next chapter";
 "back_to_bible" = "Back to Bible";
 
 /* Module Pickers */
-"choose_document" = "Choose Document";
+"choose_document" = "Trieu un document";
 "document_type" = "Document type";
 "picker_select_translation" = "Select Translation";
 "picker_select_commentary" = "Select Commentary";
@@ -93,30 +93,30 @@
 "picker_no_general_book_modules" = "No general book modules installed";
 "picker_no_map_modules" = "No map modules installed";
 "download_modules" = "Download Modules";
-"download" = "Download Documents";
+"download" = "Baixa documents";
 "easy_start" = "Easy Start";
 "easy_start_title" = "Easy start";
 "easy_start_message" = "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on.";
 "startup_download_prompt" = "Download Bible modules to start reading.";
-"welcome_message" = "Thank you for downloading %@. There are currently no Bibles or documents installed. To continue, please install at least 1 document by downloading from the internet, or by loading from a zip file document backup.";
-"supported_formats" = "Supported formats for loading documents from a file: %@";
-"format_zip" = "Zip file containing Sword module(s), or documents backup file (*.abmd) created by %@";
-"format_mysword" = "MySword documents (*.mybible)";
-"format_mybible" = "MyBible documents (*.SQLite3)";
-"format_epub" = "EPUB documents (*.epub)";
+"welcome_message" = "Gràcies per baixar %@. Ara mateix no hi ha cap Bíblia ni document instal·lat. Per continuar, instal·la almenys 1 document baixant-lo d'Internet o carregant-lo des d'un fitxer zip de còpia de seguretat de documents.";
+"supported_formats" = "Formats admesos per carregar documents des d'un fitxer: %@";
+"format_zip" = "Fitxer zip que conté mòduls Sword o fitxer de còpia de seguretat de documents (*.abmd) creat per %@";
+"format_mysword" = "Documents MySword (*.mybible)";
+"format_mybible" = "Documents MyBible (*.SQLite3)";
+"format_epub" = "Documents EPUB (*.epub)";
 
 /* Toolbar / Actions */
 "toggle_strongs_numbers" = "Toggle Strong's numbers";
-"bookmark" = "Bookmark";
-"copy" = "Copy";
-"share" = "Share";
+"bookmark" = "Marcador";
+"copy" = "Copia";
+"share" = "Comparteix";
 "search_web" = "Web";
 
 /* Strong's Modes */
 "strongs_off" = "Off";
-"strongs_inline" = "Text and Links";
-"strongs_links" = "Links";
-"strongs_hidden" = "Hidden Links";
+"strongs_inline" = "Text i enllaços";
+"strongs_links" = "Enllaços";
+"strongs_hidden" = "Enllaços ocults";
 "find_all_occurrences" = "Find all occurrences";
 "no_dictionary_installed" = "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads.";
 "back_to_previous" = "Back";
@@ -127,7 +127,7 @@
 "add_bookmark" = "Add Bookmark";
 "edit_bookmark" = "Edit Bookmark";
 "bookmark_note" = "Note";
-"labels" = "Labels";
+"labels" = "Etiquetes";
 "new_label" = "New Label";
 "study_pad" = "StudyPad";
 "my_notes" = "My Notes";
@@ -143,10 +143,10 @@
 "no_labels" = "No Labels";
 "no_labels_description" = "Create labels to organize your bookmarks and notes.";
 "label_name" = "Label name";
-"studypad" = "Study Pad";
+"studypad" = "Bloc d'estudi";
 "open_studypad" = "Open StudyPad";
-"edit_label" = "Edit label";
-"label_edit_name" = "Name";
+"edit_label" = "Edita l'etiqueta";
+"label_edit_name" = "Nom";
 "label_edit_color" = "Color";
 "label_edit_icon" = "Icon";
 "no_icon" = "No Icon";
@@ -164,35 +164,35 @@
 /* ========================================
    Search
    ======================================== */
-"search_bible" = "Search Bible";
+"search_bible" = "Cerca a la Bíblia";
 "search_results" = "Search Results";
-"whole_bible" = "Whole Bible";
+"whole_bible" = "Tota la Bíblia";
 "old_testament_short" = "OT";
 "new_testament_short" = "NT";
 "current_book" = "Current Book";
-"search_index" = "Search Index";
+"search_index" = "Índex de cerca";
 "search_checking_index" = "Checking index...";
 "search_need_index" = "To search a document we need an index.";
-"search_create_index" = "Create";
-"search_indexing_message" = "When indexing has completed you will be taken to the search screen.";
+"search_create_index" = "Crea";
+"search_indexing_message" = "Quan finalitzi la indexació, s'obrirà la pantalla de cerca.";
 "search_searching" = "Searching...";
 "search_enter_prompt" = "Enter a word or phrase to search";
 "search_bible_text" = "Search Bible text";
 "search_match" = "Match";
-"search_scope_all" = "All";
+"search_scope_all" = "Tot";
 "search_scope_ot" = "OT";
 "search_scope_nt" = "NT";
-"search_translations" = "Translations";
-"search_all" = "All";
+"search_translations" = "Traduccions";
+"search_all" = "Tot";
 
 /* ========================================
    Downloads / Module Browser
    ======================================== */
 "module_browser" = "Module Browser";
-"doc_type_all" = "All types";
+"doc_type_all" = "Tots els tipus";
 "bibles" = "Bibles";
 "commentaries" = "Commentaries";
-"dictionaries" = "Dictionaries";
+"dictionaries" = "Diccionaris";
 "category_books" = "Books";
 "maps" = "Maps";
 "document_filter_results %lld" = "Documents (%lld)";
@@ -201,20 +201,20 @@
 "update" = "Update";
 "uninstall" = "Uninstall";
 "unavailable" = "Unavailable";
-"download_document_confirm_prefix" = "Download";
-"bookmark_warning4" = "It is recommended that you backup the module before updating.";
-"bookmark_warning3" = "Do you still want to update module?";
-"bookmark_warning2" = "If document structure has changed, updating this document could make the locations of these bookmarks/notes move inside the document or disappear completely.";
-"bookmark_warning" = "There are bookmarks and/or notes for this document.";
-"recommended_document" = "Recommended!";
+"download_document_confirm_prefix" = "Baixa";
+"bookmark_warning4" = "Es recomana fer una còpia de seguretat del mòdul abans d'actualitzar-lo.";
+"bookmark_warning3" = "Encara voleu actualitzar el mòdul?";
+"bookmark_warning2" = "Si l'estructura del document ha canviat, actualitzar aquest document podria fer que les ubicacions d'aquests marcadors/notes es moguin dins del document o desapareguin completament.";
+"bookmark_warning" = "Hi ha marcadors i/o notes per a aquest document.";
+"recommended_document" = "Recomanat!";
 "bad_document_warning" = "Warning";
 "refresh_catalog" = "Refresh Catalog";
 "repositories" = "Repositories";
 "all_languages_count %lld" = "All Languages (%lld)";
 "documents_count %lld" = "%lld documents";
-"download_errors" = "Download errors";
-"install_zip" = "Load Documents From Files";
-"restore_database" = "Restore Database File";
+"download_errors" = "Errors de baixada";
+"install_zip" = "Carrega documents des de fitxers";
+"restore_database" = "Restaura el fitxer de base de dades";
 "refreshing_catalog" = "Refreshing catalog...";
 "no_modules_match_filters" = "No modules match your filters";
 "tap_refresh_to_load" = "Tap Refresh to load available modules";
@@ -225,9 +225,9 @@
 "delete_module_index_title" = "Delete Search Index";
 "delete_module_index_message_format" = "Delete the search index for %@?";
 "module_initials" = "Initials";
-"module_name" = "Name";
-"module_category" = "Category";
-"module_language" = "Language";
+"module_name" = "Nom";
+"module_category" = "Categoria";
+"module_language" = "Idioma";
 "module_source" = "Source";
 "module_versions" = "Versions";
 "module_latest_version" = "Latest";
@@ -254,19 +254,19 @@
 "line_spacing" = "Line Spacing";
 "justify_text" = "Justify Text";
 "verse_per_line" = "Verse Per Line";
-"hyphenation" = "Hyphenation";
-"settings_content" = "Content";
+"hyphenation" = "Separació de síl·labes";
+"settings_content" = "Contingut";
 "verse_numbers" = "Verse Numbers";
 "section_titles" = "Section Titles";
-"footnotes" = "Footnotes";
+"footnotes" = "Notes a peu de pàgina";
 "inline_footnotes" = "Inline Footnotes";
 "red_letters" = "Red Letters";
-"cross_references" = "Cross references";
+"cross_references" = "Referències creuades";
 "expand_cross_references" = "Expand Cross References";
 "strongs_numbers" = "Strong's Numbers";
 "morphology" = "Morphology";
 "settings_annotations" = "Annotations";
-"show_bookmarks" = "Show bookmarks";
+"show_bookmarks" = "Mostra els marcadors";
 "show_my_notes" = "Show My Notes";
 "verse_selection" = "Verse Selection";
 
@@ -277,13 +277,13 @@
 "night_theme" = "Night Theme";
 "text_color" = "Text Color";
 "background" = "Background";
-"color_workspace" = "Workspace color";
-"prefs_noise_title" = "Background noise";
-"prefs_noise_summary" = "Adding some noise to background might make it more comfortable to eyes.";
+"color_workspace" = "Color de l'espai de treball";
+"prefs_noise_title" = "Soroll de fons";
+"prefs_noise_summary" = "Afegir una mica de soroll al fons pot fer-lo més còmode per als ulls.";
 "reset_to_defaults" = "Reset to Defaults";
 
 /* Dictionaries */
-"settings_dictionaries" = "Dictionaries";
+"settings_dictionaries" = "Diccionaris";
 "hebrew_dictionary" = "Hebrew Dictionary";
 "greek_dictionary" = "Greek Dictionary";
 "no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
@@ -293,35 +293,35 @@
 "import_export" = "Import & Export";
 
 /* Security — Settings for the persecuted */
-"settings_security" = "Settings for the persecuted";
-"discrete_mode" = "Hide religious symbols";
+"settings_security" = "Configuració per a perseguits";
+"discrete_mode" = "Amaga els símbols religiosos";
 "discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
-"show_calculator" = "Calculator";
+"show_calculator" = "Calculadora";
 "show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
-"calculator_pin" = "Calculator PIN";
+"calculator_pin" = "PIN de la calculadora";
 "calculator_pin_placeholder" = "1234";
-"calculator_pin_description" = "PIN code to enter the app when the calculator is shown.";
-"discrete_help_title" = "Read this first!";
-"discrete_help_summary" = "Instructions for the settings and information about specific discrete build.";
+"calculator_pin_description" = "Codi PIN per entrar a l'aplicació quan es mostra la calculadora.";
+"discrete_help_title" = "Llegeix-ho primer!";
+"discrete_help_summary" = "Instruccions per a la configuració i informació sobre la versió discreta específica.";
 "discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
 "discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
 "discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
 "discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 /* About */
-"settings_language" = "Language";
+"settings_language" = "Idioma";
 "language_system_default" = "System Default";
 "language_restart_required" = "Restart the app for the language change to take effect.";
-"settings_about" = "About";
+"settings_about" = "Quant a";
 "version" = "Version";
 
 /* ========================================
    Import & Export
    ======================================== */
-"export" = "Export";
+"export" = "Exporta";
 "full_backup_json" = "Full Backup (JSON)";
 "export_footer" = "Export your data for backup or transfer to another device.";
-"import" = "Import";
+"import" = "Importa";
 "import_from_file" = "Import from File";
 "import_footer" = "Import data from a JSON backup or CSV bookmark file. Supported formats: .json, .csv, .bbl (MySword).";
 "modules" = "Modules";
@@ -338,7 +338,7 @@
 "installed_module_%@" = "Installed module: %@";
 "installed_epub_%@" = "Installed EPUB: %@";
 "installed_font_%@" = "Installed font: %@";
-"install_do_you_want" = "Do you want to install module (%@)?";
+"install_do_you_want" = "Voleu instal·lar el mòdul (%@)?";
 
 /* ========================================
    Repository Manager
@@ -352,18 +352,18 @@
 "reset_sources_title" = "Reset Sources?";
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Add custom repository";
-"custom_repositories" = "Custom repositories";
+"custom_repositories" = "Repositoris personalitzats";
 "custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
-"delete_custom_repository_message_format" = "Delete %@?";
+"delete_custom_repository_message_format" = "Suprimeix %@?";
 "delete_custom_repository_title" = "Delete repository";
 "edit_custom_repository" = "Edit custom repository";
-"help" = "Help";
+"help" = "Ajuda";
 "https" = "HTTPS";
 "open_wiki" = "Open Wiki";
 "repository_source_error" = "Repository source error";
-"repository_url" = "Repository URL";
+"repository_url" = "URL del repositori";
 "repository_url_placeholder" = "https://example.org/repository";
 "validating_repository" = "Validating repository";
 "source_details" = "Source Details";
@@ -382,15 +382,15 @@
 "reading_plan_no_plans_description" = "Start a reading plan to track your daily Bible reading.";
 "reading_plan_start" = "Start Plan";
 "reading_plan_active" = "Active Plans";
-"reading_plan_completed" = "Completed";
+"reading_plan_completed" = "Completat";
 "reading_plan_choose" = "Choose a reading plan to start";
 "reading_plan_import_custom" = "Import Custom Plan";
-"reading_plan_custom" = "Custom";
+"reading_plan_custom" = "Personalitzat";
 "reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
 "reading_plan_available" = "Available Plans";
 "reading_plan_import_error_read" = "Could not read file";
 "reading_plan_import_error_format" = "Invalid reading plan format";
-"plan_duplicate_user_plan" = "There is a user reading plan in sdcard jsword/readingplan with the same name as an internal plan. It can not be listed here. Please rename the file to something else, leaving it's file extension as .properties";
+"plan_duplicate_user_plan" = "Hi ha un pla de lectura d'usuari a la targeta SD jsword/readingplan amb el mateix nom que un pla intern. No es pot llistar aquí. Canvieu el nom del fitxer per un altre nom, deixant la seva extensió de fitxer com a .properties";
 
 /* Daily Reading */
 "daily_reading" = "Daily Reading";
@@ -403,9 +403,9 @@
 /* ========================================
    Speak / TTS
    ======================================== */
-"speak" = "Speak";
-"pause" = "Pause";
-"stop" = "Stop";
+"speak" = "Parla";
+"pause" = "Pausa";
+"stop" = "Atura";
 "speed" = "Speed";
 "sleep_timer" = "Sleep Timer";
 "speak_now_speaking" = "Now Speaking";
@@ -428,7 +428,7 @@
 /* ========================================
    Cross References
    ======================================== */
-"cross_references" = "Cross references";
+"cross_references" = "Referències creuades";
 
 /* ========================================
    Workspace
@@ -452,9 +452,9 @@
 "maximize" = "Maximize";
 "minimize" = "Minimize";
 "sync_scrolling" = "Sync Scrolling";
-"pin" = "Pin";
+"pin" = "Fixa";
 "sync_group" = "Sync Group";
-"restore" = "Restore";
+"restore" = "Restaura";
 
 /* ========================================
    Dictionary / General Books
@@ -495,7 +495,7 @@
 /* ========================================
    Sharing
    ======================================== */
-"share_verse" = "Share…";
+"share_verse" = "Comparteix…";
 "copy_verse" = "Copy Verse";
 
 /* ========================================
@@ -518,7 +518,7 @@
 "%lld days" = "%lld days";
 
 /* Search */
-"Find in %@" = "Find in %@";
+"Find in %@" = "Cerca a %@";
 "Create an index for %@?" = "Create an index for %@?";
 "Creating index. Processing %@" = "Creating index. Processing %@";
 "No matches found for \"%@\"" = "No matches found for \"%@\"";
@@ -545,37 +545,37 @@
 "%lld windows" = "%lld windows";
 
 /* Text Display Settings */
-"global_text_display_settings_title" = "Global text options";
-"global_text_display_settings_summary" = "Default text display settings for all workspaces";
-"workspace_text_display_settings_title" = "Text options - %@";
-"window_text_display_settings_title" = "Text options - Window %d";
-"parent_settings_category_title" = "Parent settings";
-"workspace_text_options_link" = "Workspace text options — %@";
-"workspace_text_options_link_summary" = "Edit text display settings for this workspace";
-"global_text_options_link" = "Global text options";
-"global_text_options_link_summary" = "Edit default text display settings for all workspaces";
-"text_display_font_size_title_format" = "Font size (%d pt)";
-"text_display_font_family_title_format" = "Font family (%@)";
-"text_display_line_spacing_title_format" = "Line spacing (%1.1fx)";
+"global_text_display_settings_title" = "Opcions de text globals";
+"global_text_display_settings_summary" = "Configuració de visualització del text per defecte per a tots els espais de treball";
+"workspace_text_display_settings_title" = "Opcions de text - %@";
+"window_text_display_settings_title" = "Opcions de text - Finestra %d";
+"parent_settings_category_title" = "Configuració pare";
+"workspace_text_options_link" = "Opcions de text de l'espai de treball — %@";
+"workspace_text_options_link_summary" = "Edita la configuració de visualització del text per a aquest espai de treball";
+"global_text_options_link" = "Opcions de text globals";
+"global_text_options_link_summary" = "Edita la configuració de visualització del text per defecte per a tots els espais de treball";
+"text_display_font_size_title_format" = "Mida del tipus de lletra (%d pt)";
+"text_display_font_family_title_format" = "Família de tipus de lletra (%@)";
+"text_display_line_spacing_title_format" = "Interlineat (%1.1fx)";
 "text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
-"text_display_top_margin_title_format" = "Top margin (%d mm)";
-"text_display_left_margin_title_format" = "Left margin (%d mm)";
-"text_display_right_margin_title_format" = "Right margin (%d mm)";
-"text_display_max_width_title_format" = "Maximum width of text (%d mm)";
+"text_display_top_margin_title_format" = "Marge superior (%d mm)";
+"text_display_left_margin_title_format" = "Marge esquerre (%d mm)";
+"text_display_right_margin_title_format" = "Marge dret (%d mm)";
+"text_display_max_width_title_format" = "Amplada màxima del text (%d mm)";
 
 /* ========================================
    Quick Settings & Help
    ======================================== */
-"fullscreen" = "Fullscreen";
+"fullscreen" = "Pantalla completa";
 "tilt_to_scroll" = "Tilt to Scroll";
-"reversed_split_mode" = "Reversed split mode";
+"reversed_split_mode" = "Mode de divisió invertit";
 "window_pinning" = "Window Pinning";
 "label_settings" = "Label Settings";
-"all_text_options_window_menutitle" = "All text options";
+"all_text_options_window_menutitle" = "Totes les opcions de text";
 "all_text_options" = "All Text Options";
 "help_tips" = "Help & Tips";
 "sponsor_development" = "Sponsor Development";
-"about" = "About";
+"about" = "Quant a";
 "rate_app" = "Rate App";
 "report_bug" = "Report Bug";
 "tell_friend" = "Tell a Friend";
@@ -589,19 +589,19 @@
 "about_license" = "License (GPLv3)";
 
 /* Help Sections */
-"help_navigation" = "Navigation";
+"help_navigation" = "Navegació";
 "help_navigation_body" = "Swipe left or right to move between chapters. Tap the book name in the toolbar to choose a different book and chapter.";
 "help_selection" = "Text Selection";
 "help_selection_body" = "Long-press on a verse to select it. An action bar appears with options: Bookmark, Copy, Share, Compare, Speak, and Web Search.";
 "help_pinning" = "Window Pinning";
 "help_pinning_body" = "When you have multiple windows, pin a window to keep it visible when switching Bible/Commentary categories.";
-"help_bookmarks" = "Bookmarks";
+"help_bookmarks" = "Marcadors";
 "help_bookmarks_body" = "Long-press a verse and tap Bookmark. Add labels to organize and notes for your thoughts.";
 "help_studypads" = "StudyPads";
 "help_studypads_body" = "Rich text journals attached to labels. Access them from the label manager or bookmark list.";
-"help_search" = "Search";
+"help_search" = "Cerca";
 "help_search_body" = "Full-text search with All Words, Any Word, and Phrase modes. You will be prompted to create an index on first use.";
-"help_workspaces" = "Workspaces";
+"help_workspaces" = "Espais de treball";
 "help_workspaces_body" = "Save different window arrangements as workspaces. Switch between them from the overflow menu.";
 "help_hidden" = "Hidden Features";
 "help_hidden_body" = "Double-tap the Bible text for fullscreen mode. Enable Tilt to Scroll in the overflow menu. Discrete calculator mode is available in Settings.";
@@ -616,7 +616,7 @@
 "icloud_account" = "iCloud Account";
 "last_sync" = "Last Sync";
 "sync_active" = "Active";
-"sync_disabled" = "Disabled";
+"sync_disabled" = "Desactivat";
 "syncing" = "Syncing…";
 "no_icloud_account" = "No iCloud Account";
 "icloud_signed_in" = "Signed In";
@@ -631,170 +631,170 @@
 "disable_sync" = "Disable Sync";
 "disable_sync_warning" = "Data already synced to iCloud will remain. New changes will only be saved locally.";
 
-"prefs_behavior_customization_cat" = "Application behavior";
-"prefs_display_customization_cat" = "Look & feel";
-"prefs_advanced_settings_cat" = "Advanced settings";
+"prefs_behavior_customization_cat" = "Comportament de l'aplicació";
+"prefs_display_customization_cat" = "Aspecte i presentació";
+"prefs_advanced_settings_cat" = "Configuració avançada";
 
-"prefs_toolbar_button_action_title" = "Action for toolbar button press";
-"prefs_toolbar_button_action_summary" = "Action to take when pressing/long-pressing Bible or Commentary toolbar buttons";
-"prefs_toolbar_button_action_default" = "Press to open menu, long press for documents screen (default)";
-"prefs_toolbar_button_action_swap_menu" = "Press to open next document, long press to open menu";
-"prefs_toolbar_button_action_swap_activity" = "Press to open next document, long press for documents screen";
+"prefs_toolbar_button_action_title" = "Acció del botó de la barra d'eines";
+"prefs_toolbar_button_action_summary" = "Acció a realitzar en prémer/mantenir premuts els botons de la barra d'eines de la Bíblia o el Comentari";
+"prefs_toolbar_button_action_default" = "Prem per obrir el menú, mantén premut per a la pantalla de documents (per defecte)";
+"prefs_toolbar_button_action_swap_menu" = "Prem per obrir el document següent, mantén premut per obrir el menú";
+"prefs_toolbar_button_action_swap_activity" = "Prem per obrir el document següent, mantén premut per a la pantalla de documents";
 
 
-"add_bookmark3" = "Selection";
-"add_bookmark_whole_verse1" = "Verses";
-"prefs_disable_two_step_bookmarking_title" = "One-step bookmarking";
-"prefs_disable_two_step_bookmarking_summary" = "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu";
+"add_bookmark3" = "Selecció";
+"add_bookmark_whole_verse1" = "Versets";
+"prefs_disable_two_step_bookmarking_title" = "Marcadors en un pas";
+"prefs_disable_two_step_bookmarking_summary" = "Mostra els elements «Selecció» i «Versets» directament al menú de selecció de la vista Bíblia";
 
-"active_window_indicator_summary" = "Highlight window corners to help recognising which window is active";
-"active_window_indicator_title" = "Show active window indicator";
-"auto_fullscreen" = "Fullscreen by scrolling";
-"auto_fullscreen_summary" = "Switch automatically to fullscreen when scrolling text. Tip: you can always also switch to full screen by doubletapping screen.";
-"choose_strongs_greek_dictionary_summary" = "Choose Strongs dictionary for Greek word definitions";
-"choose_strongs_greek_dictionary_title" = "Strongs Greek dictionary";
-"choose_strongs_greek_morphology_summary" = "Choose dictionary for Robinson Greek morphology definitions";
-"choose_strongs_greek_morphology_title" = "Robinson Greek morphology";
-"choose_strongs_hebrew_dictionary_summary" = "Choose Strongs dictionary for Hebrew word definitions";
-"choose_strongs_hebrew_dictionary_title" = "Strongs Hebrew dictionary";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
-"full_screen_hide_buttons_pref_summary" = "When switching to fullscreen mode, hide automatically window button bar that is on the bottom of the screen";
-"full_screen_hide_buttons_pref_title" = "Hide window button bar in fullscreen";
-"hide_bible_reference_overlay_summary" = "Do not show the semi-transparent Bible reference overlay when app is in fullscreen mode";
-"hide_bible_reference_overlay_title" = "Hide Bible reference overlay";
-"hide_window_buttons_summary" = "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them.";
-"hide_window_buttons_title" = "Hide window buttons";
+"active_window_indicator_summary" = "Ressalta les cantonades de la finestra per ajudar a reconèixer quina finestra està activa";
+"active_window_indicator_title" = "Mostra l'indicador de finestra activa";
+"auto_fullscreen" = "Pantalla completa en desplaçar";
+"auto_fullscreen_summary" = "Canvia automàticament a pantalla completa en desplaçar el text. Consell: també pots canviar a pantalla completa fent doble toc a la pantalla.";
+"choose_strongs_greek_dictionary_summary" = "Tria el diccionari de Strong per a les definicions de paraules gregues";
+"choose_strongs_greek_dictionary_title" = "Diccionari grec de Strong";
+"choose_strongs_greek_morphology_summary" = "Tria el diccionari per a les definicions de morfologia grega de Robinson";
+"choose_strongs_greek_morphology_title" = "Morfologia grega de Robinson";
+"choose_strongs_hebrew_dictionary_summary" = "Tria el diccionari de Strong per a les definicions de paraules hebrees";
+"choose_strongs_hebrew_dictionary_title" = "Diccionari hebreu de Strong";
+"choose_word_lookup_dictionary_summary" = "Tria els diccionaris per cercar paraules";
+"choose_word_lookup_dictionary_title" = "Diccionaris de cerca de paraules";
+"full_screen_hide_buttons_pref_summary" = "En canviar al mode de pantalla completa, amaga automàticament la barra de botons de finestra que hi ha a la part inferior de la pantalla";
+"full_screen_hide_buttons_pref_title" = "Amaga la barra de botons de finestra en pantalla completa";
+"hide_bible_reference_overlay_summary" = "No mostris la superposició semitransparent de referència bíblica quan l'aplicació estigui en mode de pantalla completa";
+"hide_bible_reference_overlay_title" = "Amaga la superposició de referència bíblica";
+"hide_window_buttons_summary" = "Els botons de finestra que es mostren a la dreta de les vistes bíbliques estan ocults. La barra de navegació de finestres a la part inferior continua visible i pots obrir el menú emergent de la finestra prement-los de manera prolongada.";
+"hide_window_buttons_title" = "Amaga els botons de finestra";
 "show_window_buttons_title" = "Show window buttons";
 "hide_window_buttons_hint" = "Hides the window button strip";
 "show_window_buttons_hint" = "Shows the window button strip";
-"pref_font_size_multiplier_title" = "Font size multiplier";
-"prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
-"prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
-"prefs_disable_animations_summary" = "Disable various animations such as smooth scrolling.";
-"prefs_disable_animations_title" = "Disable animations";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
-"prefs_notes_content_type_title" = "Format for new bookmark notes";
-"prefs_notes_content_type_summary" = "Text format used when creating new bookmark notes and Study Pad entries";
-"notes_content_type_html" = "Rich text (HTML)";
+"pref_font_size_multiplier_title" = "Multiplicador de mida de lletra";
+"prefs_bible_view_swipe_mode_summary" = "El gest de lliscar a l'esquerra / dreta es pot fer servir per anar a la pàgina / capítol següent.";
+"prefs_bible_view_swipe_mode_title" = "Acció per al gest de lliscar a l'esquerra / dreta";
+"prefs_disable_animations_summary" = "Desactiva diverses animacions com ara el desplaçament suau.";
+"prefs_disable_animations_title" = "Desactiva les animacions";
+"prefs_disable_click_to_edit_summary" = "Cal usar el botó d'edició per editar notes al Bloc d'estudi.";
+"prefs_disable_click_to_edit_title" = "Desactiva el clic per editar al Bloc d'estudi";
+"prefs_notes_content_type_title" = "Format per a les notes de marcador noves";
+"prefs_notes_content_type_summary" = "Format de text utilitzat en crear notes de marcador noves i entrades del Bloc d'estudi";
+"notes_content_type_html" = "Text enriquit (HTML)";
 "notes_content_type_markdown" = "Markdown";
-"prefs_double_tap_to_fullscreen_summary" = "Enter fullscreen mode by double-tapping window";
-"prefs_double_tap_to_fullscreen_title" = "Double-tap to Fullscreen";
-"prefs_e_ink_mode_title" = "Black & white mode";
-"prefs_eink_mode_summary" = "Use application in monochrome mode (no colors), making it more suitable for E-ink devices.";
-"prefs_interface_locale_summary" = "Select custom user interface language";
-"prefs_interface_locale_title" = "Application language";
-"prefs_navigate_to_verse_summary" = "Choose verse (and chapter) when selecting a passage";
-"prefs_navigate_to_verse_title" = "Navigate to verse";
-"prefs_night_mode_automatic" = "Automatic";
+"prefs_double_tap_to_fullscreen_summary" = "Entra en mode de pantalla completa amb un doble toc a la finestra";
+"prefs_double_tap_to_fullscreen_title" = "Doble toc per a pantalla completa";
+"prefs_e_ink_mode_title" = "Mode blanc i negre";
+"prefs_eink_mode_summary" = "Utilitza l'aplicació en mode monocrom (sense colors), fet que la fa més adequada per a dispositius de tinta electrònica.";
+"prefs_interface_locale_summary" = "Selecciona un idioma personalitzat per a la interfície d'usuari";
+"prefs_interface_locale_title" = "Idioma de l'aplicació";
+"prefs_navigate_to_verse_summary" = "Tria el verset (i el capítol) quan selecciones un passatge";
+"prefs_navigate_to_verse_title" = "Navega al verset";
+"prefs_night_mode_automatic" = "Automàtic";
 "prefs_night_mode_manual" = "Manual";
-"prefs_night_mode_summary" = "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen.";
-"prefs_night_mode_system" = "System";
-"prefs_night_mode_title" = "Night mode switching";
-"prefs_open_links_in_special_window_summary" = "Open links in special window, for quicker display of cross-references and Strongs";
-"prefs_open_links_in_special_window_title" = "Links window";
-"prefs_screen_keep_on_summary" = "Prevent screen sleeping while using this app";
-"prefs_screen_keep_on_title" = "Keep screen on";
-"prefs_show_error_box_summary" = "Useful for developers when debugging BibleView javascript side errors. This will make the app slower.";
-"prefs_show_error_box_title" = "Show Javascript error box";
-"prefs_swipe_mode_chapter" = "Chapter";
-"prefs_swipe_mode_none" = "Disabled";
-"prefs_swipe_mode_page" = "Page";
+"prefs_night_mode_summary" = "Si es vol canviar al mode nocturn automàticament (si el dispositiu ho admet), manualment o mitjançant la configuració del sistema (Android 10+). La commutació manual es pot fer des del menú de tres punts de la pantalla principal.";
+"prefs_night_mode_system" = "Sistema";
+"prefs_night_mode_title" = "Commutació del mode nocturn";
+"prefs_open_links_in_special_window_summary" = "Obre els enllaços en una finestra especial, per mostrar ràpidament les referències creuades i els números de Strong";
+"prefs_open_links_in_special_window_title" = "Finestra d'enllaços";
+"prefs_screen_keep_on_summary" = "Evita que la pantalla s'apagui mentre s'utilitza aquesta aplicació";
+"prefs_screen_keep_on_title" = "Mantén la pantalla encesa";
+"prefs_show_error_box_summary" = "Útil per als desenvolupadors quan depuren errors de Javascript al costat de BibleView. Això farà que l'aplicació vagi més lenta.";
+"prefs_show_error_box_title" = "Mostra el quadre d'errors de Javascript";
+"prefs_swipe_mode_chapter" = "Capítol";
+"prefs_swipe_mode_none" = "Desactivat";
+"prefs_swipe_mode_page" = "Pàgina";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Els botons de volum desplacen";
+"prefs_volume_keys_scroll_summary" = "Fes servir pujar/baixar volum per desplaçar el text de la Bíblia";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
-"prefs_experimental_features_title" = "Experimental features";
-"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
-"experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
-"experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";
-"prefs_enable_bluetooth_title" = "Enable Bluetooth media buttons";
-"prefs_enable_bluetooth_summary" = "Handle Bluetooth media buttons to start/stop speaking.";
+"prefs_experimental_features_title" = "Funcions experimentals";
+"prefs_experimental_features_summary" = "Selecciona quines funcions experimentals vols activar. Aquestes funcions encara estan en desenvolupament i poden canviar o eliminar-se";
+"experimental_feature_bookmark_edit_actions" = "Accions d'edició de marcadors";
+"experimental_feature_add_paragraph_break" = "Afegeix un marcador de salt de paràgraf";
+"prefs_enable_bluetooth_title" = "Activa els botons multimèdia Bluetooth";
+"prefs_enable_bluetooth_summary" = "Gestiona els botons multimèdia Bluetooth per iniciar/aturar la parla.";
 
-"open_bible_links_title" = "Open Bible links in AndBible";
-"open_bible_links_summary" = "When clicking links that refer to AndBible supported Bible URL, open them in AndBible";
+"open_bible_links_title" = "Obre els enllaços bíblics a AndBible";
+"open_bible_links_summary" = "Quan facis clic en enllaços que fan referència a una URL bíblica compatible amb AndBible, obrir-los a AndBible";
 
 "crash_app" = "Crash app!";
 "crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";
 "crash_app_scheduled_summary" = "Crash scheduled in 10 seconds.";
-"sign_in_failed" = "Signing in to synchronization backend service failed.";
-"sync_adapter" = "Synchronization Backend";
-"sync_adapter_summary" = "Current: %@";
+"sign_in_failed" = "Ha fallat l'inici de sessió al servei de sincronització.";
+"sync_adapter" = "Servei de sincronització";
+"sync_adapter_summary" = "Actual: %@";
 "adapters_next_cloud" = "Next Cloud";
-"auth_server_uri" = "Server URL";
-"auth_username" = "User name";
-"auth_password" = "Password";
-"auth_folder_path" = "Sync folder path";
-"auth_folder_path_summary" = "Parent folder for sync data (empty = root)";
-"invalid_url_message" = "The URL you entered is invalid. Please enter a valid URL (e.g., https://nextcloud.example.com)";
-"prefs_sync_introduction_summary1" = "Choose which backend cloud service you want to use to synchronize multiple devices.";
+"auth_server_uri" = "URL del servidor";
+"auth_username" = "Nom d'usuari";
+"auth_password" = "Contrasenya";
+"auth_folder_path" = "Ruta de la carpeta de sincronització";
+"auth_folder_path_summary" = "Carpeta principal per a les dades de sincronització (buit = arrel)";
+"invalid_url_message" = "L'URL que has introduït no és vàlida. Introdueix una URL vàlida (p. ex., https://nextcloud.example.com)";
+"prefs_sync_introduction_summary1" = "Tria quin servei de núvol vols fer servir per sincronitzar múltiples dispositius.";
 "test_connection" = "Test Connection";
-"overrideBackup" = "Existing database that this device is not synchronized to is found in Cloud. Database contains %@. What do you want to do?";
-"cloud_fetch_and_restore_initial" = "Copy from Cloud to this device";
-"cloud_create_new" = "Copy from this device to Cloud";
-"cloud_disable_sync" = "Cancel & disable synchronization";
-"cloud_sync_title" = "Device synchronization";
-"application_preferences" = "Application preferences";
-"are_you_sure_reset_local" = "This will reset your local database for %@ with the content that is currently stored in cloud service.";
-"are_you_sure_reset_cloud" = "This will reset your cloud database for %@ with the content that you have in this device.";
-"reading_plans_content" = "Reading plans and their statuses";
-"bookmarks_contents" = "Bookmarks, Labels and Study Pads";
-"workspaces_contents" = "Workspaces and Windows";
-"my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their content";
-"synchronization_categories" = "Synchronization categories";
-"sync_error" = "Error occurred in Cloud synchronization";
-"sync_cant_fetch" = "The version of database or patch file stored in Cloud is higher than the one supported by this app.";
-"sync_disabling" = "Disabling synchronizing for %@ for now.";
-"sync_update_app" = "Please update the app to continue synchronization.";
-"last_updated" = "Last updated: %@";
+"overrideBackup" = "S'ha trobat al núvol una base de dades existent amb la qual aquest dispositiu no està sincronitzat. La base de dades conté %@. Què vols fer?";
+"cloud_fetch_and_restore_initial" = "Copia del núvol a aquest dispositiu";
+"cloud_create_new" = "Copia d'aquest dispositiu al núvol";
+"cloud_disable_sync" = "Cancel·la i desactiva la sincronització";
+"cloud_sync_title" = "Sincronització del dispositiu";
+"application_preferences" = "Preferències de l'aplicació";
+"are_you_sure_reset_local" = "Això restablirà la teva base de dades local per a %@ amb el contingut emmagatzemat actualment al servei al núvol.";
+"are_you_sure_reset_cloud" = "Això restablirà la teva base de dades al núvol per a %@ amb el contingut que tens en aquest dispositiu.";
+"reading_plans_content" = "Plans de lectura i els seus estats";
+"bookmarks_contents" = "Marcadors, Etiquetes i Blocs d'estudi";
+"workspaces_contents" = "Espais de treball i Finestres";
+"my_documents" = "Els meus documents";
+"my_documents_contents" = "Els meus documents i el seu contingut";
+"synchronization_categories" = "Categories de sincronització";
+"sync_error" = "S'ha produït un error a la sincronització al núvol";
+"sync_cant_fetch" = "La versió de la base de dades o del fitxer de pedaç emmagatzemat al núvol és superior a la que admet aquesta aplicació.";
+"sync_disabling" = "Desactivant la sincronització per a %@ de moment.";
+"sync_update_app" = "Actualitza l'aplicació per continuar la sincronització.";
+"last_updated" = "Última actualització: %@";
 
-"help_workspaces_title" = "Workspaces";
-"reading_plans_plural" = "Reading Plans";
+"help_workspaces_title" = "Espais de treball";
+"reading_plans_plural" = "Plans de lectura";
 
 /* Android window popup menu parity */
-"windowMaximise" = "Maximise";
-"windowMinimise" = "Minimise";
-"change_to_normal" = "Change to normal window";
-"move_window" = "Move to";
-"move_window_to_position2" = "Position %1$d (%2$@:%3$@)";
-"window_pin_mode" = "Pin";
-"windowSynchronise" = "Synchronise";
-"window_disable_sync" = "Disable synchronize";
-"sync_group_n" = "Group %d";
-"text_options_window_menutitle" = "Text options";
-"prefs_text_colors_menutitle" = "Color settings";
-"prefs_section_title_title" = "Section titles";
-"prefs_show_strongs_title" = "Strong's numbers";
-"prefs_show_verseno_title" = "Chapter & verse numbers";
-"copy_settings" = "Copy settings to";
-"copy_settings_to_workspace" = "Workspace";
-"copy_settings_to_window" = "Window %1$d (%2$@: %3$@)";
-"copy_settings_to_global" = "Global defaults";
-"copyReference" = "Copy link to clipboard";
-"reference_copied_to_clipboard" = "Reference copied to clipboard";
+"windowMaximise" = "Maximitza";
+"windowMinimise" = "Minimitza";
+"change_to_normal" = "Canvia a finestra normal";
+"move_window" = "Mou a";
+"move_window_to_position2" = "Posició %1$d (%2$@:%3$@)";
+"window_pin_mode" = "Fixa";
+"windowSynchronise" = "Sincronitza";
+"window_disable_sync" = "Desactiva la sincronització";
+"sync_group_n" = "Grup %d";
+"text_options_window_menutitle" = "Opcions de text";
+"prefs_text_colors_menutitle" = "Configuració de colors";
+"prefs_section_title_title" = "Títols de secció";
+"prefs_show_strongs_title" = "Números de Strong";
+"prefs_show_verseno_title" = "Números de capítol i verset";
+"copy_settings" = "Copia la configuració a";
+"copy_settings_to_workspace" = "Espai de treball";
+"copy_settings_to_window" = "Finestra %1$d (%2$@: %3$@)";
+"copy_settings_to_global" = "Valors per defecte globals";
+"copyReference" = "Copia l'enllaç al porta-retalls";
+"reference_copied_to_clipboard" = "Referència copiada al porta-retalls";
 "add_ellipsis" = "%@…";
-"copy_settings_title" = "Which settings do you want to copy?";
-"select_all" = "Select all";
-"select_none" = "Select none";
+"copy_settings_title" = "Quina configuració vols copiar?";
+"select_all" = "Selecciona-ho tot";
+"select_none" = "No en seleccionis cap";
 "font" = "Font";
 "margin_size" = "Margin size";
-"top_margin" = "Top margin";
+"top_margin" = "Marge superior";
 "footnotes_inline" = "Inline footnotes";
 "expand_cross_references" = "Expand cross references";
-"cross_references" = "Cross references";
+"cross_references" = "Referències creuades";
 "verse_per_line" = "Verse per line";
-"show_bookmarks" = "Show bookmarks";
+"show_bookmarks" = "Mostra els marcadors";
 "hide_labels" = "Hide labels";
 "my_notes" = "My notes";
 "page_number" = "Page number";
-"infinite_scroll" = "Infinite scroll";
-"non_strongs_word_italic" = "Italicize added words";
-"mark_as_read_button" = "Mark as read button";
-"title_scroll_button" = "Title scroll button";
-"memorization_indicators" = "Memorization indicators";
+"infinite_scroll" = "Desplaçament infinit";
+"non_strongs_word_italic" = "Paraules afegides en cursiva";
+"mark_as_read_button" = "Botó de marcar com a llegit";
+"title_scroll_button" = "Botó de desplaçament al títol";
+"memorization_indicators" = "Indicadors de memorització";
 "ai_document_markers" = "AI document markers";
-"page_scroll_amount" = "Page scroll amount";
+"page_scroll_amount" = "Quantitat de desplaçament de pàgina";
 "ordinals" = "Ordinals";
-"error_no_content" = "No content for selected verse";
+"error_no_content" = "No hi ha contingut per al verset seleccionat";

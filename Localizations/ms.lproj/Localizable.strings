@@ -4,67 +4,67 @@
    General / Shared
    ======================================== */
 "app_name" = "AndBible";
-"done" = "Done";
-"cancel" = "Cancel";
-"delete" = "Delete";
-"save" = "Save";
+"done" = "Selesai";
+"cancel" = "Batal";
+"delete" = "Padamkan";
+"save" = "Simpan";
 "edit" = "Edit";
 "add" = "Add";
-"search" = "Find";
-"settings" = "Application preferences";
-"close" = "Close";
+"search" = "Cari";
+"settings" = "Keutamaan aplikasi";
+"close" = "Tutup";
 "ok" = "OK";
-"yes" = "Yes";
-"no" = "No";
-"error" = "Error";
+"yes" = "Ya";
+"no" = "Tidak";
+"error" = "Ralat";
 "loading" = "Loading...";
-"create" = "Create";
-"new_window" = "New window";
+"create" = "Buat";
+"new_window" = "Tetingkap baharu";
 "clear" = "Clear";
-"reset" = "Reset";
+"reset" = "Set semula";
 "retry" = "Retry";
-"all" = "All";
+"all" = "Semua";
 "sort" = "Sort";
-"name" = "Name";
+"name" = "Nama";
 "untitled" = "Untitled";
-"compare" = "Compare";
-"translations" = "Translations";
+"compare" = "Bandingkan";
+"translations" = "Terjemahan";
 "auto" = "Auto";
 "off" = "Off";
 "inline" = "Inline";
-"links" = "Links";
+"links" = "Pautan";
 "hidden" = "Hidden";
-"completed" = "Completed";
+"completed" = "Selesai";
 "no_results" = "No Results";
 "searching" = "Searching...";
 
 /* ========================================
    Navigation / Bible Reader
    ======================================== */
-"bible" = "Bible";
-"deuterocanonical" = "Deuterocanonical";
-"bookmarks" = "Bookmarks";
-"reading_plans" = "Reading Plans";
+"bible" = "Alkitab";
+"deuterocanonical" = "Deuterokanonika";
+"bookmarks" = "Penanda buku";
+"reading_plans" = "Rancangan Bacaan";
 "downloads" = "Downloads";
-"history" = "History";
-"workspaces" = "Workspaces";
+"history" = "Sejarah";
+"workspaces" = "Ruang Kerja";
 "definition" = "Definition";
-"dictionary" = "Dictionary";
-"general_book" = "Book";
-"map" = "Map";
+"dictionary" = "Kamus";
+"general_book" = "Buku";
+"map" = "Peta";
 "locked" = "Locked";
 
 /* Bible Navigation */
-"choose_book" = "Choose Book";
+"choose_book" = "Pilih Buku";
 "books" = "Books";
-"old_testament" = "Old Testament";
-"new_testament" = "New Testament";
+"old_testament" = "Perjanjian Lama";
+"new_testament" = "Perjanjian Baharu";
 "previous_chapter" = "Previous chapter";
 "next_chapter" = "Next chapter";
 "back_to_bible" = "Back to Bible";
 
 /* Module Pickers */
-"choose_document" = "Choose Document";
+"choose_document" = "Pilih Dokumen";
 "document_type" = "Document type";
 "picker_select_translation" = "Select Translation";
 "picker_select_commentary" = "Select Commentary";
@@ -77,23 +77,23 @@
 "picker_no_general_book_modules" = "No general book modules installed";
 "picker_no_map_modules" = "No map modules installed";
 "download_modules" = "Download Modules";
-"download_document_confirm_prefix" = "Download";
-"bookmark_warning4" = "It is recommended that you backup the module before updating.";
-"bookmark_warning3" = "Do you still want to update module?";
-"bookmark_warning2" = "If document structure has changed, updating this document could make the locations of these bookmarks/notes move inside the document or disappear completely.";
-"bookmark_warning" = "There are bookmarks and/or notes for this document.";
+"download_document_confirm_prefix" = "Muat turun";
+"bookmark_warning4" = "Adalah disyorkan agar anda membuat sandaran modul sebelum mengemas kini.";
+"bookmark_warning3" = "Adakah anda masih ingin mengemas kini modul?";
+"bookmark_warning2" = "Jika struktur dokumen telah berubah, mengemas kini dokumen ini boleh menyebabkan lokasi penanda buku/nota ini berpindah dalam dokumen atau hilang sepenuhnya.";
+"bookmark_warning" = "Terdapat penanda buku dan/atau nota untuk dokumen ini.";
 /* Toolbar / Actions */
 "toggle_strongs_numbers" = "Toggle Strong's numbers";
-"bookmark" = "Bookmark";
-"copy" = "Copy";
-"share" = "Share";
+"bookmark" = "Penanda Buku";
+"copy" = "Salin";
+"share" = "Kongsi";
 "search_web" = "Web";
 
 /* Strong's Modes */
 "strongs_off" = "Off";
-"strongs_inline" = "Text and Links";
-"strongs_links" = "Links";
-"strongs_hidden" = "Hidden Links";
+"strongs_inline" = "Teks dan Pautan";
+"strongs_links" = "Pautan";
+"strongs_hidden" = "Pautan Tersembunyi";
 "find_all_occurrences" = "Find all occurrences";
 "no_dictionary_installed" = "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads.";
 "back_to_previous" = "Back";
@@ -104,7 +104,7 @@
 "add_bookmark" = "Add Bookmark";
 "edit_bookmark" = "Edit Bookmark";
 "bookmark_note" = "Note";
-"labels" = "Labels";
+"labels" = "Label";
 "new_label" = "New Label";
 "study_pad" = "StudyPad";
 "my_notes" = "My Notes";
@@ -120,10 +120,10 @@
 "no_labels" = "No Labels";
 "no_labels_description" = "Create labels to organize your bookmarks and notes.";
 "label_name" = "Label name";
-"studypad" = "Study Pad";
+"studypad" = "Pad Kajian";
 "open_studypad" = "Open StudyPad";
 "edit_label" = "Edit label";
-"label_edit_name" = "Name";
+"label_edit_name" = "Nama";
 "label_edit_color" = "Color";
 "label_edit_icon" = "Icon";
 "no_icon" = "No Icon";
@@ -141,35 +141,35 @@
 /* ========================================
    Search
    ======================================== */
-"search_bible" = "Search Bible";
+"search_bible" = "Cari Alkitab";
 "search_results" = "Search Results";
-"whole_bible" = "Whole Bible";
+"whole_bible" = "Seluruh Alkitab";
 "old_testament_short" = "OT";
 "new_testament_short" = "NT";
 "current_book" = "Current Book";
-"search_index" = "Search Index";
+"search_index" = "Indeks Carian";
 "search_checking_index" = "Checking index...";
 "search_need_index" = "To search a document we need an index.";
-"search_create_index" = "Create";
-"search_indexing_message" = "When indexing has completed you will be taken to the search screen.";
+"search_create_index" = "Buat";
+"search_indexing_message" = "Apabila pengindeksan selesai, anda akan dibawa ke skrin carian.";
 "search_searching" = "Searching...";
 "search_enter_prompt" = "Enter a word or phrase to search";
 "search_bible_text" = "Search Bible text";
 "search_match" = "Match";
-"search_scope_all" = "All";
+"search_scope_all" = "Semua";
 "search_scope_ot" = "OT";
 "search_scope_nt" = "NT";
-"search_translations" = "Translations";
-"search_all" = "All";
+"search_translations" = "Terjemahan";
+"search_all" = "Semua";
 
 /* ========================================
    Downloads / Module Browser
    ======================================== */
 "module_browser" = "Module Browser";
-"doc_type_all" = "All types";
+"doc_type_all" = "Semua jenis";
 "bibles" = "Bibles";
 "commentaries" = "Commentaries";
-"dictionaries" = "Dictionaries";
+"dictionaries" = "Kamus";
 "category_books" = "Books";
 "maps" = "Maps";
 "doc_type_addons" = "Add-ons";
@@ -179,7 +179,7 @@
 "update" = "Update";
 "uninstall" = "Uninstall";
 "unavailable" = "Unavailable";
-"recommended_document" = "Recommended!";
+"recommended_document" = "Disyorkan!";
 "bad_document_warning" = "Warning";
 "refresh_catalog" = "Refresh Catalog";
 "repositories" = "Repositories";
@@ -194,9 +194,9 @@
 "delete_module_index_title" = "Delete Search Index";
 "delete_module_index_message_format" = "Delete the search index for %@?";
 "module_initials" = "Initials";
-"module_name" = "Name";
-"module_category" = "Category";
-"module_language" = "Language";
+"module_name" = "Nama";
+"module_category" = "Kategori";
+"module_language" = "Bahasa";
 "module_source" = "Source";
 "module_versions" = "Versions";
 "module_latest_version" = "Latest";
@@ -223,19 +223,19 @@
 "line_spacing" = "Line Spacing";
 "justify_text" = "Justify Text";
 "verse_per_line" = "Verse Per Line";
-"hyphenation" = "Hyphenation";
-"settings_content" = "Content";
+"hyphenation" = "Pemotongan suku kata";
+"settings_content" = "Kandungan";
 "verse_numbers" = "Verse Numbers";
 "section_titles" = "Section Titles";
-"footnotes" = "Footnotes";
+"footnotes" = "Nota kaki";
 "inline_footnotes" = "Inline Footnotes";
 "red_letters" = "Red Letters";
-"cross_references" = "Cross references";
+"cross_references" = "Rujukan silang";
 "expand_cross_references" = "Expand Cross References";
 "strongs_numbers" = "Strong's Numbers";
 "morphology" = "Morphology";
 "settings_annotations" = "Annotations";
-"show_bookmarks" = "Show bookmarks";
+"show_bookmarks" = "Tunjukkan penanda buku";
 "show_my_notes" = "Show My Notes";
 "verse_selection" = "Verse Selection";
 
@@ -246,13 +246,13 @@
 "night_theme" = "Night Theme";
 "text_color" = "Text Color";
 "background" = "Background";
-"color_workspace" = "Workspace color";
-"prefs_noise_title" = "Background noise";
-"prefs_noise_summary" = "Adding some noise to background might make it more comfortable to eyes.";
+"color_workspace" = "Warna ruang kerja";
+"prefs_noise_title" = "Hingar latar belakang";
+"prefs_noise_summary" = "Menambah sedikit hingar pada latar belakang mungkin menjadikannya lebih selesa untuk mata.";
 "reset_to_defaults" = "Reset to Defaults";
 
 /* Dictionaries */
-"settings_dictionaries" = "Dictionaries";
+"settings_dictionaries" = "Kamus";
 "hebrew_dictionary" = "Hebrew Dictionary";
 "greek_dictionary" = "Greek Dictionary";
 "no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
@@ -262,32 +262,32 @@
 "import_export" = "Import & Export";
 
 /* Security — Settings for the persecuted */
-"settings_security" = "Settings for the persecuted";
-"discrete_mode" = "Hide religious symbols";
+"settings_security" = "Tetapan untuk mereka yang dianiaya";
+"discrete_mode" = "Sembunyikan simbol agama";
 "discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
-"show_calculator" = "Calculator";
+"show_calculator" = "Kalkulator";
 "show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
-"calculator_pin" = "Calculator PIN";
+"calculator_pin" = "PIN Kalkulator";
 "calculator_pin_placeholder" = "1234";
-"calculator_pin_description" = "PIN code to enter the app when the calculator is shown.";
-"discrete_help_title" = "Read this first!";
-"discrete_help_summary" = "Instructions for the settings and information about specific discrete build.";
+"calculator_pin_description" = "Kod PIN untuk memasuki aplikasi apabila kalkulator ditunjukkan.";
+"discrete_help_title" = "Baca ini dahulu!";
+"discrete_help_summary" = "Arahan untuk tetapan dan maklumat tentang binaan diskrit tertentu.";
 "discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
 "discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
 "discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
 "discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 /* About */
-"settings_language" = "Language";
+"settings_language" = "Bahasa";
 "language_system_default" = "System Default";
 "language_restart_required" = "Restart the app for the language change to take effect.";
-"settings_about" = "About";
+"settings_about" = "Tentang";
 "version" = "Version";
 
 /* ========================================
    Import & Export
    ======================================== */
-"export" = "Export";
+"export" = "Eksport";
 "full_backup_json" = "Full Backup (JSON)";
 "export_footer" = "Export your data for backup or transfer to another device.";
 "import" = "Import";
@@ -307,7 +307,7 @@
 "installed_module_%@" = "Installed module: %@";
 "installed_epub_%@" = "Installed EPUB: %@";
 "installed_font_%@" = "Installed font: %@";
-"install_do_you_want" = "Do you want to install module (%@)?";
+"install_do_you_want" = "Adakah anda ingin memasang modul (%@)?";
 
 /* ========================================
    Repository Manager
@@ -318,18 +318,18 @@
 "reset_sources_title" = "Reset Sources?";
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Add custom repository";
-"custom_repositories" = "Custom repositories";
+"custom_repositories" = "Repositori tersuai";
 "custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
-"delete_custom_repository_message_format" = "Delete %@?";
+"delete_custom_repository_message_format" = "Padamkan %@?";
 "delete_custom_repository_title" = "Delete repository";
 "edit_custom_repository" = "Edit custom repository";
-"help" = "Help";
+"help" = "Bantuan";
 "https" = "HTTPS";
 "open_wiki" = "Open Wiki";
 "repository_source_error" = "Repository source error";
-"repository_url" = "Repository URL";
+"repository_url" = "URL repositori";
 "repository_url_placeholder" = "https://example.org/repository";
 "validating_repository" = "Validating repository";
 "source_details" = "Source Details";
@@ -346,15 +346,15 @@
 "reading_plan_no_plans_description" = "Start a reading plan to track your daily Bible reading.";
 "reading_plan_start" = "Start Plan";
 "reading_plan_active" = "Active Plans";
-"reading_plan_completed" = "Completed";
+"reading_plan_completed" = "Selesai";
 "reading_plan_choose" = "Choose a reading plan to start";
 "reading_plan_import_custom" = "Import Custom Plan";
-"reading_plan_custom" = "Custom";
+"reading_plan_custom" = "Tersuai";
 "reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
 "reading_plan_available" = "Available Plans";
 "reading_plan_import_error_read" = "Could not read file";
 "reading_plan_import_error_format" = "Invalid reading plan format";
-"plan_duplicate_user_plan" = "There is a user reading plan in sdcard jsword/readingplan with the same name as an internal plan. It can not be listed here. Please rename the file to something else, leaving it's file extension as .properties";
+"plan_duplicate_user_plan" = "Terdapat rancangan bacaan pengguna dalam sdcard jsword/readingplan dengan nama yang sama seperti rancangan dalaman. Ia tidak dapat disenaraikan di sini. Sila namakan semula fail tersebut kepada nama lain, dengan mengekalkan sambungan fail sebagai .properties";
 
 /* Daily Reading */
 "daily_reading" = "Daily Reading";
@@ -367,9 +367,9 @@
 /* ========================================
    Speak / TTS
    ======================================== */
-"speak" = "Speak";
-"pause" = "Pause";
-"stop" = "Stop";
+"speak" = "Baca";
+"pause" = "Jeda";
+"stop" = "Berhenti";
 "speed" = "Speed";
 "sleep_timer" = "Sleep Timer";
 "speak_now_speaking" = "Now Speaking";
@@ -392,7 +392,7 @@
 /* ========================================
    Cross References
    ======================================== */
-"cross_references" = "Cross references";
+"cross_references" = "Rujukan silang";
 
 /* ========================================
    Workspace
@@ -416,9 +416,9 @@
 "maximize" = "Maximize";
 "minimize" = "Minimize";
 "sync_scrolling" = "Sync Scrolling";
-"pin" = "Pin";
+"pin" = "Tetap";
 "sync_group" = "Sync Group";
-"restore" = "Restore";
+"restore" = "Pulih";
 
 /* ========================================
    Dictionary / General Books
@@ -459,7 +459,7 @@
 "icloud_account" = "iCloud Account";
 "last_sync" = "Last Sync";
 "sync_active" = "Active";
-"sync_disabled" = "Disabled";
+"sync_disabled" = "Dinyahdayakan";
 "syncing" = "Syncing…";
 "no_icloud_account" = "No iCloud Account";
 "icloud_signed_in" = "Signed In";
@@ -485,7 +485,7 @@
 /* ========================================
    Sharing
    ======================================== */
-"share_verse" = "Share…";
+"share_verse" = "Kongsi…";
 "copy_verse" = "Copy Verse";
 
 /* ========================================
@@ -508,7 +508,7 @@
 "%lld days" = "%lld days";
 
 /* Search */
-"Find in %@" = "Find in %@";
+"Find in %@" = "Cari dalam %@";
 "Create an index for %@?" = "Create an index for %@?";
 "Creating index. Processing %@" = "Creating index. Processing %@";
 "No matches found for \"%@\"" = "No matches found for \"%@\"";
@@ -535,145 +535,145 @@
 "%lld windows" = "%lld windows";
 
 /* Text Display Settings */
-"global_text_display_settings_title" = "Global text options";
-"global_text_display_settings_summary" = "Default text display settings for all workspaces";
-"workspace_text_display_settings_title" = "Text options - %@";
-"window_text_display_settings_title" = "Text options - Window %d";
-"parent_settings_category_title" = "Parent settings";
-"workspace_text_options_link" = "Workspace text options — %@";
-"workspace_text_options_link_summary" = "Edit text display settings for this workspace";
-"global_text_options_link" = "Global text options";
-"global_text_options_link_summary" = "Edit default text display settings for all workspaces";
-"text_display_font_size_title_format" = "Font size (%d pt)";
-"text_display_font_family_title_format" = "Font family (%@)";
-"text_display_line_spacing_title_format" = "Line spacing (%1.1fx)";
+"global_text_display_settings_title" = "Opsyen teks global";
+"global_text_display_settings_summary" = "Tetapan paparan teks lalai untuk semua ruang kerja";
+"workspace_text_display_settings_title" = "Opsyen teks - %@";
+"window_text_display_settings_title" = "Opsyen teks - Tetingkap %d";
+"parent_settings_category_title" = "Tetapan induk";
+"workspace_text_options_link" = "Opsyen teks ruang kerja — %@";
+"workspace_text_options_link_summary" = "Edit tetapan paparan teks untuk ruang kerja ini";
+"global_text_options_link" = "Opsyen teks global";
+"global_text_options_link_summary" = "Edit tetapan paparan teks lalai untuk semua ruang kerja";
+"text_display_font_size_title_format" = "Saiz fon (%d pt)";
+"text_display_font_family_title_format" = "Keluarga fon (%@)";
+"text_display_line_spacing_title_format" = "Jarak baris (%1.1fx)";
 "text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
-"text_display_top_margin_title_format" = "Top margin (%d mm)";
+"text_display_top_margin_title_format" = "Jidar atas (%d mm)";
 "text_display_page_scroll_amount_title_format" = "Page scroll amount (%d%%)";
-"text_display_left_margin_title_format" = "Left margin (%d mm)";
-"text_display_right_margin_title_format" = "Right margin (%d mm)";
-"text_display_max_width_title_format" = "Maximum width of text (%d mm)";
-"all_text_options_window_menutitle" = "All text options";
+"text_display_left_margin_title_format" = "Jidar kiri (%d mm)";
+"text_display_right_margin_title_format" = "Jidar kanan (%d mm)";
+"text_display_max_width_title_format" = "Lebar maksimum teks (%d mm)";
+"all_text_options_window_menutitle" = "Semua opsyen teks";
 
-"prefs_behavior_customization_cat" = "Application behavior";
-"prefs_display_customization_cat" = "Look & feel";
-"prefs_advanced_settings_cat" = "Advanced settings";
+"prefs_behavior_customization_cat" = "Gelagat aplikasi";
+"prefs_display_customization_cat" = "Rupa & nuansa";
+"prefs_advanced_settings_cat" = "Tetapan lanjutan";
 
-"prefs_toolbar_button_action_title" = "Action for toolbar button press";
-"prefs_toolbar_button_action_summary" = "Action to take when pressing/long-pressing Bible or Commentary toolbar buttons";
-"prefs_toolbar_button_action_default" = "Press to open menu, long press for documents screen (default)";
-"prefs_toolbar_button_action_swap_menu" = "Press to open next document, long press to open menu";
-"prefs_toolbar_button_action_swap_activity" = "Press to open next document, long press for documents screen";
+"prefs_toolbar_button_action_title" = "Tindakan untuk butang bar alat ditekan";
+"prefs_toolbar_button_action_summary" = "Tindakan yang diambil semasa menekan/menekan lama butang bar alat Alkitab atau Ulasan";
+"prefs_toolbar_button_action_default" = "Tekan untuk buka menu, tekan lama untuk skrin dokumen (lalai)";
+"prefs_toolbar_button_action_swap_menu" = "Tekan untuk buka dokumen berikutnya, tekan lama untuk buka menu";
+"prefs_toolbar_button_action_swap_activity" = "Tekan untuk buka dokumen berikutnya, tekan lama untuk skrin dokumen";
 
 
-"add_bookmark3" = "Selection";
-"add_bookmark_whole_verse1" = "Verses";
-"prefs_disable_two_step_bookmarking_title" = "One-step bookmarking";
-"prefs_disable_two_step_bookmarking_summary" = "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu";
+"add_bookmark3" = "Pilihan";
+"add_bookmark_whole_verse1" = "Ayat-ayat";
+"prefs_disable_two_step_bookmarking_title" = "Penanda buku satu langkah";
+"prefs_disable_two_step_bookmarking_summary" = "Tunjukkan item \"Pilihan\" dan \"Ayat\" terus dalam menu Pilihan paparan Alkitab";
 
-"active_window_indicator_summary" = "Highlight window corners to help recognising which window is active";
-"active_window_indicator_title" = "Show active window indicator";
-"auto_fullscreen" = "Fullscreen by scrolling";
-"auto_fullscreen_summary" = "Switch automatically to fullscreen when scrolling text. Tip: you can always also switch to full screen by doubletapping screen.";
-"choose_strongs_greek_dictionary_summary" = "Choose Strongs dictionary for Greek word definitions";
-"choose_strongs_greek_dictionary_title" = "Strongs Greek dictionary";
-"choose_strongs_greek_morphology_summary" = "Choose dictionary for Robinson Greek morphology definitions";
-"choose_strongs_greek_morphology_title" = "Robinson Greek morphology";
-"choose_strongs_hebrew_dictionary_summary" = "Choose Strongs dictionary for Hebrew word definitions";
-"choose_strongs_hebrew_dictionary_title" = "Strongs Hebrew dictionary";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
-"full_screen_hide_buttons_pref_summary" = "When switching to fullscreen mode, hide automatically window button bar that is on the bottom of the screen";
-"full_screen_hide_buttons_pref_title" = "Hide window button bar in fullscreen";
-"hide_bible_reference_overlay_summary" = "Do not show the semi-transparent Bible reference overlay when app is in fullscreen mode";
-"hide_bible_reference_overlay_title" = "Hide Bible reference overlay";
-"hide_window_buttons_summary" = "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them.";
-"hide_window_buttons_title" = "Hide window buttons";
+"active_window_indicator_summary" = "Serlahkan sudut tetingkap untuk membantu mengenali tetingkap mana yang aktif";
+"active_window_indicator_title" = "Tunjukkan penunjuk tetingkap aktif";
+"auto_fullscreen" = "Skrin penuh semasa menatal";
+"auto_fullscreen_summary" = "Beralih secara automatik ke skrin penuh semasa menatal teks. Petua: anda juga boleh beralih ke skrin penuh dengan mengetuk dua kali skrin.";
+"choose_strongs_greek_dictionary_summary" = "Pilih kamus Strong's untuk definisi perkataan Greek";
+"choose_strongs_greek_dictionary_title" = "Kamus Greek Strong's";
+"choose_strongs_greek_morphology_summary" = "Pilih kamus untuk definisi morfologi Greek Robinson";
+"choose_strongs_greek_morphology_title" = "Morfologi Greek Robinson";
+"choose_strongs_hebrew_dictionary_summary" = "Pilih kamus Strong's untuk definisi perkataan Ibrani";
+"choose_strongs_hebrew_dictionary_title" = "Kamus Ibrani Strong's";
+"choose_word_lookup_dictionary_summary" = "Pilih kamus untuk mencari perkataan";
+"choose_word_lookup_dictionary_title" = "Kamus carian perkataan";
+"full_screen_hide_buttons_pref_summary" = "Apabila beralih ke mod skrin penuh, sembunyikan secara automatik bar butang tetingkap yang berada di bahagian bawah skrin";
+"full_screen_hide_buttons_pref_title" = "Sembunyikan bar butang tetingkap dalam skrin penuh";
+"hide_bible_reference_overlay_summary" = "Jangan tunjukkan hamparan rujukan Alkitab separa telus apabila aplikasi dalam mod skrin penuh";
+"hide_bible_reference_overlay_title" = "Sembunyikan hamparan rujukan Alkitab";
+"hide_window_buttons_summary" = "Butang tetingkap yang dipaparkan di sebelah kanan paparan Alkitab disembunyikan. Bar navigasi tetingkap di bahagian bawah masih dipaparkan dan anda boleh membuka menu pop timbul tetingkap dengan mengetuk lama.";
+"hide_window_buttons_title" = "Sembunyikan butang tetingkap";
 "show_window_buttons_title" = "Show window buttons";
 "hide_window_buttons_hint" = "Hides the window button strip";
 "show_window_buttons_hint" = "Shows the window button strip";
-"pref_font_size_multiplier_title" = "Font size multiplier";
-"prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
-"prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
-"prefs_disable_animations_summary" = "Disable various animations such as smooth scrolling.";
-"prefs_disable_animations_title" = "Disable animations";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
-"prefs_notes_content_type_title" = "Format for new bookmark notes";
-"prefs_notes_content_type_summary" = "Text format used when creating new bookmark notes and Study Pad entries";
-"notes_content_type_html" = "Rich text (HTML)";
+"pref_font_size_multiplier_title" = "Pendarab saiz fon";
+"prefs_bible_view_swipe_mode_summary" = "Isyarat leret kiri / kanan boleh digunakan untuk pergi ke halaman / bab seterusnya.";
+"prefs_bible_view_swipe_mode_title" = "Tindakan untuk isyarat leret kiri / kanan";
+"prefs_disable_animations_summary" = "Nyahdayakan pelbagai animasi seperti tatal lancar.";
+"prefs_disable_animations_title" = "Nyahdayakan animasi";
+"prefs_disable_click_to_edit_summary" = "Memerlukan penggunaan butang edit untuk mengedit nota dalam Pad Kajian.";
+"prefs_disable_click_to_edit_title" = "Nyahdayakan klik-untuk-edit Pad Kajian";
+"prefs_notes_content_type_title" = "Format untuk nota penanda buku baharu";
+"prefs_notes_content_type_summary" = "Format teks yang digunakan semasa membuat nota penanda buku baharu dan entri Pad Kajian";
+"notes_content_type_html" = "Teks kaya (HTML)";
 "notes_content_type_markdown" = "Markdown";
-"prefs_double_tap_to_fullscreen_summary" = "Enter fullscreen mode by double-tapping window";
-"prefs_double_tap_to_fullscreen_title" = "Double-tap to Fullscreen";
-"prefs_e_ink_mode_title" = "Black & white mode";
-"prefs_eink_mode_summary" = "Use application in monochrome mode (no colors), making it more suitable for E-ink devices.";
-"prefs_interface_locale_summary" = "Select custom user interface language";
-"prefs_interface_locale_title" = "Application language";
-"prefs_navigate_to_verse_summary" = "Choose verse (and chapter) when selecting a passage";
-"prefs_navigate_to_verse_title" = "Navigate to verse";
-"prefs_night_mode_automatic" = "Automatic";
+"prefs_double_tap_to_fullscreen_summary" = "Masuk mod skrin penuh dengan mengetuk dua kali tetingkap";
+"prefs_double_tap_to_fullscreen_title" = "Ketuk dua kali untuk Skrin Penuh";
+"prefs_e_ink_mode_title" = "Mod hitam & putih";
+"prefs_eink_mode_summary" = "Gunakan aplikasi dalam mod monokrom (tanpa warna), menjadikannya lebih sesuai untuk peranti E-ink.";
+"prefs_interface_locale_summary" = "Pilih bahasa antara muka pengguna tersuai";
+"prefs_interface_locale_title" = "Bahasa aplikasi";
+"prefs_navigate_to_verse_summary" = "Pilih ayat (dan bab) semasa memilih petikan";
+"prefs_navigate_to_verse_title" = "Navigasi ke ayat";
+"prefs_night_mode_automatic" = "Automatik";
 "prefs_night_mode_manual" = "Manual";
-"prefs_night_mode_summary" = "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen.";
-"prefs_night_mode_system" = "System";
-"prefs_night_mode_title" = "Night mode switching";
-"prefs_open_links_in_special_window_summary" = "Open links in special window, for quicker display of cross-references and Strongs";
-"prefs_open_links_in_special_window_title" = "Links window";
-"prefs_screen_keep_on_summary" = "Prevent screen sleeping while using this app";
-"prefs_screen_keep_on_title" = "Keep screen on";
-"prefs_show_error_box_summary" = "Useful for developers when debugging BibleView javascript side errors. This will make the app slower.";
-"prefs_show_error_box_title" = "Show Javascript error box";
-"prefs_swipe_mode_chapter" = "Chapter";
-"prefs_swipe_mode_none" = "Disabled";
-"prefs_swipe_mode_page" = "Page";
+"prefs_night_mode_summary" = "Sama ada untuk beralih ke mod malam secara automatik (jika peranti menyokong), secara manual atau melalui tetapan sistem (Android 10+). Penukaran manual boleh dilakukan dari menu opsyen 3-titik pada skrin utama.";
+"prefs_night_mode_system" = "Sistem";
+"prefs_night_mode_title" = "Penukaran mod malam";
+"prefs_open_links_in_special_window_summary" = "Buka pautan dalam tetingkap khas, untuk paparan rujukan silang dan Strong's yang lebih pantas";
+"prefs_open_links_in_special_window_title" = "Tetingkap pautan";
+"prefs_screen_keep_on_summary" = "Elakkan skrin tidur semasa menggunakan aplikasi ini";
+"prefs_screen_keep_on_title" = "Kekalkan skrin hidup";
+"prefs_show_error_box_summary" = "Berguna untuk pembangun semasa menyahpepijat ralat sisi javascript BibleView. Ini akan menjadikan aplikasi lebih perlahan.";
+"prefs_show_error_box_title" = "Tunjukkan kotak ralat Javascript";
+"prefs_swipe_mode_chapter" = "Bab";
+"prefs_swipe_mode_none" = "Dinyahdayakan";
+"prefs_swipe_mode_page" = "Halaman";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Butang kelantangan tatal";
+"prefs_volume_keys_scroll_summary" = "Gunakan kelantangan naik/turun untuk menatal teks Alkitab";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
-"prefs_experimental_features_title" = "Experimental features";
-"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
-"experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
-"experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";
-"prefs_enable_bluetooth_title" = "Enable Bluetooth media buttons";
-"prefs_enable_bluetooth_summary" = "Handle Bluetooth media buttons to start/stop speaking.";
+"prefs_experimental_features_title" = "Ciri eksperimental";
+"prefs_experimental_features_summary" = "Pilih ciri eksperimental mana yang hendak diaktifkan. Ciri-ciri ini masih dalam pembangunan dan mungkin berubah atau dibuang";
+"experimental_feature_bookmark_edit_actions" = "Tindakan edit penanda buku";
+"experimental_feature_add_paragraph_break" = "Tambah penanda buku pemisah perenggan";
+"prefs_enable_bluetooth_title" = "Aktifkan butang media Bluetooth";
+"prefs_enable_bluetooth_summary" = "Kendalikan butang media Bluetooth untuk memulakan/menghentikan pembacaan.";
 
-"open_bible_links_title" = "Open Bible links in AndBible";
-"open_bible_links_summary" = "When clicking links that refer to AndBible supported Bible URL, open them in AndBible";
+"open_bible_links_title" = "Buka pautan Alkitab dalam AndBible";
+"open_bible_links_summary" = "Apabila mengklik pautan yang merujuk URL Alkitab yang disokong AndBible, buka dalam AndBible";
 
 "crash_app" = "Crash app!";
 "crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";
 "crash_app_scheduled_summary" = "Crash scheduled in 10 seconds.";
-"sign_in_failed" = "Signing in to synchronization backend service failed.";
-"sync_adapter" = "Synchronization Backend";
-"sync_adapter_summary" = "Current: %@";
+"sign_in_failed" = "Log masuk ke perkhidmatan bahagian belakang penyegerakan gagal.";
+"sync_adapter" = "Bahagian Belakang Penyegerakan";
+"sync_adapter_summary" = "Semasa: %@";
 "adapters_google_drive" = "Google Drive";
 "adapters_next_cloud" = "Next Cloud";
-"auth_server_uri" = "Server URL";
-"auth_username" = "User name";
-"auth_password" = "Password";
-"auth_folder_path" = "Sync folder path";
-"auth_folder_path_summary" = "Parent folder for sync data (empty = root)";
-"invalid_url_message" = "The URL you entered is invalid. Please enter a valid URL (e.g., https://nextcloud.example.com)";
-"prefs_sync_introduction_summary1" = "Choose which backend cloud service you want to use to synchronize multiple devices.";
+"auth_server_uri" = "URL pelayan";
+"auth_username" = "Nama pengguna";
+"auth_password" = "Kata laluan";
+"auth_folder_path" = "Laluan folder segerak";
+"auth_folder_path_summary" = "Folder induk untuk data segerak (kosong = akar)";
+"invalid_url_message" = "URL yang anda masukkan tidak sah. Sila masukkan URL yang sah (cth., https://nextcloud.contoh.com)";
+"prefs_sync_introduction_summary1" = "Pilih perkhidmatan awan bahagian belakang yang ingin anda gunakan untuk menyegerakkan pelbagai peranti.";
 "test_connection" = "Test Connection";
-"overrideBackup" = "Existing database that this device is not synchronized to is found in Cloud. Database contains %@. What do you want to do?";
-"cloud_fetch_and_restore_initial" = "Copy from Cloud to this device";
-"cloud_create_new" = "Copy from this device to Cloud";
-"cloud_disable_sync" = "Cancel & disable synchronization";
-"cloud_sync_title" = "Device synchronization";
-"application_preferences" = "Application preferences";
-"are_you_sure_reset_local" = "This will reset your local database for %@ with the content that is currently stored in cloud service.";
-"are_you_sure_reset_cloud" = "This will reset your cloud database for %@ with the content that you have in this device.";
-"reading_plans_content" = "Reading plans and their statuses";
-"bookmarks_contents" = "Bookmarks, Labels and Study Pads";
-"workspaces_contents" = "Workspaces and Windows";
-"my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their content";
-"synchronization_categories" = "Synchronization categories";
-"sync_error" = "Error occurred in Cloud synchronization";
-"sync_cant_fetch" = "The version of database or patch file stored in Cloud is higher than the one supported by this app.";
-"sync_disabling" = "Disabling synchronizing for %@ for now.";
-"sync_update_app" = "Please update the app to continue synchronization.";
-"last_updated" = "Last updated: %@";
+"overrideBackup" = "Pangkalan data sedia ada yang tidak disegerakkan dengan peranti ini ditemui dalam Awan. Pangkalan data mengandungi %@. Apa yang anda ingin lakukan?";
+"cloud_fetch_and_restore_initial" = "Salin dari Awan ke peranti ini";
+"cloud_create_new" = "Salin dari peranti ini ke Awan";
+"cloud_disable_sync" = "Batal & nyahdayakan penyegerakan";
+"cloud_sync_title" = "Penyegerakan peranti";
+"application_preferences" = "Keutamaan aplikasi";
+"are_you_sure_reset_local" = "Ini akan menetapkan semula pangkalan data tempatan anda untuk %@ dengan kandungan yang kini disimpan dalam perkhidmatan awan.";
+"are_you_sure_reset_cloud" = "Ini akan menetapkan semula pangkalan data awan anda untuk %@ dengan kandungan yang anda miliki dalam peranti ini.";
+"reading_plans_content" = "Rancangan bacaan dan statusnya";
+"bookmarks_contents" = "Penanda Buku, Label dan Pad Kajian";
+"workspaces_contents" = "Ruang Kerja dan Tetingkap";
+"my_documents" = "Dokumen Saya";
+"my_documents_contents" = "Dokumen Saya dan kandungannya";
+"synchronization_categories" = "Kategori penyegerakan";
+"sync_error" = "Ralat berlaku dalam penyegerakan Awan";
+"sync_cant_fetch" = "Versi pangkalan data atau fail tampalan yang disimpan dalam Awan lebih tinggi daripada yang disokong oleh aplikasi ini.";
+"sync_disabling" = "Menyahdayakan penyegerakan untuk %@ buat masa ini.";
+"sync_update_app" = "Sila kemas kini aplikasi untuk meneruskan penyegerakan.";
+"last_updated" = "Dikemas kini terakhir: %@";
 
 /* Google Drive Sync */
 "prefs_sync_introduction_summary2" = "When using Google Drive, %@ is granted access only to applications files, not any personal files.";
@@ -687,77 +687,77 @@
 "google_drive_not_signed_in" = "Not signed in";
 "google_drive_permission_required" = "Google Drive permission is required";
 
-"help_workspaces_title" = "Workspaces";
-"reading_plans_plural" = "Reading Plans";
+"help_workspaces_title" = "Ruang Kerja";
+"reading_plans_plural" = "Rancangan Bacaan";
 
 /* Android window popup menu parity */
-"windowMaximise" = "Maximise";
-"windowMinimise" = "Minimise";
-"change_to_normal" = "Change to normal window";
-"move_window" = "Move to";
-"move_window_to_position2" = "Position %1$d (%2$@:%3$@)";
-"window_pin_mode" = "Pin";
-"windowSynchronise" = "Synchronise";
-"window_disable_sync" = "Disable synchronize";
-"sync_group_n" = "Group %d";
-"text_options_window_menutitle" = "Text options";
-"prefs_text_colors_menutitle" = "Color settings";
-"prefs_section_title_title" = "Section titles";
-"prefs_show_strongs_title" = "Strong's numbers";
-"prefs_show_verseno_title" = "Chapter & verse numbers";
-"copy_settings" = "Copy settings to";
-"copy_settings_to_workspace" = "Workspace";
-"copy_settings_to_window" = "Window %1$d (%2$@: %3$@)";
-"copy_settings_to_global" = "Global defaults";
-"copyReference" = "Copy link to clipboard";
-"reference_copied_to_clipboard" = "Reference copied to clipboard";
+"windowMaximise" = "Maksimumkan";
+"windowMinimise" = "Minimumkan";
+"change_to_normal" = "Tukar ke tetingkap biasa";
+"move_window" = "Pindah ke";
+"move_window_to_position2" = "Kedudukan %1$d (%2$@:%3$@)";
+"window_pin_mode" = "Tetap";
+"windowSynchronise" = "Selaraskan";
+"window_disable_sync" = "Nyahdayakan penyegerakan";
+"sync_group_n" = "Kumpulan %d";
+"text_options_window_menutitle" = "Opsyen teks";
+"prefs_text_colors_menutitle" = "Tetapan warna";
+"prefs_section_title_title" = "Tajuk bahagian";
+"prefs_show_strongs_title" = "Nombor Strong's";
+"prefs_show_verseno_title" = "Nombor bab & ayat";
+"copy_settings" = "Salin tetapan ke";
+"copy_settings_to_workspace" = "Ruang kerja";
+"copy_settings_to_window" = "Tetingkap %1$d (%2$@: %3$@)";
+"copy_settings_to_global" = "Lalai global";
+"copyReference" = "Salin pautan ke papan klip";
+"reference_copied_to_clipboard" = "Rujukan disalin ke papan klip";
 "add_ellipsis" = "%@…";
-"copy_settings_title" = "Which settings do you want to copy?";
-"select_all" = "Select all";
-"select_none" = "Select none";
+"copy_settings_title" = "Tetapan mana yang anda ingin salin?";
+"select_all" = "Pilih semua";
+"select_none" = "Pilih tiada";
 "font" = "Font";
 "margin_size" = "Margin size";
-"top_margin" = "Top margin";
+"top_margin" = "Jidar atas";
 "footnotes_inline" = "Inline footnotes";
 "expand_cross_references" = "Expand cross references";
-"cross_references" = "Cross references";
+"cross_references" = "Rujukan silang";
 "verse_per_line" = "Verse per line";
-"show_bookmarks" = "Show bookmarks";
+"show_bookmarks" = "Tunjukkan penanda buku";
 "hide_labels" = "Hide labels";
 "my_notes" = "My notes";
 "page_number" = "Page number";
-"infinite_scroll" = "Infinite scroll";
-"non_strongs_word_italic" = "Italicize added words";
-"mark_as_read_button" = "Mark as read button";
-"title_scroll_button" = "Title scroll button";
-"memorization_indicators" = "Memorization indicators";
+"infinite_scroll" = "Tatal tanpa had";
+"non_strongs_word_italic" = "Italikkan perkataan tambahan";
+"mark_as_read_button" = "Butang tandakan sebagai dibaca";
+"title_scroll_button" = "Butang tatal tajuk";
+"memorization_indicators" = "Penunjuk hafalan";
 "ai_document_markers" = "AI document markers";
-"page_scroll_amount" = "Page scroll amount";
+"page_scroll_amount" = "Jumlah tatal halaman";
 "ordinals" = "Ordinals";
 
 /* Android shared translations */
-"about" = "About";
+"about" = "Tentang";
 "app_name_andbible" = "AndBible";
-"app_name_long" = "AndBible: Bible Study";
-"download" = "Download Documents";
-"download_errors" = "Download errors";
-"format_epub" = "EPUB documents (*.epub)";
-"format_mybible" = "MyBible documents (*.SQLite3)";
-"format_mysword" = "MySword documents (*.mybible)";
-"format_zip" = "Zip file containing Sword module(s), or documents backup file (*.abmd) created by %@";
-"install_zip" = "Load Documents From Files";
-"rename" = "Rename";
-"restore_database" = "Restore Database File";
-"reversed_split_mode" = "Reversed split mode";
-"supported_formats" = "Supported formats for loading documents from a file: %@";
-"welcome_message" = "Thank you for downloading %@. There are currently no Bibles or documents installed. To continue, please install at least 1 document by downloading from the internet, or by loading from a zip file document backup.";
+"app_name_long" = "AndBible: Kajian Alkitab";
+"download" = "Muat Turun Dokumen";
+"download_errors" = "Ralat muat turun";
+"format_epub" = "Dokumen EPUB (*.epub)";
+"format_mybible" = "Dokumen MyBible (*.SQLite3)";
+"format_mysword" = "Dokumen MySword (*.mybible)";
+"format_zip" = "Fail Zip yang mengandungi modul Sword, atau fail sandaran dokumen (*.abmd) yang dibuat oleh %@";
+"install_zip" = "Muat Dokumen Dari Fail";
+"rename" = "Namakan semula";
+"restore_database" = "Pulih Fail Pangkalan Data";
+"reversed_split_mode" = "Mod pisah terbalik";
+"supported_formats" = "Format yang disokong untuk memuatkan dokumen dari fail: %@";
+"welcome_message" = "Terima kasih kerana memuat turun %@. Kini tiada Alkitab atau dokumen yang dipasang. Untuk meneruskan, sila pasang sekurang-kurangnya 1 dokumen dengan memuat turun dari internet, atau dengan memuatkan dari fail zip sandaran dokumen.";
 
 /* Android shared translations */
-"copy_of %@" = "Copy of %@";
-"fullscreen" = "Fullscreen";
-"help_bookmarks" = "Bookmarks";
-"help_navigation" = "Navigation";
-"help_search" = "Search";
-"help_workspaces" = "Workspaces";
-"skip" = "Skip";
-"error_no_content" = "No content for selected verse";
+"copy_of %@" = "Salinan %@";
+"fullscreen" = "Skrin penuh";
+"help_bookmarks" = "Penanda buku";
+"help_navigation" = "Navigasi";
+"help_search" = "Carian";
+"help_workspaces" = "Ruang Kerja";
+"skip" = "Langkau";
+"error_no_content" = "Tiada kandungan untuk ayat yang dipilih";

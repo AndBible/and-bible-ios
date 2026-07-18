@@ -748,7 +748,8 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
 
      Android treats missing optional OT/NT groups as absent testament data, not as a fatal install
      error, when the other testament group is complete. The request sequence and published files must
-     follow that contract.
+     follow that contract. This raw-only fixture also pins the partial-Bible guard: the skipped OT
+     first file must be rechecked with a ranged probe before the install is accepted.
      */
     func testModuleRepositoryInstallsSingleTestamentModuleWhenOptionalGroupIsMissing() async throws {
         let tempDir = FileManager.default.temporaryDirectory
@@ -770,6 +771,8 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             dataPath: "./modules/texts/ztext/ntonly/"
         )
         var requestedPaths: [String] = []
+        var oldTestamentProbeCount = 0
+        var oldTestamentRecheckRangeHeader: String?
 
         ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
             requestedPaths.append(request.url?.path ?? "")
@@ -785,6 +788,10 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                 )!
                 data = catalogData
             case "/raw/modules/texts/ztext/ntonly/ot.bzs":
+                oldTestamentProbeCount += 1
+                if oldTestamentProbeCount == 2 {
+                    oldTestamentRecheckRangeHeader = request.value(forHTTPHeaderField: "Range")
+                }
                 response = HTTPURLResponse(
                     url: request.url!,
                     statusCode: 404,
@@ -832,6 +839,16 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         XCTAssertFalse(
             requestedPaths.contains("/raw/modules/texts/ztext/ntonly/ot.bzv"),
             "A missing optional OT group should not fail single-testament NT installs."
+        )
+        XCTAssertEqual(
+            oldTestamentProbeCount,
+            2,
+            "Raw-only Bible installs should recheck the skipped optional group before accepting it."
+        )
+        XCTAssertEqual(
+            oldTestamentRecheckRangeHeader,
+            "bytes=0-0",
+            "The optional-group recheck should use a tiny ranged probe instead of downloading content."
         )
 
         let localDir = swordDir
@@ -1697,7 +1714,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
 
      Normal Downloads may fall back to raw files when a package ZIP is missing, but a skipped
      testament group must be rechecked before publishing. This fixture makes the first OT request
-     return 404 and the recheck return 200. A failure means a transient mirror miss can still commit
+     return 404 and the recheck return 206. A failure means a transient mirror miss can still commit
      an NT-only full Bible.
      */
     func testModuleRepositoryRejectsPartialRawBibleFallbackWhenPackageZipIsMissing() async throws {
@@ -1722,6 +1739,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         )
         var requestedPaths: [String] = []
         var oldTestamentProbeCount = 0
+        var oldTestamentRecheckRangeHeader: String?
 
         ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
             requestedPaths.append(request.url?.path ?? "")
@@ -1746,9 +1764,12 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                 data = Data()
             case "/raw/modules/texts/ztext/full/ot.bzs":
                 oldTestamentProbeCount += 1
+                if oldTestamentProbeCount == 2 {
+                    oldTestamentRecheckRangeHeader = request.value(forHTTPHeaderField: "Range")
+                }
                 response = HTTPURLResponse(
                     url: request.url!,
-                    statusCode: oldTestamentProbeCount == 1 ? 404 : 200,
+                    statusCode: oldTestamentProbeCount == 1 ? 404 : 206,
                     httpVersion: nil,
                     headerFields: nil
                 )!
@@ -1794,6 +1815,11 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                 requestedPaths.filter { $0 == "/raw/modules/texts/ztext/full/ot.bzs" }.count,
                 2,
                 "A package-backed partial Bible fallback should recheck the skipped OT group before failing."
+            )
+            XCTAssertEqual(
+                oldTestamentRecheckRangeHeader,
+                "bytes=0-0",
+                "The availability recheck should send the ranged GET that CrossWire answers with 206."
             )
         }
 

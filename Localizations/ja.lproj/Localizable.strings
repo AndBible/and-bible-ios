@@ -4,67 +4,67 @@
    General / Shared
    ======================================== */
 "app_name" = "AndBible";
-"done" = "Done";
-"cancel" = "Cancel";
-"delete" = "Delete";
-"save" = "Save";
-"edit" = "Edit";
+"done" = "完了";
+"cancel" = "キャンセル";
+"delete" = "削除";
+"save" = "保存";
+"edit" = "編集";
 "add" = "Add";
-"search" = "Find";
-"settings" = "Application preferences";
-"close" = "Close";
+"search" = "検索";
+"settings" = "アプリの設定";
+"close" = "閉じる";
 "ok" = "OK";
-"yes" = "Yes";
-"no" = "No";
-"error" = "Error";
+"yes" = "はい";
+"no" = "いいえ";
+"error" = "エラー";
 "loading" = "Loading...";
-"create" = "Create";
-"new_window" = "New window";
+"create" = "作成";
+"new_window" = "新しいウィンドウ";
 "clear" = "Clear";
-"reset" = "Reset";
+"reset" = "リセット";
 "retry" = "Retry";
-"all" = "All";
+"all" = "すべて";
 "sort" = "Sort";
-"name" = "Name";
+"name" = "名前";
 "untitled" = "Untitled";
-"compare" = "Compare";
-"translations" = "Translations";
+"compare" = "比較";
+"translations" = "翻訳版";
 "auto" = "Auto";
 "off" = "Off";
 "inline" = "Inline";
-"links" = "Links";
+"links" = "リンク";
 "hidden" = "Hidden";
-"completed" = "Completed";
+"completed" = "完了";
 "no_results" = "No Results";
 "searching" = "Searching...";
 
 /* ========================================
    Navigation / Bible Reader
    ======================================== */
-"bible" = "Bible";
-"deuterocanonical" = "Deuterocanonical";
-"bookmarks" = "Bookmarks";
-"reading_plans" = "Reading Plans";
+"bible" = "聖書";
+"deuterocanonical" = "第二正典";
+"bookmarks" = "ブックマーク";
+"reading_plans" = "読書プラン";
 "downloads" = "Downloads";
-"history" = "History";
-"workspaces" = "Workspaces";
+"history" = "履歴";
+"workspaces" = "ワークスペース";
 "definition" = "Definition";
-"dictionary" = "Dictionary";
-"general_book" = "Book";
-"map" = "Map";
+"dictionary" = "辞書";
+"general_book" = "書";
+"map" = "地図";
 "locked" = "Locked";
 
 /* Bible Navigation */
-"choose_book" = "Choose Book";
+"choose_book" = "書を選択";
 "books" = "Books";
-"old_testament" = "Old Testament";
-"new_testament" = "New Testament";
+"old_testament" = "旧約聖書";
+"new_testament" = "新約聖書";
 "previous_chapter" = "Previous chapter";
 "next_chapter" = "Next chapter";
 "back_to_bible" = "Back to Bible";
 
 /* Module Pickers */
-"choose_document" = "Choose Document";
+"choose_document" = "文書を選択";
 "document_type" = "Document type";
 "picker_select_translation" = "Select Translation";
 "picker_select_commentary" = "Select Commentary";
@@ -77,23 +77,23 @@
 "picker_no_general_book_modules" = "No general book modules installed";
 "picker_no_map_modules" = "No map modules installed";
 "download_modules" = "Download Modules";
-"download_document_confirm_prefix" = "Download";
-"bookmark_warning4" = "It is recommended that you backup the module before updating.";
-"bookmark_warning3" = "Do you still want to update module?";
-"bookmark_warning2" = "If document structure has changed, updating this document could make the locations of these bookmarks/notes move inside the document or disappear completely.";
-"bookmark_warning" = "There are bookmarks and/or notes for this document.";
+"download_document_confirm_prefix" = "ダウンロード";
+"bookmark_warning4" = "更新する前にモジュールをバックアップすることをお勧めします。";
+"bookmark_warning3" = "それでもモジュールを更新しますか？";
+"bookmark_warning2" = "ドキュメントの構造が変更されている場合、このドキュメントを更新すると ブックマークやノートの位置がドキュメント内で移動したり、完全に消えたりする可能性があります。";
+"bookmark_warning" = "このドキュメントにはブックマークやノートがあります。";
 /* Toolbar / Actions */
 "toggle_strongs_numbers" = "Toggle Strong's numbers";
-"bookmark" = "Bookmark";
-"copy" = "Copy";
-"share" = "Share";
+"bookmark" = "ブックマーク";
+"copy" = "コピー";
+"share" = "共有";
 "search_web" = "Web";
 
 /* Strong's Modes */
 "strongs_off" = "Off";
-"strongs_inline" = "Text and Links";
-"strongs_links" = "Links";
-"strongs_hidden" = "Hidden Links";
+"strongs_inline" = "テキストとリンク";
+"strongs_links" = "リンク";
+"strongs_hidden" = "非表示リンク";
 "find_all_occurrences" = "Find all occurrences";
 "no_dictionary_installed" = "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads.";
 "back_to_previous" = "Back";
@@ -104,7 +104,7 @@
 "add_bookmark" = "Add Bookmark";
 "edit_bookmark" = "Edit Bookmark";
 "bookmark_note" = "Note";
-"labels" = "Labels";
+"labels" = "ラベル";
 "new_label" = "New Label";
 "study_pad" = "StudyPad";
 "my_notes" = "My Notes";
@@ -120,10 +120,10 @@
 "no_labels" = "No Labels";
 "no_labels_description" = "Create labels to organize your bookmarks and notes.";
 "label_name" = "Label name";
-"studypad" = "Study Pad";
+"studypad" = "スタディパッド";
 "open_studypad" = "Open StudyPad";
-"edit_label" = "Edit label";
-"label_edit_name" = "Name";
+"edit_label" = "ラベルを編集";
+"label_edit_name" = "名前";
 "label_edit_color" = "Color";
 "label_edit_icon" = "Icon";
 "no_icon" = "No Icon";
@@ -141,35 +141,35 @@
 /* ========================================
    Search
    ======================================== */
-"search_bible" = "Search Bible";
+"search_bible" = "聖書を検索";
 "search_results" = "Search Results";
-"whole_bible" = "Whole Bible";
+"whole_bible" = "聖書全体";
 "old_testament_short" = "OT";
 "new_testament_short" = "NT";
 "current_book" = "Current Book";
-"search_index" = "Search Index";
+"search_index" = "検索インデックス";
 "search_checking_index" = "Checking index...";
 "search_need_index" = "To search a document we need an index.";
-"search_create_index" = "Create";
-"search_indexing_message" = "When indexing has completed you will be taken to the search screen.";
+"search_create_index" = "作成";
+"search_indexing_message" = "インデックスの作成が完了すると、検索画面に移動します。";
 "search_searching" = "Searching...";
 "search_enter_prompt" = "Enter a word or phrase to search";
 "search_bible_text" = "Search Bible text";
 "search_match" = "Match";
-"search_scope_all" = "All";
+"search_scope_all" = "すべて";
 "search_scope_ot" = "OT";
 "search_scope_nt" = "NT";
-"search_translations" = "Translations";
-"search_all" = "All";
+"search_translations" = "翻訳版";
+"search_all" = "すべて";
 
 /* ========================================
    Downloads / Module Browser
    ======================================== */
 "module_browser" = "Module Browser";
-"doc_type_all" = "All types";
+"doc_type_all" = "すべての種類";
 "bibles" = "Bibles";
 "commentaries" = "Commentaries";
-"dictionaries" = "Dictionaries";
+"dictionaries" = "辞書";
 "category_books" = "Books";
 "maps" = "Maps";
 "doc_type_addons" = "Add-ons";
@@ -179,7 +179,7 @@
 "update" = "Update";
 "uninstall" = "Uninstall";
 "unavailable" = "Unavailable";
-"recommended_document" = "Recommended!";
+"recommended_document" = "おすすめ！";
 "bad_document_warning" = "Warning";
 "refresh_catalog" = "Refresh Catalog";
 "repositories" = "Repositories";
@@ -194,9 +194,9 @@
 "delete_module_index_title" = "Delete Search Index";
 "delete_module_index_message_format" = "Delete the search index for %@?";
 "module_initials" = "Initials";
-"module_name" = "Name";
-"module_category" = "Category";
-"module_language" = "Language";
+"module_name" = "名前";
+"module_category" = "カテゴリ";
+"module_language" = "言語";
 "module_source" = "Source";
 "module_versions" = "Versions";
 "module_latest_version" = "Latest";
@@ -223,19 +223,19 @@
 "line_spacing" = "Line Spacing";
 "justify_text" = "Justify Text";
 "verse_per_line" = "Verse Per Line";
-"hyphenation" = "Hyphenation";
-"settings_content" = "Content";
+"hyphenation" = "ハイフネーション";
+"settings_content" = "内容";
 "verse_numbers" = "Verse Numbers";
 "section_titles" = "Section Titles";
-"footnotes" = "Footnotes";
+"footnotes" = "脚注";
 "inline_footnotes" = "Inline Footnotes";
 "red_letters" = "Red Letters";
-"cross_references" = "Cross references";
+"cross_references" = "相互参照";
 "expand_cross_references" = "Expand Cross References";
 "strongs_numbers" = "Strong's Numbers";
 "morphology" = "Morphology";
 "settings_annotations" = "Annotations";
-"show_bookmarks" = "Show bookmarks";
+"show_bookmarks" = "ブックマークを表示";
 "show_my_notes" = "Show My Notes";
 "verse_selection" = "Verse Selection";
 
@@ -246,13 +246,13 @@
 "night_theme" = "Night Theme";
 "text_color" = "Text Color";
 "background" = "Background";
-"color_workspace" = "Workspace color";
-"prefs_noise_title" = "Background noise";
-"prefs_noise_summary" = "Adding some noise to background might make it more comfortable to eyes.";
+"color_workspace" = "ワークスペースの色";
+"prefs_noise_title" = "背景ノイズ";
+"prefs_noise_summary" = "背景に少しノイズを加えると、目に優しくなる場合があります。";
 "reset_to_defaults" = "Reset to Defaults";
 
 /* Dictionaries */
-"settings_dictionaries" = "Dictionaries";
+"settings_dictionaries" = "辞書";
 "hebrew_dictionary" = "Hebrew Dictionary";
 "greek_dictionary" = "Greek Dictionary";
 "no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
@@ -262,35 +262,35 @@
 "import_export" = "Import & Export";
 
 /* Security — Settings for the persecuted */
-"settings_security" = "Settings for the persecuted";
-"discrete_mode" = "Hide religious symbols";
+"settings_security" = "迫害下にある方向けの設定";
+"discrete_mode" = "宗教的シンボルを非表示";
 "discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
-"show_calculator" = "Calculator";
+"show_calculator" = "電卓";
 "show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
-"calculator_pin" = "Calculator PIN";
+"calculator_pin" = "電卓のPINコード";
 "calculator_pin_placeholder" = "1234";
-"calculator_pin_description" = "PIN code to enter the app when the calculator is shown.";
-"discrete_help_title" = "Read this first!";
-"discrete_help_summary" = "Instructions for the settings and information about specific discrete build.";
+"calculator_pin_description" = "電卓が表示されているときにアプリに入るためのPINコードです。";
+"discrete_help_title" = "最初にお読みください！";
+"discrete_help_summary" = "設定の説明と特定の隠蔽ビルドに関する情報です。";
 "discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
 "discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
 "discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
 "discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 /* About */
-"settings_language" = "Language";
+"settings_language" = "言語";
 "language_system_default" = "System Default";
 "language_restart_required" = "Restart the app for the language change to take effect.";
-"settings_about" = "About";
+"settings_about" = "情報";
 "version" = "Version";
 
 /* ========================================
    Import & Export
    ======================================== */
-"export" = "Export";
+"export" = "エクスポート";
 "full_backup_json" = "Full Backup (JSON)";
 "export_footer" = "Export your data for backup or transfer to another device.";
-"import" = "Import";
+"import" = "インポート";
 "import_from_file" = "Import from File";
 "import_footer" = "Import data from a JSON backup or CSV bookmark file. Supported formats: .json, .csv, .bbl (MySword).";
 "modules" = "Modules";
@@ -307,7 +307,7 @@
 "installed_module_%@" = "Installed module: %@";
 "installed_epub_%@" = "Installed EPUB: %@";
 "installed_font_%@" = "Installed font: %@";
-"install_do_you_want" = "Do you want to install module (%@)?";
+"install_do_you_want" = "モジュール（%@）をインストールしますか？";
 
 /* ========================================
    Repository Manager
@@ -318,18 +318,18 @@
 "reset_sources_title" = "Reset Sources?";
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Add custom repository";
-"custom_repositories" = "Custom repositories";
+"custom_repositories" = "カスタムリポジトリ";
 "custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
-"delete_custom_repository_message_format" = "Delete %@?";
+"delete_custom_repository_message_format" = "%@ を削除しますか？";
 "delete_custom_repository_title" = "Delete repository";
 "edit_custom_repository" = "Edit custom repository";
-"help" = "Help";
+"help" = "ヘルプ";
 "https" = "HTTPS";
 "open_wiki" = "Open Wiki";
 "repository_source_error" = "Repository source error";
-"repository_url" = "Repository URL";
+"repository_url" = "リポジトリのURL";
 "repository_url_placeholder" = "https://example.org/repository";
 "validating_repository" = "Validating repository";
 "source_details" = "Source Details";
@@ -346,15 +346,15 @@
 "reading_plan_no_plans_description" = "Start a reading plan to track your daily Bible reading.";
 "reading_plan_start" = "Start Plan";
 "reading_plan_active" = "Active Plans";
-"reading_plan_completed" = "Completed";
+"reading_plan_completed" = "完了";
 "reading_plan_choose" = "Choose a reading plan to start";
 "reading_plan_import_custom" = "Import Custom Plan";
-"reading_plan_custom" = "Custom";
+"reading_plan_custom" = "カスタム";
 "reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
 "reading_plan_available" = "Available Plans";
 "reading_plan_import_error_read" = "Could not read file";
 "reading_plan_import_error_format" = "Invalid reading plan format";
-"plan_duplicate_user_plan" = "There is a user reading plan in sdcard jsword/readingplan with the same name as an internal plan. It can not be listed here. Please rename the file to something else, leaving it's file extension as .properties";
+"plan_duplicate_user_plan" = "sdcard の jsword/readingplan に、内部プランと同名のユーザー読書プランがあります。ここには表示できません。 ファイルの拡張子を .properties のまま、別の名前に変更してください。";
 
 /* Daily Reading */
 "daily_reading" = "Daily Reading";
@@ -367,9 +367,9 @@
 /* ========================================
    Speak / TTS
    ======================================== */
-"speak" = "Speak";
-"pause" = "Pause";
-"stop" = "Stop";
+"speak" = "読み上げ";
+"pause" = "一時停止";
+"stop" = "停止";
 "speed" = "Speed";
 "sleep_timer" = "Sleep Timer";
 "speak_now_speaking" = "Now Speaking";
@@ -392,7 +392,7 @@
 /* ========================================
    Cross References
    ======================================== */
-"cross_references" = "Cross references";
+"cross_references" = "相互参照";
 
 /* ========================================
    Workspace
@@ -416,9 +416,9 @@
 "maximize" = "Maximize";
 "minimize" = "Minimize";
 "sync_scrolling" = "Sync Scrolling";
-"pin" = "Pin";
+"pin" = "ピン留め";
 "sync_group" = "Sync Group";
-"restore" = "Restore";
+"restore" = "復元";
 
 /* ========================================
    Dictionary / General Books
@@ -459,7 +459,7 @@
 "icloud_account" = "iCloud Account";
 "last_sync" = "Last Sync";
 "sync_active" = "Active";
-"sync_disabled" = "Disabled";
+"sync_disabled" = "無効";
 "syncing" = "Syncing…";
 "no_icloud_account" = "No iCloud Account";
 "icloud_signed_in" = "Signed In";
@@ -485,7 +485,7 @@
 /* ========================================
    Sharing
    ======================================== */
-"share_verse" = "Share…";
+"share_verse" = "共有…";
 "copy_verse" = "Copy Verse";
 
 /* ========================================
@@ -508,7 +508,7 @@
 "%lld days" = "%lld days";
 
 /* Search */
-"Find in %@" = "Find in %@";
+"Find in %@" = "%@ で検索";
 "Create an index for %@?" = "Create an index for %@?";
 "Creating index. Processing %@" = "Creating index. Processing %@";
 "No matches found for \"%@\"" = "No matches found for \"%@\"";
@@ -535,145 +535,145 @@
 "%lld windows" = "%lld windows";
 
 /* Text Display Settings */
-"global_text_display_settings_title" = "Global text options";
-"global_text_display_settings_summary" = "Default text display settings for all workspaces";
-"workspace_text_display_settings_title" = "Text options - %@";
-"window_text_display_settings_title" = "Text options - Window %d";
-"parent_settings_category_title" = "Parent settings";
-"workspace_text_options_link" = "Workspace text options — %@";
-"workspace_text_options_link_summary" = "Edit text display settings for this workspace";
-"global_text_options_link" = "Global text options";
-"global_text_options_link_summary" = "Edit default text display settings for all workspaces";
-"text_display_font_size_title_format" = "Font size (%d pt)";
-"text_display_font_family_title_format" = "Font family (%@)";
-"text_display_line_spacing_title_format" = "Line spacing (%1.1fx)";
+"global_text_display_settings_title" = "グローバルテキストオプション";
+"global_text_display_settings_summary" = "すべてのワークスペースのデフォルトのテキスト表示設定";
+"workspace_text_display_settings_title" = "テキストオプション - %@";
+"window_text_display_settings_title" = "テキストオプション - ウィンドウ %d";
+"parent_settings_category_title" = "親設定";
+"workspace_text_options_link" = "ワークスペーステキストオプション — %@";
+"workspace_text_options_link_summary" = "このワークスペースのテキスト表示設定を編集します";
+"global_text_options_link" = "グローバルテキストオプション";
+"global_text_options_link_summary" = "すべてのワークスペースのデフォルトのテキスト表示設定を編集します";
+"text_display_font_size_title_format" = "フォントサイズ（%d pt）";
+"text_display_font_family_title_format" = "フォントファミリー（%@）";
+"text_display_line_spacing_title_format" = "行間（%1.1fx）";
 "text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
-"text_display_top_margin_title_format" = "Top margin (%d mm)";
+"text_display_top_margin_title_format" = "上部余白（%d mm）";
 "text_display_page_scroll_amount_title_format" = "Page scroll amount (%d%%)";
-"text_display_left_margin_title_format" = "Left margin (%d mm)";
-"text_display_right_margin_title_format" = "Right margin (%d mm)";
-"text_display_max_width_title_format" = "Maximum width of text (%d mm)";
-"all_text_options_window_menutitle" = "All text options";
+"text_display_left_margin_title_format" = "左余白（%d mm）";
+"text_display_right_margin_title_format" = "右余白（%d mm）";
+"text_display_max_width_title_format" = "テキストの最大幅（%d mm）";
+"all_text_options_window_menutitle" = "すべてのテキストオプション";
 
-"prefs_behavior_customization_cat" = "Application behavior";
-"prefs_display_customization_cat" = "Look & feel";
-"prefs_advanced_settings_cat" = "Advanced settings";
+"prefs_behavior_customization_cat" = "アプリの動作";
+"prefs_display_customization_cat" = "外観とフィール";
+"prefs_advanced_settings_cat" = "詳細設定";
 
-"prefs_toolbar_button_action_title" = "Action for toolbar button press";
-"prefs_toolbar_button_action_summary" = "Action to take when pressing/long-pressing Bible or Commentary toolbar buttons";
-"prefs_toolbar_button_action_default" = "Press to open menu, long press for documents screen (default)";
-"prefs_toolbar_button_action_swap_menu" = "Press to open next document, long press to open menu";
-"prefs_toolbar_button_action_swap_activity" = "Press to open next document, long press for documents screen";
+"prefs_toolbar_button_action_title" = "ツールバーボタンの動作";
+"prefs_toolbar_button_action_summary" = "聖書またはコメンタリーのツールバーボタンを押したときの動作";
+"prefs_toolbar_button_action_default" = "タップでメニューを開く、長押しで文書画面（デフォルト）";
+"prefs_toolbar_button_action_swap_menu" = "タップで次の文書を開く、長押しでメニューを開く";
+"prefs_toolbar_button_action_swap_activity" = "タップで次の文書を開く、長押しで文書画面";
 
 
-"add_bookmark3" = "Selection";
-"add_bookmark_whole_verse1" = "Verses";
-"prefs_disable_two_step_bookmarking_title" = "One-step bookmarking";
-"prefs_disable_two_step_bookmarking_summary" = "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu";
+"add_bookmark3" = "選択範囲";
+"add_bookmark_whole_verse1" = "節";
+"prefs_disable_two_step_bookmarking_title" = "ワンステップブックマーク";
+"prefs_disable_two_step_bookmarking_summary" = "聖書ビューの選択メニューに「選択範囲」と「節」の項目を直接表示します";
 
-"active_window_indicator_summary" = "Highlight window corners to help recognising which window is active";
-"active_window_indicator_title" = "Show active window indicator";
-"auto_fullscreen" = "Fullscreen by scrolling";
-"auto_fullscreen_summary" = "Switch automatically to fullscreen when scrolling text. Tip: you can always also switch to full screen by doubletapping screen.";
-"choose_strongs_greek_dictionary_summary" = "Choose Strongs dictionary for Greek word definitions";
-"choose_strongs_greek_dictionary_title" = "Strongs Greek dictionary";
-"choose_strongs_greek_morphology_summary" = "Choose dictionary for Robinson Greek morphology definitions";
-"choose_strongs_greek_morphology_title" = "Robinson Greek morphology";
-"choose_strongs_hebrew_dictionary_summary" = "Choose Strongs dictionary for Hebrew word definitions";
-"choose_strongs_hebrew_dictionary_title" = "Strongs Hebrew dictionary";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
-"full_screen_hide_buttons_pref_summary" = "When switching to fullscreen mode, hide automatically window button bar that is on the bottom of the screen";
-"full_screen_hide_buttons_pref_title" = "Hide window button bar in fullscreen";
-"hide_bible_reference_overlay_summary" = "Do not show the semi-transparent Bible reference overlay when app is in fullscreen mode";
-"hide_bible_reference_overlay_title" = "Hide Bible reference overlay";
-"hide_window_buttons_summary" = "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them.";
-"hide_window_buttons_title" = "Hide window buttons";
+"active_window_indicator_summary" = "アクティブなウィンドウを識別しやすくするため、ウィンドウの角をハイライト表示します";
+"active_window_indicator_title" = "アクティブウィンドウのインジケーターを表示";
+"auto_fullscreen" = "スクロールでフルスクリーン";
+"auto_fullscreen_summary" = "テキストをスクロールすると自動的にフルスクリーンに切り替えます。ヒント：画面をダブルタップしてフルスクリーンに切り替えることもできます。";
+"choose_strongs_greek_dictionary_summary" = "ギリシャ語の語義用ストロングス辞書を選択します";
+"choose_strongs_greek_dictionary_title" = "ストロングスギリシャ語辞書";
+"choose_strongs_greek_morphology_summary" = "ロビンソンギリシャ語形態論の語義用辞書を選択します";
+"choose_strongs_greek_morphology_title" = "ロビンソンギリシャ語形態論";
+"choose_strongs_hebrew_dictionary_summary" = "ヘブライ語の語義用ストロングス辞書を選択します";
+"choose_strongs_hebrew_dictionary_title" = "ストロングスヘブライ語辞書";
+"choose_word_lookup_dictionary_summary" = "語句検索用の辞書を選択します";
+"choose_word_lookup_dictionary_title" = "語句検索辞書";
+"full_screen_hide_buttons_pref_summary" = "フルスクリーンモードに切り替えると、画面下部のウィンドウボタンバーを自動的に非表示にします";
+"full_screen_hide_buttons_pref_title" = "フルスクリーン時にウィンドウボタンバーを非表示";
+"hide_bible_reference_overlay_summary" = "アプリがフルスクリーンモードのとき、半透明の聖書参照オーバーレイを表示しません";
+"hide_bible_reference_overlay_title" = "聖書参照オーバーレイを非表示";
+"hide_window_buttons_summary" = "聖書ビューの右側に表示されているウィンドウボタンを非表示にします。下部のウィンドウナビゲーションバーは引き続き表示され、長押しでウィンドウのポップアップメニューを開くことができます。";
+"hide_window_buttons_title" = "ウィンドウボタンを非表示";
 "show_window_buttons_title" = "Show window buttons";
 "hide_window_buttons_hint" = "Hides the window button strip";
 "show_window_buttons_hint" = "Shows the window button strip";
-"pref_font_size_multiplier_title" = "Font size multiplier";
-"prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
-"prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
-"prefs_disable_animations_summary" = "Disable various animations such as smooth scrolling.";
-"prefs_disable_animations_title" = "Disable animations";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
-"prefs_notes_content_type_title" = "Format for new bookmark notes";
-"prefs_notes_content_type_summary" = "Text format used when creating new bookmark notes and Study Pad entries";
-"notes_content_type_html" = "Rich text (HTML)";
+"pref_font_size_multiplier_title" = "フォントサイズの倍率";
+"prefs_bible_view_swipe_mode_summary" = "左右スワイプで次のページや章に移動できます。";
+"prefs_bible_view_swipe_mode_title" = "左右スワイプのジェスチャー操作";
+"prefs_disable_animations_summary" = "スムーズスクロールなどのアニメーションを無効にします。";
+"prefs_disable_animations_title" = "アニメーションを無効化";
+"prefs_disable_click_to_edit_summary" = "スタディパッドのメモを編集するには編集ボタンを使用する必要があります。";
+"prefs_disable_click_to_edit_title" = "スタディパッドのクリック編集を無効化";
+"prefs_notes_content_type_title" = "新規ブックマークメモの形式";
+"prefs_notes_content_type_summary" = "新規ブックマークメモとスタディパッド項目を作成する際のテキスト形式";
+"notes_content_type_html" = "リッチテキスト（HTML）";
 "notes_content_type_markdown" = "Markdown";
-"prefs_double_tap_to_fullscreen_summary" = "Enter fullscreen mode by double-tapping window";
-"prefs_double_tap_to_fullscreen_title" = "Double-tap to Fullscreen";
-"prefs_e_ink_mode_title" = "Black & white mode";
-"prefs_eink_mode_summary" = "Use application in monochrome mode (no colors), making it more suitable for E-ink devices.";
-"prefs_interface_locale_summary" = "Select custom user interface language";
-"prefs_interface_locale_title" = "Application language";
-"prefs_navigate_to_verse_summary" = "Choose verse (and chapter) when selecting a passage";
-"prefs_navigate_to_verse_title" = "Navigate to verse";
-"prefs_night_mode_automatic" = "Automatic";
-"prefs_night_mode_manual" = "Manual";
-"prefs_night_mode_summary" = "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen.";
-"prefs_night_mode_system" = "System";
-"prefs_night_mode_title" = "Night mode switching";
-"prefs_open_links_in_special_window_summary" = "Open links in special window, for quicker display of cross-references and Strongs";
-"prefs_open_links_in_special_window_title" = "Links window";
-"prefs_screen_keep_on_summary" = "Prevent screen sleeping while using this app";
-"prefs_screen_keep_on_title" = "Keep screen on";
-"prefs_show_error_box_summary" = "Useful for developers when debugging BibleView javascript side errors. This will make the app slower.";
-"prefs_show_error_box_title" = "Show Javascript error box";
-"prefs_swipe_mode_chapter" = "Chapter";
-"prefs_swipe_mode_none" = "Disabled";
-"prefs_swipe_mode_page" = "Page";
+"prefs_double_tap_to_fullscreen_summary" = "ウィンドウをダブルタップして全画面モードに入ります";
+"prefs_double_tap_to_fullscreen_title" = "ダブルタップで全画面表示";
+"prefs_e_ink_mode_title" = "白黒モード";
+"prefs_eink_mode_summary" = "モノクロモード（色なし）でアプリを使用します。電子インクデバイスに適しています。";
+"prefs_interface_locale_summary" = "カスタムのユーザーインターフェース言語を選択します";
+"prefs_interface_locale_title" = "アプリの言語";
+"prefs_navigate_to_verse_summary" = "聖句を選択する際に節（と章）を選びます";
+"prefs_navigate_to_verse_title" = "節へ移動";
+"prefs_night_mode_automatic" = "自動";
+"prefs_night_mode_manual" = "手動";
+"prefs_night_mode_summary" = "ナイトモードを自動的に切り替えるか（デバイスが対応している場合）、手動で切り替えるか、システム設定に従うか（Android 10以降）を設定します。手動切り替えはメイン画面の3点オプションメニューから行えます。";
+"prefs_night_mode_system" = "システム";
+"prefs_night_mode_title" = "ナイトモードの切り替え";
+"prefs_open_links_in_special_window_summary" = "特別なウィンドウでリンクを開き、相互参照とストロングスをすばやく表示します";
+"prefs_open_links_in_special_window_title" = "リンクウィンドウ";
+"prefs_screen_keep_on_summary" = "このアプリの使用中に画面がスリープするのを防ぎます";
+"prefs_screen_keep_on_title" = "画面をオンに保つ";
+"prefs_show_error_box_summary" = "BibleView側のJavaScriptエラーをデバッグする開発者向け設定です。アプリの動作が遅くなります。";
+"prefs_show_error_box_title" = "JavaScriptエラーボックスを表示";
+"prefs_swipe_mode_chapter" = "章";
+"prefs_swipe_mode_none" = "無効";
+"prefs_swipe_mode_page" = "ページ";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "音量ボタンでスクロール";
+"prefs_volume_keys_scroll_summary" = "音量の上げ下げボタンで聖書テキストをスクロールします";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
-"prefs_experimental_features_title" = "Experimental features";
-"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
-"experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
-"experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";
-"prefs_enable_bluetooth_title" = "Enable Bluetooth media buttons";
-"prefs_enable_bluetooth_summary" = "Handle Bluetooth media buttons to start/stop speaking.";
+"prefs_experimental_features_title" = "試験的機能";
+"prefs_experimental_features_summary" = "有効にする試験的機能を選択してください。これらの機能はまだ開発中であり、変更または削除される場合があります";
+"experimental_feature_bookmark_edit_actions" = "ブックマーク編集アクション";
+"experimental_feature_add_paragraph_break" = "段落区切りブックマークを追加";
+"prefs_enable_bluetooth_title" = "Bluetoothメディアボタンを有効にする";
+"prefs_enable_bluetooth_summary" = "Bluetoothメディアボタンで読み上げの開始/停止を操作します。";
 
-"open_bible_links_title" = "Open Bible links in AndBible";
-"open_bible_links_summary" = "When clicking links that refer to AndBible supported Bible URL, open them in AndBible";
+"open_bible_links_title" = "聖書リンクをAndBibleで開く";
+"open_bible_links_summary" = "AndBibleがサポートする聖書URLを参照するリンクをクリックしたとき、AndBibleで開きます";
 
 "crash_app" = "Crash app!";
 "crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";
 "crash_app_scheduled_summary" = "Crash scheduled in 10 seconds.";
-"sign_in_failed" = "Signing in to synchronization backend service failed.";
-"sync_adapter" = "Synchronization Backend";
-"sync_adapter_summary" = "Current: %@";
+"sign_in_failed" = "同期バックエンドサービスへのサインインに失敗しました。";
+"sync_adapter" = "同期バックエンド";
+"sync_adapter_summary" = "現在: %@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "Next Cloud";
-"auth_server_uri" = "Server URL";
-"auth_username" = "User name";
-"auth_password" = "Password";
-"auth_folder_path" = "Sync folder path";
-"auth_folder_path_summary" = "Parent folder for sync data (empty = root)";
-"invalid_url_message" = "The URL you entered is invalid. Please enter a valid URL (e.g., https://nextcloud.example.com)";
-"prefs_sync_introduction_summary1" = "Choose which backend cloud service you want to use to synchronize multiple devices.";
+"adapters_next_cloud" = "Nextcloud";
+"auth_server_uri" = "サーバーURL";
+"auth_username" = "ユーザー名";
+"auth_password" = "パスワード";
+"auth_folder_path" = "同期フォルダーのパス";
+"auth_folder_path_summary" = "同期データの親フォルダー（空白の場合はルート）";
+"invalid_url_message" = "入力したURLが無効です。有効なURLを入力してください（例: https://nextcloud.example.com）";
+"prefs_sync_introduction_summary1" = "同期に使用するクラウドサービスのバックエンドを選択してください。";
 "test_connection" = "Test Connection";
-"overrideBackup" = "Existing database that this device is not synchronized to is found in Cloud. Database contains %@. What do you want to do?";
-"cloud_fetch_and_restore_initial" = "Copy from Cloud to this device";
-"cloud_create_new" = "Copy from this device to Cloud";
-"cloud_disable_sync" = "Cancel & disable synchronization";
-"cloud_sync_title" = "Device synchronization";
-"application_preferences" = "Application preferences";
-"are_you_sure_reset_local" = "This will reset your local database for %@ with the content that is currently stored in cloud service.";
-"are_you_sure_reset_cloud" = "This will reset your cloud database for %@ with the content that you have in this device.";
-"reading_plans_content" = "Reading plans and their statuses";
-"bookmarks_contents" = "Bookmarks, Labels and Study Pads";
-"workspaces_contents" = "Workspaces and Windows";
-"my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their content";
-"synchronization_categories" = "Synchronization categories";
-"sync_error" = "Error occurred in Cloud synchronization";
-"sync_cant_fetch" = "The version of database or patch file stored in Cloud is higher than the one supported by this app.";
-"sync_disabling" = "Disabling synchronizing for %@ for now.";
-"sync_update_app" = "Please update the app to continue synchronization.";
-"last_updated" = "Last updated: %@";
+"overrideBackup" = "このデバイスが同期していないデータベースがクラウドに見つかりました。 データベースには%@が含まれています。どうしますか？";
+"cloud_fetch_and_restore_initial" = "クラウドからこのデバイスにコピー";
+"cloud_create_new" = "このデバイスからクラウドにコピー";
+"cloud_disable_sync" = "キャンセルして同期を無効化";
+"cloud_sync_title" = "デバイスの同期";
+"application_preferences" = "アプリの設定";
+"are_you_sure_reset_local" = "%@のローカルデータベースを、クラウドサービスに現在保存されている内容でリセットします。";
+"are_you_sure_reset_cloud" = "%@のクラウドデータベースを、このデバイスの内容でリセットします。";
+"reading_plans_content" = "読書プランとその進捗状況";
+"bookmarks_contents" = "ブックマーク、ラベル、スタディパッド";
+"workspaces_contents" = "ワークスペースとウィンドウ";
+"my_documents" = "マイドキュメント";
+"my_documents_contents" = "マイドキュメントとその内容";
+"synchronization_categories" = "同期カテゴリー";
+"sync_error" = "クラウド同期でエラーが発生しました";
+"sync_cant_fetch" = "クラウドに保存されているデータベースまたはパッチファイルのバージョンが、このアプリでサポートされているバージョンより新しいです。";
+"sync_disabling" = "%@の同期を一時的に無効化しています。";
+"sync_update_app" = "同期を継続するにはアプリを更新してください。";
+"last_updated" = "最終更新: %@";
 
 /* Google Drive Sync */
 "prefs_sync_introduction_summary2" = "When using Google Drive, %@ is granted access only to applications files, not any personal files.";
@@ -687,77 +687,77 @@
 "google_drive_not_signed_in" = "Not signed in";
 "google_drive_permission_required" = "Google Drive permission is required";
 
-"help_workspaces_title" = "Workspaces";
-"reading_plans_plural" = "Reading Plans";
+"help_workspaces_title" = "ワークスペース";
+"reading_plans_plural" = "読書プラン";
 
 /* Android window popup menu parity */
-"windowMaximise" = "Maximise";
-"windowMinimise" = "Minimise";
-"change_to_normal" = "Change to normal window";
-"move_window" = "Move to";
-"move_window_to_position2" = "Position %1$d (%2$@:%3$@)";
-"window_pin_mode" = "Pin";
-"windowSynchronise" = "Synchronise";
-"window_disable_sync" = "Disable synchronize";
-"sync_group_n" = "Group %d";
-"text_options_window_menutitle" = "Text options";
-"prefs_text_colors_menutitle" = "Color settings";
-"prefs_section_title_title" = "Section titles";
-"prefs_show_strongs_title" = "Strong's numbers";
-"prefs_show_verseno_title" = "Chapter & verse numbers";
-"copy_settings" = "Copy settings to";
-"copy_settings_to_workspace" = "Workspace";
-"copy_settings_to_window" = "Window %1$d (%2$@: %3$@)";
-"copy_settings_to_global" = "Global defaults";
-"copyReference" = "Copy link to clipboard";
-"reference_copied_to_clipboard" = "Reference copied to clipboard";
+"windowMaximise" = "最大化";
+"windowMinimise" = "最小化";
+"change_to_normal" = "通常ウィンドウに変更";
+"move_window" = "移動先";
+"move_window_to_position2" = "位置 %1$d（%2$@：%3$@）";
+"window_pin_mode" = "ピン留め";
+"windowSynchronise" = "同期";
+"window_disable_sync" = "同期を無効化";
+"sync_group_n" = "グループ %d";
+"text_options_window_menutitle" = "テキストオプション";
+"prefs_text_colors_menutitle" = "色の設定";
+"prefs_section_title_title" = "セクションタイトル";
+"prefs_show_strongs_title" = "ストロング番号";
+"prefs_show_verseno_title" = "章と節の番号";
+"copy_settings" = "設定をコピー先";
+"copy_settings_to_workspace" = "ワークスペース";
+"copy_settings_to_window" = "ウィンドウ %1$d（%2$@：%3$@）";
+"copy_settings_to_global" = "グローバルデフォルト";
+"copyReference" = "リンクをクリップボードにコピー";
+"reference_copied_to_clipboard" = "参照をクリップボードにコピーしました";
 "add_ellipsis" = "%@…";
-"copy_settings_title" = "Which settings do you want to copy?";
-"select_all" = "Select all";
-"select_none" = "Select none";
+"copy_settings_title" = "コピーする設定を選択してください";
+"select_all" = "すべて選択";
+"select_none" = "なし";
 "font" = "Font";
 "margin_size" = "Margin size";
-"top_margin" = "Top margin";
+"top_margin" = "上部余白";
 "footnotes_inline" = "Inline footnotes";
 "expand_cross_references" = "Expand cross references";
-"cross_references" = "Cross references";
+"cross_references" = "相互参照";
 "verse_per_line" = "Verse per line";
-"show_bookmarks" = "Show bookmarks";
+"show_bookmarks" = "ブックマークを表示";
 "hide_labels" = "Hide labels";
 "my_notes" = "My notes";
 "page_number" = "Page number";
-"infinite_scroll" = "Infinite scroll";
-"non_strongs_word_italic" = "Italicize added words";
-"mark_as_read_button" = "Mark as read button";
-"title_scroll_button" = "Title scroll button";
-"memorization_indicators" = "Memorization indicators";
+"infinite_scroll" = "無限スクロール";
+"non_strongs_word_italic" = "補足語をイタリック体に";
+"mark_as_read_button" = "既読ボタン";
+"title_scroll_button" = "タイトルスクロールボタン";
+"memorization_indicators" = "暗記インジケーター";
 "ai_document_markers" = "AI document markers";
-"page_scroll_amount" = "Page scroll amount";
+"page_scroll_amount" = "ページスクロール量";
 "ordinals" = "Ordinals";
 
 /* Android shared translations */
-"about" = "About";
+"about" = "情報";
 "app_name_andbible" = "AndBible";
-"app_name_long" = "AndBible: Bible Study";
-"download" = "Download Documents";
-"download_errors" = "Download errors";
-"format_epub" = "EPUB documents (*.epub)";
-"format_mybible" = "MyBible documents (*.SQLite3)";
-"format_mysword" = "MySword documents (*.mybible)";
-"format_zip" = "Zip file containing Sword module(s), or documents backup file (*.abmd) created by %@";
-"install_zip" = "Load Documents From Files";
-"rename" = "Rename";
-"restore_database" = "Restore Database File";
-"reversed_split_mode" = "Reversed split mode";
-"supported_formats" = "Supported formats for loading documents from a file: %@";
-"welcome_message" = "Thank you for downloading %@. There are currently no Bibles or documents installed. To continue, please install at least 1 document by downloading from the internet, or by loading from a zip file document backup.";
+"app_name_long" = "AndBible: 聖書研究";
+"download" = "文書をダウンロード";
+"download_errors" = "ダウンロードエラー";
+"format_epub" = "EPUB文書（*.epub）";
+"format_mybible" = "MyBible文書（*.SQLite3）";
+"format_mysword" = "MySword文書（*.mybible）";
+"format_zip" = "SWORDモジュールを含むZIPファイル、または %@ が作成した文書バックアップファイル（*.abmd）";
+"install_zip" = "ファイルからドキュメントを読み込む";
+"rename" = "名前を変更";
+"restore_database" = "データベースファイルを復元";
+"reversed_split_mode" = "分割モードを反転";
+"supported_formats" = "ファイルから文書を読み込む際にサポートされている形式：%@";
+"welcome_message" = "%@ をダウンロードいただきありがとうございます。現在、聖書や文書がインストールされていません。続けるには、インターネットからダウンロードするか、ZIPファイルの文書バックアップから読み込んで、少なくとも1つの文書をインストールしてください。";
 
 /* Android shared translations */
-"copy_of %@" = "Copy of %@";
-"fullscreen" = "Fullscreen";
-"help_bookmarks" = "Bookmarks";
-"help_navigation" = "Navigation";
-"help_search" = "Search";
-"help_workspaces" = "Workspaces";
-"skip" = "Skip";
-"error_no_content" = "No content for selected verse";
+"copy_of %@" = "%@ のコピー";
+"fullscreen" = "全画面表示";
+"help_bookmarks" = "ブックマーク";
+"help_navigation" = "ナビゲーション";
+"help_search" = "検索";
+"help_workspaces" = "ワークスペース";
+"skip" = "スキップ";
+"error_no_content" = "選択した節のコンテンツがありません";

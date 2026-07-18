@@ -255,14 +255,15 @@ public enum ModuleBrowserDefaultDownloadMode: Sendable, Equatable {
      SWORD package-install policy for one requested module.
 
      Normal Downloads follows Android package-first behavior while retaining iOS raw fallback for
-     legacy/raw-compatible sources. Startup defaults require Android package ZIPs only for modules
-     selected by the Easy Start default-document planner, so later manual installs in the same
-     Downloads session keep the normal fallback behavior.
+     legacy/raw-compatible sources. Startup defaults require Android package ZIPs for modules
+     selected by the Easy Start default-document planner until that module succeeds or is cancelled,
+     so a failed default install keeps strict retry behavior while unrelated manual installs in the
+     same Downloads session keep the normal fallback behavior.
 
      - Parameters:
        - moduleName: Module initials about to be installed.
-       - installingDefaultModules: Current Easy Start default modules still owned by the startup
-         flow.
+       - strictDefaultModules: Easy Start default modules whose current session retries must remain
+         package-only.
      - Returns: Strict package policy only for active Easy Start default modules; otherwise the
        normal package-then-raw policy.
      - Side effects: none.
@@ -270,10 +271,10 @@ public enum ModuleBrowserDefaultDownloadMode: Sendable, Equatable {
      */
     func modulePackageInstallPolicy(
         for moduleName: String,
-        installingDefaultModules: Set<String>
+        strictDefaultModules: Set<String>
     ) -> ModulePackageInstallPolicy {
         guard self == .englishStartup,
-              installingDefaultModules.contains(moduleName) else {
+              strictDefaultModules.contains(moduleName) else {
             return .preferPackageThenRaw
         }
         return .requirePackage
@@ -493,6 +494,9 @@ public struct ModuleBrowserView: View {
 
     /// Startup default module names whose asynchronous installs have not finished yet.
     @State private var defaultDownloadInstallingModules: Set<String> = []
+
+    /// Startup default module names whose retries must keep strict package-only install policy.
+    @State private var defaultDownloadStrictPackageModules: Set<String> = []
 
     /**
      Creates the module browser with optional Android-compatible search and default-download state.
@@ -3066,6 +3070,7 @@ public struct ModuleBrowserView: View {
         }
 
         defaultDownloadInstallingModules.formUnion(moduleNames)
+        defaultDownloadStrictPackageModules.formUnion(moduleNames)
         onDefaultDownloadActivityChanged(true)
         for module in modulesToInstall {
             installModule(module)
@@ -3256,7 +3261,10 @@ public struct ModuleBrowserView: View {
                 ?? Self.moduleUnavailableForInstallationMessage(moduleName: module.name)
             errorMessage = message
             recordDownloadError(message)
-            markDefaultDownloadModuleFinishedIfNeeded(module.name)
+            markDefaultDownloadModuleFinishedIfNeeded(
+                module.name,
+                strictPolicyResolution: .retainForRetry
+            )
             return
         }
 
@@ -3268,7 +3276,10 @@ public struct ModuleBrowserView: View {
             let message = Self.moduleSourceNotFoundMessage(moduleName: module.name)
             errorMessage = message
             recordDownloadError(message)
-            markDefaultDownloadModuleFinishedIfNeeded(module.name)
+            markDefaultDownloadModuleFinishedIfNeeded(
+                module.name,
+                strictPolicyResolution: .retainForRetry
+            )
             return
         }
 
@@ -3288,7 +3299,7 @@ public struct ModuleBrowserView: View {
 
         let packageInstallPolicy = defaultDownloadMode.modulePackageInstallPolicy(
             for: module.name,
-            installingDefaultModules: defaultDownloadInstallingModules
+            strictDefaultModules: defaultDownloadStrictPackageModules
         )
 
         let task = Task {
@@ -3312,7 +3323,10 @@ public struct ModuleBrowserView: View {
                     downloadActivities[module.name] = nil
                     swordManager = SwordManager()
                     refreshInstalledList()
-                    markDefaultDownloadModuleFinishedIfNeeded(module.name)
+                    markDefaultDownloadModuleFinishedIfNeeded(
+                        module.name,
+                        strictPolicyResolution: .clear
+                    )
                 }
             } catch {
                 await MainActor.run {
@@ -3327,7 +3341,12 @@ public struct ModuleBrowserView: View {
                         errorMessage = Self.downloadFailureMessage(message)
                         recordDownloadError(Self.downloadFailureMessage(moduleName: module.name, message: message))
                     }
-                    markDefaultDownloadModuleFinishedIfNeeded(module.name)
+                    markDefaultDownloadModuleFinishedIfNeeded(
+                        module.name,
+                        strictPolicyResolution: (
+                            error is CancellationError || Task.isCancelled
+                        ) ? .clear : .retainForRetry
+                    )
                 }
             }
         }
@@ -3357,27 +3376,51 @@ public struct ModuleBrowserView: View {
         installTasks[moduleName] = nil
         installTaskIDs[moduleName] = nil
         downloadActivities[moduleName] = nil
-        markDefaultDownloadModuleFinishedIfNeeded(moduleName)
+        markDefaultDownloadModuleFinishedIfNeeded(moduleName, strictPolicyResolution: .clear)
         return cancelledTask
+    }
+
+    /**
+     Strict package-policy lifecycle for one startup default module.
+
+     Failed Easy Start installs keep strict package policy so row retries cannot fall back to raw
+     testament probes and recreate the partial-Bible failure from issue 354. Successful installs and
+     user cancellations clear strict membership because that default request no longer owns retries.
+     */
+    private enum DefaultDownloadStrictPolicyResolution {
+        /// Remove the module from strict package-policy membership.
+        case clear
+
+        /// Keep the module strict so the visible retry path still requires the Android package ZIP.
+        case retainForRetry
     }
 
     /**
      Marks one startup default module done and finishes the default flow when none remain.
 
      - Parameter moduleName: Module initials for the completed or skipped default install.
+     - Parameter strictPolicyResolution: Whether this terminal state keeps strict package policy for
+       later retries.
 
      Side effects:
      - removes `moduleName` from `defaultDownloadInstallingModules`
+     - clears `moduleName` from `defaultDownloadStrictPackageModules` only after success/cancel
      - invokes `onDefaultDownloadActivityChanged(false)` once the startup default set is exhausted
 
      Failure modes:
      - ignored for normal Downloads sessions where default-download mode is disabled
      */
-    private func markDefaultDownloadModuleFinishedIfNeeded(_ moduleName: String) {
+    private func markDefaultDownloadModuleFinishedIfNeeded(
+        _ moduleName: String,
+        strictPolicyResolution: DefaultDownloadStrictPolicyResolution
+    ) {
         guard defaultDownloadMode.shouldInstallDefaultDocuments else {
             return
         }
 
+        if case .clear = strictPolicyResolution {
+            defaultDownloadStrictPackageModules.remove(moduleName)
+        }
         defaultDownloadInstallingModules.remove(moduleName)
         if defaultDownloadInstallingModules.isEmpty {
             finishDefaultDownloadActivityIfNeeded()
@@ -3389,6 +3432,8 @@ public struct ModuleBrowserView: View {
 
      Side effects:
      - clears `defaultDownloadInstallingModules`
+     - preserves `defaultDownloadStrictPackageModules` so failed default modules remain strict for
+       row retries until they succeed, are cancelled, or the Downloads session ends
      - invokes `onDefaultDownloadActivityChanged(false)` for the reader coordinator
 
      Failure modes:

@@ -5,16 +5,16 @@
    ======================================== */
 "app_name" = "AndBible";
 "app_name_andbible" = "AndBible";
-"app_name_long" = "AndBible: Bible Study";
-"done" = "Done";
-"cancel" = "Cancel";
-"delete" = "Delete";
-"save" = "Save";
-"edit" = "Edit";
+"app_name_long" = "AndBible: Học Kinh Thánh";
+"done" = "Hoàn thành";
+"cancel" = "Hủy";
+"delete" = "Xóa";
+"save" = "Lưu";
+"edit" = "Chỉnh sửa";
 "add" = "Add";
-"search" = "Find";
-"settings" = "Application preferences";
-"close" = "Close";
+"search" = "Tìm kiếm";
+"settings" = "Tùy chọn ứng dụng";
+"close" = "Đóng";
 "copy_reference" = "Copy Reference";
 "go_to_reference" = "Go to Reference";
 "go_to_reference_placeholder" = "e.g. Genesis 1, Matt 5:3, Gen.1.1";
@@ -26,61 +26,61 @@
 "move_down" = "Move Down";
 "reference_copied" = "Reference copied";
 "ok" = "OK";
-"yes" = "Yes";
-"no" = "No";
-"error" = "Error";
+"yes" = "Có";
+"no" = "Không";
+"error" = "Lỗi";
 "loading" = "Loading...";
-"create" = "Create";
-"new_window" = "New window";
+"create" = "Tạo";
+"new_window" = "Cửa sổ mới";
 "clear" = "Clear";
-"reset" = "Reset";
+"reset" = "Đặt lại";
 "retry" = "Retry";
-"skip" = "Skip";
-"all" = "All";
+"skip" = "Bỏ qua";
+"all" = "Tất cả";
 "sort" = "Sort";
-"name" = "Name";
+"name" = "Tên";
 "untitled" = "Untitled";
-"compare" = "Compare";
-"translations" = "Translations";
+"compare" = "So sánh";
+"translations" = "Bản dịch";
 "auto" = "Auto";
 "off" = "Off";
 "inline" = "Inline";
-"links" = "Links";
+"links" = "Liên kết";
 "hidden" = "Hidden";
-"completed" = "Completed";
+"completed" = "Đã hoàn thành";
 "no_results" = "No Results";
 "searching" = "Searching...";
 
 /* ========================================
    Navigation / Bible Reader
    ======================================== */
-"bible" = "Bible";
-"deuterocanonical" = "Deuterocanonical";
-"bookmarks" = "Bookmarks";
-"reading_plans" = "Reading Plans";
+"bible" = "Kinh Thánh";
+"deuterocanonical" = "Ngụy Kinh";
+"bookmarks" = "Đánh dấu";
+"reading_plans" = "Kế Hoạch Đọc";
 "downloads" = "Downloads";
-"history" = "History";
-"workspaces" = "Workspaces";
-"rename" = "Rename";
+"history" = "Lịch sử";
+"workspaces" = "Không gian làm việc";
+"rename" = "Đổi tên";
 "clone" = "Clone";
-"copy_of %@" = "Copy of %@";
+"copy_of %@" = "Bản sao của %@";
 "definition" = "Definition";
-"dictionary" = "Dictionary";
-"general_book" = "Book";
-"map" = "Map";
+"dictionary" = "Từ điển";
+"general_book" = "Sách";
+"map" = "Bản đồ";
 "locked" = "Locked";
 
 /* Bible Navigation */
-"choose_book" = "Choose Book";
+"choose_book" = "Chọn sách";
 "books" = "Books";
-"old_testament" = "Old Testament";
-"new_testament" = "New Testament";
+"old_testament" = "Cựu Ước";
+"new_testament" = "Tân Ước";
 "previous_chapter" = "Previous chapter";
 "next_chapter" = "Next chapter";
 "back_to_bible" = "Back to Bible";
 
 /* Module Pickers */
-"choose_document" = "Choose Document";
+"choose_document" = "Chọn tài liệu";
 "document_type" = "Document type";
 "picker_select_translation" = "Select Translation";
 "picker_select_commentary" = "Select Commentary";
@@ -93,30 +93,30 @@
 "picker_no_general_book_modules" = "No general book modules installed";
 "picker_no_map_modules" = "No map modules installed";
 "download_modules" = "Download Modules";
-"download" = "Download Documents";
+"download" = "Tải xuống Tài liệu";
 "easy_start" = "Easy Start";
 "easy_start_title" = "Easy start";
 "easy_start_message" = "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on.";
 "startup_download_prompt" = "Download Bible modules to start reading.";
-"welcome_message" = "Thank you for downloading %@. There are currently no Bibles or documents installed. To continue, please install at least 1 document by downloading from the internet, or by loading from a zip file document backup.";
-"supported_formats" = "Supported formats for loading documents from a file: %@";
-"format_zip" = "Zip file containing Sword module(s), or documents backup file (*.abmd) created by %@";
-"format_mysword" = "MySword documents (*.mybible)";
-"format_mybible" = "MyBible documents (*.SQLite3)";
-"format_epub" = "EPUB documents (*.epub)";
+"welcome_message" = "Cảm ơn bạn đã tải xuống %@. Hiện tại chưa có Kinh Thánh hoặc tài liệu nào được cài đặt. Để tiếp tục, vui lòng cài đặt ít nhất 1 tài liệu bằng cách tải xuống từ internet, hoặc tải từ tệp sao lưu tài liệu zip.";
+"supported_formats" = "Các định dạng được hỗ trợ để tải tài liệu từ tệp: %@";
+"format_zip" = "Tệp Zip chứa (các) mô-đun Sword, hoặc tệp sao lưu tài liệu (*.abmd) được tạo bởi %@";
+"format_mysword" = "Tài liệu MySword (*.mybible)";
+"format_mybible" = "Tài liệu MyBible (*.SQLite3)";
+"format_epub" = "Tài liệu EPUB (*.epub)";
 
 /* Toolbar / Actions */
 "toggle_strongs_numbers" = "Toggle Strong's numbers";
-"bookmark" = "Bookmark";
-"copy" = "Copy";
-"share" = "Share";
+"bookmark" = "Đánh dấu";
+"copy" = "Sao chép";
+"share" = "Chia sẻ";
 "search_web" = "Web";
 
 /* Strong's Modes */
 "strongs_off" = "Off";
-"strongs_inline" = "Text and Links";
-"strongs_links" = "Links";
-"strongs_hidden" = "Hidden Links";
+"strongs_inline" = "Văn bản và Liên kết";
+"strongs_links" = "Liên kết";
+"strongs_hidden" = "Liên kết ẩn";
 "find_all_occurrences" = "Find all occurrences";
 "no_dictionary_installed" = "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads.";
 "back_to_previous" = "Back";
@@ -127,7 +127,7 @@
 "add_bookmark" = "Add Bookmark";
 "edit_bookmark" = "Edit Bookmark";
 "bookmark_note" = "Note";
-"labels" = "Labels";
+"labels" = "Nhãn";
 "new_label" = "New Label";
 "study_pad" = "StudyPad";
 "my_notes" = "My Notes";
@@ -143,10 +143,10 @@
 "no_labels" = "No Labels";
 "no_labels_description" = "Create labels to organize your bookmarks and notes.";
 "label_name" = "Label name";
-"studypad" = "Study Pad";
+"studypad" = "Sổ tay nghiên cứu";
 "open_studypad" = "Open StudyPad";
-"edit_label" = "Edit label";
-"label_edit_name" = "Name";
+"edit_label" = "Chỉnh sửa nhãn";
+"label_edit_name" = "Tên";
 "label_edit_color" = "Color";
 "label_edit_icon" = "Icon";
 "no_icon" = "No Icon";
@@ -164,35 +164,35 @@
 /* ========================================
    Search
    ======================================== */
-"search_bible" = "Search Bible";
+"search_bible" = "Tìm kiếm Kinh Thánh";
 "search_results" = "Search Results";
-"whole_bible" = "Whole Bible";
+"whole_bible" = "Toàn bộ Kinh Thánh";
 "old_testament_short" = "OT";
 "new_testament_short" = "NT";
 "current_book" = "Current Book";
-"search_index" = "Search Index";
+"search_index" = "Chỉ mục tìm kiếm";
 "search_checking_index" = "Checking index...";
 "search_need_index" = "To search a document we need an index.";
-"search_create_index" = "Create";
-"search_indexing_message" = "When indexing has completed you will be taken to the search screen.";
+"search_create_index" = "Tạo";
+"search_indexing_message" = "Khi lập chỉ mục hoàn tất, bạn sẽ được chuyển đến màn hình tìm kiếm.";
 "search_searching" = "Searching...";
 "search_enter_prompt" = "Enter a word or phrase to search";
 "search_bible_text" = "Search Bible text";
 "search_match" = "Match";
-"search_scope_all" = "All";
+"search_scope_all" = "Tất cả";
 "search_scope_ot" = "OT";
 "search_scope_nt" = "NT";
-"search_translations" = "Translations";
-"search_all" = "All";
+"search_translations" = "Bản dịch";
+"search_all" = "Tất cả";
 
 /* ========================================
    Downloads / Module Browser
    ======================================== */
 "module_browser" = "Module Browser";
-"doc_type_all" = "All types";
+"doc_type_all" = "Tất cả các loại";
 "bibles" = "Bibles";
 "commentaries" = "Commentaries";
-"dictionaries" = "Dictionaries";
+"dictionaries" = "Từ điển";
 "category_books" = "Books";
 "maps" = "Maps";
 "document_filter_results %lld" = "Documents (%lld)";
@@ -201,20 +201,20 @@
 "update" = "Update";
 "uninstall" = "Uninstall";
 "unavailable" = "Unavailable";
-"download_document_confirm_prefix" = "Download";
-"bookmark_warning4" = "It is recommended that you backup the module before updating.";
-"bookmark_warning3" = "Do you still want to update module?";
-"bookmark_warning2" = "If document structure has changed, updating this document could make the locations of these bookmarks/notes move inside the document or disappear completely.";
-"bookmark_warning" = "There are bookmarks and/or notes for this document.";
-"recommended_document" = "Recommended!";
+"download_document_confirm_prefix" = "Tải xuống";
+"bookmark_warning4" = "Nên sao lưu mô-đun trước khi cập nhật.";
+"bookmark_warning3" = "Bạn vẫn muốn cập nhật mô-đun không?";
+"bookmark_warning2" = "Nếu cấu trúc tài liệu đã thay đổi, việc cập nhật tài liệu này có thể làm vị trí của các đánh dấu/ghi chú bị di chuyển bên trong tài liệu hoặc biến mất hoàn toàn.";
+"bookmark_warning" = "Có các đánh dấu và/hoặc ghi chú cho tài liệu này.";
+"recommended_document" = "Được khuyến nghị!";
 "bad_document_warning" = "Warning";
 "refresh_catalog" = "Refresh Catalog";
 "repositories" = "Repositories";
 "all_languages_count %lld" = "All Languages (%lld)";
 "documents_count %lld" = "%lld documents";
-"download_errors" = "Download errors";
-"install_zip" = "Load Documents From Files";
-"restore_database" = "Restore Database File";
+"download_errors" = "Lỗi tải xuống";
+"install_zip" = "Tải Tài Liệu Từ Tệp";
+"restore_database" = "Khôi phục tệp cơ sở dữ liệu";
 "refreshing_catalog" = "Refreshing catalog...";
 "no_modules_match_filters" = "No modules match your filters";
 "tap_refresh_to_load" = "Tap Refresh to load available modules";
@@ -225,9 +225,9 @@
 "delete_module_index_title" = "Delete Search Index";
 "delete_module_index_message_format" = "Delete the search index for %@?";
 "module_initials" = "Initials";
-"module_name" = "Name";
-"module_category" = "Category";
-"module_language" = "Language";
+"module_name" = "Tên";
+"module_category" = "Danh mục";
+"module_language" = "Ngôn ngữ";
 "module_source" = "Source";
 "module_versions" = "Versions";
 "module_latest_version" = "Latest";
@@ -254,19 +254,19 @@
 "line_spacing" = "Line Spacing";
 "justify_text" = "Justify Text";
 "verse_per_line" = "Verse Per Line";
-"hyphenation" = "Hyphenation";
-"settings_content" = "Content";
+"hyphenation" = "Ngắt từ";
+"settings_content" = "Nội dung";
 "verse_numbers" = "Verse Numbers";
 "section_titles" = "Section Titles";
-"footnotes" = "Footnotes";
+"footnotes" = "Chú thích";
 "inline_footnotes" = "Inline Footnotes";
 "red_letters" = "Red Letters";
-"cross_references" = "Cross references";
+"cross_references" = "Tham chiếu chéo";
 "expand_cross_references" = "Expand Cross References";
 "strongs_numbers" = "Strong's Numbers";
 "morphology" = "Morphology";
 "settings_annotations" = "Annotations";
-"show_bookmarks" = "Show bookmarks";
+"show_bookmarks" = "Hiển thị đánh dấu";
 "show_my_notes" = "Show My Notes";
 "verse_selection" = "Verse Selection";
 
@@ -277,13 +277,13 @@
 "night_theme" = "Night Theme";
 "text_color" = "Text Color";
 "background" = "Background";
-"color_workspace" = "Workspace color";
-"prefs_noise_title" = "Background noise";
-"prefs_noise_summary" = "Adding some noise to background might make it more comfortable to eyes.";
+"color_workspace" = "Màu không gian làm việc";
+"prefs_noise_title" = "Nhiễu nền";
+"prefs_noise_summary" = "Thêm một chút nhiễu vào nền có thể làm cho mắt dễ chịu hơn.";
 "reset_to_defaults" = "Reset to Defaults";
 
 /* Dictionaries */
-"settings_dictionaries" = "Dictionaries";
+"settings_dictionaries" = "Từ điển";
 "hebrew_dictionary" = "Hebrew Dictionary";
 "greek_dictionary" = "Greek Dictionary";
 "no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
@@ -293,35 +293,35 @@
 "import_export" = "Import & Export";
 
 /* Security — Settings for the persecuted */
-"settings_security" = "Settings for the persecuted";
-"discrete_mode" = "Hide religious symbols";
+"settings_security" = "Cài đặt cho những người bị bức hại";
+"discrete_mode" = "Ẩn biểu tượng tôn giáo";
 "discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
-"show_calculator" = "Calculator";
+"show_calculator" = "Máy tính";
 "show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
-"calculator_pin" = "Calculator PIN";
+"calculator_pin" = "Mã PIN máy tính";
 "calculator_pin_placeholder" = "1234";
-"calculator_pin_description" = "PIN code to enter the app when the calculator is shown.";
-"discrete_help_title" = "Read this first!";
-"discrete_help_summary" = "Instructions for the settings and information about specific discrete build.";
+"calculator_pin_description" = "Mã PIN để vào ứng dụng khi màn hình máy tính được hiển thị.";
+"discrete_help_title" = "Đọc trước!";
+"discrete_help_summary" = "Hướng dẫn về cài đặt và thông tin về bản ẩn danh cụ thể.";
 "discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
 "discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
 "discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
 "discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 /* About */
-"settings_language" = "Language";
+"settings_language" = "Ngôn ngữ";
 "language_system_default" = "System Default";
 "language_restart_required" = "Restart the app for the language change to take effect.";
-"settings_about" = "About";
+"settings_about" = "Giới thiệu";
 "version" = "Version";
 
 /* ========================================
    Import & Export
    ======================================== */
-"export" = "Export";
+"export" = "Xuất";
 "full_backup_json" = "Full Backup (JSON)";
 "export_footer" = "Export your data for backup or transfer to another device.";
-"import" = "Import";
+"import" = "Nhập";
 "import_from_file" = "Import from File";
 "import_footer" = "Import data from a JSON backup or CSV bookmark file. Supported formats: .json, .csv, .bbl (MySword).";
 "modules" = "Modules";
@@ -338,7 +338,7 @@
 "installed_module_%@" = "Installed module: %@";
 "installed_epub_%@" = "Installed EPUB: %@";
 "installed_font_%@" = "Installed font: %@";
-"install_do_you_want" = "Do you want to install module (%@)?";
+"install_do_you_want" = "Bạn có muốn cài đặt mô-đun (%@) không?";
 
 /* ========================================
    Repository Manager
@@ -352,18 +352,18 @@
 "reset_sources_title" = "Reset Sources?";
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Add custom repository";
-"custom_repositories" = "Custom repositories";
+"custom_repositories" = "Kho lưu trữ tùy chỉnh";
 "custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
-"delete_custom_repository_message_format" = "Delete %@?";
+"delete_custom_repository_message_format" = "Xóa %@?";
 "delete_custom_repository_title" = "Delete repository";
 "edit_custom_repository" = "Edit custom repository";
-"help" = "Help";
+"help" = "Trợ giúp";
 "https" = "HTTPS";
 "open_wiki" = "Open Wiki";
 "repository_source_error" = "Repository source error";
-"repository_url" = "Repository URL";
+"repository_url" = "URL kho lưu trữ";
 "repository_url_placeholder" = "https://example.org/repository";
 "validating_repository" = "Validating repository";
 "source_details" = "Source Details";
@@ -382,15 +382,15 @@
 "reading_plan_no_plans_description" = "Start a reading plan to track your daily Bible reading.";
 "reading_plan_start" = "Start Plan";
 "reading_plan_active" = "Active Plans";
-"reading_plan_completed" = "Completed";
+"reading_plan_completed" = "Đã hoàn thành";
 "reading_plan_choose" = "Choose a reading plan to start";
 "reading_plan_import_custom" = "Import Custom Plan";
-"reading_plan_custom" = "Custom";
+"reading_plan_custom" = "Tùy chỉnh";
 "reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
 "reading_plan_available" = "Available Plans";
 "reading_plan_import_error_read" = "Could not read file";
 "reading_plan_import_error_format" = "Invalid reading plan format";
-"plan_duplicate_user_plan" = "There is a user reading plan in sdcard jsword/readingplan with the same name as an internal plan. It can not be listed here. Please rename the file to something else, leaving it's file extension as .properties";
+"plan_duplicate_user_plan" = "Có một kế hoạch đọc của người dùng trên thẻ nhớ jsword/readingplan có cùng tên với một kế hoạch nội bộ. Không thể liệt kê ở đây. Vui lòng đổi tên tệp thành tên khác, giữ nguyên phần mở rộng .properties";
 
 /* Daily Reading */
 "daily_reading" = "Daily Reading";
@@ -403,9 +403,9 @@
 /* ========================================
    Speak / TTS
    ======================================== */
-"speak" = "Speak";
-"pause" = "Pause";
-"stop" = "Stop";
+"speak" = "Đọc";
+"pause" = "Tạm dừng";
+"stop" = "Dừng";
 "speed" = "Speed";
 "sleep_timer" = "Sleep Timer";
 "speak_now_speaking" = "Now Speaking";
@@ -428,7 +428,7 @@
 /* ========================================
    Cross References
    ======================================== */
-"cross_references" = "Cross references";
+"cross_references" = "Tham chiếu chéo";
 
 /* ========================================
    Workspace
@@ -452,9 +452,9 @@
 "maximize" = "Maximize";
 "minimize" = "Minimize";
 "sync_scrolling" = "Sync Scrolling";
-"pin" = "Pin";
+"pin" = "Ghim";
 "sync_group" = "Sync Group";
-"restore" = "Restore";
+"restore" = "Khôi phục";
 
 /* ========================================
    Dictionary / General Books
@@ -495,7 +495,7 @@
 /* ========================================
    Sharing
    ======================================== */
-"share_verse" = "Share…";
+"share_verse" = "Chia sẻ…";
 "copy_verse" = "Copy Verse";
 
 /* ========================================
@@ -518,7 +518,7 @@
 "%lld days" = "%lld days";
 
 /* Search */
-"Find in %@" = "Find in %@";
+"Find in %@" = "Tìm trong %@";
 "Create an index for %@?" = "Create an index for %@?";
 "Creating index. Processing %@" = "Creating index. Processing %@";
 "No matches found for \"%@\"" = "No matches found for \"%@\"";
@@ -545,37 +545,37 @@
 "%lld windows" = "%lld windows";
 
 /* Text Display Settings */
-"global_text_display_settings_title" = "Global text options";
-"global_text_display_settings_summary" = "Default text display settings for all workspaces";
-"workspace_text_display_settings_title" = "Text options - %@";
-"window_text_display_settings_title" = "Text options - Window %d";
-"parent_settings_category_title" = "Parent settings";
-"workspace_text_options_link" = "Workspace text options — %@";
-"workspace_text_options_link_summary" = "Edit text display settings for this workspace";
-"global_text_options_link" = "Global text options";
-"global_text_options_link_summary" = "Edit default text display settings for all workspaces";
-"text_display_font_size_title_format" = "Font size (%d pt)";
-"text_display_font_family_title_format" = "Font family (%@)";
-"text_display_line_spacing_title_format" = "Line spacing (%1.1fx)";
+"global_text_display_settings_title" = "Tùy chọn văn bản toàn cục";
+"global_text_display_settings_summary" = "Cài đặt hiển thị văn bản mặc định cho tất cả không gian làm việc";
+"workspace_text_display_settings_title" = "Tùy chọn văn bản - %@";
+"window_text_display_settings_title" = "Tùy chọn văn bản - Cửa sổ %d";
+"parent_settings_category_title" = "Cài đặt cha";
+"workspace_text_options_link" = "Tùy chọn văn bản không gian làm việc — %@";
+"workspace_text_options_link_summary" = "Chỉnh sửa cài đặt hiển thị văn bản cho không gian làm việc này";
+"global_text_options_link" = "Tùy chọn văn bản toàn cục";
+"global_text_options_link_summary" = "Chỉnh sửa cài đặt hiển thị văn bản mặc định cho tất cả không gian làm việc";
+"text_display_font_size_title_format" = "Cỡ chữ (%d pt)";
+"text_display_font_family_title_format" = "Họ phông chữ (%@)";
+"text_display_line_spacing_title_format" = "Giãn dòng (%1.1fx)";
 "text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
-"text_display_top_margin_title_format" = "Top margin (%d mm)";
-"text_display_left_margin_title_format" = "Left margin (%d mm)";
-"text_display_right_margin_title_format" = "Right margin (%d mm)";
-"text_display_max_width_title_format" = "Maximum width of text (%d mm)";
+"text_display_top_margin_title_format" = "Lề trên (%d mm)";
+"text_display_left_margin_title_format" = "Lề trái (%d mm)";
+"text_display_right_margin_title_format" = "Lề phải (%d mm)";
+"text_display_max_width_title_format" = "Chiều rộng tối đa của văn bản (%d mm)";
 
 /* ========================================
    Quick Settings & Help
    ======================================== */
-"fullscreen" = "Fullscreen";
+"fullscreen" = "Toàn màn hình";
 "tilt_to_scroll" = "Tilt to Scroll";
-"reversed_split_mode" = "Reversed split mode";
+"reversed_split_mode" = "Chế độ chia đảo ngược";
 "window_pinning" = "Window Pinning";
 "label_settings" = "Label Settings";
-"all_text_options_window_menutitle" = "All text options";
+"all_text_options_window_menutitle" = "Tất cả tùy chọn văn bản";
 "all_text_options" = "All Text Options";
 "help_tips" = "Help & Tips";
 "sponsor_development" = "Sponsor Development";
-"about" = "About";
+"about" = "Giới thiệu";
 "rate_app" = "Rate App";
 "report_bug" = "Report Bug";
 "tell_friend" = "Tell a Friend";
@@ -589,19 +589,19 @@
 "about_license" = "License (GPLv3)";
 
 /* Help Sections */
-"help_navigation" = "Navigation";
+"help_navigation" = "Điều hướng";
 "help_navigation_body" = "Swipe left or right to move between chapters. Tap the book name in the toolbar to choose a different book and chapter.";
 "help_selection" = "Text Selection";
 "help_selection_body" = "Long-press on a verse to select it. An action bar appears with options: Bookmark, Copy, Share, Compare, Speak, and Web Search.";
 "help_pinning" = "Window Pinning";
 "help_pinning_body" = "When you have multiple windows, pin a window to keep it visible when switching Bible/Commentary categories.";
-"help_bookmarks" = "Bookmarks";
+"help_bookmarks" = "Đánh dấu";
 "help_bookmarks_body" = "Long-press a verse and tap Bookmark. Add labels to organize and notes for your thoughts.";
 "help_studypads" = "StudyPads";
 "help_studypads_body" = "Rich text journals attached to labels. Access them from the label manager or bookmark list.";
-"help_search" = "Search";
+"help_search" = "Tìm kiếm";
 "help_search_body" = "Full-text search with All Words, Any Word, and Phrase modes. You will be prompted to create an index on first use.";
-"help_workspaces" = "Workspaces";
+"help_workspaces" = "Không gian làm việc";
 "help_workspaces_body" = "Save different window arrangements as workspaces. Switch between them from the overflow menu.";
 "help_hidden" = "Hidden Features";
 "help_hidden_body" = "Double-tap the Bible text for fullscreen mode. Enable Tilt to Scroll in the overflow menu. Discrete calculator mode is available in Settings.";
@@ -616,7 +616,7 @@
 "icloud_account" = "iCloud Account";
 "last_sync" = "Last Sync";
 "sync_active" = "Active";
-"sync_disabled" = "Disabled";
+"sync_disabled" = "Đã tắt";
 "syncing" = "Syncing…";
 "no_icloud_account" = "No iCloud Account";
 "icloud_signed_in" = "Signed In";
@@ -631,170 +631,170 @@
 "disable_sync" = "Disable Sync";
 "disable_sync_warning" = "Data already synced to iCloud will remain. New changes will only be saved locally.";
 
-"prefs_behavior_customization_cat" = "Application behavior";
-"prefs_display_customization_cat" = "Look & feel";
-"prefs_advanced_settings_cat" = "Advanced settings";
+"prefs_behavior_customization_cat" = "Hành vi ứng dụng";
+"prefs_display_customization_cat" = "Giao diện & cảm nhận";
+"prefs_advanced_settings_cat" = "Cài đặt nâng cao";
 
-"prefs_toolbar_button_action_title" = "Action for toolbar button press";
-"prefs_toolbar_button_action_summary" = "Action to take when pressing/long-pressing Bible or Commentary toolbar buttons";
-"prefs_toolbar_button_action_default" = "Press to open menu, long press for documents screen (default)";
-"prefs_toolbar_button_action_swap_menu" = "Press to open next document, long press to open menu";
-"prefs_toolbar_button_action_swap_activity" = "Press to open next document, long press for documents screen";
+"prefs_toolbar_button_action_title" = "Hành động khi nhấn nút thanh công cụ";
+"prefs_toolbar_button_action_summary" = "Hành động thực hiện khi nhấn/nhấn giữ nút thanh công cụ Kinh Thánh hoặc Chú giải";
+"prefs_toolbar_button_action_default" = "Nhấn để mở menu, nhấn giữ để mở màn hình tài liệu (mặc định)";
+"prefs_toolbar_button_action_swap_menu" = "Nhấn để mở tài liệu tiếp theo, nhấn giữ để mở menu";
+"prefs_toolbar_button_action_swap_activity" = "Nhấn để mở tài liệu tiếp theo, nhấn giữ để mở màn hình tài liệu";
 
 
-"add_bookmark3" = "Selection";
-"add_bookmark_whole_verse1" = "Verses";
-"prefs_disable_two_step_bookmarking_title" = "One-step bookmarking";
-"prefs_disable_two_step_bookmarking_summary" = "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu";
+"add_bookmark3" = "Lựa chọn";
+"add_bookmark_whole_verse1" = "Các câu";
+"prefs_disable_two_step_bookmarking_title" = "Đánh dấu một bước";
+"prefs_disable_two_step_bookmarking_summary" = "Hiển thị các mục \"Lựa chọn\" và \"Câu\" trực tiếp trong menu Lựa chọn của Kinh Thánh";
 
-"active_window_indicator_summary" = "Highlight window corners to help recognising which window is active";
-"active_window_indicator_title" = "Show active window indicator";
-"auto_fullscreen" = "Fullscreen by scrolling";
-"auto_fullscreen_summary" = "Switch automatically to fullscreen when scrolling text. Tip: you can always also switch to full screen by doubletapping screen.";
-"choose_strongs_greek_dictionary_summary" = "Choose Strongs dictionary for Greek word definitions";
-"choose_strongs_greek_dictionary_title" = "Strongs Greek dictionary";
-"choose_strongs_greek_morphology_summary" = "Choose dictionary for Robinson Greek morphology definitions";
-"choose_strongs_greek_morphology_title" = "Robinson Greek morphology";
-"choose_strongs_hebrew_dictionary_summary" = "Choose Strongs dictionary for Hebrew word definitions";
-"choose_strongs_hebrew_dictionary_title" = "Strongs Hebrew dictionary";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
-"full_screen_hide_buttons_pref_summary" = "When switching to fullscreen mode, hide automatically window button bar that is on the bottom of the screen";
-"full_screen_hide_buttons_pref_title" = "Hide window button bar in fullscreen";
-"hide_bible_reference_overlay_summary" = "Do not show the semi-transparent Bible reference overlay when app is in fullscreen mode";
-"hide_bible_reference_overlay_title" = "Hide Bible reference overlay";
-"hide_window_buttons_summary" = "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them.";
-"hide_window_buttons_title" = "Hide window buttons";
+"active_window_indicator_summary" = "Đánh dấu góc cửa sổ để nhận biết cửa sổ nào đang hoạt động";
+"active_window_indicator_title" = "Hiển thị chỉ báo cửa sổ đang hoạt động";
+"auto_fullscreen" = "Toàn màn hình khi cuộn";
+"auto_fullscreen_summary" = "Tự động chuyển sang toàn màn hình khi cuộn văn bản. Mẹo: bạn cũng có thể chuyển sang toàn màn hình bất cứ lúc nào bằng cách chạm đúp vào màn hình.";
+"choose_strongs_greek_dictionary_summary" = "Chọn từ điển Strong's để tra định nghĩa từ tiếng Hy Lạp";
+"choose_strongs_greek_dictionary_title" = "Từ điển Hy Lạp Strong's";
+"choose_strongs_greek_morphology_summary" = "Chọn từ điển cho các định nghĩa hình thái học Hy Lạp Robinson";
+"choose_strongs_greek_morphology_title" = "Hình thái học Hy Lạp Robinson";
+"choose_strongs_hebrew_dictionary_summary" = "Chọn từ điển Strong's để tra định nghĩa từ tiếng Hê-bơ-rơ";
+"choose_strongs_hebrew_dictionary_title" = "Từ điển Hê-bơ-rơ Strong's";
+"choose_word_lookup_dictionary_summary" = "Chọn từ điển để tra cứu từ";
+"choose_word_lookup_dictionary_title" = "Từ điển tra cứu từ";
+"full_screen_hide_buttons_pref_summary" = "Khi chuyển sang chế độ toàn màn hình, tự động ẩn thanh nút cửa sổ ở phía dưới màn hình";
+"full_screen_hide_buttons_pref_title" = "Ẩn thanh nút cửa sổ khi toàn màn hình";
+"hide_bible_reference_overlay_summary" = "Không hiển thị lớp phủ tham chiếu Kinh Thánh bán trong suốt khi ứng dụng ở chế độ toàn màn hình";
+"hide_bible_reference_overlay_title" = "Ẩn lớp phủ tham chiếu Kinh Thánh";
+"hide_window_buttons_summary" = "Các nút cửa sổ hiển thị ở bên phải của khung xem Kinh Thánh sẽ bị ẩn. Thanh điều hướng cửa sổ ở phía dưới vẫn hiển thị và bạn có thể mở menu bật lên của cửa sổ bằng cách nhấn giữ chúng.";
+"hide_window_buttons_title" = "Ẩn nút cửa sổ";
 "show_window_buttons_title" = "Show window buttons";
 "hide_window_buttons_hint" = "Hides the window button strip";
 "show_window_buttons_hint" = "Shows the window button strip";
-"pref_font_size_multiplier_title" = "Font size multiplier";
-"prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
-"prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
-"prefs_disable_animations_summary" = "Disable various animations such as smooth scrolling.";
-"prefs_disable_animations_title" = "Disable animations";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
-"prefs_notes_content_type_title" = "Format for new bookmark notes";
-"prefs_notes_content_type_summary" = "Text format used when creating new bookmark notes and Study Pad entries";
-"notes_content_type_html" = "Rich text (HTML)";
+"pref_font_size_multiplier_title" = "Hệ số cỡ chữ";
+"prefs_bible_view_swipe_mode_summary" = "Cử chỉ vuốt trái/phải có thể dùng để chuyển sang trang/chương tiếp theo.";
+"prefs_bible_view_swipe_mode_title" = "Hành động cho cử chỉ vuốt trái/phải";
+"prefs_disable_animations_summary" = "Tắt các hoạt ảnh như cuộn mượt.";
+"prefs_disable_animations_title" = "Tắt hoạt ảnh";
+"prefs_disable_click_to_edit_summary" = "Yêu cầu sử dụng nút chỉnh sửa để chỉnh sửa ghi chú trong Sổ tay nghiên cứu.";
+"prefs_disable_click_to_edit_title" = "Tắt chỉnh sửa bằng cách nhấn trong Sổ tay nghiên cứu";
+"prefs_notes_content_type_title" = "Định dạng cho ghi chú đánh dấu mới";
+"prefs_notes_content_type_summary" = "Định dạng văn bản dùng khi tạo ghi chú đánh dấu mới và mục trong Sổ tay nghiên cứu";
+"notes_content_type_html" = "Văn bản có định dạng (HTML)";
 "notes_content_type_markdown" = "Markdown";
-"prefs_double_tap_to_fullscreen_summary" = "Enter fullscreen mode by double-tapping window";
-"prefs_double_tap_to_fullscreen_title" = "Double-tap to Fullscreen";
-"prefs_e_ink_mode_title" = "Black & white mode";
-"prefs_eink_mode_summary" = "Use application in monochrome mode (no colors), making it more suitable for E-ink devices.";
-"prefs_interface_locale_summary" = "Select custom user interface language";
-"prefs_interface_locale_title" = "Application language";
-"prefs_navigate_to_verse_summary" = "Choose verse (and chapter) when selecting a passage";
-"prefs_navigate_to_verse_title" = "Navigate to verse";
-"prefs_night_mode_automatic" = "Automatic";
-"prefs_night_mode_manual" = "Manual";
-"prefs_night_mode_summary" = "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen.";
-"prefs_night_mode_system" = "System";
-"prefs_night_mode_title" = "Night mode switching";
-"prefs_open_links_in_special_window_summary" = "Open links in special window, for quicker display of cross-references and Strongs";
-"prefs_open_links_in_special_window_title" = "Links window";
-"prefs_screen_keep_on_summary" = "Prevent screen sleeping while using this app";
-"prefs_screen_keep_on_title" = "Keep screen on";
-"prefs_show_error_box_summary" = "Useful for developers when debugging BibleView javascript side errors. This will make the app slower.";
-"prefs_show_error_box_title" = "Show Javascript error box";
-"prefs_swipe_mode_chapter" = "Chapter";
-"prefs_swipe_mode_none" = "Disabled";
-"prefs_swipe_mode_page" = "Page";
+"prefs_double_tap_to_fullscreen_summary" = "Vào chế độ toàn màn hình bằng cách nhấn đúp vào cửa sổ";
+"prefs_double_tap_to_fullscreen_title" = "Nhấn đúp để toàn màn hình";
+"prefs_e_ink_mode_title" = "Chế độ đen & trắng";
+"prefs_eink_mode_summary" = "Sử dụng ứng dụng ở chế độ đơn sắc (không màu), phù hợp hơn cho các thiết bị E-ink.";
+"prefs_interface_locale_summary" = "Chọn ngôn ngữ giao diện người dùng tùy chỉnh";
+"prefs_interface_locale_title" = "Ngôn ngữ ứng dụng";
+"prefs_navigate_to_verse_summary" = "Chọn câu (và chương) khi chọn một đoạn văn";
+"prefs_navigate_to_verse_title" = "Điều hướng đến câu";
+"prefs_night_mode_automatic" = "Tự động";
+"prefs_night_mode_manual" = "Thủ công";
+"prefs_night_mode_summary" = "Có thể tự động chuyển sang chế độ ban đêm (nếu thiết bị hỗ trợ), thủ công hoặc theo cài đặt hệ thống (Android 10+). Chuyển thủ công qua menu 3 chấm trên màn hình chính.";
+"prefs_night_mode_system" = "Hệ thống";
+"prefs_night_mode_title" = "Chuyển đổi chế độ ban đêm";
+"prefs_open_links_in_special_window_summary" = "Mở liên kết trong cửa sổ đặc biệt để hiển thị nhanh hơn các tham chiếu chéo và Strong's";
+"prefs_open_links_in_special_window_title" = "Cửa sổ liên kết";
+"prefs_screen_keep_on_summary" = "Ngăn màn hình tắt khi đang sử dụng ứng dụng này";
+"prefs_screen_keep_on_title" = "Giữ màn hình sáng";
+"prefs_show_error_box_summary" = "Hữu ích cho nhà phát triển khi gỡ lỗi phía javascript BibleView. Điều này sẽ làm ứng dụng chậm hơn.";
+"prefs_show_error_box_title" = "Hiển thị hộp lỗi Javascript";
+"prefs_swipe_mode_chapter" = "Chương";
+"prefs_swipe_mode_none" = "Đã tắt";
+"prefs_swipe_mode_page" = "Trang";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Cuộn bằng nút âm lượng";
+"prefs_volume_keys_scroll_summary" = "Dùng nút tăng/giảm âm lượng để cuộn văn bản Kinh Thánh";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
-"prefs_experimental_features_title" = "Experimental features";
-"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
-"experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
-"experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";
-"prefs_enable_bluetooth_title" = "Enable Bluetooth media buttons";
-"prefs_enable_bluetooth_summary" = "Handle Bluetooth media buttons to start/stop speaking.";
+"prefs_experimental_features_title" = "Tính năng thử nghiệm";
+"prefs_experimental_features_summary" = "Chọn tính năng thử nghiệm nào cần bật. Các tính năng này vẫn đang được phát triển và có thể thay đổi hoặc bị xóa";
+"experimental_feature_bookmark_edit_actions" = "Thao tác chỉnh sửa đánh dấu";
+"experimental_feature_add_paragraph_break" = "Thêm đánh dấu ngắt đoạn";
+"prefs_enable_bluetooth_title" = "Bật nút phương tiện Bluetooth";
+"prefs_enable_bluetooth_summary" = "Xử lý các nút phương tiện Bluetooth để bắt đầu/dừng đọc.";
 
-"open_bible_links_title" = "Open Bible links in AndBible";
-"open_bible_links_summary" = "When clicking links that refer to AndBible supported Bible URL, open them in AndBible";
+"open_bible_links_title" = "Mở liên kết Kinh Thánh trong AndBible";
+"open_bible_links_summary" = "Khi nhấp vào các liên kết tham chiếu đến URL Kinh Thánh được AndBible hỗ trợ, hãy mở chúng trong AndBible";
 
 "crash_app" = "Crash app!";
 "crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";
 "crash_app_scheduled_summary" = "Crash scheduled in 10 seconds.";
-"sign_in_failed" = "Signing in to synchronization backend service failed.";
-"sync_adapter" = "Synchronization Backend";
-"sync_adapter_summary" = "Current: %@";
+"sign_in_failed" = "Đăng nhập vào dịch vụ backend đồng bộ hóa thất bại.";
+"sync_adapter" = "Backend đồng bộ hóa";
+"sync_adapter_summary" = "Hiện tại: %@";
 "adapters_next_cloud" = "Next Cloud";
-"auth_server_uri" = "Server URL";
-"auth_username" = "User name";
-"auth_password" = "Password";
-"auth_folder_path" = "Sync folder path";
-"auth_folder_path_summary" = "Parent folder for sync data (empty = root)";
-"invalid_url_message" = "The URL you entered is invalid. Please enter a valid URL (e.g., https://nextcloud.example.com)";
-"prefs_sync_introduction_summary1" = "Choose which backend cloud service you want to use to synchronize multiple devices.";
+"auth_server_uri" = "URL máy chủ";
+"auth_username" = "Tên người dùng";
+"auth_password" = "Mật khẩu";
+"auth_folder_path" = "Đường dẫn thư mục đồng bộ";
+"auth_folder_path_summary" = "Thư mục cha cho dữ liệu đồng bộ (để trống = thư mục gốc)";
+"invalid_url_message" = "URL bạn nhập không hợp lệ. Vui lòng nhập URL hợp lệ (ví dụ: https://nextcloud.example.com)";
+"prefs_sync_introduction_summary1" = "Chọn dịch vụ đám mây bạn muốn sử dụng để đồng bộ hóa nhiều thiết bị.";
 "test_connection" = "Test Connection";
-"overrideBackup" = "Existing database that this device is not synchronized to is found in Cloud. Database contains %@. What do you want to do?";
-"cloud_fetch_and_restore_initial" = "Copy from Cloud to this device";
-"cloud_create_new" = "Copy from this device to Cloud";
-"cloud_disable_sync" = "Cancel & disable synchronization";
-"cloud_sync_title" = "Device synchronization";
-"application_preferences" = "Application preferences";
-"are_you_sure_reset_local" = "This will reset your local database for %@ with the content that is currently stored in cloud service.";
-"are_you_sure_reset_cloud" = "This will reset your cloud database for %@ with the content that you have in this device.";
-"reading_plans_content" = "Reading plans and their statuses";
-"bookmarks_contents" = "Bookmarks, Labels and Study Pads";
-"workspaces_contents" = "Workspaces and Windows";
-"my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their content";
-"synchronization_categories" = "Synchronization categories";
-"sync_error" = "Error occurred in Cloud synchronization";
-"sync_cant_fetch" = "The version of database or patch file stored in Cloud is higher than the one supported by this app.";
-"sync_disabling" = "Disabling synchronizing for %@ for now.";
-"sync_update_app" = "Please update the app to continue synchronization.";
-"last_updated" = "Last updated: %@";
+"overrideBackup" = "Cơ sở dữ liệu hiện có mà thiết bị này chưa đồng bộ hóa được tìm thấy trên Cloud. Cơ sở dữ liệu chứa %@. Bạn muốn làm gì?";
+"cloud_fetch_and_restore_initial" = "Sao chép từ Cloud sang thiết bị này";
+"cloud_create_new" = "Sao chép từ thiết bị này lên Cloud";
+"cloud_disable_sync" = "Hủy & tắt đồng bộ hóa";
+"cloud_sync_title" = "Đồng bộ hóa thiết bị";
+"application_preferences" = "Tùy chọn ứng dụng";
+"are_you_sure_reset_local" = "Thao tác này sẽ đặt lại cơ sở dữ liệu cục bộ cho %@ bằng nội dung hiện đang lưu trữ trong dịch vụ đám mây.";
+"are_you_sure_reset_cloud" = "Thao tác này sẽ đặt lại cơ sở dữ liệu đám mây cho %@ bằng nội dung bạn có trên thiết bị này.";
+"reading_plans_content" = "Kế hoạch đọc và trạng thái của chúng";
+"bookmarks_contents" = "Đánh dấu, Nhãn và Sổ tay nghiên cứu";
+"workspaces_contents" = "Không gian làm việc và Cửa sổ";
+"my_documents" = "Tài liệu của tôi";
+"my_documents_contents" = "Tài liệu của tôi và nội dung của chúng";
+"synchronization_categories" = "Danh mục đồng bộ hóa";
+"sync_error" = "Đã xảy ra lỗi trong quá trình đồng bộ hóa Cloud";
+"sync_cant_fetch" = "Phiên bản cơ sở dữ liệu hoặc tệp vá lỗi lưu trữ trên Cloud cao hơn phiên bản được ứng dụng này hỗ trợ.";
+"sync_disabling" = "Đang tắt đồng bộ hóa cho %@ trong thời gian này.";
+"sync_update_app" = "Vui lòng cập nhật ứng dụng để tiếp tục đồng bộ hóa.";
+"last_updated" = "Cập nhật lần cuối: %@";
 
-"help_workspaces_title" = "Workspaces";
-"reading_plans_plural" = "Reading Plans";
+"help_workspaces_title" = "Không gian làm việc";
+"reading_plans_plural" = "Kế Hoạch Đọc";
 
 /* Android window popup menu parity */
-"windowMaximise" = "Maximise";
-"windowMinimise" = "Minimise";
-"change_to_normal" = "Change to normal window";
-"move_window" = "Move to";
-"move_window_to_position2" = "Position %1$d (%2$@:%3$@)";
-"window_pin_mode" = "Pin";
-"windowSynchronise" = "Synchronise";
-"window_disable_sync" = "Disable synchronize";
-"sync_group_n" = "Group %d";
-"text_options_window_menutitle" = "Text options";
-"prefs_text_colors_menutitle" = "Color settings";
-"prefs_section_title_title" = "Section titles";
-"prefs_show_strongs_title" = "Strong's numbers";
-"prefs_show_verseno_title" = "Chapter & verse numbers";
-"copy_settings" = "Copy settings to";
-"copy_settings_to_workspace" = "Workspace";
-"copy_settings_to_window" = "Window %1$d (%2$@: %3$@)";
-"copy_settings_to_global" = "Global defaults";
-"copyReference" = "Copy link to clipboard";
-"reference_copied_to_clipboard" = "Reference copied to clipboard";
+"windowMaximise" = "Phóng to";
+"windowMinimise" = "Thu nhỏ";
+"change_to_normal" = "Chuyển sang cửa sổ thông thường";
+"move_window" = "Chuyển đến";
+"move_window_to_position2" = "Vị trí %1$d (%2$@:%3$@)";
+"window_pin_mode" = "Ghim";
+"windowSynchronise" = "Đồng bộ";
+"window_disable_sync" = "Tắt đồng bộ hóa";
+"sync_group_n" = "Nhóm %d";
+"text_options_window_menutitle" = "Tùy chọn văn bản";
+"prefs_text_colors_menutitle" = "Cài đặt màu sắc";
+"prefs_section_title_title" = "Tiêu đề phần";
+"prefs_show_strongs_title" = "Số Strong's";
+"prefs_show_verseno_title" = "Số chương & câu";
+"copy_settings" = "Sao chép cài đặt đến";
+"copy_settings_to_workspace" = "Không gian làm việc";
+"copy_settings_to_window" = "Cửa sổ %1$d (%2$@: %3$@)";
+"copy_settings_to_global" = "Giá trị mặc định toàn cục";
+"copyReference" = "Sao chép liên kết vào khay nhớ tạm";
+"reference_copied_to_clipboard" = "Đã sao chép tham chiếu vào bộ nhớ tạm";
 "add_ellipsis" = "%@…";
-"copy_settings_title" = "Which settings do you want to copy?";
-"select_all" = "Select all";
-"select_none" = "Select none";
+"copy_settings_title" = "Bạn muốn sao chép cài đặt nào?";
+"select_all" = "Chọn tất cả";
+"select_none" = "Bỏ chọn tất cả";
 "font" = "Font";
 "margin_size" = "Margin size";
-"top_margin" = "Top margin";
+"top_margin" = "Lề trên";
 "footnotes_inline" = "Inline footnotes";
 "expand_cross_references" = "Expand cross references";
-"cross_references" = "Cross references";
+"cross_references" = "Tham chiếu chéo";
 "verse_per_line" = "Verse per line";
-"show_bookmarks" = "Show bookmarks";
+"show_bookmarks" = "Hiển thị đánh dấu";
 "hide_labels" = "Hide labels";
 "my_notes" = "My notes";
 "page_number" = "Page number";
-"infinite_scroll" = "Infinite scroll";
-"non_strongs_word_italic" = "Italicize added words";
-"mark_as_read_button" = "Mark as read button";
-"title_scroll_button" = "Title scroll button";
-"memorization_indicators" = "Memorization indicators";
+"infinite_scroll" = "Cuộn vô tận";
+"non_strongs_word_italic" = "In nghiêng các từ được thêm vào";
+"mark_as_read_button" = "Nút đánh dấu đã đọc";
+"title_scroll_button" = "Nút cuộn tiêu đề";
+"memorization_indicators" = "Chỉ báo ghi nhớ";
 "ai_document_markers" = "AI document markers";
-"page_scroll_amount" = "Page scroll amount";
+"page_scroll_amount" = "Lượng cuộn trang";
 "ordinals" = "Ordinals";
-"error_no_content" = "No content for selected verse";
+"error_no_content" = "Không có nội dung cho câu đã chọn";

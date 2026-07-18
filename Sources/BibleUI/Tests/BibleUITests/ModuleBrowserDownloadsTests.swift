@@ -981,35 +981,35 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
 
      Normal Downloads must follow Android's package-first installer while retaining iOS raw-file
      fallback for legacy repositories. Startup Easy Start defaults require package ZIPs only for the
-     modules currently owned by the default-document flow; manual installs opened later in the same
-     Downloads session must keep raw fallback.
+     modules selected by the default-document flow; failed defaults stay strict for row retries while
+     unrelated manual installs opened later in the same Downloads session keep raw fallback.
      */
     func testModuleBrowserDefaultDownloadModeScopesStrictPackageInstallPolicyToDefaultModules() {
         XCTAssertEqual(
             ModuleBrowserDefaultDownloadMode.disabled.modulePackageInstallPolicy(
                 for: "KJV",
-                installingDefaultModules: ["KJV", "NASB"]
+                strictDefaultModules: ["KJV", "NASB"]
             ),
             .preferPackageThenRaw
         )
         XCTAssertEqual(
             ModuleBrowserDefaultDownloadMode.englishStartup.modulePackageInstallPolicy(
                 for: "KJV",
-                installingDefaultModules: ["KJV", "NASB"]
+                strictDefaultModules: ["KJV", "NASB"]
             ),
             .requirePackage
         )
         XCTAssertEqual(
             ModuleBrowserDefaultDownloadMode.englishStartup.modulePackageInstallPolicy(
                 for: "TR",
-                installingDefaultModules: ["KJV", "NASB"]
+                strictDefaultModules: ["KJV", "NASB"]
             ),
             .preferPackageThenRaw
         )
         XCTAssertEqual(
             ModuleBrowserDefaultDownloadMode.englishStartup.modulePackageInstallPolicy(
                 for: "KJV",
-                installingDefaultModules: []
+                strictDefaultModules: []
             ),
             .preferPackageThenRaw
         )
