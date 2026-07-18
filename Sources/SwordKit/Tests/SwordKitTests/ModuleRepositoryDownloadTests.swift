@@ -854,19 +854,20 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
-     Verifies commit-time publish failures restore the previous installed data directory.
+     Verifies commit-time config-backup failures restore the previous installed data directory.
 
      Setup:
      - preinstalls TESTDICT data plus its `.conf` marker
      - serves a valid replacement package so download and extraction both succeed
-     - removes write permission from `mods.d` so the publish step fails while moving the old marker
+     - removes write permission from `mods.d` so the commit path fails while backing up the old marker
 
      Expected result:
      - the commit helper restores the old data directory and leaves the old marker readable
 
      Failure meaning:
-     - a filesystem error during final publish can leave an existing module without its prior data,
-       which is the update-corruption case Android's package installer avoids.
+     - a filesystem error after the existing data directory is backed up can leave an installed
+       module without its prior data, which is the update-corruption case Android's package installer
+       avoids.
      */
     func testModuleRepositoryCommitFailureRestoresExistingInstalledFiles() async throws {
         let fm = FileManager.default
@@ -957,11 +958,18 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
 
         do {
             try await repository.installModule(named: "TESTDICT", from: source)
-            XCTFail("Expected final publish to fail when mods.d is not writable.")
+            XCTFail("Expected config backup to fail when mods.d is not writable.")
         } catch {
-            XCTAssertFalse(
-                error.localizedDescription.isEmpty,
-                "The publish failure should propagate the filesystem error that forced rollback."
+            let nsError = error as NSError
+            XCTAssertEqual(
+                nsError.domain,
+                NSCocoaErrorDomain,
+                "Fixture drifted away from the intended filesystem permission failure."
+            )
+            XCTAssertEqual(
+                nsError.code,
+                CocoaError.fileWriteNoPermission.rawValue,
+                "The rollback fixture should fail while writing in read-only mods.d."
             )
         }
 
@@ -979,6 +987,119 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             try String(contentsOf: confPath, encoding: .utf8),
             oldConf,
             "Commit-time rollback must preserve the previous installed module marker."
+        )
+    }
+
+    /**
+     Verifies post-staging publish failures remove newly placed package data.
+
+     Setup:
+     - installs FRESHDICT from a valid package with no previous module directory or marker
+     - removes write permission from `mods.d` before install so staged data can move into place but
+       the final `.conf` marker write fails
+
+     Expected result:
+     - the commit helper removes the newly placed data directory and leaves no installed marker
+
+     Failure meaning:
+     - a filesystem error after staging moves into the live module path can publish data without the
+       marker contract that `SwordManager` uses to recognize installed modules.
+     */
+    func testModuleRepositoryCommitFailureRemovesFreshlyStagedInstall() async throws {
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "TestRepo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "FRESHDICT")
+        let localDir = moduleRepositoryLocalDir(for: "FRESHDICT", under: swordDir)
+        let modsDir = swordDir.appendingPathComponent("mods.d", isDirectory: true)
+        try fm.createDirectory(at: modsDir, withIntermediateDirectories: true)
+        let confPath = modsDir.appendingPathComponent("freshdict.conf")
+        let zipData = makeModuleRepositoryZip([
+            ("modules/lexdict/rawld/freshdict/freshdict.dat", Data("new-dictionary-data".utf8)),
+            ("modules/lexdict/rawld/freshdict/freshdict.idx", Data("new-index-data".utf8))
+        ])
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/FRESHDICT.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Length": "\(zipData.count)"]
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: modsDir.path)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: modsDir.path)
+        }
+
+        do {
+            try await repository.installModule(named: "FRESHDICT", from: source)
+            XCTFail("Expected marker write to fail when mods.d is not writable.")
+        } catch {
+            let nsError = error as NSError
+            XCTAssertEqual(
+                nsError.domain,
+                NSCocoaErrorDomain,
+                "Fixture drifted away from the intended filesystem permission failure."
+            )
+            XCTAssertEqual(
+                nsError.code,
+                CocoaError.fileWriteNoPermission.rawValue,
+                "The rollback fixture should fail while writing the final marker in read-only mods.d."
+            )
+        }
+
+        XCTAssertFalse(
+            fm.fileExists(atPath: localDir.path),
+            "Post-staging rollback must remove the newly placed data directory after marker write fails."
+        )
+        XCTAssertFalse(
+            fm.fileExists(atPath: confPath.path),
+            "Post-staging rollback must not leave an installed module marker after marker write fails."
         )
     }
 
