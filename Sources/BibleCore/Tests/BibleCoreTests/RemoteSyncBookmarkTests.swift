@@ -169,6 +169,163 @@ final class RemoteSyncBookmarkTests: XCTestCase {
     }
 
     /**
+     Verifies restore normalizes Android's module-initials `book` column into display book names.
+
+     Android stores SWORD module initials (or NULL) in `BibleBookmark.book` and renders references
+     from `v11n` + ordinals, while iOS keys bookmark display, chapter-highlight queries, and
+     navigation on the same field as a display book name (issue #356). Restore must rewrite the
+     two Android-produced shapes — NULL and installed-module initials — through the resolver while
+     preserving every other value verbatim so locally created and localized names survive merges.
+     A failure here means restored Android bookmarks render as `Unknown`/initials plus garbage
+     chapter math again.
+     */
+    func testRemoteSyncBookmarkRestoreNormalizesAndroidBookColumnSemantics() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let resolver = FakeAndroidBookmarkBookNameResolver(
+            installedBibleInitials: ["KJV", "NASB"],
+            namesByOrdinal: [4: "Genesis", 1533: "Exodus"]
+        )
+        let service = RemoteSyncBookmarkRestoreService(bookNameResolver: resolver)
+
+        let initialsID = UUID(uuidString: "f3000000-0000-0000-0000-000000000001")!
+        let nullBookID = UUID(uuidString: "f3000000-0000-0000-0000-000000000002")!
+        let localizedID = UUID(uuidString: "f3000000-0000-0000-0000-000000000003")!
+        let uninstalledID = UUID(uuidString: "f3000000-0000-0000-0000-000000000004")!
+        let unresolvableID = UUID(uuidString: "f3000000-0000-0000-0000-000000000005")!
+
+        let snapshot = RemoteSyncAndroidBookmarkSnapshot(
+            labels: [],
+            bibleBookmarks: [
+                makeNormalizationBookmark(id: initialsID, ordinalStart: 4, book: "KJV"),
+                makeNormalizationBookmark(id: nullBookID, ordinalStart: 1533, book: nil),
+                makeNormalizationBookmark(id: localizedID, ordinalStart: 4, book: "1. Mose"),
+                makeNormalizationBookmark(id: uninstalledID, ordinalStart: 4, book: "ESV2011"),
+                makeNormalizationBookmark(id: unresolvableID, ordinalStart: 999_999, book: "NASB"),
+            ],
+            genericBookmarks: [],
+            studyPadEntries: []
+        )
+
+        _ = try service.replaceLocalBookmarks(
+            from: snapshot,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let restored = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
+        let booksByID = Dictionary(uniqueKeysWithValues: restored.map { ($0.id, $0.book) })
+        XCTAssertEqual(
+            booksByID[initialsID],
+            "Genesis",
+            "Installed-module initials must be rewritten to the derived display book name."
+        )
+        XCTAssertEqual(
+            booksByID[nullBookID],
+            "Exodus",
+            "NULL Android book values must be derived from the bookmark's own ordinals."
+        )
+        XCTAssertEqual(
+            booksByID[localizedID],
+            "1. Mose",
+            "Values that are not installed-module initials must survive unchanged."
+        )
+        XCTAssertEqual(
+            booksByID[uninstalledID],
+            "ESV2011",
+            "Initials of modules that are not installed cannot be classified and must be preserved."
+        )
+        XCTAssertEqual(
+            booksByID[unresolvableID],
+            "NASB",
+            "When derivation fails the raw Android value must be preserved rather than dropped."
+        )
+        XCTAssertEqual(
+            resolver.recordedRequests.map(\.v11nName),
+            ["KJV", "KJV", "KJV"],
+            "Derivation must resolve ordinals in each bookmark's own stored versification."
+        )
+    }
+
+    /**
+     Verifies restore preserves raw Android `book` values verbatim when normalization is disabled.
+
+     Passing a nil resolver keeps the pre-#356 pass-through contract so callers that need
+     Android-fidelity round-trips can opt out. A failure here means normalization can no longer
+     be disabled and fidelity-sensitive flows would silently rewrite Android data.
+     */
+    func testRemoteSyncBookmarkRestoreWithoutResolverPreservesRawBookValues() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let service = RemoteSyncBookmarkRestoreService(bookNameResolver: nil)
+        let bookmarkID = UUID(uuidString: "f4000000-0000-0000-0000-000000000001")!
+
+        let snapshot = RemoteSyncAndroidBookmarkSnapshot(
+            labels: [],
+            bibleBookmarks: [
+                makeNormalizationBookmark(id: bookmarkID, ordinalStart: 4, book: "KJV")
+            ],
+            genericBookmarks: [],
+            studyPadEntries: []
+        )
+
+        _ = try service.replaceLocalBookmarks(
+            from: snapshot,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let restored = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
+        XCTAssertEqual(restored.count, 1)
+        XCTAssertEqual(
+            restored[0].book,
+            "KJV",
+            "A nil resolver must preserve the raw Android book value verbatim."
+        )
+    }
+
+    /**
+     Builds one staged Android Bible bookmark row for book-name normalization tests.
+
+     - Parameters:
+       - id: Stable bookmark identifier.
+       - ordinalStart: Source-versification start ordinal driving derivation.
+       - book: Raw Android `book` column value under test.
+     - Returns: A label-free staged bookmark row with KJV versification.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func makeNormalizationBookmark(
+        id: UUID,
+        ordinalStart: Int,
+        book: String?
+    ) -> RemoteSyncAndroidBibleBookmark {
+        RemoteSyncAndroidBibleBookmark(
+            id: id,
+            kjvOrdinalStart: ordinalStart,
+            kjvOrdinalEnd: ordinalStart,
+            ordinalStart: ordinalStart,
+            ordinalEnd: ordinalStart,
+            v11n: "KJV",
+            playbackSettingsJSON: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_200_000),
+            book: book,
+            startOffset: nil,
+            endOffset: nil,
+            primaryLabelID: nil,
+            notes: nil,
+            lastUpdatedOn: Date(timeIntervalSince1970: 1_700_200_100),
+            wholeVerse: true,
+            type: nil,
+            customIcon: nil,
+            editAction: nil,
+            labelLinks: []
+        )
+    }
+
+    /**
      Verifies that bookmark restore remains backward-compatible with Android bookmark databases
      created before note rows and StudyPad entries gained nullable content-type metadata.
 
@@ -1776,4 +1933,79 @@ final class RemoteSyncBookmarkTests: XCTestCase {
         ])
     }
 
+}
+
+/**
+ Deterministic in-memory resolver double for Android book-name normalization tests.
+
+ The fake answers initials membership from a fixed set and derives display names from a fixed
+ ordinal map while recording every derivation request, so tests can assert both the normalization
+ rule and the versification plumbing without SWORD modules.
+
+ Side effects:
+ - records derivation requests in `recordedRequests`
+
+ Failure modes:
+ - returns `nil` for ordinals missing from `namesByOrdinal`, matching real resolver misses
+ */
+private final class FakeAndroidBookmarkBookNameResolver: AndroidBookmarkBookNameResolving {
+    /// One recorded derivation request in call order.
+    struct Request: Equatable {
+        /// Versification name the service passed for this bookmark.
+        let v11nName: String
+
+        /// Source-versification ordinal the service passed.
+        let ordinal: Int
+
+        /// KJVA fallback ordinal the service passed.
+        let kjvOrdinal: Int
+    }
+
+    private let installedBibleInitials: Set<String>
+    private let namesByOrdinal: [Int: String]
+
+    /// Derivation requests observed by the fake, in call order.
+    private(set) var recordedRequests: [Request] = []
+
+    /**
+     Creates the fake resolver.
+
+     - Parameters:
+       - installedBibleInitials: Module initials treated as installed Bibles.
+       - namesByOrdinal: Display book names keyed by source ordinal.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    init(installedBibleInitials: Set<String>, namesByOrdinal: [Int: String]) {
+        self.installedBibleInitials = installedBibleInitials
+        self.namesByOrdinal = namesByOrdinal
+    }
+
+    /**
+     Reports whether a raw value matches the configured installed-Bible initials.
+
+     - Parameter rawValue: Raw Android `book` column value.
+     - Returns: `true` when the fixture set contains the value.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    func isInstalledBibleInitials(_ rawValue: String) -> Bool {
+        installedBibleInitials.contains(rawValue)
+    }
+
+    /**
+     Derives a display book name from the fixture ordinal map.
+
+     - Parameters:
+       - v11nName: Versification name passed by the service.
+       - ordinal: Source-versification ordinal passed by the service.
+       - kjvOrdinal: KJVA fallback ordinal passed by the service.
+     - Returns: The fixture name for `ordinal`, or `nil` when unmapped.
+     - Side effects: appends the request to `recordedRequests`.
+     - Failure modes: none.
+     */
+    func displayBookName(v11nName: String, ordinal: Int, kjvOrdinal: Int) -> String? {
+        recordedRequests.append(Request(v11nName: v11nName, ordinal: ordinal, kjvOrdinal: kjvOrdinal))
+        return namesByOrdinal[ordinal]
+    }
 }

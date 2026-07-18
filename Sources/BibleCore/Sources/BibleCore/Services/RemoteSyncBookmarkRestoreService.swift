@@ -688,13 +688,58 @@ public final class RemoteSyncBookmarkRestoreService {
         let bookId: String?
     }
 
+    /// Resolver that translates Android `book` column semantics into iOS display book names.
+    private let bookNameResolver: AndroidBookmarkBookNameResolving?
+
     /**
      Creates a bookmark restore service.
 
-     - Side effects: none.
+     - Parameter bookNameResolver: Boundary that normalizes Android's module-initials `book`
+       column into the iOS display book name during restore. The default SWORD-backed resolver
+       derives names from each bookmark's own versification and ordinals; passing `nil` disables
+       normalization and preserves raw Android values verbatim.
+     - Side effects: none; the default resolver creates SWORD state lazily on first restore.
      - Failure modes: This initializer cannot fail.
      */
-    public init() {}
+    public init(
+        bookNameResolver: AndroidBookmarkBookNameResolving? = AndroidBookmarkSwordBookNameResolver()
+    ) {
+        self.bookNameResolver = bookNameResolver
+    }
+
+    /**
+     Normalizes one restored bookmark's `book` value into iOS display-name semantics.
+
+     Android stores SWORD module initials (or NULL) in the `book` column because Android renders
+     references from `v11n` + ordinals; iOS uses the same field as the display book name that
+     keys list rendering, chapter-highlight queries, and navigation (issue #356). Only the two
+     shapes Android actually produces are rewritten — NULL and installed-module initials — so
+     locally created display names and localized names survive merge round-trips unchanged.
+
+     - Parameter bookmark: Staged Android bookmark row being materialized into SwiftData.
+     - Returns: The derived display book name, or the raw Android value when derivation is
+       unavailable or the raw value is not an Android module-initials shape.
+     - Side effects: may lazily create SWORD state through the injected resolver.
+     - Failure modes: falls back to the raw value whenever resolution fails.
+     */
+    private func normalizedDisplayBookName(for bookmark: RemoteSyncAndroidBibleBookmark) -> String? {
+        guard let bookNameResolver else { return bookmark.book }
+
+        let shouldDerive: Bool
+        if let raw = bookmark.book {
+            shouldDerive = bookNameResolver.isInstalledBibleInitials(raw)
+        } else {
+            shouldDerive = true
+        }
+        guard shouldDerive else { return bookmark.book }
+
+        let derived = bookNameResolver.displayBookName(
+            v11nName: bookmark.v11n,
+            ordinal: bookmark.ordinalStart,
+            kjvOrdinal: bookmark.kjvOrdinalStart
+        )
+        return derived ?? bookmark.book
+    }
 
     /**
      Reads one staged Android bookmark SQLite database into a typed snapshot.
@@ -922,7 +967,7 @@ public final class RemoteSyncBookmarkRestoreService {
                 lastUpdatedOn: preparedBookmark.bookmark.lastUpdatedOn,
                 wholeVerse: preparedBookmark.bookmark.wholeVerse
             )
-            bookmark.book = preparedBookmark.bookmark.book
+            bookmark.book = normalizedDisplayBookName(for: preparedBookmark.bookmark)
             bookmark.startOffset = preparedBookmark.bookmark.startOffset
             bookmark.endOffset = preparedBookmark.bookmark.endOffset
             bookmark.primaryLabelId = preparedBookmark.localPrimaryLabelID
