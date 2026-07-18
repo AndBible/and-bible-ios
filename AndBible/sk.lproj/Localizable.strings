@@ -640,3 +640,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Na sdcard existuje používateľov plán čítania jsword/readingplan s rovnakým názvom ako je interný plán. Tu to nemôže byť uvedené. Pomenujte súbor inak a ponechajte príponu súboru ako .properties";
+"error_no_content" = "Pre vybraný verš nie je žiadny obsah";

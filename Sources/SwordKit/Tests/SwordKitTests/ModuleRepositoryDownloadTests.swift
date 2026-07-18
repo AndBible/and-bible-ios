@@ -8,7 +8,7 @@ import XCTest
  App-host-free package coverage for SWORD/MyBible repository download and install behavior.
 
  These tests protect Android-compatible repository refresh, MyBible package installs, local ZIP
- imports, package-directory fallback, rollback, and cancellation contracts in the SwordKit package
+ imports, package-directory inference, rollback, and cancellation contracts in the SwordKit package
  lane. Failures indicate storage/install drift, not app bootstrap or SwiftUI presentation issues.
  */
 final class ModuleRepositoryDownloadTests: XCTestCase {
@@ -407,6 +407,115 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
+     Verifies MyBible package HTTP failures use the public repository error surface.
+
+     MyBible installs download Android-compatible ZIP packages through the same Downloads API as SWORD
+     modules. A package server failure should therefore surface as `ModuleRepositoryError.downloadFailed`
+     instead of leaking the private HTTP-status helper used inside the download delegate.
+     */
+    func testModuleRepositoryMyBiblePackageHTTPFailureUsesPublicDownloadError() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Example MyBible",
+            type: "HTTP",
+            host: "mybible.example",
+            catalogPath: "/manifest.json",
+            repositoryType: SourceConfig.myBibleHTTPSRepositoryType,
+            description: "Example MyBible catalog",
+            manifestURL: URL(string: "https://mybible.example/manifest.json"),
+            sourceURL: URL(string: "https://mybible.example/manifest.json")
+        )
+        let manifestData = """
+        {
+          "url": "https://mybible.example/manifest.json",
+          "file_name": "Example MyBible",
+          "description": "Example MyBible catalog",
+          "modules": [
+            {
+              "file_name": "finrk.SQLite3.zip",
+              "description": "Finnish RK",
+              "download_url": "https://mybible.example/finrk.SQLite3.zip",
+              "language_code": "fi",
+              "update_date": "2026-05-01",
+              "update_info": "initial"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            switch request.url?.path {
+            case "/manifest.json":
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    manifestData
+                )
+            case "/finrk.SQLite3.zip":
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 503,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    Data("server error".utf8)
+                )
+            default:
+                XCTFail("Unexpected MyBible request: \(request.url?.absoluteString ?? "<nil>")")
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 404,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    Data()
+                )
+            }
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        do {
+            try await repository.installModule(named: "MyBible-finrk_SQLite3", from: source)
+            XCTFail("Expected MyBible package HTTP failure to abort install.")
+        } catch {
+            guard case ModuleRepositoryError.downloadFailed(let message) = error else {
+                XCTFail("Expected public downloadFailed wrapping, got \(type(of: error)): \(error)")
+                return
+            }
+            XCTAssertTrue(
+                message.contains("finrk.SQLite3.zip download failed (HTTP 503)"),
+                "MyBible package HTTP failures should identify the failed ZIP through the public error."
+            )
+        }
+
+        let moduleDir = swordDir
+            .appendingPathComponent("mybible", isDirectory: true)
+            .appendingPathComponent("MyBible-finrk_SQLite3", isDirectory: true)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: moduleDir.path),
+            "A failed MyBible package download must not publish an installed module directory."
+        )
+    }
+
+    /**
      Local SWORD ZIP install accepts Android-style deflated entries with data descriptors.
 
      Android's `ZipOutputStream` writes deflated entries before it knows their final sizes, leaving
@@ -530,9 +639,9 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     /**
      Verifies failed fresh downloads do not publish an installed-module marker.
 
-     Android only makes a module visible after all required data files are available. If one required
-     file fails, iOS must throw an actionable error, remove staged data, and avoid writing the `.conf`
-     file that would make the incomplete module appear installed.
+     Android only makes a module visible after the repository package ZIP installs. If the package
+     fails, iOS must throw an actionable error, avoid writing the `.conf` file, and avoid leaving
+     module data that would make the incomplete module appear installed.
      */
     func testModuleRepositoryDownloadFailsWithoutInstalledMarkerWhenRequiredFileFails() async throws {
         let tempDir = FileManager.default.temporaryDirectory
@@ -545,7 +654,8 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             name: "TestRepo",
             type: "HTTP",
             host: "example.test",
-            catalogPath: "/raw"
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
         )
         let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "TESTDICT")
 
@@ -561,15 +671,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/raw/modules/lexdict/rawld/testdict/testdict.dat":
-                response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 200,
-                    httpVersion: nil,
-                    headerFields: nil
-                )!
-                data = Data("dictionary-data".utf8)
-            case "/raw/modules/lexdict/rawld/testdict/testdict.idx":
+            case "/packages/TESTDICT.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
                     statusCode: 500,
@@ -601,11 +703,11 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
 
         do {
             try await repository.installModule(named: "TESTDICT", from: source)
-            XCTFail("Expected failed required data-file download to fail the module install.")
+            XCTFail("Expected failed package download to fail the module install.")
         } catch {
             XCTAssertTrue(
-                error.localizedDescription.contains("testdict.idx"),
-                "Failure should identify the required file that could not be downloaded."
+                error.localizedDescription.contains("TESTDICT.zip"),
+                "Failure should identify the package ZIP that could not be downloaded."
             )
         }
 
@@ -621,16 +723,16 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             FileManager.default.fileExists(
                 atPath: localDir.appendingPathComponent("testdict.dat").path
             ),
-            "A failed fresh module download should clean up staged data files."
+            "A failed fresh package download should not publish module data files."
         )
     }
 
     /**
      Verifies failed updates preserve the previously installed module atomically.
 
-     Android update failures leave the old document usable. The repository should stage replacement
-     data separately and keep the old data files plus `.conf` marker when a required update file
-     fails.
+     Android update failures leave the old document usable. The repository should stage package
+     replacement data separately and keep the old data files plus `.conf` marker when a downloaded
+     package fails before publish.
      */
     func testModuleRepositoryFailedUpdatePreservesExistingInstalledFiles() async throws {
         let tempDir = FileManager.default.temporaryDirectory
@@ -643,7 +745,8 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             name: "TestRepo",
             type: "HTTP",
             host: "example.test",
-            catalogPath: "/raw"
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
         )
         let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "TESTDICT")
         let localDir = moduleRepositoryLocalDir(for: "TESTDICT", under: swordDir)
@@ -666,6 +769,21 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         let confPath = modsDir.appendingPathComponent("testdict.conf")
         try oldConf.write(to: confPath, atomically: true, encoding: .utf8)
 
+        let zipData = makeModuleRepositoryZipWithCentralDirectory([
+            (
+                name: "modules/lexdict/rawld/testdict/testdict.dat",
+                body: Data("new-dictionary-data".utf8),
+                compressionMethod: 0,
+                compressedBody: Data("new-dictionary-data".utf8)
+            ),
+            (
+                name: "modules/lexdict/rawld/testdict/testdict.idx",
+                body: Data("new-index-data".utf8),
+                compressionMethod: 99,
+                compressedBody: Data("new-index-data".utf8)
+            )
+        ])
+
         ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
             let response: HTTPURLResponse
             let data: Data
@@ -678,22 +796,14 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/raw/modules/lexdict/rawld/testdict/testdict.dat":
+            case "/packages/TESTDICT.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
                     statusCode: 200,
                     httpVersion: nil,
-                    headerFields: nil
+                    headerFields: ["Content-Length": "\(zipData.count)"]
                 )!
-                data = Data("new-dictionary-data".utf8)
-            case "/raw/modules/lexdict/rawld/testdict/testdict.idx":
-                response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 500,
-                    httpVersion: nil,
-                    headerFields: nil
-                )!
-                data = Data("server error".utf8)
+                data = zipData
             default:
                 XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
                 response = HTTPURLResponse(
@@ -721,8 +831,8 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             XCTFail("Expected failed update to throw.")
         } catch {
             XCTAssertTrue(
-                error.localizedDescription.contains("testdict.idx"),
-                "Failure should identify the required file that could not be downloaded."
+                error.localizedDescription.contains("Unsupported ZIP compression method 99"),
+                "Failure should identify the staged package entry that could not be extracted."
             )
         }
 
@@ -744,13 +854,263 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
-     Verifies single-testament zText installs succeed when the optional testament group is absent.
+     Verifies commit-time config-backup failures restore the previous installed data directory.
 
-     Android treats missing optional OT/NT groups as absent testament data, not as a fatal install
-     error, when the other testament group is complete. The request sequence and published files must
-     follow that contract.
+     Setup:
+     - preinstalls TESTDICT data plus its `.conf` marker
+     - serves a valid replacement package so download and extraction both succeed
+     - removes write permission from `mods.d` so the commit path fails while backing up the old marker
+
+     Expected result:
+     - the commit helper restores the old data directory and leaves the old marker readable
+
+     Failure meaning:
+     - a filesystem error after the existing data directory is backed up can leave an installed
+       module without its prior data, which is the update-corruption case Android's package installer
+       avoids.
      */
-    func testModuleRepositoryInstallsSingleTestamentModuleWhenOptionalGroupIsMissing() async throws {
+    func testModuleRepositoryCommitFailureRestoresExistingInstalledFiles() async throws {
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "TestRepo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "TESTDICT")
+        let localDir = moduleRepositoryLocalDir(for: "TESTDICT", under: swordDir)
+        try fm.createDirectory(at: localDir, withIntermediateDirectories: true)
+        try Data("old-dictionary-data".utf8).write(to: localDir.appendingPathComponent("testdict.dat"))
+        try Data("old-index-data".utf8).write(to: localDir.appendingPathComponent("testdict.idx"))
+
+        let modsDir = swordDir.appendingPathComponent("mods.d", isDirectory: true)
+        try fm.createDirectory(at: modsDir, withIntermediateDirectories: true)
+        let oldConf = """
+        [TESTDICT]
+        Description=Old Test Dictionary
+        Category=Lexicons / Dictionaries
+        Lang=en
+        ModDrv=RawLD
+        DataPath=./modules/lexdict/rawld/testdict/testdict
+        Version=0.9
+        InstallSize=1
+        """
+        let confPath = modsDir.appendingPathComponent("testdict.conf")
+        try oldConf.write(to: confPath, atomically: true, encoding: .utf8)
+
+        let zipData = makeModuleRepositoryZip([
+            ("modules/lexdict/rawld/testdict/testdict.dat", Data("new-dictionary-data".utf8)),
+            ("modules/lexdict/rawld/testdict/testdict.idx", Data("new-index-data".utf8))
+        ])
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/TESTDICT.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Length": "\(zipData.count)"]
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: modsDir.path)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: modsDir.path)
+        }
+
+        do {
+            try await repository.installModule(named: "TESTDICT", from: source)
+            XCTFail("Expected config backup to fail when mods.d is not writable.")
+        } catch {
+            let nsError = error as NSError
+            XCTAssertEqual(
+                nsError.domain,
+                NSCocoaErrorDomain,
+                "Fixture drifted away from the intended filesystem permission failure."
+            )
+            XCTAssertEqual(
+                nsError.code,
+                CocoaError.fileWriteNoPermission.rawValue,
+                "The rollback fixture should fail while writing in read-only mods.d."
+            )
+        }
+
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("testdict.dat")),
+            Data("old-dictionary-data".utf8),
+            "Commit-time rollback must restore the previous data file."
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("testdict.idx")),
+            Data("old-index-data".utf8),
+            "Commit-time rollback must restore the previous index file."
+        )
+        XCTAssertEqual(
+            try String(contentsOf: confPath, encoding: .utf8),
+            oldConf,
+            "Commit-time rollback must preserve the previous installed module marker."
+        )
+    }
+
+    /**
+     Verifies post-staging publish failures remove newly placed package data.
+
+     Setup:
+     - installs FRESHDICT from a valid package with no previous module directory or marker
+     - removes write permission from `mods.d` before install so staged data can move into place but
+       the final `.conf` marker write fails
+
+     Expected result:
+     - the commit helper removes the newly placed data directory and leaves no installed marker
+
+     Failure meaning:
+     - a filesystem error after staging moves into the live module path can publish data without the
+       marker contract that `SwordManager` uses to recognize installed modules.
+     */
+    func testModuleRepositoryCommitFailureRemovesFreshlyStagedInstall() async throws {
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "TestRepo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "FRESHDICT")
+        let localDir = moduleRepositoryLocalDir(for: "FRESHDICT", under: swordDir)
+        let modsDir = swordDir.appendingPathComponent("mods.d", isDirectory: true)
+        try fm.createDirectory(at: modsDir, withIntermediateDirectories: true)
+        let confPath = modsDir.appendingPathComponent("freshdict.conf")
+        let zipData = makeModuleRepositoryZip([
+            ("modules/lexdict/rawld/freshdict/freshdict.dat", Data("new-dictionary-data".utf8)),
+            ("modules/lexdict/rawld/freshdict/freshdict.idx", Data("new-index-data".utf8))
+        ])
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/FRESHDICT.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Length": "\(zipData.count)"]
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: modsDir.path)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: modsDir.path)
+        }
+
+        do {
+            try await repository.installModule(named: "FRESHDICT", from: source)
+            XCTFail("Expected marker write to fail when mods.d is not writable.")
+        } catch {
+            let nsError = error as NSError
+            XCTAssertEqual(
+                nsError.domain,
+                NSCocoaErrorDomain,
+                "Fixture drifted away from the intended filesystem permission failure."
+            )
+            XCTAssertEqual(
+                nsError.code,
+                CocoaError.fileWriteNoPermission.rawValue,
+                "The rollback fixture should fail while writing the final marker in read-only mods.d."
+            )
+        }
+
+        XCTAssertFalse(
+            fm.fileExists(atPath: localDir.path),
+            "Post-staging rollback must remove the newly placed data directory after marker write fails."
+        )
+        XCTAssertFalse(
+            fm.fileExists(atPath: confPath.path),
+            "Post-staging rollback must not leave an installed module marker after marker write fails."
+        )
+    }
+
+    /**
+     Verifies single-testament zText packages install without synthetic OT files.
+
+     Android installs SWORD modules from ZIP packages and does not require raw OT/NT file probing to
+     distinguish full and single-testament modules. The package may legitimately contain only NT
+     data; iOS should publish exactly that package content without requesting raw OT files.
+     */
+    func testModuleRepositoryInstallsSingleTestamentPackageWithoutSyntheticOldTestamentFiles() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
@@ -761,7 +1121,8 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             name: "TestRepo",
             type: "HTTP",
             host: "example.test",
-            catalogPath: "/raw"
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
         )
         let catalogData = try makeModuleRepositoryCatalogArchive(
             moduleName: "NTONLY",
@@ -769,6 +1130,12 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             modDrv: "zText",
             dataPath: "./modules/texts/ztext/ntonly/"
         )
+        let zipData = makeModuleRepositoryZip([
+            ("mods.d/ntonly.conf", Data("placeholder".utf8)),
+            ("modules/texts/ztext/ntonly/nt.bzs", Data("new-testament-zs".utf8)),
+            ("modules/texts/ztext/ntonly/nt.bzz", Data("new-testament-zz".utf8)),
+            ("modules/texts/ztext/ntonly/nt.bzv", Data("new-testament-zv".utf8))
+        ])
         var requestedPaths: [String] = []
 
         ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
@@ -784,24 +1151,14 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/raw/modules/texts/ztext/ntonly/ot.bzs":
-                response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 404,
-                    httpVersion: nil,
-                    headerFields: nil
-                )!
-                data = Data()
-            case "/raw/modules/texts/ztext/ntonly/nt.bzs",
-                "/raw/modules/texts/ztext/ntonly/nt.bzz",
-                "/raw/modules/texts/ztext/ntonly/nt.bzv":
+            case "/packages/NTONLY.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
                     statusCode: 200,
                     httpVersion: nil,
                     headerFields: nil
                 )!
-                data = Data("new-testament-data-\(request.url!.lastPathComponent)".utf8)
+                data = zipData
             default:
                 XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
                 response = HTTPURLResponse(
@@ -825,13 +1182,10 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         _ = try await repository.refreshCatalog(for: source)
         try await repository.installModule(named: "NTONLY", from: source)
 
-        XCTAssertFalse(
-            requestedPaths.contains("/raw/modules/texts/ztext/ntonly/ot.bzz"),
-            "A missing optional OT group should skip the rest of that testament's files."
-        )
-        XCTAssertFalse(
-            requestedPaths.contains("/raw/modules/texts/ztext/ntonly/ot.bzv"),
-            "A missing optional OT group should not fail single-testament NT installs."
+        XCTAssertEqual(
+            requestedPaths.filter { $0 != "/raw/mods.d.tar.gz" },
+            ["/packages/NTONLY.zip"],
+            "Remote SWORD installs should use the package ZIP and avoid raw testament probes."
         )
 
         let localDir = swordDir
@@ -841,7 +1195,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             .appendingPathComponent("ntonly", isDirectory: true)
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: localDir.appendingPathComponent("ot.bzs").path),
-            "Missing optional testament files should not be created locally."
+            "Package installs should not synthesize missing testament files."
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: localDir.appendingPathComponent("nt.bzs").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: localDir.appendingPathComponent("nt.bzz").path))
@@ -852,16 +1206,16 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             .appendingPathComponent("ntonly.conf")
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: confPath.path),
-            "A single-testament install with at least one complete data group should publish its .conf marker."
+            "A single-testament package that contains module data should publish its .conf marker."
         )
     }
 
     /**
-     Verifies chapter-block compressed commentaries request and publish commentary file extensions.
+     Verifies chapter-block compressed commentaries publish package data files.
 
-     Android derives zCom data filenames from commentary block type. A chapter-block commentary must
-     fetch `.czs/.czz/.czv` data instead of Bible `.bzs/.bzz/.bzv` files and publish the module only
-     after the commentary group is staged.
+     Android installs commentaries from package ZIPs. A package containing `.czs/.czz/.czv`
+     chapter-block data should publish those files exactly, without iOS trying to reconstruct raw
+     filenames from `BlockType`.
      */
     func testModuleRepositoryInstallsChapterBlockCompressedCommentary() async throws {
         let tempDir = FileManager.default.temporaryDirectory
@@ -874,7 +1228,8 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             name: "CrossWire",
             type: "HTTP",
             host: "example.test",
-            catalogPath: "/raw"
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
         )
         let catalogData = try makeModuleRepositoryCatalogArchive(
             moduleName: "BARNES",
@@ -883,6 +1238,12 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             dataPath: "./modules/comments/zcom/barnes/",
             extraConf: "BlockType=CHAPTER"
         )
+        let zipData = makeModuleRepositoryZip([
+            ("mods.d/barnes.conf", Data("placeholder".utf8)),
+            ("modules/comments/zcom/barnes/nt.czs", Data("commentary-czs".utf8)),
+            ("modules/comments/zcom/barnes/nt.czz", Data("commentary-czz".utf8)),
+            ("modules/comments/zcom/barnes/nt.czv", Data("commentary-czv".utf8))
+        ])
         var requestedPaths: [String] = []
 
         ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
@@ -898,24 +1259,14 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/raw/modules/comments/zcom/barnes/ot.czs":
-                response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 404,
-                    httpVersion: nil,
-                    headerFields: nil
-                )!
-                data = Data()
-            case "/raw/modules/comments/zcom/barnes/nt.czs",
-                "/raw/modules/comments/zcom/barnes/nt.czz",
-                "/raw/modules/comments/zcom/barnes/nt.czv":
+            case "/packages/BARNES.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
                     statusCode: 200,
                     httpVersion: nil,
                     headerFields: nil
                 )!
-                data = Data("commentary-data-\(request.url!.lastPathComponent)".utf8)
+                data = zipData
             default:
                 XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
                 response = HTTPURLResponse(
@@ -939,13 +1290,11 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         _ = try await repository.refreshCatalog(for: source)
         try await repository.installModule(named: "BARNES", from: source)
 
-        XCTAssertFalse(
-            requestedPaths.contains { $0.hasSuffix(".bzs") || $0.hasSuffix(".bzz") || $0.hasSuffix(".bzv") },
-            "Chapter-block compressed commentaries should request c-extension data files, not b-extension files."
+        XCTAssertEqual(
+            requestedPaths.filter { $0 != "/raw/mods.d.tar.gz" },
+            ["/packages/BARNES.zip"],
+            "Remote commentary installs should use the package ZIP and avoid raw data-file probes."
         )
-        XCTAssertTrue(requestedPaths.contains("/raw/modules/comments/zcom/barnes/nt.czs"))
-        XCTAssertTrue(requestedPaths.contains("/raw/modules/comments/zcom/barnes/nt.czz"))
-        XCTAssertTrue(requestedPaths.contains("/raw/modules/comments/zcom/barnes/nt.czv"))
 
         let localDir = swordDir
             .appendingPathComponent("modules", isDirectory: true)
@@ -966,13 +1315,12 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
-     Verifies package-backed repositories fall back to module ZIP downloads when raw files are absent.
+     Verifies built-in package-backed repositories install from Android's package directory.
 
-     Android repositories can serve modules as package ZIPs even when individual data paths return
-     404. iOS must attempt the package URL and stage the package contents through the same installed
-     marker path.
+     Android gives the SWORD installer a package ZIP location for built-in repositories. iOS should
+     use that package without raw data-file probes so packaged modules are installed atomically.
      */
-    func testModuleRepositoryFallsBackToPackageZipWhenRawDataFilesAreUnavailable() async throws {
+    func testModuleRepositoryInstallsBuiltInPackageZipWithoutRawDataFileProbes() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
@@ -1024,15 +1372,6 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/andbible-extra/modules/comments/rawcom/augustin/ot",
-                "/andbible-extra/modules/comments/rawcom/augustin/nt":
-                response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 404,
-                    httpVersion: nil,
-                    headerFields: nil
-                )!
-                data = Data()
             case "/andbible-extra/zip/Augustin.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
@@ -1064,9 +1403,10 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         _ = try await repository.refreshCatalog(for: source)
         try await repository.installModule(named: "Augustin", from: source)
 
-        XCTAssertTrue(
-            requestedPaths.contains("/andbible-extra/zip/Augustin.zip"),
-            "Package-backed repositories should fall back to the module ZIP when raw data files are unavailable."
+        XCTAssertEqual(
+            requestedPaths.filter { $0 != "/andbible-extra/mods.d.tar.gz" },
+            ["/andbible-extra/zip/Augustin.zip"],
+            "Package-backed repositories should use Android's package ZIP without raw data files."
         )
 
         let localDir = swordDir
@@ -1084,17 +1424,393 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             .appendingPathComponent("augustin.conf")
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: confPath.path),
-            "A package ZIP fallback should still publish the catalog .conf marker through the staged installer."
+            "A package ZIP install should still publish the catalog .conf marker through the staged installer."
         )
     }
 
     /**
-     Verifies built-in repositories use Android's default package directory for ZIP fallback.
+     Verifies SWORD installs request an explicit package by default.
+
+     Android's SWORD installer receives one package directory per repository. When custom metadata
+     has that directory, iOS should follow the same package path for normal Downloads.
+     */
+    func testModuleRepositoryInstallsExplicitPackageZipByDefault() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Package Repo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "FULL",
+            category: "Biblical Texts",
+            modDrv: "zText",
+            dataPath: "./modules/texts/ztext/full/"
+        )
+        let zipData = makeModuleRepositoryZip([
+            ("mods.d/full.conf", Data("placeholder".utf8)),
+            ("modules/texts/ztext/full/ot.bzs", Data("old-testament-zs".utf8)),
+            ("modules/texts/ztext/full/ot.bzz", Data("old-testament-zz".utf8)),
+            ("modules/texts/ztext/full/ot.bzv", Data("old-testament-zv".utf8)),
+            ("modules/texts/ztext/full/nt.bzs", Data("new-testament-zs".utf8)),
+            ("modules/texts/ztext/full/nt.bzz", Data("new-testament-zz".utf8)),
+            ("modules/texts/ztext/full/nt.bzv", Data("new-testament-zv".utf8))
+        ])
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/FULL.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "FULL", from: source)
+
+        XCTAssertEqual(
+            requestedPaths.filter { $0 != "/raw/mods.d.tar.gz" },
+            ["/packages/FULL.zip"],
+            "Package-preferred installs should not probe raw OT/NT files after the package succeeds."
+        )
+
+        let localDir = moduleRepositoryTextDir(for: "FULL", under: swordDir)
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("ot.bzs")),
+            Data("old-testament-zs".utf8)
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("nt.bzs")),
+            Data("new-testament-zs".utf8)
+        )
+    }
+
+    /**
+     Verifies direct SWORD catalog custom repositories install from `catalogPath/packages`.
+
+     Android's custom repository editor accepts a direct SWORD catalog only when both
+     `mods.d.tar.gz` and a sibling `packages` directory are readable. iOS should follow that
+     package-directory rule for remote installs instead of requiring pre-existing sidecar metadata
+     or probing raw data files.
+     */
+    func testModuleRepositoryInstallsDirectCatalogPackageDirectory() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Direct Catalog",
+            type: "HTTP",
+            host: "custom.example",
+            catalogPath: "/catalog"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "CUSTOM")
+        let zipData = makeModuleRepositoryZip([
+            ("mods.d/custom.conf", Data("placeholder".utf8)),
+            ("modules/lexdict/rawld/custom/custom.dat", Data("dictionary-data".utf8)),
+            ("modules/lexdict/rawld/custom/custom.idx", Data("index-data".utf8))
+        ])
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/catalog/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/catalog/packages/CUSTOM.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "CUSTOM", from: source)
+
+        XCTAssertEqual(
+            requestedPaths.filter { $0 != "/catalog/mods.d.tar.gz" },
+            ["/catalog/packages/CUSTOM.zip"]
+        )
+
+        let localDir = moduleRepositoryLocalDir(for: "CUSTOM", under: swordDir)
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("custom.dat")),
+            Data("dictionary-data".utf8)
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("custom.idx")),
+            Data("index-data".utf8)
+        )
+    }
+
+    /**
+     Verifies remote SWORD installs fail without raw data-file probes when the package ZIP is absent.
+
+     Downloads installs are Android package-backed remote installs. If the package is missing, iOS
+     must fail visibly instead of probing optional raw testament files and risking a module that
+     opens Matthew but cannot open Genesis.
+     */
+    func testModuleRepositoryPackageInstallDoesNotProbeRawDataFilesWhenZipIsMissing() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Package Repo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "FULL",
+            category: "Biblical Texts",
+            modDrv: "zText",
+            dataPath: "./modules/texts/ztext/full/"
+        )
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/FULL.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            default:
+                XCTFail("Package installs should not request raw data files: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        do {
+            try await repository.installModule(named: "FULL", from: source)
+            XCTFail("Expected package install to fail when the package ZIP is missing.")
+        } catch {
+            XCTAssertEqual(
+                requestedPaths.filter { $0 != "/raw/mods.d.tar.gz" },
+                ["/packages/FULL.zip"]
+            )
+        }
+
+        let confPath = swordDir
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("full.conf")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: confPath.path),
+            "A package failure must not leave an installed marker."
+        )
+    }
+
+    /**
+     Verifies remote SWORD installs fail on package server errors without raw data-file probes.
+
+     Raw data-file installs can publish partial full-Bible content when a mirror is inconsistent.
+     This fixture returns HTTP 500 for the package and fails the test if any raw data file is
+     requested. A failure means remote installs can regress to the partial-download surface that
+     caused issue 354.
+     */
+    func testModuleRepositoryPackageInstallDoesNotProbeRawDataFilesWhenZipReturnsServerError() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Package Repo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "FULL",
+            category: "Biblical Texts",
+            modDrv: "zText",
+            dataPath: "./modules/texts/ztext/full/"
+        )
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/FULL.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 500,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            default:
+                XCTFail("Package installs should not request raw data files: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        do {
+            try await repository.installModule(named: "FULL", from: source)
+            XCTFail("Expected package install to fail when the package ZIP returns a server error.")
+        } catch {
+            guard case ModuleRepositoryError.downloadFailed(let message) = error else {
+                XCTFail("Expected public downloadFailed wrapping, got \(type(of: error)): \(error)")
+                return
+            }
+            XCTAssertTrue(
+                message.contains("FULL.zip download failed (HTTP 500)"),
+                "Package HTTP failures should be reported through ModuleRepositoryError.downloadFailed."
+            )
+            XCTAssertEqual(
+                requestedPaths.filter { $0 != "/raw/mods.d.tar.gz" },
+                ["/packages/FULL.zip"]
+            )
+        }
+
+        let confPath = swordDir
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("full.conf")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: confPath.path),
+            "A package failure must not leave an installed marker."
+        )
+    }
+
+    /**
+     Verifies built-in repositories use Android's default package directory for ZIP installs.
 
      STEP and similar repositories publish package ZIPs outside the catalog directory. The repository
      must use Android's configured package directory before deriving catalog-relative guesses.
      */
-    func testModuleRepositoryUsesAndroidDefaultPackageDirectoryForPackageFallback() async throws {
+    func testModuleRepositoryUsesAndroidDefaultPackageDirectoryForPackageInstall() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
@@ -1128,14 +1844,6 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/catalog/modules/lexdict/rawld/stepmod/stepmod.dat":
-                response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 404,
-                    httpVersion: nil,
-                    headerFields: nil
-                )!
-                data = Data()
             case "/packages/STEPMOD.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
@@ -1188,7 +1896,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
-     Verifies custom repository package-directory metadata wins over fallback heuristics.
+     Verifies custom repository package-directory metadata wins over catalog-directory inference.
 
      Android stores one package directory for a repository. When custom metadata exists, iOS must use
      that durable directory and avoid probing alternative catalog-relative paths that Android would not
@@ -1229,14 +1937,6 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/catalog/modules/lexdict/rawld/custom/custom.dat":
-                response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 404,
-                    httpVersion: nil,
-                    headerFields: nil
-                )!
-                data = Data()
             case "/android/packages/CUSTOM.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
@@ -1278,7 +1978,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         )
         XCTAssertFalse(
             requestedPaths.contains("/catalog/zip/CUSTOM.zip"),
-            "Persisted custom package directories must take precedence over legacy zip heuristics."
+            "Persisted custom package directories must take precedence over legacy zip guesses."
         )
 
         let localDir = moduleRepositoryLocalDir(for: "CUSTOM", under: swordDir)
@@ -1299,7 +1999,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
      preserve that one authoritative directory while making relative legacy/manifest values safe for
      the `https://host/path/module.zip` request shape.
      */
-    func testModuleRepositoryNormalizesRelativeCustomPackageDirectoryForPackageFallback() async throws {
+    func testModuleRepositoryNormalizesRelativeCustomPackageDirectoryForPackageInstall() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
@@ -1334,14 +2034,6 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/catalog/modules/lexdict/rawld/custom/custom.dat":
-                response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 404,
-                    httpVersion: nil,
-                    headerFields: nil
-                )!
-                data = Data()
             case "/android/packages/CUSTOM.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
@@ -1381,7 +2073,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
-     Verifies explicit Android package directories are authoritative for package fallback.
+     Verifies explicit Android package directories are authoritative for package installs.
 
      Android gives the installer one package directory per repository. When that explicit directory
      does not contain a ZIP, iOS should surface the install failure instead of probing catalog-relative
@@ -1417,14 +2109,6 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/catalog/modules/lexdict/rawld/custom/custom.dat":
-                response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 404,
-                    httpVersion: nil,
-                    headerFields: nil
-                )!
-                data = Data()
             case "/android/packages/CUSTOM.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
@@ -1467,10 +2151,10 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
-     Verifies cancellation during download stops before requesting later files or publishing markers.
+     Verifies cancellation during package download stops before publishing markers.
 
-     Android cancellation leaves no partially installed module. Cancelling after initial progress must
-     halt the request stream, remove staged files, and avoid writing the `.conf` marker.
+     Android cancellation leaves no partially installed module. Cancelling after initial package
+     progress must halt installation, remove staged files, and avoid writing the `.conf` marker.
      */
     func testModuleRepositoryCancellationStopsBeforeInstalledMarker() async throws {
         let tempDir = FileManager.default.temporaryDirectory
@@ -1483,9 +2167,16 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             name: "TestRepo",
             type: "HTTP",
             host: "example.test",
-            catalogPath: "/raw"
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
         )
         let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "TESTDICT")
+        let zipData = makeModuleRepositoryZip([
+            ("mods.d/testdict.conf", Data("placeholder".utf8)),
+            ("modules/lexdict/rawld/testdict/testdict.dat", Data("dictionary-data".utf8)),
+            ("modules/lexdict/rawld/testdict/testdict.idx", Data("index-data".utf8))
+        ])
+        let zipHeaders = ["Content-Length": "\(zipData.count)"]
         var requestedPaths: [String] = []
 
         ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
@@ -1501,22 +2192,14 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/raw/modules/lexdict/rawld/testdict/testdict.dat":
+            case "/packages/TESTDICT.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
                     statusCode: 200,
                     httpVersion: nil,
-                    headerFields: nil
+                    headerFields: zipHeaders
                 )!
-                data = Data("dictionary-data".utf8)
-            case "/raw/modules/lexdict/rawld/testdict/testdict.idx":
-                response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 200,
-                    httpVersion: nil,
-                    headerFields: nil
-                )!
-                data = Data("index-data".utf8)
+                data = zipData
             default:
                 XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
                 response = HTTPURLResponse(
@@ -1556,8 +2239,8 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         }
 
         XCTAssertFalse(
-            requestedPaths.contains("/raw/modules/lexdict/rawld/testdict/testdict.idx"),
-            "Cancellation after the first required file should stop before requesting the next file."
+            requestedPaths.contains { $0.hasPrefix("/raw/modules/") },
+            "Cancellation should not reach raw data-file probes."
         )
 
         let confPath = swordDir
@@ -1572,16 +2255,16 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             FileManager.default.fileExists(
                 atPath: localDir.appendingPathComponent("testdict.dat").path
             ),
-            "A cancelled fresh module download should clean up staged data files."
+            "A cancelled fresh package download should not publish staged data files."
         )
     }
 
     /**
      Verifies final-progress cancellation still stops before publish.
 
-     A cancellation delivered after the last data file but before publication must still prevent the
-     installed marker and staged directory from becoming visible, matching Android's all-or-nothing
-     install lifecycle.
+     A cancellation delivered after the package download reports completion but before publication
+     must still prevent the installed marker and staged directory from becoming visible, matching
+     Android's all-or-nothing install lifecycle.
      */
     func testModuleRepositoryCancellationAfterFinalFileStopsBeforePublish() async throws {
         let tempDir = FileManager.default.temporaryDirectory
@@ -1594,9 +2277,16 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             name: "TestRepo",
             type: "HTTP",
             host: "example.test",
-            catalogPath: "/raw"
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
         )
         let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "TESTDICT")
+        let zipData = makeModuleRepositoryZip([
+            ("mods.d/testdict.conf", Data("placeholder".utf8)),
+            ("modules/lexdict/rawld/testdict/testdict.dat", Data("dictionary-data".utf8)),
+            ("modules/lexdict/rawld/testdict/testdict.idx", Data("index-data".utf8))
+        ])
+        let zipHeaders = ["Content-Length": "\(zipData.count)"]
 
         ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
             let response: HTTPURLResponse
@@ -1610,22 +2300,14 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     headerFields: nil
                 )!
                 data = catalogData
-            case "/raw/modules/lexdict/rawld/testdict/testdict.dat":
+            case "/packages/TESTDICT.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
                     statusCode: 200,
                     httpVersion: nil,
-                    headerFields: nil
+                    headerFields: zipHeaders
                 )!
-                data = Data("dictionary-data".utf8)
-            case "/raw/modules/lexdict/rawld/testdict/testdict.idx":
-                response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 200,
-                    httpVersion: nil,
-                    headerFields: nil
-                )!
-                data = Data("index-data".utf8)
+                data = zipData
             default:
                 XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
                 response = HTTPURLResponse(
@@ -1674,7 +2356,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         let localDir = moduleRepositoryLocalDir(for: "TESTDICT", under: swordDir)
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: localDir.path),
-            "Cancelling after the final staged file should not publish staged module data."
+            "Cancelling after the package download should not publish staged module data."
         )
     }
 
@@ -1717,6 +2399,25 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             .appendingPathComponent("modules", isDirectory: true)
             .appendingPathComponent("lexdict", isDirectory: true)
             .appendingPathComponent("rawld", isDirectory: true)
+            .appendingPathComponent(moduleKey, isDirectory: true)
+    }
+
+    /**
+     Builds the local zText data directory for a test module.
+
+     - Parameters:
+       - moduleName: Catalog abbreviation used as the zText directory name.
+       - swordDir: Test SWORD home containing the `modules/` tree.
+     - Returns: The expected installed data directory for the module.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func moduleRepositoryTextDir(for moduleName: String, under swordDir: URL) -> URL {
+        let moduleKey = moduleName.lowercased()
+        return swordDir
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("texts", isDirectory: true)
+            .appendingPathComponent("ztext", isDirectory: true)
             .appendingPathComponent(moduleKey, isDirectory: true)
     }
 

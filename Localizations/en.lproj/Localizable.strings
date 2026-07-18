@@ -760,3 +760,4 @@
 "help_search" = "Search";
 "help_workspaces" = "Workspaces";
 "skip" = "Skip";
+"error_no_content" = "No content for selected verse";

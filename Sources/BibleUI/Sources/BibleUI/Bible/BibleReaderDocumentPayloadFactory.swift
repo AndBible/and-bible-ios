@@ -108,6 +108,27 @@ struct BibleReaderDocumentPayloadRequest {
  */
 struct BibleReaderDocumentPayloadFactory {
     /**
+     Severity values understood by Vue's `ErrorDocument` renderer.
+
+     Android distinguishes ordinary no-content states from reportable reader errors. Keeping that
+     distinction in the bridge payload lets native code render "No content for selected verse"
+     without showing the report-error affordance used for unexpected failures.
+
+     Side effects: none.
+     Failure modes: none.
+     */
+    enum ErrorDocumentSeverity: String {
+        /// User-visible informational state such as a valid key with no renderable content.
+        case normal = "NORMAL"
+
+        /// Recoverable warning state that should not be treated as a crash/reportable error.
+        case warning = "WARNING"
+
+        /// Unexpected reader error that Vue should render with the report-error action.
+        case error = "ERROR"
+    }
+
+    /**
      Resolves the ordinal range for a Bible chapter.
 
      - Parameters are display book name, one-based chapter, and caller-supplied verse count.
@@ -305,6 +326,35 @@ struct BibleReaderDocumentPayloadFactory {
         ]
 
         return serializedDocument(doc, failureDescription: "EPUB document") ?? "{}"
+    }
+
+    /**
+     Serializes a Vue `ErrorDocument` payload for reader-visible content failures.
+
+     Android surfaces empty-content reader states as document errors instead of leaving the reader
+     loading. iOS uses the same Vue error-document type so native SWORD failures that happen after a
+     module is already installed can stop the spinner while remaining distinct from download/install
+     failures.
+
+     - Parameters:
+       - message: User-visible message rendered by `ErrorDocument` through the OSIS segment path.
+       - severity: Error-document severity controlling the title and report-error affordance.
+     - Returns: Serialized JSON payload, or `nil` when JSON serialization fails.
+     - Side effects: Logs serialization failures through `serializedDocument`.
+     - Failure modes: Returns `nil` if the document dictionary cannot be serialized.
+     */
+    func errorDocumentJSON(
+        message: String,
+        severity: ErrorDocumentSeverity = .normal
+    ) -> String? {
+        let doc: [String: Any] = [
+            "id": "doc-1",
+            "type": "error",
+            "errorMessage": message,
+            "severity": severity.rawValue
+        ]
+
+        return serializedDocument(doc, failureDescription: "reader error document")
     }
 
     /**

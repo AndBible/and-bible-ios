@@ -641,3 +641,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "C'è un piano di lettura dell'utente nella sdcard in jsword/readingplan con lo stesso nome di un piano interno. Non può essere elencato qui. Rinomina il file con un nome diverso, ma lasciandogli l'estensione .properties";
+"error_no_content" = "Nessun contenuto per il versetto selezionato";

@@ -1,0 +1,800 @@
+/* AndBible iOS — English Localizations */
+
+/* ========================================
+   General / Shared
+   ======================================== */
+"app_name" = "AndBible";
+"app_name_andbible" = "AndBible";
+"app_name_long" = "AndBible: Masomo ya Biblia";
+"done" = "Imekamilika";
+"cancel" = "Ghairi";
+"delete" = "Futa";
+"save" = "Hifadhi";
+"edit" = "Hariri";
+"add" = "Add";
+"search" = "Tafuta";
+"settings" = "Mapendeleo ya programu";
+"close" = "Funga";
+"copy_reference" = "Copy Reference";
+"go_to_reference" = "Go to Reference";
+"go_to_reference_placeholder" = "e.g. Genesis 1, Matt 5:3, Gen.1.1";
+"go_to_reference_message" = "Type a reference or tap Browse to choose from the list.";
+"go_to_reference_invalid" = "Could not find that reference";
+"go" = "Go";
+"browse" = "Browse...";
+"move_up" = "Move Up";
+"move_down" = "Move Down";
+"reference_copied" = "Reference copied";
+"ok" = "Sawa";
+"yes" = "Ndiyo";
+"no" = "Hapana";
+"error" = "Hitilafu";
+"loading" = "Loading...";
+"create" = "Unda";
+"new_window" = "Dirisha jipya";
+"clear" = "Clear";
+"reset" = "Weka upya";
+"retry" = "Retry";
+"skip" = "Ruka";
+"all" = "Yote";
+"sort" = "Sort";
+"name" = "Jina";
+"untitled" = "Untitled";
+"compare" = "Linganisha";
+"translations" = "Tafsiri";
+"auto" = "Auto";
+"off" = "Off";
+"inline" = "Inline";
+"links" = "Viungo";
+"hidden" = "Hidden";
+"completed" = "Imekamilika";
+"no_results" = "No Results";
+"searching" = "Searching...";
+
+/* ========================================
+   Navigation / Bible Reader
+   ======================================== */
+"bible" = "Biblia";
+"deuterocanonical" = "Deuterocanonical";
+"bookmarks" = "Alamisho";
+"reading_plans" = "Mipango ya Kusoma";
+"downloads" = "Downloads";
+"history" = "Historia";
+"workspaces" = "Maeneo ya Kazi";
+"rename" = "Badilisha jina";
+"clone" = "Clone";
+"copy_of %@" = "Nakili ya %@";
+"definition" = "Definition";
+"dictionary" = "Kamusi";
+"general_book" = "Kitabu";
+"map" = "Ramani";
+"locked" = "Locked";
+
+/* Bible Navigation */
+"choose_book" = "Chagua Kitabu";
+"books" = "Books";
+"old_testament" = "Agano la Kale";
+"new_testament" = "Agano Jipya";
+"previous_chapter" = "Previous chapter";
+"next_chapter" = "Next chapter";
+"back_to_bible" = "Back to Bible";
+
+/* Module Pickers */
+"choose_document" = "Chagua Hati";
+"document_type" = "Document type";
+"picker_select_translation" = "Select Translation";
+"picker_select_commentary" = "Select Commentary";
+"picker_select_dictionary" = "Select Dictionary";
+"picker_select_general_book" = "Select General Book";
+"picker_select_map" = "Select Map";
+"picker_no_bible_modules" = "No Bible modules installed";
+"picker_no_commentary_modules" = "No commentary modules installed";
+"picker_no_dictionary_modules" = "No dictionary modules installed";
+"picker_no_general_book_modules" = "No general book modules installed";
+"picker_no_map_modules" = "No map modules installed";
+"download_modules" = "Download Modules";
+"download" = "Pakua Hati";
+"easy_start" = "Easy Start";
+"easy_start_title" = "Easy start";
+"easy_start_message" = "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on.";
+"startup_download_prompt" = "Download Bible modules to start reading.";
+"welcome_message" = "Asante kwa kupakua %@. Kwa sasa hakuna Biblia au hati zilizosanikishwa. Ili kuendelea, tafadhali sanikisha angalau hati 1 kwa kuipakua kutoka kwa mtandao, au kwa kuipakia kutoka kwa faili la zipu la hifadhi ya hati.";
+"supported_formats" = "Miundo inayoauni kwa kupakia hati kutoka kwa faili: %@";
+"format_zip" = "Faili ya Zip yenye moduli za Sword, au faili ya hifadhi ya hati (*.abmd) iliyoundwa na %@";
+"format_mysword" = "Hati za MySword (*.mybible)";
+"format_mybible" = "Hati za MyBible (*.SQLite3)";
+"format_epub" = "Hati za EPUB (*.epub)";
+
+/* Toolbar / Actions */
+"toggle_strongs_numbers" = "Toggle Strong's numbers";
+"bookmark" = "Alamisho";
+"copy" = "Nakili";
+"share" = "Shiriki";
+"search_web" = "Web";
+
+/* Strong's Modes */
+"strongs_off" = "Off";
+"strongs_inline" = "Maandishi na Viungo";
+"strongs_links" = "Viungo";
+"strongs_hidden" = "Viungo Vilivyofichwa";
+"find_all_occurrences" = "Find all occurrences";
+"no_dictionary_installed" = "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads.";
+"back_to_previous" = "Back";
+
+/* ========================================
+   Bookmarks & Labels
+   ======================================== */
+"add_bookmark" = "Add Bookmark";
+"edit_bookmark" = "Edit Bookmark";
+"bookmark_note" = "Note";
+"labels" = "Lebo";
+"new_label" = "New Label";
+"study_pad" = "StudyPad";
+"my_notes" = "My Notes";
+"no_bookmarks" = "No Bookmarks";
+"no_bookmarks_description" = "Long-press on a verse to add a bookmark.";
+"search_bookmarks" = "Search bookmarks";
+"sort_bible_order" = "Bible Order";
+"sort_date_created" = "Date Created";
+"sort_last_updated" = "Last Updated";
+"edit_labels" = "Edit Labels";
+"add_labels" = "Add labels";
+"open_studypad_for_label %@" = "Open \"%@\" StudyPad";
+"no_labels" = "No Labels";
+"no_labels_description" = "Create labels to organize your bookmarks and notes.";
+"label_name" = "Label name";
+"studypad" = "Daftari la Masomo";
+"open_studypad" = "Open StudyPad";
+"edit_label" = "Hariri lebo";
+"label_edit_name" = "Jina";
+"label_edit_color" = "Color";
+"label_edit_icon" = "Icon";
+"no_icon" = "No Icon";
+"label_edit_options" = "Options";
+"favourite" = "Favourite";
+"underline_style" = "Underline Style";
+"underline_whole_verse" = "Underline Whole Verse";
+"studypad_empty" = "Empty StudyPad";
+"studypad_empty_description" = "Add notes or bookmark verses to build your study journal.";
+"add_note" = "Add Note";
+"note" = "Note";
+"new_note" = "New Note";
+"edit_note" = "Edit Note";
+
+/* ========================================
+   Search
+   ======================================== */
+"search_bible" = "Tafuta Biblia";
+"search_results" = "Search Results";
+"whole_bible" = "Biblia Yote";
+"old_testament_short" = "OT";
+"new_testament_short" = "NT";
+"current_book" = "Current Book";
+"search_index" = "Faharasa ya Utafutaji";
+"search_checking_index" = "Checking index...";
+"search_need_index" = "To search a document we need an index.";
+"search_create_index" = "Unda";
+"search_indexing_message" = "Utaelekezwa kwenye skrini ya utafutaji baada ya uundaji wa faharasa kukamilika.";
+"search_searching" = "Searching...";
+"search_enter_prompt" = "Enter a word or phrase to search";
+"search_bible_text" = "Search Bible text";
+"search_match" = "Match";
+"search_scope_all" = "Yote";
+"search_scope_ot" = "OT";
+"search_scope_nt" = "NT";
+"search_translations" = "Tafsiri";
+"search_all" = "Yote";
+
+/* ========================================
+   Downloads / Module Browser
+   ======================================== */
+"module_browser" = "Module Browser";
+"doc_type_all" = "Aina zote";
+"bibles" = "Bibles";
+"commentaries" = "Commentaries";
+"dictionaries" = "Kamusi";
+"category_books" = "Books";
+"maps" = "Maps";
+"document_filter_results %lld" = "Documents (%lld)";
+"install" = "Install";
+"install_module" = "Install";
+"update" = "Update";
+"uninstall" = "Uninstall";
+"unavailable" = "Unavailable";
+"download_document_confirm_prefix" = "Pakua";
+"bookmark_warning4" = "Inashauriwa kufanya nakala ya hifadhi ya moduli kabla ya kusasisha.";
+"bookmark_warning3" = "Je, bado unataka kusasisha moduli?";
+"bookmark_warning2" = "Ikiwa muundo wa hati umebadilika, kusasisha hati hii kunaweza kufanya maeneo ya alamisho/maelezo hizi yahamie ndani ya hati au kutoweka kabisa.";
+"bookmark_warning" = "Kuna alamisho na/au maelezo kwa hati hii.";
+"recommended_document" = "Inapendekezwa!";
+"bad_document_warning" = "Warning";
+"refresh_catalog" = "Refresh Catalog";
+"repositories" = "Repositories";
+"all_languages_count %lld" = "All Languages (%lld)";
+"documents_count %lld" = "%lld documents";
+"download_errors" = "Hitilafu za upakuaji";
+"install_zip" = "Pakia Hati Kutoka kwa Faili";
+"restore_database" = "Rejesha Faili la Hifadhidata";
+"refreshing_catalog" = "Refreshing catalog...";
+"no_modules_match_filters" = "No modules match your filters";
+"tap_refresh_to_load" = "Tap Refresh to load available modules";
+"search_modules" = "Search modules";
+"delete_module_index" = "Delete Index";
+"uninstall_module_title" = "Uninstall Module";
+"uninstall_module_message_format" = "Remove %@ from this device?";
+"delete_module_index_title" = "Delete Search Index";
+"delete_module_index_message_format" = "Delete the search index for %@?";
+"module_initials" = "Initials";
+"module_name" = "Jina";
+"module_category" = "Kitengo";
+"module_language" = "Lugha";
+"module_source" = "Source";
+"module_versions" = "Versions";
+"module_latest_version" = "Latest";
+"module_installed_version" = "Installed";
+"module_version_unavailable" = "No version metadata available.";
+"module_install_size" = "Install size";
+"module_local_state" = "Local State";
+"module_installed" = "Installed";
+"module_encrypted" = "Encrypted";
+"module_unlocked" = "Unlocked";
+"module_locked" = "Locked";
+
+/* ========================================
+   Settings
+   ======================================== */
+"settings_display" = "Display";
+"settings_text_display" = "Text Display";
+"settings_colors" = "Colors";
+"text_display" = "Text Display";
+"settings_font" = "Font";
+"font_size" = "Size";
+"font_family" = "Family";
+"settings_layout" = "Layout";
+"line_spacing" = "Line Spacing";
+"justify_text" = "Justify Text";
+"verse_per_line" = "Verse Per Line";
+"hyphenation" = "Ukataji silabi";
+"settings_content" = "Maudhui";
+"verse_numbers" = "Verse Numbers";
+"section_titles" = "Section Titles";
+"footnotes" = "Maelezo ya chini";
+"inline_footnotes" = "Inline Footnotes";
+"red_letters" = "Red Letters";
+"cross_references" = "Marejeleo ya msalaba";
+"expand_cross_references" = "Expand Cross References";
+"strongs_numbers" = "Strong's Numbers";
+"morphology" = "Morphology";
+"settings_annotations" = "Annotations";
+"show_bookmarks" = "Onyesha alamisho";
+"show_my_notes" = "Show My Notes";
+"verse_selection" = "Verse Selection";
+
+/* Colors */
+"colors" = "Colors";
+"night_mode" = "Night Mode";
+"day_theme" = "Day Theme";
+"night_theme" = "Night Theme";
+"text_color" = "Text Color";
+"background" = "Background";
+"color_workspace" = "Rangi ya eneo la kazi";
+"prefs_noise_title" = "Kelele ya mandhari";
+"prefs_noise_summary" = "Kuongeza kelele kidogo kwa mandhari kunaweza kuifanya iwe vizuri zaidi kwa macho.";
+"reset_to_defaults" = "Reset to Defaults";
+
+/* Dictionaries */
+"settings_dictionaries" = "Kamusi";
+"hebrew_dictionary" = "Hebrew Dictionary";
+"greek_dictionary" = "Greek Dictionary";
+"no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
+
+/* Data */
+"settings_data" = "Data";
+"import_export" = "Import & Export";
+
+/* Security — Settings for the persecuted */
+"settings_security" = "Mipangilio kwa wanaodhulumiwa";
+"discrete_mode" = "Ficha alama za kidini";
+"discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
+"show_calculator" = "Kikokotoo";
+"show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
+"calculator_pin" = "PIN ya Kikokotoo";
+"calculator_pin_placeholder" = "1234";
+"calculator_pin_description" = "Msimbo wa PIN kuingia programu wakati kikokotoo kinaonyeshwa.";
+"discrete_help_title" = "Soma hii kwanza!";
+"discrete_help_summary" = "Maelekezo ya mipangilio na taarifa kuhusu toleo maalum la siri.";
+"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
+"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
+"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
+"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* About */
+"settings_language" = "Lugha";
+"language_system_default" = "System Default";
+"language_restart_required" = "Restart the app for the language change to take effect.";
+"settings_about" = "Kuhusu";
+"version" = "Version";
+
+/* ========================================
+   Import & Export
+   ======================================== */
+"export" = "Safirisha";
+"full_backup_json" = "Full Backup (JSON)";
+"export_footer" = "Export your data for backup or transfer to another device.";
+"import" = "Ingiza";
+"import_from_file" = "Import from File";
+"import_footer" = "Import data from a JSON backup or CSV bookmark file. Supported formats: .json, .csv, .bbl (MySword).";
+"modules" = "Modules";
+"install_sword_module" = "Install SWORD Module (.zip)";
+"modules_footer" = "Install a SWORD Bible module from a local .zip file. The ZIP must contain mods.d/ and module data files.";
+"epub" = "EPUB";
+"install_epub_book" = "Install EPUB Book";
+"epub_footer" = "Import an EPUB file for offline reading and study.";
+"error_read_file" = "Error: Could not read file";
+"error_save_file" = "Error: Could not save file";
+"mysword_file_hint" = "MySword file detected. Use Downloads to install Bible modules.";
+"error_unsupported_format_%@" = "Error: Unsupported file format (%@)";
+"error_prefix_%@" = "Error: %@";
+"installed_module_%@" = "Installed module: %@";
+"installed_epub_%@" = "Installed EPUB: %@";
+"installed_font_%@" = "Installed font: %@";
+"install_do_you_want" = "Je, unataka kusanikisha moduli (%@)?";
+
+/* ========================================
+   Repository Manager
+   ======================================== */
+"no_sources_configured" = "No repository sources configured.";
+"module_unavailable_for_installation %@" = "%@ is not available for installation.";
+"module_source_not_found %@" = "Source not found for %@";
+"uninstall_failed %@" = "Uninstall failed: %@";
+"remote_sources" = "Remote Sources";
+"sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
+"reset_sources_title" = "Reset Sources?";
+"reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
+"add_custom_repository" = "Add custom repository";
+"custom_repositories" = "Hazina maalum";
+"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
+"custom_repository" = "Custom repository";
+"default_repositories" = "Default repositories";
+"delete_custom_repository_message_format" = "Futa %@?";
+"delete_custom_repository_title" = "Delete repository";
+"edit_custom_repository" = "Edit custom repository";
+"help" = "Msaada";
+"https" = "HTTPS";
+"open_wiki" = "Open Wiki";
+"repository_source_error" = "Repository source error";
+"repository_url" = "URL ya hazina";
+"repository_url_placeholder" = "https://example.org/repository";
+"validating_repository" = "Validating repository";
+"source_details" = "Source Details";
+"source_name_placeholder" = "Name (e.g., My Repository)";
+"source_host_placeholder" = "Host (e.g., example.org)";
+"source_path_placeholder" = "Catalog Path (e.g., /sword)";
+"source_catalog_hint" = "The source must serve a SWORD module catalog at the specified host and path (mods.d.tar.gz).";
+"ftp_unsupported" = "FTP — Not Supported";
+"ftp_not_supported_hint" = "FTP sources are not supported on iOS. Please use an HTTP/HTTPS source instead.";
+"add_source" = "Add Source";
+
+/* ========================================
+   Reading Plans
+   ======================================== */
+"reading_plan_no_plans" = "No Reading Plans";
+"reading_plan_no_plans_description" = "Start a reading plan to track your daily Bible reading.";
+"reading_plan_start" = "Start Plan";
+"reading_plan_active" = "Active Plans";
+"reading_plan_completed" = "Imekamilika";
+"reading_plan_choose" = "Choose a reading plan to start";
+"reading_plan_import_custom" = "Import Custom Plan";
+"reading_plan_custom" = "Maalum";
+"reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
+"reading_plan_available" = "Available Plans";
+"reading_plan_import_error_read" = "Could not read file";
+"reading_plan_import_error_format" = "Invalid reading plan format";
+"plan_duplicate_user_plan" = "Kuna mpango wa kusoma wa mtumiaji katika sdcard sword/readingplan yenye jina sawa na mpango wa ndani. Haiwezi kuorodheshwa hapa. Tafadhali ibadilishie jina kwa kitu kingine, ukiacha kiendelezi cha faili chake kama .properties";
+
+/* Daily Reading */
+"daily_reading" = "Daily Reading";
+"daily_reading_loading" = "Loading plan...";
+"daily_reading_today" = "Today's Reading";
+"daily_reading_recent_days" = "Recent Days";
+"mark_as_read" = "Mark as Read";
+"unmark" = "Unmark";
+
+/* ========================================
+   Speak / TTS
+   ======================================== */
+"speak" = "Soma kwa sauti";
+"pause" = "Sitisha";
+"stop" = "Simama";
+"speed" = "Speed";
+"sleep_timer" = "Sleep Timer";
+"speak_now_speaking" = "Now Speaking";
+"speak_stopped" = "Stopped";
+"speak_paused" = "Paused";
+"speak_playing" = "Playing";
+"speak_speed" = "Speed";
+"speak_sleep_timer" = "Sleep Timer";
+
+/* ========================================
+   Compare Translations
+   ======================================== */
+"compare_select_translations" = "Select Translations";
+"compare_choose_translations" = "Choose Translations";
+"compare_install_additional_modules" = "Install additional Bible modules from Downloads to compare translations.";
+"compare_loading_translations" = "Loading translations...";
+"compare_select_translations_header" = "Select translations to compare";
+"compare_verses" = "Compare Verses";
+
+/* ========================================
+   Cross References
+   ======================================== */
+"cross_references" = "Marejeleo ya msalaba";
+
+/* ========================================
+   Workspace
+   ======================================== */
+"new_workspace" = "New Workspace";
+"workspace_name" = "Workspace Name";
+"workspace_no_workspaces" = "No workspaces yet";
+"workspace_create_first" = "Tap + to create your first workspace.";
+"workspace_new" = "New Workspace";
+
+/* ========================================
+   History
+   ======================================== */
+"history_no_history" = "No History";
+"history_no_history_description" = "Navigation history will appear as you browse.";
+
+/* ========================================
+   Window Management
+   ======================================== */
+"restore_size" = "Restore Size";
+"maximize" = "Maximize";
+"minimize" = "Minimize";
+"sync_scrolling" = "Sync Scrolling";
+"pin" = "Pina";
+"sync_group" = "Sync Group";
+"restore" = "Rejesha";
+
+/* ========================================
+   Dictionary / General Books
+   ======================================== */
+"dictionary_loading_keys" = "Loading keys...";
+"dictionary_search_keys" = "Search keys...";
+"genbook_loading_entries" = "Loading entries...";
+"genbook_no_entries" = "No Entries";
+"genbook_no_entries_description" = "This module has no entries.";
+
+/* ========================================
+   EPUB
+   ======================================== */
+"epub_library" = "EPUB Library";
+"epub_contents" = "EPUB Contents";
+"search_epub" = "Search EPUB";
+"epub_loading_library" = "Loading library...";
+"epub_no_epubs_installed" = "No EPUBs Installed";
+"epub_no_epubs_installed_description" = "Import EPUB files from the Import & Export screen.";
+"epub_loading_toc" = "Loading table of contents...";
+"epub_no_toc" = "No Table of Contents";
+"epub_no_toc_description" = "This EPUB has no table of contents entries.";
+"epub_search_prompt" = "Search in EPUB...";
+
+/* ========================================
+   EPUB Reader (no module loaded)
+   ======================================== */
+"reader_no_epub_loaded" = "No EPUB is loaded. Open one from the EPUB Library first.";
+
+/* ========================================
+   Backup (legacy keys)
+   ======================================== */
+"backup_data" = "Backup Data";
+"restore_data" = "Restore Data";
+"export_bookmarks" = "Export Bookmarks";
+"import_bookmarks" = "Import Bookmarks";
+
+/* ========================================
+   Sharing
+   ======================================== */
+"share_verse" = "Shiriki…";
+"copy_verse" = "Copy Verse";
+
+/* ========================================
+   Errors
+   ======================================== */
+"error_module_not_found" = "Module not found";
+"error_download_failed" = "Download failed";
+"error_network" = "Network error. Please check your connection.";
+
+/* ========================================
+   Interpolated Strings (format specifiers)
+   ======================================== */
+
+/* Reading Plans */
+"Day %lld" = "Day %lld";
+"Day %lld/%lld" = "Day %lld/%lld";
+"%lld days completed" = "%lld days completed";
+"%lld of %lld days completed" = "%lld of %lld days completed";
+"Started %@" = "Started %@";
+"%lld days" = "%lld days";
+
+/* Search */
+"Find in %@" = "Tafuta katika %@";
+"Create an index for %@?" = "Create an index for %@?";
+"Creating index. Processing %@" = "Creating index. Processing %@";
+"No matches found for \"%@\"" = "No matches found for \"%@\"";
+"%lld translations" = "%lld translations";
+"%@ (%@)" = "%@ (%@)";
+"%lld verses in %lld translations" = "%lld verses in %lld translations";
+"%lld verses in 1 translation" = "%lld verses in 1 translation";
+"%lld results" = "%lld results";
+
+/* Window Management */
+"Group %lld" = "Group %lld";
+
+/* EPUB */
+"Search: %@" = "Search: %@";
+"Enter a search term to find text within \"%@\"." = "Enter a search term to find text within \"%@\".";
+
+/* Compare */
+"Choose which translations to compare for %@ %lld." = "Choose which translations to compare for %@ %lld.";
+"Verse %lld" = "Verse %lld";
+"%lld selected" = "%lld selected";
+
+/* Workspace */
+"%lld window" = "%lld window";
+"%lld windows" = "%lld windows";
+
+/* Text Display Settings */
+"global_text_display_settings_title" = "Chaguo za maandishi za kimataifa";
+"global_text_display_settings_summary" = "Mipangilio ya chaguo-msingi ya onyesho la maandishi kwa maeneo yote ya kazi";
+"workspace_text_display_settings_title" = "Chaguo za maandishi - %@";
+"window_text_display_settings_title" = "Chaguo za maandishi - Dirisha %d";
+"parent_settings_category_title" = "Mipangilio ya mzazi";
+"workspace_text_options_link" = "Chaguo za maandishi za eneo la kazi — %@";
+"workspace_text_options_link_summary" = "Hariri mipangilio ya onyesho la maandishi kwa eneo hili la kazi";
+"global_text_options_link" = "Chaguo za maandishi za kimataifa";
+"global_text_options_link_summary" = "Hariri mipangilio ya chaguo-msingi ya onyesho la maandishi kwa maeneo yote ya kazi";
+"text_display_font_size_title_format" = "Ukubwa wa fonti (%d pt)";
+"text_display_font_family_title_format" = "Familia ya fonti (%@)";
+"text_display_line_spacing_title_format" = "Nafasi ya mstari (%1.1fx)";
+"text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
+"text_display_top_margin_title_format" = "Ukingo wa juu (%d mm)";
+"text_display_left_margin_title_format" = "Ukingo wa kushoto (%d mm)";
+"text_display_right_margin_title_format" = "Ukingo wa kulia (%d mm)";
+"text_display_max_width_title_format" = "Upana wa juu wa maandishi (%d mm)";
+
+/* ========================================
+   Quick Settings & Help
+   ======================================== */
+"fullscreen" = "Skrini nzima";
+"tilt_to_scroll" = "Tilt to Scroll";
+"reversed_split_mode" = "Hali ya mgawanyiko wa kinyume";
+"window_pinning" = "Window Pinning";
+"label_settings" = "Label Settings";
+"all_text_options_window_menutitle" = "Chaguo zote za maandishi";
+"all_text_options" = "All Text Options";
+"help_tips" = "Help & Tips";
+"sponsor_development" = "Sponsor Development";
+"about" = "Kuhusu";
+"rate_app" = "Rate App";
+"report_bug" = "Report Bug";
+"tell_friend" = "Tell a Friend";
+"tell_friend_message" = "Check out AndBible — a powerful, free Bible study app with offline access, bookmarks, notes, and more! https://andbible.org";
+"version %@ (%@)" = "Version %@ (%@)";
+"about_description" = "AndBible is an open-source Bible study app. Read, search, bookmark, and take notes — all offline.";
+"about_sword_credit" = "Powered by the SWORD library from the CrossWire Bible Society";
+"about_website" = "Website";
+"about_source_code" = "Source Code";
+"about_privacy_policy" = "Privacy Policy";
+"about_license" = "License (GPLv3)";
+
+/* Help Sections */
+"help_navigation" = "Uabiri";
+"help_navigation_body" = "Swipe left or right to move between chapters. Tap the book name in the toolbar to choose a different book and chapter.";
+"help_selection" = "Text Selection";
+"help_selection_body" = "Long-press on a verse to select it. An action bar appears with options: Bookmark, Copy, Share, Compare, Speak, and Web Search.";
+"help_pinning" = "Window Pinning";
+"help_pinning_body" = "When you have multiple windows, pin a window to keep it visible when switching Bible/Commentary categories.";
+"help_bookmarks" = "Alamisho";
+"help_bookmarks_body" = "Long-press a verse and tap Bookmark. Add labels to organize and notes for your thoughts.";
+"help_studypads" = "StudyPads";
+"help_studypads_body" = "Rich text journals attached to labels. Access them from the label manager or bookmark list.";
+"help_search" = "Utafutaji";
+"help_search_body" = "Full-text search with All Words, Any Word, and Phrase modes. You will be prompted to create an index on first use.";
+"help_workspaces" = "Maeneo ya Kazi";
+"help_workspaces_body" = "Save different window arrangements as workspaces. Switch between them from the overflow menu.";
+"help_hidden" = "Hidden Features";
+"help_hidden_body" = "Double-tap the Bible text for fullscreen mode. Enable Tilt to Scroll in the overflow menu. Discrete calculator mode is available in Settings.";
+
+/* iCloud Sync */
+"icloud_sync" = "iCloud Sync";
+"icloud_sync_enabled" = "Enable iCloud Sync";
+"icloud_startup_recovery_message" = "iCloud sync could not be started, so sync was turned off and AndBible opened your local data.";
+"icloud_sync_description" = "Sync bookmarks, labels, workspaces, reading plans, and notes across your devices via iCloud. Requires an iCloud account.";
+"sync_status" = "Status";
+"status" = "Status";
+"icloud_account" = "iCloud Account";
+"last_sync" = "Last Sync";
+"sync_active" = "Active";
+"sync_disabled" = "Imezimwa";
+"syncing" = "Syncing…";
+"no_icloud_account" = "No iCloud Account";
+"icloud_signed_in" = "Signed In";
+"icloud_restricted" = "iCloud Restricted";
+"icloud_could_not_determine" = "Could Not Determine iCloud Status";
+"icloud_temporarily_unavailable" = "iCloud Temporarily Unavailable";
+"sync_data_included" = "Synced Data";
+"sync_what_syncs" = "Bookmarks, labels, notes, workspaces, windows, reading plan progress, and StudyPad entries are synced. Module downloads and app settings stay on this device.";
+"restart_required" = "Restart Required";
+"restart_to_apply_sync" = "Please restart the app to apply sync changes.";
+"disable_sync_title" = "Disable iCloud Sync?";
+"disable_sync" = "Disable Sync";
+"disable_sync_warning" = "Data already synced to iCloud will remain. New changes will only be saved locally.";
+
+"prefs_behavior_customization_cat" = "Tabia ya programu";
+"prefs_display_customization_cat" = "Muonekano";
+"prefs_advanced_settings_cat" = "Mipangilio ya hali ya juu";
+
+"prefs_toolbar_button_action_title" = "Kitendo cha kitufe cha mwambaa zana";
+"prefs_toolbar_button_action_summary" = "Kitendo cha kuchukua unapobonyeza/kubonyeza muda mrefu vitufe vya mwambaa zana vya Biblia au Maoni";
+"prefs_toolbar_button_action_default" = "Bonyeza kufungua menyu, bonyeza muda mrefu kwa skrini ya hati (chaguo-msingi)";
+"prefs_toolbar_button_action_swap_menu" = "Bonyeza kufungua hati inayofuata, bonyeza muda mrefu kufungua menyu";
+"prefs_toolbar_button_action_swap_activity" = "Bonyeza kufungua hati inayofuata, bonyeza muda mrefu kwa skrini ya hati";
+
+
+"add_bookmark3" = "Uteuzi";
+"add_bookmark_whole_verse1" = "Mistari";
+"prefs_disable_two_step_bookmarking_title" = "Kuweka alamisho kwa hatua moja";
+"prefs_disable_two_step_bookmarking_summary" = "Onyesha vipengele vya \"Uteuzi\" na \"Mistari\" moja kwa moja katika menyu ya Uteuzi ya maonyesho ya Biblia";
+
+"active_window_indicator_summary" = "Angazia kona za dirisha kusaidia kutambua dirisha linalotumika";
+"active_window_indicator_title" = "Onyesha kiashiria cha dirisha linalotumika";
+"auto_fullscreen" = "Skrini nzima kwa kusogeza";
+"auto_fullscreen_summary" = "Badilisha kiotomatiki hadi skrini nzima unaposogeza maandishi. Kidokezo: unaweza pia kubadilisha hadi skrini nzima kwa kugonga mara mbili skrini.";
+"choose_strongs_greek_dictionary_summary" = "Chagua kamusi ya Strongs kwa ufafanuzi wa maneno ya Kigiriki";
+"choose_strongs_greek_dictionary_title" = "Kamusi ya Kigiriki ya Strongs";
+"choose_strongs_greek_morphology_summary" = "Chagua kamusi kwa ufafanuzi wa mofolojia ya Kigiriki ya Robinson";
+"choose_strongs_greek_morphology_title" = "Mofolojia ya Kigiriki ya Robinson";
+"choose_strongs_hebrew_dictionary_summary" = "Chagua kamusi ya Strongs kwa ufafanuzi wa maneno ya Kiebrania";
+"choose_strongs_hebrew_dictionary_title" = "Kamusi ya Kiebrania ya Strongs";
+"choose_word_lookup_dictionary_summary" = "Chagua kamusi kwa utafutaji wa maneno";
+"choose_word_lookup_dictionary_title" = "Kamusi za utafutaji wa maneno";
+"full_screen_hide_buttons_pref_summary" = "Unapobadilisha hadi hali ya skrini nzima, ficha kiotomatiki mwambaa wa vitufe vya dirisha ulio chini ya skrini";
+"full_screen_hide_buttons_pref_title" = "Ficha mwambaa wa vitufe vya dirisha katika skrini nzima";
+"hide_bible_reference_overlay_summary" = "Usionyeshe kionyeshi cha rejeleo la Biblia chenye uwazi wa nusu wakati programu iko katika hali ya skrini nzima";
+"hide_bible_reference_overlay_title" = "Ficha kionyeshi cha rejeleo la Biblia";
+"hide_window_buttons_summary" = "Vitufe vya dirisha vinavyoonyeshwa upande wa kulia wa maonyesho ya Biblia vimefichwa. Mwambaa wa uabiri wa dirisha chini bado unaonyeshwa na unaweza kufungua menyu ya ibuko ya dirisha kwa kubonyeza muda mrefu.";
+"hide_window_buttons_title" = "Ficha vitufe vya dirisha";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
+"pref_font_size_multiplier_title" = "Kizidishio cha ukubwa wa fonti";
+"prefs_bible_view_swipe_mode_summary" = "Ishara ya kuteleza kushoto / kulia inaweza kutumika kwenda kwenye ukurasa / sura inayofuata.";
+"prefs_bible_view_swipe_mode_title" = "Kitendo cha ishara ya kuteleza kushoto / kulia";
+"prefs_disable_animations_summary" = "Zima uhuishaji mbalimbali kama vile kusogeza laini.";
+"prefs_disable_animations_title" = "Zima uhuishaji";
+"prefs_disable_click_to_edit_summary" = "Inahitaji kutumia kitufe cha kuhariri ili kuhariri maelezo katika Daftari la Masomo.";
+"prefs_disable_click_to_edit_title" = "Zima kubonyeza-ili-kuhariri kwa Daftari la Masomo";
+"prefs_notes_content_type_title" = "Umbizo la maelezo mapya ya alamisho";
+"prefs_notes_content_type_summary" = "Umbizo la maandishi linalotumika wakati wa kuunda maelezo mapya ya alamisho na maingizo ya Daftari la Masomo";
+"notes_content_type_html" = "Maandishi tajiri (HTML)";
+"notes_content_type_markdown" = "Markdown";
+"prefs_double_tap_to_fullscreen_summary" = "Ingia hali ya skrini nzima kwa kugonga mara mbili dirisha";
+"prefs_double_tap_to_fullscreen_title" = "Gonga Mara Mbili hadi Skrini Nzima";
+"prefs_e_ink_mode_title" = "Hali nyeusi na nyeupe";
+"prefs_eink_mode_summary" = "Tumia programu katika hali ya rangi moja (bila rangi), kufaa zaidi kwa vifaa vya E-ink.";
+"prefs_interface_locale_summary" = "Chagua lugha maalum ya kiolesura";
+"prefs_interface_locale_title" = "Lugha ya programu";
+"prefs_navigate_to_verse_summary" = "Chagua mstari (na sura) unapochagua kifungu";
+"prefs_navigate_to_verse_title" = "Nenda kwenye mstari";
+"prefs_night_mode_automatic" = "Kiotomatiki";
+"prefs_night_mode_manual" = "Mkono";
+"prefs_night_mode_summary" = "Iwapo kubadilisha hadi hali ya usiku kiotomatiki (ikiwa kifaa kinaauni), kwa mkono au kupitia mipangilio ya mfumo (Android 10+). Kubadilisha kwa mkono kunaweza kufanywa kutoka kwenye menyu ya chaguo 3-nukta kwenye skrini kuu.";
+"prefs_night_mode_system" = "Mfumo";
+"prefs_night_mode_title" = "Kubadilisha hali ya usiku";
+"prefs_open_links_in_special_window_summary" = "Fungua viungo katika dirisha maalum, kwa onyesho la haraka la marejeleo ya msalaba na Strong's";
+"prefs_open_links_in_special_window_title" = "Dirisha la viungo";
+"prefs_screen_keep_on_summary" = "Zuia skrini kulala unapotumia programu hii";
+"prefs_screen_keep_on_title" = "Weka skrini iwashwe";
+"prefs_show_error_box_summary" = "Inafaa kwa wasanidi wakati wa kutatua hitilafu za upande wa javascript wa BibleView. Hii itafanya programu iwe polepole zaidi.";
+"prefs_show_error_box_title" = "Onyesha sanduku la hitilafu za Javascript";
+"prefs_swipe_mode_chapter" = "Sura";
+"prefs_swipe_mode_none" = "Imezimwa";
+"prefs_swipe_mode_page" = "Ukurasa";
+
+"prefs_volume_keys_scroll_title" = "Kusogeza kwa vitufe vya sauti";
+"prefs_volume_keys_scroll_summary" = "Tumia sauti juu/chini kusogeza maandishi ya Biblia";
+"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
+"prefs_experimental_features_title" = "Vipengele vya majaribio";
+"prefs_experimental_features_summary" = "Chagua vipengele vya majaribio vipi vya kuwezesha. Vipengele hivi bado vipo katika ukuzaji na vinaweza kubadilika au kuondolewa";
+"experimental_feature_bookmark_edit_actions" = "Vitendo vya kuhariri alamisho";
+"experimental_feature_add_paragraph_break" = "Ongeza alamisho ya mapumziko ya aya";
+"prefs_enable_bluetooth_title" = "Wezesha vitufe vya midia vya Bluetooth";
+"prefs_enable_bluetooth_summary" = "Shughulikia vitufe vya midia vya Bluetooth kuanza/kusimama kusoma kwa sauti.";
+
+"open_bible_links_title" = "Fungua viungo vya Biblia katika AndBible";
+"open_bible_links_summary" = "Ukibonyeza viungo vinavyorejelea URL ya Biblia inayoauni AndBible, vifungua katika AndBible";
+
+"crash_app" = "Crash app!";
+"crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";
+"crash_app_scheduled_summary" = "Crash scheduled in 10 seconds.";
+"sign_in_failed" = "Kuingia kwa huduma ya nyuma ya usawazishaji kumeshindwa.";
+"sync_adapter" = "Nyuma ya Usawazishaji";
+"sync_adapter_summary" = "Ya sasa: %@";
+"adapters_next_cloud" = "Next Cloud";
+"auth_server_uri" = "URL ya Seva";
+"auth_username" = "Jina la mtumiaji";
+"auth_password" = "Nywila";
+"auth_folder_path" = "Njia ya folda ya usawazishaji";
+"auth_folder_path_summary" = "Folda ya mzazi kwa data ya usawazishaji (tupu = mzizi)";
+"invalid_url_message" = "URL uliyoingiza si sahihi. Tafadhali ingiza URL sahihi (mfano., https://nextcloud.example.com)";
+"prefs_sync_introduction_summary1" = "Chagua huduma ya mtandaoni unayotaka kutumia kusawazisha vifaa vingi.";
+"test_connection" = "Test Connection";
+"overrideBackup" = "Hifadhidata iliyopo ambayo kifaa hiki hakikusawazishwa nayo imepatikana katika Wingu. Hifadhidata ina %@. Unataka kufanya nini?";
+"cloud_fetch_and_restore_initial" = "Nakili kutoka Wingu hadi kifaa hiki";
+"cloud_create_new" = "Nakili kutoka kifaa hiki hadi Wingu";
+"cloud_disable_sync" = "Ghairi na uzime usawazishaji";
+"cloud_sync_title" = "Usawazishaji wa kifaa";
+"application_preferences" = "Mapendeleo ya programu";
+"are_you_sure_reset_local" = "Hii itaweka upya hifadhidata yako ya ndani ya %@ na maudhui yanayohifadhiwa sasa katika huduma ya wingu.";
+"are_you_sure_reset_cloud" = "Hii itaweka upya hifadhidata yako ya wingu ya %@ na maudhui unayoyapo katika kifaa hiki.";
+"reading_plans_content" = "Mipango ya kusoma na hali zao";
+"bookmarks_contents" = "Alamisho, Lebo na Daftari za Masomo";
+"workspaces_contents" = "Maeneo ya Kazi na Madirisha";
+"my_documents" = "Hati Zangu";
+"my_documents_contents" = "Hati Zangu na maudhui yao";
+"synchronization_categories" = "Makundi ya usawazishaji";
+"sync_error" = "Hitilafu ilitokea katika usawazishaji wa Wingu";
+"sync_cant_fetch" = "Toleo la hifadhidata au faili la kiraka lililohifadhiwa katika Wingu ni la juu zaidi kuliko linalokubalika na programu hii.";
+"sync_disabling" = "Inazima usawazishaji wa %@ kwa sasa.";
+"sync_update_app" = "Tafadhali sasisha programu kuendelea na usawazishaji.";
+"last_updated" = "Ilisasishwa mara ya mwisho: %@";
+
+"help_workspaces_title" = "Maeneo ya Kazi";
+"reading_plans_plural" = "Mipango ya Kusoma";
+
+/* Android window popup menu parity */
+"windowMaximise" = "Panua";
+"windowMinimise" = "Punguza";
+"change_to_normal" = "Badilisha hadi dirisha la kawaida";
+"move_window" = "Hamia";
+"move_window_to_position2" = "Nafasi %1$d (%2$@:%3$@)";
+"window_pin_mode" = "Pina";
+"windowSynchronise" = "Sawazisha";
+"window_disable_sync" = "Zima usawazishaji";
+"sync_group_n" = "Kikundi %d";
+"text_options_window_menutitle" = "Chaguo za maandishi";
+"prefs_text_colors_menutitle" = "Mipangilio ya rangi";
+"prefs_section_title_title" = "Vichwa vya sehemu";
+"prefs_show_strongs_title" = "Nambari za Strong's";
+"prefs_show_verseno_title" = "Nambari za sura na mstari";
+"copy_settings" = "Nakili mipangilio hadi";
+"copy_settings_to_workspace" = "Eneo la kazi";
+"copy_settings_to_window" = "Dirisha %1$d (%2$@: %3$@)";
+"copy_settings_to_global" = "Chaguo-msingi za kimataifa";
+"copyReference" = "Nakili kiungo kwenye ubao wa kunakili";
+"reference_copied_to_clipboard" = "Rejeleo limenanakiliwa kwenye ubao wa kunakili";
+"add_ellipsis" = "%@…";
+"copy_settings_title" = "Ni mipangilio ipi unayotaka kunakili?";
+"select_all" = "Chagua yote";
+"select_none" = "Chagua hakuna";
+"font" = "Font";
+"margin_size" = "Margin size";
+"top_margin" = "Ukingo wa juu";
+"footnotes_inline" = "Inline footnotes";
+"expand_cross_references" = "Expand cross references";
+"cross_references" = "Marejeleo ya msalaba";
+"verse_per_line" = "Verse per line";
+"show_bookmarks" = "Onyesha alamisho";
+"hide_labels" = "Hide labels";
+"my_notes" = "My notes";
+"page_number" = "Page number";
+"infinite_scroll" = "Kusogeza bila mwisho";
+"non_strongs_word_italic" = "Italiki maneno yaliyoongezwa";
+"mark_as_read_button" = "Kitufe cha alama ya kusomwa";
+"title_scroll_button" = "Kitufe cha kusogeza kwa kichwa";
+"memorization_indicators" = "Viashiria vya kukariri";
+"ai_document_markers" = "AI document markers";
+"page_scroll_amount" = "Kiasi cha kusogeza ukurasa";
+"ordinals" = "Ordinals";
+"error_no_content" = "Hakuna maudhui kwa mstari uliochaguliwa";

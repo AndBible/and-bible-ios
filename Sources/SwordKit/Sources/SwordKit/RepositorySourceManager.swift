@@ -264,8 +264,8 @@ public final class RepositorySourceManager: @unchecked Sendable {
      Enriches a SWORD config row with Android default package-directory metadata.
 
      `InstallMgr.conf` is intentionally kept in SWORD's legacy three-field row shape, but built-in
-     repositories still need Android's package directory before Downloads or package fallback uses
-     them. Custom sidecar records already carry their own package directory and are applied later.
+     repositories still need Android's package directory before Downloads installs use them. Custom
+     sidecar records already carry their own package directory and are applied later.
 
      - Parameter source: Source parsed from local SWORD config.
      - Returns: A source with Android package metadata when it matches a built-in repository.
@@ -616,7 +616,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
         /// SWORD catalog directory or MyBible manifest path.
         var catalogDirectory: String
 
-        /// Optional Android package directory for SWORD package fallback.
+        /// Optional Android package directory for SWORD package installs.
         var packageDirectory: String
 
         /// Manifest URL used to repopulate the edit field.

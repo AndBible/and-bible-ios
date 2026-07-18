@@ -1,0 +1,800 @@
+/* AndBible iOS — English Localizations */
+
+/* ========================================
+   General / Shared
+   ======================================== */
+"app_name" = "AndBible";
+"app_name_andbible" = "AndBible";
+"app_name_long" = "AndBible: बाइबल अध्ययन";
+"done" = "सम्पन्न";
+"cancel" = "रद्द गर्नुहोस्";
+"delete" = "मेट्नुहोस्";
+"save" = "सुरक्षित गर्नुहोस्";
+"edit" = "सम्पादन";
+"add" = "Add";
+"search" = "खोज्नुहोस्";
+"settings" = "अनुप्रयोग प्राथमिकताहरू";
+"close" = "बन्द गर्नुहोस्";
+"copy_reference" = "Copy Reference";
+"go_to_reference" = "Go to Reference";
+"go_to_reference_placeholder" = "e.g. Genesis 1, Matt 5:3, Gen.1.1";
+"go_to_reference_message" = "Type a reference or tap Browse to choose from the list.";
+"go_to_reference_invalid" = "Could not find that reference";
+"go" = "Go";
+"browse" = "Browse...";
+"move_up" = "Move Up";
+"move_down" = "Move Down";
+"reference_copied" = "Reference copied";
+"ok" = "ठीक छ";
+"yes" = "हो";
+"no" = "होइन";
+"error" = "त्रुटि";
+"loading" = "Loading...";
+"create" = "बनाउनुहोस्";
+"new_window" = "नयाँ विन्डो";
+"clear" = "Clear";
+"reset" = "रिसेट";
+"retry" = "Retry";
+"skip" = "छोड्नुहोस्";
+"all" = "सबै";
+"sort" = "Sort";
+"name" = "नाम";
+"untitled" = "Untitled";
+"compare" = "तुलना";
+"translations" = "अनुवादहरू";
+"auto" = "Auto";
+"off" = "Off";
+"inline" = "Inline";
+"links" = "लिङ्कहरू";
+"hidden" = "Hidden";
+"completed" = "सम्पन्न";
+"no_results" = "No Results";
+"searching" = "Searching...";
+
+/* ========================================
+   Navigation / Bible Reader
+   ======================================== */
+"bible" = "बाइबल";
+"deuterocanonical" = "ड्युटेरोक्यानोनिकल";
+"bookmarks" = "बुकमार्कहरू";
+"reading_plans" = "पठन योजनाहरू";
+"downloads" = "Downloads";
+"history" = "इतिहास";
+"workspaces" = "कार्यक्षेत्रहरू";
+"rename" = "नाम बदल्नुहोस्";
+"clone" = "Clone";
+"copy_of %@" = "%@ को प्रतिलिपि";
+"definition" = "Definition";
+"dictionary" = "शब्दकोश";
+"general_book" = "पुस्तक";
+"map" = "नक्सा";
+"locked" = "Locked";
+
+/* Bible Navigation */
+"choose_book" = "पुस्तक छान्नुहोस्";
+"books" = "Books";
+"old_testament" = "पुरानो नियम";
+"new_testament" = "नयाँ नियम";
+"previous_chapter" = "Previous chapter";
+"next_chapter" = "Next chapter";
+"back_to_bible" = "Back to Bible";
+
+/* Module Pickers */
+"choose_document" = "कागजात छान्नुहोस्";
+"document_type" = "Document type";
+"picker_select_translation" = "Select Translation";
+"picker_select_commentary" = "Select Commentary";
+"picker_select_dictionary" = "Select Dictionary";
+"picker_select_general_book" = "Select General Book";
+"picker_select_map" = "Select Map";
+"picker_no_bible_modules" = "No Bible modules installed";
+"picker_no_commentary_modules" = "No commentary modules installed";
+"picker_no_dictionary_modules" = "No dictionary modules installed";
+"picker_no_general_book_modules" = "No general book modules installed";
+"picker_no_map_modules" = "No map modules installed";
+"download_modules" = "Download Modules";
+"download" = "कागजातहरू डाउनलोड गर्नुहोस्";
+"easy_start" = "Easy Start";
+"easy_start_title" = "Easy start";
+"easy_start_message" = "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on.";
+"startup_download_prompt" = "Download Bible modules to start reading.";
+"welcome_message" = "%@ डाउनलोड गर्नुभएकोमा धन्यवाद। हाल कुनै बाइबल वा कागजातहरू स्थापित छैनन्। जारी राख्न, कृपया इन्टरनेटबाट डाउनलोड गरेर वा zip फाइल कागजात ब्याकअपबाट लोड गरेर कम्तिमा १ वटा कागजात स्थापना गर्नुहोस्।";
+"supported_formats" = "फाइलबाट कागजातहरू लोड गर्नका लागि समर्थित ढाँचाहरू: %@";
+"format_zip" = "Sword module(हरू) भएको Zip फाइल, वा %@ द्वारा बनाइएको कागजात ब्याकअप फाइल (*.abmd)";
+"format_mysword" = "MySword कागजातहरू (*.mybible)";
+"format_mybible" = "MyBible कागजातहरू (*.SQLite3)";
+"format_epub" = "EPUB कागजातहरू (*.epub)";
+
+/* Toolbar / Actions */
+"toggle_strongs_numbers" = "Toggle Strong's numbers";
+"bookmark" = "बुकमार्क";
+"copy" = "प्रतिलिपि";
+"share" = "साझा गर्नुहोस्";
+"search_web" = "Web";
+
+/* Strong's Modes */
+"strongs_off" = "Off";
+"strongs_inline" = "पाठ र लिङ्कहरू";
+"strongs_links" = "लिङ्कहरू";
+"strongs_hidden" = "लुकेका लिङ्कहरू";
+"find_all_occurrences" = "Find all occurrences";
+"no_dictionary_installed" = "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads.";
+"back_to_previous" = "Back";
+
+/* ========================================
+   Bookmarks & Labels
+   ======================================== */
+"add_bookmark" = "Add Bookmark";
+"edit_bookmark" = "Edit Bookmark";
+"bookmark_note" = "Note";
+"labels" = "लेबलहरू";
+"new_label" = "New Label";
+"study_pad" = "StudyPad";
+"my_notes" = "My Notes";
+"no_bookmarks" = "No Bookmarks";
+"no_bookmarks_description" = "Long-press on a verse to add a bookmark.";
+"search_bookmarks" = "Search bookmarks";
+"sort_bible_order" = "Bible Order";
+"sort_date_created" = "Date Created";
+"sort_last_updated" = "Last Updated";
+"edit_labels" = "Edit Labels";
+"add_labels" = "Add labels";
+"open_studypad_for_label %@" = "Open \"%@\" StudyPad";
+"no_labels" = "No Labels";
+"no_labels_description" = "Create labels to organize your bookmarks and notes.";
+"label_name" = "Label name";
+"studypad" = "अध्ययन प्याड";
+"open_studypad" = "Open StudyPad";
+"edit_label" = "लेबल सम्पादन गर्नुहोस्";
+"label_edit_name" = "नाम";
+"label_edit_color" = "Color";
+"label_edit_icon" = "Icon";
+"no_icon" = "No Icon";
+"label_edit_options" = "Options";
+"favourite" = "Favourite";
+"underline_style" = "Underline Style";
+"underline_whole_verse" = "Underline Whole Verse";
+"studypad_empty" = "Empty StudyPad";
+"studypad_empty_description" = "Add notes or bookmark verses to build your study journal.";
+"add_note" = "Add Note";
+"note" = "Note";
+"new_note" = "New Note";
+"edit_note" = "Edit Note";
+
+/* ========================================
+   Search
+   ======================================== */
+"search_bible" = "बाइबल खोज्नुहोस्";
+"search_results" = "Search Results";
+"whole_bible" = "सम्पूर्ण बाइबल";
+"old_testament_short" = "OT";
+"new_testament_short" = "NT";
+"current_book" = "Current Book";
+"search_index" = "खोज अनुक्रमणिका";
+"search_checking_index" = "Checking index...";
+"search_need_index" = "To search a document we need an index.";
+"search_create_index" = "बनाउनुहोस्";
+"search_indexing_message" = "अनुक्रमणिका सम्पन्न भएपछि तपाईंलाई खोज स्क्रिनमा लगिनेछ।";
+"search_searching" = "Searching...";
+"search_enter_prompt" = "Enter a word or phrase to search";
+"search_bible_text" = "Search Bible text";
+"search_match" = "Match";
+"search_scope_all" = "सबै";
+"search_scope_ot" = "OT";
+"search_scope_nt" = "NT";
+"search_translations" = "अनुवादहरू";
+"search_all" = "सबै";
+
+/* ========================================
+   Downloads / Module Browser
+   ======================================== */
+"module_browser" = "Module Browser";
+"doc_type_all" = "सबै प्रकारहरू";
+"bibles" = "Bibles";
+"commentaries" = "Commentaries";
+"dictionaries" = "शब्दकोशहरू";
+"category_books" = "Books";
+"maps" = "Maps";
+"document_filter_results %lld" = "Documents (%lld)";
+"install" = "Install";
+"install_module" = "Install";
+"update" = "Update";
+"uninstall" = "Uninstall";
+"unavailable" = "Unavailable";
+"download_document_confirm_prefix" = "डाउनलोड";
+"bookmark_warning4" = "अपडेट गर्नुअघि module ब्याकअप गर्न सिफारिस गरिन्छ।";
+"bookmark_warning3" = "के तपाईं अझै पनि module अपडेट गर्न चाहनुहुन्छ?";
+"bookmark_warning2" = "यदि कागजात संरचना परिवर्तन भएको छ भने, यो कागजात अपडेट गर्दा यी बुकमार्क/टिप्पणीहरूको स्थानहरू कागजातभित्र सर्न वा पूर्ण रूपमा हराउन सक्छन्।";
+"bookmark_warning" = "यस कागजातमा बुकमार्क र/वा टिप्पणीहरू छन्।";
+"recommended_document" = "सिफारिस गरिएको!";
+"bad_document_warning" = "Warning";
+"refresh_catalog" = "Refresh Catalog";
+"repositories" = "Repositories";
+"all_languages_count %lld" = "All Languages (%lld)";
+"documents_count %lld" = "%lld documents";
+"download_errors" = "डाउनलोड त्रुटिहरू";
+"install_zip" = "फाइलहरूबाट कागजातहरू लोड गर्नुहोस्";
+"restore_database" = "डेटाबेस फाइल पुनर्स्थापना गर्नुहोस्";
+"refreshing_catalog" = "Refreshing catalog...";
+"no_modules_match_filters" = "No modules match your filters";
+"tap_refresh_to_load" = "Tap Refresh to load available modules";
+"search_modules" = "Search modules";
+"delete_module_index" = "Delete Index";
+"uninstall_module_title" = "Uninstall Module";
+"uninstall_module_message_format" = "Remove %@ from this device?";
+"delete_module_index_title" = "Delete Search Index";
+"delete_module_index_message_format" = "Delete the search index for %@?";
+"module_initials" = "Initials";
+"module_name" = "नाम";
+"module_category" = "श्रेणी";
+"module_language" = "भाषा";
+"module_source" = "Source";
+"module_versions" = "Versions";
+"module_latest_version" = "Latest";
+"module_installed_version" = "Installed";
+"module_version_unavailable" = "No version metadata available.";
+"module_install_size" = "Install size";
+"module_local_state" = "Local State";
+"module_installed" = "Installed";
+"module_encrypted" = "Encrypted";
+"module_unlocked" = "Unlocked";
+"module_locked" = "Locked";
+
+/* ========================================
+   Settings
+   ======================================== */
+"settings_display" = "Display";
+"settings_text_display" = "Text Display";
+"settings_colors" = "Colors";
+"text_display" = "Text Display";
+"settings_font" = "Font";
+"font_size" = "Size";
+"font_family" = "Family";
+"settings_layout" = "Layout";
+"line_spacing" = "Line Spacing";
+"justify_text" = "Justify Text";
+"verse_per_line" = "Verse Per Line";
+"hyphenation" = "हाइफनेसन";
+"settings_content" = "सामग्री";
+"verse_numbers" = "Verse Numbers";
+"section_titles" = "Section Titles";
+"footnotes" = "पादटिप्पणीहरू";
+"inline_footnotes" = "Inline Footnotes";
+"red_letters" = "Red Letters";
+"cross_references" = "अन्तरसन्दर्भहरू";
+"expand_cross_references" = "Expand Cross References";
+"strongs_numbers" = "Strong's Numbers";
+"morphology" = "Morphology";
+"settings_annotations" = "Annotations";
+"show_bookmarks" = "बुकमार्कहरू देखाउनुहोस्";
+"show_my_notes" = "Show My Notes";
+"verse_selection" = "Verse Selection";
+
+/* Colors */
+"colors" = "Colors";
+"night_mode" = "Night Mode";
+"day_theme" = "Day Theme";
+"night_theme" = "Night Theme";
+"text_color" = "Text Color";
+"background" = "Background";
+"color_workspace" = "कार्यक्षेत्र रंग";
+"prefs_noise_title" = "पृष्ठभूमि शोर";
+"prefs_noise_summary" = "पृष्ठभूमिमा केही शोर थप्दा आँखाको लागि आरामदायी हुन सक्छ।";
+"reset_to_defaults" = "Reset to Defaults";
+
+/* Dictionaries */
+"settings_dictionaries" = "शब्दकोशहरू";
+"hebrew_dictionary" = "Hebrew Dictionary";
+"greek_dictionary" = "Greek Dictionary";
+"no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
+
+/* Data */
+"settings_data" = "Data";
+"import_export" = "Import & Export";
+
+/* Security — Settings for the persecuted */
+"settings_security" = "उत्पीडितहरूको लागि सेटिङहरू";
+"discrete_mode" = "धार्मिक प्रतीकहरू लुकाउनुहोस्";
+"discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
+"show_calculator" = "क्याल्कुलेटर";
+"show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
+"calculator_pin" = "क्याल्कुलेटर PIN";
+"calculator_pin_placeholder" = "1234";
+"calculator_pin_description" = "क्याल्कुलेटर देखाइँदा अनुप्रयोगमा प्रवेश गर्न PIN कोड।";
+"discrete_help_title" = "पहिले यो पढ्नुहोस्!";
+"discrete_help_summary" = "सेटिङहरूको लागि निर्देशनहरू र विशेष गोप्य बिल्डको बारेमा जानकारी।";
+"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
+"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
+"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
+"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* About */
+"settings_language" = "भाषा";
+"language_system_default" = "System Default";
+"language_restart_required" = "Restart the app for the language change to take effect.";
+"settings_about" = "बारेमा";
+"version" = "Version";
+
+/* ========================================
+   Import & Export
+   ======================================== */
+"export" = "निर्यात";
+"full_backup_json" = "Full Backup (JSON)";
+"export_footer" = "Export your data for backup or transfer to another device.";
+"import" = "आयात";
+"import_from_file" = "Import from File";
+"import_footer" = "Import data from a JSON backup or CSV bookmark file. Supported formats: .json, .csv, .bbl (MySword).";
+"modules" = "Modules";
+"install_sword_module" = "Install SWORD Module (.zip)";
+"modules_footer" = "Install a SWORD Bible module from a local .zip file. The ZIP must contain mods.d/ and module data files.";
+"epub" = "EPUB";
+"install_epub_book" = "Install EPUB Book";
+"epub_footer" = "Import an EPUB file for offline reading and study.";
+"error_read_file" = "Error: Could not read file";
+"error_save_file" = "Error: Could not save file";
+"mysword_file_hint" = "MySword file detected. Use Downloads to install Bible modules.";
+"error_unsupported_format_%@" = "Error: Unsupported file format (%@)";
+"error_prefix_%@" = "Error: %@";
+"installed_module_%@" = "Installed module: %@";
+"installed_epub_%@" = "Installed EPUB: %@";
+"installed_font_%@" = "Installed font: %@";
+"install_do_you_want" = "के तपाईं module (%@) स्थापना गर्न चाहनुहुन्छ?";
+
+/* ========================================
+   Repository Manager
+   ======================================== */
+"no_sources_configured" = "No repository sources configured.";
+"module_unavailable_for_installation %@" = "%@ is not available for installation.";
+"module_source_not_found %@" = "Source not found for %@";
+"uninstall_failed %@" = "Uninstall failed: %@";
+"remote_sources" = "Remote Sources";
+"sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
+"reset_sources_title" = "Reset Sources?";
+"reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
+"add_custom_repository" = "Add custom repository";
+"custom_repositories" = "कस्टम भण्डारहरू";
+"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
+"custom_repository" = "Custom repository";
+"default_repositories" = "Default repositories";
+"delete_custom_repository_message_format" = "%@ मेट्ने?";
+"delete_custom_repository_title" = "Delete repository";
+"edit_custom_repository" = "Edit custom repository";
+"help" = "मद्दत";
+"https" = "HTTPS";
+"open_wiki" = "Open Wiki";
+"repository_source_error" = "Repository source error";
+"repository_url" = "भण्डार URL";
+"repository_url_placeholder" = "https://example.org/repository";
+"validating_repository" = "Validating repository";
+"source_details" = "Source Details";
+"source_name_placeholder" = "Name (e.g., My Repository)";
+"source_host_placeholder" = "Host (e.g., example.org)";
+"source_path_placeholder" = "Catalog Path (e.g., /sword)";
+"source_catalog_hint" = "The source must serve a SWORD module catalog at the specified host and path (mods.d.tar.gz).";
+"ftp_unsupported" = "FTP — Not Supported";
+"ftp_not_supported_hint" = "FTP sources are not supported on iOS. Please use an HTTP/HTTPS source instead.";
+"add_source" = "Add Source";
+
+/* ========================================
+   Reading Plans
+   ======================================== */
+"reading_plan_no_plans" = "No Reading Plans";
+"reading_plan_no_plans_description" = "Start a reading plan to track your daily Bible reading.";
+"reading_plan_start" = "Start Plan";
+"reading_plan_active" = "Active Plans";
+"reading_plan_completed" = "सम्पन्न";
+"reading_plan_choose" = "Choose a reading plan to start";
+"reading_plan_import_custom" = "Import Custom Plan";
+"reading_plan_custom" = "कस्टम";
+"reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
+"reading_plan_available" = "Available Plans";
+"reading_plan_import_error_read" = "Could not read file";
+"reading_plan_import_error_format" = "Invalid reading plan format";
+"plan_duplicate_user_plan" = "sdcard को jsword/readingplan मा आन्तरिक योजनासँग उही नाम भएको प्रयोगकर्ता पठन योजना छ। यसलाई यहाँ सूचीबद्ध गर्न सकिँदैन। कृपया फाइलको नाम अरू केही राख्नुहोस्, फाइल एक्स्टेन्सन .properties नै राख्नुहोस्।";
+
+/* Daily Reading */
+"daily_reading" = "Daily Reading";
+"daily_reading_loading" = "Loading plan...";
+"daily_reading_today" = "Today's Reading";
+"daily_reading_recent_days" = "Recent Days";
+"mark_as_read" = "Mark as Read";
+"unmark" = "Unmark";
+
+/* ========================================
+   Speak / TTS
+   ======================================== */
+"speak" = "बोल्नुहोस्";
+"pause" = "रोकी राख्नुहोस्";
+"stop" = "रोक्नुहोस्";
+"speed" = "Speed";
+"sleep_timer" = "Sleep Timer";
+"speak_now_speaking" = "Now Speaking";
+"speak_stopped" = "Stopped";
+"speak_paused" = "Paused";
+"speak_playing" = "Playing";
+"speak_speed" = "Speed";
+"speak_sleep_timer" = "Sleep Timer";
+
+/* ========================================
+   Compare Translations
+   ======================================== */
+"compare_select_translations" = "Select Translations";
+"compare_choose_translations" = "Choose Translations";
+"compare_install_additional_modules" = "Install additional Bible modules from Downloads to compare translations.";
+"compare_loading_translations" = "Loading translations...";
+"compare_select_translations_header" = "Select translations to compare";
+"compare_verses" = "Compare Verses";
+
+/* ========================================
+   Cross References
+   ======================================== */
+"cross_references" = "अन्तरसन्दर्भहरू";
+
+/* ========================================
+   Workspace
+   ======================================== */
+"new_workspace" = "New Workspace";
+"workspace_name" = "Workspace Name";
+"workspace_no_workspaces" = "No workspaces yet";
+"workspace_create_first" = "Tap + to create your first workspace.";
+"workspace_new" = "New Workspace";
+
+/* ========================================
+   History
+   ======================================== */
+"history_no_history" = "No History";
+"history_no_history_description" = "Navigation history will appear as you browse.";
+
+/* ========================================
+   Window Management
+   ======================================== */
+"restore_size" = "Restore Size";
+"maximize" = "Maximize";
+"minimize" = "Minimize";
+"sync_scrolling" = "Sync Scrolling";
+"pin" = "पिन";
+"sync_group" = "Sync Group";
+"restore" = "पुनर्स्थापना";
+
+/* ========================================
+   Dictionary / General Books
+   ======================================== */
+"dictionary_loading_keys" = "Loading keys...";
+"dictionary_search_keys" = "Search keys...";
+"genbook_loading_entries" = "Loading entries...";
+"genbook_no_entries" = "No Entries";
+"genbook_no_entries_description" = "This module has no entries.";
+
+/* ========================================
+   EPUB
+   ======================================== */
+"epub_library" = "EPUB Library";
+"epub_contents" = "EPUB Contents";
+"search_epub" = "Search EPUB";
+"epub_loading_library" = "Loading library...";
+"epub_no_epubs_installed" = "No EPUBs Installed";
+"epub_no_epubs_installed_description" = "Import EPUB files from the Import & Export screen.";
+"epub_loading_toc" = "Loading table of contents...";
+"epub_no_toc" = "No Table of Contents";
+"epub_no_toc_description" = "This EPUB has no table of contents entries.";
+"epub_search_prompt" = "Search in EPUB...";
+
+/* ========================================
+   EPUB Reader (no module loaded)
+   ======================================== */
+"reader_no_epub_loaded" = "No EPUB is loaded. Open one from the EPUB Library first.";
+
+/* ========================================
+   Backup (legacy keys)
+   ======================================== */
+"backup_data" = "Backup Data";
+"restore_data" = "Restore Data";
+"export_bookmarks" = "Export Bookmarks";
+"import_bookmarks" = "Import Bookmarks";
+
+/* ========================================
+   Sharing
+   ======================================== */
+"share_verse" = "साझा गर्नुहोस्…";
+"copy_verse" = "Copy Verse";
+
+/* ========================================
+   Errors
+   ======================================== */
+"error_module_not_found" = "Module not found";
+"error_download_failed" = "Download failed";
+"error_network" = "Network error. Please check your connection.";
+
+/* ========================================
+   Interpolated Strings (format specifiers)
+   ======================================== */
+
+/* Reading Plans */
+"Day %lld" = "Day %lld";
+"Day %lld/%lld" = "Day %lld/%lld";
+"%lld days completed" = "%lld days completed";
+"%lld of %lld days completed" = "%lld of %lld days completed";
+"Started %@" = "Started %@";
+"%lld days" = "%lld days";
+
+/* Search */
+"Find in %@" = "%@ मा खोज्नुहोस्";
+"Create an index for %@?" = "Create an index for %@?";
+"Creating index. Processing %@" = "Creating index. Processing %@";
+"No matches found for \"%@\"" = "No matches found for \"%@\"";
+"%lld translations" = "%lld translations";
+"%@ (%@)" = "%@ (%@)";
+"%lld verses in %lld translations" = "%lld verses in %lld translations";
+"%lld verses in 1 translation" = "%lld verses in 1 translation";
+"%lld results" = "%lld results";
+
+/* Window Management */
+"Group %lld" = "Group %lld";
+
+/* EPUB */
+"Search: %@" = "Search: %@";
+"Enter a search term to find text within \"%@\"." = "Enter a search term to find text within \"%@\".";
+
+/* Compare */
+"Choose which translations to compare for %@ %lld." = "Choose which translations to compare for %@ %lld.";
+"Verse %lld" = "Verse %lld";
+"%lld selected" = "%lld selected";
+
+/* Workspace */
+"%lld window" = "%lld window";
+"%lld windows" = "%lld windows";
+
+/* Text Display Settings */
+"global_text_display_settings_title" = "विश्वव्यापी पाठ विकल्पहरू";
+"global_text_display_settings_summary" = "सबै कार्यक्षेत्रहरूको लागि पूर्वनिर्धारित पाठ प्रदर्शन सेटिङहरू";
+"workspace_text_display_settings_title" = "पाठ विकल्पहरू - %@";
+"window_text_display_settings_title" = "पाठ विकल्पहरू - विन्डो %d";
+"parent_settings_category_title" = "मूल सेटिङहरू";
+"workspace_text_options_link" = "कार्यक्षेत्र पाठ विकल्पहरू — %@";
+"workspace_text_options_link_summary" = "यस कार्यक्षेत्रको पाठ प्रदर्शन सेटिङहरू सम्पादन गर्नुहोस्";
+"global_text_options_link" = "विश्वव्यापी पाठ विकल्पहरू";
+"global_text_options_link_summary" = "सबै कार्यक्षेत्रहरूको लागि पूर्वनिर्धारित पाठ प्रदर्शन सेटिङहरू सम्पादन गर्नुहोस्";
+"text_display_font_size_title_format" = "फन्ट आकार (%d pt)";
+"text_display_font_family_title_format" = "फन्ट परिवार (%@)";
+"text_display_line_spacing_title_format" = "रेखा अन्तर (%1.1fx)";
+"text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
+"text_display_top_margin_title_format" = "माथिल्लो किनारा (%d मिमी)";
+"text_display_left_margin_title_format" = "बायाँ किनारा (%d मिमी)";
+"text_display_right_margin_title_format" = "दायाँ किनारा (%d मिमी)";
+"text_display_max_width_title_format" = "पाठको अधिकतम चौडाइ (%d मिमी)";
+
+/* ========================================
+   Quick Settings & Help
+   ======================================== */
+"fullscreen" = "पूर्णस्क्रिन";
+"tilt_to_scroll" = "Tilt to Scroll";
+"reversed_split_mode" = "उल्टो विभाजन मोड";
+"window_pinning" = "Window Pinning";
+"label_settings" = "Label Settings";
+"all_text_options_window_menutitle" = "सबै पाठ विकल्पहरू";
+"all_text_options" = "All Text Options";
+"help_tips" = "Help & Tips";
+"sponsor_development" = "Sponsor Development";
+"about" = "बारेमा";
+"rate_app" = "Rate App";
+"report_bug" = "Report Bug";
+"tell_friend" = "Tell a Friend";
+"tell_friend_message" = "Check out AndBible — a powerful, free Bible study app with offline access, bookmarks, notes, and more! https://andbible.org";
+"version %@ (%@)" = "Version %@ (%@)";
+"about_description" = "AndBible is an open-source Bible study app. Read, search, bookmark, and take notes — all offline.";
+"about_sword_credit" = "Powered by the SWORD library from the CrossWire Bible Society";
+"about_website" = "Website";
+"about_source_code" = "Source Code";
+"about_privacy_policy" = "Privacy Policy";
+"about_license" = "License (GPLv3)";
+
+/* Help Sections */
+"help_navigation" = "नेभिगेसन";
+"help_navigation_body" = "Swipe left or right to move between chapters. Tap the book name in the toolbar to choose a different book and chapter.";
+"help_selection" = "Text Selection";
+"help_selection_body" = "Long-press on a verse to select it. An action bar appears with options: Bookmark, Copy, Share, Compare, Speak, and Web Search.";
+"help_pinning" = "Window Pinning";
+"help_pinning_body" = "When you have multiple windows, pin a window to keep it visible when switching Bible/Commentary categories.";
+"help_bookmarks" = "बुकमार्कहरू";
+"help_bookmarks_body" = "Long-press a verse and tap Bookmark. Add labels to organize and notes for your thoughts.";
+"help_studypads" = "StudyPads";
+"help_studypads_body" = "Rich text journals attached to labels. Access them from the label manager or bookmark list.";
+"help_search" = "खोज";
+"help_search_body" = "Full-text search with All Words, Any Word, and Phrase modes. You will be prompted to create an index on first use.";
+"help_workspaces" = "कार्यक्षेत्रहरू";
+"help_workspaces_body" = "Save different window arrangements as workspaces. Switch between them from the overflow menu.";
+"help_hidden" = "Hidden Features";
+"help_hidden_body" = "Double-tap the Bible text for fullscreen mode. Enable Tilt to Scroll in the overflow menu. Discrete calculator mode is available in Settings.";
+
+/* iCloud Sync */
+"icloud_sync" = "iCloud Sync";
+"icloud_sync_enabled" = "Enable iCloud Sync";
+"icloud_startup_recovery_message" = "iCloud sync could not be started, so sync was turned off and AndBible opened your local data.";
+"icloud_sync_description" = "Sync bookmarks, labels, workspaces, reading plans, and notes across your devices via iCloud. Requires an iCloud account.";
+"sync_status" = "Status";
+"status" = "Status";
+"icloud_account" = "iCloud Account";
+"last_sync" = "Last Sync";
+"sync_active" = "Active";
+"sync_disabled" = "असक्षम";
+"syncing" = "Syncing…";
+"no_icloud_account" = "No iCloud Account";
+"icloud_signed_in" = "Signed In";
+"icloud_restricted" = "iCloud Restricted";
+"icloud_could_not_determine" = "Could Not Determine iCloud Status";
+"icloud_temporarily_unavailable" = "iCloud Temporarily Unavailable";
+"sync_data_included" = "Synced Data";
+"sync_what_syncs" = "Bookmarks, labels, notes, workspaces, windows, reading plan progress, and StudyPad entries are synced. Module downloads and app settings stay on this device.";
+"restart_required" = "Restart Required";
+"restart_to_apply_sync" = "Please restart the app to apply sync changes.";
+"disable_sync_title" = "Disable iCloud Sync?";
+"disable_sync" = "Disable Sync";
+"disable_sync_warning" = "Data already synced to iCloud will remain. New changes will only be saved locally.";
+
+"prefs_behavior_customization_cat" = "अनुप्रयोग व्यवहार";
+"prefs_display_customization_cat" = "रूप र अनुभव";
+"prefs_advanced_settings_cat" = "उन्नत सेटिङहरू";
+
+"prefs_toolbar_button_action_title" = "टुलबार बटन थिच्दा हुने कार्य";
+"prefs_toolbar_button_action_summary" = "बाइबल वा टिप्पणी टुलबार बटनहरू थिच्दा/लामो थिच्दा हुने कार्य";
+"prefs_toolbar_button_action_default" = "थिच्दा मेनु खुल्छ, लामो थिच्दा कागजात स्क्रिन (पूर्वनिर्धारित)";
+"prefs_toolbar_button_action_swap_menu" = "थिच्दा अर्को कागजात खुल्छ, लामो थिच्दा मेनु खुल्छ";
+"prefs_toolbar_button_action_swap_activity" = "थिच्दा अर्को कागजात खुल्छ, लामो थिच्दा कागजात स्क्रिन";
+
+
+"add_bookmark3" = "छनोट";
+"add_bookmark_whole_verse1" = "श्लोकहरू";
+"prefs_disable_two_step_bookmarking_title" = "एक-चरण बुकमार्किङ";
+"prefs_disable_two_step_bookmarking_summary" = "\"छनोट\" र \"श्लोकहरू\" वस्तुहरू बाइबल दृश्य छनोट मेनुमा सिधै देखाउनुहोस्";
+
+"active_window_indicator_summary" = "कुन विन्डो सक्रिय छ भनेर चिन्न विन्डो कुनाहरू हाइलाइट गर्नुहोस्";
+"active_window_indicator_title" = "सक्रिय विन्डो सूचक देखाउनुहोस्";
+"auto_fullscreen" = "स्क्रोल गरेर पूर्णस्क्रिन";
+"auto_fullscreen_summary" = "पाठ स्क्रोल गर्दा स्वचालित रूपमा पूर्णस्क्रिनमा स्विच गर्नुहोस्। सुझाव: स्क्रिनमा दोहोरो ट्याप गरेर पनि पूर्णस्क्रिनमा स्विच गर्न सकिन्छ।";
+"choose_strongs_greek_dictionary_summary" = "ग्रीक शब्द परिभाषाहरूको लागि Strong's शब्दकोश छान्नुहोस्";
+"choose_strongs_greek_dictionary_title" = "Strong's ग्रीक शब्दकोश";
+"choose_strongs_greek_morphology_summary" = "Robinson ग्रीक आकारशास्त्र परिभाषाहरूको लागि शब्दकोश छान्नुहोस्";
+"choose_strongs_greek_morphology_title" = "Robinson ग्रीक आकारशास्त्र";
+"choose_strongs_hebrew_dictionary_summary" = "हिब्रू शब्द परिभाषाहरूको लागि Strong's शब्दकोश छान्नुहोस्";
+"choose_strongs_hebrew_dictionary_title" = "Strong's हिब्रू शब्दकोश";
+"choose_word_lookup_dictionary_summary" = "शब्दहरू खोज्नका लागि शब्दकोशहरू छान्नुहोस्";
+"choose_word_lookup_dictionary_title" = "शब्द खोज शब्दकोशहरू";
+"full_screen_hide_buttons_pref_summary" = "पूर्णस्क्रिन मोडमा स्विच गर्दा, स्क्रिनको तलमा रहेको विन्डो बटन बार स्वचालित रूपमा लुकाउनुहोस्";
+"full_screen_hide_buttons_pref_title" = "पूर्णस्क्रिनमा विन्डो बटन बार लुकाउनुहोस्";
+"hide_bible_reference_overlay_summary" = "अनुप्रयोग पूर्णस्क्रिन मोडमा हुँदा अर्ध-पारदर्शी बाइबल सन्दर्भ ओभरले नदेखाउनुहोस्";
+"hide_bible_reference_overlay_title" = "बाइबल सन्दर्भ ओभरले लुकाउनुहोस्";
+"hide_window_buttons_summary" = "बाइबल दृश्यहरूको दायाँ छेउमा देखिने विन्डो बटनहरू लुकाइन्छन्। तलको विन्डो नेभिगेसन बार अझै देखिन्छ र तिनीहरूमा लामो क्लिक गरेर विन्डो पप-अप मेनु खोल्न सकिन्छ।";
+"hide_window_buttons_title" = "विन्डो बटनहरू लुकाउनुहोस्";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
+"pref_font_size_multiplier_title" = "फन्ट आकार गुणक";
+"prefs_bible_view_swipe_mode_summary" = "बायाँ / दायाँ स्वाइप जेस्चर अर्को पृष्ठ / अध्यायमा जान प्रयोग गर्न सकिन्छ।";
+"prefs_bible_view_swipe_mode_title" = "बायाँ / दायाँ स्वाइप जेस्चरको लागि कार्य";
+"prefs_disable_animations_summary" = "सहज स्क्रोलिङ जस्ता विभिन्न एनिमेसनहरू असक्षम गर्नुहोस्।";
+"prefs_disable_animations_title" = "एनिमेसनहरू असक्षम गर्नुहोस्";
+"prefs_disable_click_to_edit_summary" = "अध्ययन प्याडमा टिप्पणीहरू सम्पादन गर्न सम्पादन बटन प्रयोग आवश्यक छ।";
+"prefs_disable_click_to_edit_title" = "अध्ययन प्याड क्लिक-गरेर-सम्पादन असक्षम गर्नुहोस्";
+"prefs_notes_content_type_title" = "नयाँ बुकमार्क टिप्पणीहरूको ढाँचा";
+"prefs_notes_content_type_summary" = "नयाँ बुकमार्क टिप्पणी र अध्ययन प्याड प्रविष्टिहरू बनाउँदा प्रयोग गरिने पाठ ढाँचा";
+"notes_content_type_html" = "समृद्ध पाठ (HTML)";
+"notes_content_type_markdown" = "Markdown";
+"prefs_double_tap_to_fullscreen_summary" = "विन्डोमा दोहोरो ट्याप गरेर पूर्णस्क्रिन मोड प्रवेश गर्नुहोस्";
+"prefs_double_tap_to_fullscreen_title" = "पूर्णस्क्रिनको लागि दोहोरो ट्याप";
+"prefs_e_ink_mode_title" = "कालो र सेतो मोड";
+"prefs_eink_mode_summary" = "अनुप्रयोग एकरंगी मोडमा (कुनै रंग नभई) प्रयोग गर्नुहोस्, जसले E-ink उपकरणहरूको लागि उपयुक्त बनाउँछ।";
+"prefs_interface_locale_summary" = "कस्टम प्रयोगकर्ता इन्टरफेस भाषा छान्नुहोस्";
+"prefs_interface_locale_title" = "अनुप्रयोग भाषा";
+"prefs_navigate_to_verse_summary" = "अनुच्छेद छान्दा श्लोक (र अध्याय) छान्नुहोस्";
+"prefs_navigate_to_verse_title" = "श्लोकमा जानुहोस्";
+"prefs_night_mode_automatic" = "स्वचालित";
+"prefs_night_mode_manual" = "म्यानुअल";
+"prefs_night_mode_summary" = "रात्रि मोडमा स्वचालित रूपमा स्विच गर्ने (यदि उपकरणले समर्थन गर्छ भने), म्यानुअल वा सिस्टम सेटिङ मार्फत (Android 10+)। म्यानुअल स्विचिङ मुख्य स्क्रिनको ३-बिन्दु विकल्प मेनुबाट गर्न सकिन्छ।";
+"prefs_night_mode_system" = "सिस्टम";
+"prefs_night_mode_title" = "रात्रि मोड स्विचिङ";
+"prefs_open_links_in_special_window_summary" = "अन्तरसन्दर्भ र Strong's छिटो हेर्नका लागि विशेष विन्डोमा लिङ्कहरू खोल्नुहोस्";
+"prefs_open_links_in_special_window_title" = "लिङ्क विन्डो";
+"prefs_screen_keep_on_summary" = "यो अनुप्रयोग प्रयोग गर्दा स्क्रिन सुत्न नदिनुहोस्";
+"prefs_screen_keep_on_title" = "स्क्रिन चालु राख्नुहोस्";
+"prefs_show_error_box_summary" = "BibleView javascript पक्षका त्रुटिहरू डिबग गर्दा विकासकर्ताहरूको लागि उपयोगी। यसले अनुप्रयोग ढिलो बनाउनेछ।";
+"prefs_show_error_box_title" = "Javascript त्रुटि बक्स देखाउनुहोस्";
+"prefs_swipe_mode_chapter" = "अध्याय";
+"prefs_swipe_mode_none" = "असक्षम";
+"prefs_swipe_mode_page" = "पृष्ठ";
+
+"prefs_volume_keys_scroll_title" = "भोल्युम बटनहरू स्क्रोल";
+"prefs_volume_keys_scroll_summary" = "बाइबल पाठ स्क्रोल गर्न भोल्युम माथि/तल प्रयोग गर्नुहोस्";
+"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
+"prefs_experimental_features_title" = "प्रायोगिक सुविधाहरू";
+"prefs_experimental_features_summary" = "कुन प्रायोगिक सुविधाहरू सक्षम गर्ने छान्नुहोस्। यी सुविधाहरू अझै विकासाधीन छन् र परिवर्तन वा हटाउन सकिन्छ";
+"experimental_feature_bookmark_edit_actions" = "बुकमार्क सम्पादन कार्यहरू";
+"experimental_feature_add_paragraph_break" = "अनुच्छेद विराम बुकमार्क थप्नुहोस्";
+"prefs_enable_bluetooth_title" = "Bluetooth मिडिया बटनहरू सक्षम गर्नुहोस्";
+"prefs_enable_bluetooth_summary" = "बोल्न सुरु/बन्द गर्न Bluetooth मिडिया बटनहरू ह्यान्डल गर्नुहोस्।";
+
+"open_bible_links_title" = "AndBible मा बाइबल लिङ्कहरू खोल्नुहोस्";
+"open_bible_links_summary" = "AndBible समर्थित बाइबल URL को सन्दर्भ गर्ने लिङ्कहरूमा क्लिक गर्दा, तिनीहरूलाई AndBible मा खोल्नुहोस्";
+
+"crash_app" = "Crash app!";
+"crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";
+"crash_app_scheduled_summary" = "Crash scheduled in 10 seconds.";
+"sign_in_failed" = "समन्वय ब्याकएन्ड सेवामा साइन इन असफल भयो।";
+"sync_adapter" = "समन्वय ब्याकएन्ड";
+"sync_adapter_summary" = "हालको: %@";
+"adapters_next_cloud" = "Next Cloud";
+"auth_server_uri" = "सर्भर URL";
+"auth_username" = "प्रयोगकर्ता नाम";
+"auth_password" = "पासवर्ड";
+"auth_folder_path" = "समन्वय फोल्डर पथ";
+"auth_folder_path_summary" = "समन्वय डेटाको लागि मूल फोल्डर (खाली = रूट)";
+"invalid_url_message" = "तपाईंले प्रविष्ट गरेको URL अवैध छ। कृपया वैध URL प्रविष्ट गर्नुहोस् (उदाहरणका लागि, https://nextcloud.example.com)";
+"prefs_sync_introduction_summary1" = "धेरै उपकरणहरू समन्वय गर्न कुन ब्याकएन्ड क्लाउड सेवा प्रयोग गर्ने छान्नुहोस्।";
+"test_connection" = "Test Connection";
+"overrideBackup" = "क्लाउडमा यो उपकरणसँग समन्वय नभएको अवस्थित डेटाबेस फेला पर्‍यो। डेटाबेसमा %@ छ। तपाईं के गर्न चाहनुहुन्छ?";
+"cloud_fetch_and_restore_initial" = "क्लाउडबाट यो उपकरणमा प्रतिलिपि गर्नुहोस्";
+"cloud_create_new" = "यो उपकरणबाट क्लाउडमा प्रतिलिपि गर्नुहोस्";
+"cloud_disable_sync" = "रद्द गर्नुहोस् र समन्वय असक्षम गर्नुहोस्";
+"cloud_sync_title" = "उपकरण समन्वय";
+"application_preferences" = "अनुप्रयोग प्राथमिकताहरू";
+"are_you_sure_reset_local" = "यसले %@ को लागि तपाईंको स्थानीय डेटाबेस क्लाउड सेवामा हाल भण्डारण भएको सामग्रीसँग रिसेट गर्नेछ।";
+"are_you_sure_reset_cloud" = "यसले %@ को लागि तपाईंको क्लाउड डेटाबेस यो उपकरणमा रहेको सामग्रीसँग रिसेट गर्नेछ।";
+"reading_plans_content" = "पठन योजनाहरू र तिनीहरूको स्थितिहरू";
+"bookmarks_contents" = "बुकमार्कहरू, लेबलहरू र अध्ययन प्याडहरू";
+"workspaces_contents" = "कार्यक्षेत्रहरू र विन्डोहरू";
+"my_documents" = "मेरा कागजातहरू";
+"my_documents_contents" = "मेरा कागजातहरू र तिनीहरूको सामग्री";
+"synchronization_categories" = "समन्वय श्रेणीहरू";
+"sync_error" = "क्लाउड समन्वयमा त्रुटि भयो";
+"sync_cant_fetch" = "क्लाउडमा भण्डारित डेटाबेस वा प्याच फाइलको संस्करण यो अनुप्रयोगले समर्थन गर्नेभन्दा बढी छ।";
+"sync_disabling" = "हालको लागि %@ को लागि समन्वय असक्षम गर्दैछ।";
+"sync_update_app" = "समन्वय जारी राख्न कृपया अनुप्रयोग अपडेट गर्नुहोस्।";
+"last_updated" = "अन्तिम अपडेट: %@";
+
+"help_workspaces_title" = "कार्यक्षेत्रहरू";
+"reading_plans_plural" = "पठन योजनाहरू";
+
+/* Android window popup menu parity */
+"windowMaximise" = "अधिकतम गर्नुहोस्";
+"windowMinimise" = "न्यूनतम गर्नुहोस्";
+"change_to_normal" = "सामान्य विन्डोमा परिवर्तन गर्नुहोस्";
+"move_window" = "यहाँ सार्नुहोस्";
+"move_window_to_position2" = "स्थान %1$d (%2$@:%3$@)";
+"window_pin_mode" = "पिन";
+"windowSynchronise" = "समन्वय गर्नुहोस्";
+"window_disable_sync" = "समन्वय असक्षम गर्नुहोस्";
+"sync_group_n" = "समूह %d";
+"text_options_window_menutitle" = "पाठ विकल्पहरू";
+"prefs_text_colors_menutitle" = "रंग सेटिङहरू";
+"prefs_section_title_title" = "खण्ड शीर्षकहरू";
+"prefs_show_strongs_title" = "Strong's नम्बरहरू";
+"prefs_show_verseno_title" = "अध्याय र श्लोक नम्बरहरू";
+"copy_settings" = "यसमा सेटिङहरू प्रतिलिपि गर्नुहोस्";
+"copy_settings_to_workspace" = "कार्यक्षेत्र";
+"copy_settings_to_window" = "विन्डो %1$d (%2$@: %3$@)";
+"copy_settings_to_global" = "विश्वव्यापी पूर्वनिर्धारितहरू";
+"copyReference" = "क्लिपबोर्डमा लिङ्क प्रतिलिपि गर्नुहोस्";
+"reference_copied_to_clipboard" = "सन्दर्भ क्लिपबोर्डमा प्रतिलिपि गरियो";
+"add_ellipsis" = "%@…";
+"copy_settings_title" = "तपाईं कुन सेटिङहरू प्रतिलिपि गर्न चाहनुहुन्छ?";
+"select_all" = "सबै चयन गर्नुहोस्";
+"select_none" = "कुनै पनि नछान्नुहोस्";
+"font" = "Font";
+"margin_size" = "Margin size";
+"top_margin" = "माथिल्लो किनारा";
+"footnotes_inline" = "Inline footnotes";
+"expand_cross_references" = "Expand cross references";
+"cross_references" = "अन्तरसन्दर्भहरू";
+"verse_per_line" = "Verse per line";
+"show_bookmarks" = "बुकमार्कहरू देखाउनुहोस्";
+"hide_labels" = "Hide labels";
+"my_notes" = "My notes";
+"page_number" = "Page number";
+"infinite_scroll" = "अनन्त स्क्रोल";
+"non_strongs_word_italic" = "थपिएका शब्दहरू तिरछो गर्नुहोस्";
+"mark_as_read_button" = "पढेको चिन्ह लगाउने बटन";
+"title_scroll_button" = "शीर्षक स्क्रोल बटन";
+"memorization_indicators" = "कण्ठस्थ सूचकहरू";
+"ai_document_markers" = "AI document markers";
+"page_scroll_amount" = "पृष्ठ स्क्रोल मात्रा";
+"ordinals" = "Ordinals";
+"error_no_content" = "चयनित श्लोकको लागि कुनै सामग्री छैन";

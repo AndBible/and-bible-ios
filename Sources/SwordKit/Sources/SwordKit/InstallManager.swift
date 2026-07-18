@@ -85,8 +85,8 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
 
  Android stores built-in repositories in `app/src/main/res/raw/repositories.txt` as independent
  package and catalog directories. iOS still writes `InstallMgr.conf` in the legacy SWORD-compatible
- row shape, but this definition is the shared source of truth for Downloads and package fallback so
- iOS does not reconstruct package URLs from catalog paths later.
+ row shape, but this definition is the shared source of truth for Downloads package installs so iOS
+ does not reconstruct package URLs from catalog paths later.
  */
 private struct AndroidDefaultRepositorySource: Sendable {
     /// Visible repository name from Android.

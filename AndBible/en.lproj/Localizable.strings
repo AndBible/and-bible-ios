@@ -797,3 +797,4 @@
 "ai_document_markers" = "AI document markers";
 "page_scroll_amount" = "Page scroll amount";
 "ordinals" = "Ordinals";
+"error_no_content" = "No content for selected verse";

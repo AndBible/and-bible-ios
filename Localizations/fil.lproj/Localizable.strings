@@ -1,0 +1,763 @@
+/* AndBible iOS — English Localizations */
+
+/* ========================================
+   General / Shared
+   ======================================== */
+"app_name" = "AndBible";
+"done" = "Tapos na";
+"cancel" = "Kanselahin";
+"delete" = "Tanggalin";
+"save" = "I-save";
+"edit" = "I-edit";
+"add" = "Add";
+"search" = "Hanapin";
+"settings" = "Mga kagustuhan ng application";
+"close" = "Isara";
+"ok" = "OK";
+"yes" = "Oo";
+"no" = "Hindi";
+"error" = "Error";
+"loading" = "Loading...";
+"create" = "Gumawa";
+"new_window" = "Bagong window";
+"clear" = "Clear";
+"reset" = "I-reset";
+"retry" = "Retry";
+"all" = "Lahat";
+"sort" = "Sort";
+"name" = "Pangalan";
+"untitled" = "Untitled";
+"compare" = "Ikumpara";
+"translations" = "Mga Salin";
+"auto" = "Auto";
+"off" = "Off";
+"inline" = "Inline";
+"links" = "Mga Link";
+"hidden" = "Hidden";
+"completed" = "Nakumpleto";
+"no_results" = "No Results";
+"searching" = "Searching...";
+
+/* ========================================
+   Navigation / Bible Reader
+   ======================================== */
+"bible" = "Bibliya";
+"deuterocanonical" = "Deuterocanonical";
+"bookmarks" = "Mga Bookmark";
+"reading_plans" = "Mga Plano sa Pagbabasa";
+"downloads" = "Downloads";
+"history" = "Kasaysayan";
+"workspaces" = "Mga Workspace";
+"definition" = "Definition";
+"dictionary" = "Diksyonaryo";
+"general_book" = "Aklat";
+"map" = "Mapa";
+"locked" = "Locked";
+
+/* Bible Navigation */
+"choose_book" = "Pumili ng Aklat";
+"books" = "Books";
+"old_testament" = "Lumang Tipan";
+"new_testament" = "Bagong Tipan";
+"previous_chapter" = "Previous chapter";
+"next_chapter" = "Next chapter";
+"back_to_bible" = "Back to Bible";
+
+/* Module Pickers */
+"choose_document" = "Pumili ng Dokumento";
+"document_type" = "Document type";
+"picker_select_translation" = "Select Translation";
+"picker_select_commentary" = "Select Commentary";
+"picker_select_dictionary" = "Select Dictionary";
+"picker_select_general_book" = "Select General Book";
+"picker_select_map" = "Select Map";
+"picker_no_bible_modules" = "No Bible modules installed";
+"picker_no_commentary_modules" = "No commentary modules installed";
+"picker_no_dictionary_modules" = "No dictionary modules installed";
+"picker_no_general_book_modules" = "No general book modules installed";
+"picker_no_map_modules" = "No map modules installed";
+"download_modules" = "Download Modules";
+"download_document_confirm_prefix" = "I-download";
+"bookmark_warning4" = "Inirerekomenda na i-backup ang module bago i-update.";
+"bookmark_warning3" = "Gusto mo pa ring i-update ang module?";
+"bookmark_warning2" = "Kung nagbago ang istraktura ng dokumento, ang pag-update ng dokumentong ito ay maaaring magpagalaw ng mga lokasyon ng mga bookmark/tala sa loob ng dokumento o mawala nang tuluyan.";
+"bookmark_warning" = "Mayroong mga bookmark at/o tala para sa dokumentong ito.";
+/* Toolbar / Actions */
+"toggle_strongs_numbers" = "Toggle Strong's numbers";
+"bookmark" = "Bookmark";
+"copy" = "Kopyahin";
+"share" = "I-share";
+"search_web" = "Web";
+
+/* Strong's Modes */
+"strongs_off" = "Off";
+"strongs_inline" = "Teksto at Mga Link";
+"strongs_links" = "Mga Link";
+"strongs_hidden" = "Mga Nakatagong Link";
+"find_all_occurrences" = "Find all occurrences";
+"no_dictionary_installed" = "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads.";
+"back_to_previous" = "Back";
+
+/* ========================================
+   Bookmarks & Labels
+   ======================================== */
+"add_bookmark" = "Add Bookmark";
+"edit_bookmark" = "Edit Bookmark";
+"bookmark_note" = "Note";
+"labels" = "Mga Label";
+"new_label" = "New Label";
+"study_pad" = "StudyPad";
+"my_notes" = "My Notes";
+"no_bookmarks" = "No Bookmarks";
+"no_bookmarks_description" = "Long-press on a verse to add a bookmark.";
+"search_bookmarks" = "Search bookmarks";
+"sort_bible_order" = "Bible Order";
+"sort_date_created" = "Date Created";
+"sort_last_updated" = "Last Updated";
+"edit_labels" = "Edit Labels";
+"add_labels" = "Add labels";
+"open_studypad_for_label %@" = "Open \"%@\" StudyPad";
+"no_labels" = "No Labels";
+"no_labels_description" = "Create labels to organize your bookmarks and notes.";
+"label_name" = "Label name";
+"studypad" = "Study Pad";
+"open_studypad" = "Open StudyPad";
+"edit_label" = "I-edit ang label";
+"label_edit_name" = "Pangalan";
+"label_edit_color" = "Color";
+"label_edit_icon" = "Icon";
+"no_icon" = "No Icon";
+"label_edit_options" = "Options";
+"favourite" = "Favourite";
+"underline_style" = "Underline Style";
+"underline_whole_verse" = "Underline Whole Verse";
+"studypad_empty" = "Empty StudyPad";
+"studypad_empty_description" = "Add notes or bookmark verses to build your study journal.";
+"add_note" = "Add Note";
+"note" = "Note";
+"new_note" = "New Note";
+"edit_note" = "Edit Note";
+
+/* ========================================
+   Search
+   ======================================== */
+"search_bible" = "Maghanap sa Bibliya";
+"search_results" = "Search Results";
+"whole_bible" = "Buong Bibliya";
+"old_testament_short" = "OT";
+"new_testament_short" = "NT";
+"current_book" = "Current Book";
+"search_index" = "Search Index";
+"search_checking_index" = "Checking index...";
+"search_need_index" = "To search a document we need an index.";
+"search_create_index" = "Gumawa";
+"search_indexing_message" = "Kapag natapos na ang pag-index, dadalhin ka sa screen ng paghahanap.";
+"search_searching" = "Searching...";
+"search_enter_prompt" = "Enter a word or phrase to search";
+"search_bible_text" = "Search Bible text";
+"search_match" = "Match";
+"search_scope_all" = "Lahat";
+"search_scope_ot" = "OT";
+"search_scope_nt" = "NT";
+"search_translations" = "Mga Salin";
+"search_all" = "Lahat";
+
+/* ========================================
+   Downloads / Module Browser
+   ======================================== */
+"module_browser" = "Module Browser";
+"doc_type_all" = "Lahat ng uri";
+"bibles" = "Bibles";
+"commentaries" = "Commentaries";
+"dictionaries" = "Mga Diksyonaryo";
+"category_books" = "Books";
+"maps" = "Maps";
+"doc_type_addons" = "Add-ons";
+"document_filter_results %lld" = "Documents (%lld)";
+"install" = "Install";
+"install_module" = "Install";
+"update" = "Update";
+"uninstall" = "Uninstall";
+"unavailable" = "Unavailable";
+"recommended_document" = "Inirerekomenda!";
+"bad_document_warning" = "Warning";
+"refresh_catalog" = "Refresh Catalog";
+"repositories" = "Repositories";
+"all_languages_count %lld" = "All Languages (%lld)";
+"refreshing_catalog" = "Refreshing catalog...";
+"no_modules_match_filters" = "No modules match your filters";
+"tap_refresh_to_load" = "Tap Refresh to load available modules";
+"search_modules" = "Search modules";
+"delete_module_index" = "Delete Index";
+"uninstall_module_title" = "Uninstall Module";
+"uninstall_module_message_format" = "Remove %@ from this device?";
+"delete_module_index_title" = "Delete Search Index";
+"delete_module_index_message_format" = "Delete the search index for %@?";
+"module_initials" = "Initials";
+"module_name" = "Pangalan";
+"module_category" = "Kategorya";
+"module_language" = "Wika";
+"module_source" = "Source";
+"module_versions" = "Versions";
+"module_latest_version" = "Latest";
+"module_installed_version" = "Installed";
+"module_version_unavailable" = "No version metadata available.";
+"module_install_size" = "Install size";
+"module_local_state" = "Local State";
+"module_installed" = "Installed";
+"module_encrypted" = "Encrypted";
+"module_unlocked" = "Unlocked";
+"module_locked" = "Locked";
+
+/* ========================================
+   Settings
+   ======================================== */
+"settings_display" = "Display";
+"settings_text_display" = "Text Display";
+"settings_colors" = "Colors";
+"text_display" = "Text Display";
+"settings_font" = "Font";
+"font_size" = "Size";
+"font_family" = "Family";
+"settings_layout" = "Layout";
+"line_spacing" = "Line Spacing";
+"justify_text" = "Justify Text";
+"verse_per_line" = "Verse Per Line";
+"hyphenation" = "Hyphenation";
+"settings_content" = "Nilalaman";
+"verse_numbers" = "Verse Numbers";
+"section_titles" = "Section Titles";
+"footnotes" = "Mga footnote";
+"inline_footnotes" = "Inline Footnotes";
+"red_letters" = "Red Letters";
+"cross_references" = "Mga cross-reference";
+"expand_cross_references" = "Expand Cross References";
+"strongs_numbers" = "Strong's Numbers";
+"morphology" = "Morphology";
+"settings_annotations" = "Annotations";
+"show_bookmarks" = "Ipakita ang mga bookmark";
+"show_my_notes" = "Show My Notes";
+"verse_selection" = "Verse Selection";
+
+/* Colors */
+"colors" = "Colors";
+"night_mode" = "Night Mode";
+"day_theme" = "Day Theme";
+"night_theme" = "Night Theme";
+"text_color" = "Text Color";
+"background" = "Background";
+"color_workspace" = "Kulay ng workspace";
+"prefs_noise_title" = "Background noise";
+"prefs_noise_summary" = "Ang pagdaragdag ng kaunting noise sa background ay maaaring maging mas komportable sa mata.";
+"reset_to_defaults" = "Reset to Defaults";
+
+/* Dictionaries */
+"settings_dictionaries" = "Mga Diksyonaryo";
+"hebrew_dictionary" = "Hebrew Dictionary";
+"greek_dictionary" = "Greek Dictionary";
+"no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
+
+/* Data */
+"settings_data" = "Data";
+"import_export" = "Import & Export";
+
+/* Security — Settings for the persecuted */
+"settings_security" = "Mga setting para sa mga pinersekuto";
+"discrete_mode" = "Itago ang mga relihiyosong simbolo";
+"discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
+"show_calculator" = "Calculator";
+"show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
+"calculator_pin" = "PIN ng Calculator";
+"calculator_pin_placeholder" = "1234";
+"calculator_pin_description" = "PIN code para pumasok sa app kapag ipinapakita ang calculator.";
+"discrete_help_title" = "Basahin ito muna!";
+"discrete_help_summary" = "Mga tagubilin para sa mga setting at impormasyon tungkol sa partikular na discrete build.";
+"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
+"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
+"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
+"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* About */
+"settings_language" = "Wika";
+"language_system_default" = "System Default";
+"language_restart_required" = "Restart the app for the language change to take effect.";
+"settings_about" = "Tungkol sa";
+"version" = "Version";
+
+/* ========================================
+   Import & Export
+   ======================================== */
+"export" = "I-export";
+"full_backup_json" = "Full Backup (JSON)";
+"export_footer" = "Export your data for backup or transfer to another device.";
+"import" = "Mag-import";
+"import_from_file" = "Import from File";
+"import_footer" = "Import data from a JSON backup or CSV bookmark file. Supported formats: .json, .csv, .bbl (MySword).";
+"modules" = "Modules";
+"install_sword_module" = "Install SWORD Module (.zip)";
+"modules_footer" = "Install a SWORD Bible module from a local .zip file. The ZIP must contain mods.d/ and module data files.";
+"epub" = "EPUB";
+"install_epub_book" = "Install EPUB Book";
+"epub_footer" = "Import an EPUB file for offline reading and study.";
+"error_read_file" = "Error: Could not read file";
+"error_save_file" = "Error: Could not save file";
+"mysword_file_hint" = "MySword file detected. Use Downloads to install Bible modules.";
+"error_unsupported_format_%@" = "Error: Unsupported file format (%@)";
+"error_prefix_%@" = "Error: %@";
+"installed_module_%@" = "Installed module: %@";
+"installed_epub_%@" = "Installed EPUB: %@";
+"installed_font_%@" = "Installed font: %@";
+"install_do_you_want" = "Nais mo bang i-install ang module (%@)?";
+
+/* ========================================
+   Repository Manager
+   ======================================== */
+"no_sources_configured" = "No repository sources configured.";
+"remote_sources" = "Remote Sources";
+"sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
+"reset_sources_title" = "Reset Sources?";
+"reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
+"add_custom_repository" = "Add custom repository";
+"custom_repositories" = "Mga custom na repository";
+"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
+"custom_repository" = "Custom repository";
+"default_repositories" = "Default repositories";
+"delete_custom_repository_message_format" = "Tanggalin ang %@?";
+"delete_custom_repository_title" = "Delete repository";
+"edit_custom_repository" = "Edit custom repository";
+"help" = "Tulong";
+"https" = "HTTPS";
+"open_wiki" = "Open Wiki";
+"repository_source_error" = "Repository source error";
+"repository_url" = "URL ng Repository";
+"repository_url_placeholder" = "https://example.org/repository";
+"validating_repository" = "Validating repository";
+"source_details" = "Source Details";
+"source_name_placeholder" = "Name (e.g., My Repository)";
+"source_host_placeholder" = "Host (e.g., example.org)";
+"source_path_placeholder" = "Catalog Path (e.g., /sword)";
+"source_catalog_hint" = "The source must serve a SWORD module catalog at the specified host and path (mods.d.tar.gz).";
+"add_source" = "Add Source";
+
+/* ========================================
+   Reading Plans
+   ======================================== */
+"reading_plan_no_plans" = "No Reading Plans";
+"reading_plan_no_plans_description" = "Start a reading plan to track your daily Bible reading.";
+"reading_plan_start" = "Start Plan";
+"reading_plan_active" = "Active Plans";
+"reading_plan_completed" = "Nakumpleto";
+"reading_plan_choose" = "Choose a reading plan to start";
+"reading_plan_import_custom" = "Import Custom Plan";
+"reading_plan_custom" = "Custom";
+"reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
+"reading_plan_available" = "Available Plans";
+"reading_plan_import_error_read" = "Could not read file";
+"reading_plan_import_error_format" = "Invalid reading plan format";
+"plan_duplicate_user_plan" = "Mayroong isang user reading plan sa sdcard jsword/readingplan na may parehong pangalan ng isang internal na plano. Hindi ito mailista dito. Mangyaring palitan ang pangalan ng file sa ibang bagay, na iniiwan ang extension ng file bilang .properties";
+
+/* Daily Reading */
+"daily_reading" = "Daily Reading";
+"daily_reading_loading" = "Loading plan...";
+"daily_reading_today" = "Today's Reading";
+"daily_reading_recent_days" = "Recent Days";
+"mark_as_read" = "Mark as Read";
+"unmark" = "Unmark";
+
+/* ========================================
+   Speak / TTS
+   ======================================== */
+"speak" = "Magsalita";
+"pause" = "I-pause";
+"stop" = "Itigil";
+"speed" = "Speed";
+"sleep_timer" = "Sleep Timer";
+"speak_now_speaking" = "Now Speaking";
+"speak_stopped" = "Stopped";
+"speak_paused" = "Paused";
+"speak_playing" = "Playing";
+"speak_speed" = "Speed";
+"speak_sleep_timer" = "Sleep Timer";
+
+/* ========================================
+   Compare Translations
+   ======================================== */
+"compare_select_translations" = "Select Translations";
+"compare_choose_translations" = "Choose Translations";
+"compare_install_additional_modules" = "Install additional Bible modules from Downloads to compare translations.";
+"compare_loading_translations" = "Loading translations...";
+"compare_select_translations_header" = "Select translations to compare";
+"compare_verses" = "Compare Verses";
+
+/* ========================================
+   Cross References
+   ======================================== */
+"cross_references" = "Mga cross-reference";
+
+/* ========================================
+   Workspace
+   ======================================== */
+"new_workspace" = "New Workspace";
+"workspace_name" = "Workspace Name";
+"workspace_no_workspaces" = "No workspaces yet";
+"workspace_create_first" = "Tap + to create your first workspace.";
+"workspace_new" = "New Workspace";
+
+/* ========================================
+   History
+   ======================================== */
+"history_no_history" = "No History";
+"history_no_history_description" = "Navigation history will appear as you browse.";
+
+/* ========================================
+   Window Management
+   ======================================== */
+"restore_size" = "Restore Size";
+"maximize" = "Maximize";
+"minimize" = "Minimize";
+"sync_scrolling" = "Sync Scrolling";
+"pin" = "I-pin";
+"sync_group" = "Sync Group";
+"restore" = "I-restore";
+
+/* ========================================
+   Dictionary / General Books
+   ======================================== */
+"dictionary_loading_keys" = "Loading keys...";
+"dictionary_search_keys" = "Search keys...";
+"genbook_loading_entries" = "Loading entries...";
+"genbook_no_entries" = "No Entries";
+"genbook_no_entries_description" = "This module has no entries.";
+
+/* ========================================
+   EPUB
+   ======================================== */
+"epub_library" = "EPUB Library";
+"epub_contents" = "EPUB Contents";
+"search_epub" = "Search EPUB";
+"epub_loading_library" = "Loading library...";
+"epub_no_epubs_installed" = "No EPUBs Installed";
+"epub_no_epubs_installed_description" = "Import EPUB files from the Import & Export screen.";
+"epub_loading_toc" = "Loading table of contents...";
+"epub_no_toc" = "No Table of Contents";
+"epub_no_toc_description" = "This EPUB has no table of contents entries.";
+"epub_search_prompt" = "Search in EPUB...";
+
+/* ========================================
+   EPUB Reader (no module loaded)
+   ======================================== */
+"reader_no_epub_loaded" = "No EPUB is loaded. Open one from the EPUB Library first.";
+
+/* ========================================
+   Sync
+   ======================================== */
+"icloud_sync" = "iCloud Sync";
+"icloud_sync_enabled" = "Enable iCloud Sync";
+"icloud_sync_description" = "Sync bookmarks, labels, workspaces, reading plans, and notes across your devices via iCloud. Requires an iCloud account.";
+"sync_status" = "Status";
+"status" = "Status";
+"icloud_account" = "iCloud Account";
+"last_sync" = "Last Sync";
+"sync_active" = "Active";
+"sync_disabled" = "Hindi pinagana";
+"syncing" = "Syncing…";
+"no_icloud_account" = "No iCloud Account";
+"icloud_signed_in" = "Signed In";
+"icloud_restricted" = "iCloud Restricted";
+"icloud_could_not_determine" = "Could Not Determine iCloud Status";
+"icloud_temporarily_unavailable" = "iCloud Temporarily Unavailable";
+"sync_data_included" = "Synced Data";
+"sync_what_syncs" = "Bookmarks, labels, notes, workspaces, windows, reading plan progress, and StudyPad entries are synced. Module downloads and app settings stay on this device.";
+"restart_required" = "Restart Required";
+"restart_to_apply_sync" = "Please restart the app to apply sync changes.";
+"disable_sync_title" = "Disable iCloud Sync?";
+"disable_sync" = "Disable Sync";
+"disable_sync_warning" = "Data already synced to iCloud will remain. New changes will only be saved locally.";
+
+/* ========================================
+   Backup (legacy keys)
+   ======================================== */
+"backup_data" = "Backup Data";
+"restore_data" = "Restore Data";
+"export_bookmarks" = "Export Bookmarks";
+"import_bookmarks" = "Import Bookmarks";
+
+/* ========================================
+   Sharing
+   ======================================== */
+"share_verse" = "I-share…";
+"copy_verse" = "Copy Verse";
+
+/* ========================================
+   Errors
+   ======================================== */
+"error_module_not_found" = "Module not found";
+"error_download_failed" = "Download failed";
+"error_network" = "Network error. Please check your connection.";
+
+/* ========================================
+   Interpolated Strings (format specifiers)
+   ======================================== */
+
+/* Reading Plans */
+"Day %lld" = "Day %lld";
+"Day %lld/%lld" = "Day %lld/%lld";
+"%lld days completed" = "%lld days completed";
+"%lld of %lld days completed" = "%lld of %lld days completed";
+"Started %@" = "Started %@";
+"%lld days" = "%lld days";
+
+/* Search */
+"Find in %@" = "Hanapin sa %@";
+"Create an index for %@?" = "Create an index for %@?";
+"Creating index. Processing %@" = "Creating index. Processing %@";
+"No matches found for \"%@\"" = "No matches found for \"%@\"";
+"%lld translations" = "%lld translations";
+"%@ (%@)" = "%@ (%@)";
+"%lld verses in %lld translations" = "%lld verses in %lld translations";
+"%lld verses in 1 translation" = "%lld verses in 1 translation";
+"%lld results" = "%lld results";
+
+/* Window Management */
+"Group %lld" = "Group %lld";
+
+/* EPUB */
+"Search: %@" = "Search: %@";
+"Enter a search term to find text within \"%@\"." = "Enter a search term to find text within \"%@\".";
+
+/* Compare */
+"Choose which translations to compare for %@ %lld." = "Choose which translations to compare for %@ %lld.";
+"Verse %lld" = "Verse %lld";
+"%lld selected" = "%lld selected";
+
+/* Workspace */
+"%lld window" = "%lld window";
+"%lld windows" = "%lld windows";
+
+/* Text Display Settings */
+"global_text_display_settings_title" = "Mga global na opsyon sa teksto";
+"global_text_display_settings_summary" = "Default na mga setting sa pagpapakita ng teksto para sa lahat ng workspace";
+"workspace_text_display_settings_title" = "Mga opsyon sa teksto - %@";
+"window_text_display_settings_title" = "Mga opsyon sa teksto - Window %d";
+"parent_settings_category_title" = "Mga setting ng magulang";
+"workspace_text_options_link" = "Mga opsyon sa teksto ng workspace — %@";
+"workspace_text_options_link_summary" = "I-edit ang mga setting sa pagpapakita ng teksto para sa workspace na ito";
+"global_text_options_link" = "Mga global na opsyon sa teksto";
+"global_text_options_link_summary" = "I-edit ang mga default na setting sa pagpapakita ng teksto para sa lahat ng workspace";
+"text_display_font_size_title_format" = "Laki ng font (%d pt)";
+"text_display_font_family_title_format" = "Pamilya ng font (%@)";
+"text_display_line_spacing_title_format" = "Espasyo ng linya (%1.1fx)";
+"text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
+"text_display_top_margin_title_format" = "Tuktok na margin (%d mm)";
+"text_display_page_scroll_amount_title_format" = "Page scroll amount (%d%%)";
+"text_display_left_margin_title_format" = "Kaliwang margin (%d mm)";
+"text_display_right_margin_title_format" = "Kanang margin (%d mm)";
+"text_display_max_width_title_format" = "Maximum na lapad ng teksto (%d mm)";
+"all_text_options_window_menutitle" = "Lahat ng opsyon sa teksto";
+
+"prefs_behavior_customization_cat" = "Gawi ng application";
+"prefs_display_customization_cat" = "Hitsura at pakiramdam";
+"prefs_advanced_settings_cat" = "Mga advanced na setting";
+
+"prefs_toolbar_button_action_title" = "Aksyon para sa pindutin ng button sa toolbar";
+"prefs_toolbar_button_action_summary" = "Aksyon na gagawin kapag pinindot/matagalang pinindot ang mga button sa toolbar ng Bibliya o Komentaryo";
+"prefs_toolbar_button_action_default" = "Pindutin para buksan ang menu, matagalang pindutin para sa screen ng mga dokumento (default)";
+"prefs_toolbar_button_action_swap_menu" = "Pindutin para buksan ang susunod na dokumento, matagalang pindutin para buksan ang menu";
+"prefs_toolbar_button_action_swap_activity" = "Pindutin para buksan ang susunod na dokumento, matagalang pindutin para sa screen ng mga dokumento";
+
+
+"add_bookmark3" = "Seleksyon";
+"add_bookmark_whole_verse1" = "Mga Talata";
+"prefs_disable_two_step_bookmarking_title" = "Isang hakbang na bookmarking";
+"prefs_disable_two_step_bookmarking_summary" = "Ipakita ang \"Seleksyon\" at \"Mga Talata\" nang direkta sa menu ng Seleksyon sa Bible view";
+
+"active_window_indicator_summary" = "I-highlight ang mga sulok ng window para matukoy kung aling window ang aktibo";
+"active_window_indicator_title" = "Ipakita ang indicator ng aktibong window";
+"auto_fullscreen" = "Fullscreen sa pamamagitan ng pag-scroll";
+"auto_fullscreen_summary" = "Awtomatikong lumipat sa fullscreen kapag nag-i-scroll ng teksto. Tip: maaari ka ring lumipat sa full screen sa pamamagitan ng double-tap sa screen.";
+"choose_strongs_greek_dictionary_summary" = "Pumili ng diksyonaryo ng Strong's para sa mga kahulugan ng salitang Griyego";
+"choose_strongs_greek_dictionary_title" = "Diksyonaryong Griyego ng Strong's";
+"choose_strongs_greek_morphology_summary" = "Pumili ng diksyonaryo para sa mga kahulugan ng morpolohiyang Griyego ni Robinson";
+"choose_strongs_greek_morphology_title" = "Morpolohiyang Griyego ni Robinson";
+"choose_strongs_hebrew_dictionary_summary" = "Pumili ng diksyonaryo ng Strong's para sa mga kahulugan ng salitang Hebreo";
+"choose_strongs_hebrew_dictionary_title" = "Diksyonaryong Hebreo ng Strong's";
+"choose_word_lookup_dictionary_summary" = "Pumili ng mga diksyonaryo para sa paghahanap ng mga salita";
+"choose_word_lookup_dictionary_title" = "Mga diksyonaryo para sa paghahanap ng salita";
+"full_screen_hide_buttons_pref_summary" = "Kapag lumipat sa fullscreen mode, awtomatikong itago ang window button bar na nasa ibaba ng screen";
+"full_screen_hide_buttons_pref_title" = "Itago ang window button bar sa fullscreen";
+"hide_bible_reference_overlay_summary" = "Huwag ipakita ang semi-transparent na Bible reference overlay kapag ang app ay nasa fullscreen mode";
+"hide_bible_reference_overlay_title" = "Itago ang Bible reference overlay";
+"hide_window_buttons_summary" = "Ang mga button ng window na ipinapakita sa kanang bahagi ng mga Bible view ay itinatago. Ang navigation bar ng window sa ibaba ay ipinapakita pa rin at maaari mong buksan ang popup menu ng window sa pamamagitan ng matagal na pag-tap dito.";
+"hide_window_buttons_title" = "Itago ang mga button ng window";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
+"pref_font_size_multiplier_title" = "Multiplier ng laki ng font";
+"prefs_bible_view_swipe_mode_summary" = "Ang swipe kaliwa / kanan na kilos ay maaaring gamitin para pumunta sa susunod na pahina / kabanata.";
+"prefs_bible_view_swipe_mode_title" = "Aksyon para sa swipe kaliwa / kanan na kilos";
+"prefs_disable_animations_summary" = "I-disable ang iba't ibang animation tulad ng maayos na pag-scroll.";
+"prefs_disable_animations_title" = "I-disable ang mga animation";
+"prefs_disable_click_to_edit_summary" = "Kailangan gamitin ang button na i-edit para ma-edit ang mga tala sa Study Pad.";
+"prefs_disable_click_to_edit_title" = "I-disable ang click-to-edit ng Study Pad";
+"prefs_notes_content_type_title" = "Format para sa mga bagong tala ng bookmark";
+"prefs_notes_content_type_summary" = "Format ng teksto na ginagamit kapag gumagawa ng mga bagong tala ng bookmark at mga entry ng Study Pad";
+"notes_content_type_html" = "Rich text (HTML)";
+"notes_content_type_markdown" = "Markdown";
+"prefs_double_tap_to_fullscreen_summary" = "Pumasok sa fullscreen mode sa pamamagitan ng pag-double-tap sa window";
+"prefs_double_tap_to_fullscreen_title" = "I-double-tap para sa Fullscreen";
+"prefs_e_ink_mode_title" = "Black & white mode";
+"prefs_eink_mode_summary" = "Gamitin ang application sa monochrome mode (walang kulay), na mas angkop para sa mga E-ink device.";
+"prefs_interface_locale_summary" = "Pumili ng custom na wika para sa user interface";
+"prefs_interface_locale_title" = "Wika ng application";
+"prefs_navigate_to_verse_summary" = "Pumili ng talata (at kabanata) kapag pumipili ng sipi";
+"prefs_navigate_to_verse_title" = "Pumunta sa talata";
+"prefs_night_mode_automatic" = "Awtomatiko";
+"prefs_night_mode_manual" = "Manwal";
+"prefs_night_mode_summary" = "Kung lilipat sa night mode nang awtomatiko (kung sinusuportahan ng device), manwal o sa pamamagitan ng setting ng system (Android 10+). Ang manwal na paglipat ay maaaring gawin mula sa 3-tuldok na menu ng mga opsyon sa pangunahing screen.";
+"prefs_night_mode_system" = "Sistema";
+"prefs_night_mode_title" = "Paglipat ng night mode";
+"prefs_open_links_in_special_window_summary" = "Buksan ang mga link sa espesyal na window, para sa mas mabilis na pagpapakita ng mga cross-reference at Strong's";
+"prefs_open_links_in_special_window_title" = "Window ng mga link";
+"prefs_screen_keep_on_summary" = "Pigilan ang screen na matulog habang ginagamit ang app na ito";
+"prefs_screen_keep_on_title" = "Panatilihing naka-on ang screen";
+"prefs_show_error_box_summary" = "Kapaki-pakinabang para sa mga developer kapag nagde-debug ng mga error sa Javascript side ng BibleView. Magpapabagal ito sa app.";
+"prefs_show_error_box_title" = "Ipakita ang Javascript error box";
+"prefs_swipe_mode_chapter" = "Kabanata";
+"prefs_swipe_mode_none" = "Naka-disable";
+"prefs_swipe_mode_page" = "Pahina";
+
+"prefs_volume_keys_scroll_title" = "Pag-scroll gamit ang mga volume button";
+"prefs_volume_keys_scroll_summary" = "Gamitin ang volume up/down para mag-scroll ng teksto ng Bibliya";
+"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
+"prefs_experimental_features_title" = "Mga experimental na feature";
+"prefs_experimental_features_summary" = "Pumili kung aling mga experimental na feature ang ibibigay-daan. Ang mga feature na ito ay nasa pag-unlad pa at maaaring magbago o maalis";
+"experimental_feature_bookmark_edit_actions" = "Mga aksyon sa pag-edit ng bookmark";
+"experimental_feature_add_paragraph_break" = "Magdagdag ng paragraph break na bookmark";
+"prefs_enable_bluetooth_title" = "Paganahin ang Bluetooth media buttons";
+"prefs_enable_bluetooth_summary" = "Pangasiwaan ang Bluetooth media buttons upang simulan/itigil ang pagsasalita.";
+
+"open_bible_links_title" = "Buksan ang mga link ng Bibliya sa AndBible";
+"open_bible_links_summary" = "Kapag na-click ang mga link na tumutukoy sa URL ng Bibliya na sinusuportahan ng AndBible, buksan ang mga ito sa AndBible";
+
+"crash_app" = "Crash app!";
+"crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";
+"crash_app_scheduled_summary" = "Crash scheduled in 10 seconds.";
+"sign_in_failed" = "Nabigo ang pag-sign in sa synchronization backend service.";
+"sync_adapter" = "Backend ng Synchronization";
+"sync_adapter_summary" = "Kasalukuyan: %@";
+"adapters_google_drive" = "Google Drive";
+"adapters_next_cloud" = "Next Cloud";
+"auth_server_uri" = "URL ng Server";
+"auth_username" = "Pangalan ng user";
+"auth_password" = "Password";
+"auth_folder_path" = "Path ng folder para sa sync";
+"auth_folder_path_summary" = "Parent folder para sa sync data (walang laman = root)";
+"invalid_url_message" = "Ang URL na iyong ipinasok ay hindi wasto. Mangyaring magpasok ng wastong URL (hal., https://nextcloud.example.com)";
+"prefs_sync_introduction_summary1" = "Piliin kung aling cloud service ang nais mong gamitin para i-synchronize ang maraming device.";
+"test_connection" = "Test Connection";
+"overrideBackup" = "May nakitang umiiral na database sa Cloud na hindi naka-synchronize ang device na ito. Ang database ay naglalaman ng %@. Ano ang nais mong gawin?";
+"cloud_fetch_and_restore_initial" = "Kopyahin mula sa Cloud papunta sa device na ito";
+"cloud_create_new" = "Kopyahin mula sa device na ito papunta sa Cloud";
+"cloud_disable_sync" = "Kanselahin at huwag paganahin ang synchronization";
+"cloud_sync_title" = "Synchronization ng device";
+"application_preferences" = "Mga kagustuhan ng application";
+"are_you_sure_reset_local" = "Ire-reset nito ang iyong lokal na database para sa %@ gamit ang nilalaman na kasalukuyang nakaimbak sa cloud service.";
+"are_you_sure_reset_cloud" = "Ire-reset nito ang iyong cloud database para sa %@ gamit ang nilalaman na mayroon ka sa device na ito.";
+"reading_plans_content" = "Mga plano sa pagbabasa at kanilang mga katayuan";
+"bookmarks_contents" = "Mga Bookmark, Mga Label at Study Pad";
+"workspaces_contents" = "Mga Workspace at Window";
+"my_documents" = "Aking Mga Dokumento";
+"my_documents_contents" = "Aking Mga Dokumento at kanilang nilalaman";
+"synchronization_categories" = "Mga kategorya ng synchronization";
+"sync_error" = "May naganap na error sa Cloud synchronization";
+"sync_cant_fetch" = "Ang bersyon ng database o patch file na nakaimbak sa Cloud ay mas mataas kaysa sa sinusuportahan ng app na ito.";
+"sync_disabling" = "Nini-disable ang synchronization para sa %@ sa ngayon.";
+"sync_update_app" = "Pakiayos ang app para mapatuloy ang synchronization.";
+"last_updated" = "Huling na-update: %@";
+
+/* Google Drive Sync */
+"prefs_sync_introduction_summary2" = "When using Google Drive, %@ is granted access only to applications files, not any personal files.";
+"sync_confirmation" = "Are you sure that you want to sign out and reset synchronization?";
+"google_drive_account" = "Google Drive Account";
+"google_drive_sign_in" = "Sign In to Google Drive";
+"google_drive_sign_out" = "Sign Out and Reset Synchronization";
+"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
+"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
+"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
+"google_drive_not_signed_in" = "Not signed in";
+"google_drive_permission_required" = "Google Drive permission is required";
+
+"help_workspaces_title" = "Mga Workspace";
+"reading_plans_plural" = "Mga Plano sa Pagbabasa";
+
+/* Android window popup menu parity */
+"windowMaximise" = "I-maximize";
+"windowMinimise" = "I-minimize";
+"change_to_normal" = "Baguhin sa normal na window";
+"move_window" = "Ilipat sa";
+"move_window_to_position2" = "Posisyon %1$d (%2$@:%3$@)";
+"window_pin_mode" = "I-pin";
+"windowSynchronise" = "I-synchronize";
+"window_disable_sync" = "Huwag paganahin ang pag-synchronize";
+"sync_group_n" = "Grupo %d";
+"text_options_window_menutitle" = "Mga opsyon sa teksto";
+"prefs_text_colors_menutitle" = "Mga setting ng kulay";
+"prefs_section_title_title" = "Mga pamagat ng seksyon";
+"prefs_show_strongs_title" = "Mga numero ng Strong";
+"prefs_show_verseno_title" = "Mga numero ng kabanata at talata";
+"copy_settings" = "Kopyahin ang mga setting sa";
+"copy_settings_to_workspace" = "Workspace";
+"copy_settings_to_window" = "Window %1$d (%2$@: %3$@)";
+"copy_settings_to_global" = "Mga global na default";
+"copyReference" = "Kopyahin ang link sa clipboard";
+"reference_copied_to_clipboard" = "Nakopya ang sanggunian sa clipboard";
+"add_ellipsis" = "%@…";
+"copy_settings_title" = "Aling mga setting ang gusto mong kopyahin?";
+"select_all" = "Piliin lahat";
+"select_none" = "Huwag pumili ng kahit ano";
+"font" = "Font";
+"margin_size" = "Margin size";
+"top_margin" = "Tuktok na margin";
+"footnotes_inline" = "Inline footnotes";
+"expand_cross_references" = "Expand cross references";
+"cross_references" = "Mga cross-reference";
+"verse_per_line" = "Verse per line";
+"show_bookmarks" = "Ipakita ang mga bookmark";
+"hide_labels" = "Hide labels";
+"my_notes" = "My notes";
+"page_number" = "Page number";
+"infinite_scroll" = "Walang katapusang pag-scroll";
+"non_strongs_word_italic" = "I-italicize ang mga idinagdag na salita";
+"mark_as_read_button" = "Button na markahan bilang nabasa";
+"title_scroll_button" = "Button na scroll ng pamagat";
+"memorization_indicators" = "Mga indicator ng memorisasyon";
+"ai_document_markers" = "AI document markers";
+"page_scroll_amount" = "Dami ng page scroll";
+"ordinals" = "Ordinals";
+
+/* Android shared translations */
+"about" = "Tungkol sa";
+"app_name_andbible" = "AndBible";
+"app_name_long" = "AndBible: Pag-aaral ng Bibliya";
+"download" = "I-download ang Mga Dokumento";
+"download_errors" = "Mga error sa pag-download";
+"format_epub" = "Mga dokumento ng EPUB (*.epub)";
+"format_mybible" = "Mga dokumento ng MyBible (*.SQLite3)";
+"format_mysword" = "Mga dokumento ng MySword (*.mybible)";
+"format_zip" = "Zip file na naglalaman ng Sword module(s), o backup file ng mga dokumento (*.abmd) na ginawa ng %@";
+"install_zip" = "I-load ang Mga Dokumento Mula sa Mga File";
+"rename" = "Palitan ng pangalan";
+"restore_database" = "I-restore ang File ng Database";
+"reversed_split_mode" = "Reversed na split mode";
+"supported_formats" = "Mga sinusuportahang format para sa pag-load ng mga dokumento mula sa isang file: %@";
+"welcome_message" = "Salamat sa pag-download ng %@. Kasalukuyang walang mga Bibliya o dokumento na naka-install. Para magpatuloy, mangyaring mag-install ng hindi bababa sa 1 dokumento sa pamamagitan ng pag-download mula sa internet, o sa pamamagitan ng pag-load mula sa isang zip file na backup ng dokumento.";
+
+/* Android shared translations */
+"copy_of %@" = "Kopya ng %@";
+"fullscreen" = "Fullscreen";
+"help_bookmarks" = "Mga Bookmark";
+"help_navigation" = "Nabigasyon";
+"help_search" = "Paghahanap";
+"help_workspaces" = "Mga Workspace";
+"skip" = "Laktawan";
+"error_no_content" = "Walang nilalaman para sa napiling talata";

@@ -625,3 +625,4 @@ Kada koristite Google Drive, %@ dozvoljen je pristup samo datotekama aplikacije,
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Na SD kartici postoji plan čitanja jsword/readingplan sa istim imenom kao i interni plan. Ne može biti ovdje prikazan. Molimo promijenite naziv datoteke, ostavljajući njen nastavak imena kao .properties";
+"error_no_content" = "Nema sadržaja u označenom retku";

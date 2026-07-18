@@ -624,3 +624,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Olvasási terv található az sd kártyán ugyanazzal a névvel mint az alkalmazás belső olvasási terve. Ez a terv itt nem jeleníthető meg. Nevezze át a fájlt, figyelve rá, hogy a kiterjesztése .properties maradjon.";
+"error_no_content" = "A kiválasztott vershez nem tartozik tartalom.";

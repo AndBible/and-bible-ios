@@ -1,0 +1,763 @@
+/* AndBible iOS — English Localizations */
+
+/* ========================================
+   General / Shared
+   ======================================== */
+"app_name" = "AndBible";
+"done" = "مکمل";
+"cancel" = "منسوخ کریں";
+"delete" = "حذف کریں";
+"save" = "محفوظ کریں";
+"edit" = "ترمیم کریں";
+"add" = "Add";
+"search" = "تلاش";
+"settings" = "ایپلیکیشن ترجیحات";
+"close" = "بند کریں";
+"ok" = "ٹھیک ہے";
+"yes" = "ہاں";
+"no" = "نہیں";
+"error" = "خرابی";
+"loading" = "Loading...";
+"create" = "بنائیں";
+"new_window" = "نئی ونڈو";
+"clear" = "Clear";
+"reset" = "ری سیٹ کریں";
+"retry" = "Retry";
+"all" = "تمام";
+"sort" = "Sort";
+"name" = "نام";
+"untitled" = "Untitled";
+"compare" = "موازنہ کریں";
+"translations" = "تراجم";
+"auto" = "Auto";
+"off" = "Off";
+"inline" = "Inline";
+"links" = "لنکس";
+"hidden" = "Hidden";
+"completed" = "مکمل";
+"no_results" = "No Results";
+"searching" = "Searching...";
+
+/* ========================================
+   Navigation / Bible Reader
+   ======================================== */
+"bible" = "بائبل";
+"deuterocanonical" = "ڈیوٹروکینونیکل";
+"bookmarks" = "بک مارکس";
+"reading_plans" = "مطالعہ منصوبے";
+"downloads" = "Downloads";
+"history" = "تاریخ";
+"workspaces" = "ورک اسپیسز";
+"definition" = "Definition";
+"dictionary" = "لغت";
+"general_book" = "کتاب";
+"map" = "نقشہ";
+"locked" = "Locked";
+
+/* Bible Navigation */
+"choose_book" = "کتاب منتخب کریں";
+"books" = "Books";
+"old_testament" = "پرانا عہدنامہ";
+"new_testament" = "نیا عہدنامہ";
+"previous_chapter" = "Previous chapter";
+"next_chapter" = "Next chapter";
+"back_to_bible" = "Back to Bible";
+
+/* Module Pickers */
+"choose_document" = "دستاویز منتخب کریں";
+"document_type" = "Document type";
+"picker_select_translation" = "Select Translation";
+"picker_select_commentary" = "Select Commentary";
+"picker_select_dictionary" = "Select Dictionary";
+"picker_select_general_book" = "Select General Book";
+"picker_select_map" = "Select Map";
+"picker_no_bible_modules" = "No Bible modules installed";
+"picker_no_commentary_modules" = "No commentary modules installed";
+"picker_no_dictionary_modules" = "No dictionary modules installed";
+"picker_no_general_book_modules" = "No general book modules installed";
+"picker_no_map_modules" = "No map modules installed";
+"download_modules" = "Download Modules";
+"download_document_confirm_prefix" = "ڈاؤنلوڈ کریں";
+"bookmark_warning4" = "اپ ڈیٹ کرنے سے پہلے ماڈیول کا بیک اپ لینا تجویز کیا جاتا ہے۔";
+"bookmark_warning3" = "کیا آپ پھر بھی ماڈیول اپ ڈیٹ کرنا چاہتے ہیں؟";
+"bookmark_warning2" = "اگر دستاویز کا ڈھانچہ بدل گیا ہو تو اس دستاویز کو اپ ڈیٹ کرنے سے یہ بک مارکس/نوٹس دستاویز کے اندر ادھر ادھر ہو سکتے ہیں یا مکمل طور پر غائب ہو سکتے ہیں۔";
+"bookmark_warning" = "اس دستاویز کے لیے بک مارکس اور/یا نوٹس ہیں۔";
+/* Toolbar / Actions */
+"toggle_strongs_numbers" = "Toggle Strong's numbers";
+"bookmark" = "بک مارک";
+"copy" = "کاپی کریں";
+"share" = "شیئر کریں";
+"search_web" = "Web";
+
+/* Strong's Modes */
+"strongs_off" = "Off";
+"strongs_inline" = "متن اور لنکس";
+"strongs_links" = "لنکس";
+"strongs_hidden" = "پوشیدہ لنکس";
+"find_all_occurrences" = "Find all occurrences";
+"no_dictionary_installed" = "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads.";
+"back_to_previous" = "Back";
+
+/* ========================================
+   Bookmarks & Labels
+   ======================================== */
+"add_bookmark" = "Add Bookmark";
+"edit_bookmark" = "Edit Bookmark";
+"bookmark_note" = "Note";
+"labels" = "لیبل";
+"new_label" = "New Label";
+"study_pad" = "StudyPad";
+"my_notes" = "My Notes";
+"no_bookmarks" = "No Bookmarks";
+"no_bookmarks_description" = "Long-press on a verse to add a bookmark.";
+"search_bookmarks" = "Search bookmarks";
+"sort_bible_order" = "Bible Order";
+"sort_date_created" = "Date Created";
+"sort_last_updated" = "Last Updated";
+"edit_labels" = "Edit Labels";
+"add_labels" = "Add labels";
+"open_studypad_for_label %@" = "Open \"%@\" StudyPad";
+"no_labels" = "No Labels";
+"no_labels_description" = "Create labels to organize your bookmarks and notes.";
+"label_name" = "Label name";
+"studypad" = "مطالعہ پیڈ";
+"open_studypad" = "Open StudyPad";
+"edit_label" = "لیبل ترمیم کریں";
+"label_edit_name" = "نام";
+"label_edit_color" = "Color";
+"label_edit_icon" = "Icon";
+"no_icon" = "No Icon";
+"label_edit_options" = "Options";
+"favourite" = "Favourite";
+"underline_style" = "Underline Style";
+"underline_whole_verse" = "Underline Whole Verse";
+"studypad_empty" = "Empty StudyPad";
+"studypad_empty_description" = "Add notes or bookmark verses to build your study journal.";
+"add_note" = "Add Note";
+"note" = "Note";
+"new_note" = "New Note";
+"edit_note" = "Edit Note";
+
+/* ========================================
+   Search
+   ======================================== */
+"search_bible" = "بائبل تلاش کریں";
+"search_results" = "Search Results";
+"whole_bible" = "پوری بائبل";
+"old_testament_short" = "OT";
+"new_testament_short" = "NT";
+"current_book" = "Current Book";
+"search_index" = "تلاش انڈیکس";
+"search_checking_index" = "Checking index...";
+"search_need_index" = "To search a document we need an index.";
+"search_create_index" = "بنائیں";
+"search_indexing_message" = "انڈیکسنگ مکمل ہونے پر آپ کو تلاش اسکرین پر لے جایا جائے گا۔";
+"search_searching" = "Searching...";
+"search_enter_prompt" = "Enter a word or phrase to search";
+"search_bible_text" = "Search Bible text";
+"search_match" = "Match";
+"search_scope_all" = "تمام";
+"search_scope_ot" = "OT";
+"search_scope_nt" = "NT";
+"search_translations" = "تراجم";
+"search_all" = "تمام";
+
+/* ========================================
+   Downloads / Module Browser
+   ======================================== */
+"module_browser" = "Module Browser";
+"doc_type_all" = "تمام اقسام";
+"bibles" = "Bibles";
+"commentaries" = "Commentaries";
+"dictionaries" = "لغات";
+"category_books" = "Books";
+"maps" = "Maps";
+"doc_type_addons" = "Add-ons";
+"document_filter_results %lld" = "Documents (%lld)";
+"install" = "Install";
+"install_module" = "Install";
+"update" = "Update";
+"uninstall" = "Uninstall";
+"unavailable" = "Unavailable";
+"recommended_document" = "تجویز کردہ!";
+"bad_document_warning" = "Warning";
+"refresh_catalog" = "Refresh Catalog";
+"repositories" = "Repositories";
+"all_languages_count %lld" = "All Languages (%lld)";
+"refreshing_catalog" = "Refreshing catalog...";
+"no_modules_match_filters" = "No modules match your filters";
+"tap_refresh_to_load" = "Tap Refresh to load available modules";
+"search_modules" = "Search modules";
+"delete_module_index" = "Delete Index";
+"uninstall_module_title" = "Uninstall Module";
+"uninstall_module_message_format" = "Remove %@ from this device?";
+"delete_module_index_title" = "Delete Search Index";
+"delete_module_index_message_format" = "Delete the search index for %@?";
+"module_initials" = "Initials";
+"module_name" = "نام";
+"module_category" = "زمرہ";
+"module_language" = "زبان";
+"module_source" = "Source";
+"module_versions" = "Versions";
+"module_latest_version" = "Latest";
+"module_installed_version" = "Installed";
+"module_version_unavailable" = "No version metadata available.";
+"module_install_size" = "Install size";
+"module_local_state" = "Local State";
+"module_installed" = "Installed";
+"module_encrypted" = "Encrypted";
+"module_unlocked" = "Unlocked";
+"module_locked" = "Locked";
+
+/* ========================================
+   Settings
+   ======================================== */
+"settings_display" = "Display";
+"settings_text_display" = "Text Display";
+"settings_colors" = "Colors";
+"text_display" = "Text Display";
+"settings_font" = "Font";
+"font_size" = "Size";
+"font_family" = "Family";
+"settings_layout" = "Layout";
+"line_spacing" = "Line Spacing";
+"justify_text" = "Justify Text";
+"verse_per_line" = "Verse Per Line";
+"hyphenation" = "ہائفنیشن";
+"settings_content" = "مواد";
+"verse_numbers" = "Verse Numbers";
+"section_titles" = "Section Titles";
+"footnotes" = "حاشیے";
+"inline_footnotes" = "Inline Footnotes";
+"red_letters" = "Red Letters";
+"cross_references" = "کراس حوالہ جات";
+"expand_cross_references" = "Expand Cross References";
+"strongs_numbers" = "Strong's Numbers";
+"morphology" = "Morphology";
+"settings_annotations" = "Annotations";
+"show_bookmarks" = "بک مارکس دکھائیں";
+"show_my_notes" = "Show My Notes";
+"verse_selection" = "Verse Selection";
+
+/* Colors */
+"colors" = "Colors";
+"night_mode" = "Night Mode";
+"day_theme" = "Day Theme";
+"night_theme" = "Night Theme";
+"text_color" = "Text Color";
+"background" = "Background";
+"color_workspace" = "ورک اسپیس رنگ";
+"prefs_noise_title" = "پس منظر شور";
+"prefs_noise_summary" = "پس منظر میں تھوڑا شور شامل کرنا آنکھوں کو زیادہ آرام دہ بنا سکتا ہے۔";
+"reset_to_defaults" = "Reset to Defaults";
+
+/* Dictionaries */
+"settings_dictionaries" = "لغات";
+"hebrew_dictionary" = "Hebrew Dictionary";
+"greek_dictionary" = "Greek Dictionary";
+"no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
+
+/* Data */
+"settings_data" = "Data";
+"import_export" = "Import & Export";
+
+/* Security — Settings for the persecuted */
+"settings_security" = "مظلوموں کے لیے ترتیبات";
+"discrete_mode" = "مذہبی علامات چھپائیں";
+"discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
+"show_calculator" = "کیلکولیٹر";
+"show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
+"calculator_pin" = "کیلکولیٹر PIN";
+"calculator_pin_placeholder" = "1234";
+"calculator_pin_description" = "کیلکولیٹر دکھائے جانے پر ایپ میں داخل ہونے کے لیے PIN کوڈ۔";
+"discrete_help_title" = "پہلے یہ پڑھیں!";
+"discrete_help_summary" = "ترتیبات کے لیے ہدایات اور مخصوص خفیہ بلڈ کے بارے میں معلومات۔";
+"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
+"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
+"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
+"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* About */
+"settings_language" = "زبان";
+"language_system_default" = "System Default";
+"language_restart_required" = "Restart the app for the language change to take effect.";
+"settings_about" = "کے بارے میں";
+"version" = "Version";
+
+/* ========================================
+   Import & Export
+   ======================================== */
+"export" = "برآمد کریں";
+"full_backup_json" = "Full Backup (JSON)";
+"export_footer" = "Export your data for backup or transfer to another device.";
+"import" = "درآمد کریں";
+"import_from_file" = "Import from File";
+"import_footer" = "Import data from a JSON backup or CSV bookmark file. Supported formats: .json, .csv, .bbl (MySword).";
+"modules" = "Modules";
+"install_sword_module" = "Install SWORD Module (.zip)";
+"modules_footer" = "Install a SWORD Bible module from a local .zip file. The ZIP must contain mods.d/ and module data files.";
+"epub" = "EPUB";
+"install_epub_book" = "Install EPUB Book";
+"epub_footer" = "Import an EPUB file for offline reading and study.";
+"error_read_file" = "Error: Could not read file";
+"error_save_file" = "Error: Could not save file";
+"mysword_file_hint" = "MySword file detected. Use Downloads to install Bible modules.";
+"error_unsupported_format_%@" = "Error: Unsupported file format (%@)";
+"error_prefix_%@" = "Error: %@";
+"installed_module_%@" = "Installed module: %@";
+"installed_epub_%@" = "Installed EPUB: %@";
+"installed_font_%@" = "Installed font: %@";
+"install_do_you_want" = "کیا آپ ماڈیول (%@) انسٹال کرنا چاہتے ہیں؟";
+
+/* ========================================
+   Repository Manager
+   ======================================== */
+"no_sources_configured" = "No repository sources configured.";
+"remote_sources" = "Remote Sources";
+"sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
+"reset_sources_title" = "Reset Sources?";
+"reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
+"add_custom_repository" = "Add custom repository";
+"custom_repositories" = "کسٹم ذخائر";
+"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
+"custom_repository" = "Custom repository";
+"default_repositories" = "Default repositories";
+"delete_custom_repository_message_format" = "%@ حذف کریں؟";
+"delete_custom_repository_title" = "Delete repository";
+"edit_custom_repository" = "Edit custom repository";
+"help" = "مدد";
+"https" = "HTTPS";
+"open_wiki" = "Open Wiki";
+"repository_source_error" = "Repository source error";
+"repository_url" = "ذخیرے کا URL";
+"repository_url_placeholder" = "https://example.org/repository";
+"validating_repository" = "Validating repository";
+"source_details" = "Source Details";
+"source_name_placeholder" = "Name (e.g., My Repository)";
+"source_host_placeholder" = "Host (e.g., example.org)";
+"source_path_placeholder" = "Catalog Path (e.g., /sword)";
+"source_catalog_hint" = "The source must serve a SWORD module catalog at the specified host and path (mods.d.tar.gz).";
+"add_source" = "Add Source";
+
+/* ========================================
+   Reading Plans
+   ======================================== */
+"reading_plan_no_plans" = "No Reading Plans";
+"reading_plan_no_plans_description" = "Start a reading plan to track your daily Bible reading.";
+"reading_plan_start" = "Start Plan";
+"reading_plan_active" = "Active Plans";
+"reading_plan_completed" = "مکمل";
+"reading_plan_choose" = "Choose a reading plan to start";
+"reading_plan_import_custom" = "Import Custom Plan";
+"reading_plan_custom" = "کسٹم";
+"reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
+"reading_plan_available" = "Available Plans";
+"reading_plan_import_error_read" = "Could not read file";
+"reading_plan_import_error_format" = "Invalid reading plan format";
+"plan_duplicate_user_plan" = "sdcard jsword/readingplan میں کسی اندرونی منصوبے کے نام جیسا صارف مطالعہ منصوبہ ہے۔ اسے یہاں درج نہیں کیا جا سکتا۔ براہ کرم فائل کا نام تبدیل کریں، فائل ایکسٹنشن .properties رکھیں۔";
+
+/* Daily Reading */
+"daily_reading" = "Daily Reading";
+"daily_reading_loading" = "Loading plan...";
+"daily_reading_today" = "Today's Reading";
+"daily_reading_recent_days" = "Recent Days";
+"mark_as_read" = "Mark as Read";
+"unmark" = "Unmark";
+
+/* ========================================
+   Speak / TTS
+   ======================================== */
+"speak" = "بولیں";
+"pause" = "رکیں";
+"stop" = "روکیں";
+"speed" = "Speed";
+"sleep_timer" = "Sleep Timer";
+"speak_now_speaking" = "Now Speaking";
+"speak_stopped" = "Stopped";
+"speak_paused" = "Paused";
+"speak_playing" = "Playing";
+"speak_speed" = "Speed";
+"speak_sleep_timer" = "Sleep Timer";
+
+/* ========================================
+   Compare Translations
+   ======================================== */
+"compare_select_translations" = "Select Translations";
+"compare_choose_translations" = "Choose Translations";
+"compare_install_additional_modules" = "Install additional Bible modules from Downloads to compare translations.";
+"compare_loading_translations" = "Loading translations...";
+"compare_select_translations_header" = "Select translations to compare";
+"compare_verses" = "Compare Verses";
+
+/* ========================================
+   Cross References
+   ======================================== */
+"cross_references" = "کراس حوالہ جات";
+
+/* ========================================
+   Workspace
+   ======================================== */
+"new_workspace" = "New Workspace";
+"workspace_name" = "Workspace Name";
+"workspace_no_workspaces" = "No workspaces yet";
+"workspace_create_first" = "Tap + to create your first workspace.";
+"workspace_new" = "New Workspace";
+
+/* ========================================
+   History
+   ======================================== */
+"history_no_history" = "No History";
+"history_no_history_description" = "Navigation history will appear as you browse.";
+
+/* ========================================
+   Window Management
+   ======================================== */
+"restore_size" = "Restore Size";
+"maximize" = "Maximize";
+"minimize" = "Minimize";
+"sync_scrolling" = "Sync Scrolling";
+"pin" = "پن کریں";
+"sync_group" = "Sync Group";
+"restore" = "بحال کریں";
+
+/* ========================================
+   Dictionary / General Books
+   ======================================== */
+"dictionary_loading_keys" = "Loading keys...";
+"dictionary_search_keys" = "Search keys...";
+"genbook_loading_entries" = "Loading entries...";
+"genbook_no_entries" = "No Entries";
+"genbook_no_entries_description" = "This module has no entries.";
+
+/* ========================================
+   EPUB
+   ======================================== */
+"epub_library" = "EPUB Library";
+"epub_contents" = "EPUB Contents";
+"search_epub" = "Search EPUB";
+"epub_loading_library" = "Loading library...";
+"epub_no_epubs_installed" = "No EPUBs Installed";
+"epub_no_epubs_installed_description" = "Import EPUB files from the Import & Export screen.";
+"epub_loading_toc" = "Loading table of contents...";
+"epub_no_toc" = "No Table of Contents";
+"epub_no_toc_description" = "This EPUB has no table of contents entries.";
+"epub_search_prompt" = "Search in EPUB...";
+
+/* ========================================
+   EPUB Reader (no module loaded)
+   ======================================== */
+"reader_no_epub_loaded" = "No EPUB is loaded. Open one from the EPUB Library first.";
+
+/* ========================================
+   Sync
+   ======================================== */
+"icloud_sync" = "iCloud Sync";
+"icloud_sync_enabled" = "Enable iCloud Sync";
+"icloud_sync_description" = "Sync bookmarks, labels, workspaces, reading plans, and notes across your devices via iCloud. Requires an iCloud account.";
+"sync_status" = "Status";
+"status" = "Status";
+"icloud_account" = "iCloud Account";
+"last_sync" = "Last Sync";
+"sync_active" = "Active";
+"sync_disabled" = "غیر فعال";
+"syncing" = "Syncing…";
+"no_icloud_account" = "No iCloud Account";
+"icloud_signed_in" = "Signed In";
+"icloud_restricted" = "iCloud Restricted";
+"icloud_could_not_determine" = "Could Not Determine iCloud Status";
+"icloud_temporarily_unavailable" = "iCloud Temporarily Unavailable";
+"sync_data_included" = "Synced Data";
+"sync_what_syncs" = "Bookmarks, labels, notes, workspaces, windows, reading plan progress, and StudyPad entries are synced. Module downloads and app settings stay on this device.";
+"restart_required" = "Restart Required";
+"restart_to_apply_sync" = "Please restart the app to apply sync changes.";
+"disable_sync_title" = "Disable iCloud Sync?";
+"disable_sync" = "Disable Sync";
+"disable_sync_warning" = "Data already synced to iCloud will remain. New changes will only be saved locally.";
+
+/* ========================================
+   Backup (legacy keys)
+   ======================================== */
+"backup_data" = "Backup Data";
+"restore_data" = "Restore Data";
+"export_bookmarks" = "Export Bookmarks";
+"import_bookmarks" = "Import Bookmarks";
+
+/* ========================================
+   Sharing
+   ======================================== */
+"share_verse" = "شیئر کریں…";
+"copy_verse" = "Copy Verse";
+
+/* ========================================
+   Errors
+   ======================================== */
+"error_module_not_found" = "Module not found";
+"error_download_failed" = "Download failed";
+"error_network" = "Network error. Please check your connection.";
+
+/* ========================================
+   Interpolated Strings (format specifiers)
+   ======================================== */
+
+/* Reading Plans */
+"Day %lld" = "Day %lld";
+"Day %lld/%lld" = "Day %lld/%lld";
+"%lld days completed" = "%lld days completed";
+"%lld of %lld days completed" = "%lld of %lld days completed";
+"Started %@" = "Started %@";
+"%lld days" = "%lld days";
+
+/* Search */
+"Find in %@" = "%@ میں تلاش کریں";
+"Create an index for %@?" = "Create an index for %@?";
+"Creating index. Processing %@" = "Creating index. Processing %@";
+"No matches found for \"%@\"" = "No matches found for \"%@\"";
+"%lld translations" = "%lld translations";
+"%@ (%@)" = "%@ (%@)";
+"%lld verses in %lld translations" = "%lld verses in %lld translations";
+"%lld verses in 1 translation" = "%lld verses in 1 translation";
+"%lld results" = "%lld results";
+
+/* Window Management */
+"Group %lld" = "Group %lld";
+
+/* EPUB */
+"Search: %@" = "Search: %@";
+"Enter a search term to find text within \"%@\"." = "Enter a search term to find text within \"%@\".";
+
+/* Compare */
+"Choose which translations to compare for %@ %lld." = "Choose which translations to compare for %@ %lld.";
+"Verse %lld" = "Verse %lld";
+"%lld selected" = "%lld selected";
+
+/* Workspace */
+"%lld window" = "%lld window";
+"%lld windows" = "%lld windows";
+
+/* Text Display Settings */
+"global_text_display_settings_title" = "عالمی متن کے اختیارات";
+"global_text_display_settings_summary" = "تمام ورک اسپیسز کے لیے ڈیفالٹ متن ڈسپلے ترتیبات";
+"workspace_text_display_settings_title" = "متن کے اختیارات - %@";
+"window_text_display_settings_title" = "متن کے اختیارات - ونڈو %d";
+"parent_settings_category_title" = "پیرنٹ ترتیبات";
+"workspace_text_options_link" = "ورک اسپیس متن کے اختیارات — %@";
+"workspace_text_options_link_summary" = "اس ورک اسپیس کے متن ڈسپلے ترتیبات ترمیم کریں";
+"global_text_options_link" = "عالمی متن کے اختیارات";
+"global_text_options_link_summary" = "تمام ورک اسپیسز کے لیے ڈیفالٹ متن ڈسپلے ترتیبات ترمیم کریں";
+"text_display_font_size_title_format" = "فونٹ سائز (%d pt)";
+"text_display_font_family_title_format" = "فونٹ فیملی (%@)";
+"text_display_line_spacing_title_format" = "لائن اسپیسنگ (%1.1fx)";
+"text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
+"text_display_top_margin_title_format" = "اوپری حاشیہ (%d ملی میٹر)";
+"text_display_page_scroll_amount_title_format" = "Page scroll amount (%d%%)";
+"text_display_left_margin_title_format" = "بایاں حاشیہ (%d ملی میٹر)";
+"text_display_right_margin_title_format" = "دایاں حاشیہ (%d ملی میٹر)";
+"text_display_max_width_title_format" = "متن کی زیادہ سے زیادہ چوڑائی (%d ملی میٹر)";
+"all_text_options_window_menutitle" = "تمام متن کے اختیارات";
+
+"prefs_behavior_customization_cat" = "ایپلیکیشن رویہ";
+"prefs_display_customization_cat" = "ظاہری شکل";
+"prefs_advanced_settings_cat" = "جدید ترتیبات";
+
+"prefs_toolbar_button_action_title" = "ٹول بار بٹن دبانے کا عمل";
+"prefs_toolbar_button_action_summary" = "بائبل یا تفسیر ٹول بار بٹن دبانے/طویل دبانے پر انجام دینے کا عمل";
+"prefs_toolbar_button_action_default" = "دبانے پر مینو کھولیں، طویل دبانے پر دستاویزات اسکرین (ڈیفالٹ)";
+"prefs_toolbar_button_action_swap_menu" = "دبانے پر اگلی دستاویز، طویل دبانے پر مینو کھولیں";
+"prefs_toolbar_button_action_swap_activity" = "دبانے پر اگلی دستاویز، طویل دبانے پر دستاویزات اسکرین";
+
+
+"add_bookmark3" = "انتخاب";
+"add_bookmark_whole_verse1" = "آیات";
+"prefs_disable_two_step_bookmarking_title" = "یک قدمی بک مارکنگ";
+"prefs_disable_two_step_bookmarking_summary" = "بائبل ویو انتخاب مینو میں براہ راست \"انتخاب\" اور \"آیات\" آئٹم دکھائیں";
+
+"active_window_indicator_summary" = "کون سی ونڈو فعال ہے یہ پہچاننے میں مدد کے لیے ونڈو کونوں کو نمایاں کریں";
+"active_window_indicator_title" = "فعال ونڈو اشارہ دکھائیں";
+"auto_fullscreen" = "اسکرول سے فل اسکرین";
+"auto_fullscreen_summary" = "متن اسکرول کرتے وقت خودبخود فل اسکرین پر جائیں۔ تجویز: آپ اسکرین کو ڈبل ٹیپ کر کے بھی فل اسکرین پر جا سکتے ہیں۔";
+"choose_strongs_greek_dictionary_summary" = "یونانی لفظ کی تعریفات کے لیے Strongs لغت منتخب کریں";
+"choose_strongs_greek_dictionary_title" = "Strongs یونانی لغت";
+"choose_strongs_greek_morphology_summary" = "Robinson یونانی صرف و نحو تعریفات کے لیے لغت منتخب کریں";
+"choose_strongs_greek_morphology_title" = "Robinson یونانی صرف و نحو";
+"choose_strongs_hebrew_dictionary_summary" = "عبرانی لفظ کی تعریفات کے لیے Strongs لغت منتخب کریں";
+"choose_strongs_hebrew_dictionary_title" = "Strongs عبرانی لغت";
+"choose_word_lookup_dictionary_summary" = "الفاظ تلاش کرنے کے لیے لغات منتخب کریں";
+"choose_word_lookup_dictionary_title" = "لفظ تلاش لغات";
+"full_screen_hide_buttons_pref_summary" = "فل اسکرین موڈ پر سوئچ کرتے وقت، اسکرین کے نیچے موجود ونڈو بٹن بار خودبخود چھپائیں";
+"full_screen_hide_buttons_pref_title" = "فل اسکرین میں ونڈو بٹن بار چھپائیں";
+"hide_bible_reference_overlay_summary" = "جب ایپ فل اسکرین موڈ میں ہو تو نیم شفاف بائبل حوالہ اوورلے نہ دکھائیں";
+"hide_bible_reference_overlay_title" = "بائبل حوالہ اوورلے چھپائیں";
+"hide_window_buttons_summary" = "بائبل ویوز کے دائیں جانب دکھائے جانے والے ونڈو بٹن چھپا دیے جائیں گے۔ نیچے موجود ونڈو نیویگیشن بار اب بھی دکھائی دے گا اور آپ انہیں طویل کلک کر کے ونڈو پاپ اپ مینو کھول سکتے ہیں۔";
+"hide_window_buttons_title" = "ونڈو بٹن چھپائیں";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
+"pref_font_size_multiplier_title" = "فونٹ سائز ضرب";
+"prefs_bible_view_swipe_mode_summary" = "بائیں/دائیں سوائپ جیسچر اگلے صفحے/باب پر جانے کے لیے استعمال ہو سکتا ہے۔";
+"prefs_bible_view_swipe_mode_title" = "بائیں/دائیں سوائپ جیسچر کا عمل";
+"prefs_disable_animations_summary" = "مختلف اینیمیشن جیسے ہموار اسکرولنگ کو غیر فعال کریں۔";
+"prefs_disable_animations_title" = "اینیمیشن غیر فعال کریں";
+"prefs_disable_click_to_edit_summary" = "مطالعہ پیڈ میں نوٹس ترمیم کرنے کے لیے ترمیم بٹن استعمال کرنا ضروری ہے۔";
+"prefs_disable_click_to_edit_title" = "مطالعہ پیڈ کلک-ٹو-ایڈٹ غیر فعال کریں";
+"prefs_notes_content_type_title" = "نئے بک مارک نوٹس کی شکل";
+"prefs_notes_content_type_summary" = "نئے بک مارک نوٹس اور مطالعہ پیڈ اندراجات بناتے وقت استعمال شدہ متن کی شکل";
+"notes_content_type_html" = "بھرپور متن (HTML)";
+"notes_content_type_markdown" = "مارک ڈاؤن";
+"prefs_double_tap_to_fullscreen_summary" = "ونڈو کو ڈبل ٹیپ کر کے فل اسکرین موڈ میں داخل ہوں";
+"prefs_double_tap_to_fullscreen_title" = "فل اسکرین کے لیے ڈبل ٹیپ";
+"prefs_e_ink_mode_title" = "سیاہ اور سفید موڈ";
+"prefs_eink_mode_summary" = "ایپ کو یک رنگی موڈ (بغیر رنگ) میں استعمال کریں، جو ای-انک ڈیوائسز کے لیے موزوں ہے۔";
+"prefs_interface_locale_summary" = "کسٹم یوزر انٹرفیس زبان منتخب کریں";
+"prefs_interface_locale_title" = "ایپلیکیشن زبان";
+"prefs_navigate_to_verse_summary" = "اقتباس منتخب کرتے وقت آیت (اور باب) منتخب کریں";
+"prefs_navigate_to_verse_title" = "آیت پر جائیں";
+"prefs_night_mode_automatic" = "خودکار";
+"prefs_night_mode_manual" = "دستی";
+"prefs_night_mode_summary" = "رات کا موڈ خودبخود (اگر ڈیوائس سپورٹ کرے)، دستی یا سسٹم ترتیب کے ذریعے سوئچ کریں (Android 10+)۔ دستی سوئچنگ مرکزی اسکرین پر 3 نقطوں کے مینو سے ہو سکتی ہے۔";
+"prefs_night_mode_system" = "سسٹم";
+"prefs_night_mode_title" = "رات کا موڈ سوئچنگ";
+"prefs_open_links_in_special_window_summary" = "لنکس کو خصوصی ونڈو میں کھولیں، کراس حوالہ جات اور Strongs کی تیز ڈسپلے کے لیے";
+"prefs_open_links_in_special_window_title" = "لنکس ونڈو";
+"prefs_screen_keep_on_summary" = "اس ایپ کے استعمال کے دوران اسکرین کو سونے سے روکیں";
+"prefs_screen_keep_on_title" = "اسکرین آن رکھیں";
+"prefs_show_error_box_summary" = "ڈویلپرز کے لیے BibleView جاوا اسکرپٹ سائیڈ خرابیاں ڈیبگ کرنے میں مفید۔ یہ ایپ کو سست کر دے گا۔";
+"prefs_show_error_box_title" = "جاوا اسکرپٹ خرابی باکس دکھائیں";
+"prefs_swipe_mode_chapter" = "باب";
+"prefs_swipe_mode_none" = "غیر فعال";
+"prefs_swipe_mode_page" = "صفحہ";
+
+"prefs_volume_keys_scroll_title" = "والیوم بٹن اسکرول";
+"prefs_volume_keys_scroll_summary" = "بائبل متن اسکرول کرنے کے لیے والیوم اوپر/نیچے استعمال کریں";
+"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
+"prefs_experimental_features_title" = "تجرباتی خصوصیات";
+"prefs_experimental_features_summary" = "کون سی تجرباتی خصوصیات فعال کرنی ہیں منتخب کریں۔ یہ خصوصیات ابھی زیر تیاری ہیں اور تبدیل یا ہٹائی جا سکتی ہیں";
+"experimental_feature_bookmark_edit_actions" = "بک مارک ترمیم اعمال";
+"experimental_feature_add_paragraph_break" = "پیراگراف وقفہ بک مارک شامل کریں";
+"prefs_enable_bluetooth_title" = "بلوٹوتھ میڈیا بٹن فعال کریں";
+"prefs_enable_bluetooth_summary" = "بولنا شروع/بند کرنے کے لیے بلوٹوتھ میڈیا بٹن ہینڈل کریں۔";
+
+"open_bible_links_title" = "بائبل لنکس AndBible میں کھولیں";
+"open_bible_links_summary" = "جب AndBible سپورٹڈ بائبل URL کے حوالے والے لنکس کلک کریں تو انہیں AndBible میں کھولیں";
+
+"crash_app" = "Crash app!";
+"crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";
+"crash_app_scheduled_summary" = "Crash scheduled in 10 seconds.";
+"sign_in_failed" = "ہم آہنگی بیک اینڈ سروس میں سائن ان ناکام ہوا۔";
+"sync_adapter" = "ہم آہنگی بیک اینڈ";
+"sync_adapter_summary" = "موجودہ: %@";
+"adapters_google_drive" = "Google Drive";
+"adapters_next_cloud" = "Next Cloud";
+"auth_server_uri" = "سرور URL";
+"auth_username" = "صارف نام";
+"auth_password" = "پاس ورڈ";
+"auth_folder_path" = "ہم آہنگی فولڈر راستہ";
+"auth_folder_path_summary" = "ہم آہنگی ڈیٹا کے لیے پیرنٹ فولڈر (خالی = روٹ)";
+"invalid_url_message" = "آپ کا داخل کردہ URL غلط ہے۔ براہ کرم ایک درست URL داخل کریں (مثلاً، https://nextcloud.example.com)";
+"prefs_sync_introduction_summary1" = "منتخب کریں کہ آپ متعدد ڈیوائسز ہم آہنگ کرنے کے لیے کون سی بیک اینڈ کلاؤڈ سروس استعمال کرنا چاہتے ہیں۔";
+"test_connection" = "Test Connection";
+"overrideBackup" = "کلاؤڈ میں ایسا موجودہ ڈیٹابیس ملا جس سے یہ ڈیوائس ہم آہنگ نہیں ہے۔ ڈیٹابیس میں %@ ہے۔ آپ کیا کرنا چاہتے ہیں؟";
+"cloud_fetch_and_restore_initial" = "کلاؤڈ سے اس ڈیوائس پر کاپی کریں";
+"cloud_create_new" = "اس ڈیوائس سے کلاؤڈ پر کاپی کریں";
+"cloud_disable_sync" = "منسوخ کریں اور ہم آہنگی غیر فعال کریں";
+"cloud_sync_title" = "ڈیوائس ہم آہنگی";
+"application_preferences" = "ایپلیکیشن ترجیحات";
+"are_you_sure_reset_local" = "یہ اس ڈیوائس پر %@ کا مقامی ڈیٹابیس کلاؤڈ سروس میں موجود مواد سے ری سیٹ کر دے گا۔";
+"are_you_sure_reset_cloud" = "یہ %@ کے لیے آپ کا کلاؤڈ ڈیٹابیس اس ڈیوائس میں موجود مواد سے ری سیٹ کر دے گا۔";
+"reading_plans_content" = "مطالعہ منصوبے اور ان کی حیثیت";
+"bookmarks_contents" = "بک مارکس، لیبل اور مطالعہ پیڈز";
+"workspaces_contents" = "ورک اسپیسز اور ونڈوز";
+"my_documents" = "میری دستاویزات";
+"my_documents_contents" = "میری دستاویزات اور ان کا مواد";
+"synchronization_categories" = "ہم آہنگی زمرے";
+"sync_error" = "کلاؤڈ ہم آہنگی میں خرابی ہوئی";
+"sync_cant_fetch" = "کلاؤڈ میں محفوظ ڈیٹابیس یا پیچ فائل کا ورژن اس ایپ کی حمایت یافتہ ورژن سے زیادہ ہے۔";
+"sync_disabling" = "%@ کے لیے ہم آہنگی فی الحال غیر فعال کی جا رہی ہے۔";
+"sync_update_app" = "ہم آہنگی جاری رکھنے کے لیے براہ کرم ایپ اپ ڈیٹ کریں۔";
+"last_updated" = "آخری اپ ڈیٹ: %@";
+
+/* Google Drive Sync */
+"prefs_sync_introduction_summary2" = "When using Google Drive, %@ is granted access only to applications files, not any personal files.";
+"sync_confirmation" = "Are you sure that you want to sign out and reset synchronization?";
+"google_drive_account" = "Google Drive Account";
+"google_drive_sign_in" = "Sign In to Google Drive";
+"google_drive_sign_out" = "Sign Out and Reset Synchronization";
+"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
+"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
+"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
+"google_drive_not_signed_in" = "Not signed in";
+"google_drive_permission_required" = "Google Drive permission is required";
+
+"help_workspaces_title" = "ورک اسپیسز";
+"reading_plans_plural" = "مطالعہ منصوبے";
+
+/* Android window popup menu parity */
+"windowMaximise" = "بڑا کریں";
+"windowMinimise" = "چھوٹا کریں";
+"change_to_normal" = "نارمل ونڈو میں تبدیل کریں";
+"move_window" = "منتقل کریں";
+"move_window_to_position2" = "پوزیشن %1$d (%2$@:%3$@)";
+"window_pin_mode" = "پن کریں";
+"windowSynchronise" = "ہم آہنگ کریں";
+"window_disable_sync" = "ہم آہنگی غیر فعال کریں";
+"sync_group_n" = "گروپ %d";
+"text_options_window_menutitle" = "متن کے اختیارات";
+"prefs_text_colors_menutitle" = "رنگ ترتیبات";
+"prefs_section_title_title" = "حصے کے عنوانات";
+"prefs_show_strongs_title" = "Strong's نمبر";
+"prefs_show_verseno_title" = "باب اور آیت نمبر";
+"copy_settings" = "ترتیبات کاپی کریں";
+"copy_settings_to_workspace" = "ورک اسپیس";
+"copy_settings_to_window" = "ونڈو %1$d (%2$@: %3$@)";
+"copy_settings_to_global" = "عالمی ڈیفالٹس";
+"copyReference" = "حوالہ کلپ بورڈ پر کاپی کریں";
+"reference_copied_to_clipboard" = "حوالہ کلپ بورڈ پر کاپی ہو گیا";
+"add_ellipsis" = "%@…";
+"copy_settings_title" = "آپ کون سی ترتیبات کاپی کرنا چاہتے ہیں؟";
+"select_all" = "سب منتخب کریں";
+"select_none" = "کچھ نہیں منتخب کریں";
+"font" = "Font";
+"margin_size" = "Margin size";
+"top_margin" = "اوپری حاشیہ";
+"footnotes_inline" = "Inline footnotes";
+"expand_cross_references" = "Expand cross references";
+"cross_references" = "کراس حوالہ جات";
+"verse_per_line" = "Verse per line";
+"show_bookmarks" = "بک مارکس دکھائیں";
+"hide_labels" = "Hide labels";
+"my_notes" = "My notes";
+"page_number" = "Page number";
+"infinite_scroll" = "لامحدود اسکرول";
+"non_strongs_word_italic" = "اضافی الفاظ ترچھا کریں";
+"mark_as_read_button" = "پڑھا ہوا نشان لگانے کا بٹن";
+"title_scroll_button" = "عنوان اسکرول بٹن";
+"memorization_indicators" = "حفظ کے اشارے";
+"ai_document_markers" = "AI document markers";
+"page_scroll_amount" = "صفحہ اسکرول مقدار";
+"ordinals" = "Ordinals";
+
+/* Android shared translations */
+"about" = "کے بارے میں";
+"app_name_andbible" = "AndBible";
+"app_name_long" = "AndBible: بائبل مطالعہ";
+"download" = "دستاویزات ڈاؤنلوڈ کریں";
+"download_errors" = "ڈاؤنلوڈ خرابیاں";
+"format_epub" = "EPUB دستاویزات (*.epub)";
+"format_mybible" = "MyBible دستاویزات (*.SQLite3)";
+"format_mysword" = "MySword دستاویزات (*.mybible)";
+"format_zip" = "Sword ماڈیول(ز) پر مشتمل زپ فائل، یا %@ کی بنائی دستاویز بیک اپ فائل (*.abmd)";
+"install_zip" = "فائلوں سے دستاویزات لوڈ کریں";
+"rename" = "نام بدلیں";
+"restore_database" = "ڈیٹابیس فائل بحال کریں";
+"reversed_split_mode" = "الٹا تقسیم موڈ";
+"supported_formats" = "فائل سے دستاویزات لوڈ کرنے کے لیے سپورٹ شدہ شکلیں: %@";
+"welcome_message" = "%@ ڈاؤنلوڈ کرنے کا شکریہ۔ فی الحال کوئی بائبل یا دستاویزات نصب نہیں ہیں۔ جاری رکھنے کے لیے براہ کرم انٹرنیٹ سے ڈاؤنلوڈ کر کے یا زپ فائل دستاویز بیک اپ سے لوڈ کر کے کم از کم 1 دستاویز انسٹال کریں۔";
+
+/* Android shared translations */
+"copy_of %@" = "%@ کی کاپی";
+"fullscreen" = "فل اسکرین";
+"help_bookmarks" = "بک مارکس";
+"help_navigation" = "نیویگیشن";
+"help_search" = "تلاش";
+"help_workspaces" = "ورک اسپیسز";
+"skip" = "چھوڑیں";
+"error_no_content" = "منتخب آیت کے لیے کوئی مواد نہیں";

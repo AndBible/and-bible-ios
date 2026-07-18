@@ -624,3 +624,4 @@ Wenn Google Drive verwendet wird, hat %@ nur Zugriff auf Dateien der Anwendung, 
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Es gibt einen benutzerdefinierten Leseplan in sdcard jsword/readingplan, der denselben Namen wie ein vordefinierter Leseplan hat. Darum kann er hier nicht angezeigt werden. Bitte benennen Sie den Plan um, ohne die Endung .properties zu ändern.";
+"error_no_content" = "Kein Inhalt für diesen Vers";

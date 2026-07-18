@@ -624,3 +624,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Terdapat rencana bacaan pengguna di SD card jsword/readingplan dengan nama yang sama dengan rencana internal. Tidak dapat didaftarkan di sini. Silahkan mengganti nama file, tinggalkan extension file sebagai .properties";
+"error_no_content" = "Tidak ada isi pada ayat yang dipilih";

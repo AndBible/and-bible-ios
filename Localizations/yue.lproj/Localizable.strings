@@ -606,3 +606,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "SD卡中有使用者jsword/readingplan的讀經計劃 它與內部讀經計劃名稱相同，不能在此列舉。 請重新命名至其他名稱，並將副檔名轉為 *.properties";
+"error_no_content" = "選定經節沒有內容";

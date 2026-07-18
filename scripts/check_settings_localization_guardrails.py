@@ -96,13 +96,16 @@ LOCALE_TO_ANDROID_VALUES = {
     "az": "values-az",
     "bg": "values-bg",
     "bn": "values-bn",
+    "ca": "values-ca",
     "cs": "values-cs",
+    "da": "values-da",
     "de": "values-de",
     "el": "values-el",
     "en": "values",
     "eo": "values-eo",
     "es": "values-es",
     "et": "values-et",
+    "fil": "values-fil",
     "fi": "values-fi",
     "fr": "values-fr",
     "he": "values-iw",
@@ -111,12 +114,15 @@ LOCALE_TO_ANDROID_VALUES = {
     "hu": "values-hu",
     "id": "values-id",
     "it": "values-it",
+    "ja": "values-ja",
     "kk": "values-kk",
     "ko": "values-ko",
     "lt": "values-lt",
     "ml": "values-ml",
+    "ms": "values-ms",
     "my": "values-my",
     "nb": "values-nb",
+    "ne": "values-ne",
     "nl": "values-nl",
     "pl": "values-pl",
     "pt": "values-pt",
@@ -128,17 +134,23 @@ LOCALE_TO_ANDROID_VALUES = {
     "sr": "values-b+sr+RS",
     "sr-Latn": "values-b+sr+Latn",
     "sv": "values-sv",
+    "sw": "values-sw",
     "ta": "values-ta",
     "te": "values-te",
+    "th": "values-th",
     "tr": "values-tr",
     "uk": "values-uk",
+    "ur": "values-ur",
     "uz": "values-uz",
+    "vi": "values-vi",
     "yue": "values-yue",
     "zh-Hans": "values-zh-rCN",
     "zh-Hant": "values-zh-rTW",
 }
 
 ANDROID_ROOT_ENV = "ANDBIBLE_ANDROID_ROOT"
+# Stable provenance label for generated snapshots; never serialize a local checkout path.
+ANDROID_SNAPSHOT_SOURCE_RES = "app/src/main/res"
 
 LINE_RE = re.compile(r'^"(?P<key>[^"]+)"\s*=\s*"(?P<val>(?:[^"\\]|\\.)*)";\s*$')
 LOCALE_OPTIONS_BLOCK_RE = re.compile(
@@ -1080,14 +1092,19 @@ def load_android_non_english_snapshot(path: Path) -> dict[str, list[str]]:
 
 def write_android_non_english_snapshot(
     path: Path,
-    android_root: Path,
     non_english_by_key: dict[str, list[str]],
     locale_pref_options: list[LocalePrefOption],
     shared_localization: AndroidSharedLocalization,
 ) -> None:
+    """Write a deterministic Android localization snapshot for iOS parity checks.
+
+    The live Android resource directory is intentionally not serialized as an absolute path.
+    Local and CI runs can use different checkout directories, and committing those
+    machine-specific paths causes noisy fixture churn without improving audit behavior.
+    """
     payload = {
         "generated_on": date.today().isoformat(),
-        "source_android_res": str(android_root),
+        "source_android_res": ANDROID_SNAPSHOT_SOURCE_RES,
         "parity_keys": PARITY_KEYS,
         "locale_to_android_values": LOCALE_TO_ANDROID_VALUES,
         "locale_pref_options": [
@@ -1269,7 +1286,6 @@ def main() -> int:
         shared_localization = build_android_shared_localization(args.repo_root, args.android_root)
         write_android_non_english_snapshot(
             args.android_snapshot,
-            args.android_root,
             non_english_by_key,
             locale_pref_options,
             shared_localization,

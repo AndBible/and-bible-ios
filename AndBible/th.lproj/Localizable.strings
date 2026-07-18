@@ -1,0 +1,800 @@
+/* AndBible iOS — English Localizations */
+
+/* ========================================
+   General / Shared
+   ======================================== */
+"app_name" = "AndBible";
+"app_name_andbible" = "AndBible";
+"app_name_long" = "AndBible: การศึกษาพระคัมภีร์";
+"done" = "เสร็จสิ้น";
+"cancel" = "ยกเลิก";
+"delete" = "ลบ";
+"save" = "บันทึก";
+"edit" = "แก้ไข";
+"add" = "Add";
+"search" = "ค้นหา";
+"settings" = "การตั้งค่าแอปพลิเคชัน";
+"close" = "ปิด";
+"copy_reference" = "Copy Reference";
+"go_to_reference" = "Go to Reference";
+"go_to_reference_placeholder" = "e.g. Genesis 1, Matt 5:3, Gen.1.1";
+"go_to_reference_message" = "Type a reference or tap Browse to choose from the list.";
+"go_to_reference_invalid" = "Could not find that reference";
+"go" = "Go";
+"browse" = "Browse...";
+"move_up" = "Move Up";
+"move_down" = "Move Down";
+"reference_copied" = "Reference copied";
+"ok" = "ตกลง";
+"yes" = "ใช่";
+"no" = "ไม่";
+"error" = "ข้อผิดพลาด";
+"loading" = "Loading...";
+"create" = "สร้าง";
+"new_window" = "หน้าต่างใหม่";
+"clear" = "Clear";
+"reset" = "รีเซ็ต";
+"retry" = "Retry";
+"skip" = "ข้าม";
+"all" = "ทั้งหมด";
+"sort" = "Sort";
+"name" = "ชื่อ";
+"untitled" = "Untitled";
+"compare" = "เปรียบเทียบ";
+"translations" = "ฉบับแปล";
+"auto" = "Auto";
+"off" = "Off";
+"inline" = "Inline";
+"links" = "ลิงก์";
+"hidden" = "Hidden";
+"completed" = "เสร็จสิ้น";
+"no_results" = "No Results";
+"searching" = "Searching...";
+
+/* ========================================
+   Navigation / Bible Reader
+   ======================================== */
+"bible" = "พระคัมภีร์";
+"deuterocanonical" = "เฒ่าพันธสัญญาชั้นสอง";
+"bookmarks" = "ที่คั่นหน้า";
+"reading_plans" = "แผนการอ่าน";
+"downloads" = "Downloads";
+"history" = "ประวัติ";
+"workspaces" = "พื้นที่ทำงาน";
+"rename" = "เปลี่ยนชื่อ";
+"clone" = "Clone";
+"copy_of %@" = "สำเนาของ %@";
+"definition" = "Definition";
+"dictionary" = "พจนานุกรม";
+"general_book" = "หนังสือ";
+"map" = "แผนที่";
+"locked" = "Locked";
+
+/* Bible Navigation */
+"choose_book" = "เลือกหนังสือ";
+"books" = "Books";
+"old_testament" = "พันธสัญญาเดิม";
+"new_testament" = "พันธสัญญาใหม่";
+"previous_chapter" = "Previous chapter";
+"next_chapter" = "Next chapter";
+"back_to_bible" = "Back to Bible";
+
+/* Module Pickers */
+"choose_document" = "เลือกเอกสาร";
+"document_type" = "Document type";
+"picker_select_translation" = "Select Translation";
+"picker_select_commentary" = "Select Commentary";
+"picker_select_dictionary" = "Select Dictionary";
+"picker_select_general_book" = "Select General Book";
+"picker_select_map" = "Select Map";
+"picker_no_bible_modules" = "No Bible modules installed";
+"picker_no_commentary_modules" = "No commentary modules installed";
+"picker_no_dictionary_modules" = "No dictionary modules installed";
+"picker_no_general_book_modules" = "No general book modules installed";
+"picker_no_map_modules" = "No map modules installed";
+"download_modules" = "Download Modules";
+"download" = "ดาวน์โหลดเอกสาร";
+"easy_start" = "Easy Start";
+"easy_start_title" = "Easy start";
+"easy_start_message" = "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on.";
+"startup_download_prompt" = "Download Bible modules to start reading.";
+"welcome_message" = "ขอบคุณที่ดาวน์โหลด %@ ขณะนี้ยังไม่ได้ติดตั้งพระคัมภีร์หรือเอกสารใด หากต้องการดำเนินการต่อ กรุณาติดตั้ง อย่างน้อย 1 เอกสารโดยการดาวน์โหลดจากอินเทอร์เน็ต หรือโหลดจากไฟล์สำรองข้อมูลเอกสารแบบ zip";
+"supported_formats" = "รูปแบบที่รองรับสำหรับการโหลดเอกสารจากไฟล์: %@";
+"format_zip" = "ไฟล์ Zip ที่มีโมดูล Sword หรือไฟล์สำรองข้อมูลเอกสาร (*.abmd) ที่สร้างโดย %@";
+"format_mysword" = "เอกสาร MySword (*.mybible)";
+"format_mybible" = "เอกสาร MyBible (*.SQLite3)";
+"format_epub" = "เอกสาร EPUB (*.epub)";
+
+/* Toolbar / Actions */
+"toggle_strongs_numbers" = "Toggle Strong's numbers";
+"bookmark" = "ที่คั่นหน้า";
+"copy" = "คัดลอก";
+"share" = "แชร์";
+"search_web" = "Web";
+
+/* Strong's Modes */
+"strongs_off" = "Off";
+"strongs_inline" = "ข้อความและลิงก์";
+"strongs_links" = "ลิงก์";
+"strongs_hidden" = "ลิงก์ที่ซ่อนอยู่";
+"find_all_occurrences" = "Find all occurrences";
+"no_dictionary_installed" = "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads.";
+"back_to_previous" = "Back";
+
+/* ========================================
+   Bookmarks & Labels
+   ======================================== */
+"add_bookmark" = "Add Bookmark";
+"edit_bookmark" = "Edit Bookmark";
+"bookmark_note" = "Note";
+"labels" = "ป้ายกำกับ";
+"new_label" = "New Label";
+"study_pad" = "StudyPad";
+"my_notes" = "My Notes";
+"no_bookmarks" = "No Bookmarks";
+"no_bookmarks_description" = "Long-press on a verse to add a bookmark.";
+"search_bookmarks" = "Search bookmarks";
+"sort_bible_order" = "Bible Order";
+"sort_date_created" = "Date Created";
+"sort_last_updated" = "Last Updated";
+"edit_labels" = "Edit Labels";
+"add_labels" = "Add labels";
+"open_studypad_for_label %@" = "Open \"%@\" StudyPad";
+"no_labels" = "No Labels";
+"no_labels_description" = "Create labels to organize your bookmarks and notes.";
+"label_name" = "Label name";
+"studypad" = "แผ่นบันทึกการศึกษา";
+"open_studypad" = "Open StudyPad";
+"edit_label" = "แก้ไขป้ายกำกับ";
+"label_edit_name" = "ชื่อ";
+"label_edit_color" = "Color";
+"label_edit_icon" = "Icon";
+"no_icon" = "No Icon";
+"label_edit_options" = "Options";
+"favourite" = "Favourite";
+"underline_style" = "Underline Style";
+"underline_whole_verse" = "Underline Whole Verse";
+"studypad_empty" = "Empty StudyPad";
+"studypad_empty_description" = "Add notes or bookmark verses to build your study journal.";
+"add_note" = "Add Note";
+"note" = "Note";
+"new_note" = "New Note";
+"edit_note" = "Edit Note";
+
+/* ========================================
+   Search
+   ======================================== */
+"search_bible" = "ค้นหาในพระคัมภีร์";
+"search_results" = "Search Results";
+"whole_bible" = "พระคัมภีร์ทั้งหมด";
+"old_testament_short" = "OT";
+"new_testament_short" = "NT";
+"current_book" = "Current Book";
+"search_index" = "ดัชนีการค้นหา";
+"search_checking_index" = "Checking index...";
+"search_need_index" = "To search a document we need an index.";
+"search_create_index" = "สร้าง";
+"search_indexing_message" = "เมื่อการสร้างดัชนีเสร็จสิ้น ระบบจะนำคุณไปยังหน้าจอค้นหา";
+"search_searching" = "Searching...";
+"search_enter_prompt" = "Enter a word or phrase to search";
+"search_bible_text" = "Search Bible text";
+"search_match" = "Match";
+"search_scope_all" = "ทั้งหมด";
+"search_scope_ot" = "OT";
+"search_scope_nt" = "NT";
+"search_translations" = "ฉบับแปล";
+"search_all" = "ทั้งหมด";
+
+/* ========================================
+   Downloads / Module Browser
+   ======================================== */
+"module_browser" = "Module Browser";
+"doc_type_all" = "ทุกประเภท";
+"bibles" = "Bibles";
+"commentaries" = "Commentaries";
+"dictionaries" = "พจนานุกรม";
+"category_books" = "Books";
+"maps" = "Maps";
+"document_filter_results %lld" = "Documents (%lld)";
+"install" = "Install";
+"install_module" = "Install";
+"update" = "Update";
+"uninstall" = "Uninstall";
+"unavailable" = "Unavailable";
+"download_document_confirm_prefix" = "ดาวน์โหลด";
+"bookmark_warning4" = "แนะนำให้สำรองข้อมูลโมดูลก่อนอัปเดต";
+"bookmark_warning3" = "คุณยังต้องการอัปเดตโมดูลอยู่หรือไม่?";
+"bookmark_warning2" = "หากโครงสร้างเอกสารมีการเปลี่ยนแปลง การอัปเดตเอกสารนี้อาจทำให้ ตำแหน่งของที่คั่นหน้า/บันทึกเหล่านี้เคลื่อนไปในเอกสาร หรือหายไปโดยสิ้นเชิง";
+"bookmark_warning" = "มีที่คั่นหน้าและ/หรือบันทึกสำหรับเอกสารนี้";
+"recommended_document" = "แนะนำ!";
+"bad_document_warning" = "Warning";
+"refresh_catalog" = "Refresh Catalog";
+"repositories" = "Repositories";
+"all_languages_count %lld" = "All Languages (%lld)";
+"documents_count %lld" = "%lld documents";
+"download_errors" = "ข้อผิดพลาดในการดาวน์โหลด";
+"install_zip" = "โหลดเอกสารจากไฟล์";
+"restore_database" = "กู้คืนไฟล์ฐานข้อมูล";
+"refreshing_catalog" = "Refreshing catalog...";
+"no_modules_match_filters" = "No modules match your filters";
+"tap_refresh_to_load" = "Tap Refresh to load available modules";
+"search_modules" = "Search modules";
+"delete_module_index" = "Delete Index";
+"uninstall_module_title" = "Uninstall Module";
+"uninstall_module_message_format" = "Remove %@ from this device?";
+"delete_module_index_title" = "Delete Search Index";
+"delete_module_index_message_format" = "Delete the search index for %@?";
+"module_initials" = "Initials";
+"module_name" = "ชื่อ";
+"module_category" = "หมวดหมู่";
+"module_language" = "ภาษา";
+"module_source" = "Source";
+"module_versions" = "Versions";
+"module_latest_version" = "Latest";
+"module_installed_version" = "Installed";
+"module_version_unavailable" = "No version metadata available.";
+"module_install_size" = "Install size";
+"module_local_state" = "Local State";
+"module_installed" = "Installed";
+"module_encrypted" = "Encrypted";
+"module_unlocked" = "Unlocked";
+"module_locked" = "Locked";
+
+/* ========================================
+   Settings
+   ======================================== */
+"settings_display" = "Display";
+"settings_text_display" = "Text Display";
+"settings_colors" = "Colors";
+"text_display" = "Text Display";
+"settings_font" = "Font";
+"font_size" = "Size";
+"font_family" = "Family";
+"settings_layout" = "Layout";
+"line_spacing" = "Line Spacing";
+"justify_text" = "Justify Text";
+"verse_per_line" = "Verse Per Line";
+"hyphenation" = "การขีดคั่นคำ";
+"settings_content" = "เนื้อหา";
+"verse_numbers" = "Verse Numbers";
+"section_titles" = "Section Titles";
+"footnotes" = "เชิงอรรถ";
+"inline_footnotes" = "Inline Footnotes";
+"red_letters" = "Red Letters";
+"cross_references" = "การอ้างอิงข้าม";
+"expand_cross_references" = "Expand Cross References";
+"strongs_numbers" = "Strong's Numbers";
+"morphology" = "Morphology";
+"settings_annotations" = "Annotations";
+"show_bookmarks" = "แสดงที่คั่นหน้า";
+"show_my_notes" = "Show My Notes";
+"verse_selection" = "Verse Selection";
+
+/* Colors */
+"colors" = "Colors";
+"night_mode" = "Night Mode";
+"day_theme" = "Day Theme";
+"night_theme" = "Night Theme";
+"text_color" = "Text Color";
+"background" = "Background";
+"color_workspace" = "สีพื้นที่ทำงาน";
+"prefs_noise_title" = "สัญญาณรบกวนพื้นหลัง";
+"prefs_noise_summary" = "การเพิ่มสัญญาณรบกวนให้พื้นหลังอาจทำให้สบายตามากขึ้น";
+"reset_to_defaults" = "Reset to Defaults";
+
+/* Dictionaries */
+"settings_dictionaries" = "พจนานุกรม";
+"hebrew_dictionary" = "Hebrew Dictionary";
+"greek_dictionary" = "Greek Dictionary";
+"no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
+
+/* Data */
+"settings_data" = "Data";
+"import_export" = "Import & Export";
+
+/* Security — Settings for the persecuted */
+"settings_security" = "การตั้งค่าสำหรับผู้ถูกข่มเหง";
+"discrete_mode" = "ซ่อนสัญลักษณ์ทางศาสนา";
+"discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
+"show_calculator" = "เครื่องคิดเลข";
+"show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
+"calculator_pin" = "PIN เครื่องคิดเลข";
+"calculator_pin_placeholder" = "1234";
+"calculator_pin_description" = "รหัส PIN สำหรับเข้าใช้แอปเมื่อแสดงเครื่องคิดเลข";
+"discrete_help_title" = "อ่านสิ่งนี้ก่อน!";
+"discrete_help_summary" = "คำแนะนำสำหรับการตั้งค่าและข้อมูลเกี่ยวกับบิลด์แบบไม่เปิดเผย";
+"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
+"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
+"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
+"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* About */
+"settings_language" = "ภาษา";
+"language_system_default" = "System Default";
+"language_restart_required" = "Restart the app for the language change to take effect.";
+"settings_about" = "เกี่ยวกับ";
+"version" = "Version";
+
+/* ========================================
+   Import & Export
+   ======================================== */
+"export" = "ส่งออก";
+"full_backup_json" = "Full Backup (JSON)";
+"export_footer" = "Export your data for backup or transfer to another device.";
+"import" = "นำเข้า";
+"import_from_file" = "Import from File";
+"import_footer" = "Import data from a JSON backup or CSV bookmark file. Supported formats: .json, .csv, .bbl (MySword).";
+"modules" = "Modules";
+"install_sword_module" = "Install SWORD Module (.zip)";
+"modules_footer" = "Install a SWORD Bible module from a local .zip file. The ZIP must contain mods.d/ and module data files.";
+"epub" = "EPUB";
+"install_epub_book" = "Install EPUB Book";
+"epub_footer" = "Import an EPUB file for offline reading and study.";
+"error_read_file" = "Error: Could not read file";
+"error_save_file" = "Error: Could not save file";
+"mysword_file_hint" = "MySword file detected. Use Downloads to install Bible modules.";
+"error_unsupported_format_%@" = "Error: Unsupported file format (%@)";
+"error_prefix_%@" = "Error: %@";
+"installed_module_%@" = "Installed module: %@";
+"installed_epub_%@" = "Installed EPUB: %@";
+"installed_font_%@" = "Installed font: %@";
+"install_do_you_want" = "ต้องการติดตั้งโมดูล (%@) หรือไม่?";
+
+/* ========================================
+   Repository Manager
+   ======================================== */
+"no_sources_configured" = "No repository sources configured.";
+"module_unavailable_for_installation %@" = "%@ is not available for installation.";
+"module_source_not_found %@" = "Source not found for %@";
+"uninstall_failed %@" = "Uninstall failed: %@";
+"remote_sources" = "Remote Sources";
+"sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
+"reset_sources_title" = "Reset Sources?";
+"reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
+"add_custom_repository" = "Add custom repository";
+"custom_repositories" = "ที่เก็บข้อมูลกำหนดเอง";
+"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
+"custom_repository" = "Custom repository";
+"default_repositories" = "Default repositories";
+"delete_custom_repository_message_format" = "ลบ %@?";
+"delete_custom_repository_title" = "Delete repository";
+"edit_custom_repository" = "Edit custom repository";
+"help" = "ความช่วยเหลือ";
+"https" = "HTTPS";
+"open_wiki" = "Open Wiki";
+"repository_source_error" = "Repository source error";
+"repository_url" = "URL ของที่เก็บข้อมูล";
+"repository_url_placeholder" = "https://example.org/repository";
+"validating_repository" = "Validating repository";
+"source_details" = "Source Details";
+"source_name_placeholder" = "Name (e.g., My Repository)";
+"source_host_placeholder" = "Host (e.g., example.org)";
+"source_path_placeholder" = "Catalog Path (e.g., /sword)";
+"source_catalog_hint" = "The source must serve a SWORD module catalog at the specified host and path (mods.d.tar.gz).";
+"ftp_unsupported" = "FTP — Not Supported";
+"ftp_not_supported_hint" = "FTP sources are not supported on iOS. Please use an HTTP/HTTPS source instead.";
+"add_source" = "Add Source";
+
+/* ========================================
+   Reading Plans
+   ======================================== */
+"reading_plan_no_plans" = "No Reading Plans";
+"reading_plan_no_plans_description" = "Start a reading plan to track your daily Bible reading.";
+"reading_plan_start" = "Start Plan";
+"reading_plan_active" = "Active Plans";
+"reading_plan_completed" = "เสร็จสิ้น";
+"reading_plan_choose" = "Choose a reading plan to start";
+"reading_plan_import_custom" = "Import Custom Plan";
+"reading_plan_custom" = "กำหนดเอง";
+"reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
+"reading_plan_available" = "Available Plans";
+"reading_plan_import_error_read" = "Could not read file";
+"reading_plan_import_error_format" = "Invalid reading plan format";
+"plan_duplicate_user_plan" = "มีแผนการอ่านของผู้ใช้ใน sdcard jsword/readingplan ที่มีชื่อเดียวกับแผนภายใน จึงไม่สามารถแสดงที่นี่ กรุณาเปลี่ยนชื่อไฟล์เป็นชื่ออื่น โดยคงนามสกุลไฟล์เป็น .properties";
+
+/* Daily Reading */
+"daily_reading" = "Daily Reading";
+"daily_reading_loading" = "Loading plan...";
+"daily_reading_today" = "Today's Reading";
+"daily_reading_recent_days" = "Recent Days";
+"mark_as_read" = "Mark as Read";
+"unmark" = "Unmark";
+
+/* ========================================
+   Speak / TTS
+   ======================================== */
+"speak" = "อ่านออกเสียง";
+"pause" = "พัก";
+"stop" = "หยุด";
+"speed" = "Speed";
+"sleep_timer" = "Sleep Timer";
+"speak_now_speaking" = "Now Speaking";
+"speak_stopped" = "Stopped";
+"speak_paused" = "Paused";
+"speak_playing" = "Playing";
+"speak_speed" = "Speed";
+"speak_sleep_timer" = "Sleep Timer";
+
+/* ========================================
+   Compare Translations
+   ======================================== */
+"compare_select_translations" = "Select Translations";
+"compare_choose_translations" = "Choose Translations";
+"compare_install_additional_modules" = "Install additional Bible modules from Downloads to compare translations.";
+"compare_loading_translations" = "Loading translations...";
+"compare_select_translations_header" = "Select translations to compare";
+"compare_verses" = "Compare Verses";
+
+/* ========================================
+   Cross References
+   ======================================== */
+"cross_references" = "การอ้างอิงข้าม";
+
+/* ========================================
+   Workspace
+   ======================================== */
+"new_workspace" = "New Workspace";
+"workspace_name" = "Workspace Name";
+"workspace_no_workspaces" = "No workspaces yet";
+"workspace_create_first" = "Tap + to create your first workspace.";
+"workspace_new" = "New Workspace";
+
+/* ========================================
+   History
+   ======================================== */
+"history_no_history" = "No History";
+"history_no_history_description" = "Navigation history will appear as you browse.";
+
+/* ========================================
+   Window Management
+   ======================================== */
+"restore_size" = "Restore Size";
+"maximize" = "Maximize";
+"minimize" = "Minimize";
+"sync_scrolling" = "Sync Scrolling";
+"pin" = "ปักหมุด";
+"sync_group" = "Sync Group";
+"restore" = "กู้คืน";
+
+/* ========================================
+   Dictionary / General Books
+   ======================================== */
+"dictionary_loading_keys" = "Loading keys...";
+"dictionary_search_keys" = "Search keys...";
+"genbook_loading_entries" = "Loading entries...";
+"genbook_no_entries" = "No Entries";
+"genbook_no_entries_description" = "This module has no entries.";
+
+/* ========================================
+   EPUB
+   ======================================== */
+"epub_library" = "EPUB Library";
+"epub_contents" = "EPUB Contents";
+"search_epub" = "Search EPUB";
+"epub_loading_library" = "Loading library...";
+"epub_no_epubs_installed" = "No EPUBs Installed";
+"epub_no_epubs_installed_description" = "Import EPUB files from the Import & Export screen.";
+"epub_loading_toc" = "Loading table of contents...";
+"epub_no_toc" = "No Table of Contents";
+"epub_no_toc_description" = "This EPUB has no table of contents entries.";
+"epub_search_prompt" = "Search in EPUB...";
+
+/* ========================================
+   EPUB Reader (no module loaded)
+   ======================================== */
+"reader_no_epub_loaded" = "No EPUB is loaded. Open one from the EPUB Library first.";
+
+/* ========================================
+   Backup (legacy keys)
+   ======================================== */
+"backup_data" = "Backup Data";
+"restore_data" = "Restore Data";
+"export_bookmarks" = "Export Bookmarks";
+"import_bookmarks" = "Import Bookmarks";
+
+/* ========================================
+   Sharing
+   ======================================== */
+"share_verse" = "แชร์…";
+"copy_verse" = "Copy Verse";
+
+/* ========================================
+   Errors
+   ======================================== */
+"error_module_not_found" = "Module not found";
+"error_download_failed" = "Download failed";
+"error_network" = "Network error. Please check your connection.";
+
+/* ========================================
+   Interpolated Strings (format specifiers)
+   ======================================== */
+
+/* Reading Plans */
+"Day %lld" = "Day %lld";
+"Day %lld/%lld" = "Day %lld/%lld";
+"%lld days completed" = "%lld days completed";
+"%lld of %lld days completed" = "%lld of %lld days completed";
+"Started %@" = "Started %@";
+"%lld days" = "%lld days";
+
+/* Search */
+"Find in %@" = "ค้นหาใน %@";
+"Create an index for %@?" = "Create an index for %@?";
+"Creating index. Processing %@" = "Creating index. Processing %@";
+"No matches found for \"%@\"" = "No matches found for \"%@\"";
+"%lld translations" = "%lld translations";
+"%@ (%@)" = "%@ (%@)";
+"%lld verses in %lld translations" = "%lld verses in %lld translations";
+"%lld verses in 1 translation" = "%lld verses in 1 translation";
+"%lld results" = "%lld results";
+
+/* Window Management */
+"Group %lld" = "Group %lld";
+
+/* EPUB */
+"Search: %@" = "Search: %@";
+"Enter a search term to find text within \"%@\"." = "Enter a search term to find text within \"%@\".";
+
+/* Compare */
+"Choose which translations to compare for %@ %lld." = "Choose which translations to compare for %@ %lld.";
+"Verse %lld" = "Verse %lld";
+"%lld selected" = "%lld selected";
+
+/* Workspace */
+"%lld window" = "%lld window";
+"%lld windows" = "%lld windows";
+
+/* Text Display Settings */
+"global_text_display_settings_title" = "ตัวเลือกข้อความสากล";
+"global_text_display_settings_summary" = "การตั้งค่าการแสดงข้อความเริ่มต้นสำหรับทุกพื้นที่ทำงาน";
+"workspace_text_display_settings_title" = "ตัวเลือกข้อความ - %@";
+"window_text_display_settings_title" = "ตัวเลือกข้อความ - หน้าต่าง %d";
+"parent_settings_category_title" = "การตั้งค่าต้นทาง";
+"workspace_text_options_link" = "ตัวเลือกข้อความพื้นที่ทำงาน — %@";
+"workspace_text_options_link_summary" = "แก้ไขการตั้งค่าการแสดงข้อความสำหรับพื้นที่ทำงานนี้";
+"global_text_options_link" = "ตัวเลือกข้อความสากล";
+"global_text_options_link_summary" = "แก้ไขการตั้งค่าการแสดงข้อความเริ่มต้นสำหรับทุกพื้นที่ทำงาน";
+"text_display_font_size_title_format" = "ขนาดตัวอักษร (%d pt)";
+"text_display_font_family_title_format" = "ตระกูลแบบอักษร (%@)";
+"text_display_line_spacing_title_format" = "ระยะบรรทัด (%1.1f เท่า)";
+"text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
+"text_display_top_margin_title_format" = "ขอบบน (%d มม.)";
+"text_display_left_margin_title_format" = "ขอบซ้าย (%d มม.)";
+"text_display_right_margin_title_format" = "ขอบขวา (%d มม.)";
+"text_display_max_width_title_format" = "ความกว้างสูงสุดของข้อความ (%d มม.)";
+
+/* ========================================
+   Quick Settings & Help
+   ======================================== */
+"fullscreen" = "เต็มหน้าจอ";
+"tilt_to_scroll" = "Tilt to Scroll";
+"reversed_split_mode" = "โหมดแบ่งหน้าจอแบบกลับด้าน";
+"window_pinning" = "Window Pinning";
+"label_settings" = "Label Settings";
+"all_text_options_window_menutitle" = "ตัวเลือกข้อความทั้งหมด";
+"all_text_options" = "All Text Options";
+"help_tips" = "Help & Tips";
+"sponsor_development" = "Sponsor Development";
+"about" = "เกี่ยวกับ";
+"rate_app" = "Rate App";
+"report_bug" = "Report Bug";
+"tell_friend" = "Tell a Friend";
+"tell_friend_message" = "Check out AndBible — a powerful, free Bible study app with offline access, bookmarks, notes, and more! https://andbible.org";
+"version %@ (%@)" = "Version %@ (%@)";
+"about_description" = "AndBible is an open-source Bible study app. Read, search, bookmark, and take notes — all offline.";
+"about_sword_credit" = "Powered by the SWORD library from the CrossWire Bible Society";
+"about_website" = "Website";
+"about_source_code" = "Source Code";
+"about_privacy_policy" = "Privacy Policy";
+"about_license" = "License (GPLv3)";
+
+/* Help Sections */
+"help_navigation" = "การนำทาง";
+"help_navigation_body" = "Swipe left or right to move between chapters. Tap the book name in the toolbar to choose a different book and chapter.";
+"help_selection" = "Text Selection";
+"help_selection_body" = "Long-press on a verse to select it. An action bar appears with options: Bookmark, Copy, Share, Compare, Speak, and Web Search.";
+"help_pinning" = "Window Pinning";
+"help_pinning_body" = "When you have multiple windows, pin a window to keep it visible when switching Bible/Commentary categories.";
+"help_bookmarks" = "ที่คั่นหน้า";
+"help_bookmarks_body" = "Long-press a verse and tap Bookmark. Add labels to organize and notes for your thoughts.";
+"help_studypads" = "StudyPads";
+"help_studypads_body" = "Rich text journals attached to labels. Access them from the label manager or bookmark list.";
+"help_search" = "ค้นหา";
+"help_search_body" = "Full-text search with All Words, Any Word, and Phrase modes. You will be prompted to create an index on first use.";
+"help_workspaces" = "พื้นที่ทำงาน";
+"help_workspaces_body" = "Save different window arrangements as workspaces. Switch between them from the overflow menu.";
+"help_hidden" = "Hidden Features";
+"help_hidden_body" = "Double-tap the Bible text for fullscreen mode. Enable Tilt to Scroll in the overflow menu. Discrete calculator mode is available in Settings.";
+
+/* iCloud Sync */
+"icloud_sync" = "iCloud Sync";
+"icloud_sync_enabled" = "Enable iCloud Sync";
+"icloud_startup_recovery_message" = "iCloud sync could not be started, so sync was turned off and AndBible opened your local data.";
+"icloud_sync_description" = "Sync bookmarks, labels, workspaces, reading plans, and notes across your devices via iCloud. Requires an iCloud account.";
+"sync_status" = "Status";
+"status" = "Status";
+"icloud_account" = "iCloud Account";
+"last_sync" = "Last Sync";
+"sync_active" = "Active";
+"sync_disabled" = "ปิดใช้งาน";
+"syncing" = "Syncing…";
+"no_icloud_account" = "No iCloud Account";
+"icloud_signed_in" = "Signed In";
+"icloud_restricted" = "iCloud Restricted";
+"icloud_could_not_determine" = "Could Not Determine iCloud Status";
+"icloud_temporarily_unavailable" = "iCloud Temporarily Unavailable";
+"sync_data_included" = "Synced Data";
+"sync_what_syncs" = "Bookmarks, labels, notes, workspaces, windows, reading plan progress, and StudyPad entries are synced. Module downloads and app settings stay on this device.";
+"restart_required" = "Restart Required";
+"restart_to_apply_sync" = "Please restart the app to apply sync changes.";
+"disable_sync_title" = "Disable iCloud Sync?";
+"disable_sync" = "Disable Sync";
+"disable_sync_warning" = "Data already synced to iCloud will remain. New changes will only be saved locally.";
+
+"prefs_behavior_customization_cat" = "การทำงานของแอปพลิเคชัน";
+"prefs_display_customization_cat" = "รูปลักษณ์";
+"prefs_advanced_settings_cat" = "การตั้งค่าขั้นสูง";
+
+"prefs_toolbar_button_action_title" = "การกระทำสำหรับปุ่มแถบเครื่องมือ";
+"prefs_toolbar_button_action_summary" = "การกระทำเมื่อกด/กดค้างปุ่มแถบเครื่องมือพระคัมภีร์หรือคำอธิบาย";
+"prefs_toolbar_button_action_default" = "กดเพื่อเปิดเมนู กดค้างเพื่อเปิดหน้าจอเอกสาร (ค่าเริ่มต้น)";
+"prefs_toolbar_button_action_swap_menu" = "กดเพื่อเปิดเอกสารถัดไป กดค้างเพื่อเปิดเมนู";
+"prefs_toolbar_button_action_swap_activity" = "กดเพื่อเปิดเอกสารถัดไป กดค้างเพื่อเปิดหน้าจอเอกสาร";
+
+
+"add_bookmark3" = "ส่วนที่เลือก";
+"add_bookmark_whole_verse1" = "ข้อพระคัมภีร์";
+"prefs_disable_two_step_bookmarking_title" = "การบันทึกที่คั่นหน้าแบบขั้นตอนเดียว";
+"prefs_disable_two_step_bookmarking_summary" = "แสดงรายการ \"การเลือก\" และ \"ข้อ\" โดยตรงในเมนูการเลือกของพระคัมภีร์";
+
+"active_window_indicator_summary" = "เน้นมุมหน้าต่างเพื่อช่วยระบุว่าหน้าต่างใดกำลังใช้งานอยู่";
+"active_window_indicator_title" = "แสดงตัวบ่งชี้หน้าต่างที่ใช้งานอยู่";
+"auto_fullscreen" = "เต็มหน้าจออัตโนมัติเมื่อเลื่อน";
+"auto_fullscreen_summary" = "สลับไปยังโหมดเต็มหน้าจออัตโนมัติเมื่อเลื่อนข้อความ เคล็ดลับ: คุณสามารถสลับเป็นเต็มหน้าจอได้เสมอโดยแตะหน้าจอสองครั้ง";
+"choose_strongs_greek_dictionary_summary" = "เลือกพจนานุกรม Strongs สำหรับคำจำกัดความภาษากรีก";
+"choose_strongs_greek_dictionary_title" = "พจนานุกรมภาษากรีก Strongs";
+"choose_strongs_greek_morphology_summary" = "เลือกพจนานุกรมสำหรับคำจำกัดความสัณฐานวิทยากรีก Robinson";
+"choose_strongs_greek_morphology_title" = "สัณฐานวิทยากรีก Robinson";
+"choose_strongs_hebrew_dictionary_summary" = "เลือกพจนานุกรม Strongs สำหรับคำจำกัดความภาษาฮีบรู";
+"choose_strongs_hebrew_dictionary_title" = "พจนานุกรมภาษาฮีบรู Strongs";
+"choose_word_lookup_dictionary_summary" = "เลือกพจนานุกรมสำหรับค้นหาคำ";
+"choose_word_lookup_dictionary_title" = "พจนานุกรมค้นหาคำ";
+"full_screen_hide_buttons_pref_summary" = "เมื่อสลับไปยังโหมดเต็มหน้าจอ ซ่อนแถบปุ่มหน้าต่างที่ด้านล่างของหน้าจออัตโนมัติ";
+"full_screen_hide_buttons_pref_title" = "ซ่อนแถบปุ่มหน้าต่างในโหมดเต็มหน้าจอ";
+"hide_bible_reference_overlay_summary" = "ไม่แสดงการอ้างอิงพระคัมภีร์แบบกึ่งโปร่งแสงเมื่อแอปอยู่ในโหมดเต็มหน้าจอ";
+"hide_bible_reference_overlay_title" = "ซ่อนการอ้างอิงพระคัมภีร์แบบโปร่งแสง";
+"hide_window_buttons_summary" = "ปุ่มหน้าต่างที่แสดงทางด้านขวาของมุมมองพระคัมภีร์จะถูกซ่อน แถบนำทางหน้าต่างที่ด้านล่างยังคงแสดงอยู่ และคุณสามารถเปิดเมนูป็อปอัปหน้าต่างได้โดยกดค้าง";
+"hide_window_buttons_title" = "ซ่อนปุ่มหน้าต่าง";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
+"pref_font_size_multiplier_title" = "ตัวคูณขนาดแบบอักษร";
+"prefs_bible_view_swipe_mode_summary" = "ท่าทางปัดซ้าย/ขวาสามารถใช้ไปยังหน้าถัดไป/บทถัดไป";
+"prefs_bible_view_swipe_mode_title" = "การกระทำสำหรับท่าทางปัดซ้าย/ขวา";
+"prefs_disable_animations_summary" = "ปิดการใช้งานแอนิเมชันต่างๆ เช่น การเลื่อนแบบราบรื่น";
+"prefs_disable_animations_title" = "ปิดการใช้งานแอนิเมชัน";
+"prefs_disable_click_to_edit_summary" = "ต้องใช้ปุ่มแก้ไขเพื่อแก้ไขบันทึกในแผ่นบันทึกการศึกษา";
+"prefs_disable_click_to_edit_title" = "ปิดการแตะเพื่อแก้ไขในแผ่นบันทึกการศึกษา";
+"prefs_notes_content_type_title" = "รูปแบบสำหรับบันทึกที่คั่นหน้าใหม่";
+"prefs_notes_content_type_summary" = "รูปแบบข้อความที่ใช้เมื่อสร้างบันทึกที่คั่นหน้าและรายการแผ่นบันทึกการศึกษาใหม่";
+"notes_content_type_html" = "ข้อความรูปแบบ (HTML)";
+"notes_content_type_markdown" = "Markdown";
+"prefs_double_tap_to_fullscreen_summary" = "เข้าสู่โหมดเต็มหน้าจอโดยแตะสองครั้งที่หน้าต่าง";
+"prefs_double_tap_to_fullscreen_title" = "แตะสองครั้งเพื่อเต็มหน้าจอ";
+"prefs_e_ink_mode_title" = "โหมดขาวดำ";
+"prefs_eink_mode_summary" = "ใช้แอปพลิเคชันในโหมดโมโนโครม (ไม่มีสี) เหมาะสำหรับอุปกรณ์ E-ink";
+"prefs_interface_locale_summary" = "เลือกภาษาส่วนติดต่อผู้ใช้แบบกำหนดเอง";
+"prefs_interface_locale_title" = "ภาษาของแอปพลิเคชัน";
+"prefs_navigate_to_verse_summary" = "เลือกข้อ (และบท) เมื่อเลือกตอน";
+"prefs_navigate_to_verse_title" = "นำทางไปยังข้อ";
+"prefs_night_mode_automatic" = "อัตโนมัติ";
+"prefs_night_mode_manual" = "ด้วยตนเอง";
+"prefs_night_mode_summary" = "เลือกว่าจะสลับเป็นโหมดกลางคืนโดยอัตโนมัติ (หากอุปกรณ์รองรับ) ด้วยตนเอง หรือตามการตั้งค่าระบบ (Android 10 ขึ้นไป) การสลับด้วยตนเองสามารถทำได้จากเมนู 3 จุดในหน้าจอหลัก";
+"prefs_night_mode_system" = "ระบบ";
+"prefs_night_mode_title" = "การสลับโหมดกลางคืน";
+"prefs_open_links_in_special_window_summary" = "เปิดลิงก์ในหน้าต่างพิเศษ เพื่อแสดงการอ้างอิงข้ามและ Strongs ได้รวดเร็วขึ้น";
+"prefs_open_links_in_special_window_title" = "หน้าต่างลิงก์";
+"prefs_screen_keep_on_summary" = "ป้องกันหน้าจอดับระหว่างใช้งานแอป";
+"prefs_screen_keep_on_title" = "เปิดหน้าจอค้างไว้";
+"prefs_show_error_box_summary" = "มีประโยชน์สำหรับนักพัฒนาเมื่อดีบักข้อผิดพลาดฝั่ง Javascript ของ BibleView ซึ่งจะทำให้แอปทำงานช้าลง";
+"prefs_show_error_box_title" = "แสดงกล่องข้อผิดพลาด Javascript";
+"prefs_swipe_mode_chapter" = "บท";
+"prefs_swipe_mode_none" = "ปิดใช้งาน";
+"prefs_swipe_mode_page" = "หน้า";
+
+"prefs_volume_keys_scroll_title" = "ปุ่มระดับเสียงสำหรับเลื่อน";
+"prefs_volume_keys_scroll_summary" = "ใช้ปุ่มเพิ่ม/ลดระดับเสียงเพื่อเลื่อนข้อความพระคัมภีร์";
+"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
+"prefs_experimental_features_title" = "คุณสมบัติทดลอง";
+"prefs_experimental_features_summary" = "เลือกคุณสมบัติทดลองที่ต้องการเปิดใช้งาน คุณสมบัติเหล่านี้ยังอยู่ในระหว่างพัฒนาและอาจมีการเปลี่ยนแปลงหรือถูกลบออก";
+"experimental_feature_bookmark_edit_actions" = "การแก้ไขที่คั่นหน้า";
+"experimental_feature_add_paragraph_break" = "เพิ่มที่คั่นหน้าแบบขึ้นย่อหน้า";
+"prefs_enable_bluetooth_title" = "เปิดใช้งานปุ่มมีเดียบลูทูธ";
+"prefs_enable_bluetooth_summary" = "จัดการปุ่มมีเดียบลูทูธเพื่อเริ่ม/หยุดการอ่านออกเสียง";
+
+"open_bible_links_title" = "เปิดลิงก์พระคัมภีร์ใน AndBible";
+"open_bible_links_summary" = "เมื่อคลิกลิงก์ที่อ้างถึง URL พระคัมภีร์ที่ AndBible รองรับ ให้เปิดใน AndBible";
+
+"crash_app" = "Crash app!";
+"crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";
+"crash_app_scheduled_summary" = "Crash scheduled in 10 seconds.";
+"sign_in_failed" = "การเข้าสู่ระบบบริการแบ็กเอนด์การซิงโครไนซ์ล้มเหลว";
+"sync_adapter" = "แบ็กเอนด์การซิงโครไนซ์";
+"sync_adapter_summary" = "ปัจจุบัน: %@";
+"adapters_next_cloud" = "Next Cloud";
+"auth_server_uri" = "URL เซิร์ฟเวอร์";
+"auth_username" = "ชื่อผู้ใช้";
+"auth_password" = "รหัสผ่าน";
+"auth_folder_path" = "เส้นทางโฟลเดอร์ซิงค์";
+"auth_folder_path_summary" = "โฟลเดอร์หลักสำหรับข้อมูลซิงค์ (ว่าง = รูท)";
+"invalid_url_message" = "URL ที่คุณป้อนไม่ถูกต้อง กรุณาป้อน URL ที่ถูกต้อง (เช่น https://nextcloud.example.com)";
+"prefs_sync_introduction_summary1" = "เลือกบริการคลาวด์ที่ต้องการใช้เพื่อซิงโครไนซ์อุปกรณ์หลายเครื่อง";
+"test_connection" = "Test Connection";
+"overrideBackup" = "พบฐานข้อมูลที่อุปกรณ์นี้ยังไม่ได้ซิงโครไนซ์อยู่ในคลาวด์ ฐานข้อมูลมี %@ คุณต้องการทำอะไร?";
+"cloud_fetch_and_restore_initial" = "คัดลอกจากคลาวด์มายังอุปกรณ์นี้";
+"cloud_create_new" = "คัดลอกจากอุปกรณ์นี้ไปยังคลาวด์";
+"cloud_disable_sync" = "ยกเลิกและปิดใช้งานการซิงโครไนซ์";
+"cloud_sync_title" = "การซิงโครไนซ์อุปกรณ์";
+"application_preferences" = "การตั้งค่าแอปพลิเคชัน";
+"are_you_sure_reset_local" = "การดำเนินการนี้จะรีเซ็ตฐานข้อมูลในเครื่องสำหรับ %@ ด้วยเนื้อหาที่จัดเก็บอยู่ในบริการคลาวด์ปัจจุบัน";
+"are_you_sure_reset_cloud" = "การดำเนินการนี้จะรีเซ็ตฐานข้อมูลคลาวด์สำหรับ %@ ด้วยเนื้อหาที่มีในอุปกรณ์นี้";
+"reading_plans_content" = "แผนการอ่านและสถานะของแผน";
+"bookmarks_contents" = "ที่คั่นหน้า ป้ายกำกับ และแผ่นบันทึกการศึกษา";
+"workspaces_contents" = "พื้นที่ทำงานและหน้าต่าง";
+"my_documents" = "เอกสารของฉัน";
+"my_documents_contents" = "เอกสารของฉันและเนื้อหา";
+"synchronization_categories" = "หมวดหมู่การซิงโครไนซ์";
+"sync_error" = "เกิดข้อผิดพลาดในการซิงโครไนซ์คลาวด์";
+"sync_cant_fetch" = "เวอร์ชันของฐานข้อมูลหรือไฟล์แพตช์ที่จัดเก็บในคลาวด์สูงกว่าที่แอปนี้รองรับ";
+"sync_disabling" = "ปิดใช้งานการซิงโครไนซ์สำหรับ %@ ชั่วคราว";
+"sync_update_app" = "กรุณาอัปเดตแอปเพื่อดำเนินการซิงโครไนซ์ต่อ";
+"last_updated" = "อัปเดตล่าสุด: %@";
+
+"help_workspaces_title" = "พื้นที่ทำงาน";
+"reading_plans_plural" = "แผนการอ่าน";
+
+/* Android window popup menu parity */
+"windowMaximise" = "ขยายใหญ่สุด";
+"windowMinimise" = "ย่อเล็กสุด";
+"change_to_normal" = "เปลี่ยนเป็นหน้าต่างปกติ";
+"move_window" = "ย้ายไปที่";
+"move_window_to_position2" = "ตำแหน่ง %1$d (%2$@:%3$@)";
+"window_pin_mode" = "ปักหมุด";
+"windowSynchronise" = "ซิงโครไนซ์";
+"window_disable_sync" = "ปิดการซิงโครไนซ์";
+"sync_group_n" = "กลุ่ม %d";
+"text_options_window_menutitle" = "ตัวเลือกข้อความ";
+"prefs_text_colors_menutitle" = "การตั้งค่าสี";
+"prefs_section_title_title" = "หัวข้อส่วน";
+"prefs_show_strongs_title" = "หมายเลข Strong's";
+"prefs_show_verseno_title" = "เลขบทและข้อ";
+"copy_settings" = "คัดลอกการตั้งค่าไปที่";
+"copy_settings_to_workspace" = "พื้นที่ทำงาน";
+"copy_settings_to_window" = "หน้าต่าง %1$d (%2$@: %3$@)";
+"copy_settings_to_global" = "ค่าเริ่มต้นสากล";
+"copyReference" = "คัดลอกลิงก์ไปยังคลิปบอร์ด";
+"reference_copied_to_clipboard" = "คัดลอกข้อมูลอ้างอิงแล้ว";
+"add_ellipsis" = "%@…";
+"copy_settings_title" = "คุณต้องการคัดลอกการตั้งค่าใด?";
+"select_all" = "เลือกทั้งหมด";
+"select_none" = "ไม่เลือกทั้งหมด";
+"font" = "Font";
+"margin_size" = "Margin size";
+"top_margin" = "ขอบบน";
+"footnotes_inline" = "Inline footnotes";
+"expand_cross_references" = "Expand cross references";
+"cross_references" = "การอ้างอิงข้าม";
+"verse_per_line" = "Verse per line";
+"show_bookmarks" = "แสดงที่คั่นหน้า";
+"hide_labels" = "Hide labels";
+"my_notes" = "My notes";
+"page_number" = "Page number";
+"infinite_scroll" = "การเลื่อนแบบไม่สิ้นสุด";
+"non_strongs_word_italic" = "ทำคำที่เพิ่มเข้ามาเป็นตัวเอียง";
+"mark_as_read_button" = "ปุ่มทำเครื่องหมายว่าอ่านแล้ว";
+"title_scroll_button" = "ปุ่มเลื่อนหัวข้อ";
+"memorization_indicators" = "ตัวบ่งชี้การท่องจำ";
+"ai_document_markers" = "AI document markers";
+"page_scroll_amount" = "ปริมาณการเลื่อนหน้า";
+"ordinals" = "Ordinals";
+"error_no_content" = "ไม่มีเนื้อหาสำหรับข้อพระคัมภีร์ที่เลือก";

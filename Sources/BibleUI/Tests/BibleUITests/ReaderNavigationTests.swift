@@ -988,6 +988,50 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies corrupt installed Bible content renders a visible no-content document.
+
+     The installer should reject partial downloads before publication, but an already installed
+     module can still be missing data because of filesystem damage, migration bugs, or older builds.
+     This fixture removes the Old Testament files after copying KJV, then asks the reader for
+     Genesis. A failure means the native bridge can clear Vue's documents and leave the reader on an
+     endless loading spinner instead of emitting Android's no-content message.
+     */
+    @MainActor
+    func testLoadCurrentContentEmitsNoContentErrorDocumentWhenInstalledBibleChapterIsMissing() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let dataPath = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("texts", isDirectory: true)
+            .appendingPathComponent("ztext", isDirectory: true)
+            .appendingPathComponent("kjv", isDirectory: true)
+        for fileName in ["ot.bzs", "ot.bzz", "ot.bzv"] {
+            try FileManager.default.removeItem(at: dataPath.appendingPathComponent(fileName))
+        }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertNotNil(manager.module(named: "KJV"))
+
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.loadCurrentContent()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+
+        XCTAssertEqual(payload["type"] as? String, "error")
+        XCTAssertEqual(payload["errorMessage"] as? String, "No content for selected verse")
+        XCTAssertEqual(payload["severity"] as? String, "NORMAL")
+        XCTAssertTrue(recordedScripts().contains { $0.contains("emit('clear_document'") })
+        XCTAssertTrue(recordedScripts().contains { $0.contains("emit('setup_content'") })
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=bible;module=KJV;book=Genesis;chapter=1;key=Gen.1"
+        )
+    }
+
+    /**
      Protects commentary rendering against chapter-shaped fallbacks.
 
      Android's `CurrentCommentaryPage` is a single-key page: when the current Bible verse is

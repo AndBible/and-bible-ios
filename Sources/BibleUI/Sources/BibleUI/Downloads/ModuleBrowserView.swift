@@ -463,7 +463,7 @@ public struct ModuleBrowserView: View {
     /// Guards Android startup defaults so they are requested at most once per Downloads session.
     @State private var didRequestDefaultDocuments = false
 
-    /// Startup default module names whose asynchronous installs have not finished yet.
+    /// Startup default modules whose asynchronous installs have not reached a terminal row state.
     @State private var defaultDownloadInstallingModules: Set<String> = []
 
     /**
@@ -3211,6 +3211,7 @@ public struct ModuleBrowserView: View {
      - records the module name in `downloadActivities` so the UI can show progress and cancel
      - performs repository installation work and, on success, rebuilds local SWORD state before
        refreshing the installed-module list
+     - repository installation follows Android's package ZIP path for remote SWORD modules
      - stores installation failures in the row activity and surfaces the latest failure in
        `errorMessage`
 
@@ -3259,7 +3260,10 @@ public struct ModuleBrowserView: View {
         let task = Task {
             await Task.yield()
             do {
-                try await repository.installModule(named: module.name, from: source) { progress in
+                try await repository.installModule(
+                    named: module.name,
+                    from: source
+                ) { progress in
                     Task { @MainActor in
                         guard installTaskIDs[module.name] == installID else { return }
                         downloadActivities[module.name] = .inProgress(progress)
@@ -3326,9 +3330,8 @@ public struct ModuleBrowserView: View {
      Marks one startup default module done and finishes the default flow when none remain.
 
      - Parameter moduleName: Module initials for the completed or skipped default install.
-
      Side effects:
-     - removes `moduleName` from `defaultDownloadInstallingModules`
+     - removes the module from the active startup default install set
      - invokes `onDefaultDownloadActivityChanged(false)` once the startup default set is exhausted
 
      Failure modes:
@@ -3349,7 +3352,7 @@ public struct ModuleBrowserView: View {
      Reports that startup default refresh/install activity is no longer active.
 
      Side effects:
-     - clears `defaultDownloadInstallingModules`
+     - clears active default install activity
      - invokes `onDefaultDownloadActivityChanged(false)` for the reader coordinator
 
      Failure modes:

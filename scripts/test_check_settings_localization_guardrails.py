@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check_settings_localization_guardrails as localization_guardrails
 from check_settings_localization_guardrails import (
+    AndroidSharedLocalization,
     LocalePrefOption,
     PARITY_KEYS,
     audit_android_shared_translations,
@@ -26,6 +27,7 @@ from check_settings_localization_guardrails import (
     load_android_non_english_snapshot,
     parse_ios_strings,
     sync_android_shared_translations,
+    write_android_non_english_snapshot,
 )
 
 
@@ -213,6 +215,30 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
                 localization_guardrails.default_android_root(),
                 Path("/tmp/and-bible/app/src/main/res"),
             )
+
+    def test_android_snapshot_writer_uses_portable_source_identifier(self) -> None:
+        """Prevents generated fixtures from committing local checkout paths.
+
+        The writer receives parsed Android localization data from its caller,
+        but the committed JSON must stay machine-independent. A failure means
+        regenerating the snapshot can leak a developer or CI absolute path back
+        into the repo.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshot_path = root / "snapshot.json"
+
+            write_android_non_english_snapshot(
+                snapshot_path,
+                {key: [] for key in PARITY_KEYS},
+                [],
+                AndroidSharedLocalization([], [], {}, {}, {}, {}),
+            )
+
+            payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["source_android_res"], "app/src/main/res")
+        self.assertNotIn(str(root), payload["source_android_res"])
 
     def test_locale_pref_snapshot_loader_preserves_default_empty_value(self) -> None:
         """Protects the Android default locale option while validating snapshot shape.

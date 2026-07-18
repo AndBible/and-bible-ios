@@ -624,3 +624,4 @@
 
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Hafız kartta jsword/readingplan içinde dahili bir planla aynı ada sahip bir kullanıcı okuma planı var. Burada listelenemez. Lütfen dosyanın dosya uzantısını .properties olarak bırakarak dosyayı başka bir adla yeniden adlandırın";
+"error_no_content" = "Seçilen ayeti için içerik yok";

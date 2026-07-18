@@ -11,12 +11,11 @@ import os.log
 private let logger = Logger(subsystem: "org.andbible.ios", category: "ModuleRepository")
 
 /**
- Internal HTTP-status failure used while downloading individual module files.
+ Internal HTTP-status failure used while downloading repository packages.
 
- `installModule` decides whether a 404 means "skip this optional testament group" or "fail the
- install" based on the module driver and where the failed file appears in its group. Keeping this
- separate from `ModuleRepositoryError.downloadFailed` preserves that context until the install loop
- can make the Android-parity decision.
+ Package installers convert this private transport detail into public repository errors. Keeping
+ it separate from `ModuleRepositoryError.downloadFailed` preserves the status code until the
+ SWORD package loop can decide whether a 404 means candidate unavailability.
  */
 private struct ModuleFileHTTPStatusError: Error, LocalizedError, Sendable {
     /// Repository file name whose HTTP response was not successful.
@@ -32,23 +31,23 @@ private struct ModuleFileHTTPStatusError: Error, LocalizedError, Sendable {
 }
 
 /**
- Downloads one file with native URLSession streaming and progress callbacks.
+ Downloads one repository payload with native URLSession streaming and progress callbacks.
 
  The delegate moves the completed temporary download into the caller's staging path only after a
- 200 response. It is separate from `ModuleRepository` so each file gets an isolated continuation
+ 200 response. It is separate from `ModuleRepository` so each payload gets an isolated continuation
  and cancellation target.
  */
 private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    /// Destination inside the module staging directory.
+    /// Destination inside the caller's temporary or staging directory.
     private let destinationURL: URL
 
-    /// Repository file name used in failure messages.
+    /// Repository payload name used in failure messages.
     private let fileName: String
 
     /// Number of files completed before this task began.
     private let completedFiles: Int
 
-    /// Total planned files after optional group pruning.
+    /// Total planned files used to scale progress.
     private let totalFiles: Double
 
     /// Optional normalized progress callback supplied by the UI layer.
@@ -191,8 +190,8 @@ private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDele
      - invokes the caller's progress callback when a new integer percent boundary is crossed
 
      Failure modes:
-     - unknown content length disables in-file progress; file-completion progress still occurs in
-       `ModuleRepository.installModule`
+     - unknown content length disables in-file progress until the package install reports
+       completion after a successful commit
      */
     func urlSession(
         _ session: URLSession,
@@ -332,7 +331,7 @@ public struct SourceConfig: Sendable, Identifiable {
     /// Optional manifest description retained for edit/display context.
     public let description: String?
 
-    /// Optional Android package directory used by SWORD package fallback installs.
+    /// Optional Android package directory used by SWORD package installs.
     public let packageDirectory: String?
 
     /// Optional custom repository manifest URL used for edit context and MyBible refresh.
@@ -364,7 +363,7 @@ public struct SourceConfig: Sendable, Identifiable {
        - repositoryType: Android repository type. Defaults to `sword-https` for HTTP rows and
          `ftp` for FTP rows so existing callers keep their previous behavior.
        - description: Optional human-readable manifest description.
-       - packageDirectory: Optional Android package directory for SWORD package fallback.
+       - packageDirectory: Optional Android package directory for SWORD package installs.
        - manifestURL: Optional custom repository manifest URL.
        - sourceURL: Optional resolved source URL used for display/edit context.
      - Side effects: none.
@@ -1246,25 +1245,30 @@ public final class ModuleRepository: @unchecked Sendable {
     // MARK: - Module Installation
 
     /**
-     Installs one remote SWORD module by streaming data files into a staging directory before
-     publishing it.
+     Installs one remote SWORD module from Android's repository package ZIP.
+
+     Android's Downloads path gives JSword a package directory and installs the selected module as
+     a ZIP. iOS mirrors that remote-install contract instead of probing raw SWORD data files, so
+     transient missing raw files cannot publish partial Bible or commentary data.
 
      - Parameters:
        - moduleName: Module abbreviation from the refreshed catalog, such as `KJV`.
-       - source: Remote source whose in-memory catalog entry supplies URLs and module metadata.
+       - source: Remote source whose in-memory catalog entry supplies package metadata and module
+         layout.
        - progress: Optional callback receiving normalized completion in the range `0.0...1.0`.
      - Side effects:
-       - creates a temporary staging directory next to the target module directory
-       - streams downloaded data files into staging so large modules are not fully buffered in memory
-       - skips absent optional OT/NT file groups so single-testament modules can install
-       - replaces the target module directory only after all required files have downloaded
+       - downloads a package ZIP to a temporary file
+       - extracts matching module data into a temporary staging directory
+       - replaces the target module directory only after package extraction succeeds
        - writes the module `.conf` file only after staged data is ready to publish
        - invalidates SWORD's module cache after a successful install
      - Throws:
        - `ModuleRepositoryError.moduleNotFound` when the source catalog does not contain the module
        - `ModuleRepositoryError.invalidURL` when the source cannot produce a base URL
-       - `ModuleRepositoryError.downloadFailed` when any required data file returns a non-200 HTTP
-         response, no optional data group is available, or transport fails
+       - `ModuleRepositoryError.downloadFailed` when no package URL can be built or every package
+         candidate is unavailable
+       - `ModuleRepositoryError.invalidZip` when a downloaded package is malformed or does not
+         contain the catalog module data path
        - `CancellationError` when the surrounding task is cancelled before the install completes
        - file-system errors from directory creation, data writes, or config writes
      - Important: The `.conf` file is the installed marker consumed by `SwordManager`, and updates
@@ -1283,13 +1287,13 @@ public final class ModuleRepository: @unchecked Sendable {
             return
         }
 
-        guard let baseURL = source.baseURL else {
+        guard source.baseURL != nil else {
             throw ModuleRepositoryError.invalidURL(source.name)
         }
 
         let fm = FileManager.default
 
-        // 1. Determine local directory and remote base path.
+        // 1. Determine local directory.
         //    For verse-keyed modules (ztext, rawtext, zcom, rawcom), DataPath is a directory
         //    (e.g. "modules/texts/ztext/kjv/") and files go directly inside.
         //    For lexicon/genbook modules (rawld, zld, rawgenbook), DataPath ends with a
@@ -1298,125 +1302,36 @@ public final class ModuleRepository: @unchecked Sendable {
         let driver = entry.modDrv.lowercased()
         let moduleDataPath = moduleDataDirectoryPath(for: entry.dataPath, driver: driver)
         let localDir = (swordPath as NSString).appendingPathComponent(moduleDataPath)
-        let remoteBase = moduleDataPath
         let localDirURL = URL(fileURLWithPath: localDir, isDirectory: true)
         let localParentURL = localDirURL.deletingLastPathComponent()
         try fm.createDirectory(at: localParentURL, withIntermediateDirectories: true)
-        let stagingDirURL = localParentURL.appendingPathComponent(
-            ".\(localDirURL.lastPathComponent)-\(UUID().uuidString).installing",
-            isDirectory: true
-        )
-        try fm.createDirectory(at: stagingDirURL, withIntermediateDirectories: true)
-        defer {
-            try? fm.removeItem(at: stagingDirURL)
-        }
 
-        // 2. Determine files to download based on ModDrv
-        let fileGroups = moduleFileGroups(
-            for: entry.modDrv,
-            dataPath: entry.dataPath,
-            confContent: entry.confContent
-        )
-
-        // 3. Download each file
-        var plannedFileCount = fileGroups.reduce(0) { $0 + $1.files.count }
-        var downloaded = 0
-        var stagedFileCount = 0
-
-        for group in fileGroups {
-            var downloadedInGroup = 0
-
-            for (index, fileName) in group.files.enumerated() {
-                try Task.checkCancellation()
-
-                let remoteURL = baseURL
-                    .appendingPathComponent(remoteBase)
-                    .appendingPathComponent(fileName)
-
-                do {
-                    logger.info("Downloading \(remoteURL.absoluteString)")
-                    let stagedFileURL = stagingDirURL.appendingPathComponent(fileName)
-                    try await downloadRequiredModuleFile(
-                        from: remoteURL,
-                        to: stagedFileURL,
-                        fileName: fileName,
-                        completedFiles: downloaded,
-                        totalFiles: Double(max(plannedFileCount, 1)),
-                        progress: progress
-                    )
-                    logger.info("Staged \(fileName) to \(stagedFileURL.path)")
-                    downloaded += 1
-                    downloadedInGroup += 1
-                    stagedFileCount += 1
-                    progress?(Double(downloaded) / Double(max(plannedFileCount, 1)))
-                } catch let statusError as ModuleFileHTTPStatusError
-                    where !group.required && downloadedInGroup == 0 && index == 0 && statusError.statusCode == 404 {
-                    plannedFileCount -= group.files.count
-                    if downloaded > 0 {
-                        progress?(Double(downloaded) / Double(max(plannedFileCount, 1)))
-                    }
-                    logger.info("Skipping missing optional module file group starting with \(fileName)")
-                    break
-                } catch let statusError as ModuleFileHTTPStatusError {
-                    logger.warning("Download failed for \(fileName): \(statusError.localizedDescription)")
-                    if statusError.statusCode == 404 {
-                        let installedFromPackage = try await installModulePackageFallback(
-                            named: moduleName,
-                            entry: entry,
-                            source: source,
-                            localDirURL: localDirURL,
-                            progress: progress
-                        )
-                        if installedFromPackage {
-                            return
-                        }
-                    }
-                    throw ModuleRepositoryError.downloadFailed(statusError.localizedDescription)
-                } catch {
-                    logger.warning("Download failed for \(fileName): \(error.localizedDescription)")
-                    throw error
-                }
-            }
-        }
-
-        guard stagedFileCount > 0 else {
-            let installedFromPackage = try await installModulePackageFallback(
-                named: moduleName,
-                entry: entry,
-                source: source,
-                localDirURL: localDirURL,
-                progress: progress
-            )
-            if installedFromPackage {
-                return
-            }
-            throw ModuleRepositoryError.downloadFailed("No module data files were available for \(moduleName)")
-        }
-        try Task.checkCancellation()
-
-        // 4. Publish staged files and write .conf marker with rollback for updates.
-        try commitStagedModuleInstall(
-            stagingDirURL: stagingDirURL,
+        let packageInstallResult = try await installModulePackage(
+            named: moduleName,
+            entry: entry,
+            source: source,
             localDirURL: localDirURL,
-            moduleName: moduleName,
-            confContent: entry.confContent
+            progress: progress
         )
-
-        // 5. Invalidate SWORD's module cache so new SWMgr instances rescan
-        invalidateModuleCache()
-
-        progress?(1.0)
+        switch packageInstallResult {
+        case .installed:
+            return
+        case .unavailable:
+            throw ModuleRepositoryError.downloadFailed("Package ZIP was unavailable for \(moduleName)")
+        case .noCandidates:
+            throw ModuleRepositoryError.downloadFailed("No package ZIP location was available for \(moduleName)")
+        }
     }
 
     /**
-     Streams one module file into a staging destination using URLSession's native download task.
+     Streams one repository payload into a destination using URLSession's native download task.
 
      - Parameters:
-       - remoteURL: Fully resolved repository URL for the required module file.
-       - destinationURL: Staging-file destination that will be created or replaced.
-       - fileName: Repository file name used in user-visible failure messages.
-       - completedFiles: Number of required files already staged before this download.
-       - totalFiles: Total required files for the module install, used for progress scaling.
+       - remoteURL: Fully resolved repository URL for the required package payload.
+       - destinationURL: Destination that will be created or replaced.
+       - fileName: Repository payload name used in user-visible failure messages.
+       - completedFiles: Number of payloads already staged before this download.
+       - totalFiles: Total payload count for the install, used for progress scaling.
        - progress: Optional progress callback receiving throttled normalized completion.
 
      Side effects:
@@ -1426,8 +1341,8 @@ public final class ModuleRepository: @unchecked Sendable {
      - invokes `progress` as URLSession reports integer percent boundaries
 
      Failure modes:
-     - throws `ModuleFileHTTPStatusError` for non-200 responses so the install loop can distinguish
-       optional 404 groups from required-file failures
+     - throws `ModuleFileHTTPStatusError` for non-200 responses so package installers can
+       distinguish unavailable packages from hard HTTP failures
      - throws `CancellationError` when the surrounding task is cancelled
      - propagates transport and file I/O errors
      */
@@ -1484,6 +1399,7 @@ public final class ModuleRepository: @unchecked Sendable {
        - posts `SwordModuleStore.modulesDidChangeNotification` after the staged install publishes
      - Throws:
        - `ModuleRepositoryError.invalidURL` when the manifest row has no HTTPS package URL
+       - `ModuleRepositoryError.downloadFailed` when the package response returns an HTTP failure
        - `ModuleRepositoryError.invalidZip` when the package is empty or lacks a MyBible payload
        - `CancellationError` when the surrounding task is cancelled
        - file-system errors from staging or publishing the package
@@ -1503,14 +1419,18 @@ public final class ModuleRepository: @unchecked Sendable {
             try? fm.removeItem(at: packageDownloadURL)
         }
 
-        try await downloadRequiredModuleFile(
-            from: downloadURL,
-            to: packageDownloadURL,
-            fileName: downloadURL.lastPathComponent,
-            completedFiles: 0,
-            totalFiles: 1,
-            progress: progress
-        )
+        do {
+            try await downloadRequiredModuleFile(
+                from: downloadURL,
+                to: packageDownloadURL,
+                fileName: downloadURL.lastPathComponent,
+                completedFiles: 0,
+                totalFiles: 1,
+                progress: progress
+            )
+        } catch let statusError as ModuleFileHTTPStatusError {
+            throw ModuleRepositoryError.downloadFailed(statusError.localizedDescription)
+        }
 
         try Task.checkCancellation()
         let stagingDirURL = myBibleInstallDir
@@ -1663,7 +1583,7 @@ public final class ModuleRepository: @unchecked Sendable {
 
     /**
      Writes one SWORD ZIP entry to disk using the file-backed extractor shared by local imports and
-     downloaded repository package fallbacks.
+     downloaded repository packages.
 
      - Parameters:
        - entry: ZIP entry metadata already accepted by SWORD path normalization.
@@ -1901,13 +1821,36 @@ public final class ModuleRepository: @unchecked Sendable {
     }
 
     /**
-     Installs a module from a repository ZIP package when raw data-file probing cannot find usable
-     files.
+     Result of attempting a SWORD package ZIP install.
 
-     Android's installer can use package directories such as `zip/` or `packages/rawzip/` for
-     repositories that do not expose raw module data files. The Swift installer first tries raw file
-     paths so it can preserve streaming progress, then calls this fallback only when no module data
-     has been staged.
+     The installer needs to distinguish an unavailable package from a source that cannot produce a
+     package URL so the user-visible failure identifies whether repository metadata or repository
+     availability blocked the Android-parity install.
+
+     Side effects:
+     - none; values summarize work performed by `installModulePackage`
+
+     Failure modes:
+     - none
+     */
+    private enum ModulePackageInstallResult: Equatable {
+        /// A package ZIP was downloaded, extracted, and committed.
+        case installed
+
+        /// At least one package URL was attempted, but every candidate returned 404.
+        case unavailable
+
+        /// No package URL could be built for the selected source and heuristic mode.
+        case noCandidates
+
+    }
+
+    /**
+     Installs a module from an Android-compatible repository ZIP package.
+
+     Android installs SWORD modules through repository package ZIPs. iOS follows that same remote
+     path for built-in repositories, Android-compatible custom manifests, and direct SWORD catalog
+     custom sources whose package directory is inferred as `catalogPath/packages`.
 
      - Parameters:
        - moduleName: Catalog module abbreviation whose package should be downloaded.
@@ -1915,8 +1858,8 @@ public final class ModuleRepository: @unchecked Sendable {
        - source: Repository source used to derive package ZIP candidate URLs.
        - localDirURL: Final module data directory that will receive the extracted package data.
        - progress: Optional normalized progress callback shared with the caller.
-     - Returns: `true` when a candidate package was downloaded, extracted, and committed; `false`
-       when no package candidate was available.
+     - Returns: `.installed` when a package was committed, `.unavailable` when package URLs existed
+       but returned 404, or `.noCandidates` when no package URL could be built.
      - Side effects:
        - downloads a candidate ZIP into a temporary file
        - extracts only `modules/` entries into a temporary staging tree
@@ -1924,19 +1867,24 @@ public final class ModuleRepository: @unchecked Sendable {
        - invalidates SWORD's module cache after a successful package install
      - Throws:
        - `CancellationError` when the surrounding task is cancelled
+       - `ModuleRepositoryError.downloadFailed` when a package candidate returns a non-404 HTTP
+         failure
        - `ModuleRepositoryError.invalidZip` when a downloaded candidate is malformed or lacks the
          catalog data directory
        - file-system errors from temporary extraction or final publish
      */
-    private func installModulePackageFallback(
+    private func installModulePackage(
         named moduleName: String,
         entry: CatalogModule,
         source: SourceConfig,
         localDirURL: URL,
         progress: ((Double) -> Void)?
-    ) async throws -> Bool {
-        let candidates = packageZipCandidateURLs(for: moduleName, source: source)
-        guard !candidates.isEmpty else { return false }
+    ) async throws -> ModulePackageInstallResult {
+        let candidates = packageZipCandidateURLs(
+            for: moduleName,
+            source: source
+        )
+        guard !candidates.isEmpty else { return .noCandidates }
 
         let fm = FileManager.default
         let packageDownloadURL = fm.temporaryDirectory
@@ -1949,7 +1897,7 @@ public final class ModuleRepository: @unchecked Sendable {
         for candidate in candidates {
             try Task.checkCancellation()
             do {
-                logger.info("Trying package fallback \(candidate.absoluteString)")
+                logger.info("Trying package install \(candidate.absoluteString)")
                 try await downloadRequiredModuleFile(
                     from: candidate,
                     to: packageDownloadURL,
@@ -1961,12 +1909,14 @@ public final class ModuleRepository: @unchecked Sendable {
                 downloadedPackageURL = candidate
                 break
             } catch let statusError as ModuleFileHTTPStatusError where statusError.statusCode == 404 {
-                logger.info("Skipping missing package fallback \(candidate.absoluteString)")
+                logger.info("Skipping missing package install \(candidate.absoluteString)")
                 try? fm.removeItem(at: packageDownloadURL)
+            } catch let statusError as ModuleFileHTTPStatusError {
+                throw ModuleRepositoryError.downloadFailed(statusError.localizedDescription)
             }
         }
 
-        guard let downloadedPackageURL else { return false }
+        guard let downloadedPackageURL else { return .unavailable }
 
         let entries = try readFileBackedZipEntries(from: packageDownloadURL)
         guard !entries.isEmpty else {
@@ -2014,22 +1964,25 @@ public final class ModuleRepository: @unchecked Sendable {
         )
         invalidateModuleCache()
         progress?(1.0)
-        return true
+        return .installed
     }
 
     /**
      Builds the repository package ZIP URL that matches Android's installer source model.
 
      - Parameters:
-     - moduleName: Catalog module abbreviation used as the package filename.
-     - source: Repository source whose host and catalog path anchor package locations.
-     - Returns: The single authoritative package URL for the source, or an empty array when no
-       package directory can be resolved.
+       - moduleName: Catalog module abbreviation used as the package filename.
+       - source: Repository source whose host and catalog path anchor package locations.
+     - Returns: The package URL for the source, or an empty array when no package directory can be
+       resolved.
      - Side effects: none.
-     - Failure modes: malformed host/path combinations are skipped rather than thrown because raw
-       file installation remains the primary path.
+     - Failure modes: malformed host/path combinations are skipped and cause the caller to surface
+       a package-location failure.
      */
-    private func packageZipCandidateURLs(for moduleName: String, source: SourceConfig) -> [URL] {
+    private func packageZipCandidateURLs(
+        for moduleName: String,
+        source: SourceConfig
+    ) -> [URL] {
         let packageFileName = "\(moduleName).zip"
         guard let packageDirectory = packageDirectory(for: source) else { return [] }
         let path = appendingPathComponent(packageFileName, toPath: packageDirectory)
@@ -2875,146 +2828,6 @@ public final class ModuleRepository: @unchecked Sendable {
         )
     }
 
-    // MARK: - Module File Patterns
-
-    /**
-     Describes one group of module data files that must be handled together.
-
-     Verse-keyed Bibles and commentaries can be single-testament modules, so their OT and NT groups
-     are optional until the first file in a group exists. Dictionary and genbook drivers need every
-     file in their group to produce a usable module.
-     */
-    private struct ModuleFileGroup {
-        /// Repository file names in the order they should be downloaded.
-        let files: [String]
-
-        /// Whether a missing first file fails the install instead of skipping the group.
-        let required: Bool
-    }
-
-    /**
-     Determines the module file groups to download based on the SWORD module driver.
-
-     - Parameters:
-       - modDrv: SWORD driver name from the module `.conf`.
-       - dataPath: Normalized `DataPath` from the module `.conf`.
-       - confContent: Full `.conf` content used for zCom `BlockType` file extension parity.
-     - Returns: Ordered file groups. Optional groups model Android/libsword behavior for
-       single-testament verse-keyed modules; required groups remain all-or-nothing.
-     - Side effects: none.
-     - Failure modes: unknown drivers fall back to optional ztext-style testament groups.
-     */
-    private func moduleFileGroups(
-        for modDrv: String,
-        dataPath: String,
-        confContent: String
-    ) -> [ModuleFileGroup] {
-        let driver = modDrv.lowercased()
-
-        switch driver {
-        case "ztext", "ztext4":
-            return [
-                ModuleFileGroup(files: ["ot.bzs", "ot.bzz", "ot.bzv"], required: false),
-                ModuleFileGroup(files: ["nt.bzs", "nt.bzz", "nt.bzv"], required: false)
-            ]
-        case "rawtext", "rawtext4":
-            return [
-                ModuleFileGroup(files: ["ot", "ot.vss"], required: false),
-                ModuleFileGroup(files: ["nt", "nt.vss"], required: false)
-            ]
-        case "zcom", "zcom2", "zcom4":
-            let compressedStem = compressedCommentaryFileStem(from: confContent)
-            return [
-                ModuleFileGroup(
-                    files: ["ot.\(compressedStem)zs", "ot.\(compressedStem)zz", "ot.\(compressedStem)zv"],
-                    required: false
-                ),
-                ModuleFileGroup(
-                    files: ["nt.\(compressedStem)zs", "nt.\(compressedStem)zz", "nt.\(compressedStem)zv"],
-                    required: false
-                )
-            ]
-        case "rawcom", "rawcom4":
-            return [
-                ModuleFileGroup(files: ["ot", "ot.vss"], required: false),
-                ModuleFileGroup(files: ["nt", "nt.vss"], required: false)
-            ]
-        case "zld":
-            let name = lastComponent(of: dataPath)
-            return [ModuleFileGroup(files: ["\(name).dat", "\(name).idx", "\(name).zdx", "\(name).zdt"], required: true)]
-        case "rawld", "rawld4":
-            let name = lastComponent(of: dataPath)
-            return [ModuleFileGroup(files: ["\(name).dat", "\(name).idx"], required: true)]
-        case "rawgenbook":
-            let name = lastComponent(of: dataPath)
-            return [ModuleFileGroup(files: ["\(name).bdt", "\(name).bks", "\(name).bky"], required: true)]
-        default:
-            // Best effort for unknown types
-            return [
-                ModuleFileGroup(files: ["ot.bzs", "ot.bzz", "ot.bzv"], required: false),
-                ModuleFileGroup(files: ["nt.bzs", "nt.bzz", "nt.bzv"], required: false)
-            ]
-        }
-    }
-
-    /**
-     Maps zCom `BlockType` metadata to the compressed commentary filename stem.
-
-     - Parameter confContent: Full module `.conf` content from the repository catalog.
-     - Returns: `b` for book-block modules or missing metadata, `c` for chapter-block modules,
-       and `v` for verse-block modules.
-     - Side effects: none.
-     - Failure modes: unknown `BlockType` values fall back to book-block filenames because that is
-       the historical SWORD default and preserves current behavior for modules without metadata.
-     */
-    private func compressedCommentaryFileStem(from confContent: String) -> String {
-        guard let blockType = confValue(named: "BlockType", in: confContent)?.lowercased() else {
-            return "b"
-        }
-
-        switch blockType {
-        case "chapter":
-            return "c"
-        case "verse":
-            return "v"
-        default:
-            return "b"
-        }
-    }
-
-    /**
-     Reads one key from a SWORD `.conf` document without requiring the module to be reparsed.
-
-     - Parameters:
-       - key: Case-insensitive key name to read.
-       - confContent: Full module `.conf` content.
-     - Returns: The trimmed key value when present, otherwise `nil`.
-     - Side effects: none.
-     - Failure modes: malformed lines, comments, and section headers are ignored.
-     */
-    private func confValue(named key: String, in confContent: String) -> String? {
-        for line in confContent.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty,
-                  !trimmed.hasPrefix("#"),
-                  !trimmed.hasPrefix("["),
-                  let separator = trimmed.firstIndex(of: "=") else {
-                continue
-            }
-
-            let candidateKey = String(trimmed[..<separator])
-                .trimmingCharacters(in: .whitespaces)
-            guard candidateKey.caseInsensitiveCompare(key) == .orderedSame else {
-                continue
-            }
-
-            return String(trimmed[trimmed.index(after: separator)...])
-                .trimmingCharacters(in: .whitespaces)
-        }
-
-        return nil
-    }
-
     /**
      Resolves the directory that contains data files for a module `DataPath`.
 
@@ -3039,12 +2852,6 @@ public final class ModuleRepository: @unchecked Sendable {
             return (normalizedPath as NSString).deletingLastPathComponent
         }
         return normalizedPath
-    }
-
-    /// Get the last path component, stripping trailing slashes.
-    private func lastComponent(of path: String) -> String {
-        let trimmed = path.hasSuffix("/") ? String(path.dropLast()) : path
-        return (trimmed as NSString).lastPathComponent
     }
 }
 
