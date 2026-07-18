@@ -13,9 +13,9 @@ private let logger = Logger(subsystem: "org.andbible.ios", category: "ModuleRepo
 /**
  Internal HTTP-status failure used while downloading repository packages.
 
- `installModulePackage` treats a 404 package candidate as unavailable while surfacing other HTTP
- failures as hard download errors. Keeping this separate from `ModuleRepositoryError.downloadFailed`
- preserves the status code until the package loop can make that decision.
+ Package installers convert this private transport detail into public repository errors. Keeping
+ it separate from `ModuleRepositoryError.downloadFailed` preserves the status code until the
+ SWORD package loop can decide whether a 404 means candidate unavailability.
  */
 private struct ModuleFileHTTPStatusError: Error, LocalizedError, Sendable {
     /// Repository file name whose HTTP response was not successful.
@@ -1399,6 +1399,7 @@ public final class ModuleRepository: @unchecked Sendable {
        - posts `SwordModuleStore.modulesDidChangeNotification` after the staged install publishes
      - Throws:
        - `ModuleRepositoryError.invalidURL` when the manifest row has no HTTPS package URL
+       - `ModuleRepositoryError.downloadFailed` when the package response returns an HTTP failure
        - `ModuleRepositoryError.invalidZip` when the package is empty or lacks a MyBible payload
        - `CancellationError` when the surrounding task is cancelled
        - file-system errors from staging or publishing the package
@@ -1418,14 +1419,18 @@ public final class ModuleRepository: @unchecked Sendable {
             try? fm.removeItem(at: packageDownloadURL)
         }
 
-        try await downloadRequiredModuleFile(
-            from: downloadURL,
-            to: packageDownloadURL,
-            fileName: downloadURL.lastPathComponent,
-            completedFiles: 0,
-            totalFiles: 1,
-            progress: progress
-        )
+        do {
+            try await downloadRequiredModuleFile(
+                from: downloadURL,
+                to: packageDownloadURL,
+                fileName: downloadURL.lastPathComponent,
+                completedFiles: 0,
+                totalFiles: 1,
+                progress: progress
+            )
+        } catch let statusError as ModuleFileHTTPStatusError {
+            throw ModuleRepositoryError.downloadFailed(statusError.localizedDescription)
+        }
 
         try Task.checkCancellation()
         let stagingDirURL = myBibleInstallDir

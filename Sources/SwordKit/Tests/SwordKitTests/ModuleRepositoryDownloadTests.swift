@@ -407,6 +407,115 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
+     Verifies MyBible package HTTP failures use the public repository error surface.
+
+     MyBible installs download Android-compatible ZIP packages through the same Downloads API as SWORD
+     modules. A package server failure should therefore surface as `ModuleRepositoryError.downloadFailed`
+     instead of leaking the private HTTP-status helper used inside the download delegate.
+     */
+    func testModuleRepositoryMyBiblePackageHTTPFailureUsesPublicDownloadError() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Example MyBible",
+            type: "HTTP",
+            host: "mybible.example",
+            catalogPath: "/manifest.json",
+            repositoryType: SourceConfig.myBibleHTTPSRepositoryType,
+            description: "Example MyBible catalog",
+            manifestURL: URL(string: "https://mybible.example/manifest.json"),
+            sourceURL: URL(string: "https://mybible.example/manifest.json")
+        )
+        let manifestData = """
+        {
+          "url": "https://mybible.example/manifest.json",
+          "file_name": "Example MyBible",
+          "description": "Example MyBible catalog",
+          "modules": [
+            {
+              "file_name": "finrk.SQLite3.zip",
+              "description": "Finnish RK",
+              "download_url": "https://mybible.example/finrk.SQLite3.zip",
+              "language_code": "fi",
+              "update_date": "2026-05-01",
+              "update_info": "initial"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            switch request.url?.path {
+            case "/manifest.json":
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    manifestData
+                )
+            case "/finrk.SQLite3.zip":
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 503,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    Data("server error".utf8)
+                )
+            default:
+                XCTFail("Unexpected MyBible request: \(request.url?.absoluteString ?? "<nil>")")
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 404,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    Data()
+                )
+            }
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        do {
+            try await repository.installModule(named: "MyBible-finrk_SQLite3", from: source)
+            XCTFail("Expected MyBible package HTTP failure to abort install.")
+        } catch {
+            guard case ModuleRepositoryError.downloadFailed(let message) = error else {
+                XCTFail("Expected public downloadFailed wrapping, got \(type(of: error)): \(error)")
+                return
+            }
+            XCTAssertTrue(
+                message.contains("finrk.SQLite3.zip download failed (HTTP 503)"),
+                "MyBible package HTTP failures should identify the failed ZIP through the public error."
+            )
+        }
+
+        let moduleDir = swordDir
+            .appendingPathComponent("mybible", isDirectory: true)
+            .appendingPathComponent("MyBible-finrk_SQLite3", isDirectory: true)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: moduleDir.path),
+            "A failed MyBible package download must not publish an installed module directory."
+        )
+    }
+
+    /**
      Local SWORD ZIP install accepts Android-style deflated entries with data descriptors.
 
      Android's `ZipOutputStream` writes deflated entries before it knows their final sizes, leaving
@@ -741,6 +850,135 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             try String(contentsOf: confPath, encoding: .utf8),
             oldConf,
             "A failed update must preserve the installed module config marker."
+        )
+    }
+
+    /**
+     Verifies commit-time publish failures restore the previous installed data directory.
+
+     Setup:
+     - preinstalls TESTDICT data plus its `.conf` marker
+     - serves a valid replacement package so download and extraction both succeed
+     - removes write permission from `mods.d` so the publish step fails while moving the old marker
+
+     Expected result:
+     - the commit helper restores the old data directory and leaves the old marker readable
+
+     Failure meaning:
+     - a filesystem error during final publish can leave an existing module without its prior data,
+       which is the update-corruption case Android's package installer avoids.
+     */
+    func testModuleRepositoryCommitFailureRestoresExistingInstalledFiles() async throws {
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "TestRepo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "TESTDICT")
+        let localDir = moduleRepositoryLocalDir(for: "TESTDICT", under: swordDir)
+        try fm.createDirectory(at: localDir, withIntermediateDirectories: true)
+        try Data("old-dictionary-data".utf8).write(to: localDir.appendingPathComponent("testdict.dat"))
+        try Data("old-index-data".utf8).write(to: localDir.appendingPathComponent("testdict.idx"))
+
+        let modsDir = swordDir.appendingPathComponent("mods.d", isDirectory: true)
+        try fm.createDirectory(at: modsDir, withIntermediateDirectories: true)
+        let oldConf = """
+        [TESTDICT]
+        Description=Old Test Dictionary
+        Category=Lexicons / Dictionaries
+        Lang=en
+        ModDrv=RawLD
+        DataPath=./modules/lexdict/rawld/testdict/testdict
+        Version=0.9
+        InstallSize=1
+        """
+        let confPath = modsDir.appendingPathComponent("testdict.conf")
+        try oldConf.write(to: confPath, atomically: true, encoding: .utf8)
+
+        let zipData = makeModuleRepositoryZip([
+            ("modules/lexdict/rawld/testdict/testdict.dat", Data("new-dictionary-data".utf8)),
+            ("modules/lexdict/rawld/testdict/testdict.idx", Data("new-index-data".utf8))
+        ])
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/TESTDICT.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Length": "\(zipData.count)"]
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: modsDir.path)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: modsDir.path)
+        }
+
+        do {
+            try await repository.installModule(named: "TESTDICT", from: source)
+            XCTFail("Expected final publish to fail when mods.d is not writable.")
+        } catch {
+            XCTAssertFalse(
+                error.localizedDescription.isEmpty,
+                "The publish failure should propagate the filesystem error that forced rollback."
+            )
+        }
+
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("testdict.dat")),
+            Data("old-dictionary-data".utf8),
+            "Commit-time rollback must restore the previous data file."
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("testdict.idx")),
+            Data("old-index-data".utf8),
+            "Commit-time rollback must restore the previous index file."
+        )
+        XCTAssertEqual(
+            try String(contentsOf: confPath, encoding: .utf8),
+            oldConf,
+            "Commit-time rollback must preserve the previous installed module marker."
         )
     }
 
