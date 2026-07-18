@@ -190,8 +190,8 @@ private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDele
      - invokes the caller's progress callback when a new integer percent boundary is crossed
 
      Failure modes:
-     - unknown content length disables in-file progress; file-completion progress still occurs in
-       `ModuleRepository.installModule`
+     - unknown content length disables in-file progress until the package install reports
+       completion after a successful commit
      */
     func urlSession(
         _ session: URLSession,
@@ -1862,6 +1862,8 @@ public final class ModuleRepository: @unchecked Sendable {
        - invalidates SWORD's module cache after a successful package install
      - Throws:
        - `CancellationError` when the surrounding task is cancelled
+       - `ModuleRepositoryError.downloadFailed` when a package candidate returns a non-404 HTTP
+         failure
        - `ModuleRepositoryError.invalidZip` when a downloaded candidate is malformed or lacks the
          catalog data directory
        - file-system errors from temporary extraction or final publish
@@ -1904,6 +1906,8 @@ public final class ModuleRepository: @unchecked Sendable {
             } catch let statusError as ModuleFileHTTPStatusError where statusError.statusCode == 404 {
                 logger.info("Skipping missing package install \(candidate.absoluteString)")
                 try? fm.removeItem(at: packageDownloadURL)
+            } catch let statusError as ModuleFileHTTPStatusError {
+                throw ModuleRepositoryError.downloadFailed(statusError.localizedDescription)
             }
         }
 

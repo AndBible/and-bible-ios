@@ -622,8 +622,8 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
      Verifies failed updates preserve the previously installed module atomically.
 
      Android update failures leave the old document usable. The repository should stage package
-     replacement data separately and keep the old data files plus `.conf` marker when the package
-     cannot be downloaded.
+     replacement data separately and keep the old data files plus `.conf` marker when a downloaded
+     package fails before publish.
      */
     func testModuleRepositoryFailedUpdatePreservesExistingInstalledFiles() async throws {
         let tempDir = FileManager.default.temporaryDirectory
@@ -660,6 +660,21 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         let confPath = modsDir.appendingPathComponent("testdict.conf")
         try oldConf.write(to: confPath, atomically: true, encoding: .utf8)
 
+        let zipData = makeModuleRepositoryZipWithCentralDirectory([
+            (
+                name: "modules/lexdict/rawld/testdict/testdict.dat",
+                body: Data("new-dictionary-data".utf8),
+                compressionMethod: 0,
+                compressedBody: Data("new-dictionary-data".utf8)
+            ),
+            (
+                name: "modules/lexdict/rawld/testdict/testdict.idx",
+                body: Data("new-index-data".utf8),
+                compressionMethod: 99,
+                compressedBody: Data("new-index-data".utf8)
+            )
+        ])
+
         ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
             let response: HTTPURLResponse
             let data: Data
@@ -675,11 +690,11 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             case "/packages/TESTDICT.zip":
                 response = HTTPURLResponse(
                     url: request.url!,
-                    statusCode: 500,
+                    statusCode: 200,
                     httpVersion: nil,
-                    headerFields: nil
+                    headerFields: ["Content-Length": "\(zipData.count)"]
                 )!
-                data = Data("server error".utf8)
+                data = zipData
             default:
                 XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
                 response = HTTPURLResponse(
@@ -707,8 +722,8 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             XCTFail("Expected failed update to throw.")
         } catch {
             XCTAssertTrue(
-                error.localizedDescription.contains("TESTDICT.zip"),
-                "Failure should identify the package ZIP that could not be downloaded."
+                error.localizedDescription.contains("Unsupported ZIP compression method 99"),
+                "Failure should identify the staged package entry that could not be extracted."
             )
         }
 
@@ -730,13 +745,13 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
-     Verifies single-testament zText installs succeed from repository packages.
+     Verifies single-testament zText packages install without synthetic OT files.
 
      Android installs SWORD modules from ZIP packages and does not require raw OT/NT file probing to
      distinguish full and single-testament modules. The package may legitimately contain only NT
      data; iOS should publish exactly that package content without requesting raw OT files.
      */
-    func testModuleRepositoryInstallsSingleTestamentModuleWhenOptionalGroupIsMissing() async throws {
+    func testModuleRepositoryInstallsSingleTestamentPackageWithoutSyntheticOldTestamentFiles() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
@@ -832,7 +847,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             .appendingPathComponent("ntonly.conf")
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: confPath.path),
-            "A single-testament install with at least one complete data group should publish its .conf marker."
+            "A single-testament package that contains module data should publish its .conf marker."
         )
     }
 
@@ -1407,6 +1422,14 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             try await repository.installModule(named: "FULL", from: source)
             XCTFail("Expected package install to fail when the package ZIP returns a server error.")
         } catch {
+            guard case ModuleRepositoryError.downloadFailed(let message) = error else {
+                XCTFail("Expected public downloadFailed wrapping, got \(type(of: error)): \(error)")
+                return
+            }
+            XCTAssertTrue(
+                message.contains("FULL.zip download failed (HTTP 500)"),
+                "Package HTTP failures should be reported through ModuleRepositoryError.downloadFailed."
+            )
             XCTAssertEqual(
                 requestedPaths.filter { $0 != "/raw/mods.d.tar.gz" },
                 ["/packages/FULL.zip"]
@@ -1794,6 +1817,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             ("modules/lexdict/rawld/testdict/testdict.dat", Data("dictionary-data".utf8)),
             ("modules/lexdict/rawld/testdict/testdict.idx", Data("index-data".utf8))
         ])
+        let zipHeaders = ["Content-Length": "\(zipData.count)"]
         var requestedPaths: [String] = []
 
         ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
@@ -1814,7 +1838,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     url: request.url!,
                     statusCode: 200,
                     httpVersion: nil,
-                    headerFields: nil
+                    headerFields: zipHeaders
                 )!
                 data = zipData
             default:
@@ -1903,6 +1927,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             ("modules/lexdict/rawld/testdict/testdict.dat", Data("dictionary-data".utf8)),
             ("modules/lexdict/rawld/testdict/testdict.idx", Data("index-data".utf8))
         ])
+        let zipHeaders = ["Content-Length": "\(zipData.count)"]
 
         ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
             let response: HTTPURLResponse
@@ -1921,7 +1946,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
                     url: request.url!,
                     statusCode: 200,
                     httpVersion: nil,
-                    headerFields: nil
+                    headerFields: zipHeaders
                 )!
                 data = zipData
             default:
