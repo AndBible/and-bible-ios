@@ -492,11 +492,8 @@ public struct ModuleBrowserView: View {
     /// Guards Android startup defaults so they are requested at most once per Downloads session.
     @State private var didRequestDefaultDocuments = false
 
-    /// Startup default module names whose asynchronous installs have not finished yet.
-    @State private var defaultDownloadInstallingModules: Set<String> = []
-
-    /// Startup default module names whose retries must keep strict package-only install policy.
-    @State private var defaultDownloadStrictPackageModules: Set<String> = []
+    /// Startup default install lifecycle whose failures must keep strict package-only retry policy.
+    @State private var defaultDownloadStrictPackageState = ModuleBrowserDefaultDownloadStrictPackageState()
 
     /**
      Creates the module browser with optional Android-compatible search and default-download state.
@@ -3069,8 +3066,7 @@ public struct ModuleBrowserView: View {
             return
         }
 
-        defaultDownloadInstallingModules.formUnion(moduleNames)
-        defaultDownloadStrictPackageModules.formUnion(moduleNames)
+        defaultDownloadStrictPackageState.startInstalling(moduleNames)
         onDefaultDownloadActivityChanged(true)
         for module in modulesToInstall {
             installModule(module)
@@ -3297,9 +3293,9 @@ public struct ModuleBrowserView: View {
             return
         }
 
-        let packageInstallPolicy = defaultDownloadMode.modulePackageInstallPolicy(
-            for: module.name,
-            strictDefaultModules: defaultDownloadStrictPackageModules
+        let packageInstallPolicy = defaultDownloadStrictPackageState.packageInstallPolicy(
+            mode: defaultDownloadMode,
+            moduleName: module.name
         )
 
         let task = Task {
@@ -3381,21 +3377,6 @@ public struct ModuleBrowserView: View {
     }
 
     /**
-     Strict package-policy lifecycle for one startup default module.
-
-     Failed Easy Start installs keep strict package policy so row retries cannot fall back to raw
-     testament probes and recreate the partial-Bible failure from issue 354. Successful installs and
-     user cancellations clear strict membership because that default request no longer owns retries.
-     */
-    private enum DefaultDownloadStrictPolicyResolution {
-        /// Remove the module from strict package-policy membership.
-        case clear
-
-        /// Keep the module strict so the visible retry path still requires the Android package ZIP.
-        case retainForRetry
-    }
-
-    /**
      Marks one startup default module done and finishes the default flow when none remain.
 
      - Parameter moduleName: Module initials for the completed or skipped default install.
@@ -3403,8 +3384,7 @@ public struct ModuleBrowserView: View {
        later retries.
 
      Side effects:
-     - removes `moduleName` from `defaultDownloadInstallingModules`
-     - clears `moduleName` from `defaultDownloadStrictPackageModules` only after success/cancel
+     - records the terminal state in `defaultDownloadStrictPackageState`
      - invokes `onDefaultDownloadActivityChanged(false)` once the startup default set is exhausted
 
      Failure modes:
@@ -3412,17 +3392,16 @@ public struct ModuleBrowserView: View {
      */
     private func markDefaultDownloadModuleFinishedIfNeeded(
         _ moduleName: String,
-        strictPolicyResolution: DefaultDownloadStrictPolicyResolution
+        strictPolicyResolution: ModuleBrowserDefaultDownloadStrictPackageResolution
     ) {
         guard defaultDownloadMode.shouldInstallDefaultDocuments else {
             return
         }
 
-        if case .clear = strictPolicyResolution {
-            defaultDownloadStrictPackageModules.remove(moduleName)
-        }
-        defaultDownloadInstallingModules.remove(moduleName)
-        if defaultDownloadInstallingModules.isEmpty {
+        if defaultDownloadStrictPackageState.finish(
+            moduleName,
+            strictPolicyResolution: strictPolicyResolution
+        ) {
             finishDefaultDownloadActivityIfNeeded()
         }
     }
@@ -3431,9 +3410,7 @@ public struct ModuleBrowserView: View {
      Reports that startup default refresh/install activity is no longer active.
 
      Side effects:
-     - clears `defaultDownloadInstallingModules`
-     - preserves `defaultDownloadStrictPackageModules` so failed default modules remain strict for
-       row retries until they succeed, are cancelled, or the Downloads session ends
+     - clears active default install activity while preserving failed-module strict retry state
      - invokes `onDefaultDownloadActivityChanged(false)` for the reader coordinator
 
      Failure modes:
@@ -3444,7 +3421,7 @@ public struct ModuleBrowserView: View {
             return
         }
 
-        defaultDownloadInstallingModules.removeAll()
+        defaultDownloadStrictPackageState.finishActivity()
         onDefaultDownloadActivityChanged(false)
     }
 

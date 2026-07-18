@@ -149,6 +149,8 @@ LOCALE_TO_ANDROID_VALUES = {
 }
 
 ANDROID_ROOT_ENV = "ANDBIBLE_ANDROID_ROOT"
+# Stable provenance label for generated snapshots; never serialize a local checkout path.
+ANDROID_SNAPSHOT_SOURCE_RES = "app/src/main/res"
 
 LINE_RE = re.compile(r'^"(?P<key>[^"]+)"\s*=\s*"(?P<val>(?:[^"\\]|\\.)*)";\s*$')
 LOCALE_OPTIONS_BLOCK_RE = re.compile(
@@ -1095,9 +1097,15 @@ def write_android_non_english_snapshot(
     locale_pref_options: list[LocalePrefOption],
     shared_localization: AndroidSharedLocalization,
 ) -> None:
+    """Write a deterministic Android localization snapshot for iOS parity checks.
+
+    `android_root` is intentionally not serialized as an absolute path. Local and CI runs can
+    use different checkout directories, and committing those machine-specific paths causes noisy
+    fixture churn without improving audit behavior.
+    """
     payload = {
         "generated_on": date.today().isoformat(),
-        "source_android_res": str(android_root),
+        "source_android_res": ANDROID_SNAPSHOT_SOURCE_RES,
         "parity_keys": PARITY_KEYS,
         "locale_to_android_values": LOCALE_TO_ANDROID_VALUES,
         "locale_pref_options": [

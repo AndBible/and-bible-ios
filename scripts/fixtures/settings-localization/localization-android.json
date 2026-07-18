@@ -32196,5 +32196,5 @@
     "crash_app",
     "crash_app_summary"
   ],
-  "source_android_res": "/Users/primetheus/Desktop/and-bible-convert/and-bible/app/src/main/res"
+  "source_android_res": "app/src/main/res"
 }
