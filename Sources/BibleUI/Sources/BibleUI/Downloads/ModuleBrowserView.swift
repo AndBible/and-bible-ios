@@ -252,35 +252,6 @@ public enum ModuleBrowserDefaultDownloadMode: Sendable, Equatable {
     }
 
     /**
-     SWORD package-install policy for one requested module.
-
-     Normal Downloads follows Android package-first behavior while retaining iOS raw fallback for
-     legacy/raw-compatible sources. Startup defaults require Android package ZIPs for modules
-     selected by the Easy Start default-document planner until that module succeeds or is cancelled,
-     so a failed default install keeps strict retry behavior while unrelated manual installs in the
-     same Downloads session keep the normal fallback behavior.
-
-     - Parameters:
-       - moduleName: Module initials about to be installed.
-       - strictDefaultModules: Easy Start default modules whose current session retries must remain
-         package-only.
-     - Returns: Strict package policy only for active Easy Start default modules; otherwise the
-       normal package-then-raw policy.
-     - Side effects: none.
-     - Failure modes: none.
-     */
-    func modulePackageInstallPolicy(
-        for moduleName: String,
-        strictDefaultModules: Set<String>
-    ) -> ModulePackageInstallPolicy {
-        guard self == .englishStartup,
-              strictDefaultModules.contains(moduleName) else {
-            return .preferPackageThenRaw
-        }
-        return .requirePackage
-    }
-
-    /**
      Android metadata language bucket consumed by this mode.
      - Returns: The metadata language code, or `nil` when defaults are disabled.
      - Side effects: none.
@@ -492,8 +463,8 @@ public struct ModuleBrowserView: View {
     /// Guards Android startup defaults so they are requested at most once per Downloads session.
     @State private var didRequestDefaultDocuments = false
 
-    /// Startup default install lifecycle whose failures must keep strict package-only retry policy.
-    @State private var defaultDownloadStrictPackageState = ModuleBrowserDefaultDownloadStrictPackageState()
+    /// Startup default modules whose asynchronous installs have not reached a terminal row state.
+    @State private var defaultDownloadInstallingModules: Set<String> = []
 
     /**
      Creates the module browser with optional Android-compatible search and default-download state.
@@ -3066,7 +3037,7 @@ public struct ModuleBrowserView: View {
             return
         }
 
-        defaultDownloadStrictPackageState.startInstalling(moduleNames)
+        defaultDownloadInstallingModules.formUnion(moduleNames)
         onDefaultDownloadActivityChanged(true)
         for module in modulesToInstall {
             installModule(module)
@@ -3240,8 +3211,7 @@ public struct ModuleBrowserView: View {
      - records the module name in `downloadActivities` so the UI can show progress and cancel
      - performs repository installation work and, on success, rebuilds local SWORD state before
        refreshing the installed-module list
-     - active startup default-document modules require Android package ZIPs instead of raw SWORD
-       file probes; manual installs in the same session keep normal raw fallback
+     - repository installation follows Android's package ZIP path for remote SWORD modules
      - stores installation failures in the row activity and surfaces the latest failure in
        `errorMessage`
 
@@ -3257,10 +3227,7 @@ public struct ModuleBrowserView: View {
                 ?? Self.moduleUnavailableForInstallationMessage(moduleName: module.name)
             errorMessage = message
             recordDownloadError(message)
-            markDefaultDownloadModuleFinishedIfNeeded(
-                module.name,
-                strictPolicyResolution: .retainForRetry
-            )
+            markDefaultDownloadModuleFinishedIfNeeded(module.name)
             return
         }
 
@@ -3272,10 +3239,7 @@ public struct ModuleBrowserView: View {
             let message = Self.moduleSourceNotFoundMessage(moduleName: module.name)
             errorMessage = message
             recordDownloadError(message)
-            markDefaultDownloadModuleFinishedIfNeeded(
-                module.name,
-                strictPolicyResolution: .retainForRetry
-            )
+            markDefaultDownloadModuleFinishedIfNeeded(module.name)
             return
         }
 
@@ -3293,18 +3257,12 @@ public struct ModuleBrowserView: View {
             return
         }
 
-        let packageInstallPolicy = defaultDownloadStrictPackageState.packageInstallPolicy(
-            mode: defaultDownloadMode,
-            moduleName: module.name
-        )
-
         let task = Task {
             await Task.yield()
             do {
                 try await repository.installModule(
                     named: module.name,
-                    from: source,
-                    packageInstallPolicy: packageInstallPolicy
+                    from: source
                 ) { progress in
                     Task { @MainActor in
                         guard installTaskIDs[module.name] == installID else { return }
@@ -3319,10 +3277,7 @@ public struct ModuleBrowserView: View {
                     downloadActivities[module.name] = nil
                     swordManager = SwordManager()
                     refreshInstalledList()
-                    markDefaultDownloadModuleFinishedIfNeeded(
-                        module.name,
-                        strictPolicyResolution: .clear
-                    )
+                    markDefaultDownloadModuleFinishedIfNeeded(module.name)
                 }
             } catch {
                 await MainActor.run {
@@ -3337,12 +3292,7 @@ public struct ModuleBrowserView: View {
                         errorMessage = Self.downloadFailureMessage(message)
                         recordDownloadError(Self.downloadFailureMessage(moduleName: module.name, message: message))
                     }
-                    markDefaultDownloadModuleFinishedIfNeeded(
-                        module.name,
-                        strictPolicyResolution: (
-                            error is CancellationError || Task.isCancelled
-                        ) ? .clear : .retainForRetry
-                    )
+                    markDefaultDownloadModuleFinishedIfNeeded(module.name)
                 }
             }
         }
@@ -3372,7 +3322,7 @@ public struct ModuleBrowserView: View {
         installTasks[moduleName] = nil
         installTaskIDs[moduleName] = nil
         downloadActivities[moduleName] = nil
-        markDefaultDownloadModuleFinishedIfNeeded(moduleName, strictPolicyResolution: .clear)
+        markDefaultDownloadModuleFinishedIfNeeded(moduleName)
         return cancelledTask
     }
 
@@ -3380,28 +3330,20 @@ public struct ModuleBrowserView: View {
      Marks one startup default module done and finishes the default flow when none remain.
 
      - Parameter moduleName: Module initials for the completed or skipped default install.
-     - Parameter strictPolicyResolution: Whether this terminal state keeps strict package policy for
-       later retries.
-
      Side effects:
-     - records the terminal state in `defaultDownloadStrictPackageState`
+     - removes the module from the active startup default install set
      - invokes `onDefaultDownloadActivityChanged(false)` once the startup default set is exhausted
 
      Failure modes:
      - ignored for normal Downloads sessions where default-download mode is disabled
      */
-    private func markDefaultDownloadModuleFinishedIfNeeded(
-        _ moduleName: String,
-        strictPolicyResolution: ModuleBrowserDefaultDownloadStrictPackageResolution
-    ) {
+    private func markDefaultDownloadModuleFinishedIfNeeded(_ moduleName: String) {
         guard defaultDownloadMode.shouldInstallDefaultDocuments else {
             return
         }
 
-        if defaultDownloadStrictPackageState.finish(
-            moduleName,
-            strictPolicyResolution: strictPolicyResolution
-        ) {
+        defaultDownloadInstallingModules.remove(moduleName)
+        if defaultDownloadInstallingModules.isEmpty {
             finishDefaultDownloadActivityIfNeeded()
         }
     }
@@ -3410,7 +3352,7 @@ public struct ModuleBrowserView: View {
      Reports that startup default refresh/install activity is no longer active.
 
      Side effects:
-     - clears active default install activity while preserving failed-module strict retry state
+     - clears active default install activity
      - invokes `onDefaultDownloadActivityChanged(false)` for the reader coordinator
 
      Failure modes:
@@ -3421,7 +3363,7 @@ public struct ModuleBrowserView: View {
             return
         }
 
-        defaultDownloadStrictPackageState.finishActivity()
+        defaultDownloadInstallingModules.removeAll()
         onDefaultDownloadActivityChanged(false)
     }
 

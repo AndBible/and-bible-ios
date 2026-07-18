@@ -1092,16 +1092,15 @@ def load_android_non_english_snapshot(path: Path) -> dict[str, list[str]]:
 
 def write_android_non_english_snapshot(
     path: Path,
-    android_root: Path,
     non_english_by_key: dict[str, list[str]],
     locale_pref_options: list[LocalePrefOption],
     shared_localization: AndroidSharedLocalization,
 ) -> None:
     """Write a deterministic Android localization snapshot for iOS parity checks.
 
-    `android_root` is intentionally not serialized as an absolute path. Local and CI runs can
-    use different checkout directories, and committing those machine-specific paths causes noisy
-    fixture churn without improving audit behavior.
+    The live Android resource directory is intentionally not serialized as an absolute path.
+    Local and CI runs can use different checkout directories, and committing those
+    machine-specific paths causes noisy fixture churn without improving audit behavior.
     """
     payload = {
         "generated_on": date.today().isoformat(),
@@ -1287,7 +1286,6 @@ def main() -> int:
         shared_localization = build_android_shared_localization(args.repo_root, args.android_root)
         write_android_non_english_snapshot(
             args.android_snapshot,
-            args.android_root,
             non_english_by_key,
             locale_pref_options,
             shared_localization,

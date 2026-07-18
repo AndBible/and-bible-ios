@@ -326,7 +326,7 @@ final class RepositorySourceManagerTests: XCTestCase {
      Verifies sidecar package directories are normalized when merged onto SWORD config rows.
 
      Older sidecars can contain Android package-directory values before iOS normalized them at write
-     time. Loading must normalize the merged `SourceConfig` so Downloads package fallback receives
+     time. Loading must normalize the merged `SourceConfig` so Downloads package installs receive
      the same root-relative repository path Android passes to JSword.
      */
     func testRepositorySourceManagerNormalizesSidecarPackageDirectoryWhenMergingConfigSource() throws {

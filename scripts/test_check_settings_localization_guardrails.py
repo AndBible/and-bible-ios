@@ -219,19 +219,17 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
     def test_android_snapshot_writer_uses_portable_source_identifier(self) -> None:
         """Prevents generated fixtures from committing local checkout paths.
 
-        The writer receives the live Android resource directory so it can read
-        current XML, but the committed JSON must stay machine-independent. A
-        failure means regenerating the snapshot can leak a developer or CI
-        absolute path back into the repo.
+        The writer receives parsed Android localization data from its caller,
+        but the committed JSON must stay machine-independent. A failure means
+        regenerating the snapshot can leak a developer or CI absolute path back
+        into the repo.
         """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             snapshot_path = root / "snapshot.json"
-            android_root = root / "local" / "and-bible" / "app" / "src" / "main" / "res"
 
             write_android_non_english_snapshot(
                 snapshot_path,
-                android_root,
                 {key: [] for key in PARITY_KEYS},
                 [],
                 AndroidSharedLocalization([], [], {}, {}, {}, {}),
