@@ -248,6 +248,7 @@ public final class RemoteSyncBookmarkSnapshotService {
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         let labelAliasStore = RemoteSyncBookmarkLabelAliasStore(settingsStore: settingsStore)
         let playbackSettingsStore = RemoteSyncBookmarkPlaybackSettingsStore(settingsStore: settingsStore)
+        let androidBookStore = RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore)
         let reverseAliases = Dictionary(
             uniqueKeysWithValues: labelAliasStore.allAliases().map { ($0.localLabelID, $0.remoteLabelID) }
         )
@@ -334,7 +335,7 @@ public final class RemoteSyncBookmarkSnapshotService {
                 v11n: bookmark.v11n,
                 playbackSettingsJSON: playbackJSON,
                 createdAt: bookmark.createdAt,
-                book: bookmark.book,
+                book: androidBookStore.androidBookValue(for: bookmark.id, localBook: bookmark.book),
                 startOffset: bookmark.startOffset,
                 endOffset: bookmark.endOffset,
                 primaryLabelID: primaryLabelID,

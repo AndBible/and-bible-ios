@@ -20,10 +20,10 @@ import SwordKit
  */
 public protocol AndroidBookmarkBookNameResolving {
     /**
-     Reports whether a raw Android `book` value matches an installed SWORD Bible's initials.
+     Reports whether a raw Android `book` value matches an installed passage module's initials.
 
      - Parameter rawValue: Raw string from the Android `book` column.
-     - Returns: `true` when the value equals an installed Bible module's initials.
+     - Returns: `true` when the value equals an installed Bible or commentary module's initials.
      - Side effects: may lazily enumerate installed modules.
      - Failure modes: returns `false` when module enumeration is unavailable.
      */
@@ -36,8 +36,8 @@ public protocol AndroidBookmarkBookNameResolving {
        - v11nName: Versification name stored with the Android bookmark row; empty means KJV.
        - ordinal: Intro-inclusive whole-Bible ordinal in `v11nName`.
        - kjvOrdinal: Intro-inclusive whole-Bible ordinal in KJVA used as a fallback key.
-     - Returns: The SWORD book name (e.g. `Genesis`), or `nil` when no installed module matches
-       the bookmark's versification and no KJVA-versified module can use the fallback ordinal.
+     - Returns: The SWORD book name (e.g. `Genesis`), or `nil` when no installed module can
+       resolve the ordinal in a versification-sound way.
      - Side effects: may lazily create SWORD manager state and cache module book lists.
      - Failure modes: returns `nil` for intro ordinals and unresolvable versifications.
      */
@@ -47,22 +47,31 @@ public protocol AndroidBookmarkBookNameResolving {
 /**
  SWORD-backed resolver that derives display book names from installed Bible modules.
 
- The resolver prefers an installed Bible whose versification matches the bookmark's own `v11n`
- so ordinals resolve in the versification they were recorded in, exactly like Android's
- JSword reverse mapping. When no matching module exists it falls back to a KJVA-versified
- module using the bookmark's KJVA ordinal, which is versification-correct by construction.
+ The resolver tries every installed Bible whose versification matches the bookmark's own `v11n`
+ so ordinals resolve in the versification they were recorded in, exactly like Android's JSword
+ reverse mapping. Candidates that libsword cannot open (Android custom-driver or MyBible package
+ projections) or that lack the resolved book's content are skipped rather than aborting
+ derivation. When no matching module resolves, two versification-sound fallbacks use the
+ bookmark's KJVA ordinal: a KJVA-versified module when installed, then any KJV-versified module
+ restricted to Old Testament results, because KJV and KJVA ordinals are identical up to Malachi
+ and diverge only after the apocrypha insertion point.
 
  Side effects:
- - lazily creates a `SwordManager` on first resolution and caches per-module book lists
+ - lazily creates a `SwordManager` on first resolution; caches the module inventory, per-module
+   book lists, and per-versification module choices for the resolver's lifetime
 
  Failure modes:
- - resolution returns `nil` when no installed module matches and no KJVA module exists
+ - resolution returns `nil` when no installed module can resolve the ordinal soundly
+ - the caches never observe module installs performed after the first resolution, so restore
+   flows should use a fresh resolver instance per operation (the default service wiring does)
  */
 public final class AndroidBookmarkSwordBookNameResolver: AndroidBookmarkBookNameResolving {
     private let managerProvider: () -> SwordManager?
     private var cachedManager: SwordManager??
-    private var cachedBibleInitials: Set<String>?
-    private var bookNamesByModule: [String: [String: String]] = [:]
+    private var cachedBibleModuleInfos: [ModuleInfo]?
+    private var cachedPassageInitials: Set<String>?
+    private var moduleNamesByV11n: [String: [String]] = [:]
+    private var bookListsByModule: [String: [BookInfo]] = [:]
 
     /**
      Creates a resolver backed by lazily created SWORD manager state.
@@ -77,15 +86,18 @@ public final class AndroidBookmarkSwordBookNameResolver: AndroidBookmarkBookName
     }
 
     /**
-     Reports whether a raw Android `book` value matches an installed SWORD Bible's initials.
+     Reports whether a raw Android `book` value matches an installed passage module's initials.
+
+     Android's `book` column holds an `AbstractPassageBook`, which covers commentaries as well as
+     Bibles, so both categories participate in initials classification.
 
      - Parameter rawValue: Raw string from the Android `book` column.
-     - Returns: `true` when the value equals an installed Bible module's initials.
-     - Side effects: lazily enumerates installed Bible modules once.
+     - Returns: `true` when the value equals an installed Bible or commentary module's initials.
+     - Side effects: lazily enumerates installed modules once.
      - Failure modes: returns `false` when the SWORD manager cannot be created.
      */
     public func isInstalledBibleInitials(_ rawValue: String) -> Bool {
-        installedBibleInitials().contains(rawValue)
+        installedPassageInitials().contains(rawValue)
     }
 
     /**
@@ -96,23 +108,36 @@ public final class AndroidBookmarkSwordBookNameResolver: AndroidBookmarkBookName
        - ordinal: Intro-inclusive whole-Bible ordinal in `v11nName`.
        - kjvOrdinal: Intro-inclusive whole-Bible ordinal in KJVA used as a fallback key.
      - Returns: The SWORD book name for the resolved verse, or `nil` when unresolvable.
-     - Side effects: lazily creates the SWORD manager and caches module book-name maps.
-     - Failure modes: returns `nil` for intro ordinals, empty book lists, and versifications
-       with no installed module.
+     - Side effects: lazily creates the SWORD manager and populates the resolver caches.
+     - Failure modes: returns `nil` for intro ordinals, unloadable candidate modules, and
+       versifications with no sound resolution path.
      */
     public func displayBookName(v11nName: String, ordinal: Int, kjvOrdinal: Int) -> String? {
         guard let manager = manager() else { return nil }
 
-        if let moduleName = moduleName(matchingV11n: v11nName, manager: manager),
-           let name = bookName(moduleName: moduleName, ordinal: ordinal, manager: manager) {
-            return name
+        let wanted = normalizedV11n(v11nName)
+        for moduleName in moduleNames(matchingV11n: wanted) {
+            if let book = resolvedBook(moduleName: moduleName, ordinal: ordinal, manager: manager) {
+                return book.name
+            }
         }
 
-        guard normalizedV11n(v11nName) != "KJVA",
-              let kjvaModuleName = moduleName(matchingV11n: "KJVA", manager: manager) else {
-            return nil
+        if wanted != "KJVA" {
+            for moduleName in moduleNames(matchingV11n: "KJVA") {
+                if let book = resolvedBook(moduleName: moduleName, ordinal: kjvOrdinal, manager: manager) {
+                    return book.name
+                }
+            }
         }
-        return bookName(moduleName: kjvaModuleName, ordinal: kjvOrdinal, manager: manager)
+
+        guard wanted != "KJV" else { return nil }
+        for moduleName in moduleNames(matchingV11n: "KJV") {
+            if let book = resolvedBook(moduleName: moduleName, ordinal: kjvOrdinal, manager: manager),
+               book.testament == 1 {
+                return book.name
+            }
+        }
+        return nil
     }
 
     private func manager() -> SwordManager? {
@@ -124,17 +149,29 @@ public final class AndroidBookmarkSwordBookNameResolver: AndroidBookmarkBookName
         return created
     }
 
-    private func installedBibleInitials() -> Set<String> {
-        if let cachedBibleInitials {
-            return cachedBibleInitials
+    private func bibleModuleInfos() -> [ModuleInfo] {
+        if let cachedBibleModuleInfos {
+            return cachedBibleModuleInfos
+        }
+        let infos = manager()?.installedModules(category: ModuleCategory.bible) ?? []
+        cachedBibleModuleInfos = infos
+        return infos
+    }
+
+    private func installedPassageInitials() -> Set<String> {
+        if let cachedPassageInitials {
+            return cachedPassageInitials
         }
         var initials = Set<String>()
         if let manager = manager() {
             for info in manager.installedModules(category: ModuleCategory.bible) {
                 initials.insert(info.name)
             }
+            for info in manager.installedModules(category: ModuleCategory.commentary) {
+                initials.insert(info.name)
+            }
         }
-        cachedBibleInitials = initials
+        cachedPassageInitials = initials
         return initials
     }
 
@@ -144,30 +181,32 @@ public final class AndroidBookmarkSwordBookNameResolver: AndroidBookmarkBookName
         return trimmed.isEmpty ? "KJV" : trimmed.uppercased()
     }
 
-    private func moduleName(matchingV11n v11nName: String, manager: SwordManager) -> String? {
-        let wanted = normalizedV11n(v11nName)
-        for info in manager.installedModules(category: ModuleCategory.bible)
-        where normalizedV11n(info.aboutMetadata.versification) == wanted {
-            return info.name
+    private func moduleNames(matchingV11n normalizedName: String) -> [String] {
+        if let cached = moduleNamesByV11n[normalizedName] {
+            return cached
         }
-        return nil
+        var names: [String] = []
+        for info in bibleModuleInfos()
+        where normalizedV11n(info.aboutMetadata.versification) == normalizedName {
+            names.append(info.name)
+        }
+        moduleNamesByV11n[normalizedName] = names
+        return names
     }
 
-    private func bookName(moduleName: String, ordinal: Int, manager: SwordManager) -> String? {
+    private func resolvedBook(moduleName: String, ordinal: Int, manager: SwordManager) -> BookInfo? {
         guard let module = manager.module(named: moduleName),
               let reference = module.verseReference(ordinal: ordinal) else {
             return nil
         }
 
-        if let cached = bookNamesByModule[moduleName] {
-            return cached[reference.osisBookId]
+        let books: [BookInfo]
+        if let cached = bookListsByModule[moduleName] {
+            books = cached
+        } else {
+            books = module.getBookList()
+            bookListsByModule[moduleName] = books
         }
-
-        let names = Dictionary(
-            module.getBookList().map { ($0.osisId, $0.name) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        bookNamesByModule[moduleName] = names
-        return names[reference.osisBookId]
+        return books.first(where: { $0.osisId == reference.osisBookId })
     }
 }

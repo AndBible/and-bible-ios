@@ -955,6 +955,7 @@ public final class RemoteSyncBookmarkRestoreService {
         ensureMissingSystemLabels(in: modelContext, labelsByID: &labelsByID)
 
         var bibleBookmarksByID: [UUID: BibleBookmark] = [:]
+        var normalizedBookRewrites: [(bookmarkID: UUID, rawBook: String?)] = []
         for preparedBookmark in prepared.bibleBookmarks {
             let bookmark = BibleBookmark(
                 id: preparedBookmark.bookmark.id,
@@ -967,7 +968,12 @@ public final class RemoteSyncBookmarkRestoreService {
                 lastUpdatedOn: preparedBookmark.bookmark.lastUpdatedOn,
                 wholeVerse: preparedBookmark.bookmark.wholeVerse
             )
-            bookmark.book = normalizedDisplayBookName(for: preparedBookmark.bookmark)
+            let rawBook = preparedBookmark.bookmark.book
+            let displayBook = normalizedDisplayBookName(for: preparedBookmark.bookmark)
+            bookmark.book = displayBook
+            if displayBook != rawBook {
+                normalizedBookRewrites.append((bookmarkID: bookmark.id, rawBook: rawBook))
+            }
             bookmark.startOffset = preparedBookmark.bookmark.startOffset
             bookmark.endOffset = preparedBookmark.bookmark.endOffset
             bookmark.primaryLabelId = preparedBookmark.localPrimaryLabelID
@@ -1072,8 +1078,14 @@ public final class RemoteSyncBookmarkRestoreService {
 
         let playbackSettingsStore = RemoteSyncBookmarkPlaybackSettingsStore(settingsStore: settingsStore)
         let labelAliasStore = RemoteSyncBookmarkLabelAliasStore(settingsStore: settingsStore)
+        let androidBookStore = RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore)
         playbackSettingsStore.clearAll()
         labelAliasStore.clearAll()
+        androidBookStore.clearAll()
+
+        for rewrite in normalizedBookRewrites {
+            androidBookStore.setRawBook(rewrite.rawBook, for: rewrite.bookmarkID)
+        }
 
         var preservedPlaybackSettingsCount = 0
         for preparedBookmark in prepared.bibleBookmarks {

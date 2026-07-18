@@ -198,11 +198,11 @@ final class RemoteSyncBookmarkTests: XCTestCase {
         let snapshot = RemoteSyncAndroidBookmarkSnapshot(
             labels: [],
             bibleBookmarks: [
-                makeNormalizationBookmark(id: initialsID, ordinalStart: 4, book: "KJV"),
-                makeNormalizationBookmark(id: nullBookID, ordinalStart: 1533, book: nil),
+                makeNormalizationBookmark(id: initialsID, ordinalStart: 4, book: "KJV", v11n: "KJV", kjvOrdinal: 40),
+                makeNormalizationBookmark(id: nullBookID, ordinalStart: 1533, book: nil, v11n: "KJVA", kjvOrdinal: 1533),
                 makeNormalizationBookmark(id: localizedID, ordinalStart: 4, book: "1. Mose"),
                 makeNormalizationBookmark(id: uninstalledID, ordinalStart: 4, book: "ESV2011"),
-                makeNormalizationBookmark(id: unresolvableID, ordinalStart: 999_999, book: "NASB"),
+                makeNormalizationBookmark(id: unresolvableID, ordinalStart: 999_999, book: "NASB", v11n: "Luther", kjvOrdinal: 999_998),
             ],
             genericBookmarks: [],
             studyPadEntries: []
@@ -242,9 +242,33 @@ final class RemoteSyncBookmarkTests: XCTestCase {
             "When derivation fails the raw Android value must be preserved rather than dropped."
         )
         XCTAssertEqual(
-            resolver.recordedRequests.map(\.v11nName),
-            ["KJV", "KJV", "KJV"],
-            "Derivation must resolve ordinals in each bookmark's own stored versification."
+            resolver.recordedRequests,
+            [
+                .init(v11nName: "KJV", ordinal: 4, kjvOrdinal: 40),
+                .init(v11nName: "KJVA", ordinal: 1533, kjvOrdinal: 1533),
+                .init(v11nName: "Luther", ordinal: 999_999, kjvOrdinal: 999_998),
+            ],
+            "Derivation must pass each bookmark's own versification, source ordinal, and KJVA ordinal."
+        )
+
+        let bookStore = RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore)
+        XCTAssertEqual(
+            bookStore.rawBook(for: initialsID),
+            .some("KJV"),
+            "Rewritten initials must be preserved for Android round-trip export."
+        )
+        XCTAssertEqual(
+            bookStore.rawBook(for: nullBookID),
+            .some(nil),
+            "Rewritten NULL book values must be preserved as NULL for Android round-trip export."
+        )
+        XCTAssertNil(
+            bookStore.rawBook(for: localizedID),
+            "Untouched values must not create fidelity entries."
+        )
+        XCTAssertNil(
+            bookStore.rawBook(for: unresolvableID),
+            "Failed derivations keep the raw value on the model and need no fidelity entry."
         )
     }
 
@@ -287,6 +311,79 @@ final class RemoteSyncBookmarkTests: XCTestCase {
     }
 
     /**
+     Verifies the full SQLite restore path normalizes Android module-initials book values.
+
+     The fixture writes an Android-shaped bookmarks database whose `book` column carries module
+     initials, exactly as real Android backups do, then restores it through `readSnapshot` plus
+     `replaceLocalBookmarks`. The expected result is a display book name on the SwiftData row and
+     a preserved raw value for round-trip export. A failure means the SQLite read path and the
+     normalization boundary have drifted apart while the snapshot-level tests stay green.
+     */
+    func testRemoteSyncBookmarkRestoreNormalizesBookColumnFromAndroidDatabase() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let resolver = FakeAndroidBookmarkBookNameResolver(
+            installedBibleInitials: ["KJV"],
+            namesByOrdinal: [10: "Genesis"]
+        )
+        let service = RemoteSyncBookmarkRestoreService(bookNameResolver: resolver)
+        let bookmarkID = UUID(uuidString: "f5000000-0000-0000-0000-000000000001")!
+
+        let databaseURL = try makeAndroidBookmarksDatabase(
+            labels: [],
+            bibleBookmarks: [
+                .init(
+                    id: bookmarkID,
+                    kjvOrdinalStart: 10,
+                    kjvOrdinalEnd: 10,
+                    ordinalStart: 10,
+                    ordinalEnd: 10,
+                    playbackSettingsJSON: nil,
+                    createdAt: Date(timeIntervalSince1970: 1_700_300_000),
+                    book: "KJV",
+                    startOffset: nil,
+                    endOffset: nil,
+                    primaryLabelID: nil,
+                    lastUpdatedOn: Date(timeIntervalSince1970: 1_700_300_100),
+                    wholeVerse: true,
+                    type: nil,
+                    customIcon: nil,
+                    editActionMode: nil,
+                    editActionContent: nil
+                )
+            ],
+            bibleNotes: [],
+            bibleLinks: [],
+            genericBookmarks: [],
+            genericNotes: [],
+            genericLinks: [],
+            studyPadEntries: [],
+            studyPadTexts: []
+        )
+
+        let snapshot = try service.readSnapshot(from: databaseURL)
+        _ = try service.replaceLocalBookmarks(
+            from: snapshot,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let restored = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
+        XCTAssertEqual(restored.count, 1)
+        XCTAssertEqual(
+            restored[0].book,
+            "Genesis",
+            "The SQLite restore path must rewrite Android module initials into display book names."
+        )
+        XCTAssertEqual(
+            RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore).rawBook(for: bookmarkID),
+            .some("KJV"),
+            "The SQLite restore path must preserve the raw Android value for round-trip export."
+        )
+    }
+
+    /**
      Builds one staged Android Bible bookmark row for book-name normalization tests.
 
      - Parameters:
@@ -300,15 +397,17 @@ final class RemoteSyncBookmarkTests: XCTestCase {
     private func makeNormalizationBookmark(
         id: UUID,
         ordinalStart: Int,
-        book: String?
+        book: String?,
+        v11n: String = "KJV",
+        kjvOrdinal: Int? = nil
     ) -> RemoteSyncAndroidBibleBookmark {
         RemoteSyncAndroidBibleBookmark(
             id: id,
-            kjvOrdinalStart: ordinalStart,
-            kjvOrdinalEnd: ordinalStart,
+            kjvOrdinalStart: kjvOrdinal ?? ordinalStart,
+            kjvOrdinalEnd: kjvOrdinal ?? ordinalStart,
             ordinalStart: ordinalStart,
             ordinalEnd: ordinalStart,
-            v11n: "KJV",
+            v11n: v11n,
             playbackSettingsJSON: nil,
             createdAt: Date(timeIntervalSince1970: 1_700_200_000),
             book: book,
