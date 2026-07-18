@@ -716,13 +716,21 @@ public final class RemoteSyncBookmarkRestoreService {
      shapes Android actually produces are rewritten — NULL and installed-module initials — so
      locally created display names and localized names survive merge round-trips unchanged.
 
-     - Parameter bookmark: Staged Android bookmark row being materialized into SwiftData.
-     - Returns: The derived display book name, or the raw Android value when derivation is
-       unavailable or the raw value is not an Android module-initials shape.
+     - Parameters:
+       - bookmark: Staged Android bookmark row being materialized into SwiftData.
+       - previousDisplayBook: Display value the same bookmark ID carried locally before this
+         restore, used so previously healed names survive re-materializations (sync patch apply,
+         merge imports) when the enabling module has since been removed.
+     - Returns: The derived display book name; otherwise the retained previous display name when
+       derivation fails for a rewriteable value; otherwise the raw Android value.
      - Side effects: may lazily create SWORD state through the injected resolver.
-     - Failure modes: falls back to the raw value whenever resolution fails.
+     - Failure modes: falls back to the raw value whenever resolution fails and no previous
+       display name is retainable.
      */
-    private func normalizedDisplayBookName(for bookmark: RemoteSyncAndroidBibleBookmark) -> String? {
+    private func normalizedDisplayBookName(
+        for bookmark: RemoteSyncAndroidBibleBookmark,
+        previousDisplayBook: String?
+    ) -> String? {
         guard let bookNameResolver else { return bookmark.book }
 
         let shouldDerive: Bool
@@ -733,12 +741,20 @@ public final class RemoteSyncBookmarkRestoreService {
         }
         guard shouldDerive else { return bookmark.book }
 
-        let derived = bookNameResolver.displayBookName(
+        if let derived = bookNameResolver.displayBookName(
             v11nName: bookmark.v11n,
             ordinal: bookmark.ordinalStart,
             kjvOrdinal: bookmark.kjvOrdinalStart
-        )
-        return derived ?? bookmark.book
+        ) {
+            return derived
+        }
+
+        if let previousDisplayBook,
+           previousDisplayBook != bookmark.book,
+           !bookNameResolver.isInstalledBibleInitials(previousDisplayBook) {
+            return previousDisplayBook
+        }
+        return bookmark.book
     }
 
     /**
@@ -930,6 +946,15 @@ public final class RemoteSyncBookmarkRestoreService {
     ) throws -> RemoteSyncBookmarkRestoreReport {
         let prepared = try prepareRestore(from: snapshot)
 
+        var previousDisplayBooksByID: [UUID: String] = [:]
+        if let existing = try? modelContext.fetch(FetchDescriptor<BibleBookmark>()) {
+            for bookmark in existing {
+                if let book = bookmark.book {
+                    previousDisplayBooksByID[bookmark.id] = book
+                }
+            }
+        }
+
         try deleteExistingBookmarkGraph(from: modelContext)
 
         var labelsByID: [UUID: Label] = [:]
@@ -969,7 +994,10 @@ public final class RemoteSyncBookmarkRestoreService {
                 wholeVerse: preparedBookmark.bookmark.wholeVerse
             )
             let rawBook = preparedBookmark.bookmark.book
-            let displayBook = normalizedDisplayBookName(for: preparedBookmark.bookmark)
+            let displayBook = normalizedDisplayBookName(
+                for: preparedBookmark.bookmark,
+                previousDisplayBook: previousDisplayBooksByID[preparedBookmark.bookmark.id]
+            )
             bookmark.book = displayBook
             if displayBook != rawBook {
                 normalizedBookRewrites.append((bookmarkID: bookmark.id, rawBook: rawBook))

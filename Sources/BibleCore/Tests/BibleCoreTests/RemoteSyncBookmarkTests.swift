@@ -325,10 +325,11 @@ final class RemoteSyncBookmarkTests: XCTestCase {
         let settingsStore = SettingsStore(modelContext: modelContext)
         let resolver = FakeAndroidBookmarkBookNameResolver(
             installedBibleInitials: ["KJV"],
-            namesByOrdinal: [10: "Genesis"]
+            namesByOrdinal: [10: "Genesis", 20: "Exodus"]
         )
         let service = RemoteSyncBookmarkRestoreService(bookNameResolver: resolver)
         let bookmarkID = UUID(uuidString: "f5000000-0000-0000-0000-000000000001")!
+        let nullBookBookmarkID = UUID(uuidString: "f5000000-0000-0000-0000-000000000002")!
 
         let databaseURL = try makeAndroidBookmarksDatabase(
             labels: [],
@@ -351,7 +352,26 @@ final class RemoteSyncBookmarkTests: XCTestCase {
                     customIcon: nil,
                     editActionMode: nil,
                     editActionContent: nil
-                )
+                ),
+                .init(
+                    id: nullBookBookmarkID,
+                    kjvOrdinalStart: 20,
+                    kjvOrdinalEnd: 20,
+                    ordinalStart: 20,
+                    ordinalEnd: 20,
+                    playbackSettingsJSON: nil,
+                    createdAt: Date(timeIntervalSince1970: 1_700_300_200),
+                    book: nil,
+                    startOffset: nil,
+                    endOffset: nil,
+                    primaryLabelID: nil,
+                    lastUpdatedOn: Date(timeIntervalSince1970: 1_700_300_300),
+                    wholeVerse: true,
+                    type: nil,
+                    customIcon: nil,
+                    editActionMode: nil,
+                    editActionContent: nil
+                ),
             ],
             bibleNotes: [],
             bibleLinks: [],
@@ -370,16 +390,103 @@ final class RemoteSyncBookmarkTests: XCTestCase {
         )
 
         let restored = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
-        XCTAssertEqual(restored.count, 1)
+        let booksByID = Dictionary(uniqueKeysWithValues: restored.map { ($0.id, $0.book) })
+        XCTAssertEqual(restored.count, 2)
         XCTAssertEqual(
-            restored[0].book,
+            booksByID[bookmarkID],
             "Genesis",
             "The SQLite restore path must rewrite Android module initials into display book names."
         )
         XCTAssertEqual(
-            RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore).rawBook(for: bookmarkID),
+            booksByID[nullBookBookmarkID],
+            "Exodus",
+            "The SQLite restore path must derive display names for NULL Android book columns."
+        )
+        let bookStore = RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore)
+        XCTAssertEqual(
+            bookStore.rawBook(for: bookmarkID),
             .some("KJV"),
             "The SQLite restore path must preserve the raw Android value for round-trip export."
+        )
+        XCTAssertEqual(
+            bookStore.rawBook(for: nullBookBookmarkID),
+            .some(nil),
+            "The SQLite restore path must preserve NULL Android book values for round-trip export."
+        )
+
+        let outbound = RemoteSyncBookmarkSnapshotService().snapshotCurrentState(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let outboundBooks = Dictionary(
+            uniqueKeysWithValues: outbound.bibleBookmarkRowsByKey.values.map { ($0.id, $0.book) }
+        )
+        XCTAssertEqual(
+            outboundBooks[bookmarkID],
+            "KJV",
+            "Outbound Android snapshots must project the preserved module initials, not display names."
+        )
+        XCTAssertEqual(
+            outboundBooks[nullBookBookmarkID],
+            String??.some(nil),
+            "Outbound Android snapshots must project preserved NULL book values as NULL."
+        )
+    }
+
+    /**
+     Verifies previously healed display names survive re-materialization when derivation fails.
+
+     Sync patch apply and merge imports rebuild the local graph from Android-shaped snapshots that
+     carry preserved raw values. When the module that enabled the original derivation is no longer
+     installed, the expected result keeps the earlier healed display name for the same bookmark ID
+     instead of regressing to `Unknown`/initials. A failure means an unrelated incoming sync patch
+     would visibly break bookmarks that were already displaying correctly.
+     */
+    func testRemoteSyncBookmarkRestoreRetainsHealedNamesWhenDerivationFails() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let bookmarkID = UUID(uuidString: "f6000000-0000-0000-0000-000000000001")!
+
+        let healingResolver = FakeAndroidBookmarkBookNameResolver(
+            installedBibleInitials: ["KJV"],
+            namesByOrdinal: [4: "Genesis"]
+        )
+        let snapshot = RemoteSyncAndroidBookmarkSnapshot(
+            labels: [],
+            bibleBookmarks: [
+                makeNormalizationBookmark(id: bookmarkID, ordinalStart: 4, book: "KJV")
+            ],
+            genericBookmarks: [],
+            studyPadEntries: []
+        )
+        _ = try RemoteSyncBookmarkRestoreService(bookNameResolver: healingResolver).replaceLocalBookmarks(
+            from: snapshot,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let failingResolver = FakeAndroidBookmarkBookNameResolver(
+            installedBibleInitials: ["KJV"],
+            namesByOrdinal: [:]
+        )
+        _ = try RemoteSyncBookmarkRestoreService(bookNameResolver: failingResolver).replaceLocalBookmarks(
+            from: snapshot,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let restored = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
+        XCTAssertEqual(restored.count, 1)
+        XCTAssertEqual(
+            restored[0].book,
+            "Genesis",
+            "Re-materialization with failing derivation must keep the previously healed display name."
+        )
+        XCTAssertEqual(
+            RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore).rawBook(for: bookmarkID),
+            .some("KJV"),
+            "The preserved raw Android value must survive re-materialization."
         )
     }
 

@@ -25,8 +25,12 @@ import Foundation
  - this type inherits the confinement requirements of the supplied `SettingsStore`
  */
 public final class RemoteSyncBookmarkAndroidBookStore {
-    /// Sentinel persisted for Android rows whose `book` column was NULL. Real SWORD module
-    /// initials never contain double underscores, so the sentinel cannot collide with data.
+    /**
+     Sentinel persisted for Android rows whose `book` column was NULL.
+
+     Real SWORD module initials never contain double underscores, so the sentinel cannot collide
+     with preserved data values.
+     */
     private static let nullSentinel = "__android_null__"
 
     private let settingsStore: SettingsStore
