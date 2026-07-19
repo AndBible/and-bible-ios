@@ -43,8 +43,10 @@ final class SwordVersificationTests: XCTestCase {
             SwordVersification.mapVerseFromKJVA(osisBookId: "Gen", chapter: 1, verse: 1, targetVersification: ""),
             .init(osisBookId: "Gen", chapter: 1, verse: 1)
         )
-        XCTAssertNil(
-            SwordVersification.mapVerseFromKJVA(osisBookId: "Gen", chapter: 1, verse: 1, targetVersification: "NotAVersification")
+        // An unrecognized target falls back to KJV (identity for shared canon), not nil.
+        XCTAssertEqual(
+            SwordVersification.mapVerseFromKJVA(osisBookId: "Gen", chapter: 1, verse: 1, targetVersification: "NotAVersification"),
+            .init(osisBookId: "Gen", chapter: 1, verse: 1)
         )
     }
 
@@ -53,8 +55,8 @@ final class SwordVersificationTests: XCTestCase {
 
      A restored bookmark's original source ordinal must resolve from versification metadata alone,
      without the producing module installed. SWORD's intro-inclusive `VerseKey` index matches the
-     JSword ordinal scheme (index 4 is Genesis 1:1). An empty name defaults to KJV; a present-but-
-     unrecognized name and a non-positive ordinal return nil.
+     JSword ordinal scheme (index 4 is Genesis 1:1). An empty or unrecognized name defaults to KJV;
+     a non-positive ordinal returns nil.
      */
     func testDecodesOrdinalsFromVersificationMetadataWithoutAModule() {
         XCTAssertEqual(
@@ -67,19 +69,22 @@ final class SwordVersificationTests: XCTestCase {
             .init(osisBookId: "Gen", chapter: 1, verse: 1),
             "An empty versification name defaults to KJV."
         )
+        XCTAssertEqual(
+            SwordVersification.decodeOrdinal(versification: "NotAVersification", ordinal: 4),
+            .init(osisBookId: "Gen", chapter: 1, verse: 1),
+            "An unrecognized versification name also defaults to KJV (libsword renders such modules under KJV)."
+        )
         XCTAssertNil(SwordVersification.decodeOrdinal(versification: "KJV", ordinal: 0))
-        XCTAssertNil(SwordVersification.decodeOrdinal(versification: "NotAVersification", ordinal: 4))
     }
 
     /**
      Verifies shared canonical references map to KJVA unchanged and defaults/invalid inputs behave.
 
      KJV and KJVA share Genesis..Malachi and the New Testament numbering, so a KJV reference maps to
-     the identical KJVA reference; an empty source versification defaults to KJV; a versification
-     name SWORD does not recognize returns nil (matching Android, which rejects an unsupported module
-     versification during metadata load, and the flat-API contract); non-positive inputs and empty
-     book ids return nil. A failure means the adapter is not wired to SWORD's VersificationMgr or
-     mis-handles defaults.
+     the identical KJVA reference; an empty OR unrecognized source versification defaults to KJV
+     (iOS libsword renders such modules under KJV, so their ordinals map as KJV instead of failing
+     into a raw-source-ordinal write); non-positive inputs and empty book ids return nil. A failure
+     means the adapter is not wired to SWORD's VersificationMgr or mis-handles defaults.
      */
     func testMapsSharedCanonAndDefaultsAndInvalidInputs() {
         XCTAssertEqual(
@@ -95,11 +100,11 @@ final class SwordVersificationTests: XCTestCase {
             SwordVersification.mapVerseToKJVA(osisBookId: "Gen", chapter: 1, verse: 1, sourceVersification: ""),
             .init(osisBookId: "Gen", chapter: 1, verse: 1)
         )
-        // A versification name SWORD does not recognize returns nil, matching Android's rejection of
-        // an unsupported module versification and the flat-API contract; only an empty name defaults
-        // to KJV.
-        XCTAssertNil(
-            SwordVersification.mapVerseToKJVA(osisBookId: "Gen", chapter: 1, verse: 1, sourceVersification: "NotAVersification")
+        // An unrecognized source versification falls back to KJV (identity for shared canon) rather
+        // than nil, so the caller never persists a raw source ordinal into the KJVA columns.
+        XCTAssertEqual(
+            SwordVersification.mapVerseToKJVA(osisBookId: "Gen", chapter: 1, verse: 1, sourceVersification: "NotAVersification"),
+            .init(osisBookId: "Gen", chapter: 1, verse: 1)
         )
         XCTAssertNil(
             SwordVersification.mapVerseToKJVA(osisBookId: "Gen", chapter: 0, verse: 1, sourceVersification: "KJV")

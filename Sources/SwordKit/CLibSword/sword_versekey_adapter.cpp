@@ -112,13 +112,19 @@ extern "C" int SWVersification_mapVerseToKJVA(
         return 1;
     }
 
-    // SWORD and Android treat an empty versification name as the KJV default. A present-but-
-    // unrecognized name is NOT defaulted: it returns failure, matching Android — which rejects an
-    // unsupported module versification during metadata load — and the flatapi.h contract.
+    // An empty versification name defaults to KJV. A present-but-unrecognized name ALSO falls back to
+    // KJV: iOS libsword renders a module whose versification it does not recognize under KJV (unlike
+    // Android/JSword, which rejects it at load), so the module is usable and KJV-numbered as rendered.
+    // Mapping its ordinals as KJV keeps the stored KJVA columns consistent with how the module renders;
+    // returning failure would instead let the write path persist a raw source ordinal into the KJVA
+    // columns, which resolves to the wrong verse on sync/restore.
     const char *sourceName =
         (sourceVersification && *sourceVersification) ? sourceVersification : "KJV";
     const sword::VersificationMgr::System *sourceSystem =
         versificationMgr->getVersificationSystem(sourceName);
+    if (!sourceSystem) {
+        sourceSystem = versificationMgr->getVersificationSystem("KJV");
+    }
     const sword::VersificationMgr::System *kjvaSystem =
         versificationMgr->getVersificationSystem("KJVA");
     if (!sourceSystem || !kjvaSystem) {
@@ -165,14 +171,17 @@ extern "C" int SWVersification_mapVerseFromKJVA(
         return 1;
     }
 
-    // Reverse of SWVersification_mapVerseToKJVA: an empty target name defaults to KJV; a present-
-    // but-unrecognized name returns failure (matching the forward direction and Android).
+    // Reverse of SWVersification_mapVerseToKJVA: an empty OR present-but-unrecognized target name
+    // falls back to KJV (see the forward direction), since iOS libsword renders such modules under KJV.
     const char *targetName =
         (targetVersification && *targetVersification) ? targetVersification : "KJV";
     const sword::VersificationMgr::System *kjvaSystem =
         versificationMgr->getVersificationSystem("KJVA");
     const sword::VersificationMgr::System *targetSystem =
         versificationMgr->getVersificationSystem(targetName);
+    if (!targetSystem) {
+        targetSystem = versificationMgr->getVersificationSystem("KJV");
+    }
     if (!kjvaSystem || !targetSystem) {
         return 1;
     }
@@ -208,11 +217,15 @@ extern "C" int SWVersification_decodeOrdinal(
         return 1;
     }
 
-    // An empty name defaults to KJV; a present-but-unrecognized name returns failure.
+    // An empty OR present-but-unrecognized name falls back to KJV (iOS libsword renders such modules
+    // under KJV), so a stored source ordinal still decodes consistently with how the module renders.
     const char *name = (versification && *versification) ? versification : "KJV";
     sword::VersificationMgr *versificationMgr = sword::VersificationMgr::getSystemVersificationMgr();
-    if (!versificationMgr || !versificationMgr->getVersificationSystem(name)) {
+    if (!versificationMgr) {
         return 1;
+    }
+    if (!versificationMgr->getVersificationSystem(name)) {
+        name = "KJV";
     }
 
     // Decode the intro-inclusive VerseKey index within `name`'s versification without an installed

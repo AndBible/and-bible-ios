@@ -56,16 +56,15 @@ public enum SwordVersification {
        - osisBookId: OSIS book identifier in the source versification, such as `Ps` or `Gen`.
        - chapter: One-based chapter number in the source versification.
        - verse: One-based verse number in the source versification.
-       - sourceVersification: SWORD versification name for the input reference; an empty string is
-         treated as KJV, matching SWORD and Android defaults. A present-but-unrecognized name returns
-         `nil`, matching Android's rejection of an unsupported module versification.
+       - sourceVersification: SWORD versification name for the input reference; an empty OR
+         unrecognized name is treated as KJV (iOS libsword renders such modules under KJV, so their
+         ordinals map as KJV rather than failing into a raw-source-ordinal write).
      - Returns: The KJVA reference (verse `0` for a chapter superscription/introduction), or `nil`
-       when inputs are invalid, the source versification is unrecognized, or SWORD cannot map the
-       reference into KJVA.
+       when inputs are invalid or SWORD cannot map the reference into KJVA.
      - Side effects: Runs inside the SWORD serialization queue and reads SWORD's system
        versification manager.
-     - Failure modes: Returns `nil` for non-positive chapter/verse input, an empty book id, an
-       unrecognized source versification, or a mapped result with a non-positive chapter or negative
+     - Failure modes: Returns `nil` for non-positive chapter/verse input, an empty book id, or a
+       mapped result with a non-positive chapter or negative
        verse.
      */
     public static func mapVerseToKJVA(
@@ -151,8 +150,8 @@ public enum SwordVersification {
        - osisBookId: KJVA OSIS book identifier, such as `Ps` or `Gen`.
        - chapter: One-based KJVA chapter number.
        - verse: KJVA verse number (`0` for a chapter superscription/introduction).
-       - targetVersification: SWORD versification name to map into; an empty string is treated as
-         KJV, matching SWORD and Android defaults. A present-but-unrecognized name returns `nil`.
+       - targetVersification: SWORD versification name to map into; an empty OR unrecognized name is
+         treated as KJV (iOS libsword renders such modules under KJV).
      - Returns: The target-versification reference, or `nil` when inputs are invalid, the target
        versification is unrecognized, or SWORD cannot map the reference.
      - Side effects: Runs inside the SWORD serialization queue and reads SWORD's system
@@ -206,8 +205,8 @@ public enum SwordVersification {
      module that produced it is not installed — matching this engine's module-independent goal.
 
      - Parameters:
-       - versification: SWORD versification name owning `ordinal`; an empty string is treated as KJV.
-         A present-but-unrecognized name returns `nil`.
+       - versification: SWORD versification name owning `ordinal`; an empty OR unrecognized name is
+         treated as KJV (iOS libsword renders such modules under KJV).
        - ordinal: Intro-inclusive SWORD `VerseKey` index (the same scheme the module cursor uses).
      - Returns: The decoded reference, or `nil` when the versification is unrecognized or the ordinal
        is out of range or resolves to an introduction slot.
