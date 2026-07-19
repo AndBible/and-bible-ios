@@ -2570,8 +2570,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         self.installedMapModules = other.installedMapModules
         self.moduleBookList = other.moduleBookList
 
-        // Get own module handles from the shared manager (for independent cursor state)
-        if let mod = mgr.module(named: other.activeModuleName) {
+        // Get own module handles from the shared manager (for independent cursor state). This
+        // re-resolves the sibling's active Bible BY NAME, so it carries the same versification gate as
+        // every other activation path (catalog, active-module resolution, restore, switch) for
+        // consistency and defense-in-depth: a sibling's active Bible name is already gated to a
+        // supported module today, but re-resolving an arbitrary name here without the check would
+        // reintroduce the ADR-0010 hole if a future path ever seeded an unsupported active name.
+        if let mod = mgr.module(named: other.activeModuleName),
+           SwordVersification.isVersificationDefined(mod.info.aboutMetadata.versification) {
             self.activeModule = mod
             self.activeModuleName = other.activeModuleName
         }
