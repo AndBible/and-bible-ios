@@ -138,8 +138,11 @@ Android-aligned, cross-platform-consistent choice.
   (`BibleReaderSwordCoordinator`), not in `SwordManager.installedModules`, so
   management/uninstall of an unsupported module is preserved (more forgiving than
   Android, low risk).
-- Requires a maintenance commitment to keep libsword current, or legitimately-new
-  versifications would be treated as unsupported on iOS until libsword is updated.
+- Requires keeping libsword current, or legitimately-new versifications would be
+  treated as unsupported on iOS until libsword is updated. This is an **accepted**
+  maintenance cost: the project is committed to tracking Android on an ongoing
+  basis, so keeping libsword's av11n tables aligned with the shipped JSword is
+  part of normal upkeep, not a new burden this decision introduces.
 - The `unknown → KJV` mapping fallback (PR #360) is retained as defense-in-depth:
   it keeps any residual/legacy bookmark's stored value a valid KJVA ordinal even
   though such modules are no longer offered for new reading/bookmarking.
