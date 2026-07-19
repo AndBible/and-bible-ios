@@ -355,6 +355,43 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     KJVA chapter-introduction ordinal for the chapter a source reference's verse 1 maps into.
+
+     Android's whole-chapter bookmark query starts its range at `Verse(v11n, book, chapter, 0)` — the
+     chapter superscription — so a bookmark stored on a Psalm title (KJVA verse 0, ordinal
+     `chapterStart - 1`) is included whenever that Psalm is read in any versification. iOS mirrors
+     that lower bound: it maps the source chapter's verse 1 to locate the KJVA chapter, then takes
+     that chapter's introduction ordinal. Using verse 1's own ordinal instead would start one slot
+     too high and silently exclude superscription bookmarks in KJV-family modules.
+
+     - Parameters:
+       - osisBookId: OSIS book id in `sourceVersification`.
+       - chapter: One-based chapter number in `sourceVersification`.
+       - sourceVersification: SWORD versification name; empty means KJV.
+     - Returns: The mapped KJVA chapter's introduction ordinal, or `nil` when mapping fails.
+     - Side effects: Runs inside the SWORD serialization queue via `SwordVersification`.
+     - Failure modes: Returns `nil` for unknown versifications or references SWORD cannot map.
+     */
+    private func kjvaChapterIntroOrdinal(
+        osisBookId: String,
+        chapter: Int,
+        sourceVersification: String
+    ) -> Int? {
+        guard let mapped = SwordVersification.mapVerseToKJVA(
+            osisBookId: osisBookId,
+            chapter: chapter,
+            verse: 1,
+            sourceVersification: sourceVersification
+        ) else {
+            return nil
+        }
+        return JSwordKJVAVersification.chapterIntroOrdinal(
+            osisId: mapped.osisBookId,
+            chapter: mapped.chapter
+        )
+    }
+
+    /**
      Returns the active reader source versification name for KJVA mapping.
 
      - Returns: The active module's SWORD versification (empty conf value becomes `KJV`), or KJVA
@@ -5624,21 +5661,27 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     ) -> (start: Int, end: Int, verseCount: Int)? {
         let osisId = osisBookId(for: book)
         let sourceVersification = activeSourceVersificationName()
-        // Map the visible chapter's first and last verse from the source versification into KJVA so
-        // the query span covers the correct KJVA ordinals even when the module's chapter numbering
-        // diverges from KJVA (e.g. a merged Septuagint/Vulgate Psalm covers two KJVA chapters).
-        // The last-verse index must be the chapter's *maximum verse number* in the source
-        // versification, taken from the active module's canon (`chapterOrdinalRange` reports
-        // `verseMax`). The caller's `verseCount` counts only non-empty rendered verses, so using it
-        // would truncate the span for chapters that render a verse empty (e.g. Matthew 17:21 in many
-        // modern translations) and drop bookmarks on the trailing verses. Fall back to the caller's
-        // count, then the KJVA canon count, only when no module can resolve the chapter.
+        // Map the visible chapter's span from the source versification into KJVA so the query covers
+        // the correct KJVA ordinals even when the module's chapter numbering diverges from KJVA
+        // (e.g. a merged Septuagint/Vulgate Psalm covers two KJVA chapters).
+        //
+        // Lower bound: the chapter's *introduction* ordinal (KJVA verse 0), matching Android's
+        // whole-chapter query start `Verse(v11n, book, chapter, 0)`, so a bookmark stored on a Psalm
+        // superscription (KJVA verse 0) is included when the Psalm is read in any versification,
+        // including KJV-family modules where verse 1 would otherwise start one slot too high.
+        //
+        // Upper bound: the chapter's *maximum verse number* in the source versification, taken from
+        // the active module's canon (`chapterOrdinalRange` reports `verseMax`). The caller's
+        // `verseCount` counts only non-empty rendered verses, so using it would truncate the span for
+        // chapters that render a verse empty (e.g. Matthew 17:21 in many modern translations) and
+        // drop bookmarks on the trailing verses. Fall back to the caller's count, then the KJVA canon
+        // count, only when no module can resolve the chapter.
         let sourceLastVerse = chapterOrdinalRange(book: book, chapter: chapter)?.verseCount
             ?? verseCount
             ?? JSwordKJVAVersification.verseCount(osisId: osisId, chapter: chapter)
         if let sourceLastVerse, sourceLastVerse > 0,
-           let firstKJVA = kjvaOrdinal(
-               osisBookId: osisId, chapter: chapter, verse: 1, sourceVersification: sourceVersification
+           let firstKJVA = kjvaChapterIntroOrdinal(
+               osisBookId: osisId, chapter: chapter, sourceVersification: sourceVersification
            ),
            let lastKJVA = kjvaOrdinal(
                osisBookId: osisId, chapter: chapter, verse: sourceLastVerse, sourceVersification: sourceVersification

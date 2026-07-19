@@ -500,6 +500,10 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      * must convert that source ordinal before emitting `setup_content.jumpToOrdinal`; otherwise NT
      * KJV bookmarks scroll to the wrong row because KJVA includes the apocrypha span before
      * Matthew.
+     *
+     * The document `ordinalRange` lower bound is the chapter introduction (KJVA verse 0), matching
+     * Android's whole-chapter query start `Verse(v11n, book, chapter, 0)`, while `jumpToOrdinal`
+     * stays on verse 1 — the document covers the superscription slot but scrolls to the verse.
      */
     @MainActor
     func testReaderOpenMyNotesConvertsSourceOrdinalToKJVAJumpTarget() throws {
@@ -511,6 +515,9 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let sourceOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1))
         let kjvaOrdinal = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "Matt", chapter: 1, verse: 1)
+        )
+        let kjvaIntroOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Matt", chapter: 1)
         )
         let kjvaEndOrdinal = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "Matt", chapter: 1, verse: 25)
@@ -530,7 +537,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
             bridgeEmissionPayload(from: myNotesScripts, event: "add_documents") as? [String: Any]
         )
         XCTAssertEqual(documentPayload["ordinalRange"] as? [Int], [
-            kjvaOrdinal,
+            kjvaIntroOrdinal,
             kjvaEndOrdinal,
         ])
     }
