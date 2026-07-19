@@ -326,6 +326,32 @@ public enum JSwordKJVAVersification {
     }
 
     /**
+     Computes JSword's KJVA ordinal for a chapter superscription/introduction (verse 0).
+
+     JSword addresses a chapter superscription as verse 0, whose ordinal is the reserved slot
+     immediately before verse 1 (`chapterStart - 1`). Divergent canons map Psalm-title verses onto
+     these introductions (e.g. Synodal Ps 50:1 maps to KJVA Ps 51:0), so cross-versification storage
+     resolves them the same way Android does through `Versification.getOrdinal`.
+
+     - Parameters:
+       - osisId: Canonical OSIS id or supported alias.
+       - chapter: One-based chapter number.
+     - Returns: JSword KJVA ordinal for the chapter introduction, or `nil` when the reference is
+       invalid.
+     - Side effects: none.
+     - Failure modes: Unknown ids and out-of-range chapters return `nil`.
+     */
+    public static func chapterIntroOrdinal(osisId: String, chapter: Int) -> Int? {
+        guard chapter > 0,
+              let targetIndex = bookIndexByOsisId[osisId],
+              let ordinalIndex = ordinalIndexByBookIndex[targetIndex],
+              chapter <= ordinalIndex.book.chapterVerseCounts.count else {
+            return nil
+        }
+        return ordinalIndex.chapterStartOrdinals[chapter - 1] - 1
+    }
+
+    /**
      Resolves a concrete verse reference from a JSword KJVA progress ordinal.
 
      Android Reading Progress stores memorized verses and target ranges as KJVA ordinals and then

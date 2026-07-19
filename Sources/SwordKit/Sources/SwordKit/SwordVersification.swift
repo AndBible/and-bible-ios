@@ -24,7 +24,7 @@ public enum SwordVersification {
         /// One-based KJVA chapter number.
         public let chapter: Int
 
-        /// One-based KJVA verse number.
+        /// KJVA verse number; `0` denotes a chapter superscription/introduction.
         public let verse: Int
 
         /**
@@ -59,12 +59,12 @@ public enum SwordVersification {
        - sourceVersification: SWORD versification name for the input reference; an empty string is
          treated as KJV, matching SWORD and Android defaults. A name SWORD does not recognize also
          falls back to KJV, mirroring how SWORD loads such modules.
-     - Returns: The KJVA reference, or `nil` when inputs are invalid or SWORD cannot map the
-       reference onto a positive KJVA verse.
+     - Returns: The KJVA reference (verse `0` for a chapter superscription/introduction), or `nil`
+       when inputs are invalid or SWORD cannot map the reference into KJVA.
      - Side effects: Runs inside the SWORD serialization queue and reads SWORD's system
        versification manager.
-     - Failure modes: Returns `nil` for non-positive chapter/verse, an empty book id, or a mapped
-       result outside KJVA's positive verse range.
+     - Failure modes: Returns `nil` for non-positive chapter/verse input, an empty book id, or a
+       mapped result with a non-positive chapter or negative verse.
      */
     public static func mapVerseToKJVA(
         osisBookId: String,
@@ -95,7 +95,12 @@ public enum SwordVersification {
 
             guard status == 0, let mappedBook else { return nil }
             let bookId = String(cString: mappedBook)
-            guard !bookId.isEmpty, mappedChapter > 0, mappedVerse > 0 else { return nil }
+            // A mapped verse of 0 is a valid KJVA chapter superscription/introduction: divergent
+            // canons map a Psalm-title verse onto it (e.g. Septuagint/Vulgate/Synodal Ps 50:1 ->
+            // KJVA Ps 51:0), exactly as JSword does on Android. Accept it so the caller can resolve
+            // the reserved intro ordinal instead of failing into a raw-source-ordinal fallback; only
+            // reject a non-positive chapter or an empty book.
+            guard !bookId.isEmpty, mappedChapter > 0, mappedVerse >= 0 else { return nil }
             return KJVAReference(
                 osisBookId: bookId,
                 chapter: Int(mappedChapter),

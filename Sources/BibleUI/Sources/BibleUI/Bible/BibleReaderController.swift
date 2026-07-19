@@ -338,6 +338,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         ) else {
             return nil
         }
+        // A mapped verse of 0 is a KJVA chapter superscription/introduction (e.g. a divergent-canon
+        // Psalm-title verse); resolve it to the reserved chapter-intro ordinal, matching Android's
+        // Versification.getOrdinal, rather than losing it to a nil result.
+        if mapped.verse == 0 {
+            return JSwordKJVAVersification.chapterIntroOrdinal(
+                osisId: mapped.osisBookId,
+                chapter: mapped.chapter
+            )
+        }
         return JSwordKJVAVersification.verseOrdinal(
             osisId: mapped.osisBookId,
             chapter: mapped.chapter,

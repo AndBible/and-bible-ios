@@ -59,6 +59,34 @@ final class SwordVersificationTests: XCTestCase {
      compiled mapping tables. A failure means the mapping regressed to a name-identity lookup — the
      issue #356 defect on the write side.
      */
+    /**
+     Verifies divergent-canon Psalm-title verses map to KJVA chapter superscriptions (verse 0).
+
+     The Septuagint/Synodal numbering carries a separate Psalm-title verse that KJVA folds into the
+     chapter superscription (verse 0). JSword represents that superscription as a real, positive
+     KJVA ordinal, so the engine must return verse 0 rather than nil — otherwise the caller stores a
+     raw source ordinal in the KJVA columns (the issue #356 write-side defect). These expectations
+     were captured directly from SWORD's mapping tables and match JSword's `Synodal.properties`
+     (`Ps.50.1=Ps.51.0`). A failure means verse-0 superscriptions regressed back to nil.
+     */
+    func testMapsDivergentCanonSuperscriptionsToKJVAVerseZero() {
+        XCTAssertEqual(
+            SwordVersification.mapVerseToKJVA(osisBookId: "Ps", chapter: 50, verse: 1, sourceVersification: "Synodal"),
+            .init(osisBookId: "Ps", chapter: 51, verse: 0),
+            "Synodal Psalm 50:1 (title) maps to the KJVA Psalm 51 superscription (verse 0)."
+        )
+        XCTAssertEqual(
+            SwordVersification.mapVerseToKJVA(osisBookId: "Ps", chapter: 50, verse: 2, sourceVersification: "Synodal"),
+            .init(osisBookId: "Ps", chapter: 51, verse: 0),
+            "Synodal Psalm 50:2 also maps to the KJVA Psalm 51 superscription."
+        )
+        XCTAssertEqual(
+            SwordVersification.mapVerseToKJVA(osisBookId: "Ps", chapter: 3, verse: 1, sourceVersification: "Synodal"),
+            .init(osisBookId: "Ps", chapter: 3, verse: 0),
+            "Synodal Psalm 3:1 (title) maps to the KJVA Psalm 3 superscription (verse 0)."
+        )
+    }
+
     func testMapsDivergentCanonPsalmsToKJVA() {
         // Vulgate follows the Septuagint Psalm numbering.
         XCTAssertEqual(

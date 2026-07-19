@@ -93,6 +93,28 @@ final class AndroidDatabaseBackupTests: XCTestCase {
     }
 
     /**
+     Verifies chapter superscription (verse 0) ordinals match JSword's reserved intro slot.
+
+     JSword addresses a chapter superscription as verse 0 with the ordinal immediately before
+     verse 1 (`chapterStart - 1`), and divergent canons map Psalm-title verses onto it (e.g. Synodal
+     Ps 50:1 -> KJVA Ps 51:0). `chapterIntroOrdinal` must return that reserved slot so cross-canon
+     bookmark storage matches Android's `Versification.getOrdinal`. A failure means superscription
+     bookmarks would land on the wrong ordinal (or fall back to a raw source ordinal).
+     */
+    func testJSwordKJVAVersificationChapterIntroOrdinalMatchesReservedSlot() throws {
+        let genesisOneVerseOne = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1))
+        XCTAssertEqual(JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Gen", chapter: 1), genesisOneVerseOne - 1)
+
+        let psalm51VerseOne = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 51, verse: 1))
+        let psalm51Intro = try XCTUnwrap(JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Ps", chapter: 51))
+        XCTAssertEqual(psalm51Intro, psalm51VerseOne - 1)
+        XCTAssertGreaterThan(psalm51Intro, 0, "A chapter superscription is a real positive ordinal, not the Bible-intro sentinel 0.")
+
+        XCTAssertNil(JSwordKJVAVersification.chapterIntroOrdinal(osisId: "NotABook", chapter: 1))
+        XCTAssertNil(JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Ps", chapter: 0))
+    }
+
+    /**
      Verifies that iOS reads Android `.abdb.zip` archives by database file discovery and exposes
      both restorable and unsupported database sections.
 
