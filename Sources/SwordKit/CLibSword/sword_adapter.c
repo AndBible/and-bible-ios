@@ -527,6 +527,11 @@ int SWModule_setVerseKeyIndex(void *module, long index) { return 1; }
 int SWVersification_mapVerseToKJVA(const char *sourceVersification, const char *osisBookName,
                                    int chapter, int verse, const char **kjvaOsisBookOut,
                                    int *kjvaChapterOut, int *kjvaVerseOut) { return 1; }
+int SWVersification_mapVerseFromKJVA(const char *targetVersification, const char *kjvaOsisBookName,
+                                     int chapter, int verse, const char **targetOsisBookOut,
+                                     int *targetChapterOut, int *targetVerseOut) { return 1; }
+int SWVersification_decodeOrdinal(const char *versification, long ordinal,
+                                  const char **osisBookOut, int *chapterOut, int *verseOut) { return 1; }
 
 void *InstallMgr_new(const char *basePath) {
     static int sentinel = 2;

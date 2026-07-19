@@ -112,18 +112,13 @@ extern "C" int SWVersification_mapVerseToKJVA(
         return 1;
     }
 
-    // SWORD and Android treat an empty versification name as the KJV default.
+    // SWORD and Android treat an empty versification name as the KJV default. A present-but-
+    // unrecognized name is NOT defaulted: it returns failure, matching Android — which rejects an
+    // unsupported module versification during metadata load — and the flatapi.h contract.
     const char *sourceName =
         (sourceVersification && *sourceVersification) ? sourceVersification : "KJV";
     const sword::VersificationMgr::System *sourceSystem =
         versificationMgr->getVersificationSystem(sourceName);
-    if (!sourceSystem) {
-        // SWORD renders a module whose versification name it does not recognize under KJV, so
-        // mirror that fallback instead of failing the mapping. Returning failure here would let the
-        // caller persist the raw source ordinal into the KJVA-domain storage columns, which is a
-        // cross-canon parity defect on restore/sync/export.
-        sourceSystem = versificationMgr->getVersificationSystem("KJV");
-    }
     const sword::VersificationMgr::System *kjvaSystem =
         versificationMgr->getVersificationSystem("KJVA");
     if (!sourceSystem || !kjvaSystem) {
@@ -150,6 +145,96 @@ extern "C" int SWVersification_mapVerseToKJVA(
     *kjvaOsisBookOut = mappedBookStorage.c_str();
     *kjvaChapterOut = mappedChapter;
     *kjvaVerseOut = mappedVerse;
+    return 0;
+}
+
+extern "C" int SWVersification_mapVerseFromKJVA(
+    const char *targetVersification,
+    const char *kjvaOsisBookName,
+    int chapter,
+    int verse,
+    const char **targetOsisBookOut,
+    int *targetChapterOut,
+    int *targetVerseOut) {
+    if (!kjvaOsisBookName || !targetOsisBookOut || !targetChapterOut || !targetVerseOut) {
+        return 1;
+    }
+
+    sword::VersificationMgr *versificationMgr = sword::VersificationMgr::getSystemVersificationMgr();
+    if (!versificationMgr) {
+        return 1;
+    }
+
+    // Reverse of SWVersification_mapVerseToKJVA: an empty target name defaults to KJV; a present-
+    // but-unrecognized name returns failure (matching the forward direction and Android).
+    const char *targetName =
+        (targetVersification && *targetVersification) ? targetVersification : "KJV";
+    const sword::VersificationMgr::System *kjvaSystem =
+        versificationMgr->getVersificationSystem("KJVA");
+    const sword::VersificationMgr::System *targetSystem =
+        versificationMgr->getVersificationSystem(targetName);
+    if (!kjvaSystem || !targetSystem) {
+        return 1;
+    }
+
+    // translateVerse is directional: calling it on the KJVA system with the target as destination
+    // maps a KJVA reference back onto the target versification (e.g. KJVA Ps 11:1 -> Vulg Ps 10:1).
+    thread_local std::string inputBookStorage;
+    thread_local std::string mappedBookStorage;
+    inputBookStorage = kjvaOsisBookName;
+    const char *book = inputBookStorage.c_str();
+    int mappedChapter = chapter;
+    int mappedVerse = verse;
+    int mappedVerseEnd = verse;
+    kjvaSystem->translateVerse(targetSystem, &book, &mappedChapter, &mappedVerse, &mappedVerseEnd);
+    if (!book) {
+        return 1;
+    }
+
+    mappedBookStorage = book;
+    *targetOsisBookOut = mappedBookStorage.c_str();
+    *targetChapterOut = mappedChapter;
+    *targetVerseOut = mappedVerse;
+    return 0;
+}
+
+extern "C" int SWVersification_decodeOrdinal(
+    const char *versification,
+    long ordinal,
+    const char **osisBookOut,
+    int *chapterOut,
+    int *verseOut) {
+    if (!osisBookOut || !chapterOut || !verseOut || ordinal <= 0) {
+        return 1;
+    }
+
+    // An empty name defaults to KJV; a present-but-unrecognized name returns failure.
+    const char *name = (versification && *versification) ? versification : "KJV";
+    sword::VersificationMgr *versificationMgr = sword::VersificationMgr::getSystemVersificationMgr();
+    if (!versificationMgr || !versificationMgr->getVersificationSystem(name)) {
+        return 1;
+    }
+
+    // Decode the intro-inclusive VerseKey index within `name`'s versification without an installed
+    // module — the same scheme SWModule_setVerseKeyIndex uses, but standalone — so a restored
+    // bookmark's original source ordinal resolves from versification metadata alone (as Android's
+    // Verse(v11n, ordinal) does).
+    sword::VerseKey key;
+    key.setVersificationSystem(name);
+    key.setIndex(ordinal);
+    if (key.getError() || key.getChapter() <= 0 || key.getVerse() <= 0 || key.getIndex() != ordinal) {
+        return 1;
+    }
+
+    thread_local std::string bookStorage;
+    bookStorage = safeCString(key.getOSISBookName());
+    if (bookStorage.empty()) {
+        return 1;
+    }
+
+    *osisBookOut = bookStorage.c_str();
+    *chapterOut = key.getChapter();
+    *verseOut = key.getVerse();
     return 0;
 }
 
