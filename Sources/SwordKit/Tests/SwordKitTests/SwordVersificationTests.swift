@@ -13,9 +13,11 @@ final class SwordVersificationTests: XCTestCase {
      Verifies shared canonical references map to KJVA unchanged and defaults/invalid inputs behave.
 
      KJV and KJVA share Genesis..Malachi and the New Testament numbering, so a KJV reference maps to
-     the identical KJVA reference; an empty source versification defaults to KJV; unknown
-     versifications and non-positive inputs return nil. A failure means the adapter is not wired to
-     SWORD's VersificationMgr or mis-handles defaults.
+     the identical KJVA reference; an empty source versification defaults to KJV; a versification
+     name SWORD does not recognize also falls back to KJV (mirroring SWORD's own module loading, so
+     the caller never persists a raw source ordinal into the KJVA columns); non-positive inputs and
+     empty book ids return nil. A failure means the adapter is not wired to SWORD's VersificationMgr
+     or mis-handles defaults.
      */
     func testMapsSharedCanonAndDefaultsAndInvalidInputs() {
         XCTAssertEqual(
@@ -31,8 +33,12 @@ final class SwordVersificationTests: XCTestCase {
             SwordVersification.mapVerseToKJVA(osisBookId: "Gen", chapter: 1, verse: 1, sourceVersification: ""),
             .init(osisBookId: "Gen", chapter: 1, verse: 1)
         )
-        XCTAssertNil(
-            SwordVersification.mapVerseToKJVA(osisBookId: "Gen", chapter: 1, verse: 1, sourceVersification: "NotAVersification")
+        // A versification name SWORD does not recognize falls back to KJV rather than failing, so
+        // shared-canon references still resolve to their identical KJVA reference instead of nil
+        // (which would let callers store a raw source ordinal in the KJVA columns).
+        XCTAssertEqual(
+            SwordVersification.mapVerseToKJVA(osisBookId: "Gen", chapter: 1, verse: 1, sourceVersification: "NotAVersification"),
+            .init(osisBookId: "Gen", chapter: 1, verse: 1)
         )
         XCTAssertNil(
             SwordVersification.mapVerseToKJVA(osisBookId: "Gen", chapter: 0, verse: 1, sourceVersification: "KJV")

@@ -57,13 +57,14 @@ public enum SwordVersification {
        - chapter: One-based chapter number in the source versification.
        - verse: One-based verse number in the source versification.
        - sourceVersification: SWORD versification name for the input reference; an empty string is
-         treated as KJV, matching SWORD and Android defaults.
-     - Returns: The KJVA reference, or `nil` when inputs are invalid or the source versification is
-       unknown to SWORD.
+         treated as KJV, matching SWORD and Android defaults. A name SWORD does not recognize also
+         falls back to KJV, mirroring how SWORD loads such modules.
+     - Returns: The KJVA reference, or `nil` when inputs are invalid or SWORD cannot map the
+       reference onto a positive KJVA verse.
      - Side effects: Runs inside the SWORD serialization queue and reads SWORD's system
        versification manager.
-     - Failure modes: Returns `nil` for non-positive chapter/verse, an empty book id, or an
-       unrecognized versification name.
+     - Failure modes: Returns `nil` for non-positive chapter/verse, an empty book id, or a mapped
+       result outside KJVA's positive verse range.
      */
     public static func mapVerseToKJVA(
         osisBookId: String,

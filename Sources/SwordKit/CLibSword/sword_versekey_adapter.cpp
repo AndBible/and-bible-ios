@@ -117,6 +117,13 @@ extern "C" int SWVersification_mapVerseToKJVA(
         (sourceVersification && *sourceVersification) ? sourceVersification : "KJV";
     const sword::VersificationMgr::System *sourceSystem =
         versificationMgr->getVersificationSystem(sourceName);
+    if (!sourceSystem) {
+        // SWORD renders a module whose versification name it does not recognize under KJV, so
+        // mirror that fallback instead of failing the mapping. Returning failure here would let the
+        // caller persist the raw source ordinal into the KJVA-domain storage columns, which is a
+        // cross-canon parity defect on restore/sync/export.
+        sourceSystem = versificationMgr->getVersificationSystem("KJV");
+    }
     const sword::VersificationMgr::System *kjvaSystem =
         versificationMgr->getVersificationSystem("KJVA");
     if (!sourceSystem || !kjvaSystem) {

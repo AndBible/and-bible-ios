@@ -5600,7 +5600,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameters:
        - book: Display book name for the visible chapter.
        - chapter: One-based chapter number.
-       - verseCount: Optional visible last verse count from the already-loaded chapter.
+       - verseCount: Optional rendered non-empty verse count, used only as a fallback when the
+         active module cannot report the chapter's maximum verse number.
      - Returns: Inclusive storage range and verse count, or `nil` when neither KJVA nor active
        module versification can resolve the chapter.
      - Side effects: May query the active SWORD module through `chapterOrdinalRange`.
@@ -5617,11 +5618,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         // Map the visible chapter's first and last verse from the source versification into KJVA so
         // the query span covers the correct KJVA ordinals even when the module's chapter numbering
         // diverges from KJVA (e.g. a merged Septuagint/Vulgate Psalm covers two KJVA chapters).
-        // The last-verse index must be expressed in the *source* versification: prefer the caller's
-        // visible count, then the active module's own chapter verse count, and only fall back to the
-        // KJVA canon count when no module can resolve it (identity/KJVA-source case).
-        let sourceLastVerse = verseCount
-            ?? chapterOrdinalRange(book: book, chapter: chapter)?.verseCount
+        // The last-verse index must be the chapter's *maximum verse number* in the source
+        // versification, taken from the active module's canon (`chapterOrdinalRange` reports
+        // `verseMax`). The caller's `verseCount` counts only non-empty rendered verses, so using it
+        // would truncate the span for chapters that render a verse empty (e.g. Matthew 17:21 in many
+        // modern translations) and drop bookmarks on the trailing verses. Fall back to the caller's
+        // count, then the KJVA canon count, only when no module can resolve the chapter.
+        let sourceLastVerse = chapterOrdinalRange(book: book, chapter: chapter)?.verseCount
+            ?? verseCount
             ?? JSwordKJVAVersification.verseCount(osisId: osisId, chapter: chapter)
         if let sourceLastVerse, sourceLastVerse > 0,
            let firstKJVA = kjvaOrdinal(
