@@ -108,6 +108,40 @@ final class ReaderSwordCoordinatorTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies an unknown-versification module requested as the active Bible falls back to a supported one.
+
+     The readable-Bible gate must also cover active-module resolution: a persisted or synced selection
+     naming an unknown-versification module must not become the active/rendered Bible (it would render
+     mis-numbered under KJV while being absent from every picker). The coordinator falls back to KJV.
+     See ADR-0010.
+     */
+    func testActiveBibleModuleFallsBackWhenRequestedModuleHasUnrecognizedVersification() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(named: "BOGUS", description: "Bogus Versification Bible", in: modulePath)
+        let bogusConf = URL(fileURLWithPath: modulePath).appendingPathComponent("mods.d/bogus.conf")
+        var conf = try String(contentsOf: bogusConf, encoding: .utf8)
+        conf = conf.replacingOccurrences(of: "Versification=KJV", with: "Versification=BogusV11n")
+        try conf.write(to: bogusConf, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let state = BibleReaderSwordCoordinator().configure(
+            manager: manager,
+            selection: BibleReaderSwordSelection(
+                activeModuleName: "BOGUS",
+                activeCommentaryModuleName: nil,
+                activeDictionaryModuleName: nil,
+                activeGeneralBookModuleName: nil,
+                activeMapModuleName: nil
+            ),
+            displaySettings: .appDefaults
+        )
+
+        XCTAssertNotEqual(state.activeModuleName, "BOGUS", "An unknown-versification module must not become the active Bible.")
+        XCTAssertEqual(state.activeModuleName, "KJV", "The coordinator falls back to a supported Bible (KJV).")
+        XCTAssertEqual(state.activeModule?.info.name, "KJV")
+    }
+
+    /**
      Protects the SWORD global option mapping used by reader rendering.
 
      Android applies reader display settings through JSword filters; iOS mirrors those options with

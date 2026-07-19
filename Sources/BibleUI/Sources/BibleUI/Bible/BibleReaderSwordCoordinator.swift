@@ -244,7 +244,12 @@ struct BibleReaderSwordCoordinator {
         requestedName: String,
         installedBibleModules: [ModuleInfo]
     ) -> (module: SwordModule?, name: String) {
-        if let module = manager.module(named: requestedName) {
+        // Honor the requested module only when SWORD recognizes its versification, so an
+        // unknown-versification module is never loaded as the active reader even when it is the
+        // persisted/requested selection. Otherwise fall back to KJV, then the first supported Bible.
+        // This keeps active-module resolution consistent with the readable-Bible gate. ADR-0010.
+        if let module = manager.module(named: requestedName),
+           SwordVersification.isVersificationDefined(module.info.aboutMetadata.versification) {
             return (module, requestedName)
         }
         if let kjv = manager.module(named: "KJV") {

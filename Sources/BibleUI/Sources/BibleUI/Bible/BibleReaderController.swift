@@ -2608,10 +2608,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func restoreSavedPosition() {
         guard let pm = activeWindow?.pageManager else { return }
 
-        // Restore saved Bible module
+        // Restore saved Bible module only when SWORD recognizes its versification. A persisted or
+        // synced selection naming an unknown-versification module must not override the gated active
+        // module chosen during SWORD configuration, or it would render mis-numbered under KJV while
+        // being absent from every picker. ADR-0010.
         if let saved = pm.bibleDocument,
            let mgr = swordManager,
-           let mod = mgr.module(named: saved) {
+           let mod = mgr.module(named: saved),
+           SwordVersification.isVersificationDefined(mod.info.aboutMetadata.versification) {
             activeModule = mod
             activeModuleName = saved
             refreshBookList()
