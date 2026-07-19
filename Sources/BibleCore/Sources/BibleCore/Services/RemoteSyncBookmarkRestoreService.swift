@@ -688,13 +688,122 @@ public final class RemoteSyncBookmarkRestoreService {
         let bookId: String?
     }
 
+    /// Resolver that translates Android `book` column semantics into iOS display book names.
+    private let bookNameResolver: AndroidBookmarkBookNameResolving?
+
     /**
      Creates a bookmark restore service.
 
-     - Side effects: none.
+     - Parameter bookNameResolver: Boundary that normalizes Android's module-initials `book`
+       column into the iOS display book name during restore. The default SWORD-backed resolver
+       derives names from each bookmark's own versification and ordinals; passing `nil` disables
+       normalization and preserves raw Android values verbatim.
+     - Side effects: none; the default resolver creates SWORD state lazily on first restore.
      - Failure modes: This initializer cannot fail.
      */
-    public init() {}
+    public init(
+        bookNameResolver: AndroidBookmarkBookNameResolving? = AndroidBookmarkSwordBookNameResolver()
+    ) {
+        self.bookNameResolver = bookNameResolver
+    }
+
+    /**
+     Normalizes one restored bookmark's `book` value into iOS display-name semantics.
+
+     Android stores SWORD module initials (or NULL) in the `book` column because Android renders
+     references from `v11n` + ordinals. iOS now keys list rendering, chapter-highlight queries,
+     and navigation from the KJVA ordinal columns, but still heals Android's rewriteable values so
+     older fallback paths and persisted display text avoid `Unknown`/module-initial labels. Only
+     the two shapes Android actually produces are rewritten — NULL and installed-module initials —
+     so locally created display names and localized names survive merge round-trips unchanged.
+
+     - Parameters:
+       - bookmark: Staged Android bookmark row being materialized into SwiftData.
+       - previousDisplayBook: Display value the same bookmark ID carried locally before this
+         restore, used so previously healed names survive re-materializations (sync patch apply,
+         merge imports) when the enabling module has since been removed.
+     - Returns: The derived display book name; otherwise the retained previous display name when
+       derivation fails for a rewriteable value; otherwise the raw Android value.
+     - Side effects: may lazily create SWORD state through the injected resolver.
+     - Failure modes: falls back to the raw value whenever resolution fails and no previous
+       display name is retainable.
+     */
+    private func normalizedDisplayBookName(
+        for bookmark: RemoteSyncAndroidBibleBookmark,
+        previousDisplayBook: String?
+    ) -> String? {
+        guard let bookNameResolver else { return bookmark.book }
+
+        let shouldDerive: Bool
+        if let raw = bookmark.book {
+            shouldDerive = bookNameResolver.isInstalledBibleInitials(raw)
+        } else {
+            shouldDerive = true
+        }
+        guard shouldDerive else { return bookmark.book }
+
+        if let derived = bookNameResolver.displayBookName(
+            v11nName: bookmark.v11n,
+            ordinal: bookmark.ordinalStart,
+            kjvOrdinal: bookmark.kjvOrdinalStart
+        ) {
+            return derived
+        }
+
+        if let previousDisplayBook,
+           previousDisplayBook != bookmark.book,
+           !bookNameResolver.isInstalledBibleInitials(previousDisplayBook) {
+            return previousDisplayBook
+        }
+        return bookmark.book
+    }
+
+    /**
+     Normalizes Android's `BibleBookmark.book` column into iOS source-module metadata.
+
+     Android stores the bookmark's source `AbstractPassageBook` initials in this column, while old
+     iOS snapshots may contain display Bible book names from the pre-#356 schema drift. The model's
+     `book` field remains display-facing, so this helper writes only plausible module initials to
+     `BibleBookmark.bookInitials` and leaves display names empty.
+
+     - Parameter bookmark: Staged Android-shaped Bible bookmark row.
+     - Returns: Source module initials, or an empty string when the row has no durable source
+       module identity.
+     - Side effects: may query the injected resolver to recognize installed module initials.
+     - Failure modes: Unknown single-token values are preserved as likely uninstalled module
+       initials so Android-origin rows remain round-trip capable.
+     */
+    private func normalizedSourceBookInitials(for bookmark: RemoteSyncAndroidBibleBookmark) -> String {
+        guard let raw = bookmark.book?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return ""
+        }
+        if isKnownDisplayBookName(raw) {
+            return ""
+        }
+        if bookNameResolver?.isInstalledBibleInitials(raw) == true {
+            return raw
+        }
+        return raw.rangeOfCharacter(from: .whitespacesAndNewlines) == nil ? raw : ""
+    }
+
+    /**
+     Detects legacy iOS display book names that must not be re-exported as Android module initials.
+
+     - Parameter rawValue: Trimmed value from Android's `BibleBookmark.book` column.
+     - Returns: `true` when the value matches a canonical KJVA book long name, short name, or OSIS
+       id from old iOS snapshots.
+     - Side effects: None.
+     - Failure modes: Unknown values return `false` so likely module initials can remain
+       round-trip capable.
+     */
+    private func isKnownDisplayBookName(_ rawValue: String) -> Bool {
+        JSwordKJVAVersification.books.contains {
+            rawValue.caseInsensitiveCompare($0.longName) == .orderedSame ||
+                rawValue.caseInsensitiveCompare($0.shortName) == .orderedSame ||
+                rawValue.caseInsensitiveCompare($0.osisId) == .orderedSame
+        }
+    }
 
     /**
      Reads one staged Android bookmark SQLite database into a typed snapshot.
@@ -870,7 +979,8 @@ public final class RemoteSyncBookmarkRestoreService {
        - deletes existing local bookmark-category SwiftData rows
        - inserts replacement labels, Bible bookmarks, generic bookmarks, notes, junction rows, and StudyPad rows
        - saves `modelContext`
-       - clears and repopulates the local-only playback-settings and label-alias side stores
+       - clears and repopulates the local-only playback-settings, label-alias, and Android-book
+         side stores
      - Failure modes:
        - throws `RemoteSyncBookmarkRestoreError.duplicateSystemLabels` when multiple staged labels
          claim the same reserved system-label name
@@ -884,6 +994,15 @@ public final class RemoteSyncBookmarkRestoreService {
         settingsStore: SettingsStore
     ) throws -> RemoteSyncBookmarkRestoreReport {
         let prepared = try prepareRestore(from: snapshot)
+
+        var previousDisplayBooksByID: [UUID: String] = [:]
+        if let existing = try? modelContext.fetch(FetchDescriptor<BibleBookmark>()) {
+            for bookmark in existing {
+                if let book = bookmark.book {
+                    previousDisplayBooksByID[bookmark.id] = book
+                }
+            }
+        }
 
         try deleteExistingBookmarkGraph(from: modelContext)
 
@@ -910,6 +1029,7 @@ public final class RemoteSyncBookmarkRestoreService {
         ensureMissingSystemLabels(in: modelContext, labelsByID: &labelsByID)
 
         var bibleBookmarksByID: [UUID: BibleBookmark] = [:]
+        var normalizedBookRewrites: [(bookmarkID: UUID, rawBook: String?)] = []
         for preparedBookmark in prepared.bibleBookmarks {
             let bookmark = BibleBookmark(
                 id: preparedBookmark.bookmark.id,
@@ -918,11 +1038,20 @@ public final class RemoteSyncBookmarkRestoreService {
                 ordinalStart: preparedBookmark.bookmark.ordinalStart,
                 ordinalEnd: preparedBookmark.bookmark.ordinalEnd,
                 v11n: preparedBookmark.bookmark.v11n,
+                bookInitials: normalizedSourceBookInitials(for: preparedBookmark.bookmark),
                 createdAt: preparedBookmark.bookmark.createdAt,
                 lastUpdatedOn: preparedBookmark.bookmark.lastUpdatedOn,
                 wholeVerse: preparedBookmark.bookmark.wholeVerse
             )
-            bookmark.book = preparedBookmark.bookmark.book
+            let rawBook = preparedBookmark.bookmark.book
+            let displayBook = normalizedDisplayBookName(
+                for: preparedBookmark.bookmark,
+                previousDisplayBook: previousDisplayBooksByID[preparedBookmark.bookmark.id]
+            )
+            bookmark.book = displayBook
+            if displayBook != rawBook {
+                normalizedBookRewrites.append((bookmarkID: bookmark.id, rawBook: rawBook))
+            }
             bookmark.startOffset = preparedBookmark.bookmark.startOffset
             bookmark.endOffset = preparedBookmark.bookmark.endOffset
             bookmark.primaryLabelId = preparedBookmark.localPrimaryLabelID
@@ -1027,8 +1156,14 @@ public final class RemoteSyncBookmarkRestoreService {
 
         let playbackSettingsStore = RemoteSyncBookmarkPlaybackSettingsStore(settingsStore: settingsStore)
         let labelAliasStore = RemoteSyncBookmarkLabelAliasStore(settingsStore: settingsStore)
+        let androidBookStore = RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore)
         playbackSettingsStore.clearAll()
         labelAliasStore.clearAll()
+        androidBookStore.clearAll()
+
+        for rewrite in normalizedBookRewrites {
+            androidBookStore.setRawBook(rewrite.rawBook, for: rewrite.bookmarkID)
+        }
 
         var preservedPlaybackSettingsCount = 0
         for preparedBookmark in prepared.bibleBookmarks {

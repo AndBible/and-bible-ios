@@ -114,22 +114,23 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      For a range within one chapter, JSword emits `Book chapter:start-end`, so the iOS bookmark
      list should not expand the repeated chapter or collapse a real multi-verse range.
      */
-    func testBookmarkListVerseReferenceFormatsSameChapterRangeLikeJSword() {
+    func testBookmarkListVerseReferenceFormatsSameChapterRangeLikeJSword() throws {
+        let startOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 5)
+        )
+        let endOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 7)
+        )
         let bookmark = BibleBookmark(
-            kjvOrdinalStart: 5,
-            kjvOrdinalEnd: 7,
-            ordinalStart: 5,
-            ordinalEnd: 7,
+            kjvOrdinalStart: startOrdinal,
+            kjvOrdinalEnd: endOrdinal,
+            ordinalStart: startOrdinal,
+            ordinalEnd: endOrdinal,
             v11n: "KJVA"
         )
         bookmark.book = "Genesis"
 
-        let reference = BookmarkListView.verseReference(for: bookmark) { _, ordinal in
-            [
-                5: BookmarkListVerseReference(chapter: 1, verse: 5),
-                7: BookmarkListVerseReference(chapter: 1, verse: 7),
-            ][ordinal]
-        }
+        let reference = BookmarkListView.verseReference(for: bookmark)
 
         XCTAssertEqual(reference, "Genesis 1:5-7")
     }
@@ -142,24 +143,204 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      endChapter:endVerse`. A failure here means two different ranges such as `Genesis 1:5-2:5` and
      `Genesis 1:5` can be rendered ambiguously or collapsed in the iOS bookmark list.
      */
-    func testBookmarkListVerseReferenceKeepsCrossChapterEndChapterLikeJSword() {
+    func testBookmarkListVerseReferenceKeepsCrossChapterEndChapterLikeJSword() throws {
+        let startOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 31)
+        )
+        let endOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 2, verse: 5)
+        )
         let bookmark = BibleBookmark(
-            kjvOrdinalStart: 5,
-            kjvOrdinalEnd: 45,
-            ordinalStart: 5,
-            ordinalEnd: 45,
+            kjvOrdinalStart: startOrdinal,
+            kjvOrdinalEnd: endOrdinal,
+            ordinalStart: startOrdinal,
+            ordinalEnd: endOrdinal,
             v11n: "KJVA"
         )
         bookmark.book = "Genesis"
 
-        let reference = BookmarkListView.verseReference(for: bookmark) { _, ordinal in
-            [
-                5: BookmarkListVerseReference(chapter: 1, verse: 5),
-                45: BookmarkListVerseReference(chapter: 2, verse: 5),
-            ][ordinal]
-        }
+        let reference = BookmarkListView.verseReference(for: bookmark)
 
-        XCTAssertEqual(reference, "Genesis 1:5-2:5")
+        XCTAssertEqual(reference, "Genesis 1:31-2:5")
+    }
+
+    /**
+     Verifies bookmark-list display and row navigation ignore Android's restored `book` payload.
+     *
+     * Data dependencies:
+     * - constructs restored-style Bible bookmarks whose `book` column is NULL or module initials
+     * - uses a deliberately bogus source ordinal so only the KJVA columns can resolve John 3:16
+     *
+     * Expected result:
+     * - list text renders the KJVA verse reference
+     * - tapping the row navigates to the KJVA-derived display book and chapter
+     *
+     * Failure meaning:
+     * - issue #356 has regressed and restored Android bookmarks can again show Unknown/module
+     *   initials or navigate to a bogus arithmetic chapter.
+     */
+    func testBookmarkListReferenceAndNavigationUseKJVAOrdinalsForRestoredAndroidBookValues() throws {
+        let john316 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
+        )
+
+        for storedBook in [String?.none, "KJV"] {
+            let bookmark = BibleBookmark(
+                kjvOrdinalStart: john316,
+                kjvOrdinalEnd: john316,
+                ordinalStart: 999_999,
+                ordinalEnd: 999_999,
+                v11n: "KJVA"
+            )
+            bookmark.book = storedBook
+
+            XCTAssertEqual(BookmarkListView.verseReference(for: bookmark), "John 3:16")
+            let row = BookmarkListItem(bibleBookmark: bookmark)
+            XCTAssertEqual(row.navigationTarget?.bookName, "John")
+            XCTAssertEqual(row.navigationTarget?.chapter, 3)
+        }
+    }
+
+    /**
+     Verifies bridge payload projection uses Android-compatible KJVA ordinals for visible bookmark
+     ranges while preserving Android's source ordinal and source module metadata fields.
+     *
+     * Data dependencies:
+     * - constructs one restored-style bookmark with source module initials stored separately from
+     *   the display `book` field
+     * - gives the source ordinal a bogus value so the test fails unless KJVA drives projection
+     *
+     * Expected result:
+     * - Vue `ordinalRange`, `osisRef`, and display ranges all resolve to John 3:16
+     * - `originalOrdinalRange` carries Android's source ordinal, not the KJVA storage key
+     * - `bookInitials` and related modal fields come from the bookmark source module, not the
+     *   currently active module
+     *
+     * Failure meaning:
+     * - restored Android bookmarks may not highlight in Vue, or bridge payloads may again display
+     *   module initials as Bible book names.
+     */
+    func testBookmarkPayloadUsesKJVAOrdinalsForRestoredAndroidBookmark() throws {
+        let john316 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
+        )
+        let bookmark = BibleBookmark(
+            kjvOrdinalStart: john316,
+            kjvOrdinalEnd: john316,
+            ordinalStart: 999_999,
+            ordinalEnd: 999_999,
+            v11n: "KJVA"
+        )
+        bookmark.bookInitials = "KJV"
+        let factory = BibleReaderAnnotationPayloadFactory(
+            currentBook: "Genesis",
+            activeModuleName: "NASB",
+            activeModule: nil,
+            bookCatalog: BibleReaderBookCatalog(activeModule: nil, moduleBookList: []),
+            unlabeledLabelID: Label.unlabeledId.uuidString
+        )
+
+        let payload = factory.bookmarkJSON(bookmark)
+
+        XCTAssertEqual(payload.ordinalRange, [john316, john316])
+        XCTAssertEqual(payload.originalOrdinalRange, [999_999, 999_999])
+        XCTAssertEqual(payload.bookInitials, "KJV")
+        XCTAssertEqual(payload.bookName, "KJV")
+        XCTAssertEqual(payload.bookAbbreviation, "KJV")
+        XCTAssertEqual(payload.osisRef, "John.3.16")
+        XCTAssertEqual(payload.verseRange, "John 3:16")
+        XCTAssertEqual(payload.verseRangeAbbreviated, "John 3:16")
+    }
+
+    /**
+     Verifies restored Android bookmarks with a NULL source module use Android's whole-verse
+     fallback contract.
+     *
+     * Android serializes `BibleBookmark.book == null` as a whole-verse KJVA bookmark: module
+     * metadata fields are empty, text offsets are suppressed, and the payload `v11n` falls back to
+     * KJVA. iOS represents that NULL source module as an empty `bookInitials` value.
+     *
+     * Failure meaning:
+     * - restored Android bookmarks with NULL `book` values could reintroduce stale source offsets
+     *   or non-KJVA bridge metadata that Android deliberately omits.
+     */
+    func testBookmarkPayloadTreatsMissingSourceBookLikeAndroidNullBook() throws {
+        let john316 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
+        )
+        let bookmark = BibleBookmark(
+            kjvOrdinalStart: john316,
+            kjvOrdinalEnd: john316,
+            ordinalStart: 123,
+            ordinalEnd: 123,
+            v11n: "NRSV",
+            wholeVerse: false
+        )
+        bookmark.book = "John"
+        bookmark.startOffset = 2
+        bookmark.endOffset = 5
+        let factory = BibleReaderAnnotationPayloadFactory(
+            currentBook: "John",
+            activeModuleName: "NASB",
+            activeModule: nil,
+            bookCatalog: BibleReaderBookCatalog(activeModule: nil, moduleBookList: []),
+            unlabeledLabelID: Label.unlabeledId.uuidString
+        )
+
+        let payload = factory.bookmarkJSON(bookmark)
+
+        XCTAssertEqual(payload.bookInitials, "")
+        XCTAssertEqual(payload.bookName, "")
+        XCTAssertEqual(payload.bookAbbreviation, "")
+        XCTAssertNil(payload.offsetRange)
+        XCTAssertTrue(payload.wholeVerse)
+        XCTAssertEqual(payload.v11n, JSwordKJVAVersification.name)
+        XCTAssertEqual(payload.originalOrdinalRange, [123, 123])
+        XCTAssertEqual(payload.ordinalRange, [john316, john316])
+        XCTAssertEqual(payload.osisRef, "John.3.16")
+        XCTAssertEqual(payload.verseRange, "John 3:16")
+    }
+
+    /**
+     Verifies My Notes bookmark payloads use Android's KJVA fake-document ordinal domain.
+     *
+     * Android renders `MyNotesDocument` with `ClientBibleBookmark(bookmark, KJVA)`, so the
+     * bookmark's visible `ordinalRange` is KJVA while `originalOrdinalRange` remains the source
+     * versification ordinal used by modal links. A failure here means the iOS My Notes document can
+     * drift back to active-module ordinals and break link/scroll parity with Android.
+     */
+    func testMyNotesBookmarkPayloadUsesKJVAOrdinalRangeAndSourceOriginalOrdinals() throws {
+        let john316 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
+        )
+        let john317 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 17)
+        )
+        let bookmark = BibleBookmark(
+            kjvOrdinalStart: john316,
+            kjvOrdinalEnd: john317,
+            ordinalStart: 42,
+            ordinalEnd: 43,
+            v11n: "NRSV",
+            bookInitials: "NRSV"
+        )
+        bookmark.book = "John"
+        let factory = BibleReaderAnnotationPayloadFactory(
+            currentBook: "Genesis",
+            activeModuleName: "KJV",
+            activeModule: nil,
+            bookCatalog: BibleReaderBookCatalog(activeModule: nil, moduleBookList: []),
+            unlabeledLabelID: Label.unlabeledId.uuidString
+        )
+
+        let payload = factory.bookmarkJSONForMyNotes(bookmark)
+
+        XCTAssertEqual(payload.ordinalRange, [john316, john317])
+        XCTAssertEqual(payload.originalOrdinalRange, [42, 43])
+        XCTAssertEqual(payload.bookInitials, "NRSV")
+        XCTAssertEqual(payload.bookName, "NRSV")
+        XCTAssertEqual(payload.v11n, "NRSV")
+        XCTAssertEqual(payload.verseRange, "John 3:16-17")
     }
 
     /**
@@ -312,6 +493,84 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies My Notes modal links convert source ordinals into Android's KJVA document domain.
+     *
+     * Android's bookmark modal builds `my-notes://` links from `v11n` plus
+     * `originalOrdinalRange[0]`. The destination My Notes document renders rows in KJVA, so iOS
+     * must convert that source ordinal before emitting `setup_content.jumpToOrdinal`; otherwise NT
+     * KJV bookmarks scroll to the wrong row because KJVA includes the apocrypha span before
+     * Matthew.
+     */
+    @MainActor
+    func testReaderOpenMyNotesConvertsSourceOrdinalToKJVAJumpTarget() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let sourceOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1))
+        let kjvaOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Matt", chapter: 1, verse: 1)
+        )
+        let kjvaEndOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Matt", chapter: 1, verse: 25)
+        )
+        controller.bridgeDidSetClientReady(bridge)
+        controller.navigateTo(book: "Matthew", chapter: 1, verse: 1)
+        let baselineCount = recordedScripts().count
+
+        controller.bridge(bridge, openMyNotes: "KJV", ordinal: sourceOrdinal)
+
+        let myNotesScripts = Array(recordedScripts().dropFirst(baselineCount))
+        let setupPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: myNotesScripts, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(setupPayload["jumpToOrdinal"] as? Int, kjvaOrdinal)
+        let documentPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: myNotesScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(documentPayload["ordinalRange"] as? [Int], [
+            kjvaOrdinal,
+            kjvaEndOrdinal,
+        ])
+    }
+
+    /**
+     Verifies My Notes modal links omit their scroll target when source-to-KJVA conversion fails.
+     *
+     * Android's My Notes fake document scrolls within KJVA rows. When iOS cannot resolve the source
+     * versification named by a modal link, passing the original source ordinal would cross ordinal
+     * domains and scroll to the wrong bookmark. The safe parity behavior is to open the document and
+     * leave `setup_content.jumpToOrdinal` null.
+     *
+     * Failure meaning:
+     * - unsupported or uninstalled source versifications could leak source ordinals into the KJVA My
+     *   Notes document contract and navigate to unrelated notes.
+     */
+    @MainActor
+    func testReaderOpenMyNotesOmitsJumpTargetWhenSourceOrdinalCannotConvertToKJVA() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bridgeDidSetClientReady(bridge)
+        controller.navigateTo(book: "Matthew", chapter: 1, verse: 1)
+        let baselineCount = recordedScripts().count
+
+        controller.bridge(bridge, openMyNotes: "UninstalledV11n", ordinal: 12_345)
+
+        let myNotesScripts = Array(recordedScripts().dropFirst(baselineCount))
+        let setupPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: myNotesScripts, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertTrue(setupPayload["jumpToOrdinal"] is NSNull)
+        let documentPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: myNotesScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(documentPayload["type"] as? String, "notes")
+    }
+
+    /**
      Verifies StudyPad requests made before the Vue client is ready replay after client-ready.
 
      Android treats StudyPad as a reader document, so selecting a StudyPad label while the shared
@@ -434,11 +693,19 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
         let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31))
         let endOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2))
+        let kjvStartOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 31)
+        )
+        let kjvEndOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 2, verse: 2)
+        )
 
         let bookmark = bookmarkService.addBibleBookmark(
             bookInitials: "KJV",
             startOrdinal: startOrdinal,
             endOrdinal: endOrdinal,
+            kjvOrdinalStart: kjvStartOrdinal,
+            kjvOrdinalEnd: kjvEndOrdinal,
             wholeVerse: true
         )
         bookmark.book = "Genesis"
@@ -482,12 +749,20 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
         let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31))
         let endOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2))
+        let kjvStartOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 31)
+        )
+        let kjvEndOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 2, verse: 2)
+        )
 
         let label = bookmarkService.createLabel(name: "Cross Chapter", color: Label.defaultColor)
         let bookmark = bookmarkService.addBibleBookmark(
             bookInitials: "KJV",
             startOrdinal: startOrdinal,
             endOrdinal: endOrdinal,
+            kjvOrdinalStart: kjvStartOrdinal,
+            kjvOrdinalEnd: kjvEndOrdinal,
             wholeVerse: true
         )
         bookmark.book = "Genesis"
@@ -1148,6 +1423,262 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies native bookmark creation stores the reader's source ordinals and Android KJVA ordinals
+     as separate fields.
+     *
+     * Data dependencies:
+     * - creates one bookmark through the bridge action coordinator
+     * - injects the same rendered-to-KJVA projection closure the controller supplies in production
+     *
+     * Expected result:
+     * - source ordinals preserve the rendered selection
+     * - source module initials, KJVA ordinals, and `v11n` preserve the Android-compatible storage
+     *   identity
+     *
+     * Failure meaning:
+     * - iOS-created bookmarks can become non-portable to Android or fail restored-bookmark
+     *   highlight queries when the active module versification differs from KJVA.
+     */
+    @MainActor
+    func testBookmarkActionCoordinatorStoresKJVAMappingForNewBibleBookmark() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let john316 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
+        )
+        let john317 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 17)
+        )
+        let coordinator = makeBookmarkActionCoordinator(
+            bookmarkService: bookmarkService,
+            currentV11n: { "NRSV" },
+            kjvaOrdinalRange: { _, _ in (start: john316, end: john317) }
+        )
+
+        let result = coordinator.addOrUpdateBibleBookmark(
+            bookInitials: "NRSV",
+            startOrdinal: 42,
+            endOrdinal: 43,
+            addNote: false,
+            wholeVerse: true,
+            workspaceSettings: nil
+        )
+
+        let bookmark = try XCTUnwrap(bookmarkService.bookmarks(for: john316, endOrdinal: john316).first)
+        XCTAssertEqual(bookmark.bookInitials, "NRSV")
+        XCTAssertEqual(bookmark.book, "Genesis")
+        XCTAssertEqual(bookmark.ordinalStart, 42)
+        XCTAssertEqual(bookmark.ordinalEnd, 43)
+        XCTAssertEqual(bookmark.kjvOrdinalStart, john316)
+        XCTAssertEqual(bookmark.kjvOrdinalEnd, john317)
+        XCTAssertEqual(bookmark.v11n, "NRSV")
+        guard case .bookmarksUpdated(let payloads) = result.events.first else {
+            return XCTFail("Expected add_or_update_bookmarks event")
+        }
+        XCTAssertEqual(payloads.first?.ordinalRange, [john316, john317])
+        XCTAssertEqual(payloads.first?.originalOrdinalRange, [42, 43])
+        XCTAssertEqual(payloads.first?.bookInitials, "NRSV")
+        XCTAssertEqual(payloads.first?.bookName, "NRSV")
+        XCTAssertEqual(payloads.first?.bookAbbreviation, "NRSV")
+        XCTAssertEqual(payloads.first?.verseRange, "John 3:16-17")
+    }
+
+    /**
+     Verifies Bible bookmark creation normalizes source ordinal ranges before storage and export.
+     *
+     * Android treats an `endOrdinal` of `0` as a single-verse selection and stores increasing verse
+     * ranges. The iOS bridge must apply that normalization before both KJVA projection and SwiftData
+     * persistence so later Android backup export and My Notes modal links receive source ordinals from
+     * the same normalized domain.
+     *
+     * Expected result:
+     * - the injected KJVA projector receives normalized source start/end values
+     * - persisted `ordinalStart`/`ordinalEnd` never keep the bridge's zero or reversed raw inputs
+     * - emitted `originalOrdinalRange` matches the normalized persisted source range
+     *
+     * Failure meaning:
+     * - native iOS-created bookmarks can corrupt Android-compatible backup snapshots or reintroduce
+     *   wrong-domain modal navigation for non-KJVA source modules.
+     */
+    @MainActor
+    func testBookmarkActionCoordinatorPersistsNormalizedSourceRangeForNewBibleBookmark() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let john316 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
+        )
+        let john317 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 17)
+        )
+        let john318 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 18)
+        )
+        var projectedRanges = [
+            (start: john316, end: john316),
+            (start: john317, end: john318),
+        ]
+        var projectionInputs: [(start: Int, end: Int)] = []
+        let coordinator = makeBookmarkActionCoordinator(
+            bookmarkService: bookmarkService,
+            currentV11n: { "NRSV" },
+            kjvaOrdinalRange: { start, end in
+                projectionInputs.append((start: start, end: end))
+                guard !projectedRanges.isEmpty else {
+                    XCTFail("Unexpected KJVA projection request")
+                    return nil
+                }
+                return projectedRanges.removeFirst()
+            }
+        )
+
+        let zeroEndResult = coordinator.addOrUpdateBibleBookmark(
+            bookInitials: "NRSV",
+            startOrdinal: 42,
+            endOrdinal: 0,
+            addNote: false,
+            wholeVerse: true,
+            workspaceSettings: nil
+        )
+        let zeroEndBookmark = try XCTUnwrap(
+            bookmarkService.bookmarks(for: john316, endOrdinal: john316)
+                .first(where: { $0.kjvOrdinalStart == john316 })
+        )
+        guard case .bookmarksUpdated(let zeroEndPayloads) = zeroEndResult.events.first else {
+            return XCTFail("Expected add_or_update_bookmarks event")
+        }
+
+        XCTAssertEqual(projectionInputs.count, 1)
+        XCTAssertEqual(projectionInputs[0].start, 42)
+        XCTAssertEqual(projectionInputs[0].end, 42)
+        XCTAssertEqual(zeroEndBookmark.ordinalStart, 42)
+        XCTAssertEqual(zeroEndBookmark.ordinalEnd, 42)
+        XCTAssertEqual(zeroEndBookmark.kjvOrdinalStart, john316)
+        XCTAssertEqual(zeroEndBookmark.kjvOrdinalEnd, john316)
+        XCTAssertEqual(zeroEndPayloads.first?.ordinalRange, [john316, john316])
+        XCTAssertEqual(zeroEndPayloads.first?.originalOrdinalRange, [42, 42])
+
+        let reversedResult = coordinator.addOrUpdateBibleBookmark(
+            bookInitials: "NRSV",
+            startOrdinal: 53,
+            endOrdinal: 52,
+            addNote: false,
+            wholeVerse: true,
+            workspaceSettings: nil
+        )
+        let reversedBookmark = try XCTUnwrap(
+            bookmarkService.bookmarks(for: john317, endOrdinal: john318)
+                .first(where: { $0.kjvOrdinalStart == john317 })
+        )
+        guard case .bookmarksUpdated(let reversedPayloads) = reversedResult.events.first else {
+            return XCTFail("Expected add_or_update_bookmarks event")
+        }
+
+        XCTAssertEqual(projectionInputs.count, 2)
+        XCTAssertEqual(projectionInputs[1].start, 52)
+        XCTAssertEqual(projectionInputs[1].end, 53)
+        XCTAssertEqual(reversedBookmark.ordinalStart, 52)
+        XCTAssertEqual(reversedBookmark.ordinalEnd, 53)
+        XCTAssertEqual(reversedBookmark.kjvOrdinalStart, john317)
+        XCTAssertEqual(reversedBookmark.kjvOrdinalEnd, john318)
+        XCTAssertEqual(reversedPayloads.first?.ordinalRange, [john317, john318])
+        XCTAssertEqual(reversedPayloads.first?.originalOrdinalRange, [52, 53])
+    }
+
+    /**
+     Verifies paragraph-break Bible bookmarks use the same normalized source ordinal storage contract
+     as normal Bible bookmarks.
+     *
+     * Paragraph breaks are labels on Bible bookmarks, so Android backup export and restored highlight
+     * lookup depend on their KJVA fields while modal/navigation metadata depends on their source
+     * ordinal fields. This protects both zero-ended and reversed bridge inputs from being persisted
+     * verbatim through the paragraph-break shortcut.
+     *
+     * Failure meaning:
+     * - paragraph-break bookmarks can become non-portable to Android snapshots or emit malformed
+     *   `originalOrdinalRange` values even though normal Bible bookmark creation is fixed.
+     */
+    @MainActor
+    func testBookmarkActionCoordinatorPersistsNormalizedSourceRangeForParagraphBreakBibleBookmark() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let gen11 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1)
+        )
+        let gen12 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 2)
+        )
+        let gen13 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 3)
+        )
+        var projectedRanges = [
+            (start: gen11, end: gen11),
+            (start: gen12, end: gen13),
+        ]
+        var projectionInputs: [(start: Int, end: Int)] = []
+        let coordinator = makeBookmarkActionCoordinator(
+            bookmarkService: bookmarkService,
+            currentV11n: { "NRSV" },
+            kjvaOrdinalRange: { start, end in
+                projectionInputs.append((start: start, end: end))
+                guard !projectedRanges.isEmpty else {
+                    XCTFail("Unexpected KJVA projection request")
+                    return nil
+                }
+                return projectedRanges.removeFirst()
+            }
+        )
+
+        let zeroEndResult = coordinator.addParagraphBreakBibleBookmark(
+            bookInitials: "NRSV",
+            startOrdinal: 72,
+            endOrdinal: 0
+        )
+        let zeroEndBookmark = try XCTUnwrap(
+            bookmarkService.bookmarks(for: gen11, endOrdinal: gen11)
+                .first(where: { $0.kjvOrdinalStart == gen11 })
+        )
+        guard case .bookmarksUpdated(let zeroEndPayloads) = zeroEndResult.events.first else {
+            return XCTFail("Expected add_or_update_bookmarks event")
+        }
+
+        XCTAssertEqual(projectionInputs.count, 1)
+        XCTAssertEqual(projectionInputs[0].start, 72)
+        XCTAssertEqual(projectionInputs[0].end, 72)
+        XCTAssertEqual(zeroEndBookmark.ordinalStart, 72)
+        XCTAssertEqual(zeroEndBookmark.ordinalEnd, 72)
+        XCTAssertEqual(zeroEndBookmark.kjvOrdinalStart, gen11)
+        XCTAssertEqual(zeroEndBookmark.kjvOrdinalEnd, gen11)
+        XCTAssertEqual(zeroEndPayloads.first?.ordinalRange, [gen11, gen11])
+        XCTAssertEqual(zeroEndPayloads.first?.originalOrdinalRange, [72, 72])
+
+        let reversedResult = coordinator.addParagraphBreakBibleBookmark(
+            bookInitials: "NRSV",
+            startOrdinal: 83,
+            endOrdinal: 81
+        )
+        let reversedBookmark = try XCTUnwrap(
+            bookmarkService.bookmarks(for: gen12, endOrdinal: gen13)
+                .first(where: { $0.kjvOrdinalStart == gen12 })
+        )
+        guard case .bookmarksUpdated(let reversedPayloads) = reversedResult.events.first else {
+            return XCTFail("Expected add_or_update_bookmarks event")
+        }
+
+        XCTAssertEqual(projectionInputs.count, 2)
+        XCTAssertEqual(projectionInputs[1].start, 81)
+        XCTAssertEqual(projectionInputs[1].end, 83)
+        XCTAssertEqual(reversedBookmark.ordinalStart, 81)
+        XCTAssertEqual(reversedBookmark.ordinalEnd, 83)
+        XCTAssertEqual(reversedBookmark.kjvOrdinalStart, gen12)
+        XCTAssertEqual(reversedBookmark.kjvOrdinalEnd, gen13)
+        XCTAssertEqual(reversedPayloads.first?.ordinalRange, [gen12, gen13])
+        XCTAssertEqual(reversedPayloads.first?.originalOrdinalRange, [81, 83])
+    }
+
+    /**
      Verifies primary-label changes reject Android's reserved unlabelled system label.
 
      Android `BibleJavascriptInterface.setAsPrimaryLabel` returns before mutation when the selected
@@ -1242,7 +1773,11 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      */
     private func makeBookmarkActionCoordinator(
         bookmarkService: BookmarkService,
-        notesContentType: String = "HTML"
+        notesContentType: String = "HTML",
+        currentV11n: @escaping () -> String = { "KJVA" },
+        kjvaOrdinalRange: @escaping (Int, Int) -> (start: Int, end: Int)? = { start, end in
+            (start: min(start, end), end: max(start, end))
+        }
     ) -> BibleReaderBookmarkActionCoordinator {
         BibleReaderBookmarkActionCoordinator(
             bookmarkService: bookmarkService,
@@ -1254,6 +1789,8 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
                 unlabeledLabelID: Label.unlabeledId.uuidString
             ),
             currentBook: "Genesis",
+            currentV11n: currentV11n,
+            kjvaOrdinalRange: kjvaOrdinalRange,
             currentNotesContentType: { notesContentType }
         )
     }
@@ -1283,7 +1820,9 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         controller.navigateTo(book: "Psalms", chapter: 119, verse: 1)
 
         for verse in 1...60 {
-            let ordinal = (119 - 1) * 40 + verse
+            let ordinal = try XCTUnwrap(
+                JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 119, verse: verse)
+            )
             let bookmark = BibleBookmark(
                 kjvOrdinalStart: ordinal,
                 kjvOrdinalEnd: ordinal,
@@ -1326,7 +1865,12 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let modelContext = ModelContext(container)
         let bookmarkStore = BookmarkStore(modelContext: modelContext)
         let bookmarkService = BookmarkService(store: bookmarkStore)
-        let noteOrdinal = (119 - 1) * 40 + 3
+        let noteOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 119, verse: 3)
+        )
+        let noteChapterRange = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinalRange(osisId: "Ps", chapter: 119)
+        )
         let noteBookmark = BibleBookmark(
             kjvOrdinalStart: noteOrdinal,
             kjvOrdinalEnd: noteOrdinal,
@@ -1355,12 +1899,18 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
             activeStudyPadLabelId: label.id,
             activeStudyPadLabelName: label.name,
             rowLimit: 2,
-            chapterOrdinalRange: { (start: noteOrdinal - 2, end: noteOrdinal + 2, verseCount: 5) },
+            chapterOrdinalRange: {
+                (
+                    start: noteChapterRange.lowerBound,
+                    end: noteChapterRange.upperBound,
+                    verseCount: noteChapterRange.count
+                )
+            },
             verseReference: { _, ordinal in
                 VerseKeyReference(
                     osisBookId: "Ps",
                     chapter: 119,
-                    verse: ordinal - ((119 - 1) * 40),
+                    verse: ordinal - noteChapterRange.lowerBound + 1,
                     ordinal: ordinal
                 )
             }

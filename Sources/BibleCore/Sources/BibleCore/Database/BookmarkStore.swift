@@ -96,31 +96,23 @@ public final class BookmarkStore {
     }
 
     /**
-     * Fetches Bible bookmarks whose stored KJVA ordinal range overlaps the given range.
+     * Fetches Bible bookmarks whose stored KJVA ordinal range overlaps the given KJVA range.
      * - Parameters:
-     *   - startOrdinal: Inclusive start of the query range.
-     *   - endOrdinal: Inclusive end of the query range.
-     *   - book: Optional book name filter used to avoid cross-book collisions when the current
-     *     ordinal scheme is only unique within a book.
+     *   - startOrdinal: Inclusive KJVA start of the query range.
+     *   - endOrdinal: Inclusive KJVA end of the query range.
+     *   - book: Deprecated compatibility parameter. Android backups store module initials or NULL in
+     *     `BibleBookmark.book`, so callers must not use this value to decide verse membership.
      * - Returns: Overlapping bookmarks.
      * - Failure: Fetch errors are swallowed and reported as an empty array.
-     * - Note: This query matches on stored KJVA ordinals, not the currently selected versification.
+     * - Note: This query matches on stored KJVA ordinals only; those ordinals are globally unique
+     *   across books and are the Android-compatible key for restored and native bookmark highlights.
      */
     public func bibleBookmarks(overlapping startOrdinal: Int, endOrdinal: Int, book: String? = nil) -> [BibleBookmark] {
-        let descriptor: FetchDescriptor<BibleBookmark>
-        if let book {
-            descriptor = FetchDescriptor<BibleBookmark>(
-                predicate: #Predicate {
-                    $0.kjvOrdinalStart <= endOrdinal && $0.kjvOrdinalEnd >= startOrdinal && $0.book == book
-                }
-            )
-        } else {
-            descriptor = FetchDescriptor<BibleBookmark>(
-                predicate: #Predicate {
-                    $0.kjvOrdinalStart <= endOrdinal && $0.kjvOrdinalEnd >= startOrdinal
-                }
-            )
-        }
+        let descriptor = FetchDescriptor<BibleBookmark>(
+            predicate: #Predicate {
+                $0.kjvOrdinalStart <= endOrdinal && $0.kjvOrdinalEnd >= startOrdinal
+            }
+        )
         return (try? modelContext.fetch(descriptor)) ?? []
     }
 

@@ -31,12 +31,10 @@ final class BookmarkListProjectionTests: XCTestCase {
     func testBookmarkListProjectionSortsCreatedDateAndBibleOrderLikeAndroid() {
         let exodus = bibleItem(
             reference: "Exodus 2:1",
-            ordinal: 81,
             createdAt: Date(timeIntervalSince1970: 100)
         )
         let matthew = bibleItem(
             reference: "Matthew 3:1",
-            ordinal: 1_000,
             createdAt: Date(timeIntervalSince1970: 200)
         )
 
@@ -77,8 +75,8 @@ final class BookmarkListProjectionTests: XCTestCase {
        is cleared.
      */
     func testBookmarkListProjectionSearchNarrowsAndClearsRows() {
-        let exodus = bibleItem(reference: "Exodus 2:1", ordinal: 81)
-        let matthew = bibleItem(reference: "Matthew 3:1", ordinal: 1_000)
+        let exodus = bibleItem(reference: "Exodus 2:1")
+        let matthew = bibleItem(reference: "Matthew 3:1")
 
         let filtered = BookmarkListProjection.filteredItems(
             [exodus, matthew],
@@ -128,10 +126,9 @@ final class BookmarkListProjectionTests: XCTestCase {
         let seedLabel = Label(name: "UI Test Seed")
         let genesis = bibleItem(
             reference: "Genesis 1:1",
-            ordinal: 1,
             labels: [seedLabel]
         )
-        let exodus = bibleItem(reference: "Exodus 2:1", ordinal: 81)
+        let exodus = bibleItem(reference: "Exodus 2:1")
 
         let filtered = BookmarkListProjection.filteredItems(
             [genesis, exodus],
@@ -182,10 +179,9 @@ final class BookmarkListProjectionTests: XCTestCase {
         let seedLabel = Label(name: "UI Test Seed")
         let genesis = bibleItem(
             reference: "Genesis 1:1",
-            ordinal: 1,
             labels: [seedLabel]
         )
-        let exodus = bibleItem(reference: "Exodus 2:1", ordinal: 81)
+        let exodus = bibleItem(reference: "Exodus 2:1")
         let items = [genesis, exodus]
 
         let labelFiltered = BookmarkListProjection.filteredItems(
@@ -363,12 +359,29 @@ final class BookmarkListProjectionTests: XCTestCase {
         XCTAssertTrue(try modelContext.fetch(FetchDescriptor<GenericBookmark>()).isEmpty)
     }
 
+    /**
+     Builds a Bible bookmark projection row whose storage ordinals match its visible reference.
+
+     Bookmark list rows now render, search, navigate, and sort from Android-compatible KJVA ordinals
+     rather than the legacy display-name `book` field. Test fixtures therefore resolve the supplied
+     reference through `JSwordKJVAVersification` so assertions exercise the same persisted contract as
+     restored Android bookmarks.
+
+     - Parameters:
+       - reference: Human-readable `Book Chapter:Verse` reference covered by the KJVA table.
+       - createdAt: Creation timestamp used by sort-order assertions.
+       - labels: Labels that should appear assigned to the row.
+     - Returns: A normalized Bible bookmark list item.
+     - Side effects: assigns unsaved label relationship objects to the bookmark.
+     - Failure modes: Records an XCTest failure and falls back to Genesis 1:1 when the reference
+       cannot be parsed or resolved.
+     */
     private func bibleItem(
         reference: String,
-        ordinal: Int,
         createdAt: Date = Date(timeIntervalSince1970: 100),
         labels: [Label] = []
     ) -> BookmarkListItem {
+        let ordinal = kjvaOrdinal(for: reference)
         let bookmark = BibleBookmark(
             kjvOrdinalStart: ordinal,
             kjvOrdinalEnd: ordinal,
@@ -404,6 +417,43 @@ final class BookmarkListProjectionTests: XCTestCase {
             }
             return BookmarkListVerseReference(chapter: chapter, verse: verse)
         }
+    }
+
+    /**
+     Resolves a compact display reference into the JSword KJVA ordinal expected by bookmark storage.
+
+     - Parameter reference: Human-readable `Book Chapter:Verse` reference, using JSword long or short
+       book names from the KJVA table.
+     - Returns: The resolved KJVA verse ordinal, or Genesis 1:1 after recording a test failure.
+     - Side effects: May record an XCTest failure when fixture text drifts from the KJVA contract.
+     - Failure modes: Malformed references, unknown books, and out-of-range chapter/verse values fail
+       the current test and use Genesis 1:1 so the suite can report the original assertion context.
+     */
+    private func kjvaOrdinal(for reference: String) -> Int {
+        guard let separator = reference.lastIndex(of: " ") else {
+            XCTFail("Malformed Bible reference fixture: \(reference)")
+            return 4
+        }
+        let bookName = String(reference[..<separator])
+        let chapterVerse = reference[reference.index(after: separator)...].split(separator: ":")
+        guard chapterVerse.count == 2,
+              let chapter = Int(chapterVerse[0]),
+              let verse = Int(chapterVerse[1]) else {
+            XCTFail("Malformed Bible reference fixture: \(reference)")
+            return 4
+        }
+        guard let osisId = JSwordKJVAVersification.books.first(where: {
+            $0.longName == bookName || $0.shortName == bookName || $0.osisId == bookName
+        })?.osisId,
+              let ordinal = JSwordKJVAVersification.verseOrdinal(
+                osisId: osisId,
+                chapter: chapter,
+                verse: verse
+              ) else {
+            XCTFail("Unresolvable KJVA reference fixture: \(reference)")
+            return 4
+        }
+        return ordinal
     }
 
     /**

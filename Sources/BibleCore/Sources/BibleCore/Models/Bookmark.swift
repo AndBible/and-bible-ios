@@ -113,6 +113,9 @@ public final class BibleBookmark {
     /// Raw versification identifier for the originating module.
     public var v11n: String = "KJVA"
 
+    /// Module initials for the originating Bible document.
+    public var bookInitials: String = ""
+
     /// Optional book name captured at creation time for display and legacy lookup paths.
     public var book: String?
 
@@ -164,6 +167,7 @@ public final class BibleBookmark {
        - ordinalStart: Source-versification start ordinal.
        - ordinalEnd: Source-versification end ordinal.
        - v11n: Raw source versification identifier.
+       - bookInitials: Source Bible module initials.
        - createdAt: Bookmark creation timestamp.
        - lastUpdatedOn: Timestamp of the latest mutation.
        - wholeVerse: Whether the bookmark covers an entire verse.
@@ -177,6 +181,7 @@ public final class BibleBookmark {
         ordinalStart: Int = 0,
         ordinalEnd: Int = 0,
         v11n: String = "KJVA",
+        bookInitials: String = "",
         createdAt: Date = Date(),
         lastUpdatedOn: Date = Date(),
         wholeVerse: Bool = true
@@ -187,6 +192,7 @@ public final class BibleBookmark {
         self.ordinalStart = ordinalStart
         self.ordinalEnd = ordinalEnd
         self.v11n = v11n
+        self.bookInitials = bookInitials
         self.createdAt = createdAt
         self.lastUpdatedOn = lastUpdatedOn
         self.wholeVerse = wholeVerse

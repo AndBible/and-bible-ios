@@ -43,6 +43,10 @@ struct BibleReaderAnnotationBridgeCoordinator {
     private let payloadFactory: BibleReaderAnnotationPayloadFactory
     /// Current reader book name used by bookmark creation.
     private let currentBook: String
+    /// Supplies the current module versification for source ordinal fidelity.
+    private let currentV11n: () -> String
+    /// Projects rendered reader ordinals into Android's KJVA bookmark storage domain.
+    private let kjvaOrdinalRange: (Int, Int) -> (start: Int, end: Int)?
     /// Active notes content type supplier for note and StudyPad journal creation.
     private let currentNotesContentType: () -> String
     /// Current workspace settings supplier for auto-label and cursor mutations.
@@ -70,6 +74,8 @@ struct BibleReaderAnnotationBridgeCoordinator {
        - bookmarkService: Bookmark persistence facade.
        - payloadFactory: Projection factory for typed bridge DTOs.
        - currentBook: Current book name for new Bible bookmark rows.
+       - currentV11n: Closure returning the active module versification.
+       - kjvaOrdinalRange: Closure converting rendered reader ordinals to KJVA storage ordinals.
        - currentNotesContentType: Closure returning the active notes content type.
        - workspaceSettings: Closure returning the active workspace settings.
        - setWorkspaceSettings: Closure applying updated workspace settings.
@@ -87,6 +93,8 @@ struct BibleReaderAnnotationBridgeCoordinator {
         bookmarkService: BookmarkService,
         payloadFactory: BibleReaderAnnotationPayloadFactory,
         currentBook: String,
+        currentV11n: @escaping () -> String,
+        kjvaOrdinalRange: @escaping (Int, Int) -> (start: Int, end: Int)?,
         currentNotesContentType: @escaping () -> String,
         workspaceSettings: @escaping () -> WorkspaceSettings?,
         setWorkspaceSettings: @escaping (WorkspaceSettings) -> Void,
@@ -101,6 +109,8 @@ struct BibleReaderAnnotationBridgeCoordinator {
         self.bookmarkService = bookmarkService
         self.payloadFactory = payloadFactory
         self.currentBook = currentBook
+        self.currentV11n = currentV11n
+        self.kjvaOrdinalRange = kjvaOrdinalRange
         self.currentNotesContentType = currentNotesContentType
         self.workspaceSettings = workspaceSettings
         self.setWorkspaceSettings = setWorkspaceSettings
@@ -319,6 +329,8 @@ struct BibleReaderAnnotationBridgeCoordinator {
             bookmarkService: bookmarkService,
             payloadFactory: payloadFactory,
             currentBook: currentBook,
+            currentV11n: currentV11n,
+            kjvaOrdinalRange: kjvaOrdinalRange,
             currentNotesContentType: currentNotesContentType
         )
     }

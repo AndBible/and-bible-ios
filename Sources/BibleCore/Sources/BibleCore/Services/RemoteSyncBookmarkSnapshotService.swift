@@ -248,6 +248,7 @@ public final class RemoteSyncBookmarkSnapshotService {
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         let labelAliasStore = RemoteSyncBookmarkLabelAliasStore(settingsStore: settingsStore)
         let playbackSettingsStore = RemoteSyncBookmarkPlaybackSettingsStore(settingsStore: settingsStore)
+        let androidBookStore = RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore)
         let reverseAliases = Dictionary(
             uniqueKeysWithValues: labelAliasStore.allAliases().map { ($0.localLabelID, $0.remoteLabelID) }
         )
@@ -334,7 +335,10 @@ public final class RemoteSyncBookmarkSnapshotService {
                 v11n: bookmark.v11n,
                 playbackSettingsJSON: playbackJSON,
                 createdAt: bookmark.createdAt,
-                book: bookmark.book,
+                book: androidBookStore.androidBookValue(
+                    for: bookmark.id,
+                    localBook: Self.androidBookColumnValue(for: bookmark)
+                ),
                 startOffset: bookmark.startOffset,
                 endOffset: bookmark.endOffset,
                 primaryLabelID: primaryLabelID,
@@ -894,6 +898,23 @@ public final class RemoteSyncBookmarkSnapshotService {
             return nil
         }
         return json
+    }
+
+    /**
+     Projects the local Bible bookmark source module into Android's `BibleBookmark.book` value.
+
+     The SwiftData `book` field is display-facing on iOS. Android's column stores source module
+     initials or NULL, so outbound snapshots must use the durable source-module field added for
+     #356 instead of leaking display names such as `Genesis`.
+
+     - Parameter bookmark: Local Bible bookmark being exported.
+     - Returns: Module initials for Android, or `nil` when no source module is known.
+     - Side effects: none.
+     - Failure modes: Empty or whitespace-only initials export as NULL.
+     */
+    private static func androidBookColumnValue(for bookmark: BibleBookmark) -> String? {
+        let initials = bookmark.bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+        return initials.isEmpty ? nil : initials
     }
 
     /**

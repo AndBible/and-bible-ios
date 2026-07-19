@@ -5,12 +5,11 @@ import SwiftData
 import BibleCore
 
 /**
- Verse reference resolved from an Android/JSword-style bookmark ordinal.
+ Verse reference resolved from a bookmark ordinal.
 
  Bookmark rows are built from persisted SwiftData records, but those records store ordinals in the
- source versification rather than chapter/verse text. The reader injects a resolver backed by
- SWORD's `VerseKey` so the list can display and navigate bookmarks without reintroducing local
- ordinal arithmetic.
+ Android-compatible KJVA columns used by backup/restore. The reader can still inject a resolver
+ backed by SWORD's `VerseKey` for legacy rows whose KJVA columns only mirror source ordinals.
  */
 public struct BookmarkListVerseReference: Sendable, Equatable {
     /// One-based chapter number.
@@ -451,6 +450,19 @@ public struct BookmarkListView: View {
         for bookmark: BibleBookmark,
         ordinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil
     ) -> String {
+        if let start = kjvaVerseReference(ordinal: bookmark.kjvOrdinalStart) {
+            let effectiveKJVEnd = bookmark.kjvOrdinalEnd > bookmark.kjvOrdinalStart
+                ? bookmark.kjvOrdinalEnd
+                : bookmark.kjvOrdinalStart
+            let end = kjvaVerseReference(ordinal: effectiveKJVEnd) ?? start
+            return formattedBibleReference(
+                startBookName: start.bookName,
+                startReference: start.reference,
+                endBookName: end.bookName,
+                endReference: end.reference
+            )
+        }
+
         let bookName = bookmark.book ?? "Unknown"
         let startReference = ordinalResolver?(bookName, bookmark.ordinalStart)
             ?? compatibilityVerseReference(ordinal: bookmark.ordinalStart)
@@ -459,21 +471,68 @@ public struct BookmarkListView: View {
         let endReference = ordinalResolver?(bookName, effectiveEnd)
             ?? compatibilityVerseReference(ordinal: effectiveEnd)
 
-        if effectiveEnd == bookmark.ordinalStart || endReference == startReference {
-            return "\(bookName) \(startReference.chapter):\(startReference.verse)"
-        } else if endReference.chapter == startReference.chapter {
-            return "\(bookName) \(startReference.chapter):\(startReference.verse)-\(endReference.verse)"
+        return formattedBibleReference(
+            startBookName: bookName,
+            startReference: startReference,
+            endBookName: bookName,
+            endReference: endReference
+        )
+    }
+
+    /**
+     Resolves a stored Android-compatible KJVA ordinal for bookmark-list display and navigation.
+
+     - Parameter ordinal: Persisted KJVA verse ordinal.
+     - Returns: Display book name and chapter/verse reference, or `nil` for invalid ordinals.
+     - Side effects: None.
+     - Failure modes: Unknown ordinals return `nil` so legacy fallback paths can handle older rows.
+     */
+    fileprivate static func kjvaVerseReference(
+        ordinal: Int
+    ) -> (bookName: String, reference: BookmarkListVerseReference)? {
+        guard let reference = JSwordKJVAVersification.verseReference(ordinal: ordinal) else {
+            return nil
+        }
+        return (
+            bookName: JSwordKJVAVersification.longBookName(osisId: reference.osisId) ?? reference.osisId,
+            reference: BookmarkListVerseReference(chapter: reference.chapter, verse: reference.verse)
+        )
+    }
+
+    /**
+     Formats a Bible bookmark range using JSword-style same-chapter and cross-chapter shorthand.
+
+     - Parameters:
+       - startBookName: Display name for the start book.
+       - startReference: Start chapter/verse reference.
+       - endBookName: Display name for the end book.
+       - endReference: End chapter/verse reference.
+     - Returns: User-visible bookmark reference text.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    fileprivate static func formattedBibleReference(
+        startBookName: String,
+        startReference: BookmarkListVerseReference,
+        endBookName: String,
+        endReference: BookmarkListVerseReference
+    ) -> String {
+        if startBookName == endBookName, endReference == startReference {
+            return "\(startBookName) \(startReference.chapter):\(startReference.verse)"
+        } else if startBookName == endBookName, endReference.chapter == startReference.chapter {
+            return "\(startBookName) \(startReference.chapter):\(startReference.verse)-\(endReference.verse)"
+        } else if startBookName == endBookName {
+            return "\(startBookName) \(startReference.chapter):\(startReference.verse)-\(endReference.chapter):\(endReference.verse)"
         } else {
-            return "\(bookName) \(startReference.chapter):\(startReference.verse)-\(endReference.chapter):\(endReference.verse)"
+            return "\(startBookName) \(startReference.chapter):\(startReference.verse)-\(endBookName) \(endReference.chapter):\(endReference.verse)"
         }
     }
 
     /**
      Compatibility fallback for no-module bookmark list previews.
 
-     Real reader-owned bookmark lists should inject `bibleOrdinalResolver` so ordinals are decoded
-     through SWORD's versification. The fallback keeps design previews and isolated unit tests
-     functional when no reader/controller exists.
+     Real rows should resolve through the KJVA columns first. The injected resolver and this
+     fallback remain for malformed legacy rows that predate Android-compatible bookmark storage.
      */
     fileprivate static func compatibilityVerseReference(ordinal: Int) -> BookmarkListVerseReference {
         let chapter = max(1, ((ordinal - 1) / 40) + 1)
@@ -769,13 +828,20 @@ struct BookmarkListItem: Identifiable {
         self.customIcon = bookmark.customIcon
         self.noteText = noteText
         self.labels = bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
-        let bookName = bookmark.book ?? "Genesis"
-        let resolvedStart = ordinalResolver?(bookName, bookmark.ordinalStart)
-            ?? BookmarkListView.compatibilityVerseReference(ordinal: bookmark.ordinalStart)
-        self.navigationTarget = (
-            bookName: bookName,
-            chapter: resolvedStart.chapter
-        )
+        if let target = BookmarkListView.kjvaVerseReference(ordinal: bookmark.kjvOrdinalStart) {
+            self.navigationTarget = (
+                bookName: target.bookName,
+                chapter: target.reference.chapter
+            )
+        } else {
+            let bookName = bookmark.book ?? "Genesis"
+            let resolvedStart = ordinalResolver?(bookName, bookmark.ordinalStart)
+                ?? BookmarkListView.compatibilityVerseReference(ordinal: bookmark.ordinalStart)
+            self.navigationTarget = (
+                bookName: bookName,
+                chapter: resolvedStart.chapter
+            )
+        }
     }
 
     /// Creates a normalized row for one generic bookmark.
