@@ -5,7 +5,7 @@ description: >-
   Decide how iOS treats a Bible module whose declared versification is not
   registered in the pinned libsword, versus Android/JSword rejecting it at load.
 date: 2026-07-19
-status: proposed
+status: accepted
 supersedes: []
 superseded-by: null
 decision-owner: "iOS parity maintainers + product"
@@ -22,7 +22,7 @@ related-work-items: ["PR #359", "PR #360"]
 
 # 0010: Unrecognized Module Versification Handling
 
-Status: Proposed (pending product sign-off)
+Status: Accepted
 
 Date: 2026-07-19
 
@@ -87,14 +87,23 @@ or a v11n newer than the pinned libsword.
 
 ## Decision
 
-Proposed (recommended), pending sign-off:
+Accepted and implemented:
 
 1. **Match Android for truly-unrecognized versifications.** A Bible module whose
-   declared `Versification` is not registered in libsword should be treated as
+   declared `Versification` is not registered in libsword is treated as
    **unsupported** — not offered for reading or bookmarking — mirroring JSword's
    `isSupported() == false`. Rationale: iOS should not render, and let users
    annotate, content it cannot correctly interpret; doing so risks mis-numbered
    verses, offset notes, and modules that exist on iOS but not Android.
+
+   Implemented via `SwordVersification.isVersificationDefined(_:)` (backed by
+   `SWVersification_isSystemDefined`, mirroring JSword `Versifications.isDefined`),
+   applied where the reader partitions installed modules
+   (`BibleReaderSwordCoordinator.configure` and the Compare builder's fallback):
+   a Bible module is included in the readable set only when its versification is
+   defined. The unsupported module stays in the raw `installedModules` inventory,
+   so it remains manageable/uninstallable — iOS is intentionally more forgiving
+   than Android on management while matching it on reading.
 
 2. **Keep libsword's av11n tables reasonably current** with the JSword version
    AndBible ships, so a *legitimate* versification is recognized on both
@@ -123,16 +132,20 @@ Android-aligned, cross-platform-consistent choice.
 
 ## Consequences
 
-- Enables true parity: the same modules are usable (or not) on iOS and Android.
-- Requires a load-time filter in the module-loading layer (a follow-up to
-  PR #360; not implemented by this ADR): skip/flag modules whose v11n is not in
-  libsword's registered set, mirroring JSword's check.
+- Enables true parity: the same modules are usable (or not) for reading on iOS
+  and Android.
+- The readable-Bible gate lives at the reader boundary
+  (`BibleReaderSwordCoordinator`), not in `SwordManager.installedModules`, so
+  management/uninstall of an unsupported module is preserved (more forgiving than
+  Android, low risk).
 - Requires a maintenance commitment to keep libsword current, or legitimately-new
-  versifications would be rejected on iOS until libsword is updated.
-- If Alternative C is chosen instead, add the warning affordance and keep the
-  mapping fallback; do not silently render without signalling the limitation.
-- No change is forced on PR #360; its `unknown → KJV` mapping fallback is
-  compatible with whichever option is accepted.
+  versifications would be treated as unsupported on iOS until libsword is updated.
+- The `unknown → KJV` mapping fallback (PR #360) is retained as defense-in-depth:
+  it keeps any residual/legacy bookmark's stored value a valid KJVA ordinal even
+  though such modules are no longer offered for new reading/bookmarking.
+- Not chosen: Alternative C (render with a warning). If product later prefers
+  keeping unrecognized modules readable, revisit this ADR and add the warning
+  affordance instead of the read-time exclusion.
 
 ## Related
 

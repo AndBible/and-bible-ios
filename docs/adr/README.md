@@ -65,4 +65,4 @@ sections or their front-matter equivalents:
 - [0007: iOS Discrete Mode App Name Boundary](0007-ios-discrete-mode-app-name-boundary.md)
 - [0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)
 - [0009: Android Localization Source Of Truth](0009-android-localization-source-of-truth.md)
-- [0010: Unrecognized Module Versification Handling](0010-unrecognized-module-versification-handling.md) (Proposed)
+- [0010: Unrecognized Module Versification Handling](0010-unrecognized-module-versification-handling.md)

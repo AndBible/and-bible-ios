@@ -78,6 +78,23 @@ final class SwordVersificationTests: XCTestCase {
     }
 
     /**
+     Verifies versification recognition mirrors JSword's `Versifications.isDefined`.
+
+     A module whose declared versification SWORD recognizes (KJV, KJVA, Vulg, Synodal) is defined; a
+     present-but-unrecognized name is not (so the reader can mark it unsupported, matching Android);
+     an empty name is the KJV default and is always defined. See ADR-0010.
+     */
+    func testReportsWhetherAVersificationIsSystemDefined() {
+        XCTAssertTrue(SwordVersification.isVersificationDefined("KJV"))
+        XCTAssertTrue(SwordVersification.isVersificationDefined("KJVA"))
+        XCTAssertTrue(SwordVersification.isVersificationDefined("Vulg"))
+        XCTAssertTrue(SwordVersification.isVersificationDefined("Synodal"))
+        XCTAssertTrue(SwordVersification.isVersificationDefined(""), "An empty name is the KJV default.")
+        XCTAssertFalse(SwordVersification.isVersificationDefined("BogusV11n"))
+        XCTAssertFalse(SwordVersification.isVersificationDefined("NotAVersification"))
+    }
+
+    /**
      Verifies shared canonical references map to KJVA unchanged and defaults/invalid inputs behave.
 
      KJV and KJVA share Genesis..Malachi and the New Testament numbering, so a KJV reference maps to

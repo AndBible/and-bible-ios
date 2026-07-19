@@ -165,8 +165,12 @@ struct BibleReaderCompareDocumentBuilder {
      - Failure modes: Returns an empty array when no installed module is categorized as a Bible.
      */
     private func installedCompareBibleModules(using manager: SwordManager) -> [ModuleInfo] {
+        // Mirror the reader's readable-Bible gate: exclude modules whose versification SWORD cannot
+        // map, matching the cached `installedBibleModules` the coordinator already filtered. ADR-0010.
         let modules = installedBibleModules.isEmpty
-            ? manager.installedModules().filter { $0.category == .bible }
+            ? manager.installedModules().filter {
+                $0.category == .bible && SwordVersification.isVersificationDefined($0.aboutMetadata.versification)
+            }
             : installedBibleModules
 
         guard let activeIndex = modules.firstIndex(where: { $0.name == activeModuleName }) else {

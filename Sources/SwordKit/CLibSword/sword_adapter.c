@@ -532,6 +532,7 @@ int SWVersification_mapVerseFromKJVA(const char *targetVersification, const char
                                      int *targetChapterOut, int *targetVerseOut) { return 1; }
 int SWVersification_decodeOrdinal(const char *versification, long ordinal,
                                   const char **osisBookOut, int *chapterOut, int *verseOut) { return 1; }
+int SWVersification_isSystemDefined(const char *versification) { return 1; }
 
 void *InstallMgr_new(const char *basePath) {
     static int sentinel = 2;

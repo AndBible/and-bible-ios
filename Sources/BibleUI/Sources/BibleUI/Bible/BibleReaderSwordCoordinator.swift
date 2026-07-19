@@ -122,7 +122,13 @@ struct BibleReaderSwordCoordinator {
         applyDisplayOptions(to: manager, settings: displaySettings, defaults: defaults)
 
         let modules = manager.installedModules()
-        let bibleModules = modules.filter { $0.category == .bible }
+        // A Bible module is readable only when SWORD recognizes its versification. Android marks a
+        // module with an unknown versification unsupported and never loads it; iOS mirrors that for
+        // reading/bookmarking (rendering an unmapped canon under KJV would mis-number verses and
+        // create offset notes). Such modules remain in `modules` for management/uninstall. ADR-0010.
+        let bibleModules = modules.filter {
+            $0.category == .bible && SwordVersification.isVersificationDefined($0.aboutMetadata.versification)
+        }
         let commentaryModules = modules.filter { $0.category == .commentary }
         let dictionaryModules = modules.filter { $0.category == .dictionary }
         let generalBookModules = modules.filter { $0.category == .generalBook }

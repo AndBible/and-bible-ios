@@ -176,6 +176,11 @@ int SWVersification_decodeOrdinal(const char *versification,
                                   int *chapterOut,
                                   int *verseOut);
 
+/// Reports whether SWORD's VersificationMgr recognizes the given versification name (mirrors
+/// JSword `Versifications.isDefined`). An empty name is the KJV default and is always defined.
+/// Returns 1 when defined, 0 when not.
+int SWVersification_isSystemDefined(const char *versification);
+
 /// Pop the last error code. Returns 0 if no error.
 char SWModule_popError(void *module);
 

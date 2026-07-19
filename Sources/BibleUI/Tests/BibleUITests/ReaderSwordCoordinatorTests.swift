@@ -63,6 +63,51 @@ final class ReaderSwordCoordinatorTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies a Bible module with an unrecognized versification is excluded from the readable set.
+
+     Android marks a module whose versification JSword does not recognize unsupported and never loads
+     it. iOS mirrors that for reading/bookmarking: the coordinator drops such a module from
+     `installedBibleModules` (so it is not selectable or annotatable), while it remains in the raw
+     `installedModules` inventory so it can still be managed/uninstalled. See ADR-0010.
+     */
+    func testExcludesBibleModuleWithUnrecognizedVersificationFromReadableSet() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(named: "BOGUS", description: "Bogus Versification Bible", in: modulePath)
+        // Point BOGUS at a versification SWORD does not recognize.
+        let bogusConf = URL(fileURLWithPath: modulePath)
+            .appendingPathComponent("mods.d/bogus.conf")
+        var conf = try String(contentsOf: bogusConf, encoding: .utf8)
+        conf = conf.replacingOccurrences(of: "Versification=KJV", with: "Versification=BogusV11n")
+        try conf.write(to: bogusConf, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let state = BibleReaderSwordCoordinator().configure(
+            manager: manager,
+            selection: BibleReaderSwordSelection(
+                activeModuleName: "KJV",
+                activeCommentaryModuleName: nil,
+                activeDictionaryModuleName: nil,
+                activeGeneralBookModuleName: nil,
+                activeMapModuleName: nil
+            ),
+            displaySettings: .appDefaults
+        )
+
+        XCTAssertFalse(
+            state.installedBibleModules.contains { $0.name == "BOGUS" },
+            "A module with an unrecognized versification must not be readable/bookmarkable."
+        )
+        XCTAssertTrue(
+            state.installedBibleModules.contains { $0.name == "KJV" },
+            "A module with a recognized versification stays readable."
+        )
+        XCTAssertTrue(
+            state.installedModules.contains { $0.name == "BOGUS" },
+            "The unsupported module remains in the raw inventory for management/uninstall."
+        )
+    }
+
+    /**
      Protects the SWORD global option mapping used by reader rendering.
 
      Android applies reader display settings through JSword filters; iOS mirrors those options with

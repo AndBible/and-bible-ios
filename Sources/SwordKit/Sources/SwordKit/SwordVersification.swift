@@ -246,4 +246,26 @@ public enum SwordVersification {
             )
         }
     }
+
+    /**
+     Reports whether SWORD recognizes a module's declared versification.
+
+     Mirrors Android's JSword `Versifications.isDefined` check in `SwordBookMetaData`: a module whose
+     versification SWORD cannot map is unsupported for reading (Android marks it `supported = false`
+     and never loads it). iOS libsword would otherwise render such a module under KJV, mis-numbering a
+     divergent canon; callers use this to gate those modules out of the readable Bible set while
+     leaving them in the raw installed inventory for management/uninstall. See ADR-0010.
+
+     - Parameter versification: SWORD versification name from a module's `Versification` conf value;
+       an empty string is the KJV default and is always defined.
+     - Returns: `true` when SWORD's `VersificationMgr` recognizes the name, `false` otherwise.
+     - Side effects: Runs inside the SWORD serialization queue and reads SWORD's system
+       versification manager.
+     - Failure modes: none; an unrecognized or unavailable versification manager yields `false`.
+     */
+    public static func isVersificationDefined(_ versification: String) -> Bool {
+        SwordRuntime.sync {
+            versification.withCString { SWVersification_isSystemDefined($0) == 1 }
+        }
+    }
 }

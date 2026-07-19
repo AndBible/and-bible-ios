@@ -251,4 +251,17 @@ extern "C" int SWVersification_decodeOrdinal(
     return 0;
 }
 
+extern "C" int SWVersification_isSystemDefined(const char *versification) {
+    // Mirrors JSword Versifications.isDefined: an empty name is the KJV default (always defined);
+    // a present name is defined only when SWORD's VersificationMgr knows it. Used to mark a module
+    // whose declared versification SWORD cannot map as unsupported for reading, matching Android's
+    // SwordBookMetaData rejection instead of silently rendering it under KJV.
+    const char *name = (versification && *versification) ? versification : "KJV";
+    sword::VersificationMgr *versificationMgr = sword::VersificationMgr::getSystemVersificationMgr();
+    if (!versificationMgr) {
+        return 0;
+    }
+    return versificationMgr->getVersificationSystem(name) ? 1 : 0;
+}
+
 #endif
