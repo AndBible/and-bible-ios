@@ -137,6 +137,20 @@ long SWModule_getVerseKeyIndex(void *module);
 /// Set the current VerseKey intro-inclusive index. Returns 0 on success and nonzero on failure.
 int SWModule_setVerseKeyIndex(void *module, long index);
 
+/// Map an OSIS book/chapter/verse from a source versification into KJVA using SWORD's
+/// VersificationMgr (the same av11n mapping data JSword uses on Android). Writes the KJVA OSIS
+/// book id, chapter, and verse to the out parameters. The returned book string is owned by the
+/// callee and remains valid until the next call on the same thread. An empty source versification
+/// name is treated as KJV. Returns 0 on success and nonzero when a versification is unknown or
+/// the inputs are invalid.
+int SWVersification_mapVerseToKJVA(const char *sourceVersification,
+                                   const char *osisBookName,
+                                   int chapter,
+                                   int verse,
+                                   const char **kjvaOsisBookOut,
+                                   int *kjvaChapterOut,
+                                   int *kjvaVerseOut);
+
 /// Pop the last error code. Returns 0 if no error.
 char SWModule_popError(void *module);
 

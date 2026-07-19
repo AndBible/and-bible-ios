@@ -524,6 +524,9 @@ void SWModule_setCipherKey(void *module, const char *key) { }
 const char **SWModule_getKeyChildren(void *module) { return NULL; }
 long SWModule_getVerseKeyIndex(void *module) { return -1; }
 int SWModule_setVerseKeyIndex(void *module, long index) { return 1; }
+int SWVersification_mapVerseToKJVA(const char *sourceVersification, const char *osisBookName,
+                                   int chapter, int verse, const char **kjvaOsisBookOut,
+                                   int *kjvaChapterOut, int *kjvaVerseOut) { return 1; }
 
 void *InstallMgr_new(const char *basePath) {
     static int sentinel = 2;
