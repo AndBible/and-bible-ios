@@ -219,7 +219,7 @@ struct StudyPadAccessibilitySnapshot: Equatable {
  the controller's bridge/navigation responsibilities.
  */
 struct BibleReaderAccessibilitySnapshotFactory {
-    /// Resolves the current chapter's ordinal range using the reader's active versification.
+    /// Resolves the current chapter's bookmark storage range, preferably in Android KJVA ordinals.
     typealias ChapterOrdinalRangeResolver = () -> (start: Int, end: Int, verseCount: Int)?
 
     /// Resolves a persisted bookmark ordinal into a chapter/verse reference.
@@ -254,7 +254,7 @@ struct BibleReaderAccessibilitySnapshotFactory {
        - activeStudyPadLabelId: Active StudyPad label id, if any.
        - activeStudyPadLabelName: Active StudyPad label name, if any.
        - rowLimit: Maximum detailed rows exported for UI tests.
-       - chapterOrdinalRange: Closure that resolves the visible chapter ordinal range.
+       - chapterOrdinalRange: Closure that resolves the visible chapter's bookmark storage range.
        - verseReference: Closure that resolves ordinals using the active reader versification.
      - Side effects: None during initialization.
      - Failure modes: Missing services or failed ordinal resolution produce empty snapshots rather
@@ -364,7 +364,8 @@ struct BibleReaderAccessibilitySnapshotFactory {
     
      - Returns: Sorted Bible bookmarks with non-empty note content for the current chapter.
      - Side effects: Reads bookmarks from `BookmarkService`.
-     - Failure modes: Missing service or unresolved chapter range returns an empty list.
+     - Failure modes: Missing service or unresolved KJVA/storage chapter range returns an empty
+       list.
      */
     func currentChapterMyNotesBookmarks() -> [BibleBookmark] {
         guard let service = bookmarkService,
@@ -375,8 +376,8 @@ struct BibleReaderAccessibilitySnapshotFactory {
                 return !note.isEmpty
             }
             .sorted {
-                if $0.ordinalStart != $1.ordinalStart {
-                    return $0.ordinalStart < $1.ordinalStart
+                if $0.kjvOrdinalStart != $1.kjvOrdinalStart {
+                    return $0.kjvOrdinalStart < $1.kjvOrdinalStart
                 }
                 return $0.createdAt < $1.createdAt
             }
@@ -384,12 +385,20 @@ struct BibleReaderAccessibilitySnapshotFactory {
 
     /// Stable row token for the My Notes accessibility export.
     private func myNotesReferenceToken(for bookmark: BibleBookmark) -> String {
-        let startReference = verseReference(currentBook, bookmark.ordinalStart)
-        let endReference = verseReference(currentBook, bookmark.ordinalEnd)
-        let startVerse = startReference?.verse ?? 1
-        let endVerse = max(startVerse, endReference?.verse ?? startVerse)
+        let startReference = JSwordKJVAVersification.verseReference(ordinal: bookmark.kjvOrdinalStart)
+        let effectiveKJVEndOrdinal = bookmark.kjvOrdinalEnd > bookmark.kjvOrdinalStart
+            ? bookmark.kjvOrdinalEnd
+            : bookmark.kjvOrdinalStart
+        let endReference = JSwordKJVAVersification.verseReference(ordinal: effectiveKJVEndOrdinal)
+        let legacyStartReference = verseReference(currentBook, bookmark.ordinalStart)
+        let legacyEndReference = verseReference(currentBook, bookmark.ordinalEnd)
+        let startVerse = startReference?.verse ?? legacyStartReference?.verse ?? 1
+        let endVerse = max(startVerse, endReference?.verse ?? legacyEndReference?.verse ?? startVerse)
         let verseToken = startVerse == endVerse ? "\(startVerse)" : "\(startVerse)_\(endVerse)"
-        let chapter = startReference?.chapter ?? currentChapter
-        return "\(BibleReaderRenderedContentState.token(currentBook))_\(chapter)_\(verseToken)"
+        let chapter = startReference?.chapter ?? legacyStartReference?.chapter ?? currentChapter
+        let bookName = startReference
+            .flatMap { JSwordKJVAVersification.longBookName(osisId: $0.osisId) }
+            ?? currentBook
+        return "\(BibleReaderRenderedContentState.token(bookName))_\(chapter)_\(verseToken)"
     }
 }

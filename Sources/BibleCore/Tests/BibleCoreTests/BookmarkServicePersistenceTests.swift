@@ -53,6 +53,99 @@ final class BookmarkServicePersistenceTests: XCTestCase {
     }
 
     /**
+     Verifies bookmark creation can persist Android-compatible KJVA ordinals separately from source
+     module ordinals.
+     *
+     * Data dependencies:
+     * - creates one in-memory Bible bookmark through `BookmarkService`
+     *
+     * Side effects:
+     * - inserts and saves a `BibleBookmark`
+     *
+     * Failure modes:
+     * - fails if the service collapses KJVA storage back to source ordinals, which would make
+     *   restored and newly-created non-KJVA bookmarks drift from Android backup semantics.
+     * - fails if source module initials are dropped into display-only fields.
+     */
+    func testBookmarkServicePersistsKJVAOrdinalsSeparatelyFromSourceOrdinals() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 10,
+            endOrdinal: 12,
+            kjvOrdinalStart: 20,
+            kjvOrdinalEnd: 22,
+            v11n: "KJV",
+            wholeVerse: true
+        )
+
+        XCTAssertEqual(bookmark.ordinalStart, 10)
+        XCTAssertEqual(bookmark.ordinalEnd, 12)
+        XCTAssertEqual(bookmark.kjvOrdinalStart, 20)
+        XCTAssertEqual(bookmark.kjvOrdinalEnd, 22)
+        XCTAssertEqual(bookmark.v11n, "KJV")
+        XCTAssertEqual(bookmark.bookInitials, "KJV")
+    }
+
+    /**
+     Verifies restored Android bookmarks are found by KJVA overlap even when their `book` column is
+     NULL or module initials.
+     *
+     * Data dependencies:
+     * - inserts one restored-style bookmark with `book == nil`
+     * - inserts one restored-style bookmark whose `book` value is Android module initials
+     * - inserts one outside the queried KJVA chapter range
+     *
+     * Side effects:
+     * - writes test bookmarks into an in-memory SwiftData context
+     *
+     * Failure modes:
+     * - fails if the persistence query uses `BibleBookmark.book` for membership, reproducing issue
+     *   #356 by hiding restored bookmarks from reader highlights and My Notes.
+     */
+    func testBookmarkServiceKJVAPassageQueryIgnoresRestoredAndroidBookColumn() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+
+        let nilBookBookmark = BibleBookmark(
+            kjvOrdinalStart: 100,
+            kjvOrdinalEnd: 100,
+            ordinalStart: 1_000,
+            ordinalEnd: 1_000,
+            v11n: "KJVA"
+        )
+        nilBookBookmark.book = nil
+        let initialsBookmark = BibleBookmark(
+            kjvOrdinalStart: 110,
+            kjvOrdinalEnd: 110,
+            ordinalStart: 1_010,
+            ordinalEnd: 1_010,
+            v11n: "KJVA"
+        )
+        initialsBookmark.book = "KJV"
+        let outsideBookmark = BibleBookmark(
+            kjvOrdinalStart: 200,
+            kjvOrdinalEnd: 200,
+            ordinalStart: 2_000,
+            ordinalEnd: 2_000,
+            v11n: "KJVA"
+        )
+        outsideBookmark.book = "Genesis"
+        modelContext.insert(nilBookBookmark)
+        modelContext.insert(initialsBookmark)
+        modelContext.insert(outsideBookmark)
+        try modelContext.save()
+
+        let bookmarks = bookmarkService.bookmarks(for: 95, endOrdinal: 115, book: "Genesis")
+
+        XCTAssertEqual(Set(bookmarks.map(\.id)), Set([nilBookBookmark.id, initialsBookmark.id]))
+    }
+
+    /**
      Verifies that deleting a label clears bookmark junction rows and primary-label references
      before the label itself is removed.
      *
@@ -135,6 +228,7 @@ final class BookmarkServicePersistenceTests: XCTestCase {
      * Failure modes:
      * - throws if the in-memory SwiftData container cannot be created or queried
      * - fails if the bookmark is not linked to the paragraph-break label as its primary style label
+     * - fails if the source module initials are not stored with the Bible bookmark.
      */
     func testBookmarkServiceCreatesParagraphBreakBibleBookmark() throws {
         let container = try makeBookmarkRestoreModelContainer()
@@ -160,6 +254,7 @@ final class BookmarkServicePersistenceTests: XCTestCase {
 
         XCTAssertEqual(paragraphLabel.name, Label.paragraphBreakLabelName)
         XCTAssertEqual(reloadedBookmark.book, "Genesis")
+        XCTAssertEqual(reloadedBookmark.bookInitials, "KJV")
         XCTAssertFalse(reloadedBookmark.wholeVerse)
         XCTAssertEqual(reloadedBookmark.primaryLabelId, Label.paragraphBreakLabelId)
         XCTAssertEqual(link.bookmark?.id, bookmark.id)

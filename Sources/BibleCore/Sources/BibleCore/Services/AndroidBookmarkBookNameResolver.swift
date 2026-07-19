@@ -134,7 +134,7 @@ public protocol AndroidBookmarkResolverGateway {
 
  The stage-3 constants are computed from SWORD's canonical `canon.h`/`canon_kjva.h` tables:
  both canons share Genesis..Malachi exactly; KJVA then inserts 14 apocrypha books (182 chapters,
- 5,731 verses → 5,913 intro-inclusive ordinals), so the KJVA New Testament section starts at
+ 5,717 verses → 5,913 intro-inclusive ordinals), so the KJVA New Testament section starts at
  ordinal 30,028 versus KJV's 24,115.
 
  Side effects:

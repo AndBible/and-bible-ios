@@ -85,8 +85,9 @@ public final class RemoteSyncBookmarkAndroidBookStore {
 
      - Parameters:
        - bookmarkID: Bible bookmark identifier being projected.
-       - localBook: Current iOS display value stored on the SwiftData model.
-     - Returns: The preserved raw Android value when one exists, otherwise `localBook`.
+       - localBook: Local Android-facing source module initials, or `nil` when unknown.
+     - Returns: The preserved raw Android value when one exists, otherwise the local source module
+       initials.
      - Side effects: none.
      - Failure modes: none.
      */

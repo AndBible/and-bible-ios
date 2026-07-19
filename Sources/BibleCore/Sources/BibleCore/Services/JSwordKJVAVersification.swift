@@ -326,6 +326,37 @@ public enum JSwordKJVAVersification {
     }
 
     /**
+     Computes the KJVA ordinal for a reference, clamping out-of-range chapters/verses to the
+     nearest addressable verse in the same book.
+
+     iOS lacks a full JSword `Versification.toV11n(KJVA)` mapping engine, so a reference from a
+     versification-divergent module (e.g. a merged LXX/Vulgate/Synodal Psalm chapter with more
+     verses than the KJVA chapter) can fall outside KJVA's exact numbering. Rather than reject such
+     a reference — which would force callers to persist a non-KJVA ordinal — this clamps the
+     chapter into the book and the verse into that chapter, matching JSword's behavior of mapping
+     an absent verse onto the nearest existing KJVA verse. Only genuinely unknown books return
+     `nil`. This is a bounded approximation, not a true versification remap: it corrects
+     out-of-range numbering but cannot realign whole-chapter offsets between canons.
+
+     - Parameters:
+       - osisId: Canonical OSIS id or supported alias.
+       - chapter: One-based chapter number in the source module's numbering.
+       - verse: One-based verse number in the source module's numbering.
+     - Returns: A valid KJVA ordinal inside `osisId`, or `nil` when the book is unknown.
+     - Side effects: none.
+     - Failure modes: Unknown OSIS ids return `nil`; negative inputs clamp to `1`.
+     */
+    public static func nearestVerseOrdinal(osisId: String, chapter: Int, verse: Int) -> Int? {
+        guard let book = book(forOsisId: osisId), !book.chapterVerseCounts.isEmpty else {
+            return nil
+        }
+        let clampedChapter = min(max(chapter, 1), book.chapterVerseCounts.count)
+        let lastVerse = book.chapterVerseCounts[clampedChapter - 1]
+        let clampedVerse = min(max(verse, 1), lastVerse)
+        return verseOrdinal(osisId: osisId, chapter: clampedChapter, verse: clampedVerse)
+    }
+
+    /**
      Resolves a concrete verse reference from a JSword KJVA progress ordinal.
 
      Android Reading Progress stores memorized verses and target ranges as KJVA ordinals and then

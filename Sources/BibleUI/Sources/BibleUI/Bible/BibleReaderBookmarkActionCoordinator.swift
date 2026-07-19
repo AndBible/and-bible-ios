@@ -35,6 +35,10 @@ struct BibleReaderBookmarkActionCoordinator {
     private let payloadFactory: BibleReaderAnnotationPayloadFactory
     /// Current reader book name used for legacy bookmark rows that do not carry their own book.
     private let currentBook: String
+    /// Supplies the current module versification for source ordinal fidelity.
+    private let currentV11n: () -> String
+    /// Projects rendered reader ordinals into Android's KJVA bookmark storage domain.
+    private let kjvaOrdinalRange: (Int, Int) -> (start: Int, end: Int)?
     /// Supplies the active Android-compatible notes content type for newly-created note rows.
     private let currentNotesContentType: () -> String
 
@@ -45,6 +49,8 @@ struct BibleReaderBookmarkActionCoordinator {
        - bookmarkService: Persistence facade for bookmark, label, note, and StudyPad mutations.
        - payloadFactory: Factory that projects persisted models into typed Vue bridge DTOs.
        - currentBook: Current reader book name to store on newly-created Bible bookmarks.
+       - currentV11n: Closure returning the active module versification for newly-created rows.
+       - kjvaOrdinalRange: Closure converting rendered start/end ordinals into KJVA storage ordinals.
        - currentNotesContentType: Closure returning the current notes-content-type preference for
          new note rows.
      - Side effects: None during initialization.
@@ -54,11 +60,17 @@ struct BibleReaderBookmarkActionCoordinator {
         bookmarkService: BookmarkService,
         payloadFactory: BibleReaderAnnotationPayloadFactory,
         currentBook: String,
+        currentV11n: @escaping () -> String = { "KJVA" },
+        kjvaOrdinalRange: @escaping (Int, Int) -> (start: Int, end: Int)? = { start, end in
+            (start: min(start, end), end: max(start, end))
+        },
         currentNotesContentType: @escaping () -> String
     ) {
         self.bookmarkService = bookmarkService
         self.payloadFactory = payloadFactory
         self.currentBook = currentBook
+        self.currentV11n = currentV11n
+        self.kjvaOrdinalRange = kjvaOrdinalRange
         self.currentNotesContentType = currentNotesContentType
     }
 
@@ -80,7 +92,9 @@ struct BibleReaderBookmarkActionCoordinator {
        - workspaceSettings: Active workspace settings for auto labels and StudyPad cursors.
      - Returns: Bookmark update and optional modal/config persistence events.
      - Side effects: May insert a Bible bookmark and bookmark-to-label rows.
-     - Failure modes: Missing labels in workspace settings are ignored by `BookmarkService`.
+     - Failure modes: Missing labels in workspace settings are ignored by `BookmarkService`;
+       unresolvable KJVA projection falls back to the rendered ordinal range so the bridge remains
+       usable for unsupported versifications.
      */
     func addOrUpdateBibleBookmark(
         bookInitials: String,
@@ -92,8 +106,12 @@ struct BibleReaderBookmarkActionCoordinator {
         endOffset: Int? = nil,
         workspaceSettings: WorkspaceSettings?
     ) -> BibleReaderBookmarkActionResult {
-        let existing = bookmarkService.bookmarks(for: startOrdinal, endOrdinal: startOrdinal, book: currentBook)
-            .first(where: { $0.ordinalStart == startOrdinal })
+        let effectiveEndOrdinal = endOrdinal > 0 ? endOrdinal : startOrdinal
+        let sourceStart = min(startOrdinal, effectiveEndOrdinal)
+        let sourceEnd = max(startOrdinal, effectiveEndOrdinal)
+        let storageRange = kjvaOrdinalRange(sourceStart, sourceEnd) ?? (start: sourceStart, end: sourceEnd)
+        let existing = bookmarkService.bookmarks(for: storageRange.start, endOrdinal: storageRange.start, book: currentBook)
+            .first(where: { $0.kjvOrdinalStart == storageRange.start })
 
         let bookmark: BibleBookmark
         let isNew: Bool
@@ -105,6 +123,9 @@ struct BibleReaderBookmarkActionCoordinator {
                 bookInitials: bookInitials,
                 startOrdinal: startOrdinal,
                 endOrdinal: endOrdinal,
+                kjvOrdinalStart: storageRange.start,
+                kjvOrdinalEnd: storageRange.end,
+                v11n: currentV11n(),
                 wholeVerse: wholeVerse,
                 startOffset: startOffset,
                 endOffset: endOffset,
@@ -179,17 +200,34 @@ struct BibleReaderBookmarkActionCoordinator {
     }
 
     /**
-     Creates a Bible paragraph-break bookmark.
+     Creates a Bible paragraph-break bookmark using the same KJVA storage projection as normal
+     Bible bookmarks.
+
+     - Parameters:
+       - bookInitials: Module initials associated with the selected verse.
+       - startOrdinal: Source-versification start ordinal reported by Vue.
+       - endOrdinal: Source-versification end ordinal reported by Vue.
+     - Returns: Bridge update result containing the inserted paragraph-break bookmark payload.
+     - Side effects: Inserts a Bible bookmark and attaches Android's paragraph-break system label.
+     - Failure modes: Unresolvable KJVA projection falls back to the rendered ordinal range so
+       unsupported versifications can still create paragraph breaks.
      */
     func addParagraphBreakBibleBookmark(
         bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int
     ) -> BibleReaderBookmarkActionResult {
+        let effectiveEndOrdinal = endOrdinal > 0 ? endOrdinal : startOrdinal
+        let sourceStart = min(startOrdinal, effectiveEndOrdinal)
+        let sourceEnd = max(startOrdinal, effectiveEndOrdinal)
+        let storageRange = kjvaOrdinalRange(sourceStart, sourceEnd) ?? (start: sourceStart, end: sourceEnd)
         let bookmark = bookmarkService.addParagraphBreakBibleBookmark(
             bookInitials: bookInitials,
             startOrdinal: startOrdinal,
             endOrdinal: endOrdinal,
+            kjvOrdinalStart: storageRange.start,
+            kjvOrdinalEnd: storageRange.end,
+            v11n: currentV11n(),
             book: currentBook
         )
         return BibleReaderBookmarkActionResult(

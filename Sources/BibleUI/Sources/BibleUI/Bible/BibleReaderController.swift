@@ -45,7 +45,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Whether the WebView is currently showing the My Notes document (vs Bible text).
     private(set) var showingMyNotes = false
-    /// Optional My Notes row ordinal requested before the Vue client was ready.
+    /// Optional KJVA My Notes row ordinal requested before the Vue client was ready.
     private var pendingClientReadyMyNotesJumpOrdinal: Int?
     /// Monotonic marker used by lightweight UI-test exports when My Notes state or documents rebuild.
     private(set) var myNotesMutationRevision = 0
@@ -239,6 +239,80 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Converts a bookmark-modal My Notes link target into Android's My Notes document ordinal domain.
+
+     Android builds the link from `bookmark.verseRange.start.ordinal` plus its source
+     versification, then opens a My Notes document whose row ordinals are KJVA. iOS mirrors that by
+     resolving the source ordinal through a module with the requested versification and converting
+     the resulting verse identity to a KJVA ordinal before scrolling.
+
+     - Parameters:
+       - v11nName: Source versification emitted by the bookmark payload.
+       - sourceOrdinal: Bookmark start ordinal in `v11nName`.
+     - Returns: KJVA ordinal for the same verse, or `nil` when no installed module can soundly
+       resolve the source ordinal.
+     - Side effects: May temporarily open or move SWORD modules through `verseReference`.
+     - Failure modes: Returns `nil` for invalid ordinals, unsupported versifications, or modules
+       that cannot resolve the source ordinal exactly.
+     */
+    private func kjvaMyNotesOrdinal(v11nName: String, sourceOrdinal: Int) -> Int? {
+        guard sourceOrdinal > 0 else { return nil }
+        let wanted = normalizedVersificationName(v11nName)
+        if wanted == JSwordKJVAVersification.name {
+            return sourceOrdinal
+        }
+
+        if normalizedVersificationName(activeModule?.configEntry("Versification") ?? "") == wanted,
+           let ordinal = kjvaOrdinal(sourceOrdinal: sourceOrdinal, in: activeModule) {
+            return ordinal
+        }
+
+        for info in installedBibleModules
+        where normalizedVersificationName(info.aboutMetadata.versification) == wanted {
+            guard let module = swordManager?.module(named: info.name),
+                  let ordinal = kjvaOrdinal(sourceOrdinal: sourceOrdinal, in: module) else {
+                continue
+            }
+            return ordinal
+        }
+        return nil
+    }
+
+    /**
+     Converts one module-local source ordinal to KJVA using the resolved verse identity.
+
+     - Parameters:
+       - sourceOrdinal: Ordinal in the supplied module's active versification.
+       - module: Module whose versification owns `sourceOrdinal`.
+     - Returns: Matching KJVA ordinal, or `nil` if either side rejects the verse.
+     - Side effects: Temporarily moves the module cursor through `verseReference`.
+     - Failure modes: Returns `nil` for invalid ordinals and references outside KJVA.
+     */
+    private func kjvaOrdinal(sourceOrdinal: Int, in module: SwordModule?) -> Int? {
+        guard let reference = module?.verseReference(ordinal: sourceOrdinal) else {
+            return nil
+        }
+        return JSwordKJVAVersification.verseOrdinal(
+            osisId: reference.osisBookId,
+            chapter: reference.chapter,
+            verse: reference.verse
+        )
+    }
+
+    /**
+     Normalizes empty/SWORD versification names the same way Android and SWORD treat defaults.
+
+     - Parameter name: Raw versification value.
+     - Returns: Uppercase versification key; empty input becomes `KJV`.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func normalizedVersificationName(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "KJV" : trimmed.uppercased()
+    }
+
+    /**
      Resolves the ordinal range for a chapter in the active module's versification.
 
      - Parameters:
@@ -273,7 +347,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             activeStudyPadLabelId: activeStudyPadLabelId,
             activeStudyPadLabelName: activeStudyPadLabelName,
             chapterOrdinalRange: { [self] in
-                currentChapterOrdinalRange()
+                bookmarkQueryOrdinalRange(book: currentBook, chapter: currentChapter)
             },
             verseReference: { [self] book, ordinal in
                 verseReference(book: book, ordinal: ordinal)
@@ -4063,13 +4137,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Opens the chapter-level My Notes document in the current pane.
      */
     public func bridge(_ bridge: BibleBridge, openMyNotes v11n: String, ordinal: Int) {
-        loadMyNotesDocument(jumpToOrdinal: ordinal)
+        loadMyNotesDocument(jumpToOrdinal: kjvaMyNotesOrdinal(v11nName: v11n, sourceOrdinal: ordinal) ?? ordinal)
     }
 
     /**
      Loads the My Notes document for the current chapter into the WebView.
 
-     - Parameter jumpToOrdinal: Optional rendered My Notes row ordinal to scroll to after loading.
+     - Parameter jumpToOrdinal: Optional KJVA My Notes row ordinal to scroll to after loading.
      - Side effects: Marks My Notes as the visible reader document, clears competing StudyPad and
        editing state, rebuilds the chapter's note-backed bookmarks, emits the My Notes document to
        Vue when the client is ready, or stores the request for client-ready replay when it is not.
@@ -4093,7 +4167,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             currentChapter: currentChapter,
             osisBookId: osisBookId(for: currentBook),
             jumpToOrdinal: jumpToOrdinal,
-            chapterRange: { [weak self] in self?.currentChapterOrdinalRange() },
+            chapterRange: { [weak self] in
+                guard let self else { return nil }
+                return self.bookmarkQueryOrdinalRange(book: self.currentBook, chapter: self.currentChapter)
+            },
             bookmarks: { [weak self] in self?.currentChapterMyNotesBookmarks() ?? [] },
             bookmarkPayload: { [self] bookmark in buildBookmarkJSONForMyNotes(bookmark) },
             prepareVisibleState: { [weak self] in
@@ -5320,12 +5397,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return nil
         }
 
-        // Query bookmarks for this chapter's ordinal range
-        guard let range = chapterOrdinalRange(book: book, chapter: chapter, verseCount: loadedChapter.verseCount) else {
-            logger.error("Failed to resolve SWORD chapter range for \(osisBookId, privacy: .public).\(chapter)")
+        // Query bookmarks through Android's KJVA range so restored rows with module initials or
+        // NULL in `book` still highlight in infinite-scroll chapters.
+        guard let range = bookmarkQueryOrdinalRange(book: book, chapter: chapter, verseCount: loadedChapter.verseCount) else {
+            logger.error("Failed to resolve bookmark range for \(osisBookId, privacy: .public).\(chapter)")
             return nil
         }
-        let chapterBookmarks = bookmarkService?.bookmarks(for: range.start, endOrdinal: range.end, book: book) ?? []
+        let chapterBookmarks = bookmarkService?.bookmarks(for: range.start, endOrdinal: range.end) ?? []
 
         guard let document = buildDocumentJSON(
             osisBookId: osisBookId,
@@ -5436,14 +5514,47 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - Bookmark Helpers
 
-    /// Query bookmarks for the current chapter's ordinal range, filtered by current book.
+    /**
+     Resolves the storage-domain bookmark range for a chapter.
+
+     Android persists Bible bookmark membership in KJVA-compatible ordinals. Prefer that range for
+     highlight, My Notes, and list membership so restored Android rows with module initials or NULL
+     in `BibleBookmark.book` still match the visible chapter. The active-module range remains a
+     fallback for unsupported canons and legacy rows whose KJVA columns mirror source ordinals.
+
+     - Parameters:
+       - book: Display book name for the visible chapter.
+       - chapter: One-based chapter number.
+       - verseCount: Optional visible last verse count from the already-loaded chapter.
+     - Returns: Inclusive storage range and verse count, or `nil` when neither KJVA nor active
+       module versification can resolve the chapter.
+     - Side effects: May query the active SWORD module through `chapterOrdinalRange`.
+     - Failure modes: Returns `nil` for unknown books, out-of-range chapters, or unsupported
+       module/canon combinations.
+     */
+    private func bookmarkQueryOrdinalRange(
+        book: String,
+        chapter: Int,
+        verseCount: Int? = nil
+    ) -> (start: Int, end: Int, verseCount: Int)? {
+        let osisId = osisBookId(for: book)
+        if let kjvaRange = JSwordKJVAVersification.verseOrdinalRange(osisId: osisId, chapter: chapter) {
+            let resolvedVerseCount = verseCount
+                ?? JSwordKJVAVersification.verseCount(osisId: osisId, chapter: chapter)
+                ?? max(0, kjvaRange.count)
+            return (start: kjvaRange.lowerBound, end: kjvaRange.upperBound, verseCount: resolvedVerseCount)
+        }
+        return chapterOrdinalRange(book: book, chapter: chapter, verseCount: verseCount)
+    }
+
+    /// Query bookmarks for the current chapter's Android-compatible KJVA ordinal range.
     private func bookmarksForCurrentChapter(verseCount: Int) -> [BibleBookmark] {
         guard let service = bookmarkService else { return [] }
-        guard let range = chapterOrdinalRange(book: currentBook, chapter: currentChapter, verseCount: verseCount) else {
+        guard let range = bookmarkQueryOrdinalRange(book: currentBook, chapter: currentChapter, verseCount: verseCount) else {
             logger.error("Failed to resolve bookmark range for \(self.currentBook, privacy: .public) \(self.currentChapter)")
             return []
         }
-        return service.bookmarks(for: range.start, endOrdinal: range.end, book: currentBook)
+        return service.bookmarks(for: range.start, endOrdinal: range.end)
     }
 
     // MARK: - Default Labels
@@ -5730,6 +5841,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             bookmarkService: bookmarkService,
             payloadFactory: annotationPayloadFactory(),
             currentBook: currentBook,
+            currentV11n: { [weak self] in
+                let versification = self?.activeModule?.configEntry("Versification")?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return versification.isEmpty ? "KJV" : versification
+            },
+            kjvaOrdinalRange: { [weak self] startOrdinal, endOrdinal in
+                self?.bookmarkStorageKJVARange(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+            },
             currentNotesContentType: { [weak self] in
                 self?.currentNotesContentType() ?? "HTML"
             },
@@ -6123,6 +6242,71 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return BibleReaderProgressBridgeCoordinator.ReadingProgressBridgeTarget(
             kjvBookOrdinal: kjvBookOrdinal,
             bookName: currentBook
+        )
+    }
+
+    /**
+     Resolves a rendered reader bookmark selection into Android's inclusive KJVA storage span.
+
+     Newly-created iOS bookmarks keep their source ordinals for local fidelity, but Android backup
+     compatibility depends on KJVA ordinals. This uses the memorization resolver's proven
+     rendered-to-KJVA path so bookmark creation, restore, and chapter queries share one durable key.
+
+     - Parameters:
+       - startOrdinal: First rendered ordinal reported by Vue.
+       - endOrdinal: Last rendered ordinal reported by Vue.
+     - Returns: Inclusive KJVA span, or `nil` when the rendered selection cannot be represented in
+       KJVA.
+     - Side effects: May temporarily move the active SWORD module cursor through
+       `memorizationOrdinalResolution`.
+     - Failure modes: Returns `nil` for invalid endpoints or references outside KJVA.
+     */
+    private func bookmarkStorageKJVARange(
+        startOrdinal: Int,
+        endOrdinal: Int
+    ) -> (start: Int, end: Int)? {
+        let effectiveEndOrdinal = endOrdinal > 0 ? endOrdinal : startOrdinal
+        let lower = min(startOrdinal, effectiveEndOrdinal)
+        let upper = max(startOrdinal, effectiveEndOrdinal)
+        if let resolution = memorizationOrdinalResolution(startOrdinal: lower, endOrdinal: upper) {
+            return (start: resolution.startOrdinal, end: resolution.endOrdinal)
+        }
+        // Exact KJVA numbering rejected the selection (a versification-divergent module verse with
+        // no same-numbered KJVA counterpart). Persisting the raw source ordinal here would render
+        // and export as a completely wrong verse (issue #356 on the write side), so clamp each
+        // endpoint to the nearest addressable KJVA verse in the resolved book instead.
+        guard let clampedStart = clampedKJVAStorageOrdinal(sourceOrdinal: lower),
+              let clampedEnd = clampedKJVAStorageOrdinal(sourceOrdinal: upper) else {
+            return nil
+        }
+        return (start: min(clampedStart, clampedEnd), end: max(clampedStart, clampedEnd))
+    }
+
+    /**
+     Clamps one rendered source ordinal to the nearest addressable KJVA storage ordinal.
+
+     Used only when exact KJVA resolution fails for a versification-divergent module. Resolves the
+     source ordinal to its book/chapter/verse through the active module, then maps that identity
+     onto the nearest valid KJVA verse in the same book. This keeps persisted bookmark ordinals
+     inside the Android-compatible KJVA domain and in the correct book, at the cost of exact verse
+     fidelity for canons whose numbering diverges from KJVA — a bounded approximation until iOS
+     gains a full JSword-style versification mapping engine.
+
+     - Parameter sourceOrdinal: Rendered ordinal in the active module's versification.
+     - Returns: Nearest KJVA storage ordinal, or `nil` when the reference cannot be resolved to a
+       KJVA book at all.
+     - Side effects: May temporarily move the active SWORD module cursor through `verseReference`.
+     - Failure modes: Returns `nil` for invalid ordinals and references outside the KJVA canon.
+     */
+    private func clampedKJVAStorageOrdinal(sourceOrdinal: Int) -> Int? {
+        guard sourceOrdinal > 0,
+              let reference = memorizationVerseReference(renderedOrdinal: sourceOrdinal) else {
+            return nil
+        }
+        return JSwordKJVAVersification.nearestVerseOrdinal(
+            osisId: reference.osisBookId,
+            chapter: reference.chapter,
+            verse: reference.verse
         )
     }
 

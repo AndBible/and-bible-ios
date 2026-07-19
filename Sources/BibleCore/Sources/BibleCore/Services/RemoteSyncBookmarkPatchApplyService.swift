@@ -621,7 +621,10 @@ public final class RemoteSyncBookmarkPatchApplyService {
                     v11n: bookmark.v11n,
                     playbackSettingsJSON: playbackJSON,
                     createdAt: bookmark.createdAt,
-                    book: androidBookStore.androidBookValue(for: bookmark.id, localBook: bookmark.book),
+                    book: androidBookStore.androidBookValue(
+                        for: bookmark.id,
+                        localBook: androidBookColumnValue(for: bookmark)
+                    ),
                     startOffset: bookmark.startOffset,
                     endOffset: bookmark.endOffset,
                     primaryLabelID: bookmark.primaryLabelId.map { reverseAliases[$0] ?? $0 },
@@ -1715,6 +1718,23 @@ public final class RemoteSyncBookmarkPatchApplyService {
             return nil
         }
         return json
+    }
+
+    /**
+     Projects the local Bible bookmark source module into Android's `BibleBookmark.book` value.
+
+     Patch replay compares current local rows against Android-shaped patch rows. Since iOS uses
+     `BibleBookmark.book` for display text, the Android-facing current snapshot must instead read
+     the durable source-module initials field introduced for issue #356.
+
+     - Parameter bookmark: Local Bible bookmark being compared against incoming patch data.
+     - Returns: Module initials for Android, or `nil` when no source module is known.
+     - Side effects: none.
+     - Failure modes: Empty or whitespace-only initials export as NULL.
+     */
+    private func androidBookColumnValue(for bookmark: BibleBookmark) -> String? {
+        let initials = bookmark.bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+        return initials.isEmpty ? nil : initials
     }
 
     /**

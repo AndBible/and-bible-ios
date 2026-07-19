@@ -53,6 +53,7 @@ public final class RemoteSyncResetService {
         RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore).clearAll()
         RemoteSyncBookmarkPlaybackSettingsStore(settingsStore: settingsStore).clearAll()
         RemoteSyncBookmarkLabelAliasStore(settingsStore: settingsStore).clearAll()
+        RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore).clearAll()
         RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore).clearAll()
     }
 }

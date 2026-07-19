@@ -86,24 +86,49 @@ public final class BookmarkService {
 
     // MARK: - Bible Bookmarks
 
-    /// Create a new Bible bookmark for a verse range.
+    /**
+     Creates a new Bible bookmark for a verse range.
+
+     - Parameters:
+       - bookInitials: Module initials associated with the selected verse range.
+       - startOrdinal: Source-versification start ordinal reported by the reader.
+       - endOrdinal: Source-versification end ordinal reported by the reader.
+       - kjvOrdinalStart: Optional Android-compatible KJVA start ordinal used for restore-safe
+         membership queries.
+       - kjvOrdinalEnd: Optional Android-compatible KJVA end ordinal used for restore-safe
+         membership queries.
+       - v11n: Source versification for `startOrdinal`/`endOrdinal`.
+       - wholeVerse: Whether the bookmark covers whole verses instead of a text range.
+       - startOffset: Optional text-range start offset.
+       - endOffset: Optional text-range end offset.
+       - addNote: Legacy bridge flag retained for call-site compatibility; note rows are created
+         by the caller when note text is saved.
+     - Returns: Inserted Bible bookmark.
+     - Side effects: Inserts the bookmark.
+     - Failure modes: SwiftData save failures are handled by `BookmarkStore` and do not throw.
+     */
     @discardableResult
     public func addBibleBookmark(
         bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int,
+        kjvOrdinalStart: Int? = nil,
+        kjvOrdinalEnd: Int? = nil,
         v11n: String = "KJVA",
         wholeVerse: Bool = true,
         startOffset: Int? = nil,
         endOffset: Int? = nil,
         addNote: Bool = false
     ) -> BibleBookmark {
+        let storedKJVAStart = kjvOrdinalStart ?? startOrdinal
+        let storedKJVAEnd = kjvOrdinalEnd ?? endOrdinal
         let bookmark = BibleBookmark(
-            kjvOrdinalStart: startOrdinal,
-            kjvOrdinalEnd: endOrdinal,
+            kjvOrdinalStart: storedKJVAStart,
+            kjvOrdinalEnd: storedKJVAEnd,
             ordinalStart: startOrdinal,
             ordinalEnd: endOrdinal,
             v11n: v11n,
+            bookInitials: bookInitials,
             wholeVerse: wholeVerse
         )
         bookmark.startOffset = startOffset
@@ -112,22 +137,42 @@ public final class BookmarkService {
         return bookmark
     }
 
-    /// Create a Bible bookmark that renders as a paragraph break in the web reader.
+    /**
+     Creates a Bible bookmark that renders as a paragraph break in the web reader.
+
+     - Parameters:
+       - bookInitials: Module initials associated with the selected verse.
+       - startOrdinal: Source-versification start ordinal reported by the reader.
+       - endOrdinal: Source-versification end ordinal reported by the reader.
+       - kjvOrdinalStart: Optional Android-compatible KJVA start ordinal.
+       - kjvOrdinalEnd: Optional Android-compatible KJVA end ordinal.
+       - v11n: Source versification for `startOrdinal`/`endOrdinal`.
+       - book: Optional display book fallback for legacy list paths.
+     - Returns: Inserted paragraph-break bookmark.
+     - Side effects: Ensures the paragraph-break system label exists, inserts the bookmark, and
+       attaches that system label.
+     - Failure modes: SwiftData save failures are handled by `BookmarkStore` and do not throw.
+     */
     @discardableResult
     public func addParagraphBreakBibleBookmark(
         bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int,
+        kjvOrdinalStart: Int? = nil,
+        kjvOrdinalEnd: Int? = nil,
         v11n: String = "KJVA",
         book: String? = nil
     ) -> BibleBookmark {
         ensureSystemLabels()
+        let storedKJVAStart = kjvOrdinalStart ?? startOrdinal
+        let storedKJVAEnd = kjvOrdinalEnd ?? endOrdinal
         let bookmark = BibleBookmark(
-            kjvOrdinalStart: startOrdinal,
-            kjvOrdinalEnd: endOrdinal,
+            kjvOrdinalStart: storedKJVAStart,
+            kjvOrdinalEnd: storedKJVAEnd,
             ordinalStart: startOrdinal,
             ordinalEnd: endOrdinal,
             v11n: v11n,
+            bookInitials: bookInitials,
             wholeVerse: false
         )
         bookmark.book = book
@@ -216,8 +261,11 @@ public final class BookmarkService {
     }
 
     /**
-     Get bookmarks overlapping a verse range (for rendering highlights).
-     Pass `book` to prevent cross-book ordinal collisions.
+     Get bookmarks overlapping a KJVA verse range for rendering highlights.
+
+     Android persists bookmark membership in KJVA-compatible ordinals. The optional `book` argument
+     is retained for source compatibility with older callers, but it is intentionally ignored because
+     Android backups store module initials or NULL in `BibleBookmark.book`.
      */
     public func bookmarks(for startOrdinal: Int, endOrdinal: Int, book: String? = nil) -> [BibleBookmark] {
         store.bibleBookmarks(overlapping: startOrdinal, endOrdinal: endOrdinal, book: book)

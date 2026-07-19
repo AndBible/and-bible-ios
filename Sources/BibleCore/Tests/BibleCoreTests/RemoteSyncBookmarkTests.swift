@@ -74,6 +74,27 @@ final class RemoteSyncBookmarkTests: XCTestCase {
         XCTAssertTrue(store.allAliases().isEmpty)
     }
 
+    /**
+     Verifies remote-sync reset clears the local-only Android bookmark book side store.
+
+     Issue #356 stores Android's raw `BibleBookmark.book` values outside the SwiftData display
+     field so outbound snapshots can preserve Android module initials and NULLs. Resetting remote
+     sync must clear that fidelity state with the other bookmark side stores, otherwise a later
+     account or bootstrap could inherit stale source-module mappings.
+     */
+    func testRemoteSyncResetServiceClearsBookmarkAndroidBookStore() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let store = RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore)
+        let bookmarkID = UUID(uuidString: "c2000000-0000-0000-0000-000000000001")!
+        store.setRawBook("KJV", for: bookmarkID)
+
+        RemoteSyncResetService(settingsStore: settingsStore).resetAllCategories()
+
+        XCTAssertEqual(store.rawBook(for: bookmarkID), Optional<String?>.none)
+    }
+
     func testRemoteSyncBookmarkRestoreReadsAndroidSnapshot() throws {
         let service = RemoteSyncBookmarkRestoreService()
         let speakLabelID = UUID(uuidString: "d1000000-0000-0000-0000-000000000001")!
@@ -216,31 +237,41 @@ final class RemoteSyncBookmarkTests: XCTestCase {
 
         let restored = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
         let booksByID = Dictionary(uniqueKeysWithValues: restored.map { ($0.id, $0.book) })
+        let sourceInitialsByID = Dictionary(uniqueKeysWithValues: restored.map { ($0.id, $0.bookInitials) })
         XCTAssertEqual(
             booksByID[initialsID],
             "Genesis",
             "Installed-module initials must be rewritten to the derived display book name."
         )
         XCTAssertEqual(
+            sourceInitialsByID[initialsID],
+            "KJV",
+            "Installed-module initials must also be retained on the bookmark as source metadata."
+        )
+        XCTAssertEqual(
             booksByID[nullBookID],
             "Exodus",
             "NULL Android book values must be derived from the bookmark's own ordinals."
         )
+        XCTAssertEqual(sourceInitialsByID[nullBookID], "")
         XCTAssertEqual(
             booksByID[localizedID],
             "1. Mose",
             "Values that are not installed-module initials must survive unchanged."
         )
+        XCTAssertEqual(sourceInitialsByID[localizedID], "")
         XCTAssertEqual(
             booksByID[uninstalledID],
             "ESV2011",
             "Initials of modules that are not installed cannot be classified and must be preserved."
         )
+        XCTAssertEqual(sourceInitialsByID[uninstalledID], "ESV2011")
         XCTAssertEqual(
             booksByID[unresolvableID],
             "NASB",
             "When derivation fails the raw Android value must be preserved rather than dropped."
         )
+        XCTAssertEqual(sourceInitialsByID[unresolvableID], "NASB")
         XCTAssertEqual(
             resolver.recordedRequests,
             [
@@ -262,12 +293,14 @@ final class RemoteSyncBookmarkTests: XCTestCase {
             .some(nil),
             "Rewritten NULL book values must be preserved as NULL for Android round-trip export."
         )
-        XCTAssertNil(
+        XCTAssertEqual(
             bookStore.rawBook(for: localizedID),
+            Optional<String?>.none,
             "Untouched values must not create fidelity entries."
         )
-        XCTAssertNil(
+        XCTAssertEqual(
             bookStore.rawBook(for: unresolvableID),
+            Optional<String?>.none,
             "Failed derivations keep the raw value on the model and need no fidelity entry."
         )
     }
@@ -307,6 +340,11 @@ final class RemoteSyncBookmarkTests: XCTestCase {
             restored[0].book,
             "KJV",
             "A nil resolver must preserve the raw Android book value verbatim."
+        )
+        XCTAssertEqual(
+            restored[0].bookInitials,
+            "KJV",
+            "A nil resolver still treats Android's non-empty book column as source module initials."
         )
     }
 
@@ -391,6 +429,7 @@ final class RemoteSyncBookmarkTests: XCTestCase {
 
         let restored = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
         let booksByID = Dictionary(uniqueKeysWithValues: restored.map { ($0.id, $0.book) })
+        let sourceInitialsByID = Dictionary(uniqueKeysWithValues: restored.map { ($0.id, $0.bookInitials) })
         XCTAssertEqual(restored.count, 2)
         XCTAssertEqual(
             booksByID[bookmarkID],
@@ -402,6 +441,8 @@ final class RemoteSyncBookmarkTests: XCTestCase {
             "Exodus",
             "The SQLite restore path must derive display names for NULL Android book columns."
         )
+        XCTAssertEqual(sourceInitialsByID[bookmarkID], "KJV")
+        XCTAssertEqual(sourceInitialsByID[nullBookBookmarkID], "")
         let bookStore = RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore)
         XCTAssertEqual(
             bookStore.rawBook(for: bookmarkID),
@@ -488,6 +529,54 @@ final class RemoteSyncBookmarkTests: XCTestCase {
             .some("KJV"),
             "The preserved raw Android value must survive re-materialization."
         )
+    }
+
+    /**
+     Verifies outbound Android snapshots use Bible bookmark source initials, not display book names.
+
+     Native iOS bookmark creation stores `book` as the display Bible book and `bookInitials` as the
+     source module. Android's `BibleBookmark.book` column expects module initials or NULL, so
+     snapshot export must read `bookInitials` and leave legacy rows without source metadata as NULL.
+     */
+    func testRemoteSyncBookmarkSnapshotExportsSourceInitialsInsteadOfDisplayBook() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let sourceBackedID = UUID(uuidString: "f7000000-0000-0000-0000-000000000001")!
+        let legacyDisplayOnlyID = UUID(uuidString: "f7000000-0000-0000-0000-000000000002")!
+        let sourceBacked = BibleBookmark(
+            id: sourceBackedID,
+            kjvOrdinalStart: 4,
+            kjvOrdinalEnd: 4,
+            ordinalStart: 10,
+            ordinalEnd: 10,
+            v11n: "KJV",
+            bookInitials: "KJV"
+        )
+        sourceBacked.book = "Genesis"
+        let legacyDisplayOnly = BibleBookmark(
+            id: legacyDisplayOnlyID,
+            kjvOrdinalStart: 5,
+            kjvOrdinalEnd: 5,
+            ordinalStart: 11,
+            ordinalEnd: 11,
+            v11n: "KJV"
+        )
+        legacyDisplayOnly.book = "Genesis"
+        modelContext.insert(sourceBacked)
+        modelContext.insert(legacyDisplayOnly)
+        try modelContext.save()
+
+        let snapshot = RemoteSyncBookmarkSnapshotService().snapshotCurrentState(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let outboundBooks = Dictionary(
+            uniqueKeysWithValues: snapshot.bibleBookmarkRowsByKey.values.map { ($0.id, $0.book) }
+        )
+
+        XCTAssertEqual(outboundBooks[sourceBackedID], "KJV")
+        XCTAssertEqual(outboundBooks[legacyDisplayOnlyID], String??.some(nil))
     }
 
     /**

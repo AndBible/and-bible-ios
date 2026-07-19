@@ -711,10 +711,11 @@ public final class RemoteSyncBookmarkRestoreService {
      Normalizes one restored bookmark's `book` value into iOS display-name semantics.
 
      Android stores SWORD module initials (or NULL) in the `book` column because Android renders
-     references from `v11n` + ordinals; iOS uses the same field as the display book name that
-     keys list rendering, chapter-highlight queries, and navigation (issue #356). Only the two
-     shapes Android actually produces are rewritten — NULL and installed-module initials — so
-     locally created display names and localized names survive merge round-trips unchanged.
+     references from `v11n` + ordinals. iOS now keys list rendering, chapter-highlight queries,
+     and navigation from the KJVA ordinal columns, but still heals Android's rewriteable values so
+     older fallback paths and persisted display text avoid `Unknown`/module-initial labels. Only
+     the two shapes Android actually produces are rewritten — NULL and installed-module initials —
+     so locally created display names and localized names survive merge round-trips unchanged.
 
      - Parameters:
        - bookmark: Staged Android bookmark row being materialized into SwiftData.
@@ -755,6 +756,53 @@ public final class RemoteSyncBookmarkRestoreService {
             return previousDisplayBook
         }
         return bookmark.book
+    }
+
+    /**
+     Normalizes Android's `BibleBookmark.book` column into iOS source-module metadata.
+
+     Android stores the bookmark's source `AbstractPassageBook` initials in this column, while old
+     iOS snapshots may contain display Bible book names from the pre-#356 schema drift. The model's
+     `book` field remains display-facing, so this helper writes only plausible module initials to
+     `BibleBookmark.bookInitials` and leaves display names empty.
+
+     - Parameter bookmark: Staged Android-shaped Bible bookmark row.
+     - Returns: Source module initials, or an empty string when the row has no durable source
+       module identity.
+     - Side effects: may query the injected resolver to recognize installed module initials.
+     - Failure modes: Unknown single-token values are preserved as likely uninstalled module
+       initials so Android-origin rows remain round-trip capable.
+     */
+    private func normalizedSourceBookInitials(for bookmark: RemoteSyncAndroidBibleBookmark) -> String {
+        guard let raw = bookmark.book?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return ""
+        }
+        if isKnownDisplayBookName(raw) {
+            return ""
+        }
+        if bookNameResolver?.isInstalledBibleInitials(raw) == true {
+            return raw
+        }
+        return raw.rangeOfCharacter(from: .whitespacesAndNewlines) == nil ? raw : ""
+    }
+
+    /**
+     Detects legacy iOS display book names that must not be re-exported as Android module initials.
+
+     - Parameter rawValue: Trimmed value from Android's `BibleBookmark.book` column.
+     - Returns: `true` when the value matches a canonical KJVA book long name, short name, or OSIS
+       id from old iOS snapshots.
+     - Side effects: None.
+     - Failure modes: Unknown values return `false` so likely module initials can remain
+       round-trip capable.
+     */
+    private func isKnownDisplayBookName(_ rawValue: String) -> Bool {
+        JSwordKJVAVersification.books.contains {
+            rawValue.caseInsensitiveCompare($0.longName) == .orderedSame ||
+                rawValue.caseInsensitiveCompare($0.shortName) == .orderedSame ||
+                rawValue.caseInsensitiveCompare($0.osisId) == .orderedSame
+        }
     }
 
     /**
@@ -931,7 +979,8 @@ public final class RemoteSyncBookmarkRestoreService {
        - deletes existing local bookmark-category SwiftData rows
        - inserts replacement labels, Bible bookmarks, generic bookmarks, notes, junction rows, and StudyPad rows
        - saves `modelContext`
-       - clears and repopulates the local-only playback-settings and label-alias side stores
+       - clears and repopulates the local-only playback-settings, label-alias, and Android-book
+         side stores
      - Failure modes:
        - throws `RemoteSyncBookmarkRestoreError.duplicateSystemLabels` when multiple staged labels
          claim the same reserved system-label name
@@ -989,6 +1038,7 @@ public final class RemoteSyncBookmarkRestoreService {
                 ordinalStart: preparedBookmark.bookmark.ordinalStart,
                 ordinalEnd: preparedBookmark.bookmark.ordinalEnd,
                 v11n: preparedBookmark.bookmark.v11n,
+                bookInitials: normalizedSourceBookInitials(for: preparedBookmark.bookmark),
                 createdAt: preparedBookmark.bookmark.createdAt,
                 lastUpdatedOn: preparedBookmark.bookmark.lastUpdatedOn,
                 wholeVerse: preparedBookmark.bookmark.wholeVerse

@@ -11,10 +11,10 @@ import SwordKit
  bookmark, label, and StudyPad payloads from drifting as controller responsibilities are extracted.
 
  Inputs:
- - active module state used to resolve JSword/SWORD-style ordinals and verse text
- - the current reader book used when older bookmarks do not carry an explicit book
- - the current module initials used by the web client as `bookInitials`
- - the effective book list for OSIS lookups
+- active module state used to resolve JSword/SWORD-style ordinals and verse text
+- the current reader book used when older bookmarks do not carry an explicit book
+- the current module initials used as a fallback for active-document projection
+- the effective book list for OSIS lookups
 
  Outputs:
  - typed `BibleView` bridge DTOs and document payload DTOs consumed by Vue.js
@@ -37,6 +37,24 @@ struct BibleReaderAnnotationPayloadFactory {
     private let bookCatalog: BibleReaderBookCatalog
     /// Synthetic unlabeled label identifier required by the web client.
     private let unlabeledLabelID: String
+
+    /**
+     Selects the ordinal domain used for Bible bookmark bridge payloads.
+
+     Normal reader documents highlight against the active module's rendered ordinals, while
+     Android's My Notes fake document renders bookmark rows in KJVA ordinals. Keeping the choice
+     explicit prevents `ordinalRange` and `originalOrdinalRange` from drifting back into the same
+     domain.
+
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    private enum BibleBookmarkOrdinalProjection {
+        /// Project visible row ordinals into the active reader module when possible.
+        case activeModule
+        /// Project visible row ordinals into Android's KJVA bookmark domain.
+        case kjva
+    }
 
     /**
      Normalizes Swift hash values into the non-negative `hashCode` shape expected by BibleView.
@@ -102,7 +120,7 @@ struct BibleReaderAnnotationPayloadFactory {
      - Failure modes: same as `bookmarkJSON(_:)`.
      */
     func bookmarkJSONForMyNotes(_ bookmark: BibleBookmark) -> BibleBookmarkData {
-        bookmarkJSON(bookmark)
+        bibleBookmarkJSON(bookmark, editAction: EditActionData(), ordinalProjection: .kjva)
     }
 
     /**
@@ -282,12 +300,18 @@ struct BibleReaderAnnotationPayloadFactory {
      - Parameters:
        - bookmark: Bible bookmark model to project.
        - editAction: Edit-action DTO value required by the target bridge context.
+       - ordinalProjection: Target document ordinal domain: active module for normal Bible
+         documents, KJVA for Android's My Notes fake document.
      - Returns: A typed Bible bookmark payload.
      - Side effects: reads verse text from the active SWORD module when available.
      - Failure modes: missing label relationships are filtered through shared serialization
        support.
      */
-    private func bibleBookmarkJSON(_ bookmark: BibleBookmark, editAction: EditActionData?) -> BibleBookmarkData {
+    private func bibleBookmarkJSON(
+        _ bookmark: BibleBookmark,
+        editAction: EditActionData?,
+        ordinalProjection: BibleBookmarkOrdinalProjection = .activeModule
+    ) -> BibleBookmarkData {
         let id = bookmark.id.uuidString
         let hashCode = Self.normalizedBridgeHashCode(from: id.hashValue)
         let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
@@ -306,21 +330,40 @@ struct BibleReaderAnnotationPayloadFactory {
         let bookmarkBook = bookmark.book ?? currentBook
         let rangeProjection = bibleBookmarkRangeProjection(
             bookName: bookmarkBook,
-            startOrdinal: bookmark.ordinalStart,
-            endOrdinal: bookmark.ordinalEnd
+            sourceStartOrdinal: bookmark.ordinalStart,
+            sourceEndOrdinal: bookmark.ordinalEnd,
+            kjvStartOrdinal: bookmark.kjvOrdinalStart,
+            kjvEndOrdinal: bookmark.kjvOrdinalEnd,
+            ordinalProjection: ordinalProjection
         )
-        let fullText = loadVerseText(for: rangeProjection)
+        let textRangeProjection = ordinalProjection == .activeModule ? rangeProjection : bibleBookmarkRangeProjection(
+            bookName: bookmarkBook,
+            sourceStartOrdinal: bookmark.ordinalStart,
+            sourceEndOrdinal: bookmark.ordinalEnd,
+            kjvStartOrdinal: bookmark.kjvOrdinalStart,
+            kjvEndOrdinal: bookmark.kjvOrdinalEnd,
+            ordinalProjection: .activeModule
+        )
+        let fullText = loadVerseText(for: textRangeProjection)
+        let sourceModuleMetadata = sourceModuleMetadata(for: bookmark)
+        let hasSourceModule = !sourceModuleMetadata.initials.isEmpty
+        let effectiveWholeVerse = bookmark.wholeVerse || !hasSourceModule
+        let effectiveSourceEndOrdinal = bookmark.ordinalEnd > bookmark.ordinalStart
+            ? bookmark.ordinalEnd
+            : bookmark.ordinalStart
 
         return BibleBookmarkData(
             id: id,
             type: "bookmark",
             hashCode: hashCode,
-            ordinalRange: [bookmark.ordinalStart, bookmark.ordinalEnd],
-            offsetRange: bookmarkOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset),
+            ordinalRange: [rangeProjection.start.ordinal, rangeProjection.end.ordinal],
+            offsetRange: effectiveWholeVerse
+                ? nil
+                : bookmarkOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset),
             labels: labelPayload.labelIDs,
-            bookInitials: activeModuleName,
-            bookName: activeModuleName,
-            bookAbbreviation: rangeProjection.start.osisBookId,
+            bookInitials: sourceModuleMetadata.initials,
+            bookName: sourceModuleMetadata.name,
+            bookAbbreviation: sourceModuleMetadata.abbreviation,
             createdAt: createdAt,
             text: fullText,
             fullText: fullText,
@@ -330,15 +373,15 @@ struct BibleReaderAnnotationPayloadFactory {
             notes: hasNote ? noteText : nil,
             notesContentType: bookmark.notes?.contentType,
             hasNote: hasNote,
-            wholeVerse: bookmark.wholeVerse,
+            wholeVerse: effectiveWholeVerse,
             customIcon: bookmark.customIcon,
             editAction: editAction,
             osisRef: rangeProjection.osisRef,
-            originalOrdinalRange: [bookmark.kjvOrdinalStart, bookmark.kjvOrdinalEnd],
+            originalOrdinalRange: [bookmark.ordinalStart, effectiveSourceEndOrdinal],
             verseRange: rangeProjection.verseRange,
             verseRangeOnlyNumber: rangeProjection.verseRangeOnlyNumber,
             verseRangeAbbreviated: rangeProjection.verseRangeAbbreviated,
-            v11n: bookmark.v11n,
+            v11n: hasSourceModule ? bookmark.v11n : JSwordKJVAVersification.name,
             osisFragment: nil
         )
     }
@@ -348,27 +391,44 @@ struct BibleReaderAnnotationPayloadFactory {
      `ClientBibleBookmark` fields.
 
      - Parameters:
-       - bookName: Stored or current start book name.
-       - startOrdinal: Stored start ordinal in the bookmark versification.
-       - endOrdinal: Stored end ordinal in the bookmark versification.
+       - bookName: Stored or current start book name used only by legacy fallback paths.
+       - sourceStartOrdinal: Stored start ordinal in the bookmark source versification.
+       - sourceEndOrdinal: Stored end ordinal in the bookmark source versification.
+       - kjvStartOrdinal: Stored start ordinal in Android's KJVA bookmark domain.
+       - kjvEndOrdinal: Stored end ordinal in Android's KJVA bookmark domain.
+       - ordinalProjection: Target document ordinal domain for emitted `ordinalRange`.
      - Returns: A normalized range projection. Invalid or reversed end ordinals collapse to the
        start verse, matching existing single-verse normalization.
-     - Side effects: May query the active SWORD module for ordinal-to-verse resolution.
-     - Failure modes: falls back to the no-module compatibility projection when SWORD cannot
-       resolve a verse.
+     - Side effects: May query the active SWORD module for KJVA-to-rendered ordinal projection.
+     - Failure modes: falls back to the source ordinal and no-module compatibility projection when
+       a malformed legacy row cannot be resolved through KJVA.
      */
     private func bibleBookmarkRangeProjection(
         bookName: String,
-        startOrdinal: Int,
-        endOrdinal: Int
+        sourceStartOrdinal: Int,
+        sourceEndOrdinal: Int,
+        kjvStartOrdinal: Int,
+        kjvEndOrdinal: Int,
+        ordinalProjection: BibleBookmarkOrdinalProjection
     ) -> BookmarkBridgeVerseRangeProjection {
-        let startReference = verseReference(book: bookName, ordinal: startOrdinal)
-            ?? activeModule?.verseReference(ordinal: startOrdinal)
-            ?? fallbackVerseReference(bookName: bookName, ordinal: startOrdinal)
-        let effectiveEndOrdinal = endOrdinal > startOrdinal ? endOrdinal : startOrdinal
-        let endReference = verseReference(book: bookName, ordinal: effectiveEndOrdinal)
-            ?? activeModule?.verseReference(ordinal: effectiveEndOrdinal)
-            ?? startReference
+        let startReference = renderedReference(
+            kjvOrdinal: kjvStartOrdinal,
+            sourceOrdinal: sourceStartOrdinal,
+            bookName: bookName,
+            ordinalProjection: ordinalProjection
+        )
+        let effectiveSourceEndOrdinal = sourceEndOrdinal > sourceStartOrdinal
+            ? sourceEndOrdinal
+            : sourceStartOrdinal
+        let effectiveKJVEndOrdinal = kjvEndOrdinal > kjvStartOrdinal
+            ? kjvEndOrdinal
+            : kjvStartOrdinal
+        let endReference = renderedReference(
+            kjvOrdinal: effectiveKJVEndOrdinal,
+            sourceOrdinal: effectiveSourceEndOrdinal,
+            bookName: bookName,
+            ordinalProjection: ordinalProjection
+        )
 
         return BookmarkBridgeVerseRangeProjection(
             startBookName: bridgeBookName(for: startReference, fallback: bookName),
@@ -378,6 +438,80 @@ struct BibleReaderAnnotationPayloadFactory {
             endBookAbbreviation: bridgeBookAbbreviation(for: endReference),
             end: endReference
         )
+    }
+
+    /**
+     Resolves a stored KJVA bookmark ordinal into the target document's rendered ordinal space.
+
+     Android backups identify Bible bookmarks by KJVA ordinals even when the `book` column stores
+     module initials or NULL. Normal Bible documents need the active module's rendered ordinal for
+     Vue highlight matching, while Android's My Notes fake document uses KJVA ordinals directly.
+
+     - Parameters:
+       - kjvOrdinal: Persisted Android-compatible KJVA ordinal.
+       - sourceOrdinal: Persisted source ordinal used only by legacy fallback paths.
+       - bookName: Stored or current book name used only by legacy fallback paths.
+       - ordinalProjection: Target document ordinal domain for emitted ordinals.
+     - Returns: Verse reference with an active-module ordinal when possible, otherwise a KJVA or
+       compatibility fallback reference.
+     - Side effects: May temporarily move the active SWORD module cursor through
+       `verseOrdinal(osisBookId:chapter:verse:)`.
+     - Failure modes: Malformed KJVA ordinals fall back to legacy source-ordinal resolution.
+     */
+    private func renderedReference(
+        kjvOrdinal: Int,
+        sourceOrdinal: Int,
+        bookName: String,
+        ordinalProjection: BibleBookmarkOrdinalProjection
+    ) -> VerseKeyReference {
+        if let kjvaReference = JSwordKJVAVersification.verseReference(ordinal: kjvOrdinal) {
+            let renderedOrdinal: Int
+            switch ordinalProjection {
+            case .activeModule:
+                renderedOrdinal = activeModule?.verseOrdinal(
+                    osisBookId: kjvaReference.osisId,
+                    chapter: kjvaReference.chapter,
+                    verse: kjvaReference.verse
+                ) ?? kjvaReference.ordinal
+            case .kjva:
+                renderedOrdinal = kjvaReference.ordinal
+            }
+            return VerseKeyReference(
+                osisBookId: kjvaReference.osisId,
+                chapter: kjvaReference.chapter,
+                verse: kjvaReference.verse,
+                ordinal: renderedOrdinal
+            )
+        }
+        return verseReference(book: bookName, ordinal: sourceOrdinal)
+            ?? activeModule?.verseReference(ordinal: sourceOrdinal)
+            ?? fallbackVerseReference(bookName: bookName, ordinal: sourceOrdinal)
+    }
+
+    /**
+     Projects source module metadata for Android's bookmark modal contract.
+
+     Android's `ClientBibleBookmark` emits metadata from `bookmark.book`, the source passage book
+     stored with the bookmark. iOS keeps display book names in `BibleBookmark.book`, so the bridge
+     must read the separate source-module initials field and only use the active module description
+     when it is actually the same module.
+
+     - Parameter bookmark: Bible bookmark being serialized.
+     - Returns: Source initials/name/abbreviation tuple, or empty strings when Android would have
+       had a NULL source book.
+     - Side effects: none.
+     - Failure modes: Missing active-module description falls back to initials.
+     */
+    private func sourceModuleMetadata(for bookmark: BibleBookmark) -> (initials: String, name: String, abbreviation: String) {
+        let initials = bookmark.bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !initials.isEmpty else {
+            return ("", "", "")
+        }
+        let activeDescription = activeModuleName == initials
+            ? activeModule?.info.description.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            : ""
+        let name = activeDescription.isEmpty ? initials : activeDescription
+        return (initials, name, initials)
     }
 
     /**
@@ -442,7 +576,9 @@ struct BibleReaderAnnotationPayloadFactory {
      - Failure modes: None.
      */
     private func bridgeBookName(for reference: VerseKeyReference, fallback: String) -> String {
-        BibleReaderController.bookName(forOsisId: reference.osisBookId) ?? fallback
+        BibleReaderController.bookName(forOsisId: reference.osisBookId)
+            ?? JSwordKJVAVersification.longBookName(osisId: reference.osisBookId)
+            ?? fallback
     }
 
     /**
