@@ -119,7 +119,6 @@ Tests:
 ### SWORD resources
 
 - Test fixture copy: `Sources/BibleUI/Tests/BibleUITests/Fixtures/sword`
-- Standalone source tree: `sword-modules/`
 
 ### Web bundle
 
