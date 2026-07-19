@@ -239,25 +239,55 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Reverse-maps a stored KJVA bookmark ordinal into the active module's versification for
-     bookmark-list display and navigation.
+     Builds the bookmark-list active-versification resolver, or `nil` when the active module renders
+     in KJVA-compatible numbering.
 
      Android renders bookmark-list rows in the current Bible's versification (Android's
      `BookmarkItemAdapter`), so a bookmark stored at a KJVA ordinal shows and navigates to the active
-     module's mapped verse — KJVA Psalm 10 in a Vulgate module is Psalm 9. Falls back to KJVA
-     numbering (via the caller) when no active module is loaded or the reference cannot be mapped.
+     module's mapped verse — KJVA Psalm 10 in a Vulgate module is Psalm 9. But KJV-family modules
+     (KJV/KJVA, or no module) render identically to KJVA, so this returns `nil` for them and the list
+     keeps its fast in-memory KJVA path with no per-row SWORD work. For a divergent canon it reads the
+     versification once and returns a closure that memoizes per ordinal, so a large list performs at
+     most one SWORD mapping per unique ordinal — never a serialized SWORD call per row.
 
-     - Parameter kjvOrdinal: Persisted Android-compatible KJVA ordinal.
+     - Returns: A resolver mapping a KJVA ordinal to the active versification's book name plus
+       chapter/verse, or `nil` when the active module is KJVA-compatible.
+     - Side effects: Reads the active module's `Versification` conf once through the SWORD queue.
+     - Failure modes: The returned resolver yields `nil` for malformed or unmappable ordinals.
+     */
+    func bookmarkListActiveReferenceResolver() -> ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? {
+        let activeVersification = activeModule?.configEntry("Versification") ?? ""
+        let normalized = normalizedVersificationName(activeVersification)
+        guard normalized != JSwordKJVAVersification.name, normalized != "KJV" else { return nil }
+
+        var cache: [Int: (bookName: String, reference: BookmarkListVerseReference)?] = [:]
+        return { [weak self] kjvOrdinal in
+            if let cached = cache[kjvOrdinal] { return cached }
+            let resolved = self?.bookmarkListActiveReference(
+                kjvOrdinal: kjvOrdinal,
+                versification: activeVersification
+            )
+            cache[kjvOrdinal] = resolved
+            return resolved
+        }
+    }
+
+    /**
+     Reverse-maps one stored KJVA ordinal into a target versification for bookmark-list rows.
+
+     - Parameters:
+       - kjvOrdinal: Persisted Android-compatible KJVA ordinal.
+       - activeVersification: Target module versification, read once by the resolver builder.
      - Returns: Active-versification display book name plus chapter/verse, or `nil` when the ordinal
        cannot be resolved or mapped.
      - Side effects: Runs inside the SWORD serialization queue via `SwordVersification`.
      - Failure modes: Returns `nil` for malformed KJVA ordinals or unmappable references.
      */
-    func bookmarkListActiveReference(
-        kjvOrdinal: Int
+    private func bookmarkListActiveReference(
+        kjvOrdinal: Int,
+        versification activeVersification: String
     ) -> (bookName: String, reference: BookmarkListVerseReference)? {
         guard let kjva = JSwordKJVAVersification.verseReference(ordinal: kjvOrdinal) else { return nil }
-        let activeVersification = activeModule?.configEntry("Versification") ?? ""
         guard let mapped = SwordVersification.mapVerseFromKJVA(
             osisBookId: kjva.osisId,
             chapter: kjva.chapter,
