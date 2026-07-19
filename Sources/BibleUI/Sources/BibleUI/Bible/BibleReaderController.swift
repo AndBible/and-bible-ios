@@ -262,9 +262,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return sourceOrdinal
         }
 
-        if normalizedVersificationName(activeModule?.configEntry("Versification") ?? "") == wanted,
+        // Pass the module's real-cased versification name to the engine: SWORD's versification
+        // lookup is case-sensitive (e.g. "Vulg", "Synodal"), so `wanted` (uppercased) is used only
+        // for case-insensitive matching, never as the mapping source name.
+        let activeVersification = activeModule?.configEntry("Versification") ?? ""
+        if normalizedVersificationName(activeVersification) == wanted,
            let reference = activeModule?.verseReference(ordinal: sourceOrdinal),
-           let ordinal = kjvaOrdinal(forReference: reference, sourceVersification: wanted) {
+           let ordinal = kjvaOrdinal(forReference: reference, sourceVersification: activeVersification) {
             return ordinal
         }
 
@@ -272,7 +276,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         where normalizedVersificationName(info.aboutMetadata.versification) == wanted {
             guard let module = swordManager?.module(named: info.name),
                   let reference = module.verseReference(ordinal: sourceOrdinal),
-                  let ordinal = kjvaOrdinal(forReference: reference, sourceVersification: wanted) else {
+                  let ordinal = kjvaOrdinal(
+                      forReference: reference,
+                      sourceVersification: info.aboutMetadata.versification
+                  ) else {
                 continue
             }
             return ordinal
@@ -5610,7 +5617,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         // Map the visible chapter's first and last verse from the source versification into KJVA so
         // the query span covers the correct KJVA ordinals even when the module's chapter numbering
         // diverges from KJVA (e.g. a merged Septuagint/Vulgate Psalm covers two KJVA chapters).
+        // The last-verse index must be expressed in the *source* versification: prefer the caller's
+        // visible count, then the active module's own chapter verse count, and only fall back to the
+        // KJVA canon count when no module can resolve it (identity/KJVA-source case).
         let sourceLastVerse = verseCount
+            ?? chapterOrdinalRange(book: book, chapter: chapter)?.verseCount
             ?? JSwordKJVAVersification.verseCount(osisId: osisId, chapter: chapter)
         if let sourceLastVerse, sourceLastVerse > 0,
            let firstKJVA = kjvaOrdinal(
