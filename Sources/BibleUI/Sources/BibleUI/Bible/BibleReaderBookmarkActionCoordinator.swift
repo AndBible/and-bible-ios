@@ -83,8 +83,8 @@ struct BibleReaderBookmarkActionCoordinator {
 
      - Parameters:
        - bookInitials: Module initials associated with the selected text.
-       - startOrdinal: Inclusive starting verse ordinal.
-       - endOrdinal: Inclusive ending verse ordinal.
+       - startOrdinal: Inclusive source-versification starting verse ordinal.
+       - endOrdinal: Inclusive source-versification ending verse ordinal, or `0` for a single-verse selection.
        - addNote: Whether the bookmark sheet should open directly to note editing.
        - wholeVerse: Whether the new bookmark highlights whole verses.
        - startOffset: Optional text-range start offset.
@@ -93,8 +93,9 @@ struct BibleReaderBookmarkActionCoordinator {
      - Returns: Bookmark update and optional modal/config persistence events.
      - Side effects: May insert a Bible bookmark and bookmark-to-label rows.
      - Failure modes: Missing labels in workspace settings are ignored by `BookmarkService`;
-       unresolvable KJVA projection falls back to the rendered ordinal range so the bridge remains
-       usable for unsupported versifications.
+       unresolvable KJVA projection falls back to the normalized source ordinal range so the bridge
+       remains usable for unsupported versifications without persisting reversed or zero-ended
+       source ranges.
      */
     func addOrUpdateBibleBookmark(
         bookInitials: String,
@@ -121,8 +122,8 @@ struct BibleReaderBookmarkActionCoordinator {
         } else {
             bookmark = bookmarkService.addBibleBookmark(
                 bookInitials: bookInitials,
-                startOrdinal: startOrdinal,
-                endOrdinal: endOrdinal,
+                startOrdinal: sourceStart,
+                endOrdinal: sourceEnd,
                 kjvOrdinalStart: storageRange.start,
                 kjvOrdinalEnd: storageRange.end,
                 v11n: currentV11n(),
@@ -206,11 +207,13 @@ struct BibleReaderBookmarkActionCoordinator {
      - Parameters:
        - bookInitials: Module initials associated with the selected verse.
        - startOrdinal: Source-versification start ordinal reported by Vue.
-       - endOrdinal: Source-versification end ordinal reported by Vue.
+       - endOrdinal: Source-versification end ordinal reported by Vue, or `0` for a single-verse
+         paragraph marker.
      - Returns: Bridge update result containing the inserted paragraph-break bookmark payload.
      - Side effects: Inserts a Bible bookmark and attaches Android's paragraph-break system label.
-     - Failure modes: Unresolvable KJVA projection falls back to the rendered ordinal range so
-       unsupported versifications can still create paragraph breaks.
+     - Failure modes: Unresolvable KJVA projection falls back to the normalized source ordinal range
+       so unsupported versifications can still create paragraph breaks without persisting reversed
+       or zero-ended source ranges.
      */
     func addParagraphBreakBibleBookmark(
         bookInitials: String,
@@ -223,8 +226,8 @@ struct BibleReaderBookmarkActionCoordinator {
         let storageRange = kjvaOrdinalRange(sourceStart, sourceEnd) ?? (start: sourceStart, end: sourceEnd)
         let bookmark = bookmarkService.addParagraphBreakBibleBookmark(
             bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal,
+            startOrdinal: sourceStart,
+            endOrdinal: sourceEnd,
             kjvOrdinalStart: storageRange.start,
             kjvOrdinalEnd: storageRange.end,
             v11n: currentV11n(),

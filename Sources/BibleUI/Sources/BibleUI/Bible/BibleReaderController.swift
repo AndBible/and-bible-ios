@@ -4135,9 +4135,23 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /**
      Opens the chapter-level My Notes document in the current pane.
+
+     Android passes My Notes modal links as the source versification plus the bookmark's original
+     source ordinal, while the fake My Notes document itself renders rows in KJVA order. This bridge
+     converts the source ordinal before loading the document so the optional scroll target stays in
+     the document's ordinal domain.
+
+     - Parameters:
+       - bridge: BibleView bridge instance that delivered the action; unused because the controller
+         owns document loading state.
+       - v11n: Source versification name associated with `ordinal`.
+       - ordinal: Source-versification ordinal from the bookmark modal link.
+     - Side effects: Loads or queues the My Notes document through `loadMyNotesDocument`.
+     - Failure modes: If the source ordinal cannot be projected to KJVA, the document opens without
+       a scroll target rather than sending an ordinal from the wrong domain.
      */
     public func bridge(_ bridge: BibleBridge, openMyNotes v11n: String, ordinal: Int) {
-        loadMyNotesDocument(jumpToOrdinal: kjvaMyNotesOrdinal(v11nName: v11n, sourceOrdinal: ordinal) ?? ordinal)
+        loadMyNotesDocument(jumpToOrdinal: kjvaMyNotesOrdinal(v11nName: v11n, sourceOrdinal: ordinal))
     }
 
     /**
