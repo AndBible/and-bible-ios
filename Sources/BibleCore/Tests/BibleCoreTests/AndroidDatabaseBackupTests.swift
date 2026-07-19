@@ -93,50 +93,25 @@ final class AndroidDatabaseBackupTests: XCTestCase {
     }
 
     /**
-     Verifies nearest-verse clamping keeps versification-divergent references inside the KJVA book.
+     Verifies chapter superscription (verse 0) ordinals match JSword's reserved intro slot.
 
-     Bookmark creation on a module whose numbering diverges from KJVA (e.g. an LXX/Vulgate Psalm
-     chapter with more verses than KJVA) can produce a chapter/verse absent from KJVA. Exact
-     `verseOrdinal` returns nil for those, so the bookmark storage path clamps to the nearest
-     addressable KJVA verse instead of persisting a non-KJVA source ordinal. The expected result is
-     a valid KJVA ordinal in the correct book/chapter (KJVA Psalm 9 ends at verse 20), an unchanged
-     ordinal for in-range references, and nil only for genuinely unknown books. A failure means the
-     write path could store an ordinal that renders and exports as a completely wrong verse,
-     reintroducing the issue #356 symptom on the write side.
+     JSword addresses a chapter superscription as verse 0 with the ordinal immediately before
+     verse 1 (`chapterStart - 1`), and divergent canons map Psalm-title verses onto it (e.g. Synodal
+     Ps 50:1 -> KJVA Ps 51:0). `chapterIntroOrdinal` must return that reserved slot so cross-canon
+     bookmark storage matches Android's `Versification.getOrdinal`. A failure means superscription
+     bookmarks would land on the wrong ordinal (or fall back to a raw source ordinal).
      */
-    func testJSwordKJVAVersificationNearestVerseOrdinalClampsOutOfRangeReferences() {
-        // KJVA Psalm 9 has 20 verses; an LXX/Vulgate merged Psalm 9 verse 21 has no KJVA counterpart.
-        let exactPsalm9V20 = JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 9, verse: 20)
-        XCTAssertNotNil(exactPsalm9V20)
-        XCTAssertNil(
-            JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 9, verse: 21),
-            "Verse 21 is outside KJVA Psalm 9 and must not resolve exactly."
-        )
-        XCTAssertEqual(
-            JSwordKJVAVersification.nearestVerseOrdinal(osisId: "Ps", chapter: 9, verse: 21),
-            exactPsalm9V20,
-            "An out-of-range verse must clamp to the last KJVA verse of the same chapter."
-        )
-        // In-range references are unchanged by clamping.
-        XCTAssertEqual(
-            JSwordKJVAVersification.nearestVerseOrdinal(osisId: "Gen", chapter: 1, verse: 1),
-            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1),
-            "In-range references must clamp to themselves."
-        )
-        // An out-of-range chapter clamps into the book; an in-range verse is kept.
-        XCTAssertEqual(
-            JSwordKJVAVersification.nearestVerseOrdinal(osisId: "Jude", chapter: 5, verse: 3),
-            JSwordKJVAVersification.verseOrdinal(osisId: "Jude", chapter: 1, verse: 3),
-            "Jude has a single chapter, so chapter 5 clamps to chapter 1 while verse 3 stays in range."
-        )
-        // An out-of-range verse in the clamped chapter clamps to that chapter's last verse.
-        XCTAssertEqual(
-            JSwordKJVAVersification.nearestVerseOrdinal(osisId: "Jude", chapter: 5, verse: 99),
-            JSwordKJVAVersification.verseOrdinal(osisId: "Jude", chapter: 1, verse: 25),
-            "Jude 1 ends at verse 25, so an out-of-range verse clamps to Jude 1:25."
-        )
-        // Unknown books cannot be clamped.
-        XCTAssertNil(JSwordKJVAVersification.nearestVerseOrdinal(osisId: "NotABook", chapter: 1, verse: 1))
+    func testJSwordKJVAVersificationChapterIntroOrdinalMatchesReservedSlot() throws {
+        let genesisOneVerseOne = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1))
+        XCTAssertEqual(JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Gen", chapter: 1), genesisOneVerseOne - 1)
+
+        let psalm51VerseOne = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 51, verse: 1))
+        let psalm51Intro = try XCTUnwrap(JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Ps", chapter: 51))
+        XCTAssertEqual(psalm51Intro, psalm51VerseOne - 1)
+        XCTAssertGreaterThan(psalm51Intro, 0, "A chapter superscription is a real positive ordinal, not the Bible-intro sentinel 0.")
+
+        XCTAssertNil(JSwordKJVAVersification.chapterIntroOrdinal(osisId: "NotABook", chapter: 1))
+        XCTAssertNil(JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Ps", chapter: 0))
     }
 
     /**

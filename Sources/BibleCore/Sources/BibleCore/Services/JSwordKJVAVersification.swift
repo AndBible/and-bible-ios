@@ -326,34 +326,29 @@ public enum JSwordKJVAVersification {
     }
 
     /**
-     Computes the KJVA ordinal for a reference, clamping out-of-range chapters/verses to the
-     nearest addressable verse in the same book.
+     Computes JSword's KJVA ordinal for a chapter superscription/introduction (verse 0).
 
-     iOS lacks a full JSword `Versification.toV11n(KJVA)` mapping engine, so a reference from a
-     versification-divergent module (e.g. a merged LXX/Vulgate/Synodal Psalm chapter with more
-     verses than the KJVA chapter) can fall outside KJVA's exact numbering. Rather than reject such
-     a reference — which would force callers to persist a non-KJVA ordinal — this clamps the
-     chapter into the book and the verse into that chapter, matching JSword's behavior of mapping
-     an absent verse onto the nearest existing KJVA verse. Only genuinely unknown books return
-     `nil`. This is a bounded approximation, not a true versification remap: it corrects
-     out-of-range numbering but cannot realign whole-chapter offsets between canons.
+     JSword addresses a chapter superscription as verse 0, whose ordinal is the reserved slot
+     immediately before verse 1 (`chapterStart - 1`). Divergent canons map Psalm-title verses onto
+     these introductions (e.g. Synodal Ps 50:1 maps to KJVA Ps 51:0), so cross-versification storage
+     resolves them the same way Android does through `Versification.getOrdinal`.
 
      - Parameters:
        - osisId: Canonical OSIS id or supported alias.
-       - chapter: One-based chapter number in the source module's numbering.
-       - verse: One-based verse number in the source module's numbering.
-     - Returns: A valid KJVA ordinal inside `osisId`, or `nil` when the book is unknown.
+       - chapter: One-based chapter number.
+     - Returns: JSword KJVA ordinal for the chapter introduction, or `nil` when the reference is
+       invalid.
      - Side effects: none.
-     - Failure modes: Unknown OSIS ids return `nil`; negative inputs clamp to `1`.
+     - Failure modes: Unknown ids and out-of-range chapters return `nil`.
      */
-    public static func nearestVerseOrdinal(osisId: String, chapter: Int, verse: Int) -> Int? {
-        guard let book = book(forOsisId: osisId), !book.chapterVerseCounts.isEmpty else {
+    public static func chapterIntroOrdinal(osisId: String, chapter: Int) -> Int? {
+        guard chapter > 0,
+              let targetIndex = bookIndexByOsisId[osisId],
+              let ordinalIndex = ordinalIndexByBookIndex[targetIndex],
+              chapter <= ordinalIndex.book.chapterVerseCounts.count else {
             return nil
         }
-        let clampedChapter = min(max(chapter, 1), book.chapterVerseCounts.count)
-        let lastVerse = book.chapterVerseCounts[clampedChapter - 1]
-        let clampedVerse = min(max(verse, 1), lastVerse)
-        return verseOrdinal(osisId: osisId, chapter: clampedChapter, verse: clampedVerse)
+        return ordinalIndex.chapterStartOrdinals[chapter - 1] - 1
     }
 
     /**

@@ -7,6 +7,7 @@
 
 #include <swmodule.h>
 #include <versekey.h>
+#include <versificationmgr.h>
 
 namespace {
 
@@ -92,6 +93,64 @@ extern "C" int SWModule_setVerseKeyIndex(void *module, long index) {
 
     verseKey->setIndex(index);
     return verseKey->getError();
+}
+
+extern "C" int SWVersification_mapVerseToKJVA(
+    const char *sourceVersification,
+    const char *osisBookName,
+    int chapter,
+    int verse,
+    const char **kjvaOsisBookOut,
+    int *kjvaChapterOut,
+    int *kjvaVerseOut) {
+    if (!osisBookName || !kjvaOsisBookOut || !kjvaChapterOut || !kjvaVerseOut) {
+        return 1;
+    }
+
+    sword::VersificationMgr *versificationMgr = sword::VersificationMgr::getSystemVersificationMgr();
+    if (!versificationMgr) {
+        return 1;
+    }
+
+    // SWORD and Android treat an empty versification name as the KJV default.
+    const char *sourceName =
+        (sourceVersification && *sourceVersification) ? sourceVersification : "KJV";
+    const sword::VersificationMgr::System *sourceSystem =
+        versificationMgr->getVersificationSystem(sourceName);
+    if (!sourceSystem) {
+        // SWORD renders a module whose versification name it does not recognize under KJV, so
+        // mirror that fallback instead of failing the mapping. Returning failure here would let the
+        // caller persist the raw source ordinal into the KJVA-domain storage columns, which is a
+        // cross-canon parity defect on restore/sync/export.
+        sourceSystem = versificationMgr->getVersificationSystem("KJV");
+    }
+    const sword::VersificationMgr::System *kjvaSystem =
+        versificationMgr->getVersificationSystem("KJVA");
+    if (!sourceSystem || !kjvaSystem) {
+        return 1;
+    }
+
+    // translateVerse mutates book/chapter/verse in place, mapping the source-versification
+    // reference onto its KJVA counterpart using SWORD's av11n mapping tables (the same data
+    // JSword uses on Android). The book string is copied into a separate thread-local so the
+    // returned pointer stays valid after this call and cannot alias the input buffer.
+    thread_local std::string inputBookStorage;
+    thread_local std::string mappedBookStorage;
+    inputBookStorage = osisBookName;
+    const char *book = inputBookStorage.c_str();
+    int mappedChapter = chapter;
+    int mappedVerse = verse;
+    int mappedVerseEnd = verse;
+    sourceSystem->translateVerse(kjvaSystem, &book, &mappedChapter, &mappedVerse, &mappedVerseEnd);
+    if (!book) {
+        return 1;
+    }
+
+    mappedBookStorage = book;
+    *kjvaOsisBookOut = mappedBookStorage.c_str();
+    *kjvaChapterOut = mappedChapter;
+    *kjvaVerseOut = mappedVerse;
+    return 0;
 }
 
 #endif

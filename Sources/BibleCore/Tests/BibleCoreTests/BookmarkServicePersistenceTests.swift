@@ -146,6 +146,58 @@ final class BookmarkServicePersistenceTests: XCTestCase {
     }
 
     /**
+     Verifies a Psalm-superscription bookmark is covered by its chapter's KJVA introduction range.
+
+     Android's whole-chapter bookmark query starts at the chapter introduction (`Verse(v11n, book,
+     chapter, 0)`), so a bookmark stored on a Psalm title (KJVA verse 0, ordinal `chapterStart - 1`)
+     is included when that Psalm is read in any versification. This pins the ordinal contract the
+     reader's `bookmarkQueryOrdinalRange` now relies on: the superscription bookmark is returned by a
+     range whose lower bound is the chapter introduction, is missed by a range starting at verse 1
+     (the pre-fix lower bound that excluded superscriptions in KJV-family modules), and never leaks
+     into the previous chapter's range.
+     */
+    func testSuperscriptionBookmarkIsCoveredByChapterIntroductionQueryRange() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+
+        let psalm51Intro = try XCTUnwrap(JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Ps", chapter: 51))
+        let psalm51 = try XCTUnwrap(JSwordKJVAVersification.verseOrdinalRange(osisId: "Ps", chapter: 51))
+        let psalm50Intro = try XCTUnwrap(JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Ps", chapter: 50))
+        let psalm50 = try XCTUnwrap(JSwordKJVAVersification.verseOrdinalRange(osisId: "Ps", chapter: 50))
+        XCTAssertEqual(psalm51Intro, psalm51.lowerBound - 1, "The introduction ordinal sits immediately before verse 1.")
+
+        let superscription = BibleBookmark(
+            kjvOrdinalStart: psalm51Intro,
+            kjvOrdinalEnd: psalm51Intro,
+            ordinalStart: psalm51Intro,
+            ordinalEnd: psalm51Intro,
+            v11n: "KJVA"
+        )
+        modelContext.insert(superscription)
+        try modelContext.save()
+
+        // New lower bound (chapter introduction) covers the superscription bookmark.
+        XCTAssertTrue(
+            bookmarkService.bookmarks(for: psalm51Intro, endOrdinal: psalm51.upperBound)
+                .contains { $0.id == superscription.id },
+            "Chapter-introduction lower bound must cover a Psalm-title bookmark, matching Android."
+        )
+        // Pre-fix lower bound (verse 1) missed it — the gap this fix closes.
+        XCTAssertFalse(
+            bookmarkService.bookmarks(for: psalm51.lowerBound, endOrdinal: psalm51.upperBound)
+                .contains { $0.id == superscription.id },
+            "A verse-1 lower bound excludes the superscription ordinal, showing why the fix is needed."
+        )
+        // The introduction slot never leaks into the previous chapter's range.
+        XCTAssertFalse(
+            bookmarkService.bookmarks(for: psalm50Intro, endOrdinal: psalm50.upperBound)
+                .contains { $0.id == superscription.id },
+            "The Psalm 51 introduction ordinal must not fall inside Psalm 50's range."
+        )
+    }
+
+    /**
      Verifies that deleting a label clears bookmark junction rows and primary-label references
      before the label itself is removed.
      *
