@@ -166,6 +166,10 @@ struct BibleReaderModuleSwitchCoordinator {
         guard let mod = module(named: moduleName, context: context, logSubject: "module") else {
             return
         }
+        guard isReadableBibleModule(mod) else {
+            moduleSwitchLogger.warning("Cannot switch to module \(moduleName) — unrecognized versification")
+            return
+        }
 
         context.setBibleModule(mod, moduleName)
         context.refreshBookList()
@@ -196,6 +200,10 @@ struct BibleReaderModuleSwitchCoordinator {
      */
     func switchBibleDocument(to moduleName: String, context: BibleReaderModuleSwitchContext) {
         guard let mod = module(named: moduleName, context: context, logSubject: "Bible document") else {
+            return
+        }
+        guard isReadableBibleModule(mod) else {
+            moduleSwitchLogger.warning("Cannot switch to Bible document \(moduleName) — unrecognized versification")
             return
         }
         guard let plan = validatedDocumentSwitchPlan(
@@ -601,6 +609,22 @@ struct BibleReaderModuleSwitchCoordinator {
             return nil
         }
         return mod
+    }
+
+    /**
+     Reports whether a resolved module is a readable Bible for the active reader.
+
+     A Bible module is readable only when SWORD recognizes its versification; an unknown versification
+     would render mis-numbered under KJV, so switching to it is rejected the same way the reader's
+     catalog and active-module resolution exclude it. See ADR-0010.
+
+     - Parameter module: Module resolved for a Bible switch.
+     - Returns: `true` when the module's versification is defined.
+     - Side effects: Reads SWORD's versification manager through the serialization queue.
+     - Failure modes: none.
+     */
+    private func isReadableBibleModule(_ module: SwordModule) -> Bool {
+        SwordVersification.isVersificationDefined(module.info.aboutMetadata.versification)
     }
 
     /**
