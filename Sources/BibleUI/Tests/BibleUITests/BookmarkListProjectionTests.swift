@@ -360,6 +360,43 @@ final class BookmarkListProjectionTests: XCTestCase {
     }
 
     /**
+     Verifies bookmark-list rows render and navigate in the active module's versification.
+
+     Android's `BookmarkItemAdapter` formats each row in the current Bible's versification, so a
+     bookmark stored at a KJVA ordinal must display and navigate to the active module's mapped verse
+     (KJVA Psalm 10:1 is Vulgate Psalm 9:22). Without an active-versification resolver the row falls
+     back to KJVA numbering. The resolver is injected, so this exercises the plumbing deterministically
+     without a divergent module installed.
+     */
+    func testBibleBookmarkRowRendersAndNavigatesInActiveVersification() throws {
+        let kjvaPsalm10Verse1 = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 10, verse: 1)
+        )
+        let bookmark = BibleBookmark(
+            kjvOrdinalStart: kjvaPsalm10Verse1,
+            kjvOrdinalEnd: kjvaPsalm10Verse1,
+            ordinalStart: kjvaPsalm10Verse1,
+            ordinalEnd: kjvaPsalm10Verse1
+        )
+
+        // Active module is Vulgate: KJVA Psalm 10:1 maps back to Psalm 9:22.
+        let activeResolver: (Int) -> (bookName: String, reference: BookmarkListVerseReference)? = { ordinal in
+            ordinal == kjvaPsalm10Verse1
+                ? (bookName: "Psalms", reference: BookmarkListVerseReference(chapter: 9, verse: 22))
+                : nil
+        }
+        let activeItem = BookmarkListItem(bibleBookmark: bookmark, activeReferenceResolver: activeResolver)
+        XCTAssertEqual(activeItem.reference, "Psalms 9:22", "The row renders in the active versification, not KJVA numbering.")
+        XCTAssertEqual(activeItem.navigationTarget?.bookName, "Psalms")
+        XCTAssertEqual(activeItem.navigationTarget?.chapter, 9, "Navigation targets the active-versification chapter.")
+
+        // Without a resolver, the row falls back to KJVA numbering (Psalm 10).
+        let kjvaItem = BookmarkListItem(bibleBookmark: bookmark)
+        XCTAssertEqual(kjvaItem.reference, "Psalms 10:1")
+        XCTAssertEqual(kjvaItem.navigationTarget?.chapter, 10)
+    }
+
+    /**
      Builds a Bible bookmark projection row whose storage ordinals match its visible reference.
 
      Bookmark list rows now render, search, navigate, and sort from Android-compatible KJVA ordinals

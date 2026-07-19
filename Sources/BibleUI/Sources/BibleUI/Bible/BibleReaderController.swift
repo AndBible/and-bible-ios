@@ -239,21 +239,57 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Reverse-maps a stored KJVA bookmark ordinal into the active module's versification for
+     bookmark-list display and navigation.
+
+     Android renders bookmark-list rows in the current Bible's versification (Android's
+     `BookmarkItemAdapter`), so a bookmark stored at a KJVA ordinal shows and navigates to the active
+     module's mapped verse — KJVA Psalm 10 in a Vulgate module is Psalm 9. Falls back to KJVA
+     numbering (via the caller) when no active module is loaded or the reference cannot be mapped.
+
+     - Parameter kjvOrdinal: Persisted Android-compatible KJVA ordinal.
+     - Returns: Active-versification display book name plus chapter/verse, or `nil` when the ordinal
+       cannot be resolved or mapped.
+     - Side effects: Runs inside the SWORD serialization queue via `SwordVersification`.
+     - Failure modes: Returns `nil` for malformed KJVA ordinals or unmappable references.
+     */
+    func bookmarkListActiveReference(
+        kjvOrdinal: Int
+    ) -> (bookName: String, reference: BookmarkListVerseReference)? {
+        guard let kjva = JSwordKJVAVersification.verseReference(ordinal: kjvOrdinal) else { return nil }
+        let activeVersification = activeModule?.configEntry("Versification") ?? ""
+        guard let mapped = SwordVersification.mapVerseFromKJVA(
+            osisBookId: kjva.osisId,
+            chapter: kjva.chapter,
+            verse: kjva.verse,
+            targetVersification: activeVersification
+        ) else { return nil }
+        let displayName = bookName(forOsisId: mapped.osisBookId)
+            ?? JSwordKJVAVersification.longBookName(osisId: mapped.osisBookId)
+            ?? mapped.osisBookId
+        return (
+            bookName: displayName,
+            reference: BookmarkListVerseReference(chapter: mapped.chapter, verse: mapped.verse)
+        )
+    }
+
+    /**
      Converts a bookmark-modal My Notes link target into Android's My Notes document ordinal domain.
 
      Android builds the link from `bookmark.verseRange.start.ordinal` plus its source
      versification, then opens a My Notes document whose row ordinals are KJVA. iOS mirrors that by
-     resolving the source ordinal through a module with the requested versification and converting
-     the resulting verse identity to a KJVA ordinal before scrolling.
+     decoding the source ordinal from versification metadata alone (Android's `Verse(v11n, ordinal)`)
+     and converting the resulting verse identity to a KJVA ordinal before scrolling — no installed
+     source module is required. Resolution through an installed module remains only as a fallback for
+     a mis-cased or otherwise unrecognized versification name.
 
      - Parameters:
        - v11nName: Source versification emitted by the bookmark payload.
        - sourceOrdinal: Bookmark start ordinal in `v11nName`.
-     - Returns: KJVA ordinal for the same verse, or `nil` when no installed module can soundly
-       resolve the source ordinal.
-     - Side effects: May temporarily open or move SWORD modules through `verseReference`.
-     - Failure modes: Returns `nil` for invalid ordinals, unsupported versifications, or modules
-       that cannot resolve the source ordinal exactly.
+     - Returns: KJVA ordinal for the same verse, or `nil` when the source ordinal cannot be resolved.
+     - Side effects: Runs inside the SWORD serialization queue; the fallback may move SWORD modules
+       through `verseReference`.
+     - Failure modes: Returns `nil` for invalid ordinals or versifications SWORD cannot resolve.
      */
     private func kjvaMyNotesOrdinal(v11nName: String, sourceOrdinal: Int) -> Int? {
         guard sourceOrdinal > 0 else { return nil }
@@ -262,9 +298,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return sourceOrdinal
         }
 
-        // Pass the module's real-cased versification name to the engine: SWORD's versification
-        // lookup is case-sensitive (e.g. "Vulg", "Synodal"), so `wanted` (uppercased) is used only
-        // for case-insensitive matching, never as the mapping source name.
+        // Primary, module-independent path: decode the source ordinal from the versification table
+        // itself and map the reference to KJVA. Mirrors Android's Verse(v11n, ordinal).toV11n(KJVA).
+        if let decoded = SwordVersification.decodeOrdinal(versification: v11nName, ordinal: sourceOrdinal),
+           let ordinal = kjvaOrdinal(
+               osisBookId: decoded.osisBookId,
+               chapter: decoded.chapter,
+               verse: decoded.verse,
+               sourceVersification: v11nName
+           ) {
+            return ordinal
+        }
+
+        // Fallback: resolve through an installed module whose versification matches case-insensitively
+        // (SWORD's lookup is case-sensitive, so `wanted` is used only for matching), using its
+        // real-cased conf value for the mapping.
         let activeVersification = activeModule?.configEntry("Versification") ?? ""
         if normalizedVersificationName(activeVersification) == wanted,
            let reference = activeModule?.verseReference(ordinal: sourceOrdinal),

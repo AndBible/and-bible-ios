@@ -1218,6 +1218,9 @@ public struct BibleReaderView: View {
                 bibleOrdinalResolver: { book, ordinal in
                     panePresentationController?.bookmarkListVerseReference(book: book, ordinal: ordinal)
                 },
+                activeReferenceResolver: { kjvOrdinal in
+                    panePresentationController?.bookmarkListActiveReference(kjvOrdinal: kjvOrdinal)
+                },
                 showsDismissButton: false
             )
             #if os(iOS)
