@@ -263,14 +263,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         if normalizedVersificationName(activeModule?.configEntry("Versification") ?? "") == wanted,
-           let ordinal = kjvaOrdinal(sourceOrdinal: sourceOrdinal, in: activeModule) {
+           let reference = activeModule?.verseReference(ordinal: sourceOrdinal),
+           let ordinal = kjvaOrdinal(forReference: reference, sourceVersification: wanted) {
             return ordinal
         }
 
         for info in installedBibleModules
         where normalizedVersificationName(info.aboutMetadata.versification) == wanted {
             guard let module = swordManager?.module(named: info.name),
-                  let ordinal = kjvaOrdinal(sourceOrdinal: sourceOrdinal, in: module) else {
+                  let reference = module.verseReference(ordinal: sourceOrdinal),
+                  let ordinal = kjvaOrdinal(forReference: reference, sourceVersification: wanted) else {
                 continue
             }
             return ordinal
@@ -279,24 +281,76 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Converts one module-local source ordinal to KJVA using the resolved verse identity.
+     Maps a source-versification verse reference to its KJVA ordinal via SWORD's `VersificationMgr`.
+
+     Mirrors Android's `Verse.toV11n(KJVA)`: the reference is translated through SWORD's own
+     versification mapping tables (identical to the av11n data JSword ships), so divergent canons
+     (Vulgate/LXX/Synodal and similar) resolve onto their true KJVA verses rather than being
+     re-interpreted under KJVA numbering, and out-of-range references clamp to the nearest KJVA
+     verse. The mapped reference is then converted to the JSword intro-inclusive KJVA ordinal.
 
      - Parameters:
-       - sourceOrdinal: Ordinal in the supplied module's active versification.
-       - module: Module whose versification owns `sourceOrdinal`.
-     - Returns: Matching KJVA ordinal, or `nil` if either side rejects the verse.
-     - Side effects: Temporarily moves the module cursor through `verseReference`.
-     - Failure modes: Returns `nil` for invalid ordinals and references outside KJVA.
+       - reference: Verse reference in `sourceVersification`.
+       - sourceVersification: SWORD versification name owning `reference`; empty means KJV.
+     - Returns: KJVA ordinal for the mapped verse, or `nil` when mapping or ordinal lookup fails.
+     - Side effects: Runs inside the SWORD serialization queue via `SwordVersification`.
+     - Failure modes: Returns `nil` for unknown versifications or references SWORD cannot map.
      */
-    private func kjvaOrdinal(sourceOrdinal: Int, in module: SwordModule?) -> Int? {
-        guard let reference = module?.verseReference(ordinal: sourceOrdinal) else {
+    private func kjvaOrdinal(forReference reference: VerseKeyReference, sourceVersification: String) -> Int? {
+        kjvaOrdinal(
+            osisBookId: reference.osisBookId,
+            chapter: reference.chapter,
+            verse: reference.verse,
+            sourceVersification: sourceVersification
+        )
+    }
+
+    /**
+     Maps an OSIS book/chapter/verse from a source versification to its KJVA ordinal.
+
+     - Parameters:
+       - osisBookId: OSIS book id in `sourceVersification`.
+       - chapter: One-based chapter number in `sourceVersification`.
+       - verse: One-based verse number in `sourceVersification`.
+       - sourceVersification: SWORD versification name; empty means KJV.
+     - Returns: KJVA ordinal for the mapped verse, or `nil` when mapping or ordinal lookup fails.
+     - Side effects: Runs inside the SWORD serialization queue via `SwordVersification`.
+     - Failure modes: Returns `nil` for unknown versifications or references SWORD cannot map.
+     */
+    private func kjvaOrdinal(
+        osisBookId: String,
+        chapter: Int,
+        verse: Int,
+        sourceVersification: String
+    ) -> Int? {
+        guard let mapped = SwordVersification.mapVerseToKJVA(
+            osisBookId: osisBookId,
+            chapter: chapter,
+            verse: verse,
+            sourceVersification: sourceVersification
+        ) else {
             return nil
         }
         return JSwordKJVAVersification.verseOrdinal(
-            osisId: reference.osisBookId,
-            chapter: reference.chapter,
-            verse: reference.verse
+            osisId: mapped.osisBookId,
+            chapter: mapped.chapter,
+            verse: mapped.verse
         )
+    }
+
+    /**
+     Returns the active reader source versification name for KJVA mapping.
+
+     - Returns: The active module's SWORD versification (empty conf value becomes `KJV`), or KJVA
+       when no module is loaded because the fallback catalog already resolves in the KJVA domain.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func activeSourceVersificationName() -> String {
+        guard let activeModule else { return JSwordKJVAVersification.name }
+        let raw = activeModule.configEntry("Versification")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? "KJV" : raw
     }
 
     /**
@@ -5552,11 +5606,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         verseCount: Int? = nil
     ) -> (start: Int, end: Int, verseCount: Int)? {
         let osisId = osisBookId(for: book)
-        if let kjvaRange = JSwordKJVAVersification.verseOrdinalRange(osisId: osisId, chapter: chapter) {
-            let resolvedVerseCount = verseCount
-                ?? JSwordKJVAVersification.verseCount(osisId: osisId, chapter: chapter)
-                ?? max(0, kjvaRange.count)
-            return (start: kjvaRange.lowerBound, end: kjvaRange.upperBound, verseCount: resolvedVerseCount)
+        let sourceVersification = activeSourceVersificationName()
+        // Map the visible chapter's first and last verse from the source versification into KJVA so
+        // the query span covers the correct KJVA ordinals even when the module's chapter numbering
+        // diverges from KJVA (e.g. a merged Septuagint/Vulgate Psalm covers two KJVA chapters).
+        let sourceLastVerse = verseCount
+            ?? JSwordKJVAVersification.verseCount(osisId: osisId, chapter: chapter)
+        if let sourceLastVerse, sourceLastVerse > 0,
+           let firstKJVA = kjvaOrdinal(
+               osisBookId: osisId, chapter: chapter, verse: 1, sourceVersification: sourceVersification
+           ),
+           let lastKJVA = kjvaOrdinal(
+               osisBookId: osisId, chapter: chapter, verse: sourceLastVerse, sourceVersification: sourceVersification
+           ) {
+            return (
+                start: min(firstKJVA, lastKJVA),
+                end: max(firstKJVA, lastKJVA),
+                verseCount: verseCount ?? sourceLastVerse
+            )
         }
         return chapterOrdinalRange(book: book, chapter: chapter, verseCount: verseCount)
     }
@@ -6282,46 +6349,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let effectiveEndOrdinal = endOrdinal > 0 ? endOrdinal : startOrdinal
         let lower = min(startOrdinal, effectiveEndOrdinal)
         let upper = max(startOrdinal, effectiveEndOrdinal)
-        if let resolution = memorizationOrdinalResolution(startOrdinal: lower, endOrdinal: upper) {
-            return (start: resolution.startOrdinal, end: resolution.endOrdinal)
-        }
-        // Exact KJVA numbering rejected the selection (a versification-divergent module verse with
-        // no same-numbered KJVA counterpart). Persisting the raw source ordinal here would render
-        // and export as a completely wrong verse (issue #356 on the write side), so clamp each
-        // endpoint to the nearest addressable KJVA verse in the resolved book instead.
-        guard let clampedStart = clampedKJVAStorageOrdinal(sourceOrdinal: lower),
-              let clampedEnd = clampedKJVAStorageOrdinal(sourceOrdinal: upper) else {
+        guard let resolution = memorizationOrdinalResolution(startOrdinal: lower, endOrdinal: upper) else {
             return nil
         }
-        return (start: min(clampedStart, clampedEnd), end: max(clampedStart, clampedEnd))
-    }
-
-    /**
-     Clamps one rendered source ordinal to the nearest addressable KJVA storage ordinal.
-
-     Used only when exact KJVA resolution fails for a versification-divergent module. Resolves the
-     source ordinal to its book/chapter/verse through the active module, then maps that identity
-     onto the nearest valid KJVA verse in the same book. This keeps persisted bookmark ordinals
-     inside the Android-compatible KJVA domain and in the correct book, at the cost of exact verse
-     fidelity for canons whose numbering diverges from KJVA — a bounded approximation until iOS
-     gains a full JSword-style versification mapping engine.
-
-     - Parameter sourceOrdinal: Rendered ordinal in the active module's versification.
-     - Returns: Nearest KJVA storage ordinal, or `nil` when the reference cannot be resolved to a
-       KJVA book at all.
-     - Side effects: May temporarily move the active SWORD module cursor through `verseReference`.
-     - Failure modes: Returns `nil` for invalid ordinals and references outside the KJVA canon.
-     */
-    private func clampedKJVAStorageOrdinal(sourceOrdinal: Int) -> Int? {
-        guard sourceOrdinal > 0,
-              let reference = memorizationVerseReference(renderedOrdinal: sourceOrdinal) else {
-            return nil
-        }
-        return JSwordKJVAVersification.nearestVerseOrdinal(
-            osisId: reference.osisBookId,
-            chapter: reference.chapter,
-            verse: reference.verse
-        )
+        return (start: resolution.startOrdinal, end: resolution.endOrdinal)
     }
 
     /**
@@ -6345,20 +6376,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         startOrdinal: Int,
         endOrdinal: Int
     ) -> BibleReaderProgressBridgeCoordinator.MemorizationOrdinalResolution? {
+        let sourceVersification = activeSourceVersificationName()
         guard startOrdinal > 0,
               endOrdinal >= startOrdinal,
               let startReference = memorizationVerseReference(renderedOrdinal: startOrdinal),
               let endReference = memorizationVerseReference(renderedOrdinal: endOrdinal),
-              let kjvaStart = JSwordKJVAVersification.verseOrdinal(
-                  osisId: startReference.osisBookId,
-                  chapter: startReference.chapter,
-                  verse: startReference.verse
-              ),
-              let kjvaEnd = JSwordKJVAVersification.verseOrdinal(
-                  osisId: endReference.osisBookId,
-                  chapter: endReference.chapter,
-                  verse: endReference.verse
-              ) else {
+              let kjvaStart = kjvaOrdinal(forReference: startReference, sourceVersification: sourceVersification),
+              let kjvaEnd = kjvaOrdinal(forReference: endReference, sourceVersification: sourceVersification) else {
             return nil
         }
         let projections = memorizationOrdinalProjections(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
@@ -6396,19 +6420,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         endOrdinal: Int
     ) -> [BibleReaderProgressBridgeCoordinator.MemorizationOrdinalProjection] {
         guard startOrdinal > 0, endOrdinal >= startOrdinal else { return [] }
+        let sourceVersification = activeSourceVersificationName()
         return (startOrdinal...endOrdinal).compactMap { ordinal in
-            let reference = memorizationVerseReference(renderedOrdinal: ordinal)
-            guard let reference,
-                  let kjvaOrdinal = JSwordKJVAVersification.verseOrdinal(
-                      osisId: reference.osisBookId,
-                      chapter: reference.chapter,
-                      verse: reference.verse
+            guard let reference = memorizationVerseReference(renderedOrdinal: ordinal),
+                  let mappedKJVAOrdinal = kjvaOrdinal(
+                      forReference: reference,
+                      sourceVersification: sourceVersification
                   ) else {
                 return nil
             }
             return BibleReaderProgressBridgeCoordinator.MemorizationOrdinalProjection(
                 renderedOrdinal: ordinal,
-                kjvaOrdinal: kjvaOrdinal
+                kjvaOrdinal: mappedKJVAOrdinal
             )
         }
     }
