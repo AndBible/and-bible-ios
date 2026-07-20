@@ -46,7 +46,7 @@ Confirmed behavior:
   choice — the surrounding git history (2014–2016) only touches logging/memory,
   never the rejection itself.
 
-- **iOS (libsword)** — `SwordManager` has no `supported` gate;
+- **iOS (libsword)** — before this ADR, `SwordManager` had no `supported` gate;
   `VersificationMgr::getVersificationSystem(name)` returns null for an unknown
   name and SWORD falls back to KJV. **Empirically confirmed:** a module whose
   `.conf` is edited to `Versification=BogusV11n` is still listed
@@ -89,21 +89,31 @@ or a v11n newer than the pinned libsword.
 
 Accepted and implemented:
 
-1. **Match Android for truly-unrecognized versifications.** A Bible module whose
-   declared `Versification` is not registered in libsword is treated as
-   **unsupported** — not offered for reading or bookmarking — mirroring JSword's
-   `isSupported() == false`. Rationale: iOS should not render, and let users
-   annotate, content it cannot correctly interpret; doing so risks mis-numbered
-   verses, offset notes, and modules that exist on iOS but not Android.
+1. **Match Android fully: an unsupported module is invisible everywhere.** A Bible
+   module whose declared `Versification` is not registered in libsword is treated
+   as **unsupported** — mirroring JSword's `SwordBookMetaData.isSupported() == false`,
+   which keeps the book out of `Books.installed()` entirely. It is not readable, not
+   in any picker, not shown as installed in Downloads (so it appears as
+   re-downloadable, which overwrites and heals a broken conf), and not listed in
+   Settings/Import-Export. It lies dormant on disk exactly as on Android.
 
-   Implemented via `SwordVersification.isVersificationDefined(_:)` (backed by
-   `SWVersification_isSystemDefined`, mirroring JSword `Versifications.isDefined`),
-   applied where the reader partitions installed modules
-   (`BibleReaderSwordCoordinator.configure` and the Compare builder's fallback):
-   a Bible module is included in the readable set only when its versification is
-   defined. The unsupported module stays in the raw `installedModules` inventory,
-   so it remains manageable/uninstallable — iOS is intentionally more forgiving
-   than Android on management while matching it on reading.
+   Implemented with a **single filter in `SwordManager`**, the `Books.installed()`
+   equivalent: `ModuleInfo.isSupported` (a `.bible` module requires
+   `SwordVersification.isVersificationDefined(aboutMetadata.versification)`, backed by
+   `SWVersification_isSystemDefined` / JSword `Versifications.isDefined`) gates both
+   `installedModules()` and `module(named:)`. Every consumer inherits the exclusion,
+   so there are no per-path gates to keep in sync.
+
+   *Evolution:* an earlier iteration of this PR applied per-path versification gates
+   across the reader (catalog, active-module resolution, restore, switch, pane-copy)
+   and deliberately kept the module in the raw inventory so it stayed uninstallable.
+   Two adversarial reviews each found a newly-missed activation path, and the
+   "keep it uninstallable" clause was itself a divergence from Android (Android never
+   surfaces an unsupported book anywhere, including its delete list). This ADR
+   supersedes that approach with the single `SwordManager` filter above. Uninstall is
+   unaffected — it operates by name at the InstallMgr/file level, not through the
+   filtered inventory — but the Downloads UI now offers the module as re-downloadable
+   rather than as an installed item to remove, exactly as on Android.
 
 2. **Keep libsword's av11n tables reasonably current** with the JSword version
    AndBible ships, so a *legitimate* versification is recognized on both
@@ -132,12 +142,14 @@ Android-aligned, cross-platform-consistent choice.
 
 ## Consequences
 
-- Enables true parity: the same modules are usable (or not) for reading on iOS
-  and Android.
-- The readable-Bible gate lives at the reader boundary
-  (`BibleReaderSwordCoordinator`), not in `SwordManager.installedModules`, so
-  management/uninstall of an unsupported module is preserved (more forgiving than
-  Android, low risk).
+- Enables true parity: the same modules are usable (or not) on iOS and Android,
+  and an unsupported module is invisible on the same surfaces on both.
+- The gate lives in one place — `SwordManager.installedModules()` and
+  `module(named:)` (the `Books.installed()` equivalent) — so no reader path can
+  drift out of sync, and a future activation path is covered automatically.
+- An unsupported module has no direct "Uninstall" affordance (it is not shown as
+  installed); the user re-downloads to heal it, as on Android. Uninstall-by-name
+  and index deletion still work for supported modules and are unaffected.
 - Requires keeping libsword current, or legitimately-new versifications would be
   treated as unsupported on iOS until libsword is updated. This is an **accepted**
   maintenance cost: the project is committed to tracking Android on an ongoing
@@ -155,6 +167,8 @@ Android-aligned, cross-platform-consistent choice.
 - PR #359 (versification engine), PR #360 (active-versification projection +
   `unknown → KJV` mapping fallback).
 - jsword `SwordBookMetaData.java:899-904` (Android rejection), line 169 (KJV
-  default for absent v11n).
-- SwordKit `SwordVersification` (`mapVerseToKJVA` / `mapVerseFromKJVA` /
-  `decodeOrdinal`), `SwordManager.installedModules`.
+  default for absent v11n); `Books.installed()` as the single filtered registry.
+- SwordKit: `ModuleInfo.isSupported` and its use in `SwordManager.installedModules()`
+  / `module(named:)` (the single filter); `SwordVersification.isVersificationDefined`
+  (the primitive) and the mapping engine (`mapVerseToKJVA` / `mapVerseFromKJVA` /
+  `decodeOrdinal`).

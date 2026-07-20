@@ -107,6 +107,12 @@ public final class SwordManager: @unchecked Sendable {
             customModules: Self.androidCustomInstalledModules(modulePath: modulePath) +
                 Self.myBiblePackageInstalledModules(modulePath: modulePath)
         )
+        // Exclude modules SWORD cannot fully use (e.g. a Bible with an unrecognized versification),
+        // mirroring Android's `Books.installed()`, which never contains an unsupported book. Such a
+        // module is then invisible everywhere — not readable, not in pickers, and shown as
+        // not-installed in Downloads (so it appears re-downloadable, which overwrites a broken conf).
+        // Uninstall/index operate by name and are unaffected. See ADR-0010.
+        .filter(\.isSupported)
     }
 
     /// List installed modules filtered by category.
@@ -121,9 +127,19 @@ public final class SwordManager: @unchecked Sendable {
      */
     public func module(named name: String) -> SwordModule? {
         SwordRuntime.sync {
-            if let cached = moduleCache[name] { return cached }
-            guard let modHandle = SWMgr_getModuleByName(handle, name) else { return nil }
-            return getOrCreateModule(name: name, handle: modHandle)
+            let resolved: SwordModule?
+            if let cached = moduleCache[name] {
+                resolved = cached
+            } else if let modHandle = SWMgr_getModuleByName(handle, name) {
+                resolved = getOrCreateModule(name: name, handle: modHandle)
+            } else {
+                resolved = nil
+            }
+            // Do not surface an unsupported module (e.g. a Bible with an unrecognized versification),
+            // mirroring Android's `Books.installed().getBook()`, which returns null for such a book.
+            // The cache entry is left intact so enumeration internals are unaffected. See ADR-0010.
+            guard let resolved, resolved.info.isSupported else { return nil }
+            return resolved
         }
     }
 

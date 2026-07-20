@@ -2570,14 +2570,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         self.installedMapModules = other.installedMapModules
         self.moduleBookList = other.moduleBookList
 
-        // Get own module handles from the shared manager (for independent cursor state). This
-        // re-resolves the sibling's active Bible BY NAME, so it carries the same versification gate as
-        // every other activation path (catalog, active-module resolution, restore, switch) for
-        // consistency and defense-in-depth: a sibling's active Bible name is already gated to a
-        // supported module today, but re-resolving an arbitrary name here without the check would
-        // reintroduce the ADR-0010 hole if a future path ever seeded an unsupported active name.
-        if let mod = mgr.module(named: other.activeModuleName),
-           SwordVersification.isVersificationDefined(mod.info.aboutMetadata.versification) {
+        // Get own module handles from the shared manager (for independent cursor state).
+        // `module(named:)` returns nil for an unsupported module, so an unsupported active Bible name
+        // is not re-resolved into this pane. See ADR-0010.
+        if let mod = mgr.module(named: other.activeModuleName) {
             self.activeModule = mod
             self.activeModuleName = other.activeModuleName
         }
@@ -2614,14 +2610,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func restoreSavedPosition() {
         guard let pm = activeWindow?.pageManager else { return }
 
-        // Restore saved Bible module only when SWORD recognizes its versification. A persisted or
-        // synced selection naming an unknown-versification module must not override the gated active
-        // module chosen during SWORD configuration, or it would render mis-numbered under KJV while
-        // being absent from every picker. ADR-0010.
+        // Restore the saved Bible module. `module(named:)` returns nil for an unsupported
+        // (e.g. unknown-versification) module, so a persisted or synced selection naming one is not
+        // restored and the supported module chosen during SWORD configuration remains. ADR-0010.
         if let saved = pm.bibleDocument,
            let mgr = swordManager,
-           let mod = mgr.module(named: saved),
-           SwordVersification.isVersificationDefined(mod.info.aboutMetadata.versification) {
+           let mod = mgr.module(named: saved) {
             activeModule = mod
             activeModuleName = saved
             refreshBookList()

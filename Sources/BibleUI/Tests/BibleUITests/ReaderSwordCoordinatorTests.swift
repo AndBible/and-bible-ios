@@ -63,12 +63,13 @@ final class ReaderSwordCoordinatorTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies a Bible module with an unrecognized versification is excluded from the readable set.
+     Verifies a Bible module with an unrecognized versification is invisible to the coordinator.
 
-     Android marks a module whose versification JSword does not recognize unsupported and never loads
-     it. iOS mirrors that for reading/bookmarking: the coordinator drops such a module from
-     `installedBibleModules` (so it is not selectable or annotatable), while it remains in the raw
-     `installedModules` inventory so it can still be managed/uninstalled. See ADR-0010.
+     Android marks a module whose versification JSword does not recognize unsupported and never adds
+     it to `Books.installed()`, so it is invisible everywhere. iOS mirrors that with a single filter
+     in `SwordManager.installedModules()`: such a module appears in neither the raw `installedModules`
+     inventory nor `installedBibleModules`, so it is not selectable, annotatable, or shown as
+     installed. See ADR-0010.
      */
     func testExcludesBibleModuleWithUnrecognizedVersificationFromReadableSet() throws {
         let modulePath = try makeTemporarySwordFixturePath()
@@ -81,6 +82,20 @@ final class ReaderSwordCoordinatorTests: BibleUISwordFixtureTestCase {
         try conf.write(to: bogusConf, atomically: true, encoding: .utf8)
 
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+
+        // The single SwordManager filter (mirroring Android's Books.installed()) hides the unsupported
+        // module from the inventory and from by-name resolution.
+        XCTAssertFalse(
+            manager.installedModules().contains { $0.name == "BOGUS" },
+            "installedModules() must exclude an unknown-versification Bible."
+        )
+        XCTAssertTrue(
+            manager.installedModules().contains { $0.name == "KJV" },
+            "installedModules() keeps a supported Bible."
+        )
+        XCTAssertNil(manager.module(named: "BOGUS"), "module(named:) returns nil for an unsupported module.")
+        XCTAssertNotNil(manager.module(named: "KJV"), "module(named:) resolves a supported module.")
+
         let state = BibleReaderSwordCoordinator().configure(
             manager: manager,
             selection: BibleReaderSwordSelection(
@@ -101,9 +116,9 @@ final class ReaderSwordCoordinatorTests: BibleUISwordFixtureTestCase {
             state.installedBibleModules.contains { $0.name == "KJV" },
             "A module with a recognized versification stays readable."
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             state.installedModules.contains { $0.name == "BOGUS" },
-            "The unsupported module remains in the raw inventory for management/uninstall."
+            "The unsupported module is invisible in the inventory too, matching Android's Books.installed()."
         )
     }
 

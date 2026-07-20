@@ -121,14 +121,10 @@ struct BibleReaderSwordCoordinator {
         applyBaseOptions(to: manager)
         applyDisplayOptions(to: manager, settings: displaySettings, defaults: defaults)
 
+        // `installedModules()` already excludes unsupported modules (e.g. an unknown-versification
+        // Bible), mirroring Android's `Books.installed()`, so partitioning by category is sufficient.
         let modules = manager.installedModules()
-        // A Bible module is readable only when SWORD recognizes its versification. Android marks a
-        // module with an unknown versification unsupported and never loads it; iOS mirrors that for
-        // reading/bookmarking (rendering an unmapped canon under KJV would mis-number verses and
-        // create offset notes). Such modules remain in `modules` for management/uninstall. ADR-0010.
-        let bibleModules = modules.filter {
-            $0.category == .bible && SwordVersification.isVersificationDefined($0.aboutMetadata.versification)
-        }
+        let bibleModules = modules.filter { $0.category == .bible }
         let commentaryModules = modules.filter { $0.category == .commentary }
         let dictionaryModules = modules.filter { $0.category == .dictionary }
         let generalBookModules = modules.filter { $0.category == .generalBook }
@@ -244,12 +240,10 @@ struct BibleReaderSwordCoordinator {
         requestedName: String,
         installedBibleModules: [ModuleInfo]
     ) -> (module: SwordModule?, name: String) {
-        // Honor the requested module only when SWORD recognizes its versification, so an
-        // unknown-versification module is never loaded as the active reader even when it is the
-        // persisted/requested selection. Otherwise fall back to KJV, then the first supported Bible.
-        // This keeps active-module resolution consistent with the readable-Bible gate. ADR-0010.
-        if let module = manager.module(named: requestedName),
-           SwordVersification.isVersificationDefined(module.info.aboutMetadata.versification) {
+        // `module(named:)` returns nil for an unsupported (e.g. unknown-versification) module, so an
+        // unknown-versification requested module falls through to KJV / the first supported Bible
+        // rather than becoming active. See ADR-0010.
+        if let module = manager.module(named: requestedName) {
             return (module, requestedName)
         }
         if let kjv = manager.module(named: "KJV") {

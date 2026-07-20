@@ -400,6 +400,21 @@ public struct ModuleInfo: Sendable, Identifiable {
     /// Unique identifier (uses module name).
     public var id: String { name }
 
+    /**
+     Whether the reader can use this module, mirroring JSword `SwordBookMetaData.isSupported()`.
+
+     Android excludes an unsupported book from `Books.installed()` at the registry level, so it is
+     invisible everywhere (not readable, not in pickers, not shown as installed). iOS mirrors that by
+     filtering `SwordManager.installedModules()` and `module(named:)` on this predicate. Today the
+     only actionable reason a book is unsupported is a Bible whose declared versification SWORD does
+     not recognize (its verses would be mis-numbered under KJV); this is the single, extensible home
+     for any future unsupported reason (driver/type), as on Android. Non-Bible categories are
+     supported. See ADR-0010.
+     */
+    public var isSupported: Bool {
+        category != .bible || SwordVersification.isVersificationDefined(aboutMetadata.versification)
+    }
+
     public init(
         name: String,
         description: String,
