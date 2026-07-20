@@ -102,7 +102,7 @@ public final class SwordManager: @unchecked Sendable {
             return modules
         }
 
-        return Self.mergedInstalledModules(
+        let merged = Self.mergedInstalledModules(
             swordModules: swordModules,
             customModules: Self.androidCustomInstalledModules(modulePath: modulePath) +
                 Self.myBiblePackageInstalledModules(modulePath: modulePath)
@@ -112,7 +112,11 @@ public final class SwordManager: @unchecked Sendable {
         // module is then invisible everywhere — not readable, not in pickers, and shown as
         // not-installed in Downloads (so it appears re-downloadable, which overwrites a broken conf).
         // Uninstall/index operate by name and are unaffected. See ADR-0010.
-        .filter(\.isSupported)
+        //
+        // `isSupported` reads SWORD's versification manager per Bible module; run the whole filter in
+        // one serialization hop (re-entrant `SwordRuntime.sync`) so a large library costs a single
+        // queue round-trip rather than one per module.
+        return SwordRuntime.sync { merged.filter(\.isSupported) }
     }
 
     /// List installed modules filtered by category.

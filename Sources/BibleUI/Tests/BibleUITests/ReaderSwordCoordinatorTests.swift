@@ -123,6 +123,44 @@ final class ReaderSwordCoordinatorTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies a Bible module declaring a recognized non-KJV canon survives the isSupported filter.
+
+     `isSupported` must exclude only versifications SWORD cannot map, not every non-KJV canon. This
+     guards against the filter ever being narrowed to reject a legitimate divergent canon (Vulgate,
+     Synodal, LXX, etc.): a module with `Versification=Vulg` stays in the inventory, is by-name
+     resolvable, and is readable. See ADR-0010.
+     */
+    func testKeepsBibleModuleWithRecognizedNonKJVVersification() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(named: "VULGATE", description: "Vulgate-versification Bible", in: modulePath)
+        let vulgConf = URL(fileURLWithPath: modulePath).appendingPathComponent("mods.d/vulgate.conf")
+        var conf = try String(contentsOf: vulgConf, encoding: .utf8)
+        conf = conf.replacingOccurrences(of: "Versification=KJV", with: "Versification=Vulg")
+        try conf.write(to: vulgConf, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertTrue(
+            manager.installedModules().contains { $0.name == "VULGATE" },
+            "A recognized non-KJV canon (Vulg) must remain installed/readable."
+        )
+        XCTAssertNotNil(manager.module(named: "VULGATE"), "module(named:) resolves a supported non-KJV canon.")
+
+        let state = BibleReaderSwordCoordinator().configure(
+            manager: manager,
+            selection: BibleReaderSwordSelection(
+                activeModuleName: "VULGATE",
+                activeCommentaryModuleName: nil,
+                activeDictionaryModuleName: nil,
+                activeGeneralBookModuleName: nil,
+                activeMapModuleName: nil
+            ),
+            displaySettings: .appDefaults
+        )
+        XCTAssertTrue(state.installedBibleModules.contains { $0.name == "VULGATE" })
+        XCTAssertEqual(state.activeModuleName, "VULGATE", "A supported non-KJV canon can be the active Bible.")
+    }
+
+    /**
      Verifies an unknown-versification module requested as the active Bible falls back to a supported one.
 
      The readable-Bible gate must also cover active-module resolution: a persisted or synced selection
