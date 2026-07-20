@@ -140,9 +140,9 @@ int SWModule_setVerseKeyIndex(void *module, long index);
 /// Map an OSIS book/chapter/verse from a source versification into KJVA using SWORD's
 /// VersificationMgr (the same av11n mapping data JSword uses on Android). Writes the KJVA OSIS
 /// book id, chapter, and verse to the out parameters. The returned book string is owned by the
-/// callee and remains valid until the next call on the same thread. An empty source versification
-/// name is treated as KJV. Returns 0 on success and nonzero when a versification is unknown or
-/// the inputs are invalid.
+/// callee and remains valid until the next call on the same thread. An empty OR unrecognized source
+/// versification name is treated as KJV (iOS libsword renders such modules under KJV). Returns 0 on
+/// success and nonzero when KJVA is missing or the inputs are invalid.
 int SWVersification_mapVerseToKJVA(const char *sourceVersification,
                                    const char *osisBookName,
                                    int chapter,
@@ -150,6 +150,36 @@ int SWVersification_mapVerseToKJVA(const char *sourceVersification,
                                    const char **kjvaOsisBookOut,
                                    int *kjvaChapterOut,
                                    int *kjvaVerseOut);
+
+/// Map an OSIS book/chapter/verse from KJVA into a target versification using SWORD's
+/// VersificationMgr — the reverse of SWVersification_mapVerseToKJVA. Writes the target OSIS book
+/// id, chapter, and verse to the out parameters. The returned book string is owned by the callee
+/// and remains valid until the next call on the same thread. An empty OR unrecognized target
+/// versification name is treated as KJV. Returns 0 on success and nonzero when KJVA is missing or
+/// the inputs are invalid.
+int SWVersification_mapVerseFromKJVA(const char *targetVersification,
+                                     const char *kjvaOsisBookName,
+                                     int chapter,
+                                     int verse,
+                                     const char **targetOsisBookOut,
+                                     int *targetChapterOut,
+                                     int *targetVerseOut);
+
+/// Decode an intro-inclusive VerseKey index into an OSIS book/chapter/verse within the given
+/// versification, without an installed module. Writes the OSIS book id, chapter, and verse to the
+/// out parameters. The returned book string is owned by the callee and remains valid until the
+/// next call on the same thread. An empty OR unrecognized versification name is treated as KJV.
+/// Returns 0 on success and nonzero when the ordinal is out of range.
+int SWVersification_decodeOrdinal(const char *versification,
+                                  long ordinal,
+                                  const char **osisBookOut,
+                                  int *chapterOut,
+                                  int *verseOut);
+
+/// Reports whether SWORD's VersificationMgr recognizes the given versification name (mirrors
+/// JSword `Versifications.isDefined`). An empty name is the KJV default and is always defined.
+/// Returns 1 when defined, 0 when not.
+int SWVersification_isSystemDefined(const char *versification);
 
 /// Pop the last error code. Returns 0 if no error.
 char SWModule_popError(void *module);

@@ -239,21 +239,87 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Builds the bookmark-list active-versification resolver, or `nil` when the active module renders
+     in KJVA-compatible numbering.
+
+     Android renders bookmark-list rows in the current Bible's versification (Android's
+     `BookmarkItemAdapter`), so a bookmark stored at a KJVA ordinal shows and navigates to the active
+     module's mapped verse — KJVA Psalm 10 in a Vulgate module is Psalm 9. But KJV-family modules
+     (KJV/KJVA, or no module) render identically to KJVA, so this returns `nil` for them and the list
+     keeps its fast in-memory KJVA path with no per-row SWORD work. For a divergent canon it reads the
+     versification once and returns a closure that memoizes per ordinal, so a large list performs at
+     most one SWORD mapping per unique ordinal — never a serialized SWORD call per row.
+
+     - Returns: A resolver mapping a KJVA ordinal to the active versification's book name plus
+       chapter/verse, or `nil` when the active module is KJVA-compatible.
+     - Side effects: Reads the active module's `Versification` conf once through the SWORD queue.
+     - Failure modes: The returned resolver yields `nil` for malformed or unmappable ordinals.
+     */
+    func bookmarkListActiveReferenceResolver() -> ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? {
+        let activeVersification = activeModule?.configEntry("Versification") ?? ""
+        let normalized = normalizedVersificationName(activeVersification)
+        guard normalized != JSwordKJVAVersification.name, normalized != "KJV" else { return nil }
+
+        var cache: [Int: (bookName: String, reference: BookmarkListVerseReference)?] = [:]
+        return { [weak self] kjvOrdinal in
+            if let cached = cache[kjvOrdinal] { return cached }
+            let resolved = self?.bookmarkListActiveReference(
+                kjvOrdinal: kjvOrdinal,
+                versification: activeVersification
+            )
+            cache[kjvOrdinal] = resolved
+            return resolved
+        }
+    }
+
+    /**
+     Reverse-maps one stored KJVA ordinal into a target versification for bookmark-list rows.
+
+     - Parameters:
+       - kjvOrdinal: Persisted Android-compatible KJVA ordinal.
+       - activeVersification: Target module versification, read once by the resolver builder.
+     - Returns: Active-versification display book name plus chapter/verse, or `nil` when the ordinal
+       cannot be resolved or mapped.
+     - Side effects: Runs inside the SWORD serialization queue via `SwordVersification`.
+     - Failure modes: Returns `nil` for malformed KJVA ordinals or unmappable references.
+     */
+    private func bookmarkListActiveReference(
+        kjvOrdinal: Int,
+        versification activeVersification: String
+    ) -> (bookName: String, reference: BookmarkListVerseReference)? {
+        guard let kjva = JSwordKJVAVersification.verseReference(ordinal: kjvOrdinal) else { return nil }
+        guard let mapped = SwordVersification.mapVerseFromKJVA(
+            osisBookId: kjva.osisId,
+            chapter: kjva.chapter,
+            verse: kjva.verse,
+            targetVersification: activeVersification
+        ) else { return nil }
+        let displayName = bookName(forOsisId: mapped.osisBookId)
+            ?? JSwordKJVAVersification.longBookName(osisId: mapped.osisBookId)
+            ?? mapped.osisBookId
+        return (
+            bookName: displayName,
+            reference: BookmarkListVerseReference(chapter: mapped.chapter, verse: mapped.verse)
+        )
+    }
+
+    /**
      Converts a bookmark-modal My Notes link target into Android's My Notes document ordinal domain.
 
      Android builds the link from `bookmark.verseRange.start.ordinal` plus its source
      versification, then opens a My Notes document whose row ordinals are KJVA. iOS mirrors that by
-     resolving the source ordinal through a module with the requested versification and converting
-     the resulting verse identity to a KJVA ordinal before scrolling.
+     decoding the source ordinal from versification metadata alone (Android's `Verse(v11n, ordinal)`)
+     and converting the resulting verse identity to a KJVA ordinal before scrolling — no installed
+     source module is required. Resolution through an installed module remains only as a fallback for
+     a mis-cased or otherwise unrecognized versification name.
 
      - Parameters:
        - v11nName: Source versification emitted by the bookmark payload.
        - sourceOrdinal: Bookmark start ordinal in `v11nName`.
-     - Returns: KJVA ordinal for the same verse, or `nil` when no installed module can soundly
-       resolve the source ordinal.
-     - Side effects: May temporarily open or move SWORD modules through `verseReference`.
-     - Failure modes: Returns `nil` for invalid ordinals, unsupported versifications, or modules
-       that cannot resolve the source ordinal exactly.
+     - Returns: KJVA ordinal for the same verse, or `nil` when the source ordinal cannot be resolved.
+     - Side effects: Runs inside the SWORD serialization queue; the fallback may move SWORD modules
+       through `verseReference`.
+     - Failure modes: Returns `nil` for invalid ordinals or versifications SWORD cannot resolve.
      */
     private func kjvaMyNotesOrdinal(v11nName: String, sourceOrdinal: Int) -> Int? {
         guard sourceOrdinal > 0 else { return nil }
@@ -262,9 +328,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return sourceOrdinal
         }
 
-        // Pass the module's real-cased versification name to the engine: SWORD's versification
-        // lookup is case-sensitive (e.g. "Vulg", "Synodal"), so `wanted` (uppercased) is used only
-        // for case-insensitive matching, never as the mapping source name.
+        // Primary, module-independent path: decode the source ordinal from the versification table
+        // itself and map the reference to KJVA. Mirrors Android's Verse(v11n, ordinal).toV11n(KJVA).
+        if let decoded = SwordVersification.decodeOrdinal(versification: v11nName, ordinal: sourceOrdinal),
+           let ordinal = kjvaOrdinal(
+               osisBookId: decoded.osisBookId,
+               chapter: decoded.chapter,
+               verse: decoded.verse,
+               sourceVersification: v11nName
+           ) {
+            return ordinal
+        }
+
+        // Fallback: resolve through an installed module whose versification matches case-insensitively
+        // (SWORD's lookup is case-sensitive, so `wanted` is used only for matching), using its
+        // real-cased conf value for the mapping.
         let activeVersification = activeModule?.configEntry("Versification") ?? ""
         if normalizedVersificationName(activeVersification) == wanted,
            let reference = activeModule?.verseReference(ordinal: sourceOrdinal),
@@ -2492,7 +2570,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         self.installedMapModules = other.installedMapModules
         self.moduleBookList = other.moduleBookList
 
-        // Get own module handles from the shared manager (for independent cursor state)
+        // Get own module handles from the shared manager (for independent cursor state).
+        // `module(named:)` returns nil for an unsupported module, so an unsupported active Bible name
+        // is not re-resolved into this pane. See ADR-0010.
         if let mod = mgr.module(named: other.activeModuleName) {
             self.activeModule = mod
             self.activeModuleName = other.activeModuleName
@@ -2530,7 +2610,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func restoreSavedPosition() {
         guard let pm = activeWindow?.pageManager else { return }
 
-        // Restore saved Bible module
+        // Restore the saved Bible module. `module(named:)` returns nil for an unsupported
+        // (e.g. unknown-versification) module, so a persisted or synced selection naming one is not
+        // restored and the supported module chosen during SWORD configuration remains. ADR-0010.
         if let saved = pm.bibleDocument,
            let mgr = swordManager,
            let mod = mgr.module(named: saved) {

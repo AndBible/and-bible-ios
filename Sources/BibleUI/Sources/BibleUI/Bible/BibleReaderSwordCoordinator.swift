@@ -121,6 +121,8 @@ struct BibleReaderSwordCoordinator {
         applyBaseOptions(to: manager)
         applyDisplayOptions(to: manager, settings: displaySettings, defaults: defaults)
 
+        // `installedModules()` already excludes unsupported modules (e.g. an unknown-versification
+        // Bible), mirroring Android's `Books.installed()`, so partitioning by category is sufficient.
         let modules = manager.installedModules()
         let bibleModules = modules.filter { $0.category == .bible }
         let commentaryModules = modules.filter { $0.category == .commentary }
@@ -238,6 +240,9 @@ struct BibleReaderSwordCoordinator {
         requestedName: String,
         installedBibleModules: [ModuleInfo]
     ) -> (module: SwordModule?, name: String) {
+        // `module(named:)` returns nil for an unsupported (e.g. unknown-versification) module, so an
+        // unknown-versification requested module falls through to KJV / the first supported Bible
+        // rather than becoming active. See ADR-0010.
         if let module = manager.module(named: requestedName) {
             return (module, requestedName)
         }

@@ -603,6 +603,7 @@ struct BibleReaderModuleSwitchCoordinator {
         return mod
     }
 
+
     /**
      Validates an installed module category and logs the controller-compatible warning on mismatch.
 

@@ -56,15 +56,16 @@ public enum SwordVersification {
        - osisBookId: OSIS book identifier in the source versification, such as `Ps` or `Gen`.
        - chapter: One-based chapter number in the source versification.
        - verse: One-based verse number in the source versification.
-       - sourceVersification: SWORD versification name for the input reference; an empty string is
-         treated as KJV, matching SWORD and Android defaults. A name SWORD does not recognize also
-         falls back to KJV, mirroring how SWORD loads such modules.
+       - sourceVersification: SWORD versification name for the input reference; an empty OR
+         unrecognized name is treated as KJV (iOS libsword renders such modules under KJV, so their
+         ordinals map as KJV rather than failing into a raw-source-ordinal write).
      - Returns: The KJVA reference (verse `0` for a chapter superscription/introduction), or `nil`
        when inputs are invalid or SWORD cannot map the reference into KJVA.
      - Side effects: Runs inside the SWORD serialization queue and reads SWORD's system
        versification manager.
      - Failure modes: Returns `nil` for non-positive chapter/verse input, an empty book id, or a
-       mapped result with a non-positive chapter or negative verse.
+       mapped result with a non-positive chapter or negative
+       verse.
      */
     public static func mapVerseToKJVA(
         osisBookId: String,
@@ -106,6 +107,165 @@ public enum SwordVersification {
                 chapter: Int(mappedChapter),
                 verse: Int(mappedVerse)
             )
+        }
+    }
+
+    /// A verse reference resolved within an arbitrary (non-KJVA) versification.
+    public struct VerseCoordinate: Sendable, Equatable {
+        /// OSIS book identifier in the resolved versification.
+        public let osisBookId: String
+
+        /// One-based chapter number.
+        public let chapter: Int
+
+        /// Verse number; `0` denotes a chapter superscription/introduction.
+        public let verse: Int
+
+        /**
+         Creates a versification-resolved verse reference.
+
+         - Parameters:
+           - osisBookId: OSIS book identifier.
+           - chapter: One-based chapter number.
+           - verse: Verse number (`0` for a chapter introduction).
+         - Side effects: none.
+         - Failure modes: none.
+         */
+        public init(osisBookId: String, chapter: Int, verse: Int) {
+            self.osisBookId = osisBookId
+            self.chapter = chapter
+            self.verse = verse
+        }
+    }
+
+    /**
+     Maps a KJVA verse reference into a target versification (the reverse of `mapVerseToKJVA`).
+
+     Mirrors Android's `Verse.toV11n(activeV11n)`: a stored KJVA ordinal is rendered, displayed, and
+     navigated in the active module's versification, so divergent canons (LXX/Vulgate/Synodal and
+     similar) resolve onto their true active-module verses rather than being re-interpreted under
+     KJVA numbering. Used for highlight rendering, bookmark-list references, and navigation.
+
+     - Parameters:
+       - osisBookId: KJVA OSIS book identifier, such as `Ps` or `Gen`.
+       - chapter: One-based KJVA chapter number.
+       - verse: KJVA verse number (`0` for a chapter superscription/introduction).
+       - targetVersification: SWORD versification name to map into; an empty OR unrecognized name is
+         treated as KJV (iOS libsword renders such modules under KJV).
+     - Returns: The target-versification reference, or `nil` when inputs are invalid, the target
+       versification is unrecognized, or SWORD cannot map the reference.
+     - Side effects: Runs inside the SWORD serialization queue and reads SWORD's system
+       versification manager.
+     - Failure modes: Returns `nil` for a non-positive chapter, a negative verse, an empty book id,
+       an unrecognized target versification, or a mapped result outside the target's verse range.
+     */
+    public static func mapVerseFromKJVA(
+        osisBookId: String,
+        chapter: Int,
+        verse: Int,
+        targetVersification: String
+    ) -> VerseCoordinate? {
+        guard chapter > 0, verse >= 0, !osisBookId.isEmpty else { return nil }
+
+        return SwordRuntime.sync {
+            var mappedBook: UnsafePointer<CChar>?
+            var mappedChapter: Int32 = 0
+            var mappedVerse: Int32 = 0
+
+            let status = osisBookId.withCString { bookPointer in
+                targetVersification.withCString { versificationPointer in
+                    SWVersification_mapVerseFromKJVA(
+                        versificationPointer,
+                        bookPointer,
+                        Int32(chapter),
+                        Int32(verse),
+                        &mappedBook,
+                        &mappedChapter,
+                        &mappedVerse
+                    )
+                }
+            }
+
+            guard status == 0, let mappedBook else { return nil }
+            let bookId = String(cString: mappedBook)
+            guard !bookId.isEmpty, mappedChapter > 0, mappedVerse >= 0 else { return nil }
+            return VerseCoordinate(
+                osisBookId: bookId,
+                chapter: Int(mappedChapter),
+                verse: Int(mappedVerse)
+            )
+        }
+    }
+
+    /**
+     Decodes an intro-inclusive ordinal into its verse reference within a versification.
+
+     Mirrors Android's `Verse(v11n, ordinal)`: a persisted source ordinal is resolved from the
+     versification's own metadata, so a restored bookmark's original ordinal converts even when the
+     module that produced it is not installed — matching this engine's module-independent goal.
+
+     - Parameters:
+       - versification: SWORD versification name owning `ordinal`; an empty OR unrecognized name is
+         treated as KJV (iOS libsword renders such modules under KJV).
+       - ordinal: Intro-inclusive SWORD `VerseKey` index (the same scheme the module cursor uses).
+     - Returns: The decoded reference, or `nil` when the versification is unrecognized or the ordinal
+       is out of range or resolves to an introduction slot.
+     - Side effects: Runs inside the SWORD serialization queue and reads SWORD's system
+       versification manager.
+     - Failure modes: Returns `nil` for a non-positive ordinal, an unrecognized versification, or an
+       ordinal that does not round-trip to a real verse.
+     */
+    public static func decodeOrdinal(
+        versification: String,
+        ordinal: Int
+    ) -> VerseCoordinate? {
+        guard ordinal > 0 else { return nil }
+
+        return SwordRuntime.sync {
+            var decodedBook: UnsafePointer<CChar>?
+            var decodedChapter: Int32 = 0
+            var decodedVerse: Int32 = 0
+
+            let status = versification.withCString { versificationPointer in
+                SWVersification_decodeOrdinal(
+                    versificationPointer,
+                    CLong(ordinal),
+                    &decodedBook,
+                    &decodedChapter,
+                    &decodedVerse
+                )
+            }
+
+            guard status == 0, let decodedBook else { return nil }
+            let bookId = String(cString: decodedBook)
+            guard !bookId.isEmpty, decodedChapter > 0, decodedVerse > 0 else { return nil }
+            return VerseCoordinate(
+                osisBookId: bookId,
+                chapter: Int(decodedChapter),
+                verse: Int(decodedVerse)
+            )
+        }
+    }
+
+    /**
+     Reports whether SWORD recognizes a module's declared versification.
+
+     Mirrors Android's JSword `Versifications.isDefined` check in `SwordBookMetaData`: a module whose
+     versification SWORD cannot map is unsupported for reading (Android marks it `supported = false`
+     and never loads it). iOS libsword would otherwise render such a module under KJV, mis-numbering a
+     divergent canon; callers use this to gate those modules out of the readable Bible set while
+     leaving them in the raw installed inventory for management/uninstall. See ADR-0010.
+
+     - Parameter versification: SWORD versification name from a module's `Versification` conf value;
+       an empty string is the KJV default and is always defined.
+     - Returns: `true` when SWORD's `VersificationMgr` recognizes the name, `false` otherwise.
+     - Side effects: Runs inside the SWORD serialization queue and reads SWORD's system
+       versification manager.
+     - Failure modes: none; an unrecognized or unavailable versification manager yields `false`.
+     */
+    public static func isVersificationDefined(_ versification: String) -> Bool {
+        SwordRuntime.sync {
+            versification.withCString { SWVersification_isSystemDefined($0) == 1 }
         }
     }
 }

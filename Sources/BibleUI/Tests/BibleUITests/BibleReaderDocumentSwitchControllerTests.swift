@@ -272,4 +272,113 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         XCTAssertEqual(pageManager.currentCategoryName, baselineCategoryName)
         XCTAssertEqual(persistCount, 0)
     }
+
+    /**
+     Protects the Bible switch API from activating a module with an unrecognized versification.
+
+     `switchBibleDocument(to:)` is public controller API reachable beyond the versification-filtered
+     picker (bridge, next/previous cycling, restore). A module whose versification SWORD cannot map
+     must not become the active Bible — it would render mis-numbered under KJV — so the switch leaves
+     the active Bible, category, PageManager state, and persistence untouched. See ADR-0010.
+     */
+    @MainActor
+    func testBibleDocumentSwitchRejectsUnknownVersificationModuleWithoutStateMutation() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(named: "BOGUS", description: "Bogus Versification Bible", in: modulePath)
+        let bogusConf = URL(fileURLWithPath: modulePath).appendingPathComponent("mods.d/bogus.conf")
+        var conf = try String(contentsOf: bogusConf, encoding: .utf8)
+        conf = conf.replacingOccurrences(of: "Versification=KJV", with: "Versification=BogusV11n")
+        try conf.write(to: bogusConf, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        let baselineBibleModuleName = controller.activeModuleName
+        let baselineBibleDocument = pageManager.bibleDocument
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.switchBibleDocument(to: "BOGUS")
+
+        XCTAssertNotEqual(controller.activeModuleName, "BOGUS", "An unknown-versification module must not become the active Bible.")
+        XCTAssertEqual(controller.activeModuleName, baselineBibleModuleName)
+        XCTAssertEqual(pageManager.bibleDocument, baselineBibleDocument)
+        XCTAssertEqual(persistCount, 0)
+    }
+
+    /**
+     Protects the module-only Bible switch API from activating an unknown-versification module.
+
+     `switchModule(to:)` changes the Bible without changing the visible category and, like
+     `switchBibleDocument(to:)`, is public controller API reachable beyond the versification-filtered
+     picker. A module whose versification SWORD cannot map must not become the active Bible. See
+     ADR-0010.
+     */
+    @MainActor
+    func testBibleModuleSwitchRejectsUnknownVersificationModuleWithoutStateMutation() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(named: "BOGUS", description: "Bogus Versification Bible", in: modulePath)
+        let bogusConf = URL(fileURLWithPath: modulePath).appendingPathComponent("mods.d/bogus.conf")
+        var conf = try String(contentsOf: bogusConf, encoding: .utf8)
+        conf = conf.replacingOccurrences(of: "Versification=KJV", with: "Versification=BogusV11n")
+        try conf.write(to: bogusConf, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        let baselineBibleModuleName = controller.activeModuleName
+        let baselineBibleDocument = pageManager.bibleDocument
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.switchModule(to: "BOGUS")
+
+        XCTAssertNotEqual(controller.activeModuleName, "BOGUS", "An unknown-versification module must not become the active Bible.")
+        XCTAssertEqual(controller.activeModuleName, baselineBibleModuleName)
+        XCTAssertEqual(pageManager.bibleDocument, baselineBibleDocument)
+        XCTAssertEqual(persistCount, 0)
+    }
+
+    /**
+     Protects position restore from activating a persisted unknown-versification Bible.
+
+     `restoreSavedPosition` reads `PageManager.bibleDocument`, which a pre-gate release or a synced
+     workspace may set to an unknown-versification module. Restoring it would make it the active
+     Bible (rendered mis-numbered under KJV); instead the gated active module chosen during SWORD
+     configuration (here KJV) must remain. See ADR-0010.
+     */
+    @MainActor
+    func testRestoreSavedPositionSkipsPersistedUnknownVersificationBible() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(named: "BOGUS", description: "Bogus Versification Bible", in: modulePath)
+        let bogusConf = URL(fileURLWithPath: modulePath).appendingPathComponent("mods.d/bogus.conf")
+        var conf = try String(contentsOf: bogusConf, encoding: .utf8)
+        conf = conf.replacingOccurrences(of: "Versification=KJV", with: "Versification=BogusV11n")
+        try conf.write(to: bogusConf, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        // The supported KJV is active after configuration.
+        XCTAssertEqual(controller.activeModuleName, "KJV")
+
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleDocument = "BOGUS"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.activeModuleName, "KJV", "A persisted unknown-versification Bible must not be restored as active.")
+        XCTAssertEqual(controller.activeModule?.info.name, "KJV")
+    }
 }

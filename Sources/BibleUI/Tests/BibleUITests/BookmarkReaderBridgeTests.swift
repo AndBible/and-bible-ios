@@ -543,16 +543,39 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies the bookmark-list active-versification resolver is nil for KJV-family active modules.
+
+     KJV-family modules render KJVA-compatible numbering, so the reverse KJVA->active mapping is
+     identity and the list must keep its fast in-memory path with no per-row SWORD work. Only a
+     divergent-canon active module returns a (memoizing) resolver.
+     */
+    @MainActor
+    func testBookmarkListActiveReferenceResolverIsNilForKJVFamilyModule() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bridgeDidSetClientReady(bridge)
+        controller.navigateTo(book: "Matthew", chapter: 1, verse: 1)
+
+        XCTAssertNil(
+            controller.bookmarkListActiveReferenceResolver(),
+            "KJV-family active modules render KJVA-compatibly, so the list must skip per-row SWORD mapping."
+        )
+    }
+
+    /**
      Verifies My Notes modal links omit their scroll target when source-to-KJVA conversion fails.
      *
      * Android's My Notes fake document scrolls within KJVA rows. When iOS cannot resolve the source
-     * versification named by a modal link, passing the original source ordinal would cross ordinal
-     * domains and scroll to the wrong bookmark. The safe parity behavior is to open the document and
-     * leave `setup_content.jumpToOrdinal` null.
+     * ordinal named by a modal link (here an ordinal beyond any versification's range), passing it
+     * would cross ordinal domains and scroll to the wrong bookmark. The safe parity behavior is to
+     * open the document and leave `setup_content.jumpToOrdinal` null. (An unrecognized versification
+     * name is NOT a failure — libsword renders such modules under KJV, so it resolves as KJV.)
      *
      * Failure meaning:
-     * - unsupported or uninstalled source versifications could leak source ordinals into the KJVA My
-     *   Notes document contract and navigate to unrelated notes.
+     * - an unresolvable source ordinal could leak into the KJVA My Notes document contract and
+     *   navigate to unrelated notes.
      */
     @MainActor
     func testReaderOpenMyNotesOmitsJumpTargetWhenSourceOrdinalCannotConvertToKJVA() throws {
@@ -564,7 +587,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         controller.navigateTo(book: "Matthew", chapter: 1, verse: 1)
         let baselineCount = recordedScripts().count
 
-        controller.bridge(bridge, openMyNotes: "UninstalledV11n", ordinal: 12_345)
+        controller.bridge(bridge, openMyNotes: "Vulg", ordinal: 10_000_000)
 
         let myNotesScripts = Array(recordedScripts().dropFirst(baselineCount))
         let setupPayload = try XCTUnwrap(

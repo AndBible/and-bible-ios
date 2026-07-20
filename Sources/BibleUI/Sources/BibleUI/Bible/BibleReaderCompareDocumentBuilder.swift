@@ -165,6 +165,8 @@ struct BibleReaderCompareDocumentBuilder {
      - Failure modes: Returns an empty array when no installed module is categorized as a Bible.
      */
     private func installedCompareBibleModules(using manager: SwordManager) -> [ModuleInfo] {
+        // `installedModules()` already excludes unsupported modules (ADR-0010), so filtering by
+        // category matches the cached `installedBibleModules` the coordinator builds.
         let modules = installedBibleModules.isEmpty
             ? manager.installedModules().filter { $0.category == .bible }
             : installedBibleModules

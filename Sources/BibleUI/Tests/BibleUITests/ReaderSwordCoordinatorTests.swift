@@ -63,6 +63,138 @@ final class ReaderSwordCoordinatorTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies a Bible module with an unrecognized versification is invisible to the coordinator.
+
+     Android marks a module whose versification JSword does not recognize unsupported and never adds
+     it to `Books.installed()`, so it is invisible everywhere. iOS mirrors that with a single filter
+     in `SwordManager.installedModules()`: such a module appears in neither the raw `installedModules`
+     inventory nor `installedBibleModules`, so it is not selectable, annotatable, or shown as
+     installed. See ADR-0010.
+     */
+    func testExcludesBibleModuleWithUnrecognizedVersificationFromReadableSet() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(named: "BOGUS", description: "Bogus Versification Bible", in: modulePath)
+        // Point BOGUS at a versification SWORD does not recognize.
+        let bogusConf = URL(fileURLWithPath: modulePath)
+            .appendingPathComponent("mods.d/bogus.conf")
+        var conf = try String(contentsOf: bogusConf, encoding: .utf8)
+        conf = conf.replacingOccurrences(of: "Versification=KJV", with: "Versification=BogusV11n")
+        try conf.write(to: bogusConf, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+
+        // The single SwordManager filter (mirroring Android's Books.installed()) hides the unsupported
+        // module from the inventory and from by-name resolution.
+        XCTAssertFalse(
+            manager.installedModules().contains { $0.name == "BOGUS" },
+            "installedModules() must exclude an unknown-versification Bible."
+        )
+        XCTAssertTrue(
+            manager.installedModules().contains { $0.name == "KJV" },
+            "installedModules() keeps a supported Bible."
+        )
+        XCTAssertNil(manager.module(named: "BOGUS"), "module(named:) returns nil for an unsupported module.")
+        XCTAssertNotNil(manager.module(named: "KJV"), "module(named:) resolves a supported module.")
+
+        let state = BibleReaderSwordCoordinator().configure(
+            manager: manager,
+            selection: BibleReaderSwordSelection(
+                activeModuleName: "KJV",
+                activeCommentaryModuleName: nil,
+                activeDictionaryModuleName: nil,
+                activeGeneralBookModuleName: nil,
+                activeMapModuleName: nil
+            ),
+            displaySettings: .appDefaults
+        )
+
+        XCTAssertFalse(
+            state.installedBibleModules.contains { $0.name == "BOGUS" },
+            "A module with an unrecognized versification must not be readable/bookmarkable."
+        )
+        XCTAssertTrue(
+            state.installedBibleModules.contains { $0.name == "KJV" },
+            "A module with a recognized versification stays readable."
+        )
+        XCTAssertFalse(
+            state.installedModules.contains { $0.name == "BOGUS" },
+            "The unsupported module is invisible in the inventory too, matching Android's Books.installed()."
+        )
+    }
+
+    /**
+     Verifies a Bible module declaring a recognized non-KJV canon survives the isSupported filter.
+
+     `isSupported` must exclude only versifications SWORD cannot map, not every non-KJV canon. This
+     guards against the filter ever being narrowed to reject a legitimate divergent canon (Vulgate,
+     Synodal, LXX, etc.): a module with `Versification=Vulg` stays in the inventory, is by-name
+     resolvable, and is readable. See ADR-0010.
+     */
+    func testKeepsBibleModuleWithRecognizedNonKJVVersification() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(named: "VULGATE", description: "Vulgate-versification Bible", in: modulePath)
+        let vulgConf = URL(fileURLWithPath: modulePath).appendingPathComponent("mods.d/vulgate.conf")
+        var conf = try String(contentsOf: vulgConf, encoding: .utf8)
+        conf = conf.replacingOccurrences(of: "Versification=KJV", with: "Versification=Vulg")
+        try conf.write(to: vulgConf, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertTrue(
+            manager.installedModules().contains { $0.name == "VULGATE" },
+            "A recognized non-KJV canon (Vulg) must remain installed/readable."
+        )
+        XCTAssertNotNil(manager.module(named: "VULGATE"), "module(named:) resolves a supported non-KJV canon.")
+
+        let state = BibleReaderSwordCoordinator().configure(
+            manager: manager,
+            selection: BibleReaderSwordSelection(
+                activeModuleName: "VULGATE",
+                activeCommentaryModuleName: nil,
+                activeDictionaryModuleName: nil,
+                activeGeneralBookModuleName: nil,
+                activeMapModuleName: nil
+            ),
+            displaySettings: .appDefaults
+        )
+        XCTAssertTrue(state.installedBibleModules.contains { $0.name == "VULGATE" })
+        XCTAssertEqual(state.activeModuleName, "VULGATE", "A supported non-KJV canon can be the active Bible.")
+    }
+
+    /**
+     Verifies an unknown-versification module requested as the active Bible falls back to a supported one.
+
+     The readable-Bible gate must also cover active-module resolution: a persisted or synced selection
+     naming an unknown-versification module must not become the active/rendered Bible (it would render
+     mis-numbered under KJV while being absent from every picker). The coordinator falls back to KJV.
+     See ADR-0010.
+     */
+    func testActiveBibleModuleFallsBackWhenRequestedModuleHasUnrecognizedVersification() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(named: "BOGUS", description: "Bogus Versification Bible", in: modulePath)
+        let bogusConf = URL(fileURLWithPath: modulePath).appendingPathComponent("mods.d/bogus.conf")
+        var conf = try String(contentsOf: bogusConf, encoding: .utf8)
+        conf = conf.replacingOccurrences(of: "Versification=KJV", with: "Versification=BogusV11n")
+        try conf.write(to: bogusConf, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let state = BibleReaderSwordCoordinator().configure(
+            manager: manager,
+            selection: BibleReaderSwordSelection(
+                activeModuleName: "BOGUS",
+                activeCommentaryModuleName: nil,
+                activeDictionaryModuleName: nil,
+                activeGeneralBookModuleName: nil,
+                activeMapModuleName: nil
+            ),
+            displaySettings: .appDefaults
+        )
+
+        XCTAssertNotEqual(state.activeModuleName, "BOGUS", "An unknown-versification module must not become the active Bible.")
+        XCTAssertEqual(state.activeModuleName, "KJV", "The coordinator falls back to a supported Bible (KJV).")
+        XCTAssertEqual(state.activeModule?.info.name, "KJV")
+    }
+
+    /**
      Protects the SWORD global option mapping used by reader rendering.
 
      Android applies reader display settings through JSword filters; iOS mirrors those options with

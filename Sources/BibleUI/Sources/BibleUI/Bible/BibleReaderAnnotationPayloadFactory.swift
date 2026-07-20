@@ -37,6 +37,13 @@ struct BibleReaderAnnotationPayloadFactory {
     private let bookCatalog: BibleReaderBookCatalog
     /// Synthetic unlabeled label identifier required by the web client.
     private let unlabeledLabelID: String
+    /// Active module versification, read once so per-bookmark projection avoids repeated SWORD reads.
+    private let activeVersification: String
+    /**
+     Whether the active module renders KJVA-compatible numbering (KJV-family), in which case the
+     reverse KJVA->active mapping is identity and can be skipped.
+     */
+    private let activeVersificationIsKJVACompatible: Bool
 
     /**
      Selects the ordinal domain used for Bible bookmark bridge payloads.
@@ -96,6 +103,11 @@ struct BibleReaderAnnotationPayloadFactory {
         self.activeModule = activeModule
         self.bookCatalog = bookCatalog
         self.unlabeledLabelID = unlabeledLabelID
+        let versification = activeModule?.configEntry("Versification")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.activeVersification = versification
+        let normalized = versification.uppercased()
+        self.activeVersificationIsKJVACompatible = versification.isEmpty || normalized == "KJV" || normalized == "KJVA"
     }
 
     /**
@@ -444,8 +456,10 @@ struct BibleReaderAnnotationPayloadFactory {
      Resolves a stored KJVA bookmark ordinal into the target document's rendered ordinal space.
 
      Android backups identify Bible bookmarks by KJVA ordinals even when the `book` column stores
-     module initials or NULL. Normal Bible documents need the active module's rendered ordinal for
-     Vue highlight matching, while Android's My Notes fake document uses KJVA ordinals directly.
+     module initials or NULL. Normal Bible documents reverse-map the stored KJVA reference into the
+     active module's versification (Android's `verseRange.toV11n(activeV11n)`) and use that module's
+     rendered ordinal for Vue highlight matching, while Android's My Notes fake document uses KJVA
+     ordinals directly.
 
      - Parameters:
        - kjvOrdinal: Persisted Android-compatible KJVA ordinal.
@@ -465,23 +479,63 @@ struct BibleReaderAnnotationPayloadFactory {
         ordinalProjection: BibleBookmarkOrdinalProjection
     ) -> VerseKeyReference {
         if let kjvaReference = JSwordKJVAVersification.verseReference(ordinal: kjvOrdinal) {
-            let renderedOrdinal: Int
             switch ordinalProjection {
             case .activeModule:
-                renderedOrdinal = activeModule?.verseOrdinal(
+                // KJV-family modules render KJVA numbering identically, so skip the reverse map and
+                // take the active module's ordinal for the KJVA coordinates directly (no SWORD
+                // mapping per bookmark).
+                if activeVersificationIsKJVACompatible {
+                    let renderedOrdinal = activeModule?.verseOrdinal(
+                        osisBookId: kjvaReference.osisId,
+                        chapter: kjvaReference.chapter,
+                        verse: kjvaReference.verse
+                    ) ?? kjvaReference.ordinal
+                    return VerseKeyReference(
+                        osisBookId: kjvaReference.osisId,
+                        chapter: kjvaReference.chapter,
+                        verse: kjvaReference.verse,
+                        ordinal: renderedOrdinal
+                    )
+                }
+                // Divergent canon: reverse-map the stored KJVA reference into the active module's
+                // versification (Android's verseRange.toV11n(activeV11n)), then take that module's
+                // rendered ordinal, so it lands on the true active verse (e.g. KJVA Ps 10:1 ->
+                // Vulgate Ps 9:22) instead of the identically-numbered KJVA verse.
+                if let activeModule,
+                   let mapped = SwordVersification.mapVerseFromKJVA(
+                       osisBookId: kjvaReference.osisId,
+                       chapter: kjvaReference.chapter,
+                       verse: kjvaReference.verse,
+                       targetVersification: activeVersification
+                   ),
+                   let activeOrdinal = activeModule.verseOrdinal(
+                       osisBookId: mapped.osisBookId,
+                       chapter: mapped.chapter,
+                       verse: mapped.verse
+                   ) {
+                    return VerseKeyReference(
+                        osisBookId: mapped.osisBookId,
+                        chapter: mapped.chapter,
+                        verse: mapped.verse,
+                        ordinal: activeOrdinal
+                    )
+                }
+                // No active module, or a reference the active module cannot render (e.g. a
+                // superscription): fall back to the KJVA coordinates and ordinal.
+                return VerseKeyReference(
                     osisBookId: kjvaReference.osisId,
                     chapter: kjvaReference.chapter,
-                    verse: kjvaReference.verse
-                ) ?? kjvaReference.ordinal
+                    verse: kjvaReference.verse,
+                    ordinal: kjvaReference.ordinal
+                )
             case .kjva:
-                renderedOrdinal = kjvaReference.ordinal
+                return VerseKeyReference(
+                    osisBookId: kjvaReference.osisId,
+                    chapter: kjvaReference.chapter,
+                    verse: kjvaReference.verse,
+                    ordinal: kjvaReference.ordinal
+                )
             }
-            return VerseKeyReference(
-                osisBookId: kjvaReference.osisId,
-                chapter: kjvaReference.chapter,
-                verse: kjvaReference.verse,
-                ordinal: renderedOrdinal
-            )
         }
         return verseReference(book: bookName, ordinal: sourceOrdinal)
             ?? activeModule?.verseReference(ordinal: sourceOrdinal)

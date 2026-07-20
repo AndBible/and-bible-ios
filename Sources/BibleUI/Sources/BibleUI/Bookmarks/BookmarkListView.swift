@@ -106,6 +106,12 @@ public struct BookmarkListView: View {
     /// Optional SWORD-backed resolver for Bible bookmark ordinals.
     var bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)?
 
+    /**
+     Optional resolver mapping a stored KJVA ordinal into the active module's versification for
+     display and navigation (Android renders list rows in the current Bible's versification).
+     */
+    var activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)?
+
     /// Whether the list should expose sheet-style explicit dismiss chrome.
     private let showsDismissButton: Bool
 
@@ -117,6 +123,8 @@ public struct BookmarkListView: View {
        - onOpenStudyPad: Callback invoked when the user wants to open a selected label's study pad.
        - bibleOrdinalResolver: Optional resolver that maps `(bookName, ordinal)` to a concrete
          chapter/verse using the active Bible versification.
+       - activeReferenceResolver: Optional resolver that maps a stored KJVA ordinal to the active
+         module's versification (book name plus chapter/verse) for display and navigation.
        - showsDismissButton: Whether to show the sheet-style Done button; app-owned destination
          routes rely on navigation-stack back chrome instead.
      */
@@ -124,11 +132,13 @@ public struct BookmarkListView: View {
         onNavigate: ((String, Int) -> Void)? = nil,
         onOpenStudyPad: ((UUID) -> Void)? = nil,
         bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
+        activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil,
         showsDismissButton: Bool = true
     ) {
         self.onNavigate = onNavigate
         self.onOpenStudyPad = onOpenStudyPad
         self.bibleOrdinalResolver = bibleOrdinalResolver
+        self.activeReferenceResolver = activeReferenceResolver
         self.showsDismissButton = showsDismissButton
     }
 
@@ -148,7 +158,13 @@ public struct BookmarkListView: View {
     private var bookmarkListItems: [BookmarkListItem] {
         let bibleItems = bibleBookmarks
             .filter { ($0.notes?.notes ?? "").isEmpty }
-            .map { BookmarkListItem(bibleBookmark: $0, ordinalResolver: bibleOrdinalResolver) }
+            .map {
+                BookmarkListItem(
+                    bibleBookmark: $0,
+                    ordinalResolver: bibleOrdinalResolver,
+                    activeReferenceResolver: activeReferenceResolver
+                )
+            }
         let genericItems = genericBookmarks
             .filter { ($0.notes?.notes ?? "").isEmpty }
             .map(BookmarkListItem.init(genericBookmark:))
@@ -448,13 +464,19 @@ public struct BookmarkListView: View {
      */
     static func verseReference(
         for bookmark: BibleBookmark,
-        ordinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil
+        ordinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
+        activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil
     ) -> String {
-        if let start = kjvaVerseReference(ordinal: bookmark.kjvOrdinalStart) {
+        // Prefer the active module's versification (Android renders list rows in the current Bible);
+        // fall back to KJVA numbering when no active module resolver is available.
+        let resolve: (Int) -> (bookName: String, reference: BookmarkListVerseReference)? = { ordinal in
+            activeReferenceResolver?(ordinal) ?? kjvaVerseReference(ordinal: ordinal)
+        }
+        if let start = resolve(bookmark.kjvOrdinalStart) {
             let effectiveKJVEnd = bookmark.kjvOrdinalEnd > bookmark.kjvOrdinalStart
                 ? bookmark.kjvOrdinalEnd
                 : bookmark.kjvOrdinalStart
-            let end = kjvaVerseReference(ordinal: effectiveKJVEnd) ?? start
+            let end = resolve(effectiveKJVEnd) ?? start
             return formattedBibleReference(
                 startBookName: start.bookName,
                 startReference: start.reference,
@@ -814,9 +836,14 @@ struct BookmarkListItem: Identifiable {
     /// Creates a normalized row for one Bible bookmark.
     init(
         bibleBookmark bookmark: BibleBookmark,
-        ordinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil
+        ordinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
+        activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil
     ) {
-        let reference = BookmarkListView.verseReference(for: bookmark, ordinalResolver: ordinalResolver)
+        let reference = BookmarkListView.verseReference(
+            for: bookmark,
+            ordinalResolver: ordinalResolver,
+            activeReferenceResolver: activeReferenceResolver
+        )
         let noteText = bookmark.notes?.notes ?? ""
         self.id = bookmark.id
         self.source = .bible(bookmark)
@@ -828,7 +855,10 @@ struct BookmarkListItem: Identifiable {
         self.customIcon = bookmark.customIcon
         self.noteText = noteText
         self.labels = bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
-        if let target = BookmarkListView.kjvaVerseReference(ordinal: bookmark.kjvOrdinalStart) {
+        // Navigate in the active module's versification (Android's list navigation); fall back to
+        // KJVA numbering when no active module resolver is available.
+        if let target = activeReferenceResolver?(bookmark.kjvOrdinalStart)
+            ?? BookmarkListView.kjvaVerseReference(ordinal: bookmark.kjvOrdinalStart) {
             self.navigationTarget = (
                 bookName: target.bookName,
                 chapter: target.reference.chapter
