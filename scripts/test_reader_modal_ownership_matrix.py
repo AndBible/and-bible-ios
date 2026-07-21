@@ -73,6 +73,10 @@ ROUTE_CLASSIFICATIONS: dict[str, tuple[str, str]] = {
         "Android app-owned",
         "Adapted app-owned route with Settings UI coverage.",
     ),
+    "ReaderDestination.aiSettings": (
+        "Android app-owned",
+        "Android top-level settings route with direct and Application Preferences UI coverage.",
+    ),
     "ReaderDestination.startupDocumentSetup": (
         "Android app-owned",
         "Startup setup route matching Android's first-download activity surface.",
