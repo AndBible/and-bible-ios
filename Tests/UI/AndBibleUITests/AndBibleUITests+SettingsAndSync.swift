@@ -44,11 +44,16 @@ extension AndBibleUITests {
             timeout: 20
         )
         if initialShowCalculatorToggle.value as? String != "1" {
-            tapElementReliably(initialShowCalculatorToggle, timeout: 10)
+            toggleSwitchReliably(
+                initialShowCalculatorToggle,
+                expectedValue: "1",
+                timeout: 10
+            )
         }
-        XCTAssertTrue(
-            requireSettingsNavigationControl("showCalculatorToggle", in: app, timeout: 10).exists,
-            "Android keeps Settings visible after enabling the gate; it applies on the next resume."
+        XCTAssertEqual(
+            requireSettingsNavigationControl("showCalculatorToggle", in: app, timeout: 10).value as? String,
+            "1",
+            "Android keeps Settings visible after enabling the gate and persists it for the next resume."
         )
         XCTAssertFalse(app.otherElements["calculatorGateRoot"].exists)
 
