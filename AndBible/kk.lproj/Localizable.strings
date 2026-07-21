@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Қуғынға ұшырағандарға арналған параметрлер";
 "discrete_mode" = "Діни белгілерді жасыру";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "Туралы";
 "version" = "Version";
 "export" = "Export";
@@ -440,10 +440,6 @@
 "calculator_pin_description" = "Калькулятор көрсетілген кезде қолданбаға кіру үшін PIN коды.";
 "discrete_help_title" = "Алдымен мынаны оқы!";
 "discrete_help_summary" = "Параметрлерге арналған нұсқаулар және арнайы дискретті құрастыру туралы ақпарат.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Қолданбаның тәртібі";
 "prefs_display_customization_cat" = "Қара және; сез";
@@ -514,7 +510,6 @@
 
 "prefs_volume_keys_scroll_title" = "Volume buttons scroll";
 "prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Experimental features";
 "prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
@@ -624,3 +619,92 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "SD картасында пайдаланушының оқу жоспары бар, jsword/ оқу жоспарының аталуы ішкі жоспарының аталуымен бірдей. Оны мұнда тізімдеуге болмайды. Файлдың атын басқасына өзгертіңіз, файл байланыс кеңейтілімін .properties ретінде қалдырыңыз";
 "error_no_content" = "Таңдалған аятқа мазмұн жоқ";
+
+/* Android shared translations */
+"calculator_par1" = "Қолданбаға кірмес бұрын калькулятор экраны көрсетіледі.";
+"calculator_par2" = "Онда сіз стандартты есептеулер жасай аласыз және қолданбаға кіргіңіз келсе, сіз жай ғана PIN кодын теріңіз (әдепкі – 1234), содан кейін «=\" түймесін басыңыз.";
+"calculator_par3" = "\"Калькулятордың PIN коды\" параметрі арқылы пайдаланушы PIN кодын орнатуға болады.";
+"discrete_mode_info_par1" = "Сіз қолданбаның стандартты нұсқасын пайдаланып жатырсыз, яғни оны әлі де көруге болады. қолданба ақпаратындағы қолданбаның нақты аты мен белгішесі.";
+"discrete_mode_info_par2" = "Қудаланатын ортада қауіпсіздікті жақсарту үшін дискретті пайдалануды ұсынамыз. Қолданба деректері жойылса да, әрқашан калькуляторды көрсететін қолданба нұсқасы.";
+"discrete_mode_link" = "Дискретті нұсқаның соңғы нұсқасын мына жерден жүктеп алуға болады %@";
+"give_passphrase_for_module" = "Құжат %@ шифрланған, бұғаттан шығару үшін кодтық сөз қажет.";
+"show_unlock_info" = "Модуль және; ақпаратты бұғаттан шығару";
+
+/* Android shared translations */
+"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
+"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
+"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
+
+/* Android shared translations */
+"extracting_zip_file" = "Zip файлын қазір шығару ...";
+"install_failed_reason" = "Модульді орнату келесі себептерге байланысты сәтсіз аяқталды: %@.";
+"install_zip_successfull" = "Модуль сәтті орнатылды";
+"module_install_phase_committing" = "Өтінемін күте тұрыңыз. Файлдан модульдер жүктелуде.";
+"module_install_phase_downloading" = "Жүктеу";
+"module_install_phase_queued" = "Өтінеміз күтіңіз...";
+"storage_space_warning" = "Компьютердің жергілікті жадының жеткіліксіздігі.";
+
+/* Android shared translations */
+"error_occurred" = "Қате пайда болды";
+
+/* Android shared translations */
+"conf_change_chapter" = "Тараудың өзгерулері";
+"conf_change_title" = "Тақырыптар";
+"conf_replace_divinename" = "Құдайлық есімін Яхве есімімен алмастыр";
+"conf_save_playback_settings_to_bookmarks" = "Ойнату параметрлерін бетбелгілерге сақтаңыз";
+"conf_speak_auto_bookmark" = "Автоматты кітап белгілеу";
+"conf_speak_footnotes" = "Ескертпелер";
+"conf_speak_sleep_timer" = "Ұйықы таймерін орнату";
+"conf_speak_synchronize" = "Мәтін сөйлеуге ереді";
+"forward" = "Әрі қарай жіберу";
+"playback_settings_title" = "Қайта ойнату Параметрлері";
+"rewind" = "Қайта қарау";
+"speak_bookmarks_menu_title" = "Кітап белгісінен сөйлеу";
+"speak_next" = "Келесі";
+"speak_previous" = "Алдыңғы";
+"speak_settings_title" = "Жалпы Сөйлеу Параметрлері";
+
+/* Android shared translations */
+"sleep_timer_title" = "Ұйықтау уақыты минутпен";
+"speak_beginning_of_passage" = "Аят басталуын таңдаңыз";
+"speak_ending_of_passage" = "Аят аяқталуын таңдаңыз";
+"speak_ending_verse_must_be_later" = "Аяқтау аяты басталатын аятынан кешірек болуы керек";
+"speak_verse_range_to_repeat" = "Қайталау үшін аят диапазоның таңдаңыз";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Тіл қол жеткілікті емес.";
+
+/* Android shared translations */
+"errorTitle" = "Қате пайда болды";
+"error_executing_search" = "Іздеу сауалы қате";
+"import_items" = "Импорттау %@";
+"install_zip_module" = "Киелі Кітап Модулін Орнатыңыз";
+"okay" = "Жарайды";
+"overwrite" = "Иә";
+"package_directory" = "Пакеттер каталогы (Zip файлдары)";
+"reading_plan_set_current_day" = "Ағымдағы күн ретінде орнату…";
+"reading_plan_set_start_date" = "Басталу Күнін Орнату...";
+"search_all_words" = "Барлық сөздер";
+"search_any_word" = "Кез келген сөз";
+"search_phrase" = "Сөйлем";
+"search_words_group_prompt" = "Аяттарды Табу";
+"show_notes" = "Жазбаларды көрсету";
+"speak_book_changed" = "Кітап ауыстырылды.";
+"speak_chapter_changed" = "Тарау";
+"success" = "Орындалды";
+"undo" = "Болдырмау";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Құжатта табылмаған";
+"system_items1" = "Көбірек";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Стронг сандары бар Киелі кітапты жүктеп алып, Іздеу арқылы оның индексін құру керек";
+
+/* Android shared translations */
+"bookmarks_and_mynotes_title" = "Бетбелгілер және менің жазбаларым";
+"doc_type_addons" = "Толықтырулар";
+"help_bookmarks_text" = "Мәтінді және жылжымалы мәзірдегі \"бетбелгі\" таңдау арқылы бетбелгілерді жасауға болады. Киелі кітап түріндегі таңдалған мәтінді басу арқылы жаңа бетбелгіге өз жазбаларыңызды қоса аласыз. Сондай-ақ, түсініктемелерде \"менің жазбаларым\" атты арнайы құжаты бар, ол сіздің жазбаларыңызды бөлек терезеде көруге мүмкіндік береді";
+"save_and_exit" = "Сақтау";
+"verse_tip" = "Ішінара немесе көптеген аяттарды таңдау үшін Сіз Киелі кітаптың мәтінін ұзақ басуыңызға болады";
+"watch_tutorial_video" = "Үйрету видеосын көріңіз (Ағылшын тілінде)";

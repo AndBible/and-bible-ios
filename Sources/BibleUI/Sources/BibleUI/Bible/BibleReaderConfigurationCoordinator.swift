@@ -240,10 +240,86 @@ struct BibleReaderConfigurationContext {
     let fontSizeMultiplier: Double
     /// Enabled experimental feature identifiers.
     let enabledExperimentalFeatures: [String]
+    /// Whether at least one provider row satisfies Android's AI-action visibility prerequisite.
+    let llmConfigured: Bool
     /// Whether reading progress should auto-track chapter reads.
     let autoTrackReading: Bool
     /// Memorization/reading progress settings bundle sent beside app settings.
     let readingProgressSettings: ReadingProgressSettingsBundle
+
+    /**
+     Creates one immutable snapshot of the reader's complete Vue configuration inputs.
+
+     - Parameters:
+       - displaySettings: Resolved pane display settings.
+       - defaults: App-level display fallbacks.
+       - nightMode: Current reader night-mode state.
+       - errorBox: Whether Vue error diagnostics are visible.
+       - favouriteLabelIds: Favourite label identities.
+       - recentLabelIds: Recently used label identities.
+       - studyPadCursors: Workspace StudyPad positions.
+       - autoAssignLabelIds: Workspace auto-assigned label identities.
+       - hiddenCompareDocuments: Compare modules hidden in this workspace.
+       - activeWindowState: Current pane focus projection.
+       - disableBibleModalButtons: Disabled Bible selection actions.
+       - disableGenericModalButtons: Disabled generic selection actions.
+       - monochromeMode: Current monochrome display state.
+       - disableAnimations: Current reduced-motion setting.
+       - disableClickToEdit: Whether click-to-edit is suppressed.
+       - notesContentType: Android-normalized note content type.
+       - fontSizeMultiplier: Vue font scaling factor.
+       - enabledExperimentalFeatures: Enabled feature identifiers.
+       - llmConfigured: Whether Android's provider-row prerequisite is met; defaults to fail-closed.
+       - autoTrackReading: Whether chapter reading is tracked automatically.
+       - readingProgressSettings: Memorization and reading-progress configuration.
+     - Side effects: None.
+     - Failure modes: None; callers that do not yet project AI readiness receive `false`.
+     */
+    init(
+        displaySettings: TextDisplaySettings,
+        defaults: TextDisplaySettings,
+        nightMode: Bool,
+        errorBox: Bool,
+        favouriteLabelIds: [String],
+        recentLabelIds: [String],
+        studyPadCursors: [UUID: Int],
+        autoAssignLabelIds: Set<UUID>,
+        hiddenCompareDocuments: Set<String>,
+        activeWindowState: BibleReaderActiveWindowState,
+        disableBibleModalButtons: [String],
+        disableGenericModalButtons: [String],
+        monochromeMode: Bool,
+        disableAnimations: Bool,
+        disableClickToEdit: Bool,
+        notesContentType: String,
+        fontSizeMultiplier: Double,
+        enabledExperimentalFeatures: [String],
+        llmConfigured: Bool = false,
+        autoTrackReading: Bool,
+        readingProgressSettings: ReadingProgressSettingsBundle
+    ) {
+        self.displaySettings = displaySettings
+        self.defaults = defaults
+        self.nightMode = nightMode
+        self.errorBox = errorBox
+        self.favouriteLabelIds = favouriteLabelIds
+        self.recentLabelIds = recentLabelIds
+        self.studyPadCursors = studyPadCursors
+        self.autoAssignLabelIds = autoAssignLabelIds
+        self.hiddenCompareDocuments = hiddenCompareDocuments
+        self.activeWindowState = activeWindowState
+        self.disableBibleModalButtons = disableBibleModalButtons
+        self.disableGenericModalButtons = disableGenericModalButtons
+        self.monochromeMode = monochromeMode
+        self.disableAnimations = disableAnimations
+        self.disableClickToEdit = disableClickToEdit
+        self.notesContentType = notesContentType
+        self.fontSizeMultiplier = fontSizeMultiplier
+        self.enabledExperimentalFeatures = enabledExperimentalFeatures
+        self.llmConfigured = llmConfigured
+        self.autoTrackReading = autoTrackReading
+        self.readingProgressSettings = readingProgressSettings
+    }
 }
 
 /**
@@ -430,9 +506,25 @@ struct BibleReaderAppSettings: Encodable, Equatable {
     let notesContentType: String
     let fontSizeMultiplier: Double
     let enabledExperimentalFeatures: [String]
+    /// Whether Vue should expose Android's AI selection actions.
+    let llmConfigured: Bool
+    /// Native-localized Android AI action label consumed by the Vue selection menu.
+    let llmActionLabel: String
     let autoTrackReading: Bool
     let readingProgressSettings: ReadingProgressSettingsBundle
 
+    /**
+     Projects one immutable native reader snapshot into Vue's Android-compatible app settings.
+
+     - Parameter context: Fully resolved native values for the current reader pane. AI readiness must
+       represent provider-row existence, matching Android's `CommonUtils.settings.llmConfigured`.
+     - Side effects: Resolves the localized AI action label from the current process locale and reads
+       the current clock for Android's active-window timestamp. It performs no persistence or I/O.
+     - Failure modes: Localization falls back to the supplied English value. All other inputs are
+       already concrete and cannot fail during projection.
+     - Note: The projection is deterministic except for `activeSince`, which preserves the existing
+       current-time behavior and is unrelated to AI action visibility.
+     */
     init(context: BibleReaderConfigurationContext) {
         self.nightMode = context.nightMode
         self.errorBox = context.errorBox
@@ -458,6 +550,8 @@ struct BibleReaderAppSettings: Encodable, Equatable {
         self.notesContentType = context.notesContentType
         self.fontSizeMultiplier = context.fontSizeMultiplier
         self.enabledExperimentalFeatures = context.enabledExperimentalFeatures
+        self.llmConfigured = context.llmConfigured
+        self.llmActionLabel = String(localized: "llm_actions", defaultValue: "AI actions")
         self.autoTrackReading = context.autoTrackReading
         self.readingProgressSettings = context.readingProgressSettings
     }

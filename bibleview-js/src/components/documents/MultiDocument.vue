@@ -84,7 +84,8 @@ function link(frag: OsisFragmentType, compare = false) {
     if(exportMode.value) {
         return formatExportLink({ref: osis, v11n: frag.v11n})
     } else {
-        return `osis://?osis=${osis}&v11n=${frag.v11n}`;
+        const v11n = frag.v11n ? `&v11n=${encodeURI(frag.v11n)}` : "";
+        return `osis://?osis=${osis}${v11n}`;
     }
 }
 

@@ -1,15 +1,18 @@
 // RemoteSyncProgressPatchApplyService.swift - Incremental Android patch replay for Progress
 
-import CLibSword
 import Foundation
 import SQLite3
 
 private let remoteSyncProgressPatchApplySQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 public enum RemoteSyncProgressPatchApplyError: Error, Equatable {
+    case tooManyPatchArchives(Int)
     case invalidLogEntryIdentifier(table: String)
     case missingPatchRow(table: String, id: UUID)
     case invalidSQLiteDatabase
+    case compressedArchiveTooLarge(Int64)
+    case expandedArchiveTooLarge(UInt64)
+    case cumulativeArchiveTooLarge(UInt64)
 }
 
 public struct RemoteSyncProgressPatchApplyReport: Sendable, Equatable {
@@ -23,9 +26,41 @@ public struct RemoteSyncProgressPatchApplyReport: Sendable, Equatable {
 
 /**
  Replays sparse Android Progress patch archives into local reading and memorization progress stores.
+
+ Archives are applied in caller order. Each archive publishes accepted reading, memorization, log,
+ patch-status, and fingerprint rows through its own settings transaction, matching Android's
+ independently committed archive loop. The complete batch is size-preflighted before the first
+ archive commits.
+
+ Data dependencies:
+ - gzip patch archives containing Android Progress tables and `LogEntry` rows
+ - `SettingsStore` namespaces used by progress and remote-sync bookkeeping stores
+
+Side effects:
+- materializes temporary SQLite patch databases and removes them after replay
+- atomically rewrites Progress content and sync metadata settings once per archive
+
+Failure modes:
+- malformed archives, identifiers, rows, ordinals, or SQLite data throw explicit errors
+- settings fetch, cancellation, encoding, and commit failures roll back the failing archive publish
+
+ Concurrency:
+ - inherits the confinement of the supplied `SettingsStore`; callers must not mutate it concurrently
  */
 public final class RemoteSyncProgressPatchApplyService {
     private static let progressOrdinalRange = JSwordKJVAVersification.progressOrdinalRange
+
+    /// Maximum archives admitted by one bounded replay request.
+    private static let maximumPatchArchiveCount = 1_000
+
+    /// Maximum compressed bytes accepted from one staged Progress patch.
+    private static let maximumCompressedPatchByteCount = 16 * 1_024 * 1_024
+
+    /// Maximum expanded SQLite bytes accepted from one staged Progress patch.
+    private static let maximumExpandedPatchByteCount = 64 * 1_024 * 1_024
+
+    /// Maximum aggregate expanded bytes accepted across one replay call.
+    private static let maximumCumulativeExpandedPatchByteCount = 256 * 1_024 * 1_024
 
     private let metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService
     private let snapshotService: RemoteSyncProgressSnapshotService
@@ -44,13 +79,94 @@ public final class RemoteSyncProgressPatchApplyService {
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
     }
 
+    /**
+     Replays an ordered batch of Android Progress patches with one commit per archive.
+
+     - Parameters:
+       - stagedArchives: Downloaded patch archives in Android application order.
+       - settingsStore: Store owning reading, memorization, and sync bookkeeping rows.
+     - Returns: Aggregate counts for committed patches and the final Progress content.
+     - Side Effects: Preflights the complete batch, then reads and commits each patch independently.
+     - Throws: Rethrows archive, replay, validation, cancellation, strict fetch, encoding, and
+       transaction errors. A later failure preserves each earlier archive's complete commit.
+     */
     public func applyPatchArchives(
         _ stagedArchives: [RemoteSyncStagedPatchArchive],
         settingsStore: SettingsStore
     ) throws -> RemoteSyncProgressPatchApplyReport {
+        try applyPatchArchives(
+            stagedArchives,
+            settingsStore: settingsStore,
+            publishCheckpoint: { try Task.checkCancellation() }
+        )
+    }
+
+    /**
+     Replays Progress patches with a deterministic checkpoint inside the atomic settings publish.
+
+     Progress content, Android log entries, patch status, and fingerprint baselines all live in the
+     same local settings context. Each archive publishes those namespaces through one transaction;
+     after a successful commit, a later archive failure does not roll that archive back.
+
+     - Parameters:
+       - stagedArchives: Downloaded Progress patches in Android replay order.
+       - settingsStore: Settings store owning all Progress and sync metadata rows.
+       - publishCheckpoint: Throwing callback before strict reads and after final mutations stage.
+     - Returns: Aggregate replay counts after all per-archive transactions commit.
+     - Side Effects: Preflights every archive, then atomically replaces Progress sync settings once
+       per archive.
+     - Throws: Rethrows replay, checkpoint, strict fetch, cancellation, encoding, and commit errors;
+       the failing archive rolls back while earlier archive commits remain.
+     */
+    func applyPatchArchives(
+        _ stagedArchives: [RemoteSyncStagedPatchArchive],
+        settingsStore: SettingsStore,
+        publishCheckpoint: () throws -> Void
+    ) throws -> RemoteSyncProgressPatchApplyReport {
+        guard stagedArchives.count <= Self.maximumPatchArchiveCount else {
+            throw RemoteSyncProgressPatchApplyError.tooManyPatchArchives(stagedArchives.count)
+        }
+        try preflightArchiveBounds(stagedArchives)
+        if stagedArchives.count > 1 {
+            var appliedPatchCount = 0
+            var appliedLogEntryCount = 0
+            var skippedLogEntryCount = 0
+            var readingCount = 0
+            var memorizedVerseCount = 0
+            var targetCount = 0
+            for stagedArchive in stagedArchives {
+                let report = try applyPatchArchives(
+                    [stagedArchive],
+                    settingsStore: settingsStore,
+                    publishCheckpoint: publishCheckpoint
+                )
+                appliedPatchCount += report.appliedPatchCount
+                appliedLogEntryCount += report.appliedLogEntryCount
+                skippedLogEntryCount += report.skippedLogEntryCount
+                readingCount = report.readingCount
+                memorizedVerseCount = report.memorizedVerseCount
+                targetCount = report.targetCount
+            }
+            return RemoteSyncProgressPatchApplyReport(
+                appliedPatchCount: appliedPatchCount,
+                appliedLogEntryCount: appliedLogEntryCount,
+                skippedLogEntryCount: skippedLogEntryCount,
+                readingCount: readingCount,
+                memorizedVerseCount: memorizedVerseCount,
+                targetCount: targetCount
+            )
+        }
+
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
-        let currentSnapshot = snapshotService.snapshotCurrentState(settingsStore: settingsStore)
+        let initialState = try settingsStore.performAtomicBatch {
+            try publishCheckpoint()
+            return (
+                try snapshotService.snapshotCurrentStateStrict(settingsStore: settingsStore),
+                try logEntryStore.entriesStrict(for: .progress)
+            )
+        }
+        let currentSnapshot = initialState.0
 
         var memorizedRowsByID = Dictionary(
             uniqueKeysWithValues: currentSnapshot.memorizedVerseRowsByKey.values.map { ($0.id, $0) }
@@ -67,7 +183,7 @@ public final class RemoteSyncProgressPatchApplyService {
                 settings: ReadingProgressSettingsSnapshot()
             )
         var logEntriesByKey = Dictionary(
-            uniqueKeysWithValues: logEntryStore.entries(for: .progress).map {
+            uniqueKeysWithValues: initialState.1.map {
                 (logEntryStore.key(for: .progress, entry: $0), $0)
             }
         )
@@ -75,14 +191,56 @@ public final class RemoteSyncProgressPatchApplyService {
         var appliedPatchStatuses: [RemoteSyncPatchStatus] = []
         var appliedLogEntryCount = 0
         var skippedLogEntryCount = 0
+        var cumulativeExpandedByteCount: UInt64 = 0
 
         for stagedArchive in stagedArchives {
+            try Task.checkCancellation()
             let patchDatabaseURL = temporaryDatabaseURL(prefix: "remote-sync-progress-patch-", suffix: ".sqlite3")
             defer { try? fileManager.removeItem(at: patchDatabaseURL) }
 
-            let archiveData = try Data(contentsOf: stagedArchive.archiveFileURL)
-            let databaseData = try Self.gunzip(archiveData)
-            try databaseData.write(to: patchDatabaseURL, options: .atomic)
+            let member: RemoteSyncGzipMember
+            do {
+                member = try RemoteSyncBoundedFileIO.inspectGzip(
+                    at: stagedArchive.archiveFileURL,
+                    maximumCompressedByteCount: Self.maximumCompressedPatchByteCount,
+                    maximumExpandedByteCount: Self.maximumExpandedPatchByteCount
+                )
+            } catch RemoteSyncBoundedFileError.compressedSizeExceeded(let size) {
+                throw RemoteSyncProgressPatchApplyError.compressedArchiveTooLarge(size)
+            } catch RemoteSyncBoundedFileError.expandedSizeExceeded(let size) {
+                throw RemoteSyncProgressPatchApplyError.expandedArchiveTooLarge(size)
+            } catch {
+                throw RemoteSyncProgressPatchApplyError.invalidSQLiteDatabase
+            }
+            let (nextCumulative, overflow) = cumulativeExpandedByteCount
+                .addingReportingOverflow(member.expandedByteCount)
+            guard !overflow,
+                  nextCumulative <= UInt64(Self.maximumCumulativeExpandedPatchByteCount) else {
+                throw RemoteSyncProgressPatchApplyError.cumulativeArchiveTooLarge(
+                    overflow ? UInt64.max : nextCumulative
+                )
+            }
+            cumulativeExpandedByteCount = nextCumulative
+            do {
+                try RemoteSyncBoundedFileIO.inflateGzip(
+                    member,
+                    from: stagedArchive.archiveFileURL,
+                    to: patchDatabaseURL,
+                    maximumExpandedByteCount: Self.maximumExpandedPatchByteCount
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw RemoteSyncProgressPatchApplyError.invalidSQLiteDatabase
+            }
+
+            try withSQLiteDatabase(at: patchDatabaseURL) { database in
+                try RemoteSyncAndroidDatabaseContract.validateInboundDatabase(
+                    database,
+                    category: .progress
+                )
+                try validateGlobalSettingsSingletonIdentity(in: database)
+            }
 
             let metadataSnapshot = try metadataRestoreService.readSnapshot(from: patchDatabaseURL)
             let patchLogEntries = metadataSnapshot.logEntries.filter { Self.progressTableNames.contains($0.tableName) }
@@ -91,12 +249,9 @@ public final class RemoteSyncProgressPatchApplyService {
                 guard let localEntry = logEntriesByKey[key] else {
                     return true
                 }
-                return entry.lastUpdated > localEntry.lastUpdated
+                return RemoteSyncLogEntryConflictOrder.isNewer(entry, than: localEntry)
             }
             skippedLogEntryCount += patchLogEntries.count - filteredLogEntries.count
-            guard !filteredLogEntries.isEmpty else {
-                continue
-            }
 
             try withSQLiteDatabase(at: patchDatabaseURL) { database in
                 try applyMemorizedVerseOperations(
@@ -140,31 +295,50 @@ public final class RemoteSyncProgressPatchApplyService {
             )
         }
 
-        let readingSnapshot = ReadingProgressSnapshot(
-            history: chapterRowsByID.values
-                .map {
-                    ReadingProgressHistoryRow(
-                        id: $0.id,
-                        bookInitials: $0.bookInitials,
-                        startOrdinal: 0,
-                        kjvBookOrdinal: $0.kjvBookOrdinal,
-                        chapter: $0.chapter,
-                        cycle: $0.cycle,
-                        readAt: $0.readAt,
-                        source: $0.source
-                    )
+        let readingHistory = try chapterRowsByID.values
+            .map { row -> ReadingProgressHistoryRow in
+                guard let identity = ReadingProgressKJVAIdentity(
+                    androidKJVBookOrdinal: row.kjvBookOrdinal,
+                    chapter: row.chapter
+                ) else {
+                    throw RemoteSyncProgressPatchApplyError.invalidSQLiteDatabase
                 }
-                .sorted {
-                    if $0.readAt != $1.readAt {
-                        return $0.readAt < $1.readAt
-                    }
-                    return $0.id.uuidString < $1.id.uuidString
-                },
+                return ReadingProgressHistoryRow(
+                    id: row.id,
+                    bookInitials: row.bookInitials,
+                    identity: identity,
+                    cycle: row.cycle,
+                    readAt: row.readAt,
+                    source: row.source
+                )
+            }
+            .sorted {
+                if $0.readAt != $1.readAt {
+                    return $0.readAt < $1.readAt
+                }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+        let readingSnapshot = ReadingProgressSnapshot(
+            history: readingHistory,
             settings: settingsRow.settings
         )
         let memorizationSnapshot = MemorizationProgressSnapshot(
             memorizedVerses: memorizedRowsByID.values
-                .map { MemorizedVerseProgress(id: $0.id, bookInitials: "", kjvOrdinal: $0.kjvOrdinal, memorizedAt: $0.memorizedAt) },
+                .map {
+                    MemorizedVerseProgress(
+                        id: $0.id,
+                        bookInitials: "",
+                        kjvOrdinal: $0.kjvOrdinal,
+                        memorizedAt: $0.memorizedAt,
+                        ordinalTrust: PersistedOrdinalTrustPolicy.androidImportMetadata(
+                            sourceVersification: "KJVA",
+                            sourceOrdinalStart: $0.kjvOrdinal,
+                            sourceOrdinalEnd: $0.kjvOrdinal,
+                            kjvaOrdinalStart: $0.kjvOrdinal,
+                            kjvaOrdinalEnd: $0.kjvOrdinal
+                        )
+                    )
+                },
             targetRows: targetRowsByID.values
                 .map {
                     MemorizationTargetRow(
@@ -172,19 +346,30 @@ public final class RemoteSyncProgressPatchApplyService {
                         bookInitials: "",
                         startOrdinal: $0.kjvOrdinalStart,
                         endOrdinal: $0.kjvOrdinalEnd,
-                        createdAt: $0.createdAt
+                        createdAt: $0.createdAt,
+                        ordinalTrust: PersistedOrdinalTrustPolicy.androidImportMetadata(
+                            sourceVersification: "KJVA",
+                            sourceOrdinalStart: $0.kjvOrdinalStart,
+                            sourceOrdinalEnd: $0.kjvOrdinalEnd,
+                            kjvaOrdinalStart: $0.kjvOrdinalStart,
+                            kjvaOrdinalEnd: $0.kjvOrdinalEnd
+                        )
                     )
                 }
         )
-        let report = try AndroidDatabaseBackupProgressMapper.replaceLocalSnapshots(
-            reading: readingSnapshot,
-            memorization: memorizationSnapshot,
-            settingsStore: settingsStore
-        )
+        let report = try settingsStore.performAtomicBatch {
+            let report = try AndroidDatabaseBackupProgressMapper.replaceLocalSnapshots(
+                reading: readingSnapshot,
+                memorization: memorizationSnapshot,
+                settingsStore: settingsStore
+            )
 
-        logEntryStore.replaceEntries(logEntriesByKey.values.sorted(by: Self.logEntrySort), for: .progress)
-        patchStatusStore.addStatuses(appliedPatchStatuses, for: .progress)
-        snapshotService.refreshBaselineFingerprints(settingsStore: settingsStore)
+            logEntryStore.replaceEntries(logEntriesByKey.values.sorted(by: Self.logEntrySort), for: .progress)
+            patchStatusStore.addStatuses(appliedPatchStatuses, for: .progress)
+            snapshotService.refreshBaselineFingerprints(settingsStore: settingsStore)
+            try publishCheckpoint()
+            return report
+        }
 
         return RemoteSyncProgressPatchApplyReport(
             appliedPatchCount: appliedPatchStatuses.count,
@@ -196,6 +381,63 @@ public final class RemoteSyncProgressPatchApplyService {
         )
     }
 
+    /**
+     Verifies every compressed member and aggregate expanded size before the first archive commits.
+
+     - Parameter stagedArchives: Caller-ordered Progress patch files.
+     - Side effects: Opens each archive with no-follow semantics and reads bounded gzip metadata only.
+     - Throws: Typed compressed, expanded, cumulative, or malformed-archive errors. No SQLite file is
+       inflated and no local setting is mutated by this preflight.
+     */
+    private func preflightArchiveBounds(
+        _ stagedArchives: [RemoteSyncStagedPatchArchive]
+    ) throws {
+        var cumulativeExpandedByteCount: UInt64 = 0
+        for stagedArchive in stagedArchives {
+            try Task.checkCancellation()
+            let member: RemoteSyncGzipMember
+            do {
+                member = try RemoteSyncBoundedFileIO.inspectGzip(
+                    at: stagedArchive.archiveFileURL,
+                    maximumCompressedByteCount: Self.maximumCompressedPatchByteCount,
+                    maximumExpandedByteCount: Self.maximumExpandedPatchByteCount
+                )
+            } catch RemoteSyncBoundedFileError.compressedSizeExceeded(let size) {
+                throw RemoteSyncProgressPatchApplyError.compressedArchiveTooLarge(size)
+            } catch RemoteSyncBoundedFileError.expandedSizeExceeded(let size) {
+                throw RemoteSyncProgressPatchApplyError.expandedArchiveTooLarge(size)
+            } catch {
+                throw RemoteSyncProgressPatchApplyError.invalidSQLiteDatabase
+            }
+            let (next, overflow) = cumulativeExpandedByteCount.addingReportingOverflow(
+                member.expandedByteCount
+            )
+            guard !overflow,
+                  next <= UInt64(Self.maximumCumulativeExpandedPatchByteCount) else {
+                throw RemoteSyncProgressPatchApplyError.cumulativeArchiveTooLarge(
+                    overflow ? UInt64.max : next
+                )
+            }
+            cumulativeExpandedByteCount = next
+        }
+    }
+
+    /**
+     Applies Android memorized-verse operations with SQLite unique-index conflict semantics.
+
+     An UPSERT that collides on `kjvOrdinal` updates the existing row while preserving that row's
+     primary-key UUID, exactly as Android's `ON CONFLICT DO UPDATE` statement does. A later DELETE
+     for the discarded incoming UUID therefore leaves the preserved row intact.
+
+     - Parameters:
+       - logEntries: Strictly newer operations for `MemorizedVerse`.
+       - database: Validated sparse Progress patch database.
+       - rowsByID: Mutable current generation keyed by authoritative primary-key UUID.
+       - logEntriesByKey: Mutable Android conflict baseline.
+       - logEntryStore: Canonical composite-key builder for the Progress category.
+     - Side effects: Mutates only the supplied in-memory row and log dictionaries.
+     - Throws: Identifier, missing-row, ordinal, or SQLite decoding failures before publication.
+     */
     private func applyMemorizedVerseOperations(
         _ logEntries: [RemoteSyncLogEntry],
         database: OpaquePointer,
@@ -208,10 +450,16 @@ public final class RemoteSyncProgressPatchApplyService {
             guard let row = try fetchMemorizedVerse(id: rowID, from: database) else {
                 throw RemoteSyncProgressPatchApplyError.missingPatchRow(table: entry.tableName, id: rowID)
             }
-            if let duplicate = rowsByID.first(where: { $0.value.kjvOrdinal == row.kjvOrdinal }) {
-                rowsByID.removeValue(forKey: duplicate.key)
+            if let duplicate = rowsByID.first(where: { $0.value.kjvOrdinal == row.kjvOrdinal }),
+               duplicate.key != row.id {
+                rowsByID[duplicate.key] = RemoteSyncCurrentProgressMemorizedVerseRow(
+                    id: duplicate.key,
+                    kjvOrdinal: row.kjvOrdinal,
+                    memorizedAt: row.memorizedAt
+                )
+            } else {
+                rowsByID[row.id] = row
             }
-            rowsByID[row.id] = row
             logEntriesByKey[logEntryStore.key(for: .progress, entry: entry)] = entry
         }
         for entry in logEntries.filter({ $0.type == .delete }).sorted(by: Self.logEntrySort) {
@@ -298,7 +546,7 @@ public final class RemoteSyncProgressPatchApplyService {
             in: database
         )
         defer { sqlite3_finalize(statement) }
-        bindUUIDBlob(id, to: statement, index: 1)
+        try bindUUIDBlob(id, to: statement, index: 1)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         let kjvOrdinal = Int(sqlite3_column_int(statement, 1))
         guard Self.progressOrdinalRange.contains(kjvOrdinal) else {
@@ -325,12 +573,20 @@ public final class RemoteSyncProgressPatchApplyService {
             in: database
         )
         defer { sqlite3_finalize(statement) }
-        bindUUIDBlob(id, to: statement, index: 1)
+        try bindUUIDBlob(id, to: statement, index: 1)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let kjvBookOrdinal = Int(sqlite3_column_int(statement, 1))
+        let chapter = Int(sqlite3_column_int(statement, 2))
+        guard ReadingProgressKJVAIdentity(
+            androidKJVBookOrdinal: kjvBookOrdinal,
+            chapter: chapter
+        ) != nil else {
+            throw RemoteSyncProgressPatchApplyError.invalidSQLiteDatabase
+        }
         return RemoteSyncCurrentProgressChapterReadHistoryRow(
             id: try uuidFromBlob(statement: statement, column: 0),
-            kjvBookOrdinal: Int(sqlite3_column_int(statement, 1)),
-            chapter: Int(sqlite3_column_int(statement, 2)),
+            kjvBookOrdinal: kjvBookOrdinal,
+            chapter: chapter,
             cycle: Int(sqlite3_column_int(statement, 3)),
             readAt: sqlite3_column_int64(statement, 4),
             bookInitials: stringColumn(statement: statement, index: 5),
@@ -347,7 +603,7 @@ public final class RemoteSyncProgressPatchApplyService {
             in: database
         )
         defer { sqlite3_finalize(statement) }
-        bindUUIDBlob(id, to: statement, index: 1)
+        try bindUUIDBlob(id, to: statement, index: 1)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         let startOrdinal = Int(sqlite3_column_int(statement, 1))
         let endOrdinal = Int(sqlite3_column_int(statement, 2))
@@ -379,7 +635,7 @@ public final class RemoteSyncProgressPatchApplyService {
             in: database
         )
         defer { sqlite3_finalize(statement) }
-        bindUUIDBlob(id, to: statement, index: 1)
+        try bindUUIDBlob(id, to: statement, index: 1)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         return RemoteSyncCurrentProgressSettingsRow(
             id: try uuidFromBlob(statement: statement, column: 0),
@@ -394,6 +650,54 @@ public final class RemoteSyncProgressPatchApplyService {
                 memorizeIncludeReference: sqlite3_column_int(statement, 7) != 0
             )
         )
+    }
+
+    /**
+     Rejects Progress patches that replace Android's fixed global-settings identity.
+
+     Both the singleton table row and every matching log operation must use Android's exact UUID.
+     This check runs before metadata decoding so a foreign delete identifier cannot reset local
+     settings or enter the conflict journal.
+
+     - Parameter database: Schema-validated Progress patch database.
+     - Side Effects: Reads singleton and log identifier BLOBs without mutating the database.
+     - Throws: `invalidSQLiteDatabase` for a foreign identifier, wrong storage class, malformed
+       BLOB, or SQLite read failure.
+     */
+    private func validateGlobalSettingsSingletonIdentity(
+        in database: OpaquePointer
+    ) throws {
+        let statement = try prepare(
+            """
+            SELECT id
+            FROM GlobalReadingProgressSettings
+            UNION ALL
+            SELECT entityId1
+            FROM LogEntry
+            WHERE tableName = 'GlobalReadingProgressSettings';
+            """,
+            in: database
+        )
+        defer { sqlite3_finalize(statement) }
+
+        while true {
+            switch sqlite3_step(statement) {
+            case SQLITE_ROW:
+                guard sqlite3_column_type(statement, 0) == SQLITE_BLOB,
+                      let bytes = sqlite3_column_blob(statement, 0),
+                      sqlite3_column_bytes(statement, 0) == 16 else {
+                    throw RemoteSyncProgressPatchApplyError.invalidSQLiteDatabase
+                }
+                let identifier = try uuidFromData(Data(bytes: bytes, count: 16))
+                guard identifier == RemoteSyncProgressSnapshotService.globalSettingsID else {
+                    throw RemoteSyncProgressPatchApplyError.invalidSQLiteDatabase
+                }
+            case SQLITE_DONE:
+                return
+            default:
+                throw RemoteSyncProgressPatchApplyError.invalidSQLiteDatabase
+            }
+        }
     }
 
     private func uuid(from value: RemoteSyncSQLiteValue, tableName: String) throws -> UUID {
@@ -433,10 +737,25 @@ public final class RemoteSyncProgressPatchApplyService {
         return statement
     }
 
-    private func bindUUIDBlob(_ uuid: UUID, to statement: OpaquePointer?, index: Int32) {
+    /** Binds one UUID BLOB with an exactly represented SQLite byte count. */
+    private func bindUUIDBlob(
+        _ uuid: UUID,
+        to statement: OpaquePointer?,
+        index: Int32
+    ) throws {
         let data = RemoteSyncProgressSnapshotService.uuidBlob(uuid)
+        let byteCount = try RemoteSyncWireInteger.int32(
+            exactly: data.count,
+            field: "UUID.byteCount"
+        )
         _ = data.withUnsafeBytes {
-            sqlite3_bind_blob(statement, index, $0.baseAddress, Int32(data.count), remoteSyncProgressPatchApplySQLiteTransient)
+            sqlite3_bind_blob(
+                statement,
+                index,
+                $0.baseAddress,
+                byteCount,
+                remoteSyncProgressPatchApplySQLiteTransient
+            )
         }
     }
 
@@ -470,24 +789,6 @@ public final class RemoteSyncProgressPatchApplyService {
 
     private func temporaryDatabaseURL(prefix: String, suffix: String) -> URL {
         temporaryDirectory.appendingPathComponent("\(prefix)\(UUID().uuidString)\(suffix)")
-    }
-
-    private static func gunzip(_ data: Data) throws -> Data {
-        try data.withUnsafeBytes { (pointer: UnsafeRawBufferPointer) -> Data in
-            guard let baseAddress = pointer.baseAddress else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
-            var outputLength: UInt = 0
-            guard let output = gunzip_data(
-                baseAddress.assumingMemoryBound(to: UInt8.self),
-                UInt(data.count),
-                &outputLength
-            ) else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
-            defer { gunzip_free(output) }
-            return Data(bytes: output, count: Int(outputLength))
-        }
     }
 
     private static let progressTableNames: Set<String> = [

@@ -1,0 +1,553 @@
+/*
+ * Copyright (c) 2026 Sykerö Software / Tuomas Airaksinen and the AndBible contributors.
+ *
+ * This file is part of AndBible: Bible Study (http://github.com/AndBible/and-bible).
+ */
+
+import {flushPromises, mount, type VueWrapper} from "@vue/test-utils";
+import {nextTick, ref} from "vue";
+import {afterEach, describe, expect, it, vi} from "vitest";
+import type {AiDocMarker, GenericBookmark, LabelAndStyle} from "@/types/client-objects";
+import type {OsisDocument} from "@/types/documents";
+import DocumentActionMenu from "@/components/documents/DocumentActionMenu.vue";
+import WholePageBookmarks from "@/components/WholePageBookmarks.vue";
+import OsisDocumentComponent from "@/components/documents/OsisDocument.vue";
+import AmbiguousSelectionBookmarkButton from "@/components/modals/AmbiguousSelectionBookmarkButton.vue";
+import BookmarkModal from "@/components/modals/BookmarkModal.vue";
+import BookmarkText from "@/components/BookmarkText.vue";
+import {emit} from "@/eventbus";
+import {
+    androidKey,
+    appSettingsKey,
+    calculatedConfigKey,
+    configKey,
+    customCssKey,
+    globalBookmarksKey,
+    locateTopKey,
+    stringsKey,
+} from "@/types/constants";
+
+window.bibleView = {};
+window.bibleViewDebug = {};
+
+/** Stable labels used by action components without loading asynchronous locale bundles. */
+const strings = {
+    addBookmark: "Bookmark",
+    bookmarks: "Bookmarks",
+    cancel: "Cancel",
+    copyMyDocumentPageAccessibilityLabel: "Copy My Document page",
+    deleteMyDocumentPageAccessibilityLabel: "Delete My Document page",
+    deleteMyDocumentPageConfirmation: "Delete this page?",
+    deleteMyDocumentPageConfirmationTitle: "Delete AI page?",
+    documentActionsAccessibilityLabel: "Document actions",
+    editTextPlaceholder: "Tap to edit text",
+    regenerateMyDocumentPageAccessibilityLabel: "Regenerate My Document page",
+    saveMyDocumentPageAccessibilityLabel: "Save My Document page",
+    shareMyDocumentPageAccessibilityLabel: "Share My Document page",
+};
+
+/** Font Awesome test double that keeps action buttons clickable without icon library registration. */
+const FontAwesomeIconStub = {
+    name: "FontAwesomeIcon",
+    props: ["icon", "size"],
+    template: "<i class=\"font-awesome-icon\"></i>",
+};
+
+/**
+ * Builds a complete generic document fixture with exact source and rendered-fragment identity.
+ *
+ * @param overrides Fields replaced for the behavior under test.
+ * @returns A typed OSIS document accepted by the production action components.
+ * @remarks The fixture has no reactive state or side effects; callers may safely reuse nested values.
+ */
+function documentFixture(overrides: Partial<OsisDocument> = {}): OsisDocument {
+    return {
+        id: "document-1",
+        type: "osis",
+        osisFragment: {
+            xml: '<div data-source="exact">Rendered &amp; exact</div>',
+            key: "fragment-key",
+            keyName: "Rendered page",
+            v11n: null,
+            bookCategory: "GENERAL_BOOK",
+            bookInitials: "GEN.Book",
+            bookAbbreviation: "GEN",
+            osisRef: "fragment:key",
+            isNewTestament: false,
+            features: {},
+            hasStrongs: false,
+            ordinalRange: null,
+            language: "en",
+            direction: "ltr",
+        },
+        bookInitials: "GEN.Book",
+        bookCategory: "GENERAL_BOOK",
+        bookAbbreviation: "GEN",
+        bookName: "Generic Book",
+        key: "source:key/alpha?x=1",
+        v11n: null,
+        osisRef: "page:key/alpha?x=1",
+        annotateRef: "annotate:key",
+        genericBookmarks: [],
+        ordinalRange: null,
+        isNativeHtml: false,
+        highlightedOrdinalRange: null,
+        isMyDocument: false,
+        isAiDocument: false,
+        myDocumentPageId: null,
+        sourcePromptId: null,
+        sourcePromptName: null,
+        sourceModelName: null,
+        aiDocMarkers: [],
+        commentaryRange: null,
+        ...overrides,
+    };
+}
+
+/**
+ * Builds one AI marker whose navigation and source-page identities are deliberately distinct.
+ *
+ * @returns A complete marker record for normal and ambiguous click-route tests.
+ * @remarks No IDs are generated, keeping payload assertions deterministic.
+ */
+function aiMarkerFixture(): AiDocMarker {
+    return {
+        id: "ai-marker-1",
+        type: "ai-doc-marker",
+        hashCode: 1,
+        ordinalRange: [12, 12],
+        offsetRange: null,
+        labels: ["ai-label"],
+        bookInitials: "KJV",
+        bookName: "King James Version",
+        bookAbbreviation: "KJV",
+        createdAt: 1,
+        text: "",
+        fullText: "",
+        bookmarkToLabels: [],
+        primaryLabelId: "ai-label",
+        lastUpdatedOn: 1,
+        notes: null,
+        notesContentType: null,
+        hasNote: false,
+        wholeVerse: true,
+        customIcon: "robot",
+        editAction: {mode: null, content: null},
+        verseRangeAbbreviated: "Gen 1:12",
+        title: "Explain this verse",
+        documentInitials: "AI.Documents",
+        pageKey: "page:key/42",
+        sourcePromptId: "source-prompt-id",
+        sourceBookInitials: "GEN.Book",
+        sourceBookKey: "annotate:key",
+    };
+}
+
+/**
+ * Builds a generic bookmark with structured source OSIS and a deliberately unsafe raw fallback.
+ *
+ * @returns Complete bookmark payload that distinguishes structured rendering from `v-html`.
+ */
+function genericBookmarkFixture(): GenericBookmark {
+    return {
+        id: "generic-bookmark-1",
+        type: "generic-bookmark",
+        hashCode: 2,
+        ordinalRange: null,
+        offsetRange: null,
+        labels: [],
+        bookInitials: "GEN.Book",
+        bookName: "Generic Book",
+        bookAbbreviation: "GEN",
+        createdAt: 1,
+        text: "Structured source",
+        fullText: "Structured source",
+        bookmarkToLabels: [],
+        primaryLabelId: "",
+        lastUpdatedOn: 1,
+        notes: null,
+        notesContentType: null,
+        hasNote: false,
+        wholeVerse: false,
+        customIcon: null,
+        editAction: {mode: null, content: null},
+        key: "source:key/alpha?x=1",
+        keyName: "Source page",
+        highlightedText: '<strong data-legacy-fallback="true">Legacy fallback</strong>',
+        osisFragment: {
+            xml: '<div><p data-structured="true">Structured OSIS</p></div>',
+            key: "GEN.Book--annotate:key",
+            keyName: "Structured source",
+            v11n: null,
+            bookCategory: "GENERAL_BOOK",
+            bookInitials: "GEN.Book",
+            bookAbbreviation: "GEN",
+            osisRef: "annotate:key",
+            isNewTestament: false,
+            features: {},
+            hasStrongs: false,
+            ordinalRange: null,
+            language: "en",
+            direction: "ltr",
+        },
+    };
+}
+
+/**
+ * Builds the pseudo-label styling expected by ambiguous AI marker presentation.
+ *
+ * @returns A complete flattened label/style record with the robot icon.
+ */
+function aiLabelFixture(): LabelAndStyle {
+    const style = {
+        color: 0x6464ff,
+        isSpeak: false,
+        isParagraphBreak: false,
+        underline: false,
+        underlineWholeVerse: false,
+        markerStyle: true,
+        markerStyleWholeVerse: true,
+        hideStyle: false,
+        hideStyleWholeVerse: false,
+        customIcon: "robot",
+    };
+    return {
+        id: "ai-label",
+        name: "AI document",
+        style,
+        isRealLabel: false,
+        ...style,
+    };
+}
+
+/**
+ * Creates shared reactive bookmark state for component tests.
+ *
+ * @param bookmarks Initial normal bookmarks or AI markers.
+ * @returns Minimal provider state matching fields consumed by action and bookmark composables.
+ */
+function bookmarkProvider(bookmarks: AiDocMarker[] = []) {
+    return {
+        bookmarks: ref([...bookmarks]),
+        bookmarkMap: new Map(bookmarks.map(bookmark => [bookmark.id, bookmark])),
+        bookmarkLabels: new Map([["ai-label", aiLabelFixture()]]),
+        labelsUpdated: ref(0),
+        updateBookmarks: vi.fn(),
+    };
+}
+
+/**
+ * Builds common Vue providers with bridge spies supplied by each test.
+ *
+ * @param android Native bridge method test doubles.
+ * @param globalBookmarks Reactive bookmark provider.
+ * @returns Symbol-keyed providers consumed by production components.
+ */
+function commonProviders(android: Record<string, unknown>, globalBookmarks = bookmarkProvider()) {
+    return {
+        [androidKey]: android,
+        [appSettingsKey]: {
+            monochromeMode: false,
+            nightMode: false,
+            notesContentType: "MARKDOWN",
+            errorBox: false,
+        },
+        [calculatedConfigKey]: ref({}),
+        [configKey]: {
+            bookmarksHideLabels: [],
+            showAiDocMarkers: true,
+            showBookmarks: true,
+            showMyNotes: true,
+        },
+        [globalBookmarksKey]: globalBookmarks,
+        [stringsKey]: strings,
+    };
+}
+
+/** Opens an exposed action menu against deterministic viewport geometry. */
+async function openActionMenu(wrapper: VueWrapper) {
+    const anchor = document.createElement("button");
+    vi.spyOn(anchor, "getBoundingClientRect").mockReturnValue({
+        x: 20,
+        y: 20,
+        top: 20,
+        right: 38,
+        bottom: 38,
+        left: 20,
+        width: 18,
+        height: 18,
+        toJSON: () => ({}),
+    } as DOMRect);
+    await (wrapper.vm as unknown as {openMenu: (element: HTMLElement) => Promise<void>}).openMenu(anchor);
+    await nextTick();
+}
+
+afterEach(() => {
+    document.body.innerHTML = "";
+    vi.restoreAllMocks();
+});
+
+describe("generic document action parity", () => {
+    /**
+     * Protects selection-free whole-page bookmark and existing My Documents copy/share contracts.
+     *
+     * A real menu button click must preserve Android's exact two-field source/key bookmark command,
+     * while copy/share retain exact My Documents initials and rendered page reference.
+     * AI deletion remains available for source-prompt pages, while regeneration stays hidden until
+     * the iOS host has a production generation backend. Failure means a visible control is wired to
+     * inferred payload data or to a native command that cannot complete.
+     */
+    it("sends exact whole-page, copy, and share payloads from real menu clicks", async () => {
+        const android = {
+            copyMyDocumentContent: vi.fn(),
+            createWholePageBookmark: vi.fn(),
+            regenerateMyDocumentPage: vi.fn(),
+            shareMyDocumentContent: vi.fn(),
+        };
+        const document = documentFixture({
+            isMyDocument: true,
+            myDocumentPageId: "persisted-page-id",
+            sourcePromptId: "source-prompt-id",
+        });
+        const wrapper = mount(DocumentActionMenu, {
+            props: {document},
+            global: {
+                provide: commonProviders(android),
+                stubs: {FontAwesomeIcon: FontAwesomeIconStub},
+            },
+        });
+
+        await openActionMenu(wrapper);
+        await wrapper.get('[data-action="create-whole-page-bookmark"]').trigger("click");
+        expect(android.createWholePageBookmark).toHaveBeenCalledWith(
+            "GEN.Book",
+            "annotate:key",
+        );
+
+        await openActionMenu(wrapper);
+        await wrapper.get('[data-action="share-my-document"]').trigger("click");
+        expect(android.shareMyDocumentContent).toHaveBeenCalledWith("GEN.Book", "page:key/alpha?x=1");
+
+        await openActionMenu(wrapper);
+        await wrapper.get('[data-action="copy-my-document"]').trigger("click");
+        expect(android.copyMyDocumentContent).toHaveBeenCalledWith("GEN.Book", "page:key/alpha?x=1");
+
+        await openActionMenu(wrapper);
+        expect(wrapper.find('[data-action="regenerate-ai-document"]').exists()).toBe(false);
+        expect(wrapper.find('[data-action="delete-ai-document"]').exists()).toBe(true);
+
+        wrapper.unmount();
+    });
+
+    /**
+     * Protects the normal document action-menu AI marker branch from opening bookmark details.
+     *
+     * The visible marker is matched by source identity, then an actual click must call native AI
+     * navigation with its exact, distinct document/key pair. Failure indicates marker identity was
+     * replaced by the source page identity.
+     */
+    it("opens a whole-page AI marker with its exact document and key", async () => {
+        const marker = aiMarkerFixture();
+        const android = {createWholePageBookmark: vi.fn(), openAiDocPage: vi.fn()};
+        const wrapper = mount(WholePageBookmarks, {
+            props: {
+                bookInitials: "GEN.Book",
+                bookKey: "annotate:key",
+            },
+            global: {
+                provide: commonProviders(android, bookmarkProvider([marker])),
+                stubs: {FontAwesomeIcon: FontAwesomeIconStub},
+            },
+        });
+
+        await wrapper.get('[data-action="open-ai-document"]').trigger("click");
+
+        expect(android.openAiDocPage).toHaveBeenCalledWith("AI.Documents", "page:key/42");
+        expect(android.createWholePageBookmark).not.toHaveBeenCalled();
+        wrapper.unmount();
+    });
+});
+
+describe("generic bookmark source rendering parity", () => {
+    /**
+     * Protects Android's structured `OsisFragment`/`OsisSegment` path for generic bookmarks.
+     *
+     * The structured fragment must reach `OsisFragment` with title suppression, while the legacy
+     * raw HTML fallback must not mount. Failure means native OSIS metadata is discarded in favor of
+     * unstructured highlighted HTML.
+     */
+    it("renders GenericBookmark.osisFragment through OsisFragment", () => {
+        const bookmark = genericBookmarkFixture();
+        const wrapper = mount(BookmarkText, {
+            props: {bookmark, expanded: true},
+            global: {
+                provide: commonProviders({}),
+                stubs: {
+                    AmbiguousSelection: true,
+                    OsisFragment: {
+                        name: "OsisFragment",
+                        props: {
+                            fragment: {type: Object, required: true},
+                            hideTitles: {type: Boolean, default: false},
+                        },
+                        template: '<div data-test="structured-osis">{{ fragment.key }}</div>',
+                    },
+                },
+            },
+        });
+
+        expect(wrapper.get('[data-test="structured-osis"]').text()).toBe(
+            "GEN.Book--annotate:key",
+        );
+        expect(wrapper.find('[data-legacy-fallback="true"]').exists()).toBe(false);
+        const fragment = wrapper.getComponent({name: "OsisFragment"});
+        expect(fragment.props("fragment")).toEqual(bookmark.osisFragment);
+        expect(fragment.props("hideTitles")).toBe(true);
+        wrapper.unmount();
+    });
+});
+
+describe("AI marker modal parity", () => {
+    /**
+     * Protects the ambiguous chooser's AI-specific presentation and exact click route.
+     *
+     * The marker renders its range/title without editable bookmark controls. Clicking the rendered
+     * choice must navigate natively using the marker's document/key payload. Failure means AI
+     * markers are being treated as editable persisted bookmarks in the ambiguous path.
+     */
+    it("renders and opens an ambiguous AI marker from an actual click", async () => {
+        const marker = aiMarkerFixture();
+        const android = {openAiDocPage: vi.fn()};
+        const wrapper = mount(AmbiguousSelectionBookmarkButton, {
+            props: {bookmarkId: marker.id},
+            global: {
+                provide: {
+                    ...commonProviders(android, bookmarkProvider([marker])),
+                    [locateTopKey]: ref(false),
+                },
+                stubs: {
+                    BookmarkButtons: {template: '<div data-test="bookmark-buttons"></div>'},
+                    FontAwesomeIcon: FontAwesomeIconStub,
+                    LabelList: true,
+                },
+            },
+        });
+
+        expect(wrapper.text()).toContain("Gen 1:12");
+        expect(wrapper.text()).toContain("Explain this verse");
+        expect(wrapper.find('[data-test="bookmark-buttons"]').exists()).toBe(false);
+
+        await wrapper.get(".ambiguous-button").trigger("click");
+
+        expect(android.openAiDocPage).toHaveBeenCalledWith("AI.Documents", "page:key/42");
+        wrapper.unmount();
+    });
+
+    /**
+     * Protects the shared normal bookmark event path when an AI marker reaches `BookmarkModal`.
+     *
+     * The event must bypass modal rendering and forward the exact marker target. This test covers
+     * marker-icon clicks emitted elsewhere in the document pipeline; listener cleanup occurs on
+     * unmount so no cross-test event state remains.
+     */
+    it("bypasses bookmark modal state for AI marker events", async () => {
+        const marker = aiMarkerFixture();
+        const android = {openAiDocPage: vi.fn(), saveBookmarkNote: vi.fn()};
+        const wrapper = mount(BookmarkModal, {
+            global: {
+                provide: commonProviders(android, bookmarkProvider([marker])),
+                stubs: {
+                    BookmarkButtons: true,
+                    BookmarkText: true,
+                    EditableText: true,
+                    FontAwesomeIcon: FontAwesomeIconStub,
+                    LabelList: true,
+                    ModalDialog: {template: "<div data-test=\"bookmark-modal\"><slot/></div>"},
+                },
+            },
+        });
+
+        emit("bookmark_clicked", marker.id);
+        await nextTick();
+
+        expect(android.openAiDocPage).toHaveBeenCalledWith("AI.Documents", "page:key/42");
+        expect(wrapper.find('[data-test="bookmark-modal"]').exists()).toBe(false);
+        wrapper.unmount();
+    });
+});
+
+describe("generic document metadata parity", () => {
+    /**
+     * Protects commentary range display and exact AI source-prompt navigation.
+     *
+     * A source prompt ID produces a clickable bridge action carrying that exact ID. A page without
+     * an ID keeps the prompt name as plain text so it cannot expose a dead navigation control.
+     */
+    it("renders commentaryRange.name and links only identified AI source prompts", async () => {
+        const globalBookmarks = bookmarkProvider();
+        const android = {
+            getMyDocumentPageRawContent: vi.fn(),
+            openPromptEditor: vi.fn(),
+            reloadMyDocumentPage: vi.fn(),
+            saveMyDocumentPageContent: vi.fn(),
+        };
+        const document = documentFixture({
+            bookCategory: "COMMENTARY",
+            isAiDocument: true,
+            sourcePromptId: "prompt-id",
+            sourcePromptName: "Historical context",
+            sourceModelName: "Model Exact",
+            commentaryRange: {
+                startOsisRef: "Gen.1.1",
+                endOsisRef: "Gen.1.3",
+                name: "Genesis 1:1-3",
+            },
+        });
+        const mountDocument = (currentDocument: OsisDocument) => mount(OsisDocumentComponent, {
+            props: {document: currentDocument},
+            global: {
+                provide: {
+                    ...commonProviders(android, globalBookmarks),
+                    [customCssKey]: {registerBook: vi.fn()},
+                },
+                stubs: {
+                    AreYouSure: true,
+                    DocumentActionMenu: {
+                        template: "<div></div>",
+                        methods: {openMenu: vi.fn()},
+                    },
+                    FeaturesLink: true,
+                    FontAwesomeIcon: FontAwesomeIconStub,
+                    OpenAllLink: true,
+                    OsisFragment: {
+                        props: ["fragment"],
+                        template: '<div id="frag-document-test">Rendered commentary</div>',
+                    },
+                },
+            },
+        });
+        const wrapper = mountDocument(document);
+
+        await flushPromises();
+
+        expect(wrapper.get(".commentary-range").text()).toBe("Genesis 1:1-3");
+        expect(wrapper.get(".ai-footer").text()).toContain("Historical context");
+        expect(wrapper.get(".ai-footer").text()).toContain("Model Exact");
+        const sourcePromptLink = wrapper.get(".ai-footer a.prompt-link");
+        expect(sourcePromptLink.attributes("href")).toBeUndefined();
+        await sourcePromptLink.trigger("click");
+        expect(android.openPromptEditor).toHaveBeenCalledOnce();
+        expect(android.openPromptEditor).toHaveBeenCalledWith("prompt-id");
+        wrapper.unmount();
+
+        const fallbackWrapper = mountDocument({
+            ...document,
+            sourcePromptId: null,
+        });
+        await flushPromises();
+
+        expect(fallbackWrapper.find(".ai-footer a.prompt-link").exists()).toBe(false);
+        expect(fallbackWrapper.get(".ai-footer > span:not(.model-name)").text()).toBe("Historical context");
+        fallbackWrapper.unmount();
+    });
+});

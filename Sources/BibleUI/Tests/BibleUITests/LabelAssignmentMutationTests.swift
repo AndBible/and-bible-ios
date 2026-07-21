@@ -52,6 +52,7 @@ final class LabelAssignmentMutationTests: XCTestCase {
         )
         XCTAssertEqual(assignedState, .init(kind: .bible, assignedLabelIds: [label.id]))
         XCTAssertEqual(try modelContext.fetch(FetchDescriptor<BibleBookmarkToLabel>()).count, 1)
+        XCTAssertEqual(bookmark.primaryLabelId, label.id)
 
         let removedState = try LabelAssignmentMutation.toggleLabel(
             label,
@@ -61,6 +62,7 @@ final class LabelAssignmentMutationTests: XCTestCase {
         )
         XCTAssertEqual(removedState, .init(kind: .bible, assignedLabelIds: []))
         XCTAssertTrue(try modelContext.fetch(FetchDescriptor<BibleBookmarkToLabel>()).isEmpty)
+        XCTAssertNil(bookmark.primaryLabelId)
         XCTAssertTrue(label.favourite)
     }
 
@@ -107,6 +109,7 @@ final class LabelAssignmentMutationTests: XCTestCase {
         XCTAssertEqual(secondState.kind, .bible)
         XCTAssertEqual(firstState.assignedLabelIds, Set(labels.map(\.id)))
         XCTAssertEqual(secondState.assignedLabelIds, Set(labels.map(\.id)))
+        XCTAssertEqual(bookmark.primaryLabelId, labels.first?.id)
     }
 
     /**
@@ -150,6 +153,7 @@ final class LabelAssignmentMutationTests: XCTestCase {
         XCTAssertEqual(assignedState, .init(kind: .generic, assignedLabelIds: [label.id]))
         XCTAssertEqual(try modelContext.fetch(FetchDescriptor<GenericBookmarkToLabel>()).count, 1)
         XCTAssertTrue(try modelContext.fetch(FetchDescriptor<BibleBookmarkToLabel>()).isEmpty)
+        XCTAssertEqual(bookmark.primaryLabelId, label.id)
 
         let removedState = try LabelAssignmentMutation.toggleLabel(
             label,
@@ -159,6 +163,79 @@ final class LabelAssignmentMutationTests: XCTestCase {
         )
         XCTAssertEqual(removedState, .init(kind: .generic, assignedLabelIds: []))
         XCTAssertTrue(try modelContext.fetch(FetchDescriptor<GenericBookmarkToLabel>()).isEmpty)
+        XCTAssertNil(bookmark.primaryLabelId)
+    }
+
+    /**
+     Verifies removing a primary assignment promotes the remaining label for both bookmark tables.
+
+     Setup:
+     - creates Bible and generic bookmarks with the same two labels
+     - assigns the first label, then the second, and removes the first through the production helper
+
+     Expected result:
+     - the first assignment becomes primary
+     - adding a second assignment retains the valid primary
+     - removing the primary promotes the sole remaining label on both bookmarks
+
+     Failure meaning:
+     - Label Assignment bypassed the shared Android primary-label repair contract, leaving a stale
+       scalar identifier after its relationship row was removed.
+     */
+    func testRemovingPrimaryAssignmentPromotesRemainingLabelForBibleAndGenericBookmarks() throws {
+        let modelContext = try makeBookmarkMutationContext()
+        let bible = bibleBookmark(id: UUID(uuidString: "30000000-0000-0000-0000-000000000004")!)
+        let generic = GenericBookmark(
+            id: UUID(uuidString: "30000000-0000-0000-0000-000000000005")!,
+            key: "Entry 2",
+            bookInitials: "UITESTDICT",
+            createdAt: Date(timeIntervalSince1970: 1),
+            ordinalStart: 2,
+            ordinalEnd: 2,
+            lastUpdatedOn: Date(timeIntervalSince1970: 1)
+        )
+        let first = Label(name: "First")
+        let second = Label(name: "Second")
+        modelContext.insert(bible)
+        modelContext.insert(generic)
+        modelContext.insert(first)
+        modelContext.insert(second)
+        try modelContext.save()
+
+        for (bookmarkId, kind) in [
+            (bible.id, LabelAssignmentMutation.BookmarkKind.bible),
+            (generic.id, LabelAssignmentMutation.BookmarkKind.generic),
+        ] {
+            _ = try LabelAssignmentMutation.toggleLabel(
+                first,
+                bookmarkId: bookmarkId,
+                kind: kind,
+                in: modelContext
+            )
+            _ = try LabelAssignmentMutation.toggleLabel(
+                second,
+                bookmarkId: bookmarkId,
+                kind: kind,
+                in: modelContext
+            )
+            _ = try LabelAssignmentMutation.toggleLabel(
+                first,
+                bookmarkId: bookmarkId,
+                kind: kind,
+                in: modelContext
+            )
+        }
+
+        XCTAssertEqual(bible.primaryLabelId, second.id)
+        XCTAssertEqual(generic.primaryLabelId, second.id)
+        XCTAssertEqual(
+            try LabelAssignmentMutation.state(for: bible.id, in: modelContext).assignedLabelIds,
+            [second.id]
+        )
+        XCTAssertEqual(
+            try LabelAssignmentMutation.state(for: generic.id, in: modelContext).assignedLabelIds,
+            [second.id]
+        )
     }
 
     /**
@@ -183,13 +260,20 @@ final class LabelAssignmentMutationTests: XCTestCase {
     private func bibleBookmark(id: UUID) -> BibleBookmark {
         let bookmark = BibleBookmark(
             id: id,
-            kjvOrdinalStart: 1,
-            kjvOrdinalEnd: 1,
-            ordinalStart: 1,
-            ordinalEnd: 1,
-            v11n: "KJVA",
+            kjvOrdinalStart: 4,
+            kjvOrdinalEnd: 4,
+            ordinalStart: 4,
+            ordinalEnd: 4,
+            v11n: "KJV",
             createdAt: Date(timeIntervalSince1970: 1),
-            lastUpdatedOn: Date(timeIntervalSince1970: 1)
+            lastUpdatedOn: Date(timeIntervalSince1970: 1),
+            ordinalTrustMetadata: PersistedOrdinalTrustPolicy.androidImportMetadata(
+                sourceVersification: "KJV",
+                sourceOrdinalStart: 4,
+                sourceOrdinalEnd: 4,
+                kjvaOrdinalStart: 4,
+                kjvaOrdinalEnd: 4
+            )
         )
         bookmark.book = "Genesis"
         return bookmark

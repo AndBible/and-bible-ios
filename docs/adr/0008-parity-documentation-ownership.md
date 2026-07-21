@@ -232,7 +232,7 @@ The current retained script fixtures are:
 - [ADR 0004: Reader Pointer Affordances And Upstream Bug Handling](0004-reader-pointer-affordances-and-upstream-bug-handling.md)
 - [ADR 0005: Workspace Color Scope And Reader Chrome](0005-workspace-color-scope-and-reader-chrome.md)
 - [ADR 0006: Modal Presentation Ownership For Android Parity](0006-modal-presentation-ownership-for-android-parity.md)
-- [ADR 0007: iOS Discrete Mode App Name Boundary](0007-ios-discrete-mode-app-name-boundary.md)
+- [ADR 0007: iOS Discrete SKU and Runtime Icon Boundary](0007-ios-discrete-mode-app-name-boundary.md)
 - `scripts/check_bridge_parity_inventory.py`
 - `scripts/check_settings_localization_guardrails.py`
 - `scripts/fixtures/`

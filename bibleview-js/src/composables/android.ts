@@ -80,6 +80,8 @@ export type BibleJavascriptInterface = {
     copyVerse: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
     shareMyDocumentContent: (bookInitials: string, pageKey: string) => void,
     copyMyDocumentContent: (bookInitials: string, pageKey: string) => void,
+    createWholePageBookmark: (bookInitials: string, bookKey: string) => void,
+    openAiDocPage: (documentInitials: string, pageKey: string) => void,
     addBookmark: (bookInitials: string, startOrdinal: number, endOrdinal: number, addNote: boolean) => void,
     addGenericBookmark: (bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal: number, addNote: boolean) => void,
     addParagraphBreakBookmark: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
@@ -118,9 +120,21 @@ export type BibleJavascriptInterface = {
     helpDialog: (content: string, title: Nullable<string>) => void,
     shareHtml: (html: string) => void,
     helpBookmarks: () => void,
+    showHelpDialog: (scopeKey: string) => void,
     onKeyDown: (key: string) => void,
     saveState: (newState: string) => void,
     setReadingProgressSettings: (json: string) => void,
+    llmAction: (bookInitials: string, startOrdinal: number, endOrdinal: number, text: string) => void,
+    llmActionGeneric: (bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal: number, text: string) => void,
+    noteEditorLlmAction: (contextJson: string) => void,
+    openPromptEditor: (promptId: string) => void,
+    openAiDocPageChooser: (markersJson: string) => void,
+}
+
+export type AIDocumentPageMarker = {
+    title: string,
+    documentInitials: string,
+    pageKey: string,
 }
 
 export type MyDocumentPageRawContent = {
@@ -205,6 +219,8 @@ export function patchAndroidConsole() {
 export type QuerySelection = {
     bookInitials: string
     osisRef: string
+    bookCategory: string
+    v11n: string | null
     startOrdinal: number,
     startOffset: number,
     endOrdinal: number,
@@ -245,6 +261,8 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
 
         const bookInitials = documentElem.dataset.bookInitials!;
         const osisRef = documentElem.dataset.osisRef!;
+        const bookCategory = documentElem.dataset.bookCategory!;
+        const v11n = documentElem.dataset.v11n || null;
         let startOrdinal: number, startOffset: number, endOrdinal: number, endOffset: number;
 
         try {
@@ -287,6 +305,8 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         const returnSelection: QuerySelection = {
             bookInitials,
             osisRef,
+            bookCategory,
+            v11n,
             startOrdinal,
             startOffset,
             endOrdinal,
@@ -532,6 +552,35 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         android.copyMyDocumentContent(bookInitials, pageKey);
     }
 
+    /**
+     * Requests a generic bookmark for an entire non-Bible document page.
+     *
+     * @param bookInitials Exact source module initials from the rendered document.
+     * @param bookKey Exact source key used to load the rendered page.
+     * @returns Nothing; native code persists the bookmark and may emit bookmark UI events.
+     * @remarks This forwards synchronously to the native bridge without reading the DOM or selection.
+     * Missing native support leaves the bridge call unhandled; no client-side fallback is attempted.
+     */
+    function createWholePageBookmark(
+        bookInitials: string,
+        bookKey: string,
+    ) {
+        android.createWholePageBookmark(bookInitials, bookKey);
+    }
+
+    /**
+     * Opens one AI-generated document page using its exact document and key identity.
+     *
+     * @param documentInitials Exact AI document module initials supplied by the marker payload.
+     * @param pageKey Exact page key supplied by the marker payload.
+     * @returns Nothing; native navigation owns page lookup and presentation.
+     * @remarks The call is synchronous and deterministic. Missing documents or keys are handled by
+     * native code; the web client does not substitute a different page.
+     */
+    function openAiDocPage(documentInitials: string, pageKey: string) {
+        android.openAiDocPage(documentInitials, pageKey);
+    }
+
     function saveMyDocumentPageContent(bookInitials: string, pageId: string, content: string, title: string | null) {
         android.saveMyDocumentPageContent(bookInitials, pageId, content, title);
     }
@@ -645,7 +694,48 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
     }
 
     function showHelpDialog(scopeKey: string) {
-        android.helpDialog(scopeKey, null);
+        android.showHelpDialog(scopeKey);
+    }
+
+    /** Opens the native prompt chooser for an exact Bible selection. */
+    function llmAction(
+        bookInitials: string,
+        startOrdinal: number,
+        endOrdinal?: number,
+        text = "",
+    ) {
+        android.llmAction(bookInitials, startOrdinal, endOrdinal ?? -1, text);
+    }
+
+    /** Opens the native prompt chooser for an exact generic-document selection. */
+    function llmActionGeneric(
+        bookInitials: string,
+        osisRef: string,
+        startOrdinal: number,
+        endOrdinal?: number,
+        text = "",
+    ) {
+        android.llmActionGeneric(bookInitials, osisRef, startOrdinal, endOrdinal ?? -1, text);
+    }
+
+    /** Captures one editor destination before opening native text-transformation prompts. */
+    function noteEditorLlmAction(
+        entityType: string,
+        entityId: string,
+        currentText: string,
+        contentType: string,
+    ) {
+        android.noteEditorLlmAction(JSON.stringify({entityType, entityId, currentText, contentType}));
+    }
+
+    /** Opens the exact source prompt referenced by generated document metadata. */
+    function openPromptEditor(promptId: string) {
+        android.openPromptEditor(promptId);
+    }
+
+    /** Presents native exact-page routing for one or more overlapping AI document markers. */
+    function openAiDocPageChooser(markers: AIDocumentPageMarker[]) {
+        android.openAiDocPageChooser(JSON.stringify(markers));
     }
 
     function setLimitAmbiguousModalSize(value: boolean) {
@@ -711,6 +801,8 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         getMyDocumentPageRawContent,
         shareMyDocumentContent,
         copyMyDocumentContent,
+        createWholePageBookmark,
+        openAiDocPage,
         saveMyDocumentPageContent,
         reloadMyDocumentPage,
         regenerateMyDocumentPage,
@@ -748,6 +840,11 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         speakMemorizationLoop,
         helpDialog,
         showHelpDialog,
+        llmAction,
+        llmActionGeneric,
+        noteEditorLlmAction,
+        openPromptEditor,
+        openAiDocPageChooser,
         onKeyDown,
         parseRef,
         saveState,

@@ -340,6 +340,13 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         )
     }
 
+    /** Strong's normalization and SearchView readiness must select the same index facet. */
+    func testSearchIndexRequirementFollowsNormalizedQueryContract() {
+        XCTAssertEqual(SearchView.indexRequirement(for: "faith hope"), .text)
+        XCTAssertEqual(SearchView.indexRequirement(for: "H00430"), .strongs)
+        XCTAssertEqual(SearchView.indexRequirement(for: "strong:H0430"), .strongs)
+    }
+
     /**
      Verifies iOS tokenizes Strong's OSIS lemma values the same way JSword populates the Lucene
      `strong` field.
@@ -521,12 +528,30 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         defer { try? FileManager.default.removeItem(at: databaseURL) }
 
         let service = SearchIndexService(databasePath: databaseURL.path)
+        let analyzer = SearchTextAnalyzer.profile(for: "en")
+        let analyzerIdentifier = analyzer.identifier
+        let indexedText = try SearchTextAnalyzer.analyzedText(
+            "And the Spirit of God moved upon the face of the waters.",
+            profile: analyzer
+        )
         try await service.performIndexMutationForTesting { db in
             let sql = """
-            INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
-            VALUES ('Genesis 1:2', 'And the Spirit of God moved upon the face of the waters.', 'KJV', 0);
-            INSERT INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
-            VALUES ('KJV', 1, datetime('now'), \(SearchIndexService.currentSchemaVersion));
+            INSERT INTO verse_fts (
+                search_text, verse_key, plain_text, module_name, entry_order, osis_book,
+                display_book, display_book_mode, chapter, verse, book_order, canon_scope
+            ) VALUES (
+                '\(indexedText)',
+                'Genesis 1:2', 'And the Spirit of God moved upon the face of the waters.',
+                'KJV', 0, 'Gen', 'Genesis', 'source', 1, 2, 2, 'ot'
+            );
+            INSERT INTO indexed_modules (
+                module_name, verse_count, indexed_at, schema_version, language_code, analyzer_id,
+                strongs_complete, source_version, source_fingerprint, store_generation
+            ) VALUES (
+                'KJV', 1, datetime('now'), \(SearchIndexService.currentSchemaVersion),
+                'en', '\(analyzerIdentifier)', 0, '',
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 0
+            );
             """
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
                 let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "SQLite write failed"
@@ -546,10 +571,24 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
             service.hasStrongsIndex(for: "KJV"),
             "A text-only index must not satisfy the Strong's index facet."
         )
+        let textOnlyResults = try service.searchStrongs(
+            canonicalTokens: queryOptions.canonicalStrongTokens,
+            moduleName: "KJV"
+        )
+        XCTAssertEqual(textOnlyResults.moduleName, "KJV")
         XCTAssertTrue(
-            service.searchStrongs(canonicalTokens: queryOptions.canonicalStrongTokens, moduleName: "KJV").isEmpty,
+            textOnlyResults.hits.isEmpty,
             "Strong's search must not synthesize hits from text-only FTS rows."
         )
+        XCTAssertFalse(textOnlyResults.isTruncated)
+        XCTAssertThrowsError(
+            try service.searchStrongs(
+                canonicalTokens: queryOptions.canonicalStrongTokens,
+                moduleName: "UNINDEXED"
+            )
+        ) { error in
+            XCTAssertEqual(error as? SearchIndexError, .indexUnavailable(moduleName: "UNINDEXED"))
+        }
 
         try await service.performIndexMutationForTesting { db in
             let sql = """
@@ -565,11 +604,15 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         }
 
         XCTAssertTrue(service.hasStrongsIndex(for: "KJV"))
-        let hits = service.searchStrongs(
+        let moduleResults = try service.searchStrongs(
             canonicalTokens: queryOptions.canonicalStrongTokens,
             moduleName: "KJV"
         )
-        XCTAssertEqual(hits.map(\.key), ["Genesis 1:2"])
+        XCTAssertEqual(moduleResults.moduleName, "KJV")
+        XCTAssertEqual(moduleResults.hits.map(\.key), ["Genesis 1:2"])
+        XCTAssertEqual(moduleResults.hits.map(\.moduleName), ["KJV"])
+        XCTAssertEqual(moduleResults.hits.map(\.identity.osisBookId), ["Gen"])
+        XCTAssertFalse(moduleResults.isTruncated)
     }
 
     /**
@@ -593,21 +636,52 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         defer { try? FileManager.default.removeItem(at: databaseURL) }
 
         let service = SearchIndexService(databasePath: databaseURL.path)
+        let analyzer = SearchTextAnalyzer.profile(for: "en")
+        let analyzerIdentifier = analyzer.identifier
+        let kjvRows = try [
+            "And the Spirit of God moved upon the face of the waters.",
+            "The book of the generation of Jesus Christ.",
+            "But Noah found grace in the eyes of the Lord.",
+        ].map { try SearchTextAnalyzer.analyzedText($0, profile: analyzer) }
+        let webRows = try [
+            "The earth was formless and empty.",
+            "For God so loved the world.",
+        ].map { try SearchTextAnalyzer.analyzedText($0, profile: analyzer) }
         try await service.performIndexMutationForTesting { db in
             let sql = """
-            INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
+            INSERT INTO verse_fts (
+                search_text, verse_key, plain_text, module_name, entry_order, osis_book,
+                display_book, display_book_mode, chapter, verse, book_order, canon_scope
+            )
             VALUES
-                ('Genesis 1:2', 'And the Spirit of God moved upon the face of the waters.', 'KJV', 0),
-                ('Matthew 1:1', 'The book of the generation of Jesus Christ.', 'KJV', 1),
-                ('Genesis 6:8', 'But Noah found grace in the eyes of the Lord.', 'KJV', 2),
-                ('Genesis 1:2', 'The earth was formless and empty.', 'AATESTWEB', 0),
-                ('John 3:16', 'For God so loved the world.', 'AATESTWEB', 1);
+                ('\(kjvRows[0])', 'Genesis 1:2',
+                 'And the Spirit of God moved upon the face of the waters.', 'KJV', 0,
+                 'Gen', 'Genesis', 'source', 1, 2, 2, 'ot'),
+                ('\(kjvRows[1])', 'Matthew 1:1',
+                 'The book of the generation of Jesus Christ.', 'KJV', 1,
+                 'Matt', 'Matthew', 'source', 1, 1, 42, 'nt'),
+                ('\(kjvRows[2])', 'Genesis 6:8',
+                 'But Noah found grace in the eyes of the Lord.', 'KJV', 2,
+                 'Gen', 'Genesis', 'source', 6, 8, 2, 'ot'),
+                ('\(webRows[0])', 'Genesis 1:2',
+                 'The earth was formless and empty.', 'AATESTWEB', 0,
+                 'Gen', 'Genesis', 'source', 1, 2, 2, 'ot'),
+                ('\(webRows[1])', 'John 3:16',
+                 'For God so loved the world.', 'AATESTWEB', 1,
+                 'John', 'John', 'source', 3, 16, 45, 'nt');
             INSERT INTO verse_strongs (module_name, token, verse_key, entry_order)
             VALUES ('KJV', 'H0430', 'Genesis 1:2', 0);
-            INSERT INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
+            INSERT INTO indexed_modules (
+                module_name, verse_count, indexed_at, schema_version, language_code, analyzer_id,
+                strongs_complete, source_version, source_fingerprint, store_generation
+            )
             VALUES
-                ('KJV', 3, datetime('now'), \(SearchIndexService.currentSchemaVersion)),
-                ('AATESTWEB', 2, datetime('now'), \(SearchIndexService.currentSchemaVersion));
+                ('KJV', 3, datetime('now'), \(SearchIndexService.currentSchemaVersion),
+                 'en', '\(analyzerIdentifier)', 1, '',
+                 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 0),
+                ('AATESTWEB', 2, datetime('now'), \(SearchIndexService.currentSchemaVersion),
+                 'en', '\(analyzerIdentifier)', 1, '',
+                 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 0);
             """
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
                 let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "SQLite write failed"
@@ -1228,6 +1302,9 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
                 keyName: "00430",
                 bookInitials: "BDBT",
                 bookAbbreviation: "BDBT",
+                v11n: "KJV",
+                language: "en",
+                direction: "ltr",
                 features: OsisFeatures(type: "hebrew", keyName: "00430"),
                 isNativeHtml: false
             )],

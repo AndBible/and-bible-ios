@@ -7,6 +7,195 @@ import XCTest
 private let readingPlanSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 /**
+ Forces one file-backed SwiftData store to report an operational write failure.
+
+ The helper installs `BEFORE INSERT`, `BEFORE UPDATE`, and `BEFORE DELETE` triggers on every model
+ table in the selected configuration.
+ Evaluating an oversized `zeroblob` raises SQLite's `SQLITE_TOOBIG` operational error through Core
+ Data's normal throwing save path. It avoids lock waits and does not masquerade as an optimistic-lock
+ conflict, so SwiftData can roll back normally and the test can reopen both stores.
+
+ - Side effects: Opens one SQLite connection and installs/removes temporary failure triggers.
+ - Failure modes: Throws an `NSError` when SQLite cannot open, inspect, or modify the selected store.
+ - Important: Tests must remove the triggers before reopening the SwiftData container.
+ */
+final class ReadingPlanSQLiteStoreWriteFailure {
+    /// Open SQLite connection used to manage test-only triggers.
+    private var database: OpaquePointer?
+
+    /// Trigger names currently installed in the selected store.
+    private var triggerNames: [String] = []
+
+    /**
+     Opens the selected file-backed SwiftData store.
+
+     - Parameter databaseURL: Graph or settings SQLite store whose writes should fail.
+     - Side effects: Opens a read-write SQLite connection.
+     - Failure modes: Throws when SQLite cannot open the selected store.
+     */
+    init(databaseURL: URL) throws {
+        var openedDatabase: OpaquePointer?
+        let result = sqlite3_open_v2(
+            databaseURL.path,
+            &openedDatabase,
+            SQLITE_OPEN_READWRITE,
+            nil
+        )
+        guard result == SQLITE_OK, let openedDatabase else {
+            let message = openedDatabase.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown SQLite error"
+            if let openedDatabase {
+                sqlite3_close(openedDatabase)
+            }
+            throw NSError(
+                domain: "ReadingPlanSQLiteStoreWriteFailure",
+                code: Int(result),
+                userInfo: [NSLocalizedDescriptionKey: message]
+            )
+        }
+        database = openedDatabase
+        sqlite3_busy_timeout(openedDatabase, 1_000)
+    }
+
+    /**
+     Installs operational-error triggers for every write operation on each model table.
+
+     - Side effects: Adds persistent test-only triggers that reject the next entity write.
+     - Failure modes: Throws when model tables cannot be enumerated or a trigger cannot be created.
+       Repeated installation while active is a no-op.
+     */
+    func install() throws {
+        guard triggerNames.isEmpty, let database else {
+            return
+        }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        let tableSQL = """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name GLOB 'Z*'
+          AND name NOT IN ('Z_METADATA', 'Z_MODELCACHE', 'Z_PRIMARYKEY')
+        ORDER BY name
+        """
+        guard sqlite3_prepare_v2(database, tableSQL, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw sqliteError(database)
+        }
+
+        var tableNames: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let rawName = sqlite3_column_text(statement, 0) {
+                tableNames.append(String(cString: rawName))
+            }
+        }
+        guard !tableNames.isEmpty else {
+            throw NSError(
+                domain: "ReadingPlanSQLiteStoreWriteFailure",
+                code: Int(SQLITE_NOTFOUND),
+                userInfo: [NSLocalizedDescriptionKey: "No SwiftData model tables found"]
+            )
+        }
+
+        do {
+            for (tableIndex, tableName) in tableNames.enumerated() {
+                for operation in ["INSERT", "UPDATE", "DELETE"] {
+                    let triggerName = "reading_plan_write_failure_\(tableIndex)_\(operation.lowercased())"
+                    try execute(
+                        """
+                        CREATE TRIGGER "\(triggerName)"
+                        BEFORE \(operation) ON "\(tableName)"
+                        BEGIN
+                            SELECT zeroblob(2147483648);
+                        END;
+                        """,
+                        database: database
+                    )
+                    triggerNames.append(triggerName)
+                }
+            }
+        } catch {
+            remove()
+            throw error
+        }
+    }
+
+    /**
+     Removes every installed failure trigger.
+
+     - Side effects: Restores ordinary writes to the selected store.
+     - Failure modes: Trigger-removal errors are ignored so cleanup does not mask the tested error.
+     */
+    func remove() {
+        guard let database else {
+            return
+        }
+        for triggerName in triggerNames.reversed() {
+            try? execute("DROP TRIGGER IF EXISTS \"\(triggerName)\";", database: database)
+        }
+        triggerNames.removeAll()
+    }
+
+    /**
+     Executes one SQLite schema statement.
+
+     - Parameters:
+       - statement: Complete SQLite statement to execute.
+       - database: Open fixture database connection.
+     - Side effects: Installs or removes test-only triggers.
+     - Failure modes: Throws an `NSError` containing SQLite's latest diagnostic.
+     */
+    private func execute(_ statement: String, database: OpaquePointer) throws {
+        let result = sqlite3_exec(database, statement, nil, nil, nil)
+        guard result == SQLITE_OK else {
+            throw sqliteError(database, code: result)
+        }
+    }
+
+    /**
+     Builds one NSError from the selected SQLite connection's latest diagnostic.
+
+     - Parameters:
+       - database: Open SQLite connection that reported the failure.
+       - code: SQLite result code, defaulting to the connection's latest code.
+     - Returns: Error carrying SQLite's domain, code, and diagnostic message.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func sqliteError(_ database: OpaquePointer, code: Int32? = nil) -> NSError {
+        NSError(
+            domain: "ReadingPlanSQLiteStoreWriteFailure",
+            code: Int(code ?? sqlite3_errcode(database)),
+            userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(database))]
+        )
+    }
+
+    /** Removes installed triggers and closes the direct SQLite connection. */
+    deinit {
+        remove()
+        if let database {
+            sqlite3_close(database)
+        }
+    }
+}
+
+/**
+ Production-shaped file-backed reading-plan restore store set.
+
+ Reading plans and days live in one graph configuration while `Setting` rows live in a second local
+ configuration, matching `AndBibleApp` without enabling CloudKit in unit tests.
+ */
+struct PersistentReadingPlanRestoreStore {
+    /// Container spanning the graph and local settings configurations.
+    let container: ModelContainer
+
+    /// SQLite URL for the reading-plan and reading-plan-day graph.
+    let graphStoreURL: URL
+
+    /// SQLite URL for local preserved-status settings.
+    let settingsStoreURL: URL
+}
+
+/**
  Android `ReadingPlan` table row fixture for remote-sync snapshot tests.
 
  The row mirrors the production Android backup schema so restore, patch, and initial-backup tests
@@ -57,10 +246,53 @@ func makeReadingPlanRestoreModelContainer() throws -> ModelContainer {
     let schema = Schema([
         ReadingPlan.self,
         ReadingPlanDay.self,
+        ReadingPlanDefinitionPublicationState.self,
         Setting.self,
     ])
     let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
     return try ModelContainer(for: schema, configurations: [configuration])
+}
+
+/**
+ Creates or reopens production-shaped file-backed stores for reading-plan restore tests.
+
+ - Parameter directoryURL: Existing temporary directory that owns both SQLite store families.
+ - Returns: Container plus graph/settings URLs used for independent failure injection.
+ - Side effects: Creates or opens `ReadingPlanGraph.store` and `ReadingPlanSettings.store` beneath
+   `directoryURL`.
+ - Failure modes: Rethrows SwiftData model-container/configuration errors.
+ */
+func makePersistentReadingPlanRestoreStore(in directoryURL: URL) throws -> PersistentReadingPlanRestoreStore {
+    let graphModels: [any PersistentModel.Type] = [
+        ReadingPlan.self,
+        ReadingPlanDay.self,
+        ReadingPlanDefinitionPublicationState.self,
+    ]
+    let localModels: [any PersistentModel.Type] = [Setting.self]
+    let schema = Schema(graphModels + localModels)
+    let graphStoreURL = directoryURL.appendingPathComponent("ReadingPlanGraph.store")
+    let settingsStoreURL = directoryURL.appendingPathComponent("ReadingPlanSettings.store")
+    let graphConfiguration = ModelConfiguration(
+        "ReadingPlanRestoreGraph",
+        schema: Schema(graphModels),
+        url: graphStoreURL,
+        cloudKitDatabase: .none
+    )
+    let settingsConfiguration = ModelConfiguration(
+        "ReadingPlanRestoreSettings",
+        schema: Schema(localModels),
+        url: settingsStoreURL,
+        cloudKitDatabase: .none
+    )
+    let container = try ModelContainer(
+        for: schema,
+        configurations: [graphConfiguration, settingsConfiguration]
+    )
+    return PersistentReadingPlanRestoreStore(
+        container: container,
+        graphStoreURL: graphStoreURL,
+        settingsStoreURL: settingsStoreURL
+    )
 }
 
 /**
@@ -93,28 +325,7 @@ func makeAndroidReadingPlansDatabase(
     XCTAssertEqual(
         sqlite3_exec(
             db,
-            """
-            CREATE TABLE ReadingPlan (
-                planCode TEXT NOT NULL,
-                planStartDate INTEGER NOT NULL,
-                planCurrentDay INTEGER NOT NULL DEFAULT 1,
-                id BLOB NOT NULL PRIMARY KEY
-            );
-            CREATE TABLE ReadingPlanStatus (
-                planCode TEXT NOT NULL,
-                planDay INTEGER NOT NULL,
-                readingStatus TEXT NOT NULL,
-                id BLOB NOT NULL PRIMARY KEY
-            );
-            CREATE TABLE LogEntry (
-                tableName TEXT NOT NULL,
-                entityId1 BLOB,
-                entityId2 BLOB,
-                type TEXT NOT NULL,
-                lastUpdated INTEGER NOT NULL,
-                sourceDevice TEXT NOT NULL
-            );
-            """,
+            RemoteSyncAndroidDatabaseContract.createSchemaSQL(for: .readingPlans),
             nil,
             nil,
             nil
@@ -245,9 +456,11 @@ func makeReadingPlanPatchArchive(
  Remote-sync adapter test double for reading-plan backup upload tests.
 
  The actor records calls made by `RemoteSyncInitialBackupUploadService` and captures uploaded archive
- bytes so the test can inspect the generated Android-compatible database.
+ bytes so the test can inspect the generated Android-compatible database. It models create-only
+ publication by validating and forwarding the exact bounded source file through the deterministic
+ upload queue.
  */
-actor ReadingPlanMockRemoteSyncAdapter: RemoteSyncAdapting {
+actor ReadingPlanMockRemoteSyncAdapter: RemoteSyncAdapting, RemoteSyncConditionalFileUploading {
     private var uploadResults: [RemoteSyncFile] = []
     private var events: [ReadingPlanMockRemoteSyncAdapterEvent] = []
     private var uploadedFiles: [ReadingPlanMockRemoteSyncUploadedFile] = []
@@ -354,6 +567,41 @@ actor ReadingPlanMockRemoteSyncAdapter: RemoteSyncAdapting {
             parentID: parentID,
             mimeType: contentType
         )
+    }
+
+    /**
+     Records a create-only upload through the mock's deterministic upload path.
+
+     The fixture does not model competing writers; conflict and reconciliation behavior is covered by
+     `RemoteSyncRemotePatchReconcilerTests`. The returned metadata comes from the queued upload result.
+
+     - Parameters:
+       - name: Exact remote filename being created.
+       - fileURL: Durable immutable archive file captured by the initial-backup service.
+       - maximumByteCount: Maximum accepted archive size.
+       - parentID: Destination sync-folder identifier.
+       - contentType: MIME type attached to the remote file.
+     - Returns: A successful create result containing queued remote metadata.
+     - Side effects: Reads and records the bounded upload file through the mock upload path.
+     - Throws: Rethrows bounded-file validation and mock upload failures.
+     */
+    func uploadIfAbsent(
+        name: String,
+        fileURL: URL,
+        maximumByteCount: Int,
+        parentID: String,
+        contentType: String
+    ) async throws -> RemoteSyncConditionalUploadResult {
+        _ = try RemoteSyncBoundedFileIO.fingerprintRegularFile(
+            at: fileURL,
+            maximumByteCount: maximumByteCount
+        )
+        return .created(try await upload(
+            name: name,
+            fileURL: fileURL,
+            parentID: parentID,
+            contentType: contentType
+        ))
     }
 
     func delete(id: String) async throws {

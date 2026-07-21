@@ -12,6 +12,66 @@ import XCTest
  */
 final class PassageGridTests: XCTestCase {
     /**
+     Verifies Android's Obadiah/Jude shortcut completes chapter-only selection at chapter one.
+
+     A failure means a one-chapter Bible book still opens a redundant chapter grid instead of
+     returning the same direct result as Android's `GridChoosePassageBook`.
+     */
+    func testSingleChapterBookCompletesChapterSelectionDirectly() {
+        for book in [
+            BookInfo(name: "Obadiah", osisId: "Obad", abbreviation: "Obad", chapterCount: 1, testament: 1),
+            BookInfo(name: "Jude", osisId: "Jude", abbreviation: "Jude", chapterCount: 1, testament: 2),
+        ] {
+            XCTAssertEqual(
+                PassageBookSelectionDestination.resolve(book: book, navigateToVerse: false),
+                .selection(chapter: 1, verse: nil),
+                book.name
+            )
+        }
+    }
+
+    /**
+     Verifies verse-oriented selection skips directly to chapter one's verse grid for Jude.
+
+     A failure means the shortcut incorrectly completes without a verse or still inserts the
+     one-item chapter step.
+     */
+    func testSingleChapterBookOpensChapterOneVerseChooserWhenVerseIsRequired() {
+        let jude = BookInfo(
+            name: "Jude",
+            osisId: "Jude",
+            abbreviation: "Jude",
+            chapterCount: 1,
+            testament: 2
+        )
+
+        XCTAssertEqual(
+            PassageBookSelectionDestination.resolve(book: jude, navigateToVerse: true),
+            .verseChooser(chapter: 1)
+        )
+    }
+
+    /**
+     Verifies multi-chapter books retain the normal chapter-grid route.
+
+     A failure means the single-chapter shortcut has leaked into ordinary book navigation.
+     */
+    func testMultiChapterBookRetainsChapterChooser() {
+        let genesis = BookInfo(
+            name: "Genesis",
+            osisId: "Gen",
+            abbreviation: "Gen",
+            chapterCount: 50,
+            testament: 1
+        )
+
+        XCTAssertEqual(
+            PassageBookSelectionDestination.resolve(book: genesis, navigateToVerse: true),
+            .chapterChooser
+        )
+    }
+
+    /**
      Verifies the chooser option state machine mirrors Android's overflow-menu behavior.
 
      Android's `GridChoosePassageBook` persists the row-order, category grouping, long-name, and
@@ -561,8 +621,8 @@ final class PassageGridTests: XCTestCase {
             ],
             settings: ReadingProgressSettingsSnapshot(activeCycle: 3)
         )
-        let memorizationSnapshot = MemorizationProgressSnapshot(
-            memorizedRanges: [
+        let memorizationSnapshot = try trustedKJVAMemorizationSnapshot(
+            ranges: [
                 MemorizationProgressRange(bookInitials: "", startOrdinal: genesisStart, endOrdinal: genesisStart + 2),
             ]
         )
@@ -631,8 +691,8 @@ final class PassageGridTests: XCTestCase {
         let genesis = try XCTUnwrap(BibleReaderController.defaultBooks.first { $0.osisId == "Gen" })
         let genesisStart = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1))
 
-        let memorizationSnapshot = MemorizationProgressSnapshot(
-            memorizedRanges: [
+        let memorizationSnapshot = try trustedKJVAMemorizationSnapshot(
+            ranges: [
                 MemorizationProgressRange(bookInitials: "", startOrdinal: genesisStart, endOrdinal: genesisStart + 9),
                 MemorizationProgressRange(bookInitials: "KJV", startOrdinal: genesisStart + 4, endOrdinal: genesisStart + 14),
                 MemorizationProgressRange(bookInitials: "KJV", startOrdinal: genesisStart + 15, endOrdinal: genesisStart + 19),
@@ -649,5 +709,56 @@ final class PassageGridTests: XCTestCase {
         )
 
         XCTAssertEqual(chapterProgress.memorizationFraction, 20.0 / 31.0, accuracy: 0.0001)
+    }
+
+    /**
+     Creates a snapshot that models provenance-verified KJVA memorization rows.
+
+     The persisted ordinal trust boundary requires every consumer to receive explicit provenance.
+     Expanding the compact test ranges into per-verse rows keeps these passage-grid tests on the same
+     boundary as restore and sync instead of relying on quarantined legacy fixtures. Empty scopes
+     model Android-imported global rows; nonempty scopes model KJVA-native module writes.
+
+     - Parameter ranges: KJVA ranges and compatibility module scopes represented by the fixture.
+     - Returns: Snapshot containing one provenance-verified row per covered ordinal.
+     - Side effects: Reads the bundled KJVA canon bounds while constructing trust metadata.
+     - Failure modes: Invalid native fixture ordinals throw through `XCTUnwrap`; invalid Android
+       ordinals receive unresolved metadata and are suppressed, causing progress assertions to fail.
+     */
+    private func trustedKJVAMemorizationSnapshot(
+        ranges: [MemorizationProgressRange]
+    ) throws -> MemorizationProgressSnapshot {
+        var verses: [MemorizedVerseProgress] = []
+        for range in ranges where range.startOrdinal > 0 && range.endOrdinal >= range.startOrdinal {
+            for ordinal in range.startOrdinal...range.endOrdinal {
+                let ordinalTrust: PersistedOrdinalTrustMetadata
+                if range.bookInitials.isEmpty {
+                    ordinalTrust = PersistedOrdinalTrustPolicy.androidImportMetadata(
+                        sourceVersification: "KJVA",
+                        sourceOrdinalStart: ordinal,
+                        sourceOrdinalEnd: ordinal,
+                        kjvaOrdinalStart: ordinal,
+                        kjvaOrdinalEnd: ordinal
+                    )
+                } else {
+                    ordinalTrust = try XCTUnwrap(
+                        VerifiedKJVAOrdinalRange(
+                            resolvingSourceBookInitials: range.bookInitials,
+                            sourceVersification: "KJVA",
+                            sourceOrdinalStart: ordinal,
+                            sourceOrdinalEnd: ordinal
+                        )
+                    ).ordinalTrust
+                }
+                verses.append(
+                    MemorizedVerseProgress(
+                        bookInitials: range.bookInitials,
+                        kjvOrdinal: ordinal,
+                        ordinalTrust: ordinalTrust
+                    )
+                )
+            }
+        }
+        return MemorizationProgressSnapshot(memorizedVerses: verses)
     }
 }

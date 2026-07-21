@@ -286,6 +286,7 @@ final class ReaderChromeTests: XCTestCase {
             showsReverseSplitModeToggle: true,
             reverseSplitModeEnabled: false,
             windowPinningEnabled: false,
+            showsAIActions: true,
             showsBibleDisplayOptions: true,
             sectionTitlesEnabled: true,
             moduleHasStrongs: true,

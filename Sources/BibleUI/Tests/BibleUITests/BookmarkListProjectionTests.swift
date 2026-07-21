@@ -62,11 +62,11 @@ final class BookmarkListProjectionTests: XCTestCase {
      Verifies BookmarkList's Android-style in-content search narrows and clears rows.
 
      Setup:
-     - builds one Exodus and one Matthew bookmark projection row
+     - builds one Exodus and one Matthew bookmark projection row with distinct note text
      - filters with a mixed-case query and then with an empty query
 
      Expected result:
-     - matching is case-insensitive against the row's searchable text
+     - matching is case-insensitive against Android's note-only searchable text
      - clearing search restores all rows
      - detailed state export includes the same count/query/row-token contract the UI consumed
 
@@ -75,13 +75,13 @@ final class BookmarkListProjectionTests: XCTestCase {
        is cleared.
      */
     func testBookmarkListProjectionSearchNarrowsAndClearsRows() {
-        let exodus = bibleItem(reference: "Exodus 2:1")
-        let matthew = bibleItem(reference: "Matthew 3:1")
+        let exodus = bibleItem(reference: "Exodus 2:1", note: "Wilderness history")
+        let matthew = bibleItem(reference: "Matthew 3:1", note: "Gospel result")
 
         let filtered = BookmarkListProjection.filteredItems(
             [exodus, matthew],
             selectedLabelId: nil,
-            searchText: "matthew",
+            searchText: "gospel",
             sortOrder: .bibleOrder
         )
         XCTAssertEqual(filtered.map(\.reference), ["Matthew 3:1"])
@@ -90,12 +90,12 @@ final class BookmarkListProjectionTests: XCTestCase {
                 for: filtered,
                 selectedLabelId: nil,
                 labels: [],
-                searchText: "Matthew",
+                searchText: "Gospel",
                 isAssigningLabels: false,
                 includeRowTokens: true,
                 rowTokenLimit: 10
             ),
-            "count=1;selectedLabel=all;query=Matthew;labelAssignment=false;rows=|Matthew_3_1|"
+            "count=1;selectedLabel=all;query=Gospel;labelAssignment=false;rows=|Matthew_3_1|"
         )
 
         let cleared = BookmarkListProjection.filteredItems(
@@ -126,9 +126,10 @@ final class BookmarkListProjectionTests: XCTestCase {
         let seedLabel = Label(name: "UI Test Seed")
         let genesis = bibleItem(
             reference: "Genesis 1:1",
-            labels: [seedLabel]
+            labels: [seedLabel],
+            note: "Selected label note"
         )
-        let exodus = bibleItem(reference: "Exodus 2:1")
+        let exodus = bibleItem(reference: "Exodus 2:1", note: "Conflicting note")
 
         let filtered = BookmarkListProjection.filteredItems(
             [genesis, exodus],
@@ -179,9 +180,10 @@ final class BookmarkListProjectionTests: XCTestCase {
         let seedLabel = Label(name: "UI Test Seed")
         let genesis = bibleItem(
             reference: "Genesis 1:1",
-            labels: [seedLabel]
+            labels: [seedLabel],
+            note: "Selected label note"
         )
-        let exodus = bibleItem(reference: "Exodus 2:1")
+        let exodus = bibleItem(reference: "Exodus 2:1", note: "Conflicting note")
         let items = [genesis, exodus]
 
         let labelFiltered = BookmarkListProjection.filteredItems(
@@ -195,7 +197,7 @@ final class BookmarkListProjectionTests: XCTestCase {
         let conflictingQuery = BookmarkListProjection.filteredItems(
             items,
             selectedLabelId: seedLabel.id,
-            searchText: "Exodus",
+            searchText: "Conflicting",
             sortOrder: .bibleOrder
         )
         XCTAssertTrue(conflictingQuery.isEmpty)
@@ -204,12 +206,12 @@ final class BookmarkListProjectionTests: XCTestCase {
                 for: conflictingQuery,
                 selectedLabelId: seedLabel.id,
                 labels: [seedLabel],
-                searchText: "Exodus",
+                searchText: "Conflicting",
                 isAssigningLabels: false,
                 includeRowTokens: true,
                 rowTokenLimit: 10
             ),
-            "count=0;selectedLabel=UI_Test_Seed;query=Exodus;labelAssignment=false;rows="
+            "count=0;selectedLabel=UI_Test_Seed;query=Conflicting;labelAssignment=false;rows="
         )
 
         let reset = BookmarkListProjection.filteredItems(
@@ -408,6 +410,7 @@ final class BookmarkListProjectionTests: XCTestCase {
        - reference: Human-readable `Book Chapter:Verse` reference covered by the KJVA table.
        - createdAt: Creation timestamp used by sort-order assertions.
        - labels: Labels that should appear assigned to the row.
+       - note: Optional note text searched by Android's bookmark search.
      - Returns: A normalized Bible bookmark list item.
      - Side effects: assigns unsaved label relationship objects to the bookmark.
      - Failure modes: Records an XCTest failure and falls back to Genesis 1:1 when the reference
@@ -416,7 +419,8 @@ final class BookmarkListProjectionTests: XCTestCase {
     private func bibleItem(
         reference: String,
         createdAt: Date = Date(timeIntervalSince1970: 100),
-        labels: [Label] = []
+        labels: [Label] = [],
+        note: String? = nil
     ) -> BookmarkListItem {
         let ordinal = kjvaOrdinal(for: reference)
         let bookmark = BibleBookmark(
@@ -431,6 +435,11 @@ final class BookmarkListProjectionTests: XCTestCase {
             .split(separator: " ")
             .dropLast()
             .joined(separator: " ")
+        if let note {
+            let notes = BibleBookmarkNotes(bookmarkId: bookmark.id, notes: note)
+            notes.bookmark = bookmark
+            bookmark.notes = notes
+        }
         if !labels.isEmpty {
             bookmark.bookmarkToLabels = labels.map { label in
                 let link = BibleBookmarkToLabel()

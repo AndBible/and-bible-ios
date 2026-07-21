@@ -16,7 +16,17 @@
   -->
 
 <template>
-  <div class="large-action" @click="emit('click')">
+  <div
+    class="large-action"
+    role="button"
+    tabindex="0"
+    :data-selection-action="button"
+    :aria-label="button === 'LLM_ACTION' ? appSettings.llmActionLabel : undefined"
+    :title="button === 'LLM_ACTION' ? appSettings.llmActionLabel : undefined"
+    @click="emit('click')"
+    @keydown.enter.prevent="emit('click')"
+    @keydown.space.prevent="emit('click')"
+  >
     <FontAwesomeLayers v-if="button === 'BOOKMARK'">
       <FontAwesomeIcon icon="bookmark"/>
       <FontAwesomeIcon icon="plus" transform="shrink-5 down-6 right-12"/>
@@ -31,6 +41,7 @@
     <FontAwesomeIcon v-else-if="button === 'MEMORIZE'" :icon="faBrain"/>
     <FontAwesomeIcon v-else-if="button === 'SPEAK'" icon="headphones"/>
     <FontAwesomeIcon v-else-if="button === 'ADD_PARAGRAPH_BREAK'" :icon="faParagraph"/>
+    <FontAwesomeIcon v-else-if="button === 'LLM_ACTION'" :icon="faRobot"/>
     <div class="title">
       <template v-if="button === 'BOOKMARK'">{{ strings.addBookmark }}</template>
       <template v-else-if="button === 'BOOKMARK_NOTES'">{{ vertical ? strings.verseNoteLong : strings.verseNote }}</template>
@@ -40,16 +51,26 @@
       <template v-else-if="button === 'MEMORIZE'">{{ vertical ? strings.verseMemorizeLong : strings.verseMemorize }}</template>
       <template v-else-if="button === 'SPEAK'">{{ strings.verseSpeak }}</template>
       <template v-else-if="button === 'ADD_PARAGRAPH_BREAK'">{{ vertical ? strings.verseParagraphBreakLong : strings.verseParagraphBreak }}</template>
+      <template v-else-if="button === 'LLM_ACTION'">{{ appSettings.llmActionLabel }}</template>
     </div>
   </div>
 </template>
 
 <script lang="ts" setup>
+/**
+ * Renders one icon-and-label command in the selection action surface.
+ *
+ * @param button Android-compatible action identifier whose icon and label are rendered.
+ * @param vertical Whether the action uses the expanded menu label where one exists.
+ * @fires click When pointer, Enter, or Space activation requests the command.
+ * @remarks The AI command receives its localized accessible name from native `set_config` state;
+ * rendering does not call the native bridge or mutate selection state directly.
+ */
 import { PropType } from "vue";
 import { FontAwesomeIcon, FontAwesomeLayers } from "@fortawesome/vue-fontawesome";
 import { useCommon } from "@/composables";
 import { ModalButtonId } from "@/composables/config";
-import { faBrain, faParagraph } from "@fortawesome/free-solid-svg-icons";
+import { faBrain, faParagraph, faRobot } from "@fortawesome/free-solid-svg-icons";
 
 defineProps({
   button: {
@@ -63,7 +84,7 @@ defineProps({
 });
 
 const emit = defineEmits(['click']);
-const { strings } = useCommon();
+const { strings, appSettings } = useCommon();
 
 </script>
 

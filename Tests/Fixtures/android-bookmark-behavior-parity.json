@@ -1,0 +1,62 @@
+{
+  "authority": {
+    "bookmarkMutations": "app/src/main/java/net/bible/android/control/bookmark/BookmarkControl.kt",
+    "genericTextProjection": "app/src/main/java/net/bible/android/control/bookmark/BookmarkControl.kt:696-756",
+    "bridgePayloads": "app/src/main/java/net/bible/android/control/page/ClientPageObjects.kt:305-386",
+    "sorting": "app/src/main/java/net/bible/android/database/bookmarks/BookmarksDao.kt:50-73",
+    "fixedLabels": "app/src/main/java/net/bible/android/database/bookmarks/BookmarkEntities.kt"
+  },
+  "fixedLabelIDs": {
+    "speak": "00000000-0000-ab1e-0000-5bea400001a1",
+    "unlabeled": "00000000-0000-ab1e-0000-001abe1ed001",
+    "paragraphBreak": "00000000-0000-ab1e-0000-ba4a64a30001",
+    "ai": "00000000-0000-ab1e-0000-a100000001a1"
+  },
+  "sameStartBibleHighlights": [
+    {
+      "id": "a2000000-0000-0000-0000-000000000001",
+      "kjvaOrdinalStart": 4,
+      "startOffset": 2,
+      "endOffset": 5
+    },
+    {
+      "id": "a2000000-0000-0000-0000-000000000002",
+      "kjvaOrdinalStart": 4,
+      "startOffset": 8,
+      "endOffset": 13
+    }
+  ],
+  "genericSelection": {
+    "id": "a2000000-0000-0000-0000-000000000010",
+    "bookInitials": "DICT-AUTH",
+    "activeBookInitials": "ACTIVE-WRONG",
+    "key": "entry-alpha",
+    "ordinalStart": 40,
+    "ordinalEnd": 41,
+    "startOffset": 6,
+    "endOffset": 14,
+    "wholeVerse": false,
+    "source": {
+      "bookName": "Stored Dictionary",
+      "bookAbbreviation": "SD",
+      "keyName": "Entry Alpha",
+      "plainText": "Alpha selected Omega",
+      "xml": "<div>Alpha selected Omega</div>"
+    },
+    "expected": {
+      "text": "selected",
+      "fullText": "Alpha selected Omega",
+      "highlightedText": "Alpha <b>selected</b> Omega"
+    }
+  },
+  "sorting": {
+    "lastUpdatedAscending": [
+      "a2000000-0000-0000-0000-000000000021",
+      "a2000000-0000-0000-0000-000000000022"
+    ],
+    "labelOrderNumberAscending": [
+      "a2000000-0000-0000-0000-000000000032",
+      "a2000000-0000-0000-0000-000000000031"
+    ]
+  }
+}

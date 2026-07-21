@@ -31,6 +31,14 @@ enum LabelAssignmentMutation {
 
         /// A generic document bookmark backed by `GenericBookmarkToLabel`.
         case generic
+
+        /// Bookmark-service table identifier used by shared label mutations.
+        var serviceIdentifier: String {
+            switch self {
+            case .bible: "bible"
+            case .generic: "generic"
+            }
+        }
     }
 
     /**
@@ -96,17 +104,9 @@ enum LabelAssignmentMutation {
         kind: BookmarkKind,
         in modelContext: ModelContext
     ) throws -> State {
-        switch kind {
-        case .bible:
-            guard let bookmark = try fetchBibleBookmark(bookmarkId, in: modelContext) else {
-                throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
-            }
-            toggleBibleLabel(label, for: bookmark, in: modelContext)
-        case .generic:
-            guard let bookmark = try fetchGenericBookmark(bookmarkId, in: modelContext) else {
-                throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
-            }
-            toggleGenericLabel(label, for: bookmark, in: modelContext)
+        let service = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        guard service.toggleLabel(bookmarkId: bookmarkId, labelId: label.id) == kind.serviceIdentifier else {
+            throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
         }
         try modelContext.save()
         return try state(for: bookmarkId, in: modelContext)
@@ -159,26 +159,24 @@ enum LabelAssignmentMutation {
             return try state(for: bookmarkId, in: modelContext)
         }
 
+        let currentState = try state(for: bookmarkId, in: modelContext)
+        guard currentState.kind == kind else {
+            throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
+        }
+
         let label: BibleCore.Label
         if let existingLabel = try existingUserLabel(named: name, in: modelContext) {
             label = existingLabel
         } else {
             let createdLabel = BibleCore.Label(name: name)
             modelContext.insert(createdLabel)
+            try modelContext.save()
             label = createdLabel
         }
 
-        switch kind {
-        case .bible:
-            guard let bookmark = try fetchBibleBookmark(bookmarkId, in: modelContext) else {
-                throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
-            }
-            assignBibleLabelIfNeeded(label, to: bookmark, in: modelContext)
-        case .generic:
-            guard let bookmark = try fetchGenericBookmark(bookmarkId, in: modelContext) else {
-                throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
-            }
-            assignGenericLabelIfNeeded(label, to: bookmark, in: modelContext)
+        let service = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        guard service.assignLabel(bookmarkId: bookmarkId, labelId: label.id) == kind.serviceIdentifier else {
+            throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
         }
         try modelContext.save()
         return try state(for: bookmarkId, in: modelContext)
@@ -249,115 +247,6 @@ enum LabelAssignmentMutation {
         return try modelContext.fetch(descriptor).first { $0.isRealLabel }
     }
 
-    /**
-     Toggles a Bible bookmark-label relationship without saving.
-
-     - Parameters:
-       - label: Label to add or remove.
-       - bookmark: Bible bookmark being mutated.
-       - modelContext: SwiftData context used to insert or delete relationship rows.
-     - Side effects: Mutates `bookmark.bookmarkToLabels`, deletes stale links, inserts new links,
-       and updates `lastUpdatedOn`.
-     - Failure modes: This helper does not throw; callers save and surface persistence failures.
-     */
-    private static func toggleBibleLabel(
-        _ label: BibleCore.Label,
-        for bookmark: BibleBookmark,
-        in modelContext: ModelContext
-    ) {
-        let links = bookmark.bookmarkToLabels ?? []
-        let matchingLinks = links.filter { $0.label?.id == label.id }
-        if !matchingLinks.isEmpty {
-            matchingLinks.forEach(modelContext.delete)
-            bookmark.bookmarkToLabels?.removeAll { $0.label?.id == label.id }
-        } else {
-            assignBibleLabelIfNeeded(label, to: bookmark, in: modelContext)
-        }
-        bookmark.lastUpdatedOn = Date()
-    }
-
-    /**
-     Toggles a generic bookmark-label relationship without saving.
-
-     - Parameters:
-       - label: Label to add or remove.
-       - bookmark: Generic bookmark being mutated.
-       - modelContext: SwiftData context used to insert or delete relationship rows.
-     - Side effects: Mutates `bookmark.bookmarkToLabels`, deletes stale links, inserts new links,
-       and updates `lastUpdatedOn`.
-     - Failure modes: This helper does not throw; callers save and surface persistence failures.
-     */
-    private static func toggleGenericLabel(
-        _ label: BibleCore.Label,
-        for bookmark: GenericBookmark,
-        in modelContext: ModelContext
-    ) {
-        let links = bookmark.bookmarkToLabels ?? []
-        let matchingLinks = links.filter { $0.label?.id == label.id }
-        if !matchingLinks.isEmpty {
-            matchingLinks.forEach(modelContext.delete)
-            bookmark.bookmarkToLabels?.removeAll { $0.label?.id == label.id }
-        } else {
-            assignGenericLabelIfNeeded(label, to: bookmark, in: modelContext)
-        }
-        bookmark.lastUpdatedOn = Date()
-    }
-
-    /**
-     Assigns a label to a Bible bookmark when the relationship does not already exist.
-
-     - Parameters:
-       - label: Label to assign.
-       - bookmark: Bible bookmark receiving the label.
-       - modelContext: SwiftData context used to insert the relationship.
-     - Side effects: Inserts one `BibleBookmarkToLabel` and updates `lastUpdatedOn`.
-     - Failure modes: This helper does not throw; callers save and surface persistence failures.
-     */
-    private static func assignBibleLabelIfNeeded(
-        _ label: BibleCore.Label,
-        to bookmark: BibleBookmark,
-        in modelContext: ModelContext
-    ) {
-        guard bookmark.bookmarkToLabels?.contains(where: { $0.label?.id == label.id }) != true else {
-            return
-        }
-        let link = BibleBookmarkToLabel()
-        link.bookmark = bookmark
-        link.label = label
-        modelContext.insert(link)
-        var links = bookmark.bookmarkToLabels ?? []
-        links.append(link)
-        bookmark.bookmarkToLabels = links
-        bookmark.lastUpdatedOn = Date()
-    }
-
-    /**
-     Assigns a label to a generic bookmark when the relationship does not already exist.
-
-     - Parameters:
-       - label: Label to assign.
-       - bookmark: Generic bookmark receiving the label.
-       - modelContext: SwiftData context used to insert the relationship.
-     - Side effects: Inserts one `GenericBookmarkToLabel` and updates `lastUpdatedOn`.
-     - Failure modes: This helper does not throw; callers save and surface persistence failures.
-     */
-    private static func assignGenericLabelIfNeeded(
-        _ label: BibleCore.Label,
-        to bookmark: GenericBookmark,
-        in modelContext: ModelContext
-    ) {
-        guard bookmark.bookmarkToLabels?.contains(where: { $0.label?.id == label.id }) != true else {
-            return
-        }
-        let link = GenericBookmarkToLabel()
-        link.bookmark = bookmark
-        link.label = label
-        modelContext.insert(link)
-        var links = bookmark.bookmarkToLabels ?? []
-        links.append(link)
-        bookmark.bookmarkToLabels = links
-        bookmark.lastUpdatedOn = Date()
-    }
 }
 
 /**

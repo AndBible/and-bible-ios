@@ -80,8 +80,11 @@ npm run dev
 npm run build-production
 ```
 
-The build output in `dist/` is embedded into the iOS app bundle under
-`Sources/BibleView/Resources/bibleview-js/`.
+The ignored build output in `dist/` is not packaged automatically by local Xcode builds. The committed
+production fallback lives at `../Sources/BibleView/Sources/BibleView/Resources/bibleview-js/`; update
+it atomically with `scripts/manage_bibleview_bundle.py` as documented in
+`docs/howto/working-with-vuejs.md`. CI supplies a verified Debug bundle before test builds, while the
+release workflow rebuilds Production before archive creation and verifies each archived copy.
 
 ## Working Rules
 

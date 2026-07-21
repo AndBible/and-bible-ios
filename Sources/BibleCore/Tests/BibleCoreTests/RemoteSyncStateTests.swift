@@ -26,6 +26,10 @@ private enum TestStartupContainerError: LocalizedError {
  shared `AndBibleTests` class are not required for these contracts.
  */
 final class RemoteSyncStateTests: XCTestCase {
+    private static let testCloudKitContainerIdentifier = try! ProductCloudKitContainerIdentifier(
+        "iCloud.org.andbible.tests"
+    )
+
     /**
      Clears the shared URL protocol handler after WebDAV configuration tests.
 
@@ -68,6 +72,7 @@ final class RemoteSyncStateTests: XCTestCase {
             AiPageCacheEntry.self,
             ReadingPlan.self,
             ReadingPlanDay.self,
+            ReadingPlanDefinitionPublicationState.self,
         ]
         let localModels: [any PersistentModel.Type] = [
             Repository.self,
@@ -88,7 +93,7 @@ final class RemoteSyncStateTests: XCTestCase {
             "AndBibleCloudCompatibility-\(storeSuffix)",
             schema: Schema(cloudModels),
             url: temporaryDirectory.appendingPathComponent("AndBibleCloud.store"),
-            cloudKitDatabase: .private("iCloud.org.andbible.ios")
+            cloudKitDatabase: .private(Self.testCloudKitContainerIdentifier.value)
         )
         let localConfig = ModelConfiguration(
             "LocalCompatibility-\(storeSuffix)",
@@ -239,7 +244,11 @@ final class RemoteSyncStateTests: XCTestCase {
         }
 
         let syncEnabledKey = "icloud_sync_enabled"
-        let service = SyncService(defaults: defaults, syncEnabledKey: syncEnabledKey)
+        let service = SyncService(
+            cloudKitContainerIdentifier: Self.testCloudKitContainerIdentifier,
+            defaults: defaults,
+            syncEnabledKey: syncEnabledKey
+        )
         service.setInitialState(enabled: false)
         var requestedModes: [Bool] = []
         service.setModeChangeHandler { requestedMode in
@@ -280,7 +289,11 @@ final class RemoteSyncStateTests: XCTestCase {
 
         let syncEnabledKey = "icloud_sync_enabled"
         defaults.set(false, forKey: syncEnabledKey)
-        let service = SyncService(defaults: defaults, syncEnabledKey: syncEnabledKey)
+        let service = SyncService(
+            cloudKitContainerIdentifier: Self.testCloudKitContainerIdentifier,
+            defaults: defaults,
+            syncEnabledKey: syncEnabledKey
+        )
         service.setInitialState(enabled: false)
         service.setModeChangeHandler { _ in
             throw RuntimeModeChangeError.rejected
@@ -318,7 +331,11 @@ final class RemoteSyncStateTests: XCTestCase {
 
         let syncEnabledKey = "icloud_sync_enabled"
         defaults.set(true, forKey: syncEnabledKey)
-        let service = SyncService(defaults: defaults, syncEnabledKey: syncEnabledKey)
+        let service = SyncService(
+            cloudKitContainerIdentifier: Self.testCloudKitContainerIdentifier,
+            defaults: defaults,
+            syncEnabledKey: syncEnabledKey
+        )
         service.setInitialState(enabled: true)
         service.recordAccountDescription("Signed in before failed mode change")
         let expectedLastSyncDate = Date(timeIntervalSince1970: 1_805_000_000)
@@ -355,7 +372,11 @@ final class RemoteSyncStateTests: XCTestCase {
         }
 
         let syncEnabledKey = "icloud_sync_enabled"
-        let service = SyncService(defaults: defaults, syncEnabledKey: syncEnabledKey)
+        let service = SyncService(
+            cloudKitContainerIdentifier: Self.testCloudKitContainerIdentifier,
+            defaults: defaults,
+            syncEnabledKey: syncEnabledKey
+        )
         service.setInitialState(enabled: false)
 
         service.toggleSync()
@@ -376,6 +397,13 @@ final class RemoteSyncStateTests: XCTestCase {
         XCTAssertNil(store.webDAVPassword())
     }
 
+    /**
+     Verifies Android-compatible Nextcloud settings trim address fields but preserve password bytes.
+
+     Android's `SharedPrefsDataStore` writes credential text exactly as entered while the server URL,
+     username, and folder fields have independent normalization contracts. A failure means iOS could
+     silently change a valid app password containing leading or trailing whitespace.
+     */
     func testRemoteSyncSettingsStorePersistsAndroidCompatibleNextCloudKeys() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let secretStore = InMemorySecretStore()
@@ -398,7 +426,7 @@ final class RemoteSyncStateTests: XCTestCase {
         )
         XCTAssertEqual(settingsStore.getString("gdrive_username"), "alice")
         XCTAssertEqual(settingsStore.getString("gdrive_folder_path"), "Sync Folder")
-        XCTAssertEqual(secretStore.secret(forKey: "gdrive_password"), "secret")
+        XCTAssertEqual(secretStore.secret(forKey: "gdrive_password"), " secret ")
         XCTAssertEqual(
             store.loadWebDAVConfiguration(),
             WebDAVSyncConfiguration(
@@ -407,7 +435,7 @@ final class RemoteSyncStateTests: XCTestCase {
                 folderPath: "Sync Folder"
             )
         )
-        XCTAssertEqual(store.webDAVPassword(), "secret")
+        XCTAssertEqual(store.webDAVPassword(), " secret ")
     }
 
     func testRemoteSyncSettingsStoreFallsBackToICloudForUnknownBackendValue() throws {
@@ -471,7 +499,13 @@ final class RemoteSyncStateTests: XCTestCase {
         XCTAssertEqual(settingsStore.getString("gdrive_folder_path"), "")
     }
 
-    func testRemoteSyncSettingsStoreClearsPasswordWhenSaveReceivesWhitespaceOnlySecret() throws {
+    /**
+     Verifies a whitespace-only password remains exact credential data instead of becoming deletion.
+
+     Android removes the preference only for a null value and otherwise preserves the supplied string.
+     A failure means iOS diverges from Android or makes whitespace-bearing credentials unusable.
+     */
+    func testRemoteSyncSettingsStorePreservesWhitespaceOnlyPassword() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let secretStore = InMemorySecretStore()
         let store = RemoteSyncSettingsStore(settingsStore: settingsStore, secretStore: secretStore)
@@ -495,7 +529,7 @@ final class RemoteSyncStateTests: XCTestCase {
             password: "   "
         )
 
-        XCTAssertNil(store.webDAVPassword())
+        XCTAssertEqual(store.webDAVPassword(), "   ")
         XCTAssertNil(store.loadWebDAVConfiguration()?.folderPath)
     }
 
@@ -585,6 +619,12 @@ final class RemoteSyncStateTests: XCTestCase {
         _ = try await client.testConnection()
     }
 
+    /**
+     Verifies an explicit Nextcloud DAV endpoint remains the request root without duplicated segments.
+
+     The mocked multistatus response uses hrefs beneath that same custom root so the test exercises
+     endpoint preservation without violating the transport's server-path containment contract.
+     */
     func testWebDAVSyncConfigurationPreservesExplicitDAVEndpoint() async throws {
         let configuration = WebDAVSyncConfiguration(
             serverURL: "https://nextcloud.example.com/custom/remote.php/dav/files/alice",
@@ -603,7 +643,11 @@ final class RemoteSyncStateTests: XCTestCase {
                 httpVersion: nil,
                 headerFields: nil
             )!
-            return (response, sampleWebDAVMultiStatusXML.data(using: .utf8)!)
+            let body = webDAVMultiStatusXML(
+                folderPath: "/custom/remote.php/dav/files/alice",
+                fileName: "1.1.sqlite3.gz"
+            )
+            return (response, body.data(using: .utf8)!)
         }
 
         let client = try configuration.makeWebDAVClient(
@@ -656,6 +700,12 @@ final class RemoteSyncStateTests: XCTestCase {
         )
     }
 
+    /**
+     Verifies folder identifiers retain Android raw keys while the iOS lifecycle phase is durable.
+
+     A restart must recover pending initial work instead of interpreting a configured folder as
+     ready. Failure means interrupted adoption can silently skip its required initial restore.
+     */
     func testRemoteSyncStateStorePersistsBootstrapStateUsingAndroidRawKeys() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let store = RemoteSyncStateStore(settingsStore: settingsStore)
@@ -664,7 +714,8 @@ final class RemoteSyncStateTests: XCTestCase {
             RemoteSyncBootstrapState(
                 syncFolderID: "/org.andbible.ios-sync-bookmarks",
                 deviceFolderID: "/org.andbible.ios-sync-bookmarks/ios-device",
-                secretFileName: "device-known-ios-device-secret"
+                secretFileName: "device-known-ios-device-secret",
+                phase: .awaitingRemoteInitialRestore
             ),
             for: .bookmarks
         )
@@ -682,11 +733,16 @@ final class RemoteSyncStateTests: XCTestCase {
             "device-known-ios-device-secret"
         )
         XCTAssertEqual(
+            settingsStore.getString("remote_sync.bookmarks.bootstrapPhase"),
+            "awaitingRemoteInitialRestore"
+        )
+        XCTAssertEqual(
             store.bootstrapState(for: .bookmarks),
             RemoteSyncBootstrapState(
                 syncFolderID: "/org.andbible.ios-sync-bookmarks",
                 deviceFolderID: "/org.andbible.ios-sync-bookmarks/ios-device",
-                secretFileName: "device-known-ios-device-secret"
+                secretFileName: "device-known-ios-device-secret",
+                phase: .awaitingRemoteInitialRestore
             )
         )
     }
@@ -730,6 +786,34 @@ final class RemoteSyncStateTests: XCTestCase {
         )
     }
 
+    /**
+     Verifies a newly selected destination keeps cleanup pending until publication abandonment succeeds.
+
+     The marker is independent of the initial-transfer phase so restart can retry cleanup without
+     deleting a durable initial archive after cleanup has already completed.
+     */
+    func testRemoteSyncStateStorePersistsDestinationCleanupBoundary() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+        let pendingState = RemoteSyncBootstrapState(
+            syncFolderID: "/readingplans",
+            deviceFolderID: "/readingplans/ios-device",
+            secretFileName: "device-known-secret",
+            phase: .awaitingLocalInitialUpload
+        )
+
+        try stateStore.setBootstrapStateForNewDestinationAtomically(
+            pendingState,
+            for: .readingPlans
+        )
+        XCTAssertEqual(stateStore.bootstrapState(for: .readingPlans), pendingState)
+        XCTAssertTrue(stateStore.requiresPendingPublicationReset(for: .readingPlans))
+
+        try stateStore.markPendingPublicationResetComplete(for: .readingPlans)
+        XCTAssertFalse(stateStore.requiresPendingPublicationReset(for: .readingPlans))
+        XCTAssertEqual(stateStore.bootstrapState(for: .readingPlans), pendingState)
+    }
+
     func testRemoteSyncStateStoreClearCategoryDoesNotTouchOtherCategories() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let store = RemoteSyncStateStore(settingsStore: settingsStore)
@@ -738,7 +822,8 @@ final class RemoteSyncStateTests: XCTestCase {
             RemoteSyncBootstrapState(
                 syncFolderID: "/bookmark-sync",
                 deviceFolderID: "/bookmark-sync/ios-device",
-                secretFileName: "bookmark-secret"
+                secretFileName: "bookmark-secret",
+                phase: .awaitingRemoteInitialRestore
             ),
             for: .bookmarks
         )
@@ -944,7 +1029,13 @@ final class RemoteSyncStateTests: XCTestCase {
         XCTAssertEqual(stateStore.bootstrapState(for: .bookmarks), RemoteSyncBootstrapState())
     }
 
-    func testRemoteSyncBootstrapCoordinatorAdoptRemoteFolderPersistsMarkerAndDeviceFolder() async throws {
+    /**
+     Verifies adoption persists a pending restore phase and inspection never reports it as ready.
+
+     The marker/device folder are valid, but incremental sync must remain blocked until the remote
+     initial backup publishes successfully. The mock performs no filesystem or network I/O.
+     */
+    func testRemoteSyncBootstrapCoordinatorAdoptRemoteFolderPersistsPendingInitialRestore() async throws {
         let settingsStore = try makeInMemorySettingsStore()
         let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
         let adapter = RemoteSyncMockAdapter()
@@ -977,12 +1068,27 @@ final class RemoteSyncStateTests: XCTestCase {
             RemoteSyncBootstrapState(
                 syncFolderID: "/org.andbible.ios-sync-bookmarks",
                 deviceFolderID: "/org.andbible.ios-sync-bookmarks/ios-device",
-                secretFileName: "device-known-ios-device-secret"
+                secretFileName: "device-known-ios-device-secret",
+                phase: .awaitingRemoteInitialRestore
             )
         )
         XCTAssertEqual(stateStore.bootstrapState(for: .bookmarks), state)
+
+        await adapter.setKnownResponse(
+            true,
+            forSyncFolderID: "/org.andbible.ios-sync-bookmarks",
+            secretFileName: "device-known-ios-device-secret"
+        )
+        let inspectedStatus = try await coordinator.inspect(.bookmarks)
+        XCTAssertEqual(inspectedStatus, .requiresInitialRestore(state))
     }
 
+    /**
+     Verifies remote creation remains pending until the caller uploads the local initial baseline.
+
+     The remote folder replacement and setup complete, but inspection cannot expose the category as
+     ready before upload acceptance. Failure means an interrupted create path can skip its baseline.
+     */
     func testRemoteSyncBootstrapCoordinatorCreateRemoteFolderCanReplaceExistingRemoteFolder() async throws {
         let settingsStore = try makeInMemorySettingsStore()
         let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
@@ -1026,7 +1132,8 @@ final class RemoteSyncStateTests: XCTestCase {
             RemoteSyncBootstrapState(
                 syncFolderID: "/org.andbible.ios-sync-bookmarks",
                 deviceFolderID: "/org.andbible.ios-sync-bookmarks/ios-device",
-                secretFileName: "device-known-ios-device-secret"
+                secretFileName: "device-known-ios-device-secret",
+                phase: .awaitingLocalInitialUpload
             )
         )
         let events = await adapter.eventsSnapshot()
@@ -1077,6 +1184,101 @@ final class RemoteSyncStateTests: XCTestCase {
         XCTAssertEqual(store.statuses(for: .workspaces).count, 1)
     }
 
+    /**
+     Verifies authoritative patch-history reads distinguish corrupt metadata from an empty history.
+
+     The compatibility reader remains soft for existing non-critical callers, while the strict reader
+     must identify the exact malformed settings key. A failure means outbound numbering or inbound
+     discovery could reuse an already accepted patch number after local metadata corruption.
+     */
+    func testRemoteSyncPatchStatusStoreStrictReadRejectsMalformedAndMismatchedRows() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let store = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let malformedKey = store.key(
+            for: .readingPlans,
+            sourceDevice: "ios-device",
+            patchNumber: 4
+        )
+        settingsStore.setString(malformedKey, value: "{not-json")
+
+        XCTAssertThrowsError(try store.statusesStrict(for: .readingPlans)) { error in
+            XCTAssertEqual(
+                error as? RemoteSyncPatchStatusStoreError,
+                .invalidStoredStatus(malformedKey)
+            )
+        }
+        XCTAssertTrue(store.statuses(for: .readingPlans).isEmpty)
+
+        settingsStore.remove(malformedKey)
+        let mismatchedKey = store.key(
+            for: .readingPlans,
+            sourceDevice: "ios-device",
+            patchNumber: 5
+        )
+        let mismatchedStatus = RemoteSyncPatchStatus(
+            sourceDevice: "ios-device",
+            patchNumber: 6,
+            sizeBytes: 600,
+            appliedDate: 6_000
+        )
+        let payload = try String(
+            decoding: JSONEncoder().encode(mismatchedStatus),
+            as: UTF8.self
+        )
+        settingsStore.setString(mismatchedKey, value: payload)
+
+        XCTAssertThrowsError(try store.lastPatchNumberStrict(
+            for: .readingPlans,
+            sourceDevice: "ios-device"
+        )) { error in
+            XCTAssertEqual(
+                error as? RemoteSyncPatchStatusStoreError,
+                .invalidStoredStatus(mismatchedKey)
+            )
+        }
+    }
+
+    /**
+     Verifies discovery fails before remote listing when accepted patch metadata is corrupt.
+
+     Treating the malformed row as absent could replay an already applied patch or misclassify a
+     sequence gap. The empty adapter event log proves validation precedes every transport operation.
+     */
+    func testRemoteSyncPatchDiscoveryRejectsCorruptStatusBeforeRemoteListing() async throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let statusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let corruptKey = statusStore.key(
+            for: .workspaces,
+            sourceDevice: "pixel",
+            patchNumber: 2
+        )
+        settingsStore.setString(corruptKey, value: "{not-json")
+        let adapter = RemoteSyncMockAdapter()
+        let service = RemoteSyncPatchDiscoveryService(
+            adapter: adapter,
+            statusStore: statusStore
+        )
+
+        await XCTAssertThrowsErrorAsync(
+            try await service.discoverPendingPatches(
+                for: .workspaces,
+                bootstrapState: RemoteSyncBootstrapState(
+                    syncFolderID: "/org.andbible.ios-sync-workspaces"
+                ),
+                progressState: RemoteSyncProgressState(),
+                currentSchemaVersion: 1
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteSyncPatchStatusStoreError,
+                .invalidStoredStatus(corruptKey)
+            )
+        }
+        let events = await adapter.eventsSnapshot()
+        XCTAssertTrue(events.isEmpty)
+    }
+
+    /** Verifies Android `Regex.find` parsing, including unanchored and first-match behavior. */
     func testRemoteSyncPatchDiscoveryParsesAndroidPatchFileNames() {
         XCTAssertEqual(
             RemoteSyncPatchDiscoveryService.parsePatchFileName("7.12.sqlite3.gz")?.patchNumber,
@@ -1089,6 +1291,24 @@ final class RemoteSyncStateTests: XCTestCase {
         XCTAssertEqual(
             RemoteSyncPatchDiscoveryService.parsePatchFileName("5.sqlite3.gz")?.schemaVersion,
             1
+        )
+        XCTAssertEqual(
+            RemoteSyncPatchDiscoveryService.parsePatchFileName(
+                "prefix-8.9.sqlite3.gz-suffix"
+            )?.patchNumber,
+            8
+        )
+        XCTAssertEqual(
+            RemoteSyncPatchDiscoveryService.parsePatchFileName(
+                "prefix-8.9.sqlite3.gz-suffix"
+            )?.schemaVersion,
+            9
+        )
+        XCTAssertEqual(
+            RemoteSyncPatchDiscoveryService.parsePatchFileName(
+                "first-3.sqlite3.gz-second-4.7.sqlite3.gz"
+            )?.patchNumber,
+            3
         )
         XCTAssertNil(RemoteSyncPatchDiscoveryService.parsePatchFileName("initial.sqlite3.gz"))
     }
@@ -1242,6 +1462,62 @@ final class RemoteSyncStateTests: XCTestCase {
         }
     }
 
+    /**
+     Verifies discovery rejects an internal hole after the first expected patch.
+
+     The first-patch check alone admits `{1, 3}`, allowing patch 3 to replay without patch 2 and
+     permanently advancing local status past missing mutations. The complete source stream must be
+     contiguous before any archive reaches staging.
+     */
+    func testRemoteSyncPatchDiscoveryThrowsWhenLaterPatchSequenceHasGap() async throws {
+        let statusStore = RemoteSyncPatchStatusStore(settingsStore: try makeInMemorySettingsStore())
+        let adapter = RemoteSyncMockAdapter()
+        let folderID = "/org.andbible.ios-sync-bookmarks/device-a"
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: folderID,
+                name: "device-a",
+                size: 0,
+                timestamp: 1_000,
+                parentID: "/org.andbible.ios-sync-bookmarks",
+                mimeType: NextCloudSyncAdapter.folderMimeType
+            )
+        ])
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: "\(folderID)/1.1.sqlite3.gz",
+                name: "1.1.sqlite3.gz",
+                size: 111,
+                timestamp: 2_100,
+                parentID: folderID,
+                mimeType: "application/gzip"
+            ),
+            RemoteSyncFile(
+                id: "\(folderID)/3.1.sqlite3.gz",
+                name: "3.1.sqlite3.gz",
+                size: 333,
+                timestamp: 2_000,
+                parentID: folderID,
+                mimeType: "application/gzip"
+            ),
+        ])
+
+        let service = RemoteSyncPatchDiscoveryService(adapter: adapter, statusStore: statusStore)
+
+        await XCTAssertThrowsErrorAsync(
+            try await service.discoverPendingPatches(
+                for: .bookmarks,
+                bootstrapState: RemoteSyncBootstrapState(
+                    syncFolderID: "/org.andbible.ios-sync-bookmarks"
+                ),
+                progressState: RemoteSyncProgressState(),
+                currentSchemaVersion: 1
+            )
+        ) { error in
+            XCTAssertEqual(error as? RemoteSyncPatchDiscoveryError, .patchFilesSkipped)
+        }
+    }
+
     func testRemoteSyncPatchDiscoveryThrowsWhenRemotePatchNeedsNewerSchema() async throws {
         let statusStore = RemoteSyncPatchStatusStore(settingsStore: try makeInMemorySettingsStore())
         let adapter = RemoteSyncMockAdapter()
@@ -1280,6 +1556,46 @@ final class RemoteSyncStateTests: XCTestCase {
         }
     }
 
+    /** Rejects a workspace patch generation that has a migration edge but no Room export. */
+    func testRemoteSyncPatchDiscoveryRejectsWorkspaceGenerationWithoutRoomExport() async throws {
+        let statusStore = RemoteSyncPatchStatusStore(settingsStore: try makeInMemorySettingsStore())
+        let adapter = RemoteSyncMockAdapter()
+        let syncFolderID = "/org.andbible.ios-sync-workspaces"
+        let deviceFolderID = "\(syncFolderID)/device-a"
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: deviceFolderID,
+                name: "device-a",
+                size: 0,
+                timestamp: 1_000,
+                parentID: syncFolderID,
+                mimeType: NextCloudSyncAdapter.folderMimeType
+            )
+        ])
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: "\(deviceFolderID)/1.10.sqlite3.gz",
+                name: "1.10.sqlite3.gz",
+                size: 333,
+                timestamp: 2_000,
+                parentID: deviceFolderID,
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            )
+        ])
+
+        let service = RemoteSyncPatchDiscoveryService(adapter: adapter, statusStore: statusStore)
+        await XCTAssertThrowsErrorAsync(
+            try await service.discoverPendingPatches(
+                for: .workspaces,
+                bootstrapState: RemoteSyncBootstrapState(syncFolderID: syncFolderID),
+                progressState: RemoteSyncProgressState(),
+                currentSchemaVersion: 24
+            )
+        ) { error in
+            XCTAssertEqual(error as? RemoteSyncPatchDiscoveryError, .incompatiblePatchVersion(10))
+        }
+    }
+
     func testRemoteSyncArchiveStagingDownloadsInitialBackupAndExtractsSQLiteFile() async throws {
         let adapter = RemoteSyncMockAdapter()
         let initialDatabaseURL = try makeTemporarySQLiteDatabase(userVersion: 3)
@@ -1297,6 +1613,7 @@ final class RemoteSyncStateTests: XCTestCase {
                 parentID: "/org.andbible.ios-sync-bookmarks",
                 mimeType: "application/gzip"
             ),
+            category: .bookmarks,
             currentSchemaVersion: 5
         )
 
@@ -1331,6 +1648,7 @@ final class RemoteSyncStateTests: XCTestCase {
                     parentID: "/org.andbible.ios-sync-bookmarks",
                     mimeType: "application/gzip"
                 ),
+                category: .bookmarks,
                 currentSchemaVersion: 3
             )
         ) { error in
@@ -1341,10 +1659,43 @@ final class RemoteSyncStateTests: XCTestCase {
         }
     }
 
+    /** Rejects an initial workspace generation without an authoritative generated Room schema. */
+    func testRemoteSyncArchiveStagingRejectsWorkspaceGenerationWithoutRoomExport() async throws {
+        let adapter = RemoteSyncMockAdapter()
+        let initialDatabaseURL = try makeTemporarySQLiteDatabase(userVersion: 10)
+        defer { try? FileManager.default.removeItem(at: initialDatabaseURL) }
+        let initialArchiveData = try RemoteSyncArchiveStagingService.gzip(
+            Data(contentsOf: initialDatabaseURL)
+        )
+        let remoteID = "/org.andbible.ios-sync-workspaces/initial.sqlite3.gz"
+        await adapter.setDownloadData(initialArchiveData, forID: remoteID)
+
+        let service = RemoteSyncArchiveStagingService(adapter: adapter)
+        await XCTAssertThrowsErrorAsync(
+            try await service.downloadInitialBackup(
+                RemoteSyncFile(
+                    id: remoteID,
+                    name: "initial.sqlite3.gz",
+                    size: Int64(initialArchiveData.count),
+                    timestamp: 1_000,
+                    parentID: "/org.andbible.ios-sync-workspaces",
+                    mimeType: NextCloudSyncAdapter.gzipMimeType
+                ),
+                category: .workspaces,
+                currentSchemaVersion: 24
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteSyncArchiveStagingError,
+                .incompatibleInitialBackupVersion(10)
+            )
+        }
+    }
+
     func testRemoteSyncArchiveStagingDownloadsPatchArchivesInSuppliedOrder() async throws {
         let adapter = RemoteSyncMockAdapter()
-        let firstArchive = Data("first-archive".utf8)
-        let secondArchive = Data("second-archive".utf8)
+        let firstArchive = try RemoteSyncArchiveStagingService.gzip(Data("first-archive".utf8))
+        let secondArchive = try RemoteSyncArchiveStagingService.gzip(Data("second-archive".utf8))
         await adapter.setDownloadData(firstArchive, forID: "/org.andbible.ios-sync-bookmarks/device-b/1.1.sqlite3.gz")
         await adapter.setDownloadData(secondArchive, forID: "/org.andbible.ios-sync-bookmarks/device-a/2.1.sqlite3.gz")
 

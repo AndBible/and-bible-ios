@@ -126,6 +126,10 @@ final class RemoteSyncLifecycleTests: XCTestCase {
             ),
             for: .readingPlans
         )
+        RemoteSyncReadingPlanSnapshotService().refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
 
         let patchDatabaseURL = try makeAndroidReadingPlansDatabase(
             plans: [
@@ -358,6 +362,16 @@ final class RemoteSyncLifecycleTests: XCTestCase {
             )
         ])
         await adapter.enqueueListFilesResult([])
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "\(deviceFolderID)/1.1.sqlite3.gz",
+                name: "1.1.sqlite3.gz",
+                size: 0,
+                timestamp: 4_000_000,
+                parentID: deviceFolderID,
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
 
         let service = RemoteSyncSynchronizationService(
             adapter: adapter,
@@ -380,7 +394,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         XCTAssertNil(report.initialRestoreReport)
         XCTAssertNil(report.patchReplayReport)
         XCTAssertEqual(report.discoveredPatchCount, 0)
-        XCTAssertEqual(report.lastPatchWritten, 4_000_000)
+        XCTAssertGreaterThan(try XCTUnwrap(report.lastPatchWritten), 4_000_000)
         XCTAssertEqual(report.lastSynchronized, 4_000_000)
 
         guard case .readingPlans(let uploadReport)? = report.patchUploadReport else {
@@ -392,7 +406,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         XCTAssertEqual(uploadReport.upsertedStatusCount, 1)
         XCTAssertEqual(uploadReport.deletedRowCount, 0)
         XCTAssertEqual(uploadReport.logEntryCount, 2)
-        XCTAssertEqual(uploadReport.lastUpdated, 4_000_000)
+        XCTAssertEqual(uploadReport.lastUpdated, report.lastPatchWritten)
         XCTAssertEqual(uploadReport.uploadedFile.name, "1.1.sqlite3.gz")
         XCTAssertEqual(uploadReport.uploadedFile.parentID, deviceFolderID)
 
@@ -407,7 +421,10 @@ final class RemoteSyncLifecycleTests: XCTestCase {
                 )
             ]
         )
-        XCTAssertEqual(stateStore.progressState(for: .readingPlans).lastPatchWritten, 4_000_000)
+        XCTAssertEqual(
+            stateStore.progressState(for: .readingPlans).lastPatchWritten,
+            uploadReport.lastUpdated
+        )
         XCTAssertEqual(stateStore.progressState(for: .readingPlans).lastSynchronized, 4_000_000)
 
         let uploadedFiles = await adapter.uploadedFilesSnapshot()
@@ -429,14 +446,14 @@ final class RemoteSyncLifecycleTests: XCTestCase {
                 secretFileName: "device-known-ios-device-secret"
             ),
             .listFiles(
-                parentIDs: [syncFolderID],
+                parentIDs: [deviceFolderID],
                 name: nil,
-                mimeType: NextCloudSyncAdapter.folderMimeType,
+                mimeType: nil,
                 modifiedAtLeast: nil
             ),
             .listFiles(
                 parentIDs: [deviceFolderID],
-                name: nil,
+                name: "1.1.sqlite3.gz",
                 mimeType: nil,
                 modifiedAtLeast: nil
             ),
@@ -445,10 +462,21 @@ final class RemoteSyncLifecycleTests: XCTestCase {
                 parentID: deviceFolderID,
                 contentType: NextCloudSyncAdapter.gzipMimeType
             ),
+            .listFiles(
+                parentIDs: [syncFolderID],
+                name: nil,
+                mimeType: NextCloudSyncAdapter.folderMimeType,
+                modifiedAtLeast: nil
+            ),
         ])
     }
 
-    /// Verifies that skipped-patch discovery retries once from a zero sync baseline before applying the next valid patch.
+    /**
+     Verifies skipped-patch discovery persists a zero cursor before applying the next valid patch.
+
+     The first pass discovers a numbering gap. The retry must use and retain Android's durable zero
+     baseline while applying the complete patch sequence, ensuring a later pass repeats full discovery.
+     */
     func testRemoteSyncSynchronizationServiceRetriesSkippedPatchDiscoveryOnce() async throws {
         let container = try makeReadingPlanRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -522,6 +550,10 @@ final class RemoteSyncLifecycleTests: XCTestCase {
                 sourceDevice: "pixel"
             ),
             for: .readingPlans
+        )
+        RemoteSyncReadingPlanSnapshotService().refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
         )
 
         let patchDatabaseURL = try makeAndroidReadingPlansDatabase(
@@ -629,7 +661,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
 
         XCTAssertEqual(report.category, .readingPlans)
         XCTAssertEqual(report.discoveredPatchCount, 1)
-        XCTAssertEqual(report.lastSynchronized, 2_500_000)
+        XCTAssertEqual(report.lastSynchronized, 0)
         XCTAssertNil(report.patchUploadReport)
 
         guard case .readingPlans(let patchReport)? = report.patchReplayReport else {
@@ -645,7 +677,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         XCTAssertEqual(plans[0].currentDay, 2)
 
         let persistedProgress = stateStore.progressState(for: .readingPlans)
-        XCTAssertEqual(persistedProgress.lastSynchronized, 2_500_000)
+        XCTAssertEqual(persistedProgress.lastSynchronized, 0)
 
         let events = await adapter.eventsSnapshot()
         XCTAssertEqual(events, [
@@ -695,7 +727,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         let template = try XCTUnwrap(
             ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })
         )
-        let plan = ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        let plan = try ReadingPlanService.startPlan(template: template, modelContext: modelContext)
         plan.startDate = Date(timeIntervalSince1970: 1_735_689_600)
         plan.currentDay = 2
         let firstDay = try XCTUnwrap(plan.days?.first(where: { $0.dayNumber == 1 }))
@@ -737,6 +769,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
                 mimeType: NextCloudSyncAdapter.gzipMimeType
             )
         )
+        await adapter.enqueueListFilesResult([])
         await adapter.enqueueListFilesResult([
             RemoteSyncFile(
                 id: deviceFolderID,
@@ -767,7 +800,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         XCTAssertNil(report.initialRestoreReport)
         XCTAssertNil(report.patchReplayReport)
         XCTAssertNil(report.patchUploadReport)
-        XCTAssertEqual(report.lastPatchWritten, 4_000_000)
+        XCTAssertGreaterThan(try XCTUnwrap(report.lastPatchWritten), 4_000_000)
         XCTAssertEqual(report.lastSynchronized, 4_000_000)
         let uploadedFiles = await adapter.uploadedFilesSnapshot()
         let patchZeroSize = Int64(try XCTUnwrap(uploadedFiles.first?.data.count))
@@ -782,7 +815,10 @@ final class RemoteSyncLifecycleTests: XCTestCase {
                 )
             ]
         )
-        XCTAssertEqual(stateStore.progressState(for: .readingPlans).lastPatchWritten, 4_000_000)
+        XCTAssertEqual(
+            stateStore.progressState(for: .readingPlans).lastPatchWritten,
+            report.lastPatchWritten
+        )
         XCTAssertEqual(stateStore.progressState(for: .readingPlans).lastSynchronized, 4_000_000)
 
         let events = await adapter.eventsSnapshot()
@@ -790,6 +826,12 @@ final class RemoteSyncLifecycleTests: XCTestCase {
             .createFolder(name: "org.andbible.ios-sync-readingplans", parentID: nil),
             .makeKnown(syncFolderID: syncFolderID, deviceIdentifier: "ios-device"),
             .createFolder(name: "ios-device", parentID: syncFolderID),
+            .listFiles(
+                parentIDs: [syncFolderID],
+                name: "initial.sqlite3.gz",
+                mimeType: nil,
+                modifiedAtLeast: nil
+            ),
             .upload(
                 name: "initial.sqlite3.gz",
                 parentID: syncFolderID,
@@ -1132,7 +1174,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
                 modifiedAtLeast: nil
             ),
             .listFiles(
-                parentIDs: [pixelFolder.id, localDeviceFolder.id],
+                parentIDs: [localDeviceFolder.id, pixelFolder.id],
                 name: nil,
                 mimeType: nil,
                 modifiedAtLeast: nil
@@ -1151,7 +1193,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
 
         let template = ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })!
-        let plan = ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        let plan = try ReadingPlanService.startPlan(template: template, modelContext: modelContext)
         plan.startDate = Date(timeIntervalSince1970: 1_735_689_600)
         plan.currentDay = 1
         try modelContext.save()
@@ -1202,9 +1244,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         )
 
         XCTAssertNil(report)
-        let events = await adapter.eventsSnapshot()
         let uploadedFiles = await adapter.uploadedFilesSnapshot()
-        XCTAssertEqual(events, [])
         XCTAssertTrue(uploadedFiles.isEmpty)
     }
 
@@ -1221,7 +1261,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         let restoreService = RemoteSyncReadingPlanRestoreService()
 
         let template = ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })!
-        let plan = ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        let plan = try ReadingPlanService.startPlan(template: template, modelContext: modelContext)
         plan.startDate = Date(timeIntervalSince1970: 1_735_689_600)
         plan.currentDay = 1
         try modelContext.save()
@@ -1242,6 +1282,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
             settingsStore: settingsStore
         )
 
+        settingsStore.setString("remote_sync_device_identifier", value: "ios-device")
         plan.currentDay = 2
         let dayOne = try XCTUnwrap(plan.days?.first(where: { $0.dayNumber == 1 }))
         dayOne.isCompleted = true
@@ -1276,10 +1317,22 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         XCTAssertEqual(unwrappedReport.upsertedStatusCount, 0)
         XCTAssertEqual(unwrappedReport.deletedRowCount, 0)
         XCTAssertEqual(unwrappedReport.logEntryCount, 1)
-        XCTAssertEqual(unwrappedReport.lastUpdated, 2_000)
+        XCTAssertGreaterThan(unwrappedReport.lastUpdated, 2_000)
 
         let events = await adapter.eventsSnapshot()
         XCTAssertEqual(events, [
+            .listFiles(
+                parentIDs: ["/org.andbible.ios-sync-readingplans/ios-device"],
+                name: nil,
+                mimeType: nil,
+                modifiedAtLeast: nil
+            ),
+            .listFiles(
+                parentIDs: ["/org.andbible.ios-sync-readingplans/ios-device"],
+                name: "1.1.sqlite3.gz",
+                mimeType: nil,
+                modifiedAtLeast: nil
+            ),
             .upload(
                 name: "1.1.sqlite3.gz",
                 parentID: "/org.andbible.ios-sync-readingplans/ios-device",
@@ -1320,7 +1373,10 @@ final class RemoteSyncLifecycleTests: XCTestCase {
                 )
             ]
         )
-        XCTAssertEqual(stateStore.progressState(for: .readingPlans).lastPatchWritten, 2_000)
+        XCTAssertEqual(
+            stateStore.progressState(for: .readingPlans).lastPatchWritten,
+            unwrappedReport.lastUpdated
+        )
         XCTAssertEqual(logEntryStore.entries(for: .readingPlans).count, 1)
 
         let currentSnapshot = snapshotService.snapshotCurrentState(
@@ -1358,16 +1414,7 @@ final class RemoteSyncLifecycleTests: XCTestCase {
                 )
             ],
             statuses: [],
-            logEntries: [
-                .init(
-                    tableName: "ReadingPlan",
-                    entityID1: .blob(readingPlanUUIDBlob(planID)),
-                    entityID2: .text(""),
-                    type: .upsert,
-                    lastUpdated: 1_500,
-                    sourceDevice: "pixel"
-                )
-            ]
+            logEntries: []
         )
         defer { try? FileManager.default.removeItem(at: databaseURL) }
 
@@ -1393,6 +1440,10 @@ final class RemoteSyncLifecycleTests: XCTestCase {
 
         let plans = try modelContext.fetch(FetchDescriptor<ReadingPlan>())
         XCTAssertEqual(plans.count, 1)
+        XCTAssertTrue(
+            RemoteSyncLogEntryStore(settingsStore: settingsStore)
+                .entries(for: .readingPlans).isEmpty
+        )
         modelContext.delete(plans[0])
         try modelContext.save()
 
@@ -1441,6 +1492,536 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         XCTAssertEqual(metadataSnapshot.logEntries.count, 1)
         XCTAssertEqual(metadataSnapshot.logEntries[0].type, .delete)
         XCTAssertEqual(metadataSnapshot.logEntries[0].tableName, "ReadingPlan")
+    }
+
+    /**
+     Verifies a reading-plan edit made while remote publication is suspended remains pending.
+
+     The first acceptance must retain the immutable uploaded fingerprint rather than re-reading the
+     live graph. A second patch containing the newer day proves the concurrent edit was not lost.
+     */
+    func testReadingPlanUploadKeepsInFlightEditDirtyForNextPatch() async throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let snapshotService = RemoteSyncReadingPlanSnapshotService()
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first { $0.code == "y1ot1nt1_OTthenNT" }
+        )
+        let plan = try ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        plan.currentDay = 1
+        try modelContext.save()
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        plan.currentDay = 2
+        try modelContext.save()
+        let uploadedSnapshot = try snapshotService.snapshotCurrentStateStrict(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let planKey = try XCTUnwrap(uploadedSnapshot.planRowsByKey.first?.key)
+
+        let adapter = RemoteSyncDurableOutboxTestAdapter(
+            uploadMetadata: [
+                .init(timestamp: 8_000),
+                .init(timestamp: 9_000),
+            ]
+        )
+        await adapter.suspendNextUpload()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reading-plan-inflight-edit-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = RemoteSyncReadingPlanPatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true),
+            nowProvider: { 7_000 }
+        )
+
+        let uploadTask = Task {
+            try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/readingplans/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
+        await adapter.waitUntilUploadStarts()
+        plan.currentDay = 3
+        try modelContext.save()
+        await adapter.resumeUpload()
+
+        let firstResult = try await uploadTask.value
+        let firstReport = try XCTUnwrap(firstResult)
+        XCTAssertEqual(firstReport.patchNumber, 1)
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: settingsStore).fingerprint(
+                forLogKey: planKey,
+                category: .readingPlans
+            ),
+            uploadedSnapshot.fingerprintsByKey[planKey]
+        )
+        let currentSnapshot = try snapshotService.snapshotCurrentStateStrict(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertNotEqual(
+            currentSnapshot.fingerprintsByKey[planKey],
+            uploadedSnapshot.fingerprintsByKey[planKey]
+        )
+
+        let secondResult = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/readingplans/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let secondReport = try XCTUnwrap(secondResult)
+        XCTAssertEqual(secondReport.patchNumber, 2)
+        let uploads = await adapter.uploads()
+        XCTAssertEqual(uploads.map(\.name), ["1.1.sqlite3.gz", "2.1.sqlite3.gz"])
+    }
+
+    /**
+     Verifies remote success followed by local failure resumes the exact durable reading-plan generation.
+
+     A new service instance reconciles the existing remote bytes instead of allocating or rebuilding a
+     patch. Sync status uses remote file metadata, while `lastPatchWritten` retains generation time.
+     */
+    func testReadingPlanUploadAcceptanceFailureResumesExactOutboxGeneration() async throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let snapshotService = RemoteSyncReadingPlanSnapshotService()
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first { $0.code == "y1ot1nt1_OTthenNT" }
+        )
+        let plan = try ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        plan.currentDay = 1
+        try modelContext.save()
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let acceptedSnapshot = try snapshotService.snapshotCurrentStateStrict(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let planKey = try XCTUnwrap(acceptedSnapshot.planRowsByKey.first?.key)
+        plan.currentDay = 2
+        try modelContext.save()
+
+        let adapter = RemoteSyncDurableOutboxTestAdapter(
+            uploadMetadata: [.init(timestamp: 12_000, size: 54_321)]
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reading-plan-acceptance-retry-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let outboxDirectory = directory.appendingPathComponent("outbox", isDirectory: true)
+        let failingService = RemoteSyncReadingPlanPatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: { 10_000 },
+            finalAcceptanceCheckpoint: {
+                throw NSError(domain: "ReadingPlanUploadAcceptance", code: 61)
+            }
+        )
+
+        do {
+            _ = try await failingService.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/readingplans/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected reading-plan acceptance failure")
+        } catch {
+            XCTAssertEqual((error as NSError).domain, "ReadingPlanUploadAcceptance")
+        }
+
+        XCTAssertNotNil(settingsStore.getString(RemoteSyncReadingPlanPatchUploadService.pendingUploadKey))
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: settingsStore).fingerprint(
+                forLogKey: planKey,
+                category: .readingPlans
+            ),
+            acceptedSnapshot.fingerprintsByKey[planKey]
+        )
+        XCTAssertTrue(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .readingPlans).isEmpty
+        )
+        XCTAssertNil(
+            RemoteSyncStateStore(settingsStore: settingsStore)
+                .progressState(for: .readingPlans).lastPatchWritten
+        )
+
+        let retryService = RemoteSyncReadingPlanPatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: { 99_000 }
+        )
+        let retryResult = try await retryService.resumePendingUploadIfPresent(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/readingplans/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let report = try XCTUnwrap(retryResult)
+
+        XCTAssertEqual(report.patchNumber, 1)
+        let retryUploads = await adapter.uploads()
+        XCTAssertEqual(retryUploads.count, 1)
+        XCTAssertNil(settingsStore.getString(RemoteSyncReadingPlanPatchUploadService.pendingUploadKey))
+        XCTAssertEqual(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .readingPlans),
+            [
+                RemoteSyncPatchStatus(
+                    sourceDevice: "ios-device",
+                    patchNumber: 1,
+                    sizeBytes: 54_321,
+                    appliedDate: 12_000
+                )
+            ]
+        )
+        XCTAssertGreaterThan(report.lastUpdated, 10_000)
+        XCTAssertEqual(
+            RemoteSyncStateStore(settingsStore: settingsStore)
+                .progressState(for: .readingPlans).lastPatchWritten,
+            report.lastUpdated
+        )
+    }
+
+    /**
+     Verifies cancellation after a reading-plan archive becomes durable retains retryable outbox state.
+
+     The mock suspends conditional creation deterministically. Cancellation must leave local acceptance
+     untouched; a resume-only call then reconciles the same remote bytes and accepts patch one.
+     */
+    func testReadingPlanUploadCancellationRetainsDurableGenerationForResume() async throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let snapshotService = RemoteSyncReadingPlanSnapshotService()
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first { $0.code == "y1ot1nt1_OTthenNT" }
+        )
+        let plan = try ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        try modelContext.save()
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        plan.currentDay += 1
+        try modelContext.save()
+
+        let adapter = RemoteSyncDurableOutboxTestAdapter(
+            uploadMetadata: [.init(timestamp: 15_000)]
+        )
+        await adapter.suspendNextUpload()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reading-plan-cancel-retry-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = RemoteSyncReadingPlanPatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true),
+            nowProvider: { 14_000 }
+        )
+        let uploadTask = Task {
+            try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/readingplans/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
+        await adapter.waitUntilUploadStarts()
+        uploadTask.cancel()
+        await adapter.resumeUpload()
+
+        do {
+            _ = try await uploadTask.value
+            XCTFail("Expected reading-plan upload cancellation")
+        } catch is CancellationError {
+            // Expected: the durable generation remains available for reconciliation.
+        }
+        XCTAssertNotNil(settingsStore.getString(RemoteSyncReadingPlanPatchUploadService.pendingUploadKey))
+        XCTAssertTrue(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .readingPlans).isEmpty
+        )
+
+        let resumed = try await service.resumePendingUploadIfPresent(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/readingplans/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertEqual(try XCTUnwrap(resumed).patchNumber, 1)
+        let resumedUploads = await adapter.uploads()
+        XCTAssertEqual(resumedUploads.count, 1)
+    }
+
+    /**
+     Verifies absent local status allocates after remote reading-plan history and corruption fails closed.
+
+     Remote patch seven must yield patch eight. A subsequent malformed local status must abort before
+     any additional conditional create, rather than being treated as an empty accepted sequence.
+     */
+    func testReadingPlanUploadUsesRemoteNumberingAndRejectsCorruptLocalStatus() async throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let snapshotService = RemoteSyncReadingPlanSnapshotService()
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first { $0.code == "y1ot1nt1_OTthenNT" }
+        )
+        let plan = try ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        try modelContext.save()
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        plan.currentDay += 1
+        try modelContext.save()
+
+        let deviceFolderID = "/readingplans/ios-device"
+        let adapter = RemoteSyncDurableOutboxTestAdapter(
+            uploadMetadata: [.init(timestamp: 18_000)]
+        )
+        await adapter.seedRemoteFile(
+            name: "7.1.sqlite3.gz",
+            parentID: deviceFolderID,
+            data: Data("accepted remote history".utf8),
+            timestamp: 17_000
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reading-plan-remote-numbering-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = RemoteSyncReadingPlanPatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true),
+            nowProvider: { 17_500 }
+        )
+
+        let firstResult = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: deviceFolderID),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertEqual(try XCTUnwrap(firstResult).patchNumber, 8)
+        let numberedUploads = await adapter.uploads()
+        XCTAssertEqual(numberedUploads.map(\.name), ["8.1.sqlite3.gz"])
+
+        plan.currentDay += 1
+        try modelContext.save()
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let corruptKey = patchStatusStore.key(
+            for: .readingPlans,
+            sourceDevice: "ios-device",
+            patchNumber: 9
+        )
+        settingsStore.setString(corruptKey, value: "{not-json")
+        do {
+            _ = try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: deviceFolderID),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected corrupt reading-plan patch status to fail closed")
+        } catch let error as RemoteSyncPatchStatusStoreError {
+            XCTAssertEqual(error, .invalidStoredStatus(corruptKey))
+        }
+        let uploadsAfterCorruption = await adapter.uploads()
+        XCTAssertEqual(uploadsAfterCorruption.count, 1)
+    }
+
+    /**
+     Verifies generated Android status ids merge without overwriting newer reading-plan progress.
+
+     Two id-less statuses are uploaded while transport is suspended. Acceptance must add the generated
+     id to the still-present row while preserving its newer JSON, and must not recreate the deleted row.
+     The next patch proves both concurrent changes remain dirty.
+     */
+    func testReadingPlanUploadMergesGeneratedStatusIDWithoutOverwritingConcurrentChanges() async throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let snapshotService = RemoteSyncReadingPlanSnapshotService()
+        let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first { $0.code == "y1ot1nt1_OTthenNT" }
+        )
+        let plan = try ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        try modelContext.save()
+        statusStore.setStatus(
+            #"{"chapterReadArray":[{"readingNumber":1,"isRead":false}]}"#,
+            planCode: plan.planCode,
+            dayNumber: 1
+        )
+        statusStore.setStatus(
+            #"{"chapterReadArray":[{"readingNumber":1,"isRead":false}]}"#,
+            planCode: plan.planCode,
+            dayNumber: 2
+        )
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        statusStore.setStatus(
+            #"{"chapterReadArray":[{"readingNumber":1,"isRead":true}]}"#,
+            planCode: plan.planCode,
+            dayNumber: 1
+        )
+        statusStore.setStatus(
+            #"{"chapterReadArray":[{"readingNumber":1,"isRead":true}]}"#,
+            planCode: plan.planCode,
+            dayNumber: 2
+        )
+
+        let adapter = RemoteSyncDurableOutboxTestAdapter(
+            uploadMetadata: [
+                .init(timestamp: 19_000),
+                .init(timestamp: 20_000),
+            ]
+        )
+        await adapter.suspendNextUpload()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reading-plan-status-id-merge-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = RemoteSyncReadingPlanPatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true),
+            nowProvider: { 18_500 }
+        )
+        let uploadTask = Task {
+            try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/readingplans/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
+        await adapter.waitUntilUploadStarts()
+        let newerJSON = #"{"chapterReadArray":[{"readingNumber":1,"isRead":true},{"readingNumber":2,"isRead":true}]}"#
+        statusStore.setStatus(newerJSON, planCode: plan.planCode, dayNumber: 1)
+        statusStore.removeStatus(planCode: plan.planCode, dayNumber: 2)
+        await adapter.resumeUpload()
+
+        let firstResult = try await uploadTask.value
+        XCTAssertEqual(try XCTUnwrap(firstResult).patchNumber, 1)
+        let retainedStatus = try XCTUnwrap(
+            statusStore.storedStatus(planCode: plan.planCode, dayNumber: 1)
+        )
+        XCTAssertEqual(retainedStatus.readingStatusJSON, newerJSON)
+        XCTAssertNotNil(retainedStatus.remoteStatusID)
+        XCTAssertNil(statusStore.storedStatus(planCode: plan.planCode, dayNumber: 2))
+
+        let secondResult = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/readingplans/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertEqual(try XCTUnwrap(secondResult).patchNumber, 2)
+    }
+
+    /**
+     Verifies a reading-plan outbox cannot cross destinations without explicit lifecycle cleanup.
+
+     A failed acceptance leaves an old-folder generation. The new folder must reject it; explicit
+     discard preserves the old baseline so the current graph rebuilds as patch one for the replacement.
+     */
+    func testReadingPlanDestinationReplacementRequiresExplicitPendingCleanup() async throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let snapshotService = RemoteSyncReadingPlanSnapshotService()
+        let template = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first { $0.code == "y1ot1nt1_OTthenNT" }
+        )
+        let plan = try ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        try modelContext.save()
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        plan.currentDay += 1
+        try modelContext.save()
+
+        let adapter = RemoteSyncDurableOutboxTestAdapter(
+            uploadMetadata: [
+                .init(timestamp: 21_000),
+                .init(timestamp: 22_000),
+            ]
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reading-plan-destination-replacement-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let outboxDirectory = directory.appendingPathComponent("outbox", isDirectory: true)
+        let failingService = RemoteSyncReadingPlanPatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: { 20_000 },
+            finalAcceptanceCheckpoint: {
+                throw NSError(domain: "ReadingPlanDestination", code: 71)
+            }
+        )
+        do {
+            _ = try await failingService.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/readingplans/old-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected local acceptance failure")
+        } catch {
+            XCTAssertEqual((error as NSError).domain, "ReadingPlanDestination")
+        }
+
+        let replacementService = RemoteSyncReadingPlanPatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: { 20_500 }
+        )
+        do {
+            _ = try await replacementService.resumePendingUploadIfPresent(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/readingplans/new-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected mismatched reading-plan outbox to fail closed")
+        } catch let error as RemoteSyncReadingPlanPatchUploadError {
+            XCTAssertEqual(
+                error,
+                .pendingUploadDestinationMismatch(
+                    stored: "/readingplans/old-device",
+                    requested: "/readingplans/new-device"
+                )
+            )
+        }
+
+        try replacementService.discardPendingUploadForDestinationReplacement(
+            settingsStore: settingsStore
+        )
+        let replacementResult = try await replacementService.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/readingplans/new-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertEqual(try XCTUnwrap(replacementResult).patchNumber, 1)
+        let destinationUploads = await adapter.uploads()
+        XCTAssertEqual(
+            destinationUploads.map(\.parentID),
+            ["/readingplans/old-device", "/readingplans/new-device"]
+        )
     }
 
     func testWebDAVSyncConfigurationRejectsLoginPageURLs() {
@@ -2043,4 +2624,248 @@ final class RemoteSyncLifecycleTests: XCTestCase {
     }
 #endif
 
+}
+
+/**
+ Deterministic remote backend for durable patch outbox behavior tests across sync categories.
+
+ The actor retains exact bytes by destination and filename, supports continuation-driven suspension,
+ records conditional-create attempts, and allows remote metadata to differ from local archive metadata.
+ It intentionally models only the file semantics needed by category upload tests; folder-known methods
+ return stable defaults and never perform external I/O.
+ */
+actor RemoteSyncDurableOutboxTestAdapter: RemoteSyncAdapting, RemoteSyncConditionalFileUploading {
+    /** Remote metadata assigned to one successful conditional create. */
+    struct UploadMetadata: Sendable, Equatable {
+        /// Server-applied modification timestamp in milliseconds.
+        let timestamp: Int64
+
+        /// Optional server-reported size, which may differ from the local archive byte count.
+        let size: Int64?
+
+        /** Creates one deterministic remote metadata response. */
+        init(timestamp: Int64, size: Int64? = nil) {
+            self.timestamp = timestamp
+            self.size = size
+        }
+    }
+
+    /** One completed conditional-create attempt retained for assertions. */
+    struct Upload: Sendable, Equatable {
+        /// Exact Android patch filename.
+        let name: String
+
+        /// Destination device-folder identifier.
+        let parentID: String
+
+        /// Immutable archive bytes supplied to conditional create.
+        let data: Data
+    }
+
+    private var uploadMetadata: [UploadMetadata]
+    private var completedUploads: [Upload] = []
+    private var remoteFilesByID: [String: (file: RemoteSyncFile, data: Data)] = [:]
+    private var shouldSuspendNextUpload = false
+    private var uploadDidStart = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    /** Creates a backend with deterministic server metadata assigned in upload order. */
+    init(uploadMetadata: [UploadMetadata]) {
+        self.uploadMetadata = uploadMetadata
+    }
+
+    /** Configures the next conditional create to pause after receiving immutable bytes. */
+    func suspendNextUpload() {
+        shouldSuspendNextUpload = true
+        uploadDidStart = false
+    }
+
+    /** Waits without polling until the suspended conditional create has captured its bytes. */
+    func waitUntilUploadStarts() async {
+        if uploadDidStart {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    /** Releases a suspended conditional create exactly once. */
+    func resumeUpload() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+
+    /** Seeds one accepted remote patch for numbering or exact-byte reconciliation. */
+    func seedRemoteFile(
+        name: String,
+        parentID: String,
+        data: Data,
+        timestamp: Int64
+    ) {
+        let id = "\(parentID)/\(name)"
+        remoteFilesByID[id] = (
+            RemoteSyncFile(
+                id: id,
+                name: name,
+                size: Int64(data.count),
+                timestamp: timestamp,
+                parentID: parentID,
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            ),
+            data
+        )
+    }
+
+    /** Returns completed conditional-create attempts in call order. */
+    func uploads() -> [Upload] {
+        completedUploads
+    }
+
+    /** Lists in-memory remote objects using the adapter's production filter contract. */
+    func listFiles(
+        parentIDs: [String]?,
+        name: String?,
+        mimeType: String?,
+        modifiedAtLeast: Date?
+    ) async throws -> [RemoteSyncFile] {
+        remoteFilesByID.values.map(\.file).filter { file in
+            (parentIDs == nil || parentIDs!.contains(file.parentID))
+                && (name == nil || file.name == name)
+                && (mimeType == nil || file.mimeType == mimeType)
+                && (modifiedAtLeast == nil
+                    || Date(timeIntervalSince1970: TimeInterval(file.timestamp) / 1_000)
+                        >= modifiedAtLeast!)
+        }
+    }
+
+    /** Creates an in-memory folder descriptor without storing folder state. */
+    func createNewFolder(name: String, parentID: String?) async throws -> RemoteSyncFile {
+        RemoteSyncFile(
+            id: "\(parentID ?? "/")/\(name)",
+            name: name,
+            size: 0,
+            timestamp: 0,
+            parentID: parentID ?? "/",
+            mimeType: NextCloudSyncAdapter.folderMimeType
+        )
+    }
+
+    /** Returns exact bytes for one seeded or uploaded remote object. */
+    func download(id: String) async throws -> Data {
+        remoteFilesByID[id]?.data ?? Data()
+    }
+
+    /**
+     Supports non-conditional protocol callers by routing through the same in-memory create path.
+
+     Category outbox tests use `uploadIfAbsent`; this method exists only to satisfy the broader adapter
+     protocol and deliberately replaces an existing fixture when called directly.
+     */
+    func upload(
+        name: String,
+        fileURL: URL,
+        parentID: String,
+        contentType: String
+    ) async throws -> RemoteSyncFile {
+        let data = try Data(contentsOf: fileURL)
+        let id = "\(parentID)/\(name)"
+        let metadata = nextUploadMetadata(for: data)
+        let file = makeRemoteFile(
+            id: id,
+            name: name,
+            parentID: parentID,
+            contentType: contentType,
+            data: data,
+            metadata: metadata
+        )
+        completedUploads.append(Upload(name: name, parentID: parentID, data: data))
+        remoteFilesByID[id] = (file, data)
+        return file
+    }
+
+    /** Atomically creates one in-memory remote object without replacing an occupied name. */
+    func uploadIfAbsent(
+        name: String,
+        fileURL: URL,
+        maximumByteCount: Int,
+        parentID: String,
+        contentType: String
+    ) async throws -> RemoteSyncConditionalUploadResult {
+        let data = try RemoteSyncBoundedFileIO.readRegularFile(
+            at: fileURL,
+            maximumByteCount: maximumByteCount
+        )
+        let id = "\(parentID)/\(name)"
+        guard remoteFilesByID[id] == nil else {
+            return .alreadyExists
+        }
+        if shouldSuspendNextUpload {
+            shouldSuspendNextUpload = false
+            uploadDidStart = true
+            startWaiters.forEach { $0.resume() }
+            startWaiters.removeAll()
+            await withCheckedContinuation { continuation in
+                releaseContinuation = continuation
+            }
+            guard remoteFilesByID[id] == nil else {
+                return .alreadyExists
+            }
+        }
+        let metadata = nextUploadMetadata(for: data)
+        let file = makeRemoteFile(
+            id: id,
+            name: name,
+            parentID: parentID,
+            contentType: contentType,
+            data: data,
+            metadata: metadata
+        )
+        completedUploads.append(Upload(name: name, parentID: parentID, data: data))
+        remoteFilesByID[id] = (file, data)
+        return .created(file)
+    }
+
+    /** Removes one in-memory remote object. */
+    func delete(id: String) async throws {
+        remoteFilesByID.removeValue(forKey: id)
+    }
+
+    /** Returns a stable known-folder result for protocol completeness. */
+    func isSyncFolderKnown(syncFolderID: String, secretFileName: String) async throws -> Bool {
+        true
+    }
+
+    /** Returns a stable marker name for protocol completeness. */
+    func makeSyncFolderKnown(syncFolderID: String, deviceIdentifier: String) async throws -> String {
+        "device-known-\(deviceIdentifier)-secret"
+    }
+
+    /** Consumes the next server metadata fixture or derives metadata from local bytes. */
+    private func nextUploadMetadata(for data: Data) -> UploadMetadata {
+        guard !uploadMetadata.isEmpty else {
+            return UploadMetadata(timestamp: 0, size: Int64(data.count))
+        }
+        return uploadMetadata.removeFirst()
+    }
+
+    /** Builds one remote file descriptor from deterministic server metadata. */
+    private func makeRemoteFile(
+        id: String,
+        name: String,
+        parentID: String,
+        contentType: String,
+        data: Data,
+        metadata: UploadMetadata
+    ) -> RemoteSyncFile {
+        RemoteSyncFile(
+            id: id,
+            name: name,
+            size: metadata.size ?? Int64(data.count),
+            timestamp: metadata.timestamp,
+            parentID: parentID,
+            mimeType: contentType
+        )
+    }
 }

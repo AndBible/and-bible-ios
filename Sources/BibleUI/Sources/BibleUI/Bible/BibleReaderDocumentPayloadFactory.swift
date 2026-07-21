@@ -47,6 +47,32 @@ struct BibleReaderDocumentPayloadRequest {
     let keyName: String?
     /// Optional exact ordinal range for single-key or non-chapter documents.
     let ordinalRangeOverride: [Int]?
+    /// Optional source-versification range for the nested OSIS fragment.
+    let fragmentOrdinalRange: [Int]?
+    /// Optional exact fragment identity when it differs from `initials--documentKey`.
+    let fragmentKey: String?
+    /// Optional exact fragment OSIS reference when it differs from the document key.
+    let fragmentOsisRef: String?
+    /// Optional annotation reference declared by source OSIS.
+    let annotateRef: String?
+    /// Source-derived fragment features exposed to Vue.
+    let fragmentFeatures: [String: String]
+    /// Android commentary block metadata, or `nil` for non-commentary content and empty blocks.
+    let commentaryRange: ReaderCommentaryRangePayload?
+    /// Source module display name exposed as Android's document `bookName`.
+    let moduleName: String?
+    /// Source module abbreviation exposed at document and fragment levels.
+    let moduleAbbreviation: String?
+    /// Exact source-module versification, or `nil` for a document without a verse domain.
+    let versificationName: String?
+    /// Source module language code.
+    let language: String
+    /// Source module reading direction.
+    let direction: String
+    /// Optional source-specific Strong's capability override.
+    let sourceHasStrongs: Bool?
+    /// Authoritative KJVA range used for Android's Bible AI-marker overlap query.
+    let aiMarkerKJVAOrdinalRange: [Int]?
 
     /**
      Creates a document payload request while preserving the controller's historical defaults.
@@ -70,7 +96,20 @@ struct BibleReaderDocumentPayloadRequest {
         originalOrdinalRange: [Int]? = nil,
         documentKey: String? = nil,
         keyName: String? = nil,
-        ordinalRangeOverride: [Int]? = nil
+        ordinalRangeOverride: [Int]? = nil,
+        fragmentOrdinalRange: [Int]? = nil,
+        fragmentKey: String? = nil,
+        fragmentOsisRef: String? = nil,
+        annotateRef: String? = nil,
+        fragmentFeatures: [String: String] = [:],
+        commentaryRange: ReaderCommentaryRangePayload? = nil,
+        moduleName: String? = nil,
+        moduleAbbreviation: String? = nil,
+        versificationName: String? = nil,
+        language: String = "en",
+        direction: String = "ltr",
+        sourceHasStrongs: Bool? = nil,
+        aiMarkerKJVAOrdinalRange: [Int]? = nil
     ) {
         self.osisBookId = osisBookId
         self.bookName = bookName
@@ -86,6 +125,19 @@ struct BibleReaderDocumentPayloadRequest {
         self.documentKey = documentKey
         self.keyName = keyName
         self.ordinalRangeOverride = ordinalRangeOverride
+        self.fragmentOrdinalRange = fragmentOrdinalRange
+        self.fragmentKey = fragmentKey
+        self.fragmentOsisRef = fragmentOsisRef
+        self.annotateRef = annotateRef
+        self.fragmentFeatures = fragmentFeatures
+        self.commentaryRange = commentaryRange
+        self.moduleName = moduleName
+        self.moduleAbbreviation = moduleAbbreviation
+        self.versificationName = versificationName
+        self.language = language
+        self.direction = direction
+        self.sourceHasStrongs = sourceHasStrongs
+        self.aiMarkerKJVAOrdinalRange = aiMarkerKJVAOrdinalRange
     }
 }
 
@@ -165,6 +217,12 @@ struct BibleReaderDocumentPayloadFactory {
     private let memorizedOrdinals: OrdinalProgressProvider
     /// Memorization target ordinal lookup.
     private let targetOrdinals: OrdinalProgressProvider
+    /// Exact generic bookmark projection for one source document and key.
+    private let genericBookmarks: (String, String) -> [GenericBookmarkData]
+    /// Exact generated-page marker projection for one non-Bible source document and key.
+    private let aiDocMarkersForPage: (String, String) -> [MyDocumentAIDocMarker]
+    /// Generated-page marker projection for one authoritative Bible KJVA range.
+    private let aiDocMarkersForKJVARange: (Int, Int) -> [MyDocumentAIDocMarker]
 
     /**
      Creates a document payload factory for one snapshot of controller reader state.
@@ -178,6 +236,9 @@ struct BibleReaderDocumentPayloadFactory {
        - chapterReadCount: Reads persisted read counts for rendered Bible chapters.
        - memorizedOrdinals: Reads memorized ordinals for the rendered range.
        - targetOrdinals: Reads memorization target ordinals for the rendered range.
+       - genericBookmarks: Projects persisted generic annotations for exact source identities.
+       - aiDocMarkersForPage: Projects generated-page markers for exact non-Bible source identities.
+       - aiDocMarkersForKJVARange: Projects markers overlapping an authoritative Bible KJVA range.
      - Side effects: None during initialization; closures are invoked by serialization methods.
      - Failure modes: None during initialization.
      */
@@ -189,7 +250,10 @@ struct BibleReaderDocumentPayloadFactory {
         kjvBookOrdinal: @escaping KJVBookOrdinalResolver,
         chapterReadCount: @escaping ChapterReadCountProvider,
         memorizedOrdinals: @escaping OrdinalProgressProvider,
-        targetOrdinals: @escaping OrdinalProgressProvider
+        targetOrdinals: @escaping OrdinalProgressProvider,
+        genericBookmarks: @escaping (String, String) -> [GenericBookmarkData] = { _, _ in [] },
+        aiDocMarkersForPage: @escaping (String, String) -> [MyDocumentAIDocMarker] = { _, _ in [] },
+        aiDocMarkersForKJVARange: @escaping (Int, Int) -> [MyDocumentAIDocMarker] = { _, _ in [] }
     ) {
         self.activeModuleName = activeModuleName
         self.hasStrongs = hasStrongs
@@ -199,6 +263,9 @@ struct BibleReaderDocumentPayloadFactory {
         self.chapterReadCount = chapterReadCount
         self.memorizedOrdinals = memorizedOrdinals
         self.targetOrdinals = targetOrdinals
+        self.genericBookmarks = genericBookmarks
+        self.aiDocMarkersForPage = aiDocMarkersForPage
+        self.aiDocMarkersForKJVARange = aiDocMarkersForKJVARange
     }
 
     /**
@@ -208,16 +275,17 @@ struct BibleReaderDocumentPayloadFactory {
      - Returns: JSON for one Vue document record, or `nil` when required Bible range data or JSON
        serialization is unavailable.
      - Side effects: Reads bookmark/progress data through injected closures and logs failures.
-     - Failure modes: Bible documents require a resolvable ordinal range unless an override is
-       supplied; non-Bible documents default to `[0, 0]` to preserve existing bridge semantics.
+     - Failure modes: Bible documents require both a source versification and a resolvable ordinal
+       range unless an override is supplied. Non-verse-key documents preserve null range metadata.
      */
     func documentJSON(_ request: BibleReaderDocumentPayloadRequest) -> String? {
         let key = request.documentKey ?? "\(request.osisBookId).\(request.chapter)"
         let displayKeyName = request.keyName ?? "\(request.bookName) \(request.chapter)"
-        let documentOrdinalRange: [Int]
+        let isBibleDocument = request.bookCategory == DocumentCategory.bible.rawValue
+        let documentOrdinalRange: [Int]?
         if let ordinalRangeOverride = request.ordinalRangeOverride {
             documentOrdinalRange = ordinalRangeOverride
-        } else if request.bookCategory == DocumentCategory.bible.rawValue {
+        } else if isBibleDocument {
             guard let range = chapterOrdinalRange(request.bookName, request.chapter, request.verseCount) else {
                 documentPayloadLogger.error(
                     "Failed to resolve Bible document range for \(request.osisBookId, privacy: .public).\(request.chapter)"
@@ -226,13 +294,44 @@ struct BibleReaderDocumentPayloadFactory {
             }
             documentOrdinalRange = [range.start, range.end]
         } else {
-            documentOrdinalRange = [0, 0]
+            documentOrdinalRange = nil
         }
 
-        let ordinalStart = documentOrdinalRange.first ?? 0
-        let ordinalEnd = documentOrdinalRange.last ?? ordinalStart
+        guard !isBibleDocument || request.versificationName != nil else {
+            documentPayloadLogger.error(
+                "Refusing Bible payload without a source versification for \(request.osisBookId, privacy: .public).\(request.chapter)"
+            )
+            return nil
+        }
+
+        let ordinalStart = documentOrdinalRange?.first ?? 0
+        let ordinalEnd = documentOrdinalRange?.last ?? ordinalStart
         let initials = request.bookInitials ?? activeModuleName
+        let abbreviation = request.moduleAbbreviation ?? initials
+        let moduleDisplayName = request.moduleName ?? initials
+        let annotateRef = request.annotateRef ?? key
+        let documentOsisRef = request.annotateRef ?? request.fragmentOsisRef ?? key
         let bookmarkObjects = request.bookmarks.compactMap { jsonObject(from: bookmarkPayload($0)) }
+        let genericBookmarkObjects = isBibleDocument
+            ? []
+            : genericBookmarks(initials, annotateRef).compactMap { jsonObject(from: $0) }
+        let markers: [MyDocumentAIDocMarker]
+        if isBibleDocument,
+           let range = request.aiMarkerKJVAOrdinalRange,
+           let start = range.first,
+           let end = range.last {
+            markers = aiDocMarkersForKJVARange(min(start, end), max(start, end))
+        } else if isBibleDocument {
+            markers = []
+        } else {
+            markers = aiDocMarkersForPage(initials, annotateRef)
+        }
+        let markerObjects = markers.map {
+            BibleReaderMyDocumentCoordinator.markerJSON(
+                $0,
+                targetVersification: isBibleDocument ? request.versificationName : nil
+            )
+        }
         let chapterReadCountValue = chapterReadCountValue(
             bookCategory: request.bookCategory,
             bookName: request.bookName,
@@ -240,36 +339,49 @@ struct BibleReaderDocumentPayloadFactory {
         )
 
         var doc: [String: Any] = [
-            "id": "doc-1",
-            "type": "bible",
+            "id": Self.androidDocumentID(bookInitials: initials, key: key),
+            "type": isBibleDocument ? "bible" : "osis",
             "osisFragment": osisFragmentObject(
                 request: request,
                 key: key,
                 displayKeyName: displayKeyName,
                 initials: initials,
-                ordinalRange: documentOrdinalRange
+                ordinalRange: request.fragmentOrdinalRange
+                    ?? (isBibleDocument ? documentOrdinalRange : nil)
             ),
             "bookInitials": initials,
             "bookCategory": request.bookCategory,
-            "bookAbbreviation": request.osisBookId,
-            "bookName": request.bookName,
+            "bookAbbreviation": abbreviation,
+            "bookName": moduleDisplayName,
             "key": key,
-            "v11n": "KJVA",
-            "osisRef": key,
-            "annotateRef": "",
-            "genericBookmarks": [Any](),
-            "ordinalRange": documentOrdinalRange,
+            "v11n": request.versificationName ?? NSNull(),
+            "osisRef": documentOsisRef,
+            "annotateRef": annotateRef,
+            "genericBookmarks": genericBookmarkObjects,
+            "ordinalRange": documentOrdinalRange ?? NSNull(),
             "isNativeHtml": false,
-            "bookmarks": bookmarkObjects,
-            "bibleBookName": request.bookName,
-            "addChapter": request.addChapter,
-            "chapterNumber": request.chapter,
-            "originalOrdinalRange": request.originalOrdinalRange ?? NSNull(),
-            "memorizedOrdinals": memorizedOrdinals(initials, ordinalStart, ordinalEnd),
-            "targetOrdinals": targetOrdinals(initials, ordinalStart, ordinalEnd),
+            "highlightedOrdinalRange": NSNull(),
+            "isMyDocument": false,
+            "isAiDocument": false,
+            "myDocumentPageId": NSNull(),
+            "sourcePromptId": NSNull(),
+            "sourcePromptName": NSNull(),
+            "sourceModelName": NSNull(),
+            "aiDocMarkers": markerObjects,
+            "commentaryRange": request.commentaryRange
+                .flatMap { jsonObject(from: $0) } ?? NSNull(),
         ]
-        if let chapterReadCountValue {
-            doc["chapterReadCount"] = chapterReadCountValue
+        if isBibleDocument {
+            doc["bookmarks"] = bookmarkObjects
+            doc["bibleBookName"] = request.bookName
+            doc["addChapter"] = request.addChapter
+            doc["chapterNumber"] = request.chapter
+            doc["originalOrdinalRange"] = request.originalOrdinalRange ?? NSNull()
+            doc["memorizedOrdinals"] = memorizedOrdinals(initials, ordinalStart, ordinalEnd)
+            doc["targetOrdinals"] = targetOrdinals(initials, ordinalStart, ordinalEnd)
+            if let chapterReadCountValue {
+                doc["chapterReadCount"] = chapterReadCountValue
+            }
         }
 
         return serializedDocument(doc, failureDescription: "\(request.osisBookId) \(request.chapter)")
@@ -283,49 +395,98 @@ struct BibleReaderDocumentPayloadFactory {
      Vue `OsisDocument` path passes the HTML through to `OsisFragment` without OSIS conversion.
 
      - Parameters:
-       - bookName: Visible EPUB section title.
-       - bookInitials: Parent EPUB title used as document initials.
+       - bookName: EPUB package title exposed as Android's general-book name.
+       - bookInitials: Stable Android-compatible EPUB document initials.
+       - key: Numeric general-book fragment key.
+       - keyName: Visible EPUB section or TOC-entry title.
        - content: Rewritten XHTML/HTML content loaded from the EPUB index.
+       - ordinalRange: Inclusive BVA range inside the source spine document.
+       - language: EPUB package language used by the renderer.
+       - genericBookmarks: Generic annotations projected for this exact document/key.
      - Returns: Serialized JSON payload. Returns `{}` if JSON serialization fails.
      - Side effects: Logs serialization failures.
      - Failure modes: Invalid JSON object construction returns `{}` to match the previous
        controller behavior.
      */
-    func epubDocumentJSON(bookName: String, bookInitials: String, content: String) -> String {
+    func epubDocumentJSON(
+        bookName: String,
+        bookInitials: String,
+        key: String,
+        keyName: String,
+        content: String,
+        ordinalRange: [Int],
+        language: String,
+        genericBookmarks: [GenericBookmarkData] = []
+    ) -> String {
+        let direction = Self.isRightToLeft(language: language) ? "rtl" : "ltr"
+        let fragmentKey = "\(bookInitials)--\(key)"
+        let hydratedBookmarks = self.genericBookmarks(bookInitials, key)
+        let markers = aiDocMarkersForPage(bookInitials, key)
         let doc: [String: Any] = [
-            "id": "doc-1",
+            "id": Self.androidDocumentID(bookInitials: bookInitials, key: key),
             "type": "osis",
             "osisFragment": [
                 "xml": content,
-                "key": "epub",
-                "keyName": bookName,
-                "v11n": "KJVA",
+                "key": fragmentKey,
+                "keyName": keyName,
+                "v11n": NSNull(),
                 "bookCategory": DocumentCategory.generalBook.rawValue,
                 "bookInitials": bookInitials,
-                "bookAbbreviation": "Epub",
-                "osisRef": "epub",
+                "bookAbbreviation": bookName,
+                "osisRef": key,
                 "isNewTestament": false,
                 "features": [String: Any](),
                 "hasStrongs": false,
-                "ordinalRange": [0, 0],
-                "language": "en",
-                "direction": "ltr"
+                "ordinalRange": ordinalRange,
+                "language": language,
+                "direction": direction
             ] as [String: Any],
             "bookInitials": bookInitials,
             "bookCategory": DocumentCategory.generalBook.rawValue,
-            "bookAbbreviation": "Epub",
+            "bookAbbreviation": bookName,
             "bookName": bookName,
-            "key": "epub",
-            "v11n": "KJVA",
-            "osisRef": "epub",
-            "annotateRef": "",
-            "genericBookmarks": [Any](),
-            "ordinalRange": [0, 0],
+            "key": key,
+            "v11n": NSNull(),
+            "osisRef": key,
+            "annotateRef": key,
+            "genericBookmarks": (genericBookmarks.isEmpty ? hydratedBookmarks : genericBookmarks)
+                .compactMap { jsonObject(from: $0) },
+            "ordinalRange": ordinalRange,
             "isNativeHtml": true,
-            "highlightedOrdinalRange": NSNull()
+            "highlightedOrdinalRange": NSNull(),
+            "aiDocMarkers": markers.map { BibleReaderMyDocumentCoordinator.markerJSON($0) },
         ]
 
         return serializedDocument(doc, failureDescription: "EPUB document") ?? "{}"
+    }
+
+    /**
+     Builds Android's DOM-safe document identifier for one EPUB general-book key.
+
+     Android replaces every scalar outside Unicode letters and ASCII digits in
+     `<book initials>-<key>` with `_`. The identifier is presentation-only; portable EPUB
+     identity remains the unsanitized `bookInitials` and numeric `key` fields.
+
+     - Parameters:
+       - bookInitials: Exact Android-compatible EPUB initials, including retained `A-z` punctuation.
+       - key: Numeric EPUB fragment key.
+     - Returns: A deterministic DOM-safe document identifier.
+     - Side effects: None.
+     - Failure modes: None; every input scalar maps to itself or `_`.
+     */
+    private static func androidDocumentID(bookInitials: String, key: String) -> String {
+        "\(bookInitials)-\(key)".unicodeScalars.map { scalar in
+            if CharacterSet.letters.contains(scalar) || (48...57).contains(scalar.value) {
+                return String(scalar)
+            }
+            return "_"
+        }.joined()
+    }
+
+    /// Returns whether a package language normally renders right-to-left.
+    private static func isRightToLeft(language: String) -> Bool {
+        let primary = language.split(separator: "-").first?.lowercased() ?? ""
+        return ["ar", "fa", "he", "iw", "ps", "ur", "yi"].contains(primary)
     }
 
     /**
@@ -365,7 +526,8 @@ struct BibleReaderDocumentPayloadFactory {
        - key: Exact Vue document key and OSIS reference.
        - displayKeyName: Human-readable key label shown by the web reader.
        - initials: Module initials already resolved from the request or active Bible module.
-       - ordinalRange: Ordinal range emitted at both document and fragment levels.
+       - ordinalRange: Source-versification range for a Bible fragment. Generic/commentary
+         documents pass `nil` because their top-level local `BVA` range is not a verse-key range.
      - Returns: A JSON-compatible dictionary for the document's `osisFragment` field.
      - Side effects: None.
      - Failure modes: None directly; JSON compatibility is validated by `serializedDocument`.
@@ -375,23 +537,23 @@ struct BibleReaderDocumentPayloadFactory {
         key: String,
         displayKeyName: String,
         initials: String,
-        ordinalRange: [Int]
+        ordinalRange: [Int]?
     ) -> [String: Any] {
         [
             "xml": request.xml,
-            "key": key,
+            "key": request.fragmentKey ?? "\(initials)--\(key)",
             "keyName": displayKeyName,
-            "v11n": "KJVA",
+            "v11n": request.versificationName ?? NSNull(),
             "bookCategory": request.bookCategory,
             "bookInitials": initials,
-            "bookAbbreviation": request.osisBookId,
-            "osisRef": key,
+            "bookAbbreviation": request.moduleAbbreviation ?? initials,
+            "osisRef": request.fragmentOsisRef ?? key,
             "isNewTestament": request.isNewTestament,
-            "features": [String: Any](),
-            "hasStrongs": hasStrongs,
-            "ordinalRange": ordinalRange,
-            "language": "en",
-            "direction": "ltr",
+            "features": request.fragmentFeatures,
+            "hasStrongs": request.sourceHasStrongs ?? (initials == activeModuleName && hasStrongs),
+            "ordinalRange": ordinalRange ?? NSNull(),
+            "language": request.language,
+            "direction": request.direction,
         ]
     }
 

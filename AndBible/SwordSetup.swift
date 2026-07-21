@@ -19,6 +19,17 @@ enum SwordSetup {
         let swordDir = SwordManager.defaultModulePath()
         let fm = FileManager.default
 
+        do {
+            try ModuleStoreTransactionPublisher(
+                moduleRootURL: URL(fileURLWithPath: swordDir, isDirectory: true),
+                fileManager: fm
+            ).recoverInterruptedTransactions()
+        } catch {
+            preconditionFailure(
+                "Unable to recover an interrupted module-store transaction: \(error.localizedDescription)"
+            )
+        }
+
         // Create required subdirectories
         let modsD = (swordDir as NSString).appendingPathComponent("mods.d")
         let modulesDir = (swordDir as NSString).appendingPathComponent("modules")

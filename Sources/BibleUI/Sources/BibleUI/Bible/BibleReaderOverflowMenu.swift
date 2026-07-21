@@ -9,6 +9,7 @@ enum BibleReaderOverflowMenuAction {
     case toggleReverseSplitMode
     case toggleWindowPinning
     case openLabelSettings
+    case openAIActions
     case toggleSectionTitles
     case openStrongsMode
     case toggleVerseNumbers
@@ -25,6 +26,7 @@ struct BibleReaderOverflowMenuState {
     let showsReverseSplitModeToggle: Bool
     let reverseSplitModeEnabled: Bool
     let windowPinningEnabled: Bool
+    let showsAIActions: Bool
     let showsBibleDisplayOptions: Bool
     let sectionTitlesEnabled: Bool
     let moduleHasStrongs: Bool
@@ -114,6 +116,16 @@ struct BibleReaderOverflowMenu: View {
                     identifier: "readerOpenLabelSettingsAction",
                     action: .openLabelSettings
                 )
+
+                if state.showsAIActions {
+                    Divider()
+                    button(
+                        title: ellipsisTitle(String(localized: "llm_actions", defaultValue: "AI actions")),
+                        assetName: "SettingsIconRobot",
+                        identifier: "readerOpenAIActionsAction",
+                        action: .openAIActions
+                    )
+                }
 
                 if state.showsBibleDisplayOptions {
                     Divider()

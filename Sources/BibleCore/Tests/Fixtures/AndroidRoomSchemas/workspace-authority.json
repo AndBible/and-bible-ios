@@ -1,0 +1,42 @@
+{
+  "androidCommit": "0f3b85823cebbfafeb5a51675827f5314cac3c56",
+  "androidSourceSHA256": {
+    "app/src/main/java/net/bible/android/database/progress/ProgressDatabase.kt": "15eb838623d0de719a0fee5b5333f911d3c119d670ae8796687af0e13c999ae0",
+    "app/src/main/java/net/bible/android/database/progress/ProgressEntities.kt": "339ecbee10e89181cec590553e3f797c072f4d5a422720dd94fa63d97beedd77",
+    "app/src/main/java/net/bible/service/cloudsync/SyncUtilities.kt": "39ad71a66585eb971698351bfe34f026ba4d0124f08f6bf806ec2cd293c5c007",
+    "app/src/main/java/net/bible/service/db/DatabaseContainer.kt": "d486a92c74f3cc75886705670a13c155e55795fc283f8836f35a2b97e6c6919f"
+  },
+  "currentIdentityHash": "59b8635a1eb5125e32e2789eedd02ab2",
+  "currentVersion": 24,
+  "migrationSHA256": "14699ba4c7aebea2f79cdb78cedfbb707c19231f2250cc09612a5f6cdc99cb38",
+  "schemaSHA256": {
+    "1": "b1c6fc6016a6e2d5b4d43cd5fef59f3bcd6258953277b8d57778c7ec22c79bb7",
+    "2": "0620a53cc7b51a59226e54943fa5354a3739cda20f959b977defe1789314a0ca",
+    "3": "e14441f2f7e8b6895a74859a3d5d2e906f88af02051d3622fdc94f3df20b1799",
+    "4": "e704b509de93fb087dd90c35db29c00e658abb7accf5ce0735845af5b9b9d0fc",
+    "5": "7d53c16dc9ef978b81cfc183964661451fd21a3416177711940944e7f3e98f21",
+    "6": "7966f68708e1cbbc68998878c1201cef4e3a4a2c16258a4c5e02bbf808267c8f",
+    "7": "f64a031d74408b86efd82ce826423c3c41e809587821ea70c8787dca201880a6",
+    "8": "c068814ac1a1046de73a6432e8d7faacbc6925c0463c46e98a13e6fbd13e3f12",
+    "9": "69674956c5482ffc410895addc1487d9198dd0001c1b04888ec8eec1caf2fbac",
+    "11": "be7e26208d956a12be2b4ee3f33f2a7f69ae17d7e0352b8b3b0d56dbb4884242",
+    "13": "e9b647d380b5b238abdd8d59263140a45e57d44be27f8300f057e072f4c70560",
+    "14": "08f66c75547b5566db9da3f1455ac23347f41eed22a22bed0038b39a748b1568",
+    "15": "eadc1225d3f4eba4e42f4b6e7bc8a1804220e580703d2690fcacaa1c53c2c3f4",
+    "16": "8081cfcb9df99dc101eaae32d281f2fea132464c430ac48b8562749e5772f768",
+    "17": "d794ef0f9c2c2ee8c52ab448c952de0a43b1a3efa80b96887a086d11fbec32bd",
+    "18": "d70e5ba8bf5e727ac7c80e7564f21c2aa54bdceb0d7976d5380a6983adf7dbb4",
+    "19": "ef5ac3837e6ec13590a128c543d2786429949cb9478bd3e83df1ff9920c3f47a",
+    "20": "8307e09fee4d8021b0b8d4fba8f838d0c63c9931a3c12b860b2b6ef48a4fe2b2",
+    "21": "8b7c282256c2da302eb6c5d50a957d038eca6bc98fb7aea8ec8a2c1cac697f47",
+    "22": "5b8771ec3db13f0bd23f10794cb0d530c0f9c91f2dbe004985282aa0f10de8a9",
+    "23": "f1a0d998a23558f40383e73dd4633afef0542e13a0ad29fea69818e29fbea713",
+    "24": "d86a4e06b827507d7d85ab04619d1ce0be029df803be5c668330a6a7bf21aa60"
+  },
+  "progress": {
+    "identityHash": "76330d8367020840e56e6b92d921522a",
+    "schemaSHA256": "e4fe8573c13c943b02e71085ef471af3179afb3037e53b75151e9f8d8a798795",
+    "version": 9
+  },
+  "utilitySHA256": "9398f2c7b4c02cf3488f48654d33c5d49ad11aff18739ccc8e7706fe40438415"
+}

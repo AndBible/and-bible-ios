@@ -1,4 +1,5 @@
 {
+  "AndBibleUITests/AndBibleUITests/testDiscreteProductEnforcesCalculatorLaunchGateAndSettingsBoundary": "none",
   "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": "my-notes-single",
   "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": "bookmark-filter",
   "AndBibleUITests/AndBibleUITests/testMyDocumentsScreenOpensFromReaderMenuAndOpensPage": "my-documents-single",

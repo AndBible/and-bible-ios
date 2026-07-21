@@ -19,6 +19,9 @@ public struct InstalledTtfFont: Equatable, Sendable {
     /// TTF filename stored under the SWORD root's `ttf/` directory.
     public let fileName: String
 
+    /// Exact forward-slash path beneath `ttf/`, including nested Android restore directories.
+    public let relativePath: String
+
     /**
      Creates metadata for one manually installed Android-style TTF addon.
 
@@ -26,13 +29,20 @@ public struct InstalledTtfFont: Equatable, Sendable {
        - fontName: User-visible font name derived from the installed TTF filename without its extension.
        - moduleName: SWORD addon module initials written to `mods.d/<moduleName>.conf`.
        - fileName: TTF filename stored under the SWORD root's `ttf/` directory.
+       - relativePath: Optional nested path beneath `ttf/`; defaults to `fileName` for manual imports.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
-    public init(fontName: String, moduleName: String, fileName: String) {
+    public init(
+        fontName: String,
+        moduleName: String,
+        fileName: String,
+        relativePath: String? = nil
+    ) {
         self.fontName = fontName
         self.moduleName = moduleName
         self.fileName = fileName
+        self.relativePath = relativePath ?? fileName
     }
 }
 
@@ -117,29 +127,27 @@ public struct TtfFontRepository: Sendable {
             throw TtfFontRepositoryError.cantRead(fileName)
         }
 
-        try createInstallDirectories()
-
-        let destination = fontsDirectory.appendingPathComponent(fileName, isDirectory: false)
-        if url.standardizedFileURL != destination.standardizedFileURL {
-            if fileManager.fileExists(atPath: destination.path) {
-                guard fileManager.isWritableFile(atPath: destination.path) else {
-                    throw TtfFontRepositoryError.cantWrite(fileName)
-                }
-                try fileManager.removeItem(at: destination)
+        let installed = installedFontMetadata(relativePath: fileName)
+        let stagingDirectory = fileManager.temporaryDirectory.appendingPathComponent(
+            "ttf-addon-\(UUID().uuidString).staging",
+            isDirectory: true
+        )
+        let stagedFontURL = stagingDirectory.appendingPathComponent(fileName)
+        do {
+            try fileManager.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+            defer { try? fileManager.removeItem(at: stagingDirectory) }
+            try fileManager.copyItem(at: url, to: stagedFontURL)
+            try mutationPublisher.publishTtfAddon(
+                installed,
+                stagedFontURL: stagedFontURL,
+                configContent: addonConfig(for: installed)
+            )
+        } catch {
+            if !sourceIsReadable(url) {
+                throw TtfFontRepositoryError.cantRead(fileName)
             }
-            do {
-                try fileManager.copyItem(at: url, to: destination)
-            } catch {
-                if !sourceIsReadable(url) {
-                    throw TtfFontRepositoryError.cantRead(fileName)
-                }
-                throw TtfFontRepositoryError.cantWrite(fileName)
-            }
+            throw TtfFontRepositoryError.cantWrite(fileName)
         }
-
-        let installed = installedFontMetadata(forFileName: fileName)
-        try writeAddonConfig(for: installed)
-        invalidateModuleCache()
         return installed
     }
 
@@ -150,37 +158,87 @@ public struct TtfFontRepository: Sendable {
      equivalent metadata to `mods.d` so discovery works through normal `SwordManager` scans.
 
      - Returns: Installed-font metadata for each readable `.ttf` file found under `ttf/`.
-     - Side effects: creates missing directories, rewrites addon config files, and invalidates the
-       SWORD module cache when at least one font is registered.
-     - Throws: filesystem errors while creating directories or writing config files. Directory
-       listing failures are treated as no readable TTF files, matching Android startup registration.
+     - Side effects: transactionally rewrites addon config files and invalidates the SWORD module
+       cache for each readable font. A missing font directory is not created.
+     - Throws: Cancellation or `TtfFontRepositoryError.cantWrite` when transactional config
+       publication fails. Directory listing failures are treated as no readable TTF files, matching
+       Android startup registration.
      */
     @discardableResult
     public func registerInstalledFonts() throws -> [InstalledTtfFont] {
-        try createInstallDirectories()
-        guard let files = try? fileManager.contentsOfDirectory(
-            at: fontsDirectory,
-            includingPropertiesForKeys: [.isRegularFileKey, .isReadableKey],
-            options: [.skipsHiddenFiles]
-        ) else {
+        guard fileManager.fileExists(atPath: fontsDirectory.path),
+              let enumerator = fileManager.enumerator(
+                at: fontsDirectory,
+                includingPropertiesForKeys: [
+                    .isDirectoryKey,
+                    .isRegularFileKey,
+                    .isReadableKey,
+                    .isSymbolicLinkKey,
+                ],
+                options: []
+              ) else {
             return []
         }
 
-        var installedFonts: [InstalledTtfFont] = []
-        for file in files where file.pathExtension.lowercased() == "ttf" {
-            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .isReadableKey])
-            guard values?.isRegularFile != false, values?.isReadable != false else {
+        let fontPackPathKeys = configuredFontPackPathKeys()
+        var discoveredFontPaths: [String] = []
+        for case let file as URL in enumerator {
+            try Task.checkCancellation()
+            let values = try? file.resourceValues(forKeys: [
+                .isDirectoryKey,
+                .isRegularFileKey,
+                .isReadableKey,
+                .isSymbolicLinkKey,
+            ])
+            if values?.isSymbolicLink == true {
+                if values?.isDirectory == true {
+                    enumerator.skipDescendants()
+                }
                 continue
             }
-            let installed = installedFontMetadata(forFileName: file.lastPathComponent)
-            try writeAddonConfig(for: installed)
-            installedFonts.append(installed)
+            guard file.pathExtension.lowercased() == "ttf",
+                  values?.isRegularFile == true,
+                  values?.isReadable != false,
+                  let relativePath = relativeFontPath(for: file),
+                  !fontPackPathKeys.contains(filesystemCollisionKey(relativePath)) else {
+                continue
+            }
+            discoveredFontPaths.append(relativePath)
         }
 
-        if !installedFonts.isEmpty {
-            invalidateModuleCache()
+        discoveredFontPaths.sort {
+            $0.utf8.lexicographicallyPrecedes($1.utf8)
+        }
+        var installedFonts: [InstalledTtfFont] = []
+        var registeredIdentities = Set<String>()
+        for relativePath in discoveredFontPaths {
+            try Task.checkCancellation()
+            let installed = installedFontMetadata(relativePath: relativePath)
+            guard registeredIdentities.insert(
+                filesystemCollisionKey(installed.moduleName)
+            ).inserted else {
+                continue
+            }
+            do {
+                try mutationPublisher.publishTtfAddon(
+                    installed,
+                    stagedFontURL: nil,
+                    configContent: addonConfig(for: installed)
+                )
+            } catch {
+                throw TtfFontRepositoryError.cantWrite(installed.fileName)
+            }
+            installedFonts.append(installed)
         }
         return installedFonts
+    }
+
+    /// Shared transactional publisher for this SWORD root.
+    private var mutationPublisher: ModuleStoreTransactionPublisher {
+        ModuleStoreTransactionPublisher(
+            moduleRootURL: URL(fileURLWithPath: swordPath, isDirectory: true),
+            fileManager: fileManager
+        )
     }
 
     /// Directory where Android stores manually installed TTF files.
@@ -189,74 +247,115 @@ public struct TtfFontRepository: Sendable {
             .appendingPathComponent("ttf", isDirectory: true)
     }
 
-    /// Directory containing SWORD module config files.
-    private var modsDirectory: URL {
-        URL(fileURLWithPath: swordPath, isDirectory: true)
-            .appendingPathComponent("mods.d", isDirectory: true)
+    /**
+     Resolves files already owned by installed FontPack configs beneath `ttf/`.
+
+     Android registers configured font packs as their existing SWORD module and only synthesizes
+     `TTF_` books for otherwise unowned manual files. iOS-generated manual registrations carry an
+     explicit marker and remain eligible for deterministic refresh.
+
+     - Returns: Filesystem collision keys for config-owned TTF paths.
+     - Side effects: Reads installed SWORD configs through the shared parser.
+     - Failure modes: Malformed, unsafe, and non-TTF provider rows are ignored; normal module
+       inventory remains responsible for reporting an unusable FontPack.
+     */
+    private func configuredFontPackPathKeys() -> Set<String> {
+        var keys = Set<String>()
+        for config in SwordModuleConfig.readAll(modulePath: swordPath) {
+            guard config.values["andbibleiosmanualttf"] == nil,
+                  let providers = config.values["andbibleprovidesfont"],
+                  config.dataPath.hasPrefix("ttf/") else {
+                continue
+            }
+            let parent = String(config.dataPath.dropFirst("ttf/".count))
+            for provider in providers {
+                guard let separator = provider.firstIndex(of: ";") else { continue }
+                let fileName = provider[provider.index(after: separator)...]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let relativePath = parent + fileName
+                let components = relativePath.split(
+                    separator: "/",
+                    omittingEmptySubsequences: false
+                )
+                guard !components.isEmpty,
+                      components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
+                      !relativePath.contains("\\"),
+                      !relativePath.contains("\0"),
+                      (relativePath as NSString).pathExtension.lowercased() == "ttf" else {
+                    continue
+                }
+                keys.insert(filesystemCollisionKey(relativePath))
+            }
+        }
+        return keys
     }
 
-    /**
-     Creates the SWORD subdirectories touched by the TTF installer.
-
-     - Side effects: creates `ttf` and `mods.d` directories when absent.
-     - Throws: filesystem errors from `FileManager`.
-     */
-    private func createInstallDirectories() throws {
-        try fileManager.createDirectory(at: fontsDirectory, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: modsDirectory, withIntermediateDirectories: true)
+    /** Matches the case/canonical equivalence of the destination filesystem. */
+    private func filesystemCollisionKey(_ value: String) -> String {
+        value.precomposedStringWithCanonicalMapping.lowercased(
+            with: Locale(identifier: "en_US_POSIX")
+        )
     }
 
     /**
      Builds stable addon metadata for one TTF filename.
 
-     - Parameter fileName: Sanitized filename stored in the `ttf` directory.
+     - Parameter relativePath: Exact validated path beneath the `ttf` directory.
      - Returns: Font metadata with an Android-shaped `TTF_` module name.
      */
-    private func installedFontMetadata(forFileName fileName: String) -> InstalledTtfFont {
+    private func installedFontMetadata(relativePath: String) -> InstalledTtfFont {
+        let fileName = (relativePath as NSString).lastPathComponent
         let fontName = sanitizedConfigValue((fileName as NSString).deletingPathExtension)
-        let moduleName = "TTF_" + sanitizedModuleSuffix(fontName)
-        return InstalledTtfFont(fontName: fontName, moduleName: moduleName, fileName: fileName)
+        let moduleName = "TTF_" + fontName
+        return InstalledTtfFont(
+            fontName: fontName,
+            moduleName: moduleName,
+            fileName: fileName,
+            relativePath: relativePath
+        )
     }
 
-    /**
-     Writes the SWORD config file that makes a TTF visible as an And Bible addon.
-
-     - Parameter font: Installed-font metadata to serialize.
-     - Side effects: writes or replaces one `.conf` file under `mods.d`.
-     - Throws: `TtfFontRepositoryError.cantWrite` with the selected TTF filename when config
-       serialization fails.
-     */
-    private func writeAddonConfig(for font: InstalledTtfFont) throws {
-        let config = """
+    /** Returns generated SWORD config content that makes one TTF visible as an addon. */
+    private func addonConfig(for font: InstalledTtfFont) -> String {
+        let parent = (font.relativePath as NSString).deletingLastPathComponent
+        let dataPath = parent.isEmpty || parent == "." ? "./ttf/" : "./ttf/\(parent)/"
+        return """
         [\(font.moduleName)]
         Description=\(font.fontName)
         Category=And Bible
         ModDrv=RawGenBook
-        DataPath=./ttf/
+        DataPath=\(dataPath)
         Encoding=UTF-8
         AndBibleProvidesFont=\(font.fontName);\(font.fileName)
+        AndBibleIOSGeneratedRegistration=true
+        AndBibleIOSManualTtf=true
         AndBibleMinimumVersion=892
 
         """
-        let configURL = modsDirectory
-            .appendingPathComponent(font.moduleName.lowercased(), isDirectory: false)
-            .appendingPathExtension("conf")
-        do {
-            try config.write(to: configURL, atomically: true, encoding: .utf8)
-        } catch {
-            throw TtfFontRepositoryError.cantWrite(font.fileName)
-        }
     }
 
     /**
-     Removes SWORD's module cache so the next manager sees newly registered font addons.
+     Resolves one enumerated font to a safe path relative to the Android `ttf` root.
 
-     - Side effects: deletes `mods.d/modules-conf.cache` when present.
-     - Failure modes: deletion failures are ignored, matching the existing module installer.
+     - Parameter fileURL: Real regular file produced by the repository enumerator.
+     - Returns: Forward-slash relative path, or `nil` when the path escapes or contains traversal.
+     - Side effects: none.
+     - Failure modes: Unsafe or non-descendant paths are ignored during Android-style discovery.
      */
-    private func invalidateModuleCache() {
-        let cacheURL = modsDirectory.appendingPathComponent("modules-conf.cache", isDirectory: false)
-        try? fileManager.removeItem(at: cacheURL)
+    private func relativeFontPath(for fileURL: URL) -> String? {
+        let rootComponents = fontsDirectory.standardizedFileURL.pathComponents
+        let fileComponents = fileURL.standardizedFileURL.pathComponents
+        guard fileComponents.count > rootComponents.count,
+              Array(fileComponents.prefix(rootComponents.count)) == rootComponents else {
+            return nil
+        }
+        let components = fileComponents.dropFirst(rootComponents.count)
+        guard components.allSatisfy({
+            !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("\\") && !$0.contains("\0")
+        }) else {
+            return nil
+        }
+        return components.joined(separator: "/")
     }
 
     /**
@@ -318,20 +417,4 @@ public struct TtfFontRepository: Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /**
-     Creates a SWORD-safe module-name suffix from an arbitrary font name.
-
-     - Parameter value: User-visible font name.
-     - Returns: Non-empty alphanumeric/underscore suffix.
-     */
-    private func sanitizedModuleSuffix(_ value: String) -> String {
-        let scalars = value.unicodeScalars.map { scalar -> Character in
-            if CharacterSet.alphanumerics.contains(scalar) || scalar == "_" || scalar == "-" {
-                return Character(scalar)
-            }
-            return "_"
-        }
-        let suffix = String(scalars).trimmingCharacters(in: CharacterSet(charactersIn: "_-"))
-        return suffix.isEmpty ? "Font" : suffix
-    }
 }

@@ -14,9 +14,9 @@ enum ReadingProgressTab: Int, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .reading:
-            return String(localized: "reading", defaultValue: "Reading")
+            return String(localized: "memorize_tab_reading", defaultValue: "Reading")
         case .memorization:
-            return String(localized: "memorization", defaultValue: "Memorization")
+            return String(localized: "memorize_tab_memorization", defaultValue: "Memorization")
         }
     }
 }
@@ -27,6 +27,10 @@ struct ChapterReadHistoryTarget: Equatable {
     let kjvBookOrdinal: Int
     let bookName: String
     let chapter: Int
+}
+
+private struct ReadingProgressPersistenceFailure: Identifiable {
+    let id = UUID()
 }
 
 /**
@@ -49,6 +53,13 @@ struct ReadingProgressView: View {
     @State private var targetsShown = 10
     @State private var selectedMemorizationBookOsisId: String?
     @State private var memorizationDeletionRequest: MemorizationDeletionRequest?
+    @State private var readingRevision = 0
+    @State private var selectedReadingBookOrdinal: Int?
+    @State private var selectedReadingDayMilliseconds: Int64?
+    @State private var showNewReadingCycleConfirmation = false
+    @State private var persistenceFailure: ReadingProgressPersistenceFailure?
+    /// History rows staged for Android-style delete-on-dismiss with tap-again undo.
+    @State private var pendingReadingDeleteIDs: Set<UUID> = []
 
     private static let relativeDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
@@ -72,7 +83,7 @@ struct ReadingProgressView: View {
 
     var body: some View {
         Form {
-            Picker(String(localized: "reading_progress", defaultValue: "Reading Progress"), selection: $selectedTab) {
+            Picker(String(localized: "reading_progress_title", defaultValue: "Read/Memory Progress"), selection: $selectedTab) {
                 ForEach(ReadingProgressTab.allCases) { tab in
                     Text(tab.title).tag(tab)
                 }
@@ -86,7 +97,7 @@ struct ReadingProgressView: View {
                 memorizationSection
             }
         }
-        .navigationTitle(String(localized: "reading_progress", defaultValue: "Reading Progress"))
+        .navigationTitle(String(localized: "reading_progress_title", defaultValue: "Read/Memory Progress"))
         .alert(item: $memorizationDeletionRequest) { request in
             Alert(
                 title: Text(""),
@@ -98,33 +109,267 @@ struct ReadingProgressView: View {
                 secondaryButton: .cancel(Text(String(localized: "cancel", defaultValue: "Cancel")))
             )
         }
+        .alert(item: $persistenceFailure) { _ in
+            Alert(
+                title: Text(String(
+                    localized: "reading_progress_save_failed",
+                    defaultValue: "Unable to save progress"
+                )),
+                message: Text(String(
+                    localized: "reading_progress_save_failed_message",
+                    defaultValue: "Your existing progress was left unchanged. Try again."
+                )),
+                dismissButton: .default(Text(String(localized: "ok", defaultValue: "OK")))
+            )
+        }
+        .confirmationDialog(
+            String(localized: "reading_progress_new_cycle", defaultValue: "New cycle"),
+            isPresented: $showNewReadingCycleConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "reading_progress_new_cycle", defaultValue: "New cycle")) {
+                guard applyPendingReadingDeletes() else { return }
+                do {
+                    _ = try readingStore?.startNewCycle()
+                    selectedReadingBookOrdinal = nil
+                    selectedReadingDayMilliseconds = nil
+                    readingRevision += 1
+                } catch {
+                    persistenceFailure = ReadingProgressPersistenceFailure()
+                }
+            }
+            Button(String(localized: "cancel", defaultValue: "Cancel"), role: .cancel) {}
+        } message: {
+            Text(String(
+                localized: "reading_progress_new_cycle_confirm",
+                defaultValue: "Start a new reading cycle? This will begin tracking your progress from scratch, while preserving your previous cycle's data."
+            ))
+        }
+        .onDisappear {
+            _ = applyPendingReadingDeletes()
+        }
     }
 
     @ViewBuilder
     private var readingSection: some View {
-        let summary = readingStore?.readingSummary() ?? ReadingProgressSummary(
+        let presentation = readingStore?.presentation(recentLimit: .max) ?? ReadingProgressPresentationSnapshot(
             cycle: 1,
+            latestCycle: 1,
             distinctChapterCount: 0,
-            readingCount: 0,
+            activeDayCount: 0,
+            totalBibleChapterCount: 1_189,
+            books: [],
+            calendar: [],
             recentRows: []
         )
 
-        Section(String(localized: "summary", defaultValue: "Summary")) {
-            LabeledContent(String(localized: "cycle", defaultValue: "Cycle"), value: "\(summary.cycle)")
-            LabeledContent(String(localized: "chapters", defaultValue: "Chapters"), value: "\(summary.distinctChapterCount)")
-            LabeledContent(String(localized: "readings", defaultValue: "Readings"), value: "\(summary.readingCount)")
-        }
+        Group {
+            Section {
+                HStack {
+                    Button {
+                        selectReadingCycle(max(presentation.cycle - 1, 1))
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .disabled(presentation.cycle <= 1)
+                    .help(String(localized: "reading_progress_previous_cycle", defaultValue: "Previous cycle"))
 
-        Section(String(localized: "recent", defaultValue: "Recent")) {
-            if summary.recentRows.isEmpty {
-                Text(String(localized: "no_reading_history", defaultValue: "No reading history"))
+                    Spacer()
+                    Text(String(
+                        format: String(localized: "reading_progress_cycle", defaultValue: "Cycle %d"),
+                        presentation.cycle
+                    ))
+                    .font(.headline)
+                    Spacer()
+
+                    Button {
+                        selectReadingCycle(presentation.cycle + 1)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                    }
+                    .disabled(presentation.cycle >= presentation.latestCycle)
+                    .help(String(localized: "reading_progress_next_cycle", defaultValue: "Next cycle"))
+
+                    if presentation.cycle >= presentation.latestCycle {
+                        Button {
+                            showNewReadingCycleConfirmation = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .help(String(localized: "reading_progress_new_cycle", defaultValue: "New Cycle"))
+                    }
+                }
+            }
+
+            Section(String(localized: "summary", defaultValue: "Summary")) {
+                LabeledContent(
+                    String(localized: "reading_progress_chapters_read", defaultValue: "chapters read"),
+                    value: "\(presentation.distinctChapterCount) / \(presentation.totalBibleChapterCount)"
+                )
+                LabeledContent(
+                    String(localized: "reading_progress_active_days", defaultValue: "active days"),
+                    value: "\(presentation.activeDayCount)"
+                )
+                ProgressView(value: presentation.overallProgress)
+                Text(String(
+                    format: String(localized: "reading_progress_overall", defaultValue: "%@%% of Bible read"),
+                    String(format: "%.1f", presentation.overallPercent)
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            readingBookSections(presentation)
+
+            Section(String(localized: "reading_progress_calendar", defaultValue: "Reading activity")) {
+                ReadingProgressCalendarHeatmap(
+                    counts: presentation.calendar,
+                    selectedDayMilliseconds: $selectedReadingDayMilliseconds
+                )
+            }
+
+            readingHistorySection(presentation)
+        }
+        .id(readingRevision)
+    }
+
+    /** Renders Android's Old/New Testament book heatmaps and selected chapter counts. */
+    @ViewBuilder
+    private func readingBookSections(_ presentation: ReadingProgressPresentationSnapshot) -> some View {
+        let effectiveMaximum = AndroidReadingProgressHeatmap.effectiveBookScaleMaximum(
+            presentation.books.map(\.readPercent).max()
+        )
+        let groups = [
+            (
+                String(localized: "reading_progress_old_testament", defaultValue: "Old Testament"),
+                presentation.books.filter { !$0.book.isNewTestament }
+            ),
+            (
+                String(localized: "reading_progress_new_testament", defaultValue: "New Testament"),
+                presentation.books.filter(\.book.isNewTestament)
+            ),
+        ]
+        Section(String(localized: "reading_progress_bible_heatmap", defaultValue: "Bible overview")) {
+            ReadingProgressBookScale(effectiveMaximum: effectiveMaximum)
+            ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+                Text(group.0)
+                    .font(.subheadline.weight(.semibold))
+                ReadingProgressBookHeatmap(
+                    books: group.1,
+                    effectiveMaximum: effectiveMaximum,
+                    selectedBookOrdinal: $selectedReadingBookOrdinal
+                )
+            }
+
+            if let selectedReadingBookOrdinal,
+               let selectedBook = presentation.books.first(where: {
+                   $0.book.bibleBookOrdinal == selectedReadingBookOrdinal
+               }) {
+                Divider()
+                Text(selectedBook.book.longName)
+                    .font(.headline)
+                ReadingProgressChapterHeatmap(book: selectedBook, onOpenChapter: onOpenChapter)
+            }
+        }
+    }
+
+    /** Renders recent or selected Android history with one-row delete controls. */
+    @ViewBuilder
+    private func readingHistorySection(_ presentation: ReadingProgressPresentationSnapshot) -> some View {
+        let rows = selectedReadingHistoryRows(in: presentation)
+        Section(String(localized: "reading_progress_history_title", defaultValue: "Reading history")) {
+            if rows.isEmpty {
+                Text(String(
+                    localized: "reading_progress_history_no_entries",
+                    defaultValue: "No read entries for this selection."
+                ))
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(summary.recentRows, id: \.id) { row in
-                    ReadingProgressHistoryRowView(row: row)
+                ForEach(rows.prefix(50), id: \.id) { row in
+                    let isPending = pendingReadingDeleteIDs.contains(row.id)
+                    HStack {
+                        ReadingProgressHistoryRowView(row: row)
+                        Spacer()
+                        Button {
+                            if isPending {
+                                pendingReadingDeleteIDs.remove(row.id)
+                            } else {
+                                pendingReadingDeleteIDs.insert(row.id)
+                            }
+                        } label: {
+                            Image(systemName: isPending ? "arrow.uturn.backward" : "xmark")
+                        }
+                        .foregroundStyle(
+                            isPending
+                                ? AndroidReadingProgressColor.readingColor(
+                                    argb: AndroidReadingProgressHeatmap.chapterMaximumARGB
+                                )
+                                : Color.secondary
+                        )
+                        .help(
+                            isPending
+                                ? String(localized: "undo", defaultValue: "Undo")
+                                : String(localized: "delete", defaultValue: "Delete")
+                        )
+                    }
+                    .opacity(isPending ? 0.45 : 1)
                 }
             }
         }
+    }
+
+    /** Selects an existing Android reading cycle and clears drill-down filters. */
+    private func selectReadingCycle(_ cycle: Int) {
+        guard applyPendingReadingDeletes() else { return }
+        do {
+            _ = try readingStore?.setActiveCycle(cycle)
+            selectedReadingBookOrdinal = nil
+            selectedReadingDayMilliseconds = nil
+            readingRevision += 1
+        } catch {
+            persistenceFailure = ReadingProgressPersistenceFailure()
+        }
+    }
+
+    /** Commits Android-style pending history deletions when the history surface closes or changes cycle. */
+    @discardableResult
+    private func applyPendingReadingDeletes() -> Bool {
+        guard !pendingReadingDeleteIDs.isEmpty else { return true }
+        guard let readingStore else {
+            pendingReadingDeleteIDs.removeAll()
+            return true
+        }
+        for id in Array(pendingReadingDeleteIDs) {
+            do {
+                _ = try readingStore.deleteHistoryEntry(id: id)
+                pendingReadingDeleteIDs.remove(id)
+            } catch {
+                persistenceFailure = ReadingProgressPersistenceFailure()
+                readingRevision += 1
+                return false
+            }
+        }
+        readingRevision += 1
+        return true
+    }
+
+    /** Resolves history for the selected day/book, otherwise Android's newest entries. */
+    private func selectedReadingHistoryRows(
+        in presentation: ReadingProgressPresentationSnapshot,
+        calendar: Calendar = .current
+    ) -> [ReadingProgressHistoryRow] {
+        if let selectedReadingDayMilliseconds {
+            let start = AndroidTimestamp.date(from: selectedReadingDayMilliseconds)
+            let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start
+            return presentation.recentRows.filter {
+                let date = AndroidTimestamp.date(from: $0.readAt)
+                return date >= start && date < end
+            }
+        }
+        if let selectedReadingBookOrdinal {
+            return presentation.recentRows.filter { $0.kjvBookOrdinal == selectedReadingBookOrdinal }
+        }
+        return Array(presentation.recentRows.prefix(20))
     }
 
     @ViewBuilder
@@ -303,17 +548,22 @@ struct ReadingProgressView: View {
     }
 
     private func performMemorizationDeletion(_ request: MemorizationDeletionRequest) {
-        switch request.kind {
-        case .memorizedPassage(let passage):
-            _ = memorizationStore?.unmarkMemorized(
-                bookInitials: "",
-                startOrdinal: passage.range.startOrdinal,
-                endOrdinal: passage.range.endOrdinal
-            )
-        case .target(let item):
-            _ = memorizationStore?.removeMemorizationTarget(id: item.id)
+        guard let memorizationStore else { return }
+        do {
+            switch request.kind {
+            case .memorizedPassage(let passage):
+                _ = try memorizationStore.unmarkMemorized(
+                    bookInitials: "",
+                    startOrdinal: passage.range.startOrdinal,
+                    endOrdinal: passage.range.endOrdinal
+                )
+            case .target(let item):
+                _ = try memorizationStore.removeMemorizationTarget(id: item.id)
+            }
+            memorizationRevision += 1
+        } catch {
+            persistenceFailure = ReadingProgressPersistenceFailure()
         }
-        memorizationRevision += 1
     }
 
     private func relativeDateText(milliseconds: Int64) -> String {
@@ -644,12 +894,15 @@ private struct MemorizationCalendarView: View {
     }
 
     private func dayStartMilliseconds(_ day: Date) -> Int64 {
-        Int64((calendar.startOfDay(for: day).timeIntervalSince1970 * 1000.0).rounded())
+        let start = calendar.startOfDay(for: day)
+        return (try? AndroidTimestamp.milliseconds(from: start))
+            ?? (start.timeIntervalSince1970.sign == .minus ? .min : .max)
     }
 }
 
 private enum AndroidReadingProgressColor {
     static let targetDot = rgb(0x9C, 0x27, 0xB0)
+    static let readingDarkText = rgb(0x44, 0x44, 0x44)
 
     private static let empty = rgb(0xE8, 0xE8, 0xE8)
     private static let memLow = rgb(0xC6, 0xE4, 0x8B)
@@ -699,6 +952,16 @@ private enum AndroidReadingProgressColor {
         default:
             return calendarLevelColors[4]
         }
+    }
+
+    /** Converts Android's packed ARGB contract value into a SwiftUI color. */
+    static func readingColor(argb: UInt32) -> Color {
+        Color(
+            red: Double((argb >> 16) & 0xFF) / 255,
+            green: Double((argb >> 8) & 0xFF) / 255,
+            blue: Double(argb & 0xFF) / 255,
+            opacity: Double((argb >> 24) & 0xFF) / 255
+        )
     }
 
     private static func rgb(_ red: Int, _ green: Int, _ blue: Int) -> Color {
@@ -779,55 +1042,523 @@ struct ReadingProgressSettingsView: View {
     }
 }
 
+/** Android percentage legend for the repeat-read book heatmap. */
+private struct ReadingProgressBookScale: View {
+    /// Dynamic Android scale maximum, where `1` represents 100 percent.
+    let effectiveMaximum: Double
+
+    /** Builds Android's fixed 25-percent color bands through the effective maximum. */
+    var body: some View {
+        let percentages = AndroidReadingProgressHeatmap.bookScalePercentages(
+            maximumReadPercent: effectiveMaximum
+        )
+        HStack(alignment: .center, spacing: 6) {
+            Text(String(localized: "reading_progress_percent_read_scale", defaultValue: "Percent\nRead"))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+            VStack(spacing: 2) {
+                HStack(spacing: 0) {
+                    ForEach(percentages, id: \.self) { percentage in
+                        Rectangle()
+                            .fill(AndroidReadingProgressColor.readingColor(
+                                argb: AndroidReadingProgressHeatmap.bookARGB(
+                                    readPercent: Double(percentage) / 100,
+                                    effectiveMaximum: effectiveMaximum
+                                )
+                            ))
+                    }
+                }
+                .frame(height: 9)
+                HStack(spacing: 0) {
+                    ForEach(percentages, id: \.self) { percentage in
+                        Text(String(
+                            format: String(localized: "reading_progress_percent_label", defaultValue: "%d%%"),
+                            percentage
+                        ))
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/** Android-style 66-book repeat-read heatmap with compact, stable book tiles. */
+private struct ReadingProgressBookHeatmap: View {
+    /// Scripture-book summaries for one testament.
+    let books: [ReadingProgressBookSummary]
+    /// Shared dynamic scale maximum across both testaments.
+    let effectiveMaximum: Double
+    /// Selected Android KJVA book ordinal for chapter drill-down.
+    @Binding var selectedBookOrdinal: Int?
+
+    private let columns = [GridItem(.adaptive(minimum: 48, maximum: 64), spacing: 6)]
+
+    /** Builds tappable book cells whose intensity reflects total reads per chapter. */
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 6) {
+            ForEach(books) { summary in
+                let argb = AndroidReadingProgressHeatmap.bookARGB(
+                    readPercent: summary.readPercent,
+                    effectiveMaximum: effectiveMaximum
+                )
+                Button {
+                    selectedBookOrdinal = summary.book.bibleBookOrdinal
+                } label: {
+                    HStack(spacing: 2) {
+                        Text(summary.book.shortName)
+                        if summary.isComplete {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 7, weight: .bold))
+                                .alignmentGuide(.firstTextBaseline) { dimensions in
+                                    dimensions[.bottom]
+                                }
+                        }
+                    }
+                        .font(.caption2.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 30)
+                        .foregroundStyle(
+                            summary.readPercent >= 1
+                                ? Color.white
+                                : AndroidReadingProgressColor.readingDarkText
+                        )
+                        .background(AndroidReadingProgressColor.readingColor(argb: argb))
+                        .overlay {
+                            if selectedBookOrdinal == summary.book.bibleBookOrdinal {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .stroke(Color.primary, lineWidth: 2)
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(summary.book.longName)
+                .accessibilityValue(String(format: "%.0f%%", summary.readPercent * 100))
+            }
+        }
+    }
+}
+
+/** Android read-count legend for one selected book's chapter heatmap. */
+private struct ReadingProgressChapterScale: View {
+    /// Largest repeat-read count in the selected book.
+    let maximumCount: Int
+
+    /** Builds Android's one/five/effective-maximum anchored color scale. */
+    var body: some View {
+        let counts = AndroidReadingProgressHeatmap.chapterScaleCounts(maximumCount: maximumCount)
+        HStack(alignment: .center, spacing: 6) {
+            Text(String(localized: "reading_progress_read_count_scale", defaultValue: "Read\nCount"))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+            VStack(spacing: 2) {
+                HStack(spacing: 0) {
+                    ForEach(counts, id: \.self) { count in
+                        Rectangle()
+                            .fill(AndroidReadingProgressColor.readingColor(
+                                argb: AndroidReadingProgressHeatmap.chapterARGB(
+                                    count: count,
+                                    maximumCount: maximumCount
+                                )
+                            ))
+                    }
+                }
+                .frame(height: 9)
+                HStack(spacing: 0) {
+                    ForEach(counts, id: \.self) { count in
+                        Text("\(count)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/** Android count-mode chapter heatmap for one selected KJV scripture book. */
+private struct ReadingProgressChapterHeatmap: View {
+    /// Selected Android KJVA book summary.
+    let book: ReadingProgressBookSummary
+    /// Reader-owned navigation callback receiving KJVA OSIS ID and one-based chapter.
+    let onOpenChapter: (String, Int) -> Void
+
+    private let columns = [GridItem(.adaptive(minimum: 32, maximum: 42), spacing: 5)]
+
+    /** Builds fixed chapter cells whose intensity represents repeat-read count. */
+    var body: some View {
+        let maximum = max(book.chapterReadCounts.values.max() ?? 0, 1)
+        VStack(alignment: .leading, spacing: 8) {
+            ReadingProgressChapterScale(maximumCount: maximum)
+            LazyVGrid(columns: columns, spacing: 5) {
+                ForEach(1...book.book.chapterCount, id: \.self) { chapter in
+                    let count = book.chapterReadCounts[chapter, default: 0]
+                    let argb = AndroidReadingProgressHeatmap.chapterARGB(
+                        count: count,
+                        maximumCount: maximum
+                    )
+                    Button {
+                        onOpenChapter(book.book.osisId, chapter)
+                    } label: {
+                        Text("\(chapter)")
+                            .font(.caption2.monospacedDigit())
+                            .frame(maxWidth: .infinity, minHeight: 28)
+                            .foregroundStyle(
+                                AndroidReadingProgressHeatmap.usesLightForeground(argb: argb)
+                                    ? Color.white
+                                    : AndroidReadingProgressColor.readingDarkText
+                            )
+                            .background(AndroidReadingProgressColor.readingColor(argb: argb))
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(book.book.longName) \(chapter)")
+                    .accessibilityValue("\(count)")
+                }
+            }
+        }
+    }
+}
+
+/** Android-equivalent 52-week local-day reading calendar. */
+private struct ReadingProgressCalendarHeatmap: View {
+    /// Android local-midnight activity buckets in the active cycle.
+    let counts: [ReadingProgressDayCount]
+    /// Selected non-empty local day used to filter history rows.
+    @Binding var selectedDayMilliseconds: Int64?
+
+    private let calendar = Calendar.current
+    private let cellSize: CGFloat = 14
+    private let cellPadding: CGFloat = 2
+    private let labelWidth: CGFloat = 24
+    private let headerHeight: CGFloat = 16
+
+    /** Builds Android's first-weekday-aligned 53-week calendar with non-empty-day selection. */
+    var body: some View {
+        let countsByDay = Dictionary(uniqueKeysWithValues: counts.map { ($0.dayStartMilliseconds, $0.count) })
+        let maximum = max(counts.map(\.count).max() ?? 0, 1)
+
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 0) {
+                    VStack(spacing: cellPadding) {
+                        Color.clear
+                            .frame(width: labelWidth, height: headerHeight)
+                        ForEach(0..<7, id: \.self) { dayIndex in
+                            dayLabel(for: dayIndex)
+                                .frame(width: labelWidth, height: cellSize, alignment: .leading)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .top, spacing: cellPadding) {
+                            ForEach(0..<53, id: \.self) { weekIndex in
+                                Text(monthLabel(forWeek: weekIndex))
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: cellSize, height: headerHeight, alignment: .leading)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        HStack(alignment: .top, spacing: cellPadding) {
+                            ForEach(0..<53, id: \.self) { weekIndex in
+                                VStack(spacing: cellPadding) {
+                                    ForEach(0..<7, id: \.self) { dayIndex in
+                                        if let day = calendarDay(weekIndex: weekIndex, dayIndex: dayIndex) {
+                                            let milliseconds = dayStartMilliseconds(day)
+                                            let count = countsByDay[milliseconds, default: 0]
+                                            if count > 0 {
+                                                Button {
+                                                    selectedDayMilliseconds = milliseconds
+                                                } label: {
+                                                    calendarCell(
+                                                        count: count,
+                                                        maximum: maximum,
+                                                        selected: selectedDayMilliseconds == milliseconds
+                                                    )
+                                                }
+                                                .buttonStyle(.plain)
+                                                .help("\(day.formatted(date: .abbreviated, time: .omitted)): \(count)")
+                                                .accessibilityLabel(day.formatted(date: .long, time: .omitted))
+                                                .accessibilityValue("\(count)")
+                                            } else {
+                                                calendarCell(count: 0, maximum: maximum, selected: false)
+                                                    .accessibilityLabel(day.formatted(date: .long, time: .omitted))
+                                                    .accessibilityValue("0")
+                                            }
+                                        } else {
+                                            Color.clear
+                                                .frame(width: cellSize, height: cellSize)
+                                        }
+                                    }
+                                }
+                                .id(weekIndex)
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+            .onAppear {
+                proxy.scrollTo(52, anchor: .trailing)
+            }
+        }
+    }
+
+    /// Local midnight at the first day of the week containing the date 52 weeks ago.
+    private var calendarStart: Date {
+        let today = calendar.startOfDay(for: Date())
+        let shifted = calendar.date(byAdding: .weekOfYear, value: -52, to: today) ?? today
+        return calendar.dateInterval(of: .weekOfYear, for: shifted)?.start ?? shifted
+    }
+
+    /** Resolves one visible calendar cell while omitting future dates. */
+    private func calendarDay(weekIndex: Int, dayIndex: Int) -> Date? {
+        guard let day = calendar.date(
+            byAdding: .day,
+            value: weekIndex * 7 + dayIndex,
+            to: calendarStart
+        ) else {
+            return nil
+        }
+        return day <= calendar.startOfDay(for: Date()) ? day : nil
+    }
+
+    /** Builds one fixed-size Android activity cell. */
+    private func calendarCell(count: Int, maximum: Int, selected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(AndroidReadingProgressColor.memorizationCalendarColor(
+                count: count,
+                maxCount: maximum
+            ))
+            .overlay {
+                if selected {
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(Color.primary, lineWidth: 1.5)
+                }
+            }
+            .frame(width: cellSize, height: cellSize)
+    }
+
+    /** Mirrors Android's sparse Monday/Wednesday/Friday row labels. */
+    @ViewBuilder
+    private func dayLabel(for dayIndex: Int) -> some View {
+        switch dayIndex {
+        case 1:
+            Text("M")
+        case 3:
+            Text("W")
+        case 5:
+            Text("F")
+        default:
+            Text("")
+        }
+    }
+
+    /** Emits a month abbreviation only when the first row crosses into a new month. */
+    private func monthLabel(forWeek weekIndex: Int) -> String {
+        guard let day = calendarDay(weekIndex: weekIndex, dayIndex: 0) else { return "" }
+        if weekIndex > 0,
+           let previous = calendarDay(weekIndex: weekIndex - 1, dayIndex: 0),
+           calendar.component(.month, from: previous) == calendar.component(.month, from: day) {
+            return ""
+        }
+        return day.formatted(.dateTime.month(.abbreviated))
+    }
+
+    /** Converts a local day to Android's local-midnight millisecond key. */
+    private func dayStartMilliseconds(_ day: Date) -> Int64 {
+        let start = calendar.startOfDay(for: day)
+        return (try? AndroidTimestamp.milliseconds(from: start))
+            ?? (start.timeIntervalSince1970.sign == .minus ? .min : .max)
+    }
+}
+
 struct ChapterReadHistoryView: View {
     let store: ReadingProgressStore?
     let target: ChapterReadHistoryTarget?
+    @State private var revision = 0
+    /// Rows staged for deletion and committed when this Android-equivalent history surface closes.
+    @State private var pendingDeleteIDs: Set<UUID> = []
+    @State private var persistenceFailure: ReadingProgressPersistenceFailure?
 
     var body: some View {
         Form {
             if let target {
+                let _ = revision
                 let rows = store?.chapterReadHistory(
                     kjvBookOrdinal: target.kjvBookOrdinal,
                     chapter: target.chapter
                 ) ?? []
-                Section("\(target.bookName) \(target.chapter)") {
+                Section(chapterSubject(for: target)) {
                     if rows.isEmpty {
-                        Text(String(localized: "no_reading_history", defaultValue: "No reading history"))
+                        Text(String(
+                            localized: "reading_progress_history_no_entries",
+                            defaultValue: "No read entries for this selection."
+                        ))
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(rows, id: \.id) { row in
-                            ReadingProgressHistoryRowView(row: row)
+                            let isPending = pendingDeleteIDs.contains(row.id)
+                            HStack {
+                                ReadingProgressHistoryRowView(row: row, showsChapterReference: false)
+                                Spacer()
+                                Button {
+                                    if isPending {
+                                        pendingDeleteIDs.remove(row.id)
+                                    } else {
+                                        pendingDeleteIDs.insert(row.id)
+                                    }
+                                } label: {
+                                    Image(systemName: isPending ? "arrow.uturn.backward" : "xmark")
+                                }
+                                .foregroundStyle(
+                                    isPending
+                                        ? AndroidReadingProgressColor.readingColor(
+                                            argb: AndroidReadingProgressHeatmap.chapterMaximumARGB
+                                        )
+                                        : Color.secondary
+                                )
+                                .help(
+                                    isPending
+                                        ? String(localized: "undo", defaultValue: "Undo")
+                                        : String(localized: "delete", defaultValue: "Delete")
+                                )
+                            }
+                            .opacity(isPending ? 0.45 : 1)
                         }
                     }
                 }
             } else {
-                Text(String(localized: "no_reading_history", defaultValue: "No reading history"))
+                Text(String(
+                    localized: "reading_progress_history_no_entries",
+                    defaultValue: "No read entries for this selection."
+                ))
                     .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle(String(localized: "reading_history", defaultValue: "Reading History"))
-    }
-}
-
-private struct ReadingProgressHistoryRowView: View {
-    let row: ReadingProgressHistoryRow
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("\(row.bookInitials) \(row.chapter)")
-                .font(.headline)
-            HStack {
-                Text(readAtText)
-                Spacer()
-                Text(row.source.rawValue)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        .navigationTitle(String(localized: "reading_progress_history_title", defaultValue: "Read History"))
+        .alert(item: $persistenceFailure) { _ in
+            Alert(
+                title: Text(String(
+                    localized: "reading_progress_save_failed",
+                    defaultValue: "Unable to save progress"
+                )),
+                message: Text(String(
+                    localized: "reading_progress_save_failed_message",
+                    defaultValue: "Your existing progress was left unchanged. Try again."
+                )),
+                dismissButton: .default(Text(String(localized: "ok", defaultValue: "OK")))
+            )
+        }
+        .onDisappear {
+            _ = applyPendingDeletes()
         }
     }
 
-    private var readAtText: String {
-        Date(timeIntervalSince1970: TimeInterval(row.readAt) / 1000.0)
-            .formatted(date: .abbreviated, time: .shortened)
+    /** Commits rows still staged when the fixed-chapter history surface closes. */
+    @discardableResult
+    private func applyPendingDeletes() -> Bool {
+        guard !pendingDeleteIDs.isEmpty else { return true }
+        guard let store else {
+            pendingDeleteIDs.removeAll()
+            return true
+        }
+        for id in Array(pendingDeleteIDs) {
+            do {
+                _ = try store.deleteHistoryEntry(id: id)
+                pendingDeleteIDs.remove(id)
+            } catch {
+                persistenceFailure = ReadingProgressPersistenceFailure()
+                revision += 1
+                return false
+            }
+        }
+        revision += 1
+        return true
+    }
+
+    /** Resolves Android's short KJVA subject for the fixed-chapter history view. */
+    private func chapterSubject(for target: ChapterReadHistoryTarget) -> String {
+        let shortName = ReadingProgressKJVAIdentity(
+            androidKJVBookOrdinal: target.kjvBookOrdinal,
+            chapter: target.chapter
+        )?.book.shortName ?? target.bookName
+        return String(
+            format: String(
+                localized: "reading_progress_history_for",
+                defaultValue: "Reading progress for %@"
+            ),
+            "\(shortName) \(target.chapter)"
+        )
+    }
+}
+
+/** Android read-history row with KJVA reference, timestamp, and source-version fallback. */
+private struct ReadingProgressHistoryRowView: View {
+    /// Persisted Android chapter-history row.
+    let row: ReadingProgressHistoryRow
+    /// Whether the containing history selection spans more than one chapter.
+    let showsChapterReference: Bool
+
+    /** Creates either Android's chapter-per-row or fixed-chapter history presentation. */
+    init(row: ReadingProgressHistoryRow, showsChapterReference: Bool = true) {
+        self.row = row
+        self.showsChapterReference = showsChapterReference
+    }
+
+    /** Renders the same primary/secondary text split as Android `ReadHistoryDialog`. */
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(primaryText)
+                .font(.headline)
+            Text(secondaryText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Android primary row content for a broad or fixed-chapter selection.
+    private var primaryText: String {
+        if showsChapterReference {
+            return "\(row.androidDisplayReference) · \(timeText)"
+        }
+        return "\(dateText) \(timeText)"
+    }
+
+    /// Android secondary row content for a broad or fixed-chapter selection.
+    private var secondaryText: String {
+        showsChapterReference ? "\(dateText) · \(versionText)" : versionText
+    }
+
+    /// Localized date text matching Android's device date formatter.
+    private var dateText: String {
+        readDate.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    /// Localized time text matching Android's device time formatter.
+    private var timeText: String {
+        readDate.formatted(date: .omitted, time: .shortened)
+    }
+
+    /// Stored source module initials or Android's localized unknown-version fallback.
+    private var versionText: String {
+        row.androidDisplayVersion ?? String(
+            localized: "reading_progress_history_version_unknown",
+            defaultValue: "Unknown version"
+        )
+    }
+
+    /// Persisted epoch milliseconds converted once for row formatting.
+    private var readDate: Date {
+        AndroidTimestamp.date(from: row.readAt)
     }
 }

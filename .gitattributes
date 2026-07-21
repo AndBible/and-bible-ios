@@ -1,0 +1,2 @@
+# Preserve provenance-pinned upstream MMSEG dictionary bytes, including CRLF line endings.
+Sources/BibleCore/Sources/BibleCore/Resources/search/mmseg4j/*.dic binary

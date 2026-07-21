@@ -41,6 +41,21 @@ enum UITestSearchQuerySeed {
     }
 }
 
+/// Applies platform-supported search-field input behavior without changing shared submit handling.
+private struct SearchQueryInputBehavior: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+#if os(iOS)
+        content
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled(true)
+            .submitLabel(.search)
+#else
+        content
+#endif
+    }
+}
+
 /**
  Full-text search interface with index management, scope filters, and multi-translation support.
 
@@ -51,8 +66,8 @@ enum UITestSearchQuerySeed {
  - `ready`: render search options and results
 
  Data dependencies:
- - `swordModule` provides the primary search target and fallback direct-SWORD search path
- - `swordManager` resolves additional modules for multi-translation or Strong's searches
+ - `swordModule` provides the primary SWORD search target and compatibility fallback
+ - `searchIndexSourceRegistry` resolves SWORD and Android-compatible SQLite selections exactly
  - `searchIndexService` provides FTS index presence checks, index creation, and indexed search
  - `installedBibleModules`, `currentBook`, and `currentOsisBookId` define search scopes and
    translation-selection behavior
@@ -60,12 +75,17 @@ enum UITestSearchQuerySeed {
  Side effects:
  - `onAppear` seeds initial module selection, applies `initialQuery`, and triggers the index check
  - `startIndexCreation()` launches asynchronous index creation through `SearchIndexService`
- - `performSearch()` launches detached search work and marshals results back onto the main actor
+ - `performSearch()` owns one replaceable search task and publishes only its latest generation
+ - index creation uses an independent replaceable task and generation guard
+ - query, option, module, navigation, and dismissal changes cancel work they make obsolete
  - `navigateTo(_:)` notifies the caller and dismisses Search with the active presentation mechanism
  */
 public struct SearchView: View {
     /// Callback invoked when the user selects a search hit and wants to navigate to it.
-    let onNavigate: ((String, Int, Int) -> Void)?
+    let onNavigate: ((SearchNavigationTarget) -> Bool)?
+
+    /// Reference resolver invoked before a submitted value is treated as full-text search syntax.
+    let onOpenReference: ((String) -> Bool)?
 
     /// Primary Sword module whose search index and results drive the screen.
     var swordModule: SwordModule?
@@ -76,8 +96,17 @@ public struct SearchView: View {
     /// Optional FTS index service used for index existence checks, creation, and indexed search.
     var searchIndexService: SearchIndexService?
 
+    /// Immutable SWORD-first registry used to open selected backend-neutral index sources exactly.
+    var searchIndexSourceRegistry: BibleSearchIndexSourceRegistry?
+
     /// Installed Bible modules available for multi-translation search selection.
     var installedBibleModules: [ModuleInfo]
+
+    /// Registry-backed persistence for Android's selected Search translations preference.
+    var selectionPreferences: SearchSelectionPreferences?
+
+    /// Whether this presentation was opened by Android's Strong's Find All action.
+    var isStrongsFindAll: Bool
 
     /// Current user-visible book name used for the "current book" scope label and fallback navigation.
     var currentBook: String
@@ -94,11 +123,26 @@ public struct SearchView: View {
     /// Whether a background search task is currently running.
     @State private var isSearching = false
 
-    /// Flattened result list displayed in the main results section.
-    @State private var results: [SearchHit] = []
+    /// Canonically grouped result set shared by text and Strong's searches.
+    @State private var groupedResults: SearchGroupedResults?
 
-    /// Aggregate per-module counts used when searching across multiple translations.
-    @State private var multiResults: MultiResultGroup?
+    /// Explicit query/index failure shown independently from a valid zero-result outcome.
+    @State private var searchFailureMessage: String?
+
+    /// Replaceable full-text/Strong's task owned by this presentation.
+    @State private var searchTask: Task<Void, Never>?
+
+    /// Normalized query represented by the current loading, result, or failure state.
+    @State private var representedSearchQuery: String?
+
+    /// Replaceable selected-module index-creation task owned by this presentation.
+    @State private var indexTask: Task<Void, Never>?
+
+    /// Latest search generation permitted to publish result, failure, and loading state.
+    @State private var searchRequestGate = LatestSearchRequestGate()
+
+    /// Latest index generation permitted to publish readiness or failure state.
+    @State private var indexRequestGate = LatestSearchRequestGate()
 
     /// Word-match mode controlling FTS query decoration and fallback search semantics.
     @State private var wordMode: SearchWordMode = .allWords
@@ -111,6 +155,9 @@ public struct SearchView: View {
 
     /// Installed module names selected for indexed multi-translation search.
     @State private var selectedModules: Set<String> = []
+
+    /// Persisted module order retained separately from picker membership.
+    @State private var selectedModuleOrder: [String] = []
 
     /// Draft module names edited inside the Android-style translation picker before OK commits.
     @State private var pendingTranslationSelection: Set<String> = []
@@ -142,6 +189,9 @@ public struct SearchView: View {
 
         /// Shows search controls and current results.
         case ready
+
+        /// Shows a retryable index failure without exposing a stale or absent index as ready.
+        case indexFailure(moduleName: String, moduleDescription: String, message: String)
     }
 
     /// Search scope choices exposed in the options panel.
@@ -159,43 +209,6 @@ public struct SearchView: View {
         case currentBook
     }
 
-    /**
-     One passage-level search result shown in the list.
-     */
-    struct SearchHit: Identifiable {
-        /// Stable UI identity for list diffing.
-        let id = UUID()
-
-        /// User-visible book name parsed from the search result key.
-        let book: String
-
-        /// One-based chapter number parsed from the search result key.
-        let chapter: Int
-
-        /// One-based verse number parsed from the search result key.
-        let verse: Int
-
-        /// Snippet or preview text shown in the result row.
-        let text: String
-
-        /// Module name when the result came from a multi-translation search.
-        let moduleName: String?
-
-        /// Formatted human-readable reference string shown in the list row.
-        var reference: String { "\(book) \(chapter):\(verse)" }
-    }
-
-    /**
-     Aggregate counts for multi-translation result presentation.
-     */
-    struct MultiResultGroup {
-        /// Per-module result totals used for the horizontal summary pill list.
-        let perModule: [(name: String, count: Int)]
-
-        /// Total hits across all selected modules.
-        let totalCount: Int
-    }
-
     /// Optional initial query to auto-populate and execute (e.g. from "Find all occurrences").
     private var initialQuery: String
 
@@ -206,11 +219,16 @@ public struct SearchView: View {
        - swordModule: Primary module to search and to use for index checks.
        - swordManager: Manager used to resolve additional modules for multi-search or Strong's.
        - searchIndexService: Optional index service providing FTS-backed search and indexing.
+       - searchIndexSourceRegistry: SWORD-first source snapshot for exact backend resolution.
        - installedBibleModules: Installed Bible modules available to the translation picker.
        - currentBook: Current user-visible book name for the current-book search scope.
        - currentOsisBookId: Current OSIS book identifier for SWORD scope construction.
+       - selectionPreferences: Registry-backed selected-translation persistence.
+       - isStrongsFindAll: Whether this presentation must use Android's isolated Strong's-capable
+         selection and preference key.
        - initialQuery: Optional query to prefill and auto-run on appear.
-       - onNavigate: Callback invoked when the user selects a search hit.
+       - onOpenReference: Resolver invoked before full-text query compilation.
+       - onNavigate: Callback returning true only when the selected hit was opened successfully.
      - Note: Initialization has no side effects. Index checks and optional auto-search begin in
        `onAppear`.
      */
@@ -218,19 +236,27 @@ public struct SearchView: View {
         swordModule: SwordModule? = nil,
         swordManager: SwordManager? = nil,
         searchIndexService: SearchIndexService? = nil,
+        searchIndexSourceRegistry: BibleSearchIndexSourceRegistry? = nil,
         installedBibleModules: [ModuleInfo] = [],
         currentBook: String = "Genesis",
         currentOsisBookId: String = "Gen",
+        selectionPreferences: SearchSelectionPreferences? = nil,
+        isStrongsFindAll: Bool = false,
         initialQuery: String = "",
-        onNavigate: ((String, Int, Int) -> Void)? = nil
+        onOpenReference: ((String) -> Bool)? = nil,
+        onNavigate: ((SearchNavigationTarget) -> Bool)? = nil
     ) {
         self.swordModule = swordModule
         self.swordManager = swordManager
         self.searchIndexService = searchIndexService
+        self.searchIndexSourceRegistry = searchIndexSourceRegistry
         self.installedBibleModules = installedBibleModules
         self.currentBook = currentBook
         self.currentOsisBookId = currentOsisBookId
+        self.selectionPreferences = selectionPreferences
+        self.isStrongsFindAll = isStrongsFindAll
         self.initialQuery = initialQuery
+        self.onOpenReference = onOpenReference
         self.onNavigate = onNavigate
     }
 
@@ -255,6 +281,13 @@ public struct SearchView: View {
 
             case .ready:
                 searchContent
+
+            case .indexFailure(let moduleName, let moduleDescription, let message):
+                indexFailureView(
+                    moduleName: moduleName,
+                    moduleDescription: moduleDescription,
+                    message: message
+                )
             }
         }
         .accessibilityElement(children: .contain)
@@ -275,18 +308,26 @@ public struct SearchView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .onAppear {
-            if selectedModules.isEmpty, let mod = swordModule {
-                selectedModules = [mod.info.name]
-            }
+            restoreSelectedModules()
             let seededInitialQuery = initialQuery.isEmpty ? (UITestSearchQuerySeed.consume() ?? "") : initialQuery
             _ = applyInitialQueryIfNeeded(seededInitialQuery)
             checkIndex()
         }
         .onChange(of: initialQuery) { _, newValue in
             let didApply = applyInitialQueryIfNeeded(newValue)
-            if didApply, case .ready = viewState {
-                performSearch()
+            if didApply {
+                checkIndex()
             }
+        }
+        .onChange(of: query) { _, newValue in
+            guard Self.shouldInvalidateSearch(
+                representedQuery: representedSearchQuery,
+                changedQuery: newValue
+            ) else {
+                return
+            }
+            cancelSearchWork(clearPublishedState: true)
+            self.representedSearchQuery = nil
         }
         .onChange(of: scopeOption) { _, _ in
             if case .ready = viewState, !query.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -299,16 +340,15 @@ public struct SearchView: View {
             }
         }
         .onChange(of: selectedModules) { _, _ in
-            if case .ready = viewState, !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                checkIndex()
-            }
+            checkIndex()
         }
+        .onDisappear(perform: cancelAllAsyncWork)
     }
 
     /// Navigation title derived from the active state and latest result summary.
     private var navigationTitle: String {
         switch viewState {
-        case .needsIndex, .creatingIndex:
+        case .needsIndex, .creatingIndex, .indexFailure:
             return String(localized: "search_index")
         case .ready:
             if !resultSummary.isEmpty {
@@ -321,6 +361,71 @@ public struct SearchView: View {
         case .checkingIndex:
             return String(localized: "search")
         }
+    }
+
+    /// Android persistence lane used by this Search presentation.
+    private var selectionContext: SearchTranslationSelectionContext {
+        isStrongsFindAll ? .strongsFindAll : .standard
+    }
+
+    /// Installed modules Android permits this Search presentation to select.
+    private var candidateSearchModules: [ModuleInfo] {
+        SearchTranslationSelectionPolicy.candidateModules(
+            from: installedBibleModules,
+            isStrongsFindAll: isStrongsFindAll
+        )
+    }
+
+    /**
+     Resolves the primary module used when no persisted selection remains valid.
+
+     Manual Search falls back to the active Bible. Strong's Find All first keeps an active
+     Strong's-capable Bible, then prefers an already indexed Strong's Bible before the first
+     installed eligible module, matching `SwordDocumentFacade.defaultBibleWithStrongs`.
+
+     - Returns: Eligible fallback module initials, or `nil` when no Search candidate exists.
+     - Side effects: Reads index readiness from `SearchIndexService` for Strong's fallback ranking.
+     - Failure modes: Missing active metadata and an empty eligible inventory return `nil`.
+     */
+    private var fallbackSearchModuleName: String? {
+        SearchTranslationSelectionPolicy.fallbackModuleName(
+            currentModuleName: swordModule?.info.name,
+            candidateModules: candidateSearchModules,
+            isStrongsFindAll: isStrongsFindAll,
+            isIndexed: { searchIndexService?.hasStrongsIndex(for: $0) ?? false }
+        )
+    }
+
+    /**
+     Returns selected modules in the execution and display order Android uses for this flow.
+
+     Standard Search retains the existing primary-first, abbreviation-sorted contract. Strong's
+     Find All preserves the order restored from its separate preference and never injects or moves
+     a non-Strong's active Bible.
+
+     - Returns: Eligible selected module initials in deterministic Android order.
+     - Side effects: None.
+     - Failure modes: An empty effective selection returns an empty array so index checking can
+       surface the unavailable-module state instead of searching an unrelated Bible.
+     */
+    private var orderedSelectedModuleNames: [String] {
+        if isStrongsFindAll {
+            return SearchTranslationSelectionPolicy.strongsOrderedSelection(
+                selectedModuleNames: selectedModules,
+                rememberedOrder: selectedModuleOrder,
+                candidateModules: candidateSearchModules
+            )
+        }
+        return Self.androidOrderedSelectedSearchModuleNames(
+            selectedModuleNames: selectedModules,
+            primaryModuleName: swordModule?.info.name,
+            installedModules: candidateSearchModules
+        )
+    }
+
+    /// Primary-first picker argument used only by manual Search.
+    private var pickerPrimaryModuleName: String? {
+        isStrongsFindAll ? nil : swordModule?.info.name
     }
 
     /**
@@ -341,8 +446,10 @@ public struct SearchView: View {
         case .needsIndex: "needsIndex"
         case .creatingIndex: "creatingIndex"
         case .ready: "ready"
+        case .indexFailure: "indexFailure"
         }
-        let baseState = "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode));searchFieldFocused=\(isSearchFieldFocused);\(searchAccessibilityTranslationPickerToken)"
+        let resultCount = groupedResults?.totalHitCount ?? 0
+        let baseState = "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(resultCount);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode));searchFieldFocused=\(isSearchFieldFocused);\(searchAccessibilityTranslationPickerToken)"
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return baseState
         }
@@ -351,12 +458,7 @@ public struct SearchView: View {
 
     /// Stable selected-translation token exported for UI automation.
     private var searchAccessibilitySelectionToken: String {
-        let orderedModules = Self.androidOrderedSelectedSearchModuleNames(
-            selectedModuleNames: selectedModules,
-            primaryModuleName: swordModule?.info.name,
-            installedModules: installedBibleModules
-        )
-        return "selectedModules=\(selectedModules.sorted().joined(separator: ","));selectedModuleOrder=\(orderedModules.joined(separator: ","))"
+        "selectedModules=\(selectedModules.sorted().joined(separator: ","));selectedModuleOrder=\(orderedSelectedModuleNames.joined(separator: ","))"
     }
 
     /**
@@ -373,12 +475,10 @@ public struct SearchView: View {
        `search_translations` fallback instead of a malformed empty button.
      */
     private var selectedTranslationSummaryLabel: String {
-        Self.androidSelectedTranslationSummaryLabel(
-            selectedModuleNames: selectedModules,
-            primaryModuleName: swordModule?.info.name,
-            installedModules: installedBibleModules,
-            fallbackLabel: String(localized: "search_translations", defaultValue: "Translations")
-        )
+        guard !orderedSelectedModuleNames.isEmpty else {
+            return String(localized: "search_translations", defaultValue: "Translations")
+        }
+        return orderedSelectedModuleNames.joined(separator: ", ")
     }
 
     /**
@@ -430,13 +530,30 @@ public struct SearchView: View {
 
     /// Stable grouped-result totals exported for UI automation.
     private var searchAccessibilityGroupToken: String {
-        guard let multiResults else {
-            return "groupedTotal=none;groupedCounts=none"
+        Self.searchAccessibilityGroupToken(for: groupedResults)
+    }
+
+    /**
+     Serializes successful grouped counts and explicit per-module failures for Search UI automation.
+
+     - Parameter groupedResults: Current production grouped result, or `nil` before a query completes.
+     - Returns: Stable semicolon-delimited group, hit, count, and failed-module tokens.
+     - Side effects: None.
+     - Failure modes: Missing results emit `none` sentinels; empty successes or failures emit empty values.
+     */
+    nonisolated static func searchAccessibilityGroupToken(
+        for groupedResults: SearchGroupedResults?
+    ) -> String {
+        guard let groupedResults else {
+            return "groupedTotal=none;groupedCounts=none;groupedFailures=none"
         }
-        let counts = multiResults.perModule
-            .map { "\($0.name):\($0.count)" }
+        let counts = groupedResults.moduleCounts
+            .map { "\($0.moduleName):\($0.count)" }
             .joined(separator: ",")
-        return "groupedTotal=\(multiResults.totalCount);groupedCounts=\(counts)"
+        let failures = groupedResults.moduleFailures
+            .map(\.moduleName)
+            .joined(separator: ",")
+        return "groupedTotal=\(groupedResults.groups.count);groupedHitTotal=\(groupedResults.totalHitCount);groupedCounts=\(counts);groupedFailures=\(failures)"
     }
 
     /// Compact dedicated state export used by the UI harness instead of the full Search container.
@@ -456,7 +573,8 @@ public struct SearchView: View {
 
     /// Stable search-result row tokens exported for UI automation.
     private var searchAccessibilityRowsToken: String {
-        results.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+        (groupedResults?.groups ?? [])
+            .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
             .map { "|\(searchResultIdentifier(for: $0))|" }
             .joined(separator: ",")
     }
@@ -494,6 +612,7 @@ public struct SearchView: View {
 
             HStack(spacing: 40) {
                 Button(String(localized: "cancel")) {
+                    cancelAllAsyncWork()
                     dismiss()
                 }
                 .foregroundStyle(.secondary)
@@ -506,6 +625,65 @@ public struct SearchView: View {
             .font(.headline)
             .padding(.bottom, 40)
         }
+    }
+
+    /**
+     Builds the retryable failure state shown when index creation or verification fails.
+
+     - Parameters:
+       - moduleName: Durable module abbreviation used when retrying index creation.
+       - moduleDescription: User-visible module name associated with the failure.
+       - message: Concrete failure returned by the index service or module resolver.
+     - Returns: A blocking error surface with Retry and Cancel actions.
+     - Side effects: Retry re-enters `startIndexCreation()`; Cancel invalidates outstanding work and dismisses Search.
+     - Failure modes: The view itself cannot fail and never transitions to `.ready` implicitly.
+     */
+    private func indexFailureView(
+        moduleName: String,
+        moduleDescription: String,
+        message: String
+    ) -> some View {
+        VStack(spacing: 20) {
+            Spacer()
+
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 42))
+                .foregroundStyle(.orange)
+
+            VStack(spacing: 8) {
+                Text(String(localized: "error_occurred", defaultValue: "Search index failed"))
+                    .font(.headline)
+                Text(moduleDescription)
+                    .font(.subheadline.weight(.medium))
+                Text(message)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 28)
+
+            Spacer()
+
+            HStack(spacing: 28) {
+                Button(String(localized: "cancel")) {
+                    cancelAllAsyncWork()
+                    dismiss()
+                }
+                .foregroundStyle(.secondary)
+
+                Button(String(localized: "retry", defaultValue: "Retry")) {
+                    viewState = .needsIndex(
+                        moduleName: moduleName,
+                        moduleDescription: moduleDescription
+                    )
+                    startIndexCreation()
+                }
+                .fontWeight(.semibold)
+            }
+            .padding(.bottom, 36)
+        }
+        .accessibilityIdentifier("searchIndexFailure")
+        .accessibilityValue("module=\(moduleName);message=\(message)")
     }
 
     // MARK: - Index Progress
@@ -560,10 +738,13 @@ public struct SearchView: View {
                     ProgressView(String(localized: "search_searching"))
                         .frame(maxWidth: .infinity, alignment: .center)
                         .listRowSeparator(.hidden)
-                } else if let multi = multiResults, selectedModules.count > 1 {
-                    multiResultsSection(multi)
-                } else if !results.isEmpty {
-                    singleResultsSection
+                } else if let searchFailureMessage {
+                    Text(searchFailureMessage)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("searchExecutionFailure")
+                } else if let groupedResults {
+                    groupedResultsSection(groupedResults)
                 } else if !query.isEmpty, !resultSummary.isEmpty {
                     Text(String(localized: "no_results"))
                         .foregroundStyle(.secondary)
@@ -582,11 +763,16 @@ public struct SearchView: View {
     private var searchQueryBar: some View {
         TextField(
             String(localized: "type_text_or_bible_reference", defaultValue: "Type text or Bible reference"),
-            text: $query
+            text: Binding(
+                get: { query },
+                set: { newValue in
+                    guard query != newValue else { return }
+                    query = newValue
+                    cancelSearchWork(clearPublishedState: true)
+                }
+            )
         )
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled(true)
-        .submitLabel(.search)
+        .modifier(SearchQueryInputBehavior())
         .focused($isSearchFieldFocused)
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -833,32 +1019,23 @@ public struct SearchView: View {
 
     // MARK: - Results Sections
 
-    /// Result section used for single-translation searches.
-    private var singleResultsSection: some View {
-        Section {
-            ForEach(results) { hit in
-                Button(action: { navigateTo(hit) }) {
-                    searchHitRow(hit)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier(searchResultIdentifier(for: hit))
-            }
-        }
-    }
-
     /**
-     Builds the grouped-results UI for multi-translation searches.
+     Builds Android's verse-grouped result UI for text and Strong's searches.
 
-     - Parameter multi: Aggregate result counts and module summary data for the current search.
+     - Parameter grouped: Canonical verse groups with module-preserving matches and summary counts.
+     - Returns: Sections containing successful module counts, explicit module failures, and one
+       expandable-equivalent match group per canonical verse.
+     - Side effects: Selecting a module match calls `navigateTo(_:)` with that exact hit.
+     - Failure modes: Empty result collections render no sections; the caller owns the empty state.
      */
-    private func multiResultsSection(_ multi: MultiResultGroup) -> some View {
+    private func groupedResultsSection(_ grouped: SearchGroupedResults) -> some View {
         Group {
             Section {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(multi.perModule, id: \.name) { entry in
+                        ForEach(grouped.moduleCounts, id: \.moduleName) { entry in
                             HStack(spacing: 4) {
-                                Text(entry.name)
+                                Text(entry.moduleName)
                                     .font(.caption.weight(.semibold))
                                 Text("\(entry.count)")
                                     .font(.caption)
@@ -868,58 +1045,118 @@ public struct SearchView: View {
                             .padding(.vertical, 5)
                             .background(.quaternary, in: Capsule())
                             .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(entry.name)
+                            .accessibilityLabel(entry.moduleName)
                             .accessibilityValue("count=\(entry.count)")
-                            .accessibilityIdentifier("searchResultGroupPill::\(sanitizedAccessibilitySegment(entry.name))")
+                            .accessibilityIdentifier("searchResultGroupPill::\(sanitizedAccessibilitySegment(entry.moduleName))")
                         }
                     }
                 }
             }
 
-            Section {
-                ForEach(results) { hit in
-                    Button(action: { navigateTo(hit) }) {
-                        searchHitRow(hit)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
+            if !grouped.moduleFailures.isEmpty {
+                Section {
+                    ForEach(grouped.moduleFailures) { failure in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(failure.moduleName)
+                                    .font(.subheadline.weight(.semibold))
+                                Text(failure.message)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier(
+                            "searchModuleFailure::\(sanitizedAccessibilitySegment(failure.moduleName))"
+                        )
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier(searchResultIdentifier(for: hit))
+                }
+            }
+
+            if grouped.groups.isEmpty {
+                Section {
+                    Text(String(localized: "no_results"))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .listRowSeparator(.hidden)
+                }
+            } else {
+                Section {
+                    ForEach(grouped.groups) { group in
+                        searchResultGroup(group)
+                    }
+                }
+            }
+
+            if grouped.isTruncated {
+                Section {
+                    Text(String(
+                        localized: "search_results_truncated",
+                        defaultValue: "More than 5,000 results were found in at least one translation."
+                    ))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("searchResultsTruncated")
                 }
             }
         }
     }
 
     /**
-     Builds one result-row view for a search hit.
+     Builds one canonical verse group with a separately selectable row for every matching module.
 
-     - Parameter hit: Passage-level search result to render.
+     - Parameter group: Canonical verse and ordered module matches to render.
+     - Returns: Unframed grouped rows preserving module identity through user selection.
+     - Side effects: A module row invokes `navigateTo(_:)` with the selected module hit.
+     - Failure modes: A malformed empty group renders only its canonical reference and no action.
      */
-    private func searchHitRow(_ hit: SearchHit) -> some View {
+    private func searchResultGroup(_ group: SearchGroupedVerseResult) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let moduleName = hit.moduleName {
-                Text("\(hit.reference) (\(moduleName))")
-                    .font(.headline)
-            } else {
-                Text(hit.reference)
-                    .font(.headline)
+            Text(group.displayReference)
+                .font(.headline)
+
+            ForEach(Array(group.matches.enumerated()), id: \.element.id) { index, hit in
+                Button(action: { navigateTo(hit) }) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(hit.moduleName)
+                            .font(.caption.weight(.semibold))
+                            .frame(minWidth: 48, alignment: .leading)
+                        Text(SearchIndexService.cleanText(hit.snippet))
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(group.matches.count == 1 ? nil : 3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(
+                    index == 0
+                        ? searchResultIdentifier(for: group)
+                        : searchModuleResultIdentifier(for: hit)
+                )
             }
-            highlightedText(hit.text)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
     /**
      Returns the stable accessibility identifier for one result row.
 
-     - Parameter hit: Search hit whose verse reference should back the identifier.
+     - Parameter group: Search group whose verse reference should back the identifier.
      - Returns: Identifier formatted as `searchResultRow::<sanitized reference>`.
      */
-    private func searchResultIdentifier(for hit: SearchHit) -> String {
-        "searchResultRow::\(sanitizedAccessibilitySegment(hit.reference))"
+    private func searchResultIdentifier(for group: SearchGroupedVerseResult) -> String {
+        "searchResultRow::\(sanitizedAccessibilitySegment(group.displayReference))"
+    }
+
+    /** Returns a stable module-specific identifier for non-primary matches in a verse group. */
+    private func searchModuleResultIdentifier(for hit: SearchModuleHit) -> String {
+        let reference = "\(hit.displayBook) \(hit.identity.chapter):\(hit.identity.verse)"
+        return "searchResultModuleRow::\(sanitizedAccessibilitySegment(reference))::\(sanitizedAccessibilitySegment(hit.moduleName))"
     }
 
     /**
@@ -935,103 +1172,6 @@ public struct SearchView: View {
             options: .regularExpression
         )
         return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-    }
-
-    /**
-     Returns a `Text` value with query terms and Strong's tags visually emphasized.
-
-     - Parameter text: Source snippet text returned by indexed or SWORD search.
-     - Returns: Styled text that bolds query-term matches and formats Strong's tags as superscripts.
-     */
-    private func highlightedText(_ text: String) -> Text {
-        let terms = query.lowercased().split(separator: " ").map(String.init)
-        let lower = text.lowercased()
-
-        var result = Text("")
-        var currentIndex = text.startIndex
-
-        while currentIndex < text.endIndex {
-            // Check for Strong's tag <H\d+> or <G\d+>
-            if text[currentIndex] == "<",
-               let closingIdx = Self.strongsTagClosingIndex(in: text, from: currentIndex) {
-                let inner = String(text[text.index(after: currentIndex)..<closingIdx])
-                let isMatch = !terms.isEmpty && terms.contains(where: { inner.lowercased().contains($0) })
-                if isMatch {
-                    result = result + Text(inner)
-                        .font(.system(size: 9))
-                        .baselineOffset(-3)
-                        .foregroundColor(.accentColor)
-                } else {
-                    result = result + Text(inner)
-                        .font(.system(size: 9))
-                        .baselineOffset(-3)
-                        .foregroundColor(Color.secondary.opacity(0.5))
-                }
-                currentIndex = text.index(after: closingIdx)
-                continue
-            }
-
-            // Check for query term match
-            var matched = false
-            if !terms.isEmpty {
-                for term in terms {
-                    if lower[currentIndex...].hasPrefix(term) {
-                        let end = text.index(currentIndex, offsetBy: term.count, limitedBy: text.endIndex) ?? text.endIndex
-                        result = result + Text(text[currentIndex..<end]).bold().foregroundColor(.accentColor)
-                        currentIndex = end
-                        matched = true
-                        break
-                    }
-                }
-            }
-
-            if !matched {
-                let start = currentIndex
-                currentIndex = text.index(after: currentIndex)
-                while currentIndex < text.endIndex {
-                    if text[currentIndex] == "<",
-                       Self.strongsTagClosingIndex(in: text, from: currentIndex) != nil {
-                        break
-                    }
-                    if !terms.isEmpty {
-                        var foundTerm = false
-                        for term in terms {
-                            if lower[currentIndex...].hasPrefix(term) {
-                                foundTerm = true
-                                break
-                            }
-                        }
-                        if foundTerm { break }
-                    }
-                    currentIndex = text.index(after: currentIndex)
-                }
-                result = result + Text(text[start..<currentIndex])
-            }
-        }
-        return result
-    }
-
-    /**
-     Returns the closing angle-bracket index for a Strong's tag at the given position.
-
-     - Parameters:
-       - text: Full snippet text being scanned for inline Strong's tags.
-       - start: Candidate index that may begin a tag like `<H12345>` or `<G999>`.
-     - Returns: The index of the closing `>` when a valid Strong's tag is found, otherwise `nil`.
-     */
-    private static func strongsTagClosingIndex(in text: String, from start: String.Index) -> String.Index? {
-        guard text[start] == "<" else { return nil }
-        let afterLt = text.index(after: start)
-        guard afterLt < text.endIndex else { return nil }
-        let ch = text[afterLt]
-        guard ch == "H" || ch == "G" || ch == "h" || ch == "g" else { return nil }
-        var idx = text.index(after: afterLt)
-        guard idx < text.endIndex, text[idx].isNumber else { return nil }
-        while idx < text.endIndex, text[idx].isNumber {
-            idx = text.index(after: idx)
-        }
-        guard idx < text.endIndex, text[idx] == ">" else { return nil }
-        return idx
     }
 
     // MARK: - Translation Picker
@@ -1059,7 +1199,7 @@ public struct SearchView: View {
                 }
                 .accessibilityHidden(true)
 
-            makeTranslationPicker(modules: installedBibleModules)
+            makeTranslationPicker(modules: candidateSearchModules)
                 .padding(.horizontal, 24)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1235,8 +1375,8 @@ public struct SearchView: View {
         isSearchFieldFocused = false
         let draftState = SearchTranslationPickerDraftState.opened(
             selectedModuleNames: selectedModules,
-            primaryModuleName: swordModule?.info.name,
-            installedModules: installedBibleModules
+            primaryModuleName: pickerPrimaryModuleName,
+            installedModules: candidateSearchModules
         )
         pendingTranslationSelection = draftState.pendingSelection
         showTranslationPicker = draftState.isPresented
@@ -1274,20 +1414,45 @@ public struct SearchView: View {
      - triggers the existing `selectedModules` change observer when the committed set changes
      */
     private func commitTranslationPickerSelection() {
+        let shouldCommitSelection = !pendingTranslationSelection.isEmpty
         let result = SearchTranslationPickerDraftState(
             isPresented: showTranslationPicker,
             pendingSelection: pendingTranslationSelection
         ).committedSelection(
             previousModuleNames: selectedModules,
-            primaryModuleName: swordModule?.info.name,
-            installedModules: installedBibleModules
+            primaryModuleName: pickerPrimaryModuleName,
+            installedModules: candidateSearchModules
         )
         let orderedSelection = result.orderedModuleNames
-        if !orderedSelection.isEmpty {
+        if shouldCommitSelection, !orderedSelection.isEmpty {
             selectedModules = Set(orderedSelection)
+            selectedModuleOrder = orderedSelection
+            selectionPreferences?.saveSelection(orderedSelection, context: selectionContext)
         }
         pendingTranslationSelection = result.draftState.pendingSelection
         showTranslationPicker = result.draftState.isPresented
+    }
+
+    /**
+     Restores Android's persisted Search translation selection for the installed module set.
+
+     The persisted order is retained by `SearchSelectionPreferences`; this view stores membership in
+     a `Set` and reuses `androidOrderedSelectedSearchModuleNames` whenever request order matters.
+
+     - Side effects: Reads the shared settings store and updates `selectedModules`.
+     - Failure modes: Missing persistence or a stale selection falls back to the installed primary
+       module. No unavailable module is retained.
+     */
+    private func restoreSelectedModules() {
+        let installedNames = candidateSearchModules.map(\.name)
+        let primaryName = fallbackSearchModuleName
+        let restored = selectionPreferences?.loadSelection(
+            installedModuleNames: installedNames,
+            primaryModuleName: primaryName,
+            context: selectionContext
+        ) ?? primaryName.map { [$0] } ?? []
+        selectedModules = Set(restored)
+        selectedModuleOrder = restored
     }
 
     /**
@@ -1321,7 +1486,7 @@ public struct SearchView: View {
             isPresented: showTranslationPicker,
             pendingSelection: pendingTranslationSelection
         ).toggledAll(
-            moduleNames: Self.androidSortedTranslationModules(installedBibleModules).map(\.name)
+            moduleNames: Self.androidSortedTranslationModules(candidateSearchModules).map(\.name)
         ).pendingSelection
     }
 
@@ -1329,20 +1494,21 @@ public struct SearchView: View {
      Resolves whether one module has a completed Search index for picker labeling.
 
      Android appends "Search index not created" when JSword reports an index status other than
-     done. iOS can only render that status when a `SearchIndexService` is available; absent service
-     means direct SWORD fallback is in use, so the picker omits an unverified warning.
+     done. A missing iOS index service is not treated as indexed because Search has no compatible
+     fallback query engine.
 
      - Parameter moduleName: SWORD module abbreviation to inspect.
      - Returns: `true` when the module should render without the unindexed suffix.
      - Side effects: Reads Search index metadata through `SearchIndexService`.
      */
     private func isTranslationModuleIndexed(_ moduleName: String) -> Bool {
-        searchIndexService?.hasIndex(for: moduleName) ?? true
+        guard let source = resolveSearchIndexSource(named: moduleName) else { return false }
+        return searchIndexService?.hasIndex(for: source.searchIndexSourceIdentity) ?? false
     }
 
     /// Visible Select all/none label for the Search translation picker neutral action.
     private var searchTranslationSelectToggleTitle: String {
-        let allCount = Self.androidSortedTranslationModules(installedBibleModules).count
+        let allCount = Self.androidSortedTranslationModules(candidateSearchModules).count
         if allCount > 0, pendingTranslationSelection.count == allCount {
             return String(localized: "select_none", defaultValue: "Select none")
         }
@@ -1351,7 +1517,7 @@ public struct SearchView: View {
 
     /// Stable UI-test semantic state for the picker neutral select toggle.
     private var searchTranslationSelectToggleAccessibilityValue: String {
-        let allCount = Self.androidSortedTranslationModules(installedBibleModules).count
+        let allCount = Self.androidSortedTranslationModules(candidateSearchModules).count
         return allCount > 0 && pendingTranslationSelection.count == allCount
             ? "selectNone"
             : "selectAll"
@@ -1360,12 +1526,15 @@ public struct SearchView: View {
     // MARK: - Navigation
 
     /**
-     Forwards the selected result to the caller and dismisses Search.
+     Forwards the selected result and dismisses Search only after exact navigation succeeds.
 
      - Parameter hit: Selected search result.
+     - Side effects: Cancels Search work and dismisses the presentation after caller confirmation.
+     - Failure modes: A missing callback or rejected target leaves Search and its results visible.
      */
-    private func navigateTo(_ hit: SearchHit) {
-        onNavigate?(hit.book, hit.chapter, hit.verse)
+    private func navigateTo(_ hit: SearchModuleHit) {
+        guard onNavigate?(SearchNavigationTarget(hit: hit)) == true else { return }
+        cancelAllAsyncWork()
         dismiss()
     }
 
@@ -1374,69 +1543,62 @@ public struct SearchView: View {
     /**
      Checks whether the selected search target modules already have indexes.
 
-     Android checks JSword index readiness before launching indexed searches, including Strong's
-     "find all occurrences" queries. iOS mirrors that behavior by resolving Strong's-capable Bible
-     modules for Strong's input and ordinary selected modules for text input, then prompting for
-     the first missing index before allowing the search to auto-run.
+     Android checks every selected translation's JSword index before launching text or Strong's
+     searches. iOS applies the same selected-module list and prompts for the first missing index.
 
      Side effects:
-     - mutates `viewState` to `.ready`, `.needsIndex`, or `.creatingIndex`
+     - mutates `viewState` to `.ready`, `.needsIndex`, or `.indexFailure`
      - may trigger `autoSearchIfNeeded()` when the search UI becomes ready
      - reads index availability from `SearchIndexService`
 
      Failure modes:
-     - if `searchIndexService` is unavailable, the method intentionally skips index inspection,
-       marks the view ready, and leaves `performSearch()` to use its non-indexed SWORD fallback
-     - if no Strong's-capable module can be resolved for a Strong's query, the method marks the
-       view ready so the search can finish with zero results rather than blocking on an index that
-       cannot be built
+     - a missing index service or empty effective module selection becomes an explicit retryable
+       failure instead of exposing Search as ready
      */
     private func checkIndex() {
-        if StrongsSearchSupport.normalizedQueryOptions(for: query) != nil {
-            guard let service = searchIndexService else {
-                viewState = .ready
-                autoSearchIfNeeded()
-                return
-            }
-
-            let strongsModules = Self.resolveStrongsSearchModules(
-                currentModule: swordModule,
-                installedModules: installedBibleModules,
-                swordManager: swordManager,
-                searchIndexService: service
+        cancelSearchWork(clearPublishedState: true)
+        cancelIndexWork()
+        let fallbackModuleName = fallbackSearchModuleName ?? swordModule?.info.name ?? "Search"
+        guard let service = searchIndexService else {
+            viewState = .indexFailure(
+                moduleName: fallbackModuleName,
+                moduleDescription: moduleDescription(for: fallbackModuleName),
+                message: SearchIndexError.databaseUnavailable(
+                    operation: "checking selected translations"
+                ).localizedDescription
             )
-            guard !strongsModules.isEmpty else {
-                viewState = .ready
-                autoSearchIfNeeded()
-                return
-            }
-
-            if let missingModule = strongsModules.first(where: { !service.hasStrongsIndex(for: $0.info.name) }) {
-                viewState = .needsIndex(
-                    moduleName: missingModule.info.name,
-                    moduleDescription: moduleDescription(for: missingModule.info.name)
-                )
-                return
-            }
-
-            viewState = .ready
-            autoSearchIfNeeded()
             return
         }
 
-        guard let service = searchIndexService, let mod = swordModule else {
-            // No service or module — skip index check, go directly to ready
-            viewState = .ready
-            autoSearchIfNeeded()
+        let moduleNames = orderedSelectedModuleNames
+        guard !moduleNames.isEmpty else {
+            viewState = .indexFailure(
+                moduleName: fallbackModuleName,
+                moduleDescription: moduleDescription(for: fallbackModuleName),
+                message: isStrongsFindAll
+                    ? String(
+                        localized: "no_indexed_bible_with_strongs_ref",
+                        defaultValue: "You must download a Bible containing Strong's numbers and build its index via Search"
+                    )
+                    : "No installed Bible translation is available for Search."
+            )
             return
         }
 
-        let moduleNames = Self.androidOrderedSelectedSearchModuleNames(
-            selectedModuleNames: selectedModules,
-            primaryModuleName: mod.info.name,
-            installedModules: installedBibleModules
-        )
-        if let missingModuleName = moduleNames.first(where: { !service.hasIndex(for: $0) }) {
+        guard let selectedSources = resolveSearchIndexSources(named: moduleNames) else {
+            viewState = .indexFailure(
+                moduleName: fallbackModuleName,
+                moduleDescription: moduleDescription(for: fallbackModuleName),
+                message: "A selected translation could not be opened for index verification."
+            )
+            return
+        }
+
+        let requirement = Self.indexRequirement(for: query)
+        if let missingModuleName = service.modulesNeedingIndex(
+            from: selectedSources.map { $0.source.searchIndexSourceIdentity },
+            requirement: requirement
+        ).first?.moduleName {
             viewState = .needsIndex(
                 moduleName: missingModuleName,
                 moduleDescription: moduleDescription(for: missingModuleName)
@@ -1498,254 +1660,328 @@ public struct SearchView: View {
     /**
      Starts asynchronous index creation for the modules required by the current query.
 
-     Ordinary text searches index the primary and selected translation modules. Strong's searches
-     index Strong's-capable Bible modules so the later query can use the same indexed lexical-token
-     architecture Android gets from JSword. Once all requested indexes are built, the view
-     transitions back to `.ready`.
+     Text and Strong's searches index the same selected translations, matching Android's pre-search
+     `IndexStatus.DONE` gate. Once every requested index is built and verified, the view becomes
+     ready and resumes an initial query.
 
      Side effects:
      - mutates `viewState` to `.creatingIndex` and later back to `.ready`
-     - queries `SearchIndexService` and `SwordManager` to collect modules requiring indexes
+     - queries `SearchIndexService` and the backend-neutral registry for sources requiring indexes
      - launches asynchronous index creation work for each queued module
 
      Failure modes:
-     - if `searchIndexService` is unavailable, the method skips index creation and immediately
-       transitions the view back to `.ready`
-     - if a selected module cannot be resolved from `SwordManager`, it is silently skipped
-     - `SearchIndexService.createIndex` does not surface thrown errors here; any internal failure is
-       treated as a best-effort attempt and the view still returns to `.ready`
+     - a missing service, unresolved selected module, thrown creation error, or failed post-create
+       verification transitions to `.indexFailure` and never exposes stale Search results
      */
     private func startIndexCreation() {
+        cancelSearchWork(clearPublishedState: true)
+        cancelIndexWork()
+        let fallbackModuleName = fallbackSearchModuleName ?? swordModule?.info.name ?? "Search"
         guard let service = searchIndexService else {
-            viewState = .ready
+            viewState = .indexFailure(
+                moduleName: fallbackModuleName,
+                moduleDescription: moduleDescription(for: fallbackModuleName),
+                message: SearchIndexError.databaseUnavailable(
+                    operation: "creating selected translation indexes"
+                ).localizedDescription
+            )
             return
         }
 
+        let selectedNames = orderedSelectedModuleNames
+        guard let selectedSources = resolveSearchIndexSources(named: selectedNames) else {
+            viewState = .indexFailure(
+                moduleName: fallbackModuleName,
+                moduleDescription: moduleDescription(for: fallbackModuleName),
+                message: "A selected translation could not be opened for indexing."
+            )
+            return
+        }
+        let requirement = Self.indexRequirement(for: query)
+        let missingIdentities = service.modulesNeedingIndex(
+            from: selectedSources.map { $0.source.searchIndexSourceIdentity },
+            requirement: requirement
+        )
+        let missingNames = missingIdentities.map(\.moduleName)
+        var sourcesToIndex: [(source: any BibleSearchIndexSource, name: String)] = []
+        for identity in missingIdentities {
+            guard let source = selectedSources.first(where: {
+                $0.name == identity.moduleName
+                    && $0.source.searchIndexSourceIdentity == identity
+            })?.source else {
+                viewState = .indexFailure(
+                    moduleName: identity.moduleName,
+                    moduleDescription: moduleDescription(for: identity.moduleName),
+                    message: "The selected translation could not be opened for indexing."
+                )
+                return
+            }
+            sourcesToIndex.append((source, identity.moduleName))
+        }
+
+        let requestToken = indexRequestGate.begin()
         viewState = .creatingIndex
 
-        // Collect all modules that need indexing
-        let modulesToIndex: [(SwordModule, String)] = {
-            var list: [(SwordModule, String)] = []
-            if StrongsSearchSupport.normalizedQueryOptions(for: query) != nil {
-                let strongsModules = Self.resolveStrongsSearchModules(
-                    currentModule: swordModule,
-                    installedModules: installedBibleModules,
-                    swordManager: swordManager,
-                    searchIndexService: service
-                )
-                for mod in strongsModules where !service.hasStrongsIndex(for: mod.info.name) {
-                    list.append((mod, mod.info.name))
-                }
-                return list
-            }
-
-            // Always index the primary module
-            if let mod = swordModule, !service.hasIndex(for: mod.info.name) {
-                list.append((mod, mod.info.name))
-            }
-            // Also index any other selected modules
-            if let mgr = swordManager {
-                let selectedNames = Self.androidOrderedSelectedSearchModuleNames(
-                    selectedModuleNames: selectedModules,
-                    primaryModuleName: swordModule?.info.name,
-                    installedModules: installedBibleModules
-                )
-                for name in selectedNames where !service.hasIndex(for: name) {
-                    if let existing = list.first(where: { $0.1 == name }) {
-                        _ = existing // already queued
-                    } else if let mod = mgr.module(named: name) {
-                        list.append((mod, name))
+        indexTask = Task {
+            var activeModuleName = missingNames.first ?? fallbackModuleName
+            do {
+                for item in sourcesToIndex {
+                    try Task.checkCancellation()
+                    activeModuleName = item.name
+                    try await service.createIndex(source: item.source)
+                    try Task.checkCancellation()
+                    guard indexRequestGate.accepts(requestToken) else { return }
+                    guard service.modulesNeedingIndex(
+                        from: [item.source.searchIndexSourceIdentity],
+                        requirement: requirement
+                    ).isEmpty else {
+                        throw SearchIndexError.indexVerificationFailed(moduleName: item.name)
                     }
                 }
+                try Task.checkCancellation()
+                guard indexRequestGate.accepts(requestToken) else { return }
+                indexTask = nil
+                viewState = .ready
+                autoSearchIfNeeded()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard indexRequestGate.accepts(requestToken), !Task.isCancelled else { return }
+                indexTask = nil
+                viewState = .indexFailure(
+                    moduleName: activeModuleName,
+                    moduleDescription: moduleDescription(for: activeModuleName),
+                    message: error.localizedDescription
+                )
             }
-            return list
-        }()
-
-        Task {
-            for (mod, _) in modulesToIndex {
-                await service.createIndex(module: mod)
-            }
-            viewState = .ready
-            autoSearchIfNeeded()
         }
+    }
+
+    /**
+     Resolves one selected backend without substituting the active or another translation.
+
+     - Parameter moduleName: Persisted selected initials or JSword-compatible full name.
+     - Returns: Exact SWORD/SQLite source from the presentation snapshot, with the historical SWORD
+       fallback retained for standalone Search construction.
+     - Side effects: None.
+     - Failure modes: Missing, stale, and category-incompatible identities return nil.
+     */
+    private func resolveSearchIndexSource(
+        named moduleName: String
+    ) -> (any BibleSearchIndexSource)? {
+        if let searchIndexSourceRegistry {
+            return searchIndexSourceRegistry.source(named: moduleName)
+        }
+        if swordModule?.info.name == moduleName {
+            return swordModule
+        }
+        return swordManager?.module(named: moduleName)
+    }
+
+    /**
+     Resolves every selected module to one exact source snapshot without fallback substitution.
+
+     - Parameter moduleNames: Ordered selected module initials.
+     - Returns: Ordered source/name pairs, or `nil` if any selected identity is unavailable.
+     - Side effects: None; source metadata may read bounded filesystem attributes for fingerprinting.
+     - Failure modes: Missing or colliding stale selections fail the complete readiness operation.
+     */
+    private func resolveSearchIndexSources(
+        named moduleNames: [String]
+    ) -> [(name: String, source: any BibleSearchIndexSource)]? {
+        var resolved: [(name: String, source: any BibleSearchIndexSource)] = []
+        resolved.reserveCapacity(moduleNames.count)
+        for moduleName in moduleNames {
+            guard let source = resolveSearchIndexSource(named: moduleName),
+                  source.searchIndexModuleInfo.name == moduleName else {
+                return nil
+            }
+            resolved.append((moduleName, source))
+        }
+        return resolved
     }
 
     // MARK: - Search Execution
 
     /**
-     Executes the current search query using indexed Strong's lookup, indexed FTS, or SWORD fallback.
+     Executes the current search query using indexed Strong's lookup or indexed full-text search.
 
      The method snapshots current view state, then performs the potentially expensive work in a
      detached task so UI updates remain responsive. Results are marshalled back to the main actor.
 
      Side effects:
+     - asks the reader reference parser to consume a recognized Bible reference before text search
      - clears current results and marks the view as actively searching
      - snapshots search configuration and dispatches background work in a detached task
      - publishes result hits, summaries, and final loading state back on the main actor
 
      Failure modes:
      - if the trimmed query is empty, the method returns without starting a search
-     - if the current module, search index service, or SWORD manager are unavailable, the detached
-       search logic falls back to whichever strategies remain possible and may legitimately yield no results
+     - a missing index service or selected translation becomes an explicit search failure
+     - Lucene/FTS syntax and analyzer failures remain visible rather than becoming empty results
      - zero-hit searches are treated as a valid outcome and update the UI with empty results rather than an error
      */
     private func performSearch() {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        cancelSearchWork(clearPublishedState: false)
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            clearPublishedSearchState()
+            return
+        }
+        if onOpenReference?(trimmedQuery) == true {
+            cancelAllAsyncWork()
+            dismiss()
+            return
+        }
+        representedSearchQuery = trimmedQuery
+
+        guard let currentSearchIndexService = searchIndexService else {
+            groupedResults = nil
+            resultSummary = ""
+            searchFailureMessage = SearchIndexError.databaseUnavailable(
+                operation: "executing Search"
+            ).localizedDescription
+            isSearching = false
+            return
+        }
+
         isSearching = true
-        multiResults = nil
-        results = []
+        groupedResults = nil
+        searchFailureMessage = nil
         resultSummary = ""
 
-        let currentQuery = query
+        let currentQuery = trimmedQuery
         let currentWordMode = wordMode
         let currentScope = scopeOption
-        let currentSelectedModules = Self.androidOrderedSelectedSearchModuleNames(
-            selectedModuleNames: selectedModules,
-            primaryModuleName: swordModule?.info.name,
-            installedModules: installedBibleModules
-        )
-        let bookName = currentBook
-        let osisBookId = currentOsisBookId
-        let currentSwordModule = swordModule
-        let currentSwordManager = swordManager
-        let currentSearchIndexService = searchIndexService
-        let currentInstalledBibleModules = installedBibleModules
-        let strongsQueryOptions = StrongsSearchSupport.normalizedQueryOptions(for: currentQuery)
-        let (scopeBookName, scopeTestament) = Self.resolveScopeParams(
-            scope: currentScope, bookName: bookName
-        )
-        let swordScope = Self.swordScope(for: currentScope, osisBookId: osisBookId)
-        let strongsModules: [SwordModule] = if strongsQueryOptions != nil {
-            Self.resolveStrongsSearchModules(
-                currentModule: currentSwordModule,
-                installedModules: currentInstalledBibleModules,
-                swordManager: currentSwordManager,
-                searchIndexService: currentSearchIndexService
-            )
-        } else {
-            []
+        let currentSelectedModules = orderedSelectedModuleNames
+        guard let currentSelectedSources = resolveSearchIndexSources(named: currentSelectedModules) else {
+            groupedResults = nil
+            resultSummary = ""
+            searchFailureMessage = "A selected translation could not be opened for Search."
+            isSearching = false
+            return
         }
-        let singleModuleName = currentSelectedModules.first ?? currentSwordModule?.info.name ?? ""
+        let currentSourceIdentities = currentSelectedSources.map {
+            $0.source.searchIndexSourceIdentity
+        }
+        let osisBookId = currentOsisBookId
+        let strongsQueryOptions = StrongsSearchSupport.normalizedQueryOptions(for: currentQuery)
+        let indexedScope = Self.indexedScope(for: currentScope, osisBookId: osisBookId)
 
-        Task.detached(priority: .userInitiated) {
-            // Android parity: find-all occurrences uses canonical Strong's tokens from the
-            // module index and a Strong's-capable Bible module, not plain-text FTS.
-            if let strongsQueryOptions {
-                if !strongsModules.isEmpty {
-                    var hits: [SearchHit] = []
-                    for strongsModule in strongsModules {
-                        if let service = currentSearchIndexService,
-                           service.hasStrongsIndex(for: strongsModule.info.name) {
-                            hits = Self.convertIndexResults(service.searchStrongs(
-                                canonicalTokens: strongsQueryOptions.canonicalStrongTokens,
-                                moduleName: strongsModule.info.name,
-                                scopeBookName: scopeBookName,
-                                scopeTestament: scopeTestament
-                            ))
-                        } else {
-                            hits = StrongsSearchSupport.searchVerseHits(
-                                in: strongsModule,
-                                queryOptions: strongsQueryOptions,
-                                scope: swordScope
-                            ).map {
-                                SearchHit(
-                                    book: $0.book,
-                                    chapter: $0.chapter,
-                                    verse: $0.verse,
-                                    text: $0.previewText,
-                                    moduleName: nil
-                                )
-                            }
-                        }
-                        if !hits.isEmpty { break }
-                    }
-                    let resolvedHits = hits
-                    await MainActor.run {
-                        results = resolvedHits
-                        resultSummary = String(localized: "\(resolvedHits.count) verses in 1 translation")
-                        isSearching = false
-                    }
-                    return
+        let indexRequirement = Self.indexRequirement(for: currentQuery)
+        if let missingModuleName = currentSearchIndexService.modulesNeedingIndex(
+            from: currentSourceIdentities,
+            requirement: indexRequirement
+        ).first?.moduleName {
+            groupedResults = nil
+            resultSummary = ""
+            searchFailureMessage = nil
+            isSearching = false
+            viewState = .needsIndex(
+                moduleName: missingModuleName,
+                moduleDescription: moduleDescription(for: missingModuleName)
+            )
+            return
+        }
+
+        let requestToken = searchRequestGate.begin()
+        searchTask = Task.detached(priority: .userInitiated) {
+            do {
+                try Task.checkCancellation()
+                guard !currentSelectedModules.isEmpty else {
+                    throw SearchIndexError.indexUnavailable(moduleName: "selected translations")
                 }
-            }
 
-            if let service = currentSearchIndexService {
-                // FTS5 index search
-                if currentSelectedModules.count > 1 {
-                    let grouped = service.searchMultiple(
-                        query: currentQuery,
-                        moduleNames: currentSelectedModules,
-                        wordMode: currentWordMode,
-                        scopeBookName: scopeBookName,
-                        scopeTestament: scopeTestament
+                let grouped: SearchGroupedResults
+                if let strongsQueryOptions {
+                    grouped = try currentSearchIndexService.searchStrongsMultiple(
+                        canonicalTokens: strongsQueryOptions.canonicalStrongTokens,
+                        sourceIdentities: currentSourceIdentities,
+                        scope: indexedScope
                     )
-                    let hits = Self.convertGroupedResults(
-                        grouped,
-                        moduleOrder: currentSelectedModules
-                    )
-                    let perModule = Self.orderedGroupedModuleNames(
-                        grouped,
-                        moduleOrder: currentSelectedModules
-                    ).map { moduleName in
-                        (name: moduleName, count: grouped[moduleName]?.count ?? 0)
-                    }
-                    let totalCount = perModule.reduce(0) { $0 + $1.count }
-
-                    await MainActor.run {
-                        results = hits
-                        multiResults = MultiResultGroup(perModule: perModule, totalCount: totalCount)
-                        resultSummary = String(localized: "\(totalCount) verses in \(perModule.count) translations")
-                        isSearching = false
-                    }
                 } else {
-                    let ftsResults = service.search(
+                    grouped = try currentSearchIndexService.searchMultiple(
                         query: currentQuery,
-                        moduleName: singleModuleName,
+                        sourceIdentities: currentSourceIdentities,
                         wordMode: currentWordMode,
-                        scopeBookName: scopeBookName,
-                        scopeTestament: scopeTestament
+                        scope: indexedScope
                     )
-                    let hits = Self.convertIndexResults(ftsResults)
-
-                    await MainActor.run {
-                        results = hits
-                        resultSummary = String(localized: "\(hits.count) verses in 1 translation")
-                        isSearching = false
-                    }
                 }
-            } else {
-                // Fallback: direct SWORD search (no index service)
-                if let module = currentSwordModule {
-                    let decorated = currentWordMode.decorateQuery(currentQuery)
-                    let options = SearchOptions(
-                        query: decorated,
-                        searchType: currentWordMode.searchType,
-                        scope: swordScope
-                    )
-                    let swordResults = module.search(options)
-                    let hits: [SearchHit] = swordResults.results.prefix(5000).compactMap { result in
-                        guard let parsed = StrongsSearchSupport.parseVerseKey(result.key) else { return nil }
-                        return SearchHit(
-                            book: parsed.book, chapter: parsed.chapter,
-                            verse: parsed.verse, text: result.previewText, moduleName: nil
-                        )
-                    }
+                try Task.checkCancellation()
 
-                    await MainActor.run {
-                        results = hits
-                        resultSummary = String(localized: "\(hits.count) results")
-                        isSearching = false
-                    }
-                } else {
-                    await MainActor.run {
-                        isSearching = false
-                    }
+                await MainActor.run {
+                    guard searchRequestGate.accepts(requestToken), !Task.isCancelled else { return }
+                    searchTask = nil
+                    groupedResults = grouped
+                    let translationCount = grouped.moduleCounts.count
+                    resultSummary = String(
+                        localized: "\(grouped.groups.count) verses in \(translationCount) translations"
+                    )
+                    searchFailureMessage = nil
+                    isSearching = false
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                await MainActor.run {
+                    guard searchRequestGate.accepts(requestToken), !Task.isCancelled else { return }
+                    searchTask = nil
+                    groupedResults = nil
+                    resultSummary = ""
+                    searchFailureMessage = error.localizedDescription
+                    isSearching = false
                 }
             }
         }
     }
 
+    /** Cancels and invalidates the current search generation. */
+    private func cancelSearchWork(clearPublishedState: Bool) {
+        searchTask?.cancel()
+        searchTask = nil
+        searchRequestGate.invalidate()
+        isSearching = false
+        if clearPublishedState {
+            clearPublishedSearchState()
+        }
+    }
+
+    /** Cancels and invalidates the current index-creation generation. */
+    private func cancelIndexWork() {
+        indexTask?.cancel()
+        indexTask = nil
+        indexRequestGate.invalidate()
+    }
+
+    /** Clears results and errors that no longer describe the current Search input. */
+    private func clearPublishedSearchState() {
+        groupedResults = nil
+        resultSummary = ""
+        searchFailureMessage = nil
+        isSearching = false
+    }
+
+    /** Cancels every asynchronous lane owned by this Search presentation. */
+    private func cancelAllAsyncWork() {
+        cancelSearchWork(clearPublishedState: false)
+        cancelIndexWork()
+    }
+
     // MARK: - Helpers
+
+    /** Returns whether edited query text invalidates the currently represented Search state. */
+    nonisolated static func shouldInvalidateSearch(
+        representedQuery: String?,
+        changedQuery: String
+    ) -> Bool {
+        guard let representedQuery else { return false }
+        return changedQuery.trimmingCharacters(in: .whitespacesAndNewlines) != representedQuery
+    }
+
+    /** Selects the index facet required by the normalized Search query. */
+    nonisolated static func indexRequirement(for query: String) -> SearchIndexRequirement {
+        StrongsSearchSupport.normalizedQueryOptions(for: query) == nil ? .text : .strongs
+    }
 
     /**
      Sorts Search translation picker modules using Android's abbreviation ordering.
@@ -1870,163 +2106,17 @@ public struct SearchView: View {
         return "\(baseLabel) (\(unindexedStatus))"
     }
 
-    /**
-     Resolves `SearchIndexService` scope parameters from the selected scope choice.
-
-     - Parameters:
-       - scope: Current scope selection from the UI.
-       - bookName: User-visible current book name used for the current-book scope.
-     - Returns: Book-name and testament filters appropriate for indexed search APIs.
-     */
-    nonisolated private static func resolveScopeParams(
-        scope: ScopeChoice, bookName: String
-    ) -> (scopeBookName: String?, scopeTestament: String?) {
-        switch scope {
-        case .wholeBible: return (nil, nil)
-        case .oldTestament: return (nil, "OT")
-        case .newTestament: return (nil, "NT")
-        case .currentBook: return (bookName, nil)
-        }
-    }
-
-    /**
-     Converts a scope choice into the SWORD scope string used by non-indexed search APIs.
-
-     - Parameters:
-       - choice: Current scope selection from the UI.
-       - osisBookId: Current OSIS book identifier for current-book searches.
-     - Returns: SWORD scope expression or `nil` for whole-Bible search.
-     */
-    nonisolated private static func swordScope(for choice: ScopeChoice, osisBookId: String) -> String? {
+    /** Converts the UI scope into the canonical fields persisted by the FTS index. */
+    nonisolated private static func indexedScope(
+        for choice: ScopeChoice,
+        osisBookId: String
+    ) -> SearchCanonicalScope {
         switch choice {
-        case .wholeBible: return nil
-        case .oldTestament: return "Gen-Mal"
-        case .newTestament: return "Matt-Rev"
-        case .currentBook: return osisBookId
+        case .wholeBible: return .wholeBible
+        case .oldTestament: return .oldTestament
+        case .newTestament: return .newTestament
+        case .currentBook: return .currentBook(osisBookId: osisBookId)
         }
-    }
-
-    /**
-     Converts indexed single-module results into list rows.
-
-     - Parameter ftsResults: Raw index-search results returned by `SearchIndexService`.
-     - Returns: Passage-level hits suitable for UI presentation.
-     */
-    nonisolated private static func convertIndexResults(
-        _ ftsResults: [SearchIndexService.IndexSearchResult]
-    ) -> [SearchHit] {
-        ftsResults.compactMap { result in
-            guard let parsed = StrongsSearchSupport.parseVerseKey(result.key) else { return nil }
-            return SearchHit(
-                book: parsed.book, chapter: parsed.chapter,
-                verse: parsed.verse,
-                text: SearchIndexService.cleanText(result.snippet),
-                moduleName: nil
-            )
-        }
-    }
-
-    /**
-     Flattens grouped multi-translation results into one ordered hit list.
-
-     - Parameters:
-       - grouped: Raw grouped index results keyed by module name.
-       - moduleOrder: Android-ordered module names selected for the search.
-     - Returns: Flat passage-level hits annotated with their source module name.
-     - Side effects: none.
-     - Failure modes: Groups whose module names are not in `moduleOrder` are appended
-       alphabetically so no Search hits are dropped.
-     */
-    nonisolated private static func convertGroupedResults(
-        _ grouped: [String: [SearchIndexService.IndexSearchResult]],
-        moduleOrder: [String]
-    ) -> [SearchHit] {
-        var allHits: [SearchHit] = []
-        for moduleName in orderedGroupedModuleNames(grouped, moduleOrder: moduleOrder) {
-            for result in grouped[moduleName] ?? [] {
-                guard let parsed = StrongsSearchSupport.parseVerseKey(result.key) else { continue }
-                allHits.append(SearchHit(
-                    book: parsed.book, chapter: parsed.chapter,
-                    verse: parsed.verse,
-                    text: SearchIndexService.cleanText(result.snippet),
-                    moduleName: moduleName
-                ))
-            }
-        }
-        return allHits
-    }
-
-    /**
-     Resolves grouped Search result module names in selected Android order.
-
-     `SearchIndexService.searchMultiple` returns a dictionary, so iOS must restore Android's
-     primary-first selected module order before building summaries or flattening rows. Any
-     unexpected dictionary keys are appended alphabetically to preserve data without hiding drift.
-
-     - Parameters:
-       - grouped: Raw grouped Search results keyed by module abbreviation.
-       - moduleOrder: Android-ordered selected modules used for the search request.
-     - Returns: Module names to render for grouped Search summaries and rows.
-     - Side effects: none.
-     - Failure modes: Missing selected modules are omitted from the ordered prefix when the grouped
-       response has no entry for them.
-     */
-    nonisolated private static func orderedGroupedModuleNames(
-        _ grouped: [String: [SearchIndexService.IndexSearchResult]],
-        moduleOrder: [String]
-    ) -> [String] {
-        let groupedNames = Set(grouped.keys)
-        var orderedNames = moduleOrder.filter { groupedNames.contains($0) }
-        let remainingNames = groupedNames.subtracting(orderedNames).sorted()
-        orderedNames.append(contentsOf: remainingNames)
-        return orderedNames
-    }
-
-    /**
-     Resolves the effective module for Strong's "find all occurrences" searches.
-
-     Android uses the current Bible when it has Strong's data; otherwise it chooses a default
-     Strong's Bible, preferring one that already has a completed index. This resolver returns at
-     most one module so iOS does not require indexing unrelated Strong's translations before a
-     single find-all search can run.
-
-     - Parameters:
-       - currentModule: Currently open Bible module, preferred when it advertises Strong's support.
-       - installedModules: Installed Bible modules available to the reader.
-       - swordManager: Module manager used to resolve the fallback Strong's-capable module.
-       - searchIndexService: Optional index service used to prefer an already-indexed fallback
-         module when the current module is not Strong's-capable.
-     - Returns: A single Strong's-capable module when one can be resolved, otherwise an empty list.
-     */
-    nonisolated private static func resolveStrongsSearchModules(
-        currentModule: SwordModule?,
-        installedModules: [ModuleInfo],
-        swordManager: SwordManager?,
-        searchIndexService: SearchIndexService?
-    ) -> [SwordModule] {
-        if let currentModule, currentModule.info.features.contains(.strongsNumbers) {
-            return [currentModule]
-        }
-
-        guard let swordManager else { return [] }
-        let strongsBibleInfos = installedModules
-            .enumerated()
-            .filter { $0.element.features.contains(.strongsNumbers) }
-            .sorted { lhs, rhs in
-                let leftIndexed = searchIndexService?.hasIndex(for: lhs.element.name) ?? false
-                let rightIndexed = searchIndexService?.hasIndex(for: rhs.element.name) ?? false
-                if leftIndexed != rightIndexed {
-                    return leftIndexed && !rightIndexed
-                }
-                return lhs.offset < rhs.offset
-            }
-            .map(\.element)
-
-        guard let defaultInfo = strongsBibleInfos.first,
-              let defaultModule = swordManager.module(named: defaultInfo.name) else {
-            return []
-        }
-        return [defaultModule]
     }
 
 }

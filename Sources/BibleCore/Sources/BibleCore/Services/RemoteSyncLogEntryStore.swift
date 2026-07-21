@@ -216,6 +216,24 @@ public struct RemoteSyncLogEntry: Codable, Sendable, Equatable {
 }
 
 /**
+ Typed failures raised when persisted `LogEntry` state cannot be trusted for synchronization.
+
+ Strict readers report the exact storage key so callers can diagnose or reset corrupt local sync
+ metadata. No malformed row is ignored and duplicate logical identities never reach a trapping
+ `Dictionary(uniqueKeysWithValues:)` initializer.
+ */
+public enum RemoteSyncLogEntryReadError: Error, Equatable {
+    /// One settings payload was not valid UTF-8 JSON for `RemoteSyncLogEntry`.
+    case malformedPayload(storageKey: String)
+
+    /// The decoded Android identity does not match the settings key that contained it.
+    case storageKeyMismatch(storageKey: String, expectedKey: String)
+
+    /// More than one settings row decoded to the same Android composite identity.
+    case duplicateIdentity(identityKey: String, firstStorageKey: String, duplicateStorageKey: String)
+}
+
+/**
 Persists Android `LogEntry` rows in the local settings table on iOS.
 
 Android uses a dedicated `LogEntry` SQLite table per syncable database. iOS does not yet expose
@@ -229,8 +247,9 @@ Data dependencies:
 Side effects:
 - writes and deletes local `Setting` rows in the `LocalStore`
 
-Failure modes:
-- malformed stored JSON values are ignored during reads
+ Failure modes:
+- `entriesStrict(for:)` reports malformed, mismatched, and duplicate rows as typed errors
+- the legacy `entries(for:)` reader retains its compatibility behavior and ignores malformed JSON
 - underlying `SettingsStore` writes swallow save errors, so callers should treat persistence as
   best-effort sync bookkeeping rather than transactional state
 
@@ -347,6 +366,50 @@ public final class RemoteSyncLogEntryStore {
                 return try? decoder.decode(RemoteSyncLogEntry.self, from: data)
             }
             .sorted(by: Self.replaySort)
+    }
+
+    /**
+     Reads and validates every stored Android log row for synchronization-critical work.
+
+     - Parameter category: Logical sync category to inspect.
+     - Returns: Complete validated log rows sorted by the shared deterministic conflict order.
+     - Side Effects: Reads category-scoped local settings.
+     - Throws:
+       - `RemoteSyncLogEntryReadError.malformedPayload` for invalid UTF-8 or JSON
+       - `RemoteSyncLogEntryReadError.storageKeyMismatch` when payload identity differs from its key
+       - `RemoteSyncLogEntryReadError.duplicateIdentity` when two rows represent one Android key
+     */
+    public func entriesStrict(for category: RemoteSyncCategory) throws -> [RemoteSyncLogEntry] {
+        var decodedRows: [(storageKey: String, identityKey: String, entry: RemoteSyncLogEntry)] = []
+
+        for stored in settingsStore.entries(withPrefix: prefix(for: category)).sorted(by: { $0.key < $1.key }) {
+            guard let data = stored.value.data(using: .utf8),
+                  let decoded = try? decoder.decode(RemoteSyncLogEntry.self, from: data) else {
+                throw RemoteSyncLogEntryReadError.malformedPayload(storageKey: stored.key)
+            }
+            decodedRows.append((stored.key, key(for: category, entry: decoded), decoded))
+        }
+
+        var storageKeyByIdentity: [String: String] = [:]
+        for row in decodedRows {
+            if let firstStorageKey = storageKeyByIdentity[row.identityKey] {
+                throw RemoteSyncLogEntryReadError.duplicateIdentity(
+                    identityKey: row.identityKey,
+                    firstStorageKey: firstStorageKey,
+                    duplicateStorageKey: row.storageKey
+                )
+            }
+            storageKeyByIdentity[row.identityKey] = row.storageKey
+        }
+
+        for row in decodedRows where row.storageKey != row.identityKey {
+            throw RemoteSyncLogEntryReadError.storageKeyMismatch(
+                storageKey: row.storageKey,
+                expectedKey: row.identityKey
+            )
+        }
+
+        return decodedRows.map(\.entry).sorted(by: RemoteSyncLogEntryConflictOrder.precedes)
     }
 
     /**

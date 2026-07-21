@@ -14,6 +14,7 @@ import UniformTypeIdentifiers
  Data dependencies:
  - `modelContext` persists started or deleted plans
  - `plans` is a live SwiftData query ordered by most recent start date
+ - action callbacks supply exact plan versification and parent-owned active-module behavior
 
  Side effects:
  - starting a template creates a new persisted reading plan
@@ -50,21 +51,49 @@ public struct ReadingPlanListView: View {
     /// New plan identifier waiting for the selector sheet to dismiss before navigation.
     @State private var pendingStartedPlanID: UUID?
 
+    /// Exact Android plan code selected through the `reading_plan` preference.
+    @State private var selectedPlanCode: String?
+
+    /// Fail-visible durable definition recovery error encountered before catalog use.
+    @State private var definitionRecoveryError: String?
+
+    /// Loads an optional raw versification, throwing when the plan definition is unavailable.
+    let planVersificationResolver: ReadingPlanVersificationResolver?
+
+    /// Performs Android-compatible active-module mapping and the requested Read/Speak operation.
+    let onPerformDailyReadingAction: DailyReadingActionHandler?
+
+    /// Closes the reading-plan stack after a successful, durably recorded Read action.
+    let onReadCompleted: (@MainActor () -> Void)?
+
     /**
      Creates the reading-plan list screen.
 
-     - Note: This initializer has no inputs and performs no side effects.
+     - Parameters:
+       - planVersificationResolver: Loads one plan code's optional raw JSword versification value,
+         throwing when the definition itself is unavailable.
+       - onPerformDailyReadingAction: Maps, validates, and performs typed Daily Reading requests.
+       - onReadCompleted: Returns from Daily Reading to the owning Bible reader after progress saves.
+     - Note: Initialization performs no side effects.
      */
-    public init() {}
+    public init(
+        planVersificationResolver: ReadingPlanVersificationResolver? = nil,
+        onPerformDailyReadingAction: DailyReadingActionHandler? = nil,
+        onReadCompleted: (@MainActor () -> Void)? = nil
+    ) {
+        self.planVersificationResolver = planVersificationResolver
+        self.onPerformDailyReadingAction = onPerformDailyReadingAction
+        self.onReadCompleted = onReadCompleted
+    }
 
     /// Active plans still in progress.
     private var activePlans: [ReadingPlan] {
-        plans.filter { $0.isActive }
+        plans.filter { $0.planCode == selectedPlanCode }
     }
 
     /// Completed plans no longer marked active.
     private var completedPlans: [ReadingPlan] {
-        plans.filter { !$0.isActive }
+        plans.filter { $0.planCode != selectedPlanCode }
     }
 
     /**
@@ -102,20 +131,28 @@ public struct ReadingPlanListView: View {
         }
         .sheet(isPresented: $showAvailablePlans) {
             NavigationStack {
-                AvailablePlansView { template in
-                    let plan = ReadingPlanService.startPlan(
-                        template: template,
-                        modelContext: modelContext
-                    )
-                    pendingStartedPlanID = plan.id
-                    showAvailablePlans = false
-                }
+                AvailablePlansView(
+                    onSelect: startSelectedTemplate,
+                    onImport: importAndStartCustomPlan
+                )
             }
             .presentationDetents([.large])
         }
         .onChange(of: showAvailablePlans) { _, isPresented in
             guard !isPresented else { return }
             navigateToPendingStartedPlan()
+        }
+        .onAppear(perform: recoverDefinitionsAndReconcileSelection)
+        .alert(
+            String(localized: "error", defaultValue: "Error"),
+            isPresented: Binding(
+                get: { definitionRecoveryError != nil },
+                set: { if !$0 { definitionRecoveryError = nil } }
+            )
+        ) {
+            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
+        } message: {
+            Text(definitionRecoveryError ?? "")
         }
     }
 
@@ -162,7 +199,12 @@ public struct ReadingPlanListView: View {
     private func readingPlanListDestination(_ route: ReadingPlanListRoute) -> some View {
         switch route {
         case .dailyReading(let planID):
-            DailyReadingView(planId: planID)
+            DailyReadingView(
+                planId: planID,
+                planVersificationResolver: planVersificationResolver,
+                onPerformAction: onPerformDailyReadingAction,
+                onReadCompleted: onReadCompleted
+            )
         }
     }
 
@@ -173,7 +215,12 @@ public struct ReadingPlanListView: View {
                 Section(String(localized: "reading_plan_active")) {
                     ForEach(activePlans) { plan in
                         NavigationLink {
-                            DailyReadingView(planId: plan.id)
+                            DailyReadingView(
+                                planId: plan.id,
+                                planVersificationResolver: planVersificationResolver,
+                                onPerformAction: onPerformDailyReadingAction,
+                                onReadCompleted: onReadCompleted
+                            )
                         } label: {
                             ActivePlanRow(plan: plan)
                         }
@@ -193,9 +240,14 @@ public struct ReadingPlanListView: View {
             }
 
             if !completedPlans.isEmpty {
-                Section(String(localized: "reading_plan_completed")) {
+                Section(String(localized: "reading_plans")) {
                     ForEach(completedPlans) { plan in
-                        CompletedPlanRow(plan: plan)
+                        Button {
+                            selectAndOpen(plan)
+                        } label: {
+                            ActivePlanRow(plan: plan)
+                        }
+                        .buttonStyle(.plain)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     deletePlan(plan)
@@ -247,10 +299,91 @@ public struct ReadingPlanListView: View {
 
     /// Deletes one persisted plan and lets the live query refresh the list sections.
     private func deletePlan(_ plan: ReadingPlan) {
-        withAnimation {
-            modelContext.delete(plan)
+        do {
+            try ReadingPlanService.resetPlan(
+                plan,
+                modelContext: modelContext,
+                progressStore: ReadingPlanProgressStore(
+                    modelContext: modelContext,
+                    settingsStore: SettingsStore(modelContext: modelContext)
+                ),
+                selectionStore: selectionStore
+            )
+            withAnimation {
+                selectedPlanCode = selectionStore.selectedPlanCode
+            }
+        } catch {
+            definitionRecoveryError = error.localizedDescription
         }
-        try? modelContext.save()
+    }
+
+    /// Android selected-plan preference store for this view's persistence context.
+    private var selectionStore: ReadingPlanSelectionStore {
+        ReadingPlanSelectionStore(settingsStore: SettingsStore(modelContext: modelContext))
+    }
+
+    /// Migrates legacy flags and refreshes the exact Android selected-plan code.
+    private func reconcileSelection() throws {
+        selectedPlanCode = try selectionStore.reconcile(
+            plans,
+            modelContext: modelContext
+        )?.planCode
+    }
+
+    /** Recovers definition publication before any reading-plan catalog or selection lookup. */
+    private func recoverDefinitionsAndReconcileSelection() {
+        do {
+            try ReadingPlanService.recoverCustomPlanDefinitionPublication(
+                settingsStore: SettingsStore(modelContext: modelContext)
+            )
+            definitionRecoveryError = nil
+            try reconcileSelection()
+        } catch {
+            definitionRecoveryError = error.localizedDescription
+        }
+    }
+
+    /** Starts one bundled or already-installed template through the existing selection path. */
+    private func startSelectedTemplate(_ template: ReadingPlanTemplate) {
+        do {
+            let plan = try ReadingPlanService.startPlan(
+                template: template,
+                modelContext: modelContext,
+                selectionStore: selectionStore
+            )
+            finishStartingPlan(plan)
+        } catch {
+            definitionRecoveryError = error.localizedDescription
+        }
+    }
+
+    /** Imports exact bytes and starts or rebuilds their plan through one durable mutation path. */
+    private func importAndStartCustomPlan(fileName: String, propertiesData: Data) throws {
+        let plan = try ReadingPlanService.importAndStartCustomPlan(
+            fileName: fileName,
+            propertiesData: propertiesData,
+            modelContext: modelContext,
+            settingsStore: SettingsStore(modelContext: modelContext)
+        )
+        finishStartingPlan(plan)
+    }
+
+    /** Updates sheet and navigation state after either start path returns a persisted plan. */
+    private func finishStartingPlan(_ plan: ReadingPlan) {
+        selectedPlanCode = plan.planCode
+        pendingStartedPlanID = plan.id
+        showAvailablePlans = false
+    }
+
+    /// Selects an already-started plan without deleting another plan's state, then opens it.
+    private func selectAndOpen(_ plan: ReadingPlan) {
+        do {
+            try selectionStore.select(plan, among: plans, modelContext: modelContext)
+            selectedPlanCode = plan.planCode
+            activeReadingPlanRoute = .dailyReading(plan.id)
+        } catch {
+            definitionRecoveryError = error.localizedDescription
+        }
     }
 }
 
@@ -344,6 +477,9 @@ private struct CompletedPlanRow: View {
 private struct AvailablePlansView: View {
     /// Callback invoked when the user chooses a plan template to start.
     let onSelect: (ReadingPlanTemplate) -> Void
+
+    /// Byte-preserving custom import owned by the parent model/settings transaction.
+    let onImport: (_ fileName: String, _ propertiesData: Data) throws -> Void
 
     /// Dismiss action for the sheet.
     @Environment(\.dismiss) private var dismiss
@@ -496,8 +632,8 @@ private struct AvailablePlansView: View {
 
      Side effects:
      - starts and stops security-scoped resource access for the selected file
-     - parses custom `.properties`-style plan text through `ReadingPlanService`
-     - updates `importError` or forwards the parsed template to `onSelect`
+     - forwards original custom `.properties` bytes without transcoding
+     - updates `importError` or invokes the parent's coordinated import transaction
      */
     private func handleCustomPlanImport(_ result: Result<[URL], Error>) {
         switch result {
@@ -506,22 +642,22 @@ private struct AvailablePlansView: View {
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
-            guard let data = try? Data(contentsOf: url),
-                  let text = String(data: data, encoding: .utf8) ??
-                    String(data: data, encoding: .isoLatin1) else {
+            guard let data = try? ReadingPlanService.readCustomPlanDefinitionData(from: url) else {
                 importError = String(localized: "reading_plan_import_error_read")
                 return
             }
 
-            let name = url.deletingPathExtension().lastPathComponent
-                .replacingOccurrences(of: "_", with: " ")
-            guard let template = ReadingPlanService.importCustomPlan(name: name, propertiesText: text) else {
+            do {
+                try onImport(
+                    url.lastPathComponent,
+                    data
+                )
+            } catch {
                 importError = String(localized: "reading_plan_import_error_format")
                 return
             }
 
             importError = nil
-            onSelect(template)
 
         case .failure(let error):
             importError = error.localizedDescription

@@ -23,6 +23,15 @@ struct BibleReaderWordLookupDocumentBuilder {
         /// Short module label shown in Vue tabs.
         let abbreviation: String
 
+        /// Source SWORD versification, or `nil` for non-SWORD custom documents.
+        let v11n: String?
+
+        /// Source language code.
+        let language: String
+
+        /// Source reading direction.
+        let direction: String
+
         /// Resolves the first matching dictionary key variant for this module.
         let lookup: ([String]) -> BibleReaderStrongsDocumentBuilder.DictionaryLookupResult?
 
@@ -40,10 +49,16 @@ struct BibleReaderWordLookupDocumentBuilder {
         init(
             name: String,
             abbreviation: String,
+            v11n: String? = nil,
+            language: String = "en",
+            direction: String = "ltr",
             lookup: @escaping ([String]) -> BibleReaderStrongsDocumentBuilder.DictionaryLookupResult?
         ) {
             self.name = name
             self.abbreviation = abbreviation
+            self.v11n = v11n
+            self.language = language
+            self.direction = direction
             self.lookup = lookup
         }
     }
@@ -86,6 +101,37 @@ struct BibleReaderWordLookupDocumentBuilder {
                 swordManager: manager,
                 disabledDictionaryNames: disabled
             )
+        }
+    }
+
+    /**
+     Creates a production builder from Android's global SWORD/SQLite dictionary registry.
+
+     - Parameters:
+       - installedDictionarySources: Deferred globally resolved dictionary inventory.
+       - disabledDictionaryNames: Deferred inverse selected-word preference set.
+     - Side effects: None during construction; each availability/lookup call reads current
+       preferences and invokes exact backend lookups on enabled sources.
+     - Failure modes: Wrong-category, Strong's/morphology, disabled, and unreadable sources are
+       omitted; an empty result follows the normal not-found path.
+     */
+    init(
+        installedDictionarySources: @escaping () -> [BibleReaderInstalledDictionarySource],
+        disabledDictionaryNames: @escaping () -> Set<String>
+    ) {
+        self.modules = {
+            let disabled = disabledDictionaryNames()
+            return installedDictionarySources().compactMap { source in
+                let info = source.info
+                guard info.category == .dictionary,
+                      !info.features.contains(.greekDef),
+                      !info.features.contains(.hebrewDef),
+                      !info.features.contains(.greekParse),
+                      !disabled.contains(info.name) else {
+                    return nil
+                }
+                return Self.dictionaryModule(source)
+            }
         }
     }
 
@@ -147,6 +193,9 @@ struct BibleReaderWordLookupDocumentBuilder {
                 keyName: query,
                 bookInitials: module.name,
                 bookAbbreviation: module.abbreviation,
+                v11n: module.v11n,
+                language: module.language,
+                direction: module.direction,
                 features: OsisFeatures(),
                 isNativeHtml: lookup.isNativeHtml
             ))
@@ -186,6 +235,9 @@ struct BibleReaderWordLookupDocumentBuilder {
                 DictionaryModule(
                     name: module.info.name,
                     abbreviation: String(module.info.name.prefix(10)),
+                    v11n: VersificationMapper.versificationName(for: module),
+                    language: module.info.language.isEmpty ? "en" : module.info.language,
+                    direction: module.info.isRightToLeft ? "rtl" : "ltr",
                     lookup: { keyOptions in
                         BibleReaderStrongsDocumentBuilder.lookupInModule(
                             module,
@@ -196,6 +248,20 @@ struct BibleReaderWordLookupDocumentBuilder {
             )
         }
         return result
+    }
+
+    /** Projects one globally resolved SWORD/SQLite dictionary into the lookup facade. */
+    private static func dictionaryModule(
+        _ source: BibleReaderInstalledDictionarySource
+    ) -> DictionaryModule {
+        DictionaryModule(
+            name: source.info.name,
+            abbreviation: source.abbreviation,
+            v11n: source.versificationName,
+            language: source.info.language.isEmpty ? "en" : source.info.language,
+            direction: source.info.isRightToLeft ? "rtl" : "ltr",
+            lookup: { source.lookup(keyOptions: $0) }
+        )
     }
 
     /**

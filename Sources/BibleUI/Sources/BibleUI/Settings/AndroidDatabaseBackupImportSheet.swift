@@ -328,7 +328,7 @@ private struct AndroidDatabaseBackupSectionRow: View {
      Human-readable metadata summary for the row.
      */
     private var detailText: String {
-        var pieces = section.hasDatabaseFile
+        let pieces = section.hasDatabaseFile
             ? [
                 String(
                     localized: "android_backup_database_version",

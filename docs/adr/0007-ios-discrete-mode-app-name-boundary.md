@@ -1,4 +1,4 @@
-# 0007: iOS Discrete Mode App Name Boundary
+# 0007: iOS Discrete SKU and Runtime Icon Boundary
 
 Status: Accepted
 
@@ -32,50 +32,61 @@ set.
 
 ## Decision
 
-iOS discrete mode is an adapted parity implementation, not a complete runtime
-identity swap.
+iOS ships two explicit identity contracts:
 
-iOS must:
+1. The standard `AndBible` target keeps the optional runtime `discrete_mode`
+   adaptation. It may switch to the bundled `CalculatorIcon`, but its signed
+   display name remains AndBible because iOS cannot rename an installed bundle.
+   Product copy must describe this as icon-only and warn that the real signed
+   identity remains discoverable in system app information.
+2. The `AndBibleDiscrete` target is the Android-discrete-flavor equivalent. It
+   builds a separately installable `Calculator.app` with a fixed Calculator
+   display name, calculator primary icon, distinct bundle identifier, distinct
+   CloudKit container, and calculator gate enforced as a target invariant before
+   SwiftUI startup and throughout the process lifetime.
 
-- use `UIApplication.setAlternateIconName("CalculatorIcon")` when
-  `discrete_mode` is enabled and restore the primary icon when disabled
-- package iPhone and iPad alternate icon resources in `CFBundleIcons` and
-  `CFBundleIcons~ipad`
-- keep `CFBundleDisplayName` fixed for the installed app bundle
-- keep settings and help copy honest that iOS changes the launcher icon only and
-  cannot change the app display name at runtime
+Each target owns a concrete `ANDBIBLE_CLOUDKIT_CONTAINER_IDENTIFIER` build
+setting. Xcode writes it to the processed Info.plist as
+`AndBibleCloudKitContainerIdentifier`; the app validates that value once and
+injects the same typed identifier into both SwiftData and `SyncService`.
+Standard uses `iCloud.org.andbible.ios`, while Calculator uses
+`iCloud.com.app.calculator.ios`. There is no runtime fallback between them.
 
-iOS must not:
+The targets also own separate Info.plist source files. Standard advertises the
+SWORD ZIP, EPUB, and font document types. Calculator advertises no external
+document types, matching Android's discrete flavor, while retaining the shared
+in-app import workflow.
 
-- promise that the app name changes when the in-app `discrete_mode` toggle is
-  enabled
-- try to mutate Info.plist, localized bundle resources, or signed app metadata
-  at runtime
-- implement an app-controlled shortcut, notification label, or internal title
-  change as a substitute for changing the Home Screen app name
+The discrete target must hide the runtime `discrete_mode` and `show_calculator`
+switches because its identity and launch gate are target invariants. It keeps
+Calculator-specific security help and Calculator PIN controls. The standard
+target keeps those switches, icon-only disclosure, and a link directing users
+who need stronger protection to the Calculator product documentation.
 
-If product requirements need Android discrete-flavor semantics on iOS, that is a
-separate distribution decision: create a dedicated target/SKU/build flavor with
-a fixed calculator display name and icon, then review App Store, signing,
-localization, support, and migration implications. It should not be implemented
-as a runtime setting inside the standard iOS app bundle.
+Both targets share application code and Android-compatible settings data. The
+target boundary owns product identity; no in-app shortcut, notification label,
+or internal title may be used as a substitute for signed bundle metadata.
 
 ## Consequences
 
-- `discrete_mode` remains an adapted parity implementation under this ADR.
-- The standard iOS app can show a calculator alternate icon, including iPad's
-  required 152x152 alternate icon asset, but its Home Screen label remains the
-  bundle display name.
-- Tests should guard the alternate icon metadata and bundled PNG size contract,
-  not assert a runtime app-name change.
-- Future copy changes must preserve the iOS limitation instead of importing the
-  Android "rename the app" summary verbatim.
-- A future fully disguised iOS app identity requires a separate build/distribution
-  ADR rather than weakening this runtime boundary.
+- The standard app's runtime toggle remains an icon-only platform adaptation.
+- Users who require the full disguised identity install the separately signed
+  Calculator SKU, matching Android's discrete distribution model.
+- App Store records, provisioning profiles, and the
+  `iCloud.com.app.calculator.ios` container must be configured before distributing
+  the Calculator SKU.
+- Structural tests and CI build both target identities so product metadata cannot
+  silently collapse back into one bundle. CI inspects processed Info.plists and
+  ad-hoc-signed simulator entitlements, installs Calculator, and executes its
+  launch-gate/settings-boundary smoke test.
+- Repository checks cannot establish Apple-side provisioning. Distribution
+  requires the signed-archive and external-evidence gate documented in
+  `docs/howto/distribution-release-readiness.md`.
 
 ## Related
 
 - [ADR 0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)
+- [Distribution release readiness](../howto/distribution-release-readiness.md)
 - [Apple CFBundleDisplayName](https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundledisplayname)
 - [Apple CFBundleIcons](https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundleicons)
 - [Apple alternate app icons](https://developer.apple.com/documentation/xcode/configuring-your-app-to-use-alternate-app-icons)

@@ -4,6 +4,199 @@ import XCTest
 @testable import SwordKit
 
 final class SwordManagerTests: XCTestCase {
+    /**
+     Verifies manager-level unlock rejects invalid requests without manufacturing module state.
+
+     The setup uses an empty SWORD root so the contract is deterministic with both the real and stub
+     bridge. A failure means picker unlock could report success for a missing module or empty key.
+     */
+    func testUnlockModuleRejectsMissingModuleAndEmptyCipherKey() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: moduleRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+
+        XCTAssertFalse(manager.unlockModule(named: "MISSING", withCipherKey: "secret"))
+        XCTAssertFalse(manager.unlockModule(named: "MISSING", withCipherKey: ""))
+    }
+
+    /**
+     Verifies decrypted Bible, commentary, dictionary, and general-book entries must form
+     renderable OSIS before a key is accepted.
+
+     - Setup: Supplies representative in-memory OSIS fragments for every encrypted SWORD document
+       category; no native backend state is mocked.
+     - Expected result: Each category-specific fragment parses into renderable document content.
+     - Side effects: Parses in-memory fixtures only.
+     - Failure meaning: A category can persist unauthenticated ciphertext despite the native
+       backend returning success.
+     */
+    func testCipherEntryValidationAcceptsRenderableAndroidDocumentFormats() {
+        let fixtures: [(ModuleCategory, String)] = [
+            (.bible, #"<verse osisID="Gen.1.1">In the beginning</verse>"#),
+            (.commentary, #"<verse osisID="Gen.1.1"><p>Commentary text</p></verse>"#),
+            (.dictionary, #"<entryFree><orth>agape</orth><p>Love</p></entryFree>"#),
+            (.generalBook, #"<div><title>Introduction</title><p>Book text</p></div>"#),
+        ]
+
+        for (category, content) in fixtures {
+            XCTAssertTrue(
+                SwordManager.cipherEntryIsStructurallyReadable(
+                    osisFragment: content,
+                    category: category,
+                    moduleInitials: "LOCKED"
+                ),
+                "Expected structurally valid \(category.rawValue) content to pass."
+            )
+        }
+    }
+
+    /**
+     Verifies empty, control-corrupted, and malformed decrypted bytes fail independently of SWORD's
+     backend error flag.
+
+     - Setup: Supplies replacement/control scalars plus empty and truncated OSIS fragments.
+     - Expected result: Raw plausibility and category-aware structural checks reject every fixture.
+     - Side effects: Parses in-memory fixtures only.
+     - Failure meaning: A wrong raw-module key can still be persisted when ciphertext happens not to
+       trigger `SWModule_popError`.
+     */
+    func testCipherEntryValidationRejectsUnauthenticatedGarbage() {
+        XCTAssertFalse(SwordManager.isPlausibleDecryptedModuleText("bad\u{0097}text"))
+        XCTAssertFalse(SwordManager.isPlausibleDecryptedModuleText("bad\u{E000}text"))
+        XCTAssertFalse(SwordManager.cipherEntryIsStructurallyReadable(
+            osisFragment: "",
+            category: .bible,
+            moduleInitials: "LOCKED"
+        ))
+        XCTAssertFalse(SwordManager.cipherEntryIsStructurallyReadable(
+            osisFragment: "<p>cipher\u{0001}text</p>",
+            category: .dictionary,
+            moduleInitials: "LOCKED"
+        ))
+        XCTAssertFalse(SwordManager.cipherEntryIsStructurallyReadable(
+            osisFragment: "<entryFree><p>truncated",
+            category: .generalBook,
+            moduleInitials: "LOCKED"
+        ))
+    }
+
+    /**
+     Verifies a real encrypted RawLD module rejects a wrong key without persistence and remains
+     retryable with the correct key.
+
+     - Setup: Loads a native Sapphire II encrypted RawLD record through libsword with an empty
+       `CipherKey`, then submits an ordinary wrong passphrase before the fixture's real key.
+     - Expected result: The wrong key leaves byte-identical config and locked inventory; the correct
+       retry decrypts content and persists the verified key.
+     - Side effects: Writes a native RawLD index/record, encrypts the entry with SWORD's Sapphire II
+       format, loads it through libsword, and rewrites only the temporary config after success.
+     - Failure meaning: Wrong keys can mark encrypted modules unlocked, poison durable config, or
+       prevent a later correct-key retry.
+     */
+    func testEncryptedRawLDWrongKeyIsUnpersistedAndCorrectKeyRemainsRetryable() throws {
+        let fixture = try makeEncryptedRawLDFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let originalConfig = try Data(contentsOf: fixture.configURL)
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        let initiallyLocked = try XCTUnwrap(
+            manager.installedModules().first { $0.name == "LOCKED" }
+        )
+        XCTAssertTrue(initiallyLocked.isEncrypted)
+        XCTAssertFalse(initiallyLocked.isUnlocked)
+
+        XCTAssertFalse(
+            manager.unlockModule(named: "LOCKED", withCipherKey: "wrong-test-key")
+        )
+        XCTAssertEqual(try Data(contentsOf: fixture.configURL), originalConfig)
+        XCTAssertFalse(
+            manager.installedModules().first { $0.name == "LOCKED" }?.isUnlocked ?? true
+        )
+
+        XCTAssertTrue(manager.unlockModule(named: "LOCKED", withCipherKey: fixture.cipherKey))
+        let persistedConfig = try String(contentsOf: fixture.configURL, encoding: .utf8)
+        XCTAssertTrue(persistedConfig.contains("CipherKey=\(fixture.cipherKey)"))
+        XCTAssertTrue(
+            manager.installedModules().first { $0.name == "LOCKED" }?.isUnlocked ?? false
+        )
+        let module = try XCTUnwrap(manager.module(named: "LOCKED"))
+        module.begin()
+        XCTAssertTrue(module.rawEntry().contains("Encrypted dictionary entry"))
+    }
+
+    /**
+     Verifies a failed replacement key leaves an already-unlocked module and its durable key intact.
+
+     - Setup: Builds a native encrypted RawLD fixture, persists its correct key before manager
+       creation, and proves the live module can decrypt the entry.
+     - Expected result: A wrong candidate fails structural validation in an isolated manager while
+       the original config bytes and live-manager plaintext remain unchanged.
+     - Side effects: Creates and removes a temporary SWORD root; no shared module state is touched.
+     - Failure meaning: Retrying unlock can replace a working key before validation or leave the
+       current reader poisoned by a failed candidate.
+     */
+    func testEncryptedRawLDFailedReplacementRestoresExistingKeyAndReadableSession() throws {
+        let fixture = try makeEncryptedRawLDFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        var persistedConfiguration = try String(contentsOf: fixture.configURL, encoding: .utf8)
+        persistedConfiguration = persistedConfiguration.replacingOccurrences(
+            of: "CipherKey=",
+            with: "CipherKey=\(fixture.cipherKey)"
+        )
+        try persistedConfiguration.write(
+            to: fixture.configURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        let originalConfig = try Data(contentsOf: fixture.configURL)
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        let module = try XCTUnwrap(manager.module(named: "LOCKED"))
+        module.begin()
+        XCTAssertTrue(module.rawEntry().contains("Encrypted dictionary entry"))
+
+        XCTAssertFalse(manager.unlockModule(named: "LOCKED", withCipherKey: "wrong-test-key"))
+
+        XCTAssertEqual(try Data(contentsOf: fixture.configURL), originalConfig)
+        module.begin()
+        XCTAssertTrue(module.rawEntry().contains("Encrypted dictionary entry"))
+        XCTAssertTrue(
+            manager.installedModules().first { $0.name == "LOCKED" }?.isUnlocked ?? false
+        )
+    }
+
+    /**
+     Verifies a content-verified key is durably written to the exact module config section.
+
+     A read-back failure means a picker unlock could work only for the current manager session and
+     regress to locked after relaunch.
+     */
+    func testPersistVerifiedCipherKeySurvivesConfigReload() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+        let configURL = configDirectory.appendingPathComponent("locked.conf")
+        try """
+        [LOCKED]
+        ModDrv=RawText
+        DataPath=./modules/texts/rawtext/locked/
+        CipherKey=
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        XCTAssertTrue(
+            SwordManager.persistVerifiedCipherKey(
+                "secret-key",
+                moduleName: "locked",
+                modulePath: moduleRoot.path
+            )
+        )
+
+        let reloaded = try String(contentsOf: configURL, encoding: .utf8)
+        XCTAssertTrue(reloaded.contains("CipherKey=secret-key"))
+    }
+
     func testDefaultModulePath() {
         let path = SwordManager.defaultModulePath()
         XCTAssertTrue(path.contains("sword"))
@@ -325,9 +518,83 @@ final class SwordManagerTests: XCTestCase {
 
         XCTAssertEqual(bdbt.category, .dictionary)
         XCTAssertEqual(bdbt.language, "en")
+        XCTAssertEqual(bdbt.moduleDriver, "MyBibleDictionary")
         XCTAssertTrue(bdbt.features.contains(.greekDef))
         XCTAssertTrue(bdbt.features.contains(.hebrewDef))
         XCTAssertTrue(manager.installedModules(category: .dictionary).contains { $0.name == "BDBT" })
+    }
+
+    /**
+     Verifies both installed-book APIs reject the same malformed metadata JSword excludes.
+
+     - Setup: Writes a real RawLD payload referenced by three configs: one known driver with an
+       unknown versification, one unknown driver, and one missing `ModDrv`.
+     - Expected result: Neither enumeration nor direct name lookup exposes any invalid module.
+     - Failure meaning: A malformed non-Bible module can enter iOS pickers or Downloads despite being
+       absent from Android's `Books.installed()` registry.
+     - Side effects: Creates and removes one isolated temporary SWORD root.
+     */
+    func testInstalledBookAPIsRejectUnknownDriverAndVersificationMetadata() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let modsDir = tempDir.appendingPathComponent("mods.d", isDirectory: true)
+        let dataDir = tempDir.appendingPathComponent(
+            "modules/lexdict/rawld/invalid",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: modsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let record = Data("entry\r\nvalue".utf8)
+        let recordSize = UInt16(record.count)
+        try (record + Data([0x0A])).write(to: dataDir.appendingPathComponent("invalid.dat"))
+        try Data([
+            0x00, 0x00, 0x00, 0x00,
+            UInt8(recordSize & 0x00FF), UInt8(recordSize >> 8),
+        ]).write(to: dataDir.appendingPathComponent("invalid.idx"))
+
+        let sharedConfig = """
+        Description=Invalid Dictionary
+        Category=Lexicons / Dictionaries
+        DataPath=./modules/lexdict/rawld/invalid/invalid
+        Lang=en
+        """
+        try """
+        [UNKNOWNV11N]
+        \(sharedConfig)
+        ModDrv=RawLD
+        Versification=NotAVersification
+        """.write(
+            to: modsDir.appendingPathComponent("unknownv11n.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [UNKNOWNDRIVER]
+        \(sharedConfig)
+        ModDrv=MadeUpDictionary
+        """.write(
+            to: modsDir.appendingPathComponent("unknowndriver.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [MISSINGDRIVER]
+        \(sharedConfig)
+        """.write(
+            to: modsDir.appendingPathComponent("missingdriver.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: tempDir.path))
+        let invalidNames = Set(["UNKNOWNV11N", "UNKNOWNDRIVER", "MISSINGDRIVER"])
+
+        XCTAssertTrue(invalidNames.isDisjoint(with: manager.installedModules().map(\.name)))
+        for name in invalidNames {
+            XCTAssertNil(manager.module(named: name), "Expected \(name) to fail closed")
+        }
     }
 
     /**
@@ -479,6 +746,8 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertEqual(finrk.description, "Finnish RK")
         XCTAssertEqual(finrk.category, .bible)
         XCTAssertEqual(finrk.language, "fi")
+        XCTAssertEqual(finrk.aboutMetadata.versification, "KJVA")
+        XCTAssertTrue(finrk.isSupported)
         XCTAssertEqual(manager.moduleCount, modules.count)
     }
 
@@ -536,10 +805,234 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertEqual(r.id, "KJV:Gen 1:1")
     }
 
+    /**
+     Builds a native encrypted RawLD fixture whose ciphertext contains no embedded NUL.
+
+     - Returns: Temporary SWORD root, config location, and the correct key.
+     - Side effects: Creates one config plus RawLD `.dat` and six-byte `.idx` files in a unique
+       temporary directory.
+     - Failure Modes: Propagates filesystem errors, rejects oversized records, or fails if the
+       bounded key search cannot produce C-string-safe fixture ciphertext.
+     */
+    private func makeEncryptedRawLDFixture() throws -> SwordManagerEncryptedFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = root.appendingPathComponent("mods.d", isDirectory: true)
+        let dataDirectory = root.appendingPathComponent(
+            "modules/lexdict/rawld/locked",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+
+        let plaintext = Data(
+            "<entryFree><orth>cipher</orth><p>Encrypted dictionary entry.</p></entryFree>".utf8
+        )
+        var selectedKey: String?
+        var encrypted = Data()
+        for candidateIndex in 0..<256 {
+            let candidateKey = "cipherkey\(candidateIndex)"
+            var cipher = SwordManagerTestSapphire(key: Array(candidateKey.utf8))
+            let candidateCiphertext = Data(plaintext.map { cipher.encrypt($0) })
+            if !candidateCiphertext.contains(0) {
+                selectedKey = candidateKey
+                encrypted = candidateCiphertext
+                break
+            }
+        }
+        guard let cipherKey = selectedKey else {
+            throw SwordManagerEncryptedFixtureError.ciphertextContainsNUL
+        }
+        let keyPrefix = Data("ENTRY\r\n".utf8)
+        let recordSize = keyPrefix.count + encrypted.count
+        guard recordSize <= Int(UInt16.max) else {
+            throw SwordManagerEncryptedFixtureError.entryTooLarge
+        }
+        var record = keyPrefix
+        record.append(encrypted)
+        record.append(0x0A)
+        let dataPrefix = dataDirectory.appendingPathComponent("locked")
+        try record.write(to: dataPrefix.appendingPathExtension("dat"))
+        var index = Data([0, 0, 0, 0])
+        let entrySize = UInt16(recordSize)
+        index.append(UInt8(entrySize & 0x00ff))
+        index.append(UInt8((entrySize >> 8) & 0x00ff))
+        try index.write(to: dataPrefix.appendingPathExtension("idx"))
+
+        let configURL = configDirectory.appendingPathComponent("locked.conf")
+        try """
+        [LOCKED]
+        Description=Encrypted RawLD Fixture
+        Category=Lexicons / Dictionaries
+        ModDrv=RawLD
+        DataPath=./modules/lexdict/rawld/locked/locked
+        SourceType=OSIS
+        Encoding=UTF-8
+        CipherKey=
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+        return SwordManagerEncryptedFixture(
+            root: root,
+            configURL: configURL,
+            cipherKey: cipherKey
+        )
+    }
+
     private static func makePseudoBooksMockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [PseudoBooksMockURLProtocol.self]
         return URLSession(configuration: configuration)
+    }
+}
+
+/**
+ Carries the temporary paths and verified key for one native encrypted-module unlock test.
+
+ The value owns no resources itself; its test creates and removes `root`. Construction performs no
+ I/O, cannot fail, and is deterministic for the supplied values.
+ */
+private struct SwordManagerEncryptedFixture {
+    /// SWORD root containing the encrypted RawLD module.
+    let root: URL
+
+    /// Config whose `CipherKey` persistence is asserted.
+    let configURL: URL
+
+    /// Plain key used to produce the fixture ciphertext.
+    let cipherKey: String
+
+}
+
+/**
+ Describes deterministic failures while constructing a native encrypted RawLD fixture.
+
+ Cases identify fixture limitations rather than production unlock failures. The enum has no side
+ effects and is used only to fail a test before libsword is invoked.
+ */
+private enum SwordManagerEncryptedFixtureError: Error {
+    /// RawLD cannot represent the fixture entry in its two-byte length field.
+    case entryTooLarge
+
+    /// No bounded test key produced RawLD ciphertext without an embedded C-string terminator.
+    case ciphertextContainsNUL
+
+}
+
+/**
+ Test-only Sapphire II encryptor matching libsword's `Sapphire::encrypt` state transitions.
+
+ Production decryption remains entirely inside libsword. This implementation only creates realistic
+ ciphertext at runtime so unlock tests exercise a native RawLD SWORD backend.
+ */
+private struct SwordManagerTestSapphire {
+    private var cards = [UInt8](repeating: 0, count: 256)
+    private var rotor: UInt8 = 0
+    private var ratchet: UInt8 = 0
+    private var avalanche: UInt8 = 0
+    private var lastPlain: UInt8 = 0
+    private var lastCipher: UInt8 = 0
+
+    /**
+     Initializes the exact keyed card permutation used by libsword.
+
+     - Parameter key: One to 255 key bytes used to seed the Sapphire II permutation.
+     - Side effects: Initializes only this value's stream state.
+     - Failure modes: Traps when `key` is empty or exceeds Sapphire II's one-byte key length.
+     - Postcondition: The next `encrypt` call emits the first byte of a deterministic keyed stream.
+     */
+    init(key: [UInt8]) {
+        precondition(!key.isEmpty && key.count <= 255)
+        for index in cards.indices {
+            cards[index] = UInt8(index)
+        }
+        var toSwap: UInt8 = 0
+        var keyPosition = 0
+        var runningSum: UInt8 = 0
+        for index in stride(from: 255, through: 0, by: -1) {
+            toSwap = keyRandom(
+                limit: index,
+                key: key,
+                runningSum: &runningSum,
+                keyPosition: &keyPosition
+            )
+            cards.swapAt(index, Int(toSwap))
+        }
+        rotor = cards[1]
+        ratchet = cards[3]
+        avalanche = cards[5]
+        lastPlain = cards[7]
+        lastCipher = cards[Int(runningSum)]
+    }
+
+    /**
+     Encrypts one byte with the fixture's Sapphire II state.
+
+     - Parameter plaintext: Next plaintext byte in stream order.
+     - Returns: Corresponding ciphertext byte.
+     - Side effects: Advances the mutable card, rotor, ratchet, avalanche, and history state.
+     - Failure modes: None after valid initialization; callers must preserve byte order.
+     */
+    mutating func encrypt(_ plaintext: UInt8) -> UInt8 {
+        ratchet = ratchet &+ cards[Int(rotor)]
+        rotor = rotor &+ 1
+        let swapTemporary = cards[Int(lastCipher)]
+        cards[Int(lastCipher)] = cards[Int(ratchet)]
+        cards[Int(ratchet)] = cards[Int(lastPlain)]
+        cards[Int(lastPlain)] = cards[Int(rotor)]
+        cards[Int(rotor)] = swapTemporary
+        avalanche = avalanche &+ cards[Int(swapTemporary)]
+
+        let firstIndex = Int(cards[Int(ratchet)] &+ cards[Int(rotor)])
+        let nestedIndex = Int(
+            cards[Int(lastPlain)] &+ cards[Int(lastCipher)] &+ cards[Int(avalanche)]
+        )
+        lastCipher = plaintext ^ cards[firstIndex] ^ cards[Int(cards[nestedIndex])]
+        lastPlain = plaintext
+        return lastCipher
+    }
+
+    /**
+     Selects one keyed permutation index using libsword's bounded retry rule.
+
+     - Parameters:
+       - limit: Inclusive upper bound used to construct the selection mask.
+       - key: Non-empty Sapphire key bytes.
+       - runningSum: Mutable key-schedule accumulator.
+       - keyPosition: Mutable cursor into `key`.
+     - Returns: One permutation index no greater than `limit`.
+     - Side effects: Advances `runningSum` and `keyPosition` deterministically.
+     - Failure modes: None; initialization enforces a non-empty key and supplies nonnegative limits.
+     */
+    private mutating func keyRandom(
+        limit: Int,
+        key: [UInt8],
+        runningSum: inout UInt8,
+        keyPosition: inout Int
+    ) -> UInt8 {
+        guard limit > 0 else { return 0 }
+        var mask = 1
+        while mask < limit {
+            mask = (mask << 1) + 1
+        }
+        var retryCount = 0
+        while true {
+            runningSum = cards[Int(runningSum)] &+ key[keyPosition]
+            keyPosition += 1
+            if keyPosition >= key.count {
+                keyPosition = 0
+                runningSum = runningSum &+ UInt8(key.count)
+            }
+            retryCount += 1
+            var candidate = mask & Int(runningSum)
+            if retryCount > 11 {
+                candidate %= limit
+            }
+            if candidate <= limit {
+                return UInt8(candidate)
+            }
+        }
     }
 }
 

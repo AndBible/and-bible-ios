@@ -1,0 +1,263 @@
+name: Distribution Release Readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Prepare signed archives, or validate evidence against a prior prepare run
+        required: true
+        type: choice
+        options:
+          - prepare
+          - validate
+      archive_run_id:
+        description: Successful prepare-phase run ID; required only for validation
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  XCODE_VERSION: "26.3"
+
+jobs:
+  prepare-release-archives:
+    name: Prepare Signed Release Archives
+    if: inputs.phase == 'prepare'
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      DEVELOPER_TEAM: ${{ secrets.DISTRIBUTION_DEVELOPMENT_TEAM }}
+      ASC_KEY_ID: ${{ secrets.DISTRIBUTION_ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.DISTRIBUTION_ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY_BASE64: ${{ secrets.DISTRIBUTION_ASC_PRIVATE_KEY_BASE64 }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Require signing inputs
+        shell: bash
+        run: |
+          : "${DEVELOPER_TEAM:?DISTRIBUTION_DEVELOPMENT_TEAM is required}"
+          : "${ASC_KEY_ID:?DISTRIBUTION_ASC_KEY_ID is required}"
+          : "${ASC_ISSUER_ID:?DISTRIBUTION_ASC_ISSUER_ID is required}"
+          : "${ASC_PRIVATE_KEY_BASE64:?DISTRIBUTION_ASC_PRIVATE_KEY_BASE64 is required}"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: bibleview-js/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: bibleview-js
+        run: npm ci
+
+      - name: Build isolated BibleView production bundle
+        working-directory: bibleview-js
+        env:
+          BIBLEVIEW_OUTPUT_DIR: ${{ runner.temp }}/bibleview-production
+        run: npm run build-production
+
+      - name: Validate and install production bundle before SwiftPM resolution
+        run: |
+          python3 scripts/manage_bibleview_bundle.py validate \
+            --bundle "$RUNNER_TEMP/bibleview-production" \
+            --mode production
+          python3 scripts/manage_bibleview_bundle.py sync \
+            --source "$RUNNER_TEMP/bibleview-production" \
+            --destination Sources/BibleView/Sources/BibleView/Resources/bibleview-js \
+            --mode production
+
+      - name: Select pinned Xcode
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Cache release libsword XCFramework
+        uses: actions/cache@v5
+        with:
+          path: |
+            libsword/sword-src
+            libsword/build
+            libsword/libsword.xcframework
+          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-release-${{ hashFiles('libsword/build-ios.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-release-
+
+      - name: Build release libsword XCFramework
+        shell: bash
+        env:
+          INCLUDE_MACOS_SLICE: "0"
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            brew install cmake
+          fi
+          if ! command -v svn >/dev/null 2>&1; then
+            brew install subversion
+          fi
+          if [ -f libsword/libsword.xcframework/ios-arm64/libsword.a ] && [ -f libsword/libsword.xcframework/ios-arm64_x86_64-simulator/libsword.a ]; then
+            echo "Using cached libsword.xcframework"
+          else
+            INCLUDE_MACOS_SLICE=0 ./libsword/build-ios.sh
+          fi
+
+      - name: Materialize App Store Connect key
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/appstoreconnect/private_keys"
+          printf '%s' "$ASC_PRIVATE_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: Archive standard product
+        run: >-
+          xcodebuild archive
+          -project AndBible.xcodeproj
+          -scheme AndBible
+          -configuration Release
+          -destination generic/platform=iOS
+          -archivePath "$RUNNER_TEMP/AndBible.xcarchive"
+          DEVELOPMENT_TEAM="$DEVELOPER_TEAM"
+          -allowProvisioningUpdates
+          -authenticationKeyPath "$RUNNER_TEMP/appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          -authenticationKeyID "$ASC_KEY_ID"
+          -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Archive Calculator product
+        run: >-
+          xcodebuild archive
+          -project AndBible.xcodeproj
+          -scheme AndBibleDiscrete
+          -configuration Release
+          -destination generic/platform=iOS
+          -archivePath "$RUNNER_TEMP/Calculator.xcarchive"
+          DEVELOPMENT_TEAM="$DEVELOPER_TEAM"
+          -allowProvisioningUpdates
+          -authenticationKeyPath "$RUNNER_TEMP/appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          -authenticationKeyID "$ASC_KEY_ID"
+          -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Verify both archives embed the exact production bundle
+        run: |
+          python3 scripts/manage_bibleview_bundle.py verify-archive \
+            --archive "$RUNNER_TEMP/AndBible.xcarchive" \
+            --expected "$RUNNER_TEMP/bibleview-production"
+          python3 scripts/manage_bibleview_bundle.py verify-archive \
+            --archive "$RUNNER_TEMP/Calculator.xcarchive" \
+            --expected "$RUNNER_TEMP/bibleview-production"
+
+      - name: Create archive-bound evidence template
+        run: >-
+          python3 scripts/validate_distribution_release_readiness.py
+          --standard-archive "$RUNNER_TEMP/AndBible.xcarchive"
+          --calculator-archive "$RUNNER_TEMP/Calculator.xcarchive"
+          --expected-commit-sha "$GITHUB_SHA"
+          --write-binding "$RUNNER_TEMP/release-archive-binding.json"
+
+      - name: Package exact archives for device validation
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/distribution-release-artifacts"
+          tar -C "$RUNNER_TEMP" -cpf "$RUNNER_TEMP/distribution-release-artifacts/AndBible.xcarchive.tar" AndBible.xcarchive
+          tar -C "$RUNNER_TEMP" -cpf "$RUNNER_TEMP/distribution-release-artifacts/Calculator.xcarchive.tar" Calculator.xcarchive
+          cp "$RUNNER_TEMP/release-archive-binding.json" "$RUNNER_TEMP/distribution-release-artifacts/release-archive-binding.json"
+          python3 scripts/manage_bibleview_bundle.py sync \
+            --source "$RUNNER_TEMP/bibleview-production" \
+            --destination "$RUNNER_TEMP/distribution-release-artifacts/bibleview-production" \
+            --mode production
+
+      - name: Publish archive binding in workflow summary
+        shell: bash
+        run: |
+          {
+            echo '## Exact release archive binding'
+            echo
+            echo 'Use these artifacts for physical-device validation. Copy the binding into schema-v2 evidence, set validated_at after all checks pass, then dispatch the validate phase with this run ID.'
+            echo
+            echo '```json'
+            cat "$RUNNER_TEMP/release-archive-binding.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload exact archives and binding
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-release-archives-${{ github.run_id }}
+          path: ${{ runner.temp }}/distribution-release-artifacts
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
+      - name: Remove App Store Connect key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+
+  validate-release-evidence:
+    name: Validate Exact Release Archives and Evidence
+    if: inputs.phase == 'validate'
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ARCHIVE_RUN_ID: ${{ inputs.archive_run_id }}
+      DEVELOPER_TEAM: ${{ secrets.DISTRIBUTION_DEVELOPMENT_TEAM }}
+      RELEASE_EVIDENCE_JSON: ${{ secrets.DISTRIBUTION_RELEASE_EVIDENCE_JSON }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Require validation inputs
+        shell: bash
+        run: |
+          : "${ARCHIVE_RUN_ID:?archive_run_id is required for validation}"
+          : "${DEVELOPER_TEAM:?DISTRIBUTION_DEVELOPMENT_TEAM is required}"
+          : "${RELEASE_EVIDENCE_JSON:?DISTRIBUTION_RELEASE_EVIDENCE_JSON is required}"
+
+      - name: Verify prepare run provenance
+        shell: bash
+        run: |
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ARCHIVE_RUN_ID}")"
+          source_sha="$(printf '%s' "$run_json" | jq -r '.head_sha')"
+          conclusion="$(printf '%s' "$run_json" | jq -r '.conclusion')"
+          workflow_path="$(printf '%s' "$run_json" | jq -r '.path')"
+          event="$(printf '%s' "$run_json" | jq -r '.event')"
+          test "$source_sha" = "$GITHUB_SHA" || { echo "Prepare run SHA $source_sha does not match validation SHA $GITHUB_SHA"; exit 1; }
+          test "$conclusion" = "success" || { echo "Prepare run did not complete successfully: $conclusion"; exit 1; }
+          test "$workflow_path" = ".github/workflows/distribution-release-readiness.yml" || { echo "Unexpected prepare workflow: $workflow_path"; exit 1; }
+          test "$event" = "workflow_dispatch" || { echo "Prepare artifact did not come from workflow_dispatch: $event"; exit 1; }
+
+      - name: Download exact prepare-run archives
+        run: >-
+          gh run download "$ARCHIVE_RUN_ID"
+          --repo "$GITHUB_REPOSITORY"
+          --name "distribution-release-archives-${ARCHIVE_RUN_ID}"
+          --dir "$RUNNER_TEMP/distribution-release-artifacts"
+
+      - name: Restore exact Xcode archives
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/restored-archives"
+          tar -C "$RUNNER_TEMP/restored-archives" -xpf "$RUNNER_TEMP/distribution-release-artifacts/AndBible.xcarchive.tar"
+          tar -C "$RUNNER_TEMP/restored-archives" -xpf "$RUNNER_TEMP/distribution-release-artifacts/Calculator.xcarchive.tar"
+
+      - name: Verify restored archives retain production BibleView assets
+        run: |
+          python3 scripts/manage_bibleview_bundle.py verify-archive \
+            --archive "$RUNNER_TEMP/restored-archives/AndBible.xcarchive" \
+            --expected "$RUNNER_TEMP/distribution-release-artifacts/bibleview-production"
+          python3 scripts/manage_bibleview_bundle.py verify-archive \
+            --archive "$RUNNER_TEMP/restored-archives/Calculator.xcarchive" \
+            --expected "$RUNNER_TEMP/distribution-release-artifacts/bibleview-production"
+
+      - name: Materialize completed release evidence
+        shell: bash
+        run: printf '%s' "$RELEASE_EVIDENCE_JSON" > "$RUNNER_TEMP/distribution-release-evidence.json"
+
+      - name: Validate signed archives and bound external evidence
+        run: >-
+          python3 scripts/validate_distribution_release_readiness.py
+          --standard-archive "$RUNNER_TEMP/restored-archives/AndBible.xcarchive"
+          --calculator-archive "$RUNNER_TEMP/restored-archives/Calculator.xcarchive"
+          --expected-commit-sha "$GITHUB_SHA"
+          --team-identifier "$DEVELOPER_TEAM"
+          --evidence "$RUNNER_TEMP/distribution-release-evidence.json"

@@ -19,11 +19,29 @@ public enum RemoteSyncInitialBackupUploadError: Error, Equatable {
     /// The temporary SQLite database could not be opened or written safely.
     case invalidSQLiteDatabase
 
+    /// A built outbound database does not satisfy the exact inbound Android Room contract.
+    case invalidBuiltDatabaseContract(RemoteSyncCategory)
+
     /// Upload was requested from a builder-only service that has no remote backend.
     case missingRemoteAdapter
 
     /// The requested category does not yet have an initial-backup export pipeline.
     case unsupportedCategory(RemoteSyncCategory)
+
+    /// Bookmark initial backups must use Android Room bookmark schema version 12 exactly.
+    case unsupportedBookmarkSchemaVersion(Int)
+
+    /// A category export requested a schema other than the exact Android Room contract this build supports.
+    case unsupportedSchemaVersion(category: RemoteSyncCategory, version: Int)
+
+    /// A durable prepared-upload archive or its exact acceptance metadata was missing or corrupted.
+    case invalidPendingUploadArtifact
+
+    /// A durable prepared upload belongs to another explicit bootstrap generation.
+    case pendingUploadDestinationMismatch
+
+    /// Android database sync cannot reconstruct active device-local custom plan definitions.
+    case unsupportedCustomReadingPlans([String])
 }
 
 /**
@@ -75,15 +93,19 @@ public struct RemoteSyncInitialBackupUploadReport: Sendable, Equatable {
  Data dependencies:
  - `RemoteSyncAdapting` uploads the compressed initial-backup archive
  - category snapshot services project live SwiftData rows into Android-shaped tables
- - `RemoteSyncLogEntryStore`, `RemoteSyncPatchStatusStore`, and `RemoteSyncStateStore` persist the
+ - the reading-plan snapshot service rejects active custom plans because Android syncs only Room
+   rows and cannot reconstruct device-local `.properties` files
+ - `RemoteSyncPatchStatusStore`, `RemoteSyncStateStore`, and category snapshot services persist the
    accepted local baseline after upload
  - `RemoteSyncWorkspaceFidelityStore` preserves Android history aliases for synthesized workspace
    history rows
 
  Side effects:
  - creates temporary SQLite and gzip files beneath the configured temporary directory
+ - rejects active custom reading plans before exporting the reading-plan category
  - uploads one `initial.sqlite3.gz` archive into the category sync folder
- - clears category-scoped `LogEntry` and `SyncStatus` bookkeeping and records patch zero
+ - clears category-scoped `LogEntry` bookkeeping, publishes the exact accepted-row identity manifest,
+   clears prior `SyncStatus` rows, and records patch zero
  - resets category progress bookkeeping before the next ready-state synchronization pass
  - refreshes outbound fingerprint baselines so the uploaded initial state is not re-emitted as a
    sparse patch immediately afterwards
@@ -93,39 +115,111 @@ public struct RemoteSyncInitialBackupUploadReport: Sendable, Equatable {
  - throws `RemoteSyncInitialBackupUploadError.missingSyncFolderID` when bootstrap state is incomplete
  - throws `RemoteSyncInitialBackupUploadError.jsonEncodingFailed` when one Android JSON payload cannot be serialized
  - throws `RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase` when SQLite rejects schema or row writes
+ - rethrows strict graph/history snapshot and deferred settings-read failures without uploading an
+   incomplete baseline
+ - throws `unsupportedCustomReadingPlans` before transport because Android database sync cannot
+   carry an active custom plan's local definition file
  - rethrows transport failures from the backend adapter
  - rethrows filesystem read and write failures while staging the temporary archive
  - rethrows gzip-compression failures from `RemoteSyncArchiveStagingService`
+ - local acceptance failures roll back patch zero, progress, fingerprints, aliases, and any joined
+   lifecycle mutation as one generation
 
  Concurrency:
  - this type is not `Sendable`; callers must respect the confinement rules of the supplied
    `ModelContext` and `SettingsStore`
  */
 public final class RemoteSyncInitialBackupUploadService {
+    /** Immutable fingerprint and accepted-row generation captured before network suspension. */
+    private enum AcceptedFingerprintGeneration: Codable {
+        case readingPlans(RemoteSyncReadingPlanAcceptedGeneration)
+        case bookmarks(RemoteSyncBookmarkAcceptedBaseline)
+        case workspaces(RemoteSyncWorkspaceAcceptedGeneration)
+        case myDocuments(RemoteSyncMyDocumentAcceptedBaseline)
+        case progress(RemoteSyncProgressAcceptedGeneration)
+    }
+
+    /** Codable workspace-history alias retained with a durable initial-upload retry. */
+    private struct StoredWorkspaceHistoryAlias: Codable {
+        let remoteHistoryItemID: Int64
+        let localHistoryItemID: UUID
+
+        init(_ alias: RemoteSyncWorkspaceFidelityStore.HistoryItemAlias) {
+            remoteHistoryItemID = alias.remoteHistoryItemID
+            localHistoryItemID = alias.localHistoryItemID
+        }
+
+        var runtimeValue: RemoteSyncWorkspaceFidelityStore.HistoryItemAlias {
+            RemoteSyncWorkspaceFidelityStore.HistoryItemAlias(
+                remoteHistoryItemID: remoteHistoryItemID,
+                localHistoryItemID: localHistoryItemID
+            )
+        }
+    }
+
+    /** Exact local metadata that must be accepted only after its matching archive uploads. */
+    private struct AcceptedInitialBackup: Codable {
+        let timestamp: Int64
+        let fingerprintGeneration: AcceptedFingerprintGeneration
+        let workspaceHistoryAliases: [StoredWorkspaceHistoryAlias]
+    }
+
+    /** Durable descriptor for one prepared initial archive and its exact acceptance generation. */
+    private struct PendingInitialUploadMetadata: Codable {
+        let categoryRawValue: String
+        let syncFolderID: String
+        let deviceFolderID: String?
+        let schemaVersion: Int
+        let archiveSize: Int64
+        let archiveSHA256: String
+        let acceptedInitialBackup: AcceptedInitialBackup
+        var publicationIdentity: RemoteSyncPublicationIdentity?
+    }
+
+    /** Prepared archive reused across transport or post-upload local-acceptance retries. */
+    private struct PendingInitialUpload {
+        let archiveURL: URL
+        let metadata: PendingInitialUploadMetadata
+    }
+
+    /** Category represented by one immutable accepted fingerprint generation. */
+    private static func category(
+        for generation: AcceptedFingerprintGeneration
+    ) -> RemoteSyncCategory {
+        switch generation {
+        case .readingPlans:
+            return .readingPlans
+        case .bookmarks:
+            return .bookmarks
+        case .workspaces:
+            return .workspaces
+        case .myDocuments:
+            return .myDocuments
+        case .progress:
+            return .progress
+        }
+    }
+
     /**
      Carries the staged database and any category-specific bookkeeping needed after upload acceptance.
 
      - Parameters:
        - databaseURL: Temporary SQLite database that will be archived and uploaded.
-       - workspaceHistoryAliases: Workspace history alias mappings emitted by workspace export.
-       - acceptedBaselineTimestamp: Optional timestamp already written into uploaded baseline rows; callers reuse it
-         for local accepted-baseline state to avoid introducing a newer local patch watermark than the upload contains.
+       - acceptedInitialBackup: Exact fingerprints, row identities, timestamp, and side metadata
+         projected in the same strict read batch as `databaseURL`.
      - Side effects: none.
      - Failure modes: This value type cannot fail to initialize.
      */
     private struct BuiltInitialBackup {
         let databaseURL: URL
-        let workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias]
-        let acceptedBaselineTimestamp: Int64?
+        let acceptedInitialBackup: AcceptedInitialBackup
 
         init(
             databaseURL: URL,
-            workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias],
-            acceptedBaselineTimestamp: Int64? = nil
+            acceptedInitialBackup: AcceptedInitialBackup
         ) {
             self.databaseURL = databaseURL
-            self.workspaceHistoryAliases = workspaceHistoryAliases
-            self.acceptedBaselineTimestamp = acceptedBaselineTimestamp
+            self.acceptedInitialBackup = acceptedInitialBackup
         }
     }
 
@@ -133,7 +227,9 @@ public final class RemoteSyncInitialBackupUploadService {
     private let deviceIdentifier: String
     private let fileManager: FileManager
     private let temporaryDirectory: URL
+    private let retryDirectory: URL
     private let nowProvider: () -> Int64
+    private let readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService
 
     /**
      Creates an initial-backup upload service for one remote backend.
@@ -141,26 +237,40 @@ public final class RemoteSyncInitialBackupUploadService {
      - Parameters:
        - adapter: Remote backend adapter used for initial-backup uploads.
        - deviceIdentifier: Stable device identifier used for patch-zero bookkeeping.
+       - readingPlanSnapshotService: Snapshot service bound to this device's custom-plan directory.
+       - userPlanDirectory: Local custom-definition directory used by snapshot recovery.
        - fileManager: File manager used for temporary staging and cleanup.
        - temporaryDirectory: Optional staging directory override.
-       - nowProvider: Millisecond clock used for local sync bookkeeping resets.
+       - retryDirectory: Optional durable prepared-upload directory override used by tests.
+       - nowProvider: Optional millisecond clock used for local sync bookkeeping resets. The
+         Android-compatible runtime clock is selected inside the initializer when omitted.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
     public init(
         adapter: any RemoteSyncAdapting,
         deviceIdentifier: String,
+        readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService? = nil,
+        userPlanDirectory: URL = ReadingPlanService.defaultUserReadingPlanDirectory(),
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil,
-        nowProvider: @escaping () -> Int64 = {
-            Int64(Date().timeIntervalSince1970 * 1000.0)
-        }
+        retryDirectory: URL? = nil,
+        nowProvider: (() -> Int64)? = nil
     ) {
         self.adapter = adapter
         self.deviceIdentifier = deviceIdentifier
+        self.readingPlanSnapshotService = readingPlanSnapshotService
+            ?? RemoteSyncReadingPlanSnapshotService(
+                userPlanDirectory: userPlanDirectory,
+                fileManager: fileManager
+            )
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
-        self.nowProvider = nowProvider
+        self.retryDirectory = retryDirectory
+            ?? Self.defaultRetryDirectory(fileManager: fileManager)
+        self.nowProvider = nowProvider ?? {
+            AndroidTimestamp.currentMilliseconds()
+        }
     }
 
     /**
@@ -182,10 +292,12 @@ public final class RemoteSyncInitialBackupUploadService {
     ) {
         adapter = nil
         deviceIdentifier = "manual-database-backup-export"
+        readingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService(fileManager: fileManager)
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
+        retryDirectory = self.temporaryDirectory
         nowProvider = {
-            Int64(Date().timeIntervalSince1970 * 1000.0)
+            AndroidTimestamp.currentMilliseconds()
         }
     }
 
@@ -200,8 +312,14 @@ public final class RemoteSyncInitialBackupUploadService {
        - fileManager: File manager used for temporary SQLite output.
        - temporaryDirectory: Optional staging directory override.
      - Returns: Temporary SQLite database URL; the caller owns cleanup.
-     - Side effects: writes one temporary SQLite database beneath the configured temporary directory.
-     - Failure modes: Rethrows SQLite and JSON-encoding failures from the category-specific writers.
+     - Side effects:
+       - captures graph and settings through the same strict read batch used by remote initial upload
+       - writes one temporary SQLite database beneath the configured temporary directory
+       - for manual bookmark backups, copies normalized local Android `LogEntry` metadata into the
+         exported database so a later Import can enforce Android's timestamp conflict rules
+     - Failure modes: Rethrows dirty/mismatched context, strict graph/history fetch, deferred
+       settings-read, cancellation, SQLite, and JSON-encoding failures; shared builder failures
+       remove any temporary database they created.
      */
     static func buildAndroidDatabaseBackupDatabase(
         for category: RemoteSyncCategory,
@@ -215,12 +333,75 @@ public final class RemoteSyncInitialBackupUploadService {
             fileManager: fileManager,
             temporaryDirectory: temporaryDirectory
         )
-        return try service.buildInitialBackup(
+        let built = try service.buildInitialBackup(
             for: category,
             modelContext: modelContext,
             settingsStore: settingsStore,
             schemaVersion: schemaVersion
-        ).databaseURL
+        )
+        if category == .bookmarks {
+            try service.appendManualBookmarkLogEntries(
+                to: built.databaseURL,
+                settingsStore: settingsStore
+            )
+        }
+        return built.databaseURL
+    }
+
+    /**
+     Copies the retained bookmark conflict baseline into a manual Android database backup.
+
+     Android's manual backup copies the live Room file after checkpointing it, so its `LogEntry`
+     rows travel with the bookmark data. iOS stores those rows outside SwiftData and must append
+     them explicitly. Legacy iOS `NULL` secondary keys are normalized to Android's empty-text key,
+     and rows that collide after normalization retain the deterministic latest entry.
+
+     - Parameters:
+       - databaseURL: Writable Android Room-v12 bookmark database produced by the shared builder.
+       - settingsStore: Local settings store containing retained bookmark `LogEntry` rows.
+     - Side effects: opens and writes the exported SQLite database in one transaction.
+     - Failure modes: Throws `invalidSQLiteDatabase` when SQLite cannot open the database or
+       rejects a normalized log row.
+     - Note: Remote initial-backup upload does not call this helper because Android clears its log
+       immediately before copying `initial.sqlite3.gz`.
+     */
+    private func appendManualBookmarkLogEntries(
+        to databaseURL: URL,
+        settingsStore: SettingsStore
+    ) throws {
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        var entriesByKey: [String: RemoteSyncLogEntry] = [:]
+        for rawEntry in try logEntryStore.entriesStrict(for: .bookmarks) {
+            let entry = AndroidBookmarkDatabaseContract.normalizedLogEntry(rawEntry)
+            let key = logEntryStore.key(for: .bookmarks, entry: entry)
+            if entriesByKey[key].map({
+                RemoteSyncLogEntryConflictOrder.isNewer(entry, than: $0)
+            }) ?? true {
+                entriesByKey[key] = entry
+            }
+        }
+
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &database, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+              let database else {
+            if let database {
+                sqlite3_close(database)
+            }
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_close(database) }
+
+        try execute("BEGIN IMMEDIATE TRANSACTION;", in: database)
+        do {
+            for key in entriesByKey.keys.sorted() {
+                guard let entry = entriesByKey[key] else { continue }
+                try insertLogEntry(entry, in: database)
+            }
+            try execute("COMMIT;", in: database)
+        } catch {
+            try? execute("ROLLBACK;", in: database)
+            throw error
+        }
     }
 
     /**
@@ -231,24 +412,69 @@ public final class RemoteSyncInitialBackupUploadService {
        - bootstrapState: Ready bootstrap state containing the category sync-folder identifier.
        - modelContext: SwiftData context that owns the current local category graph.
        - settingsStore: Local-only settings store backing fidelity and sync bookkeeping.
-       - schemaVersion: SQLite user-version written into the exported Android database.
+       - schemaVersion: Optional explicit Android schema version. Omit it to use the category's
+         canonical Room contract.
      - Returns: Summary of the uploaded initial archive and locally recorded patch zero.
      - Side effects:
+       - captures one exact graph/settings generation inside a strict read batch
        - writes temporary SQLite and gzip files
-       - uploads `initial.sqlite3.gz` into the remote sync folder
-       - clears category log-entry and patch-status bookkeeping and records patch zero
-       - resets category progress state and refreshes fingerprint baselines
-       - may rewrite workspace history aliases for the exported workspace baseline
+       - reconciles `initial.sqlite3.gz` by exact bytes and conditionally creates it when absent
+       - atomically clears local Android operations, publishes the exact captured identity manifest, clears prior patch
+         statuses, records patch zero, resets progress, publishes captured fingerprints, and may
+         rewrite workspace history aliases
      - Failure modes:
        - throws `RemoteSyncInitialBackupUploadError.missingSyncFolderID` when `bootstrapState.syncFolderID` is missing or empty
-       - rethrows SQLite, JSON-encoding, compression, transport, and filesystem failures from the lower layers
+       - rethrows strict snapshot/settings reads, SQLite, JSON-encoding, compression, transport,
+         filesystem, cancellation, and atomic acceptance failures from the lower layers
      */
     public func uploadInitialBackup(
         for category: RemoteSyncCategory,
         bootstrapState: RemoteSyncBootstrapState,
         modelContext: ModelContext,
         settingsStore: SettingsStore,
-        schemaVersion: Int = 1
+        schemaVersion: Int? = nil
+    ) async throws -> RemoteSyncInitialBackupUploadReport {
+        try await uploadInitialBackup(
+            for: category,
+            bootstrapState: bootstrapState,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            schemaVersion: schemaVersion ?? category.currentSchemaVersion,
+            acceptedBaselineMutations: {}
+        )
+    }
+
+    /**
+     Uploads an initial backup and joins caller-owned lifecycle mutations to local acceptance.
+
+     The remote upload necessarily completes before local acceptance. After it succeeds, patch-zero,
+     progress, fingerprints, workspace aliases, and `acceptedBaselineMutations` publish through one
+     settings-backed transaction. A local failure leaves the previous generation intact so retrying
+     may safely upload again without reporting the bootstrap as ready.
+
+     - Parameters:
+       - category: Logical sync category whose current local state becomes the remote baseline.
+       - bootstrapState: Prepared bootstrap state containing the category sync folder.
+       - modelContext: Clean SwiftData context shared by graph and settings reads.
+       - settingsStore: Settings store bound to `modelContext`.
+       - schemaVersion: Android SQLite schema version written to the backup.
+       - acceptedBaselineMutations: Synchronous caller mutations that must commit with local baseline acceptance.
+     - Returns: Summary of the uploaded archive and accepted patch-zero status.
+     - Side Effects: Builds a durable retry archive, reconciles it with the remote destination, then
+       atomically publishes local acceptance bookkeeping and caller mutations. The temporary SQLite
+       source is removed after preparation; the durable archive and metadata remain after transport
+       or local-acceptance failure and are removed only after successful acceptance or explicit
+       destination replacement.
+     - Throws: Rethrows strict snapshot/settings reads, SQLite/filesystem work, transport, caller
+       mutation, cancellation, and atomic commit failures.
+     */
+    func uploadInitialBackup(
+        for category: RemoteSyncCategory,
+        bootstrapState: RemoteSyncBootstrapState,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        schemaVersion: Int,
+        acceptedBaselineMutations: () throws -> Void
     ) async throws -> RemoteSyncInitialBackupUploadReport {
         guard let syncFolderID = bootstrapState.syncFolderID?.trimmingCharacters(in: .whitespacesAndNewlines),
               !syncFolderID.isEmpty else {
@@ -258,36 +484,40 @@ public final class RemoteSyncInitialBackupUploadService {
             throw RemoteSyncInitialBackupUploadError.missingRemoteAdapter
         }
 
-        let builtBackup = try buildInitialBackup(
+        let pendingUpload = try prepareInitialUpload(
             for: category,
+            syncFolderID: syncFolderID,
+            deviceFolderID: bootstrapState.deviceFolderID,
             modelContext: modelContext,
             settingsStore: settingsStore,
             schemaVersion: schemaVersion
         )
-        let archiveURL = temporaryURL(prefix: "remote-sync-initial-upload-", suffix: ".sqlite3.gz")
-        defer {
-            try? fileManager.removeItem(at: builtBackup.databaseURL)
-            try? fileManager.removeItem(at: archiveURL)
+
+        let reconciliation = try await RemoteSyncRemotePatchReconciler(adapter: adapter).reconcile(
+            archive: RemoteSyncDurablePatchArchive(
+                fileName: RemoteSyncPatchDiscoveryService.initialBackupFilename,
+                fileURL: pendingUpload.archiveURL,
+                sha256: pendingUpload.metadata.archiveSHA256,
+                size: pendingUpload.metadata.archiveSize,
+                parentID: syncFolderID,
+                contentType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
+        let uploadedFile: RemoteSyncFile
+        switch reconciliation {
+        case .created(let file), .matchedExisting(let file):
+            uploadedFile = file
         }
 
-        let archiveData = try RemoteSyncArchiveStagingService.gzip(Data(contentsOf: builtBackup.databaseURL))
-        try archiveData.write(to: archiveURL, options: .atomic)
-
-        let uploadedFile = try await adapter.upload(
-            name: RemoteSyncPatchDiscoveryService.initialBackupFilename,
-            fileURL: archiveURL,
-            parentID: syncFolderID,
-            contentType: NextCloudSyncAdapter.gzipMimeType
-        )
-
-        resetAcceptedBaseline(
+        try resetAcceptedBaseline(
             for: category,
             uploadedFile: uploadedFile,
             settingsStore: settingsStore,
             modelContext: modelContext,
-            workspaceHistoryAliases: builtBackup.workspaceHistoryAliases,
-            acceptedBaselineTimestamp: builtBackup.acceptedBaselineTimestamp
+            acceptedInitialBackup: pendingUpload.metadata.acceptedInitialBackup,
+            acceptedBaselineMutations: acceptedBaselineMutations
         )
+        removePendingInitialUpload(for: category)
 
         let patchZeroStatus = RemoteSyncPatchStatus(
             sourceDevice: deviceIdentifier,
@@ -304,7 +534,333 @@ public final class RemoteSyncInitialBackupUploadService {
     }
 
     /**
-     Builds one temporary Android-shaped category database for initial-backup upload.
+     Loads or creates the durable archive and immutable metadata for one initial upload.
+
+     A prepared generation is persisted before transport begins. Retries for the same category,
+     destination, and schema reuse those exact bytes and acceptance metadata. A destination or
+     schema mismatch fails closed so ordinary retries cannot discard an ambiguously published
+     generation; explicit reset/replacement must abandon it before a new generation is built.
+
+     - Parameters:
+       - category: Logical category being prepared.
+       - syncFolderID: Remote initial-backup destination.
+       - deviceFolderID: Device-folder identity paired with the bootstrap generation.
+       - modelContext: Clean context containing the graph generation to export.
+       - settingsStore: Settings store paired with `modelContext`.
+       - schemaVersion: Android database schema written into the archive.
+     - Returns: Durable prepared archive and its exact local acceptance payload.
+     - Side Effects: May build a temporary database and atomically write archive/metadata files.
+     - Throws: Rethrows strict build, schema validation, compression, encoding, hashing, and
+       filesystem failures; corrupt retry artifacts and destination/schema mismatches fail closed.
+     */
+    private func prepareInitialUpload(
+        for category: RemoteSyncCategory,
+        syncFolderID: String,
+        deviceFolderID: String?,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        schemaVersion: Int
+    ) throws -> PendingInitialUpload {
+        if let pendingUpload = try loadPendingInitialUpload(
+            for: category,
+            syncFolderID: syncFolderID,
+            deviceFolderID: deviceFolderID,
+            schemaVersion: schemaVersion
+        ) {
+            return pendingUpload
+        }
+
+        let builtBackup = try buildInitialBackup(
+            for: category,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            schemaVersion: schemaVersion
+        )
+        defer { try? fileManager.removeItem(at: builtBackup.databaseURL) }
+        try Self.validateBuiltInitialBackupDatabase(
+            at: builtBackup.databaseURL,
+            category: category
+        )
+
+        let archiveURL = pendingArchiveURL(for: category)
+        let metadataURL = pendingMetadataURL(for: category)
+        try fileManager.createDirectory(
+            at: retryDirectory,
+            withIntermediateDirectories: true
+        )
+        var keepsPreparedUpload = false
+        defer {
+            if !keepsPreparedUpload {
+                try? fileManager.removeItem(at: archiveURL)
+                try? fileManager.removeItem(at: metadataURL)
+            }
+        }
+        let archiveFingerprint = try RemoteSyncArchiveStagingService.gzipInitialBackupDatabase(
+            at: builtBackup.databaseURL,
+            to: archiveURL
+        )
+        var metadata = PendingInitialUploadMetadata(
+            categoryRawValue: category.rawValue,
+            syncFolderID: syncFolderID,
+            deviceFolderID: deviceFolderID,
+            schemaVersion: schemaVersion,
+            archiveSize: archiveFingerprint.byteCount,
+            archiveSHA256: archiveFingerprint.sha256,
+            acceptedInitialBackup: builtBackup.acceptedInitialBackup,
+            publicationIdentity: nil
+        )
+        metadata.publicationIdentity = try RemoteSyncPublicationIdentity.initialBackup(
+            category: category,
+            destinationID: syncFolderID,
+            sourceDevice: deviceIdentifier,
+            schemaVersion: schemaVersion,
+            remoteFileName: RemoteSyncPatchDiscoveryService.initialBackupFilename,
+            archiveFileName: archiveURL.lastPathComponent,
+            archiveSHA256: metadata.archiveSHA256,
+            archiveSize: metadata.archiveSize,
+            rowCounts: Self.acceptedRowCounts(in: builtBackup.acceptedInitialBackup),
+            acceptancePayload: metadata
+        )
+
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            try encoder.encode(metadata).write(to: metadataURL, options: .atomic)
+        } catch {
+            throw error
+        }
+        keepsPreparedUpload = true
+        return PendingInitialUpload(archiveURL: archiveURL, metadata: metadata)
+    }
+
+    /**
+     Validates one built outbound database through the same exact contract used on inbound restore.
+
+     - Parameters:
+       - databaseURL: Closed SQLite database produced by a category initial-backup builder.
+       - category: Category whose Android Room schema and identity must match.
+     - Side Effects: Opens the database read-only and closes it before returning.
+     - Throws:
+       - `RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase` when SQLite cannot open the file
+       - `RemoteSyncInitialBackupUploadError.invalidBuiltDatabaseContract` when version, identity,
+         runtime triggers, or complete schema differ
+         from the inbound contract
+     */
+    static func validateBuiltInitialBackupDatabase(
+        at databaseURL: URL,
+        category: RemoteSyncCategory
+    ) throws {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(
+            databaseURL.path,
+            &database,
+            SQLITE_OPEN_READONLY,
+            nil
+        ) == SQLITE_OK,
+        let database else {
+            if let database {
+                sqlite3_close(database)
+            }
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_close(database) }
+
+        do {
+            try RemoteSyncAndroidDatabaseContract.validateInboundDatabase(
+                database,
+                category: category
+            )
+        } catch {
+            throw RemoteSyncInitialBackupUploadError.invalidBuiltDatabaseContract(category)
+        }
+    }
+
+    /**
+     Loads a matching durable prepared upload when one exists.
+
+     - Parameters:
+       - category: Logical category being retried.
+       - syncFolderID: Current remote initial-backup destination.
+       - deviceFolderID: Current device-folder identity.
+       - schemaVersion: Current Android schema version.
+     - Returns: Matching prepared upload, or `nil` when no generation exists.
+     - Side Effects: Reads the durable metadata and archive without mutating either.
+     - Throws:
+       - `invalidPendingUploadArtifact` when metadata or archive integrity is invalid and rebuilding
+         could acknowledge bytes different from a prior remote upload
+       - `pendingUploadDestinationMismatch` when explicit reset/replacement has not abandoned a
+         generation bound to another destination or schema
+     */
+    private func loadPendingInitialUpload(
+        for category: RemoteSyncCategory,
+        syncFolderID: String,
+        deviceFolderID: String?,
+        schemaVersion: Int
+    ) throws -> PendingInitialUpload? {
+        let archiveURL = pendingArchiveURL(for: category)
+        let metadataURL = pendingMetadataURL(for: category)
+        let hasArchive = fileManager.fileExists(atPath: archiveURL.path)
+        let hasMetadata = fileManager.fileExists(atPath: metadataURL.path)
+        guard hasArchive || hasMetadata else { return nil }
+        guard hasArchive, hasMetadata else {
+            do {
+                if hasArchive {
+                    try fileManager.removeItem(at: archiveURL)
+                }
+                if hasMetadata {
+                    try fileManager.removeItem(at: metadataURL)
+                }
+            } catch {
+                throw RemoteSyncInitialBackupUploadError.invalidPendingUploadArtifact
+            }
+            return nil
+        }
+
+        let metadata: PendingInitialUploadMetadata
+        do {
+            metadata = try JSONDecoder().decode(
+                PendingInitialUploadMetadata.self,
+                from: RemoteSyncBoundedFileIO.readRegularFile(
+                    at: metadataURL,
+                    maximumByteCount: 4 * 1_024 * 1_024
+                )
+            )
+        } catch {
+            throw RemoteSyncInitialBackupUploadError.invalidPendingUploadArtifact
+        }
+
+        guard metadata.categoryRawValue == category.rawValue else {
+            throw RemoteSyncInitialBackupUploadError.invalidPendingUploadArtifact
+        }
+        guard metadata.syncFolderID == syncFolderID,
+              metadata.deviceFolderID == deviceFolderID,
+              metadata.schemaVersion == schemaVersion else {
+            throw RemoteSyncInitialBackupUploadError.pendingUploadDestinationMismatch
+        }
+
+        guard let publicationIdentity = metadata.publicationIdentity else {
+            throw RemoteSyncInitialBackupUploadError.invalidPendingUploadArtifact
+        }
+        var acceptancePayload = metadata
+        acceptancePayload.publicationIdentity = nil
+        do {
+            try publicationIdentity.validate(
+                kind: .initialBackup,
+                category: category,
+                destinationID: syncFolderID,
+                sourceDevice: deviceIdentifier,
+                patchNumber: 0,
+                schemaVersion: schemaVersion,
+                remoteFileName: RemoteSyncPatchDiscoveryService.initialBackupFilename,
+                archiveFileName: archiveURL.lastPathComponent,
+                archiveSHA256: metadata.archiveSHA256,
+                archiveSize: metadata.archiveSize,
+                rowCounts: Self.acceptedRowCounts(in: metadata.acceptedInitialBackup),
+                acceptancePayload: acceptancePayload
+            )
+        } catch {
+            throw RemoteSyncInitialBackupUploadError.invalidPendingUploadArtifact
+        }
+
+        let archiveFingerprint: RemoteSyncRegularFileFingerprint
+        do {
+            archiveFingerprint = try RemoteSyncBoundedFileIO.fingerprintRegularFile(
+                at: archiveURL,
+                maximumByteCount: RemoteSyncArchiveStagingService.maximumCompressedInitialBackupByteCount
+            )
+        } catch {
+            throw RemoteSyncInitialBackupUploadError.invalidPendingUploadArtifact
+        }
+        guard archiveFingerprint.byteCount == metadata.archiveSize,
+              archiveFingerprint.sha256 == metadata.archiveSHA256 else {
+            throw RemoteSyncInitialBackupUploadError.invalidPendingUploadArtifact
+        }
+        return PendingInitialUpload(archiveURL: archiveURL, metadata: metadata)
+    }
+
+    /**
+     Removes one category's durable prepared-upload generation after acceptance or replacement.
+
+     - Parameter category: Logical category whose prepared archive is no longer needed.
+     - Side Effects: Best-effort removal of the archive and metadata sidecar.
+     - Failure modes: Cleanup errors are intentionally ignored after durable local acceptance.
+     */
+    private func removePendingInitialUpload(for category: RemoteSyncCategory) {
+        try? fileManager.removeItem(at: pendingArchiveURL(for: category))
+        try? fileManager.removeItem(at: pendingMetadataURL(for: category))
+    }
+
+    /** Returns the production durable initial-upload directory beneath Application Support. */
+    static func defaultRetryDirectory(fileManager: FileManager) -> URL {
+        let root = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? fileManager.temporaryDirectory
+        return root.appendingPathComponent("RemoteSyncInitialUploads", isDirectory: true)
+    }
+
+    /** Returns the stable durable archive path for one category and retry root. */
+    static func pendingArchiveURL(
+        for category: RemoteSyncCategory,
+        retryDirectory: URL
+    ) -> URL {
+        retryDirectory.appendingPathComponent("\(category.rawValue)-pending.sqlite3.gz")
+    }
+
+    /** Returns the stable durable metadata path for one category and retry root. */
+    static func pendingMetadataURL(
+        for category: RemoteSyncCategory,
+        retryDirectory: URL
+    ) -> URL {
+        retryDirectory.appendingPathComponent("\(category.rawValue)-pending.json")
+    }
+
+    /** Returns the configured durable archive path for one category. */
+    private func pendingArchiveURL(for category: RemoteSyncCategory) -> URL {
+        Self.pendingArchiveURL(for: category, retryDirectory: retryDirectory)
+    }
+
+    /** Returns the configured durable metadata path for one category. */
+    private func pendingMetadataURL(for category: RemoteSyncCategory) -> URL {
+        Self.pendingMetadataURL(for: category, retryDirectory: retryDirectory)
+    }
+
+    /**
+     Counts the exact accepted Android rows bound to one initial-backup generation.
+
+     - Parameter acceptedInitialBackup: Immutable category baseline captured with the archive.
+     - Returns: Nonempty table-name counts plus an `acceptedRows` total.
+     - Side effects: none.
+     - Failure modes: This exhaustive projection cannot fail.
+     */
+    private static func acceptedRowCounts(
+        in acceptedInitialBackup: AcceptedInitialBackup
+    ) -> [String: Int] {
+        let tableNames: [String]
+        switch acceptedInitialBackup.fingerprintGeneration {
+        case .readingPlans(let generation):
+            tableNames = generation.rowsByKey.values.map(\.tableName)
+        case .bookmarks(let baseline):
+            tableNames = baseline.rowIdentities.map(\.tableName)
+        case .workspaces(let generation):
+            tableNames = generation.rowsByKey.values.map(\.tableName)
+        case .myDocuments(let baseline):
+            tableNames = baseline.rowIdentities.map(\.tableName)
+        case .progress(let generation):
+            tableNames = generation.rowsByKey.values.map(\.tableName)
+        }
+        var counts = Dictionary(grouping: tableNames, by: { $0 }).mapValues(\.count)
+        counts["acceptedRows"] = tableNames.count
+        return counts
+    }
+
+    /**
+     Builds one temporary Android-shaped category database from an exact local generation.
+
+     Remote initial upload and manual Android database export share this strict read boundary. All
+     graph categories use throwing snapshot projections, workspace history fetches throw, and soft
+     settings reads are promoted to a batch failure. If a deferred settings error surfaces after a
+     writer created its SQLite file, that artifact is removed before the error escapes.
 
      - Parameters:
        - category: Logical sync category whose current local state should be exported.
@@ -312,8 +868,10 @@ public final class RemoteSyncInitialBackupUploadService {
        - settingsStore: Local-only settings store backing fidelity metadata.
        - schemaVersion: SQLite user-version written into the exported database.
      - Returns: Temporary SQLite database file and any synthesized workspace history aliases.
-     - Side effects: writes one temporary SQLite database beneath the configured temporary directory.
-     - Failure modes: rethrows SQLite and JSON-encoding failures from the category-specific writers.
+     - Side Effects: Reads one graph/settings generation and writes one temporary SQLite database
+       beneath the configured temporary directory.
+     - Throws: Rethrows dirty/mismatched context, strict graph/history fetch, deferred settings-read,
+       cancellation, SQLite, and JSON-encoding failures; removes any created database on failure.
      */
     private func buildInitialBackup(
         for category: RemoteSyncCategory,
@@ -321,36 +879,49 @@ public final class RemoteSyncInitialBackupUploadService {
         settingsStore: SettingsStore,
         schemaVersion: Int
     ) throws -> BuiltInitialBackup {
-        switch category {
-        case .readingPlans:
-            return try buildReadingPlanInitialBackup(
-                modelContext: modelContext,
-                settingsStore: settingsStore,
-                schemaVersion: schemaVersion
-            )
-        case .bookmarks:
-            return try buildBookmarkInitialBackup(
-                modelContext: modelContext,
-                settingsStore: settingsStore,
-                schemaVersion: schemaVersion
-            )
-        case .workspaces:
-            return try buildWorkspaceInitialBackup(
-                modelContext: modelContext,
-                settingsStore: settingsStore,
-                schemaVersion: schemaVersion
-            )
-        case .myDocuments:
-            return try buildMyDocumentInitialBackup(
-                modelContext: modelContext,
-                settingsStore: settingsStore,
-                schemaVersion: schemaVersion
-            )
-        case .progress:
-            return try buildProgressInitialBackup(
-                settingsStore: settingsStore,
-                schemaVersion: schemaVersion
-            )
+        var createdDatabaseURL: URL?
+        do {
+            return try settingsStore.performAtomicBatch(in: modelContext) {
+                let builtBackup: BuiltInitialBackup
+                switch category {
+                case .readingPlans:
+                    builtBackup = try buildReadingPlanInitialBackup(
+                        modelContext: modelContext,
+                        settingsStore: settingsStore,
+                        schemaVersion: schemaVersion
+                    )
+                case .bookmarks:
+                    builtBackup = try buildBookmarkInitialBackup(
+                        modelContext: modelContext,
+                        settingsStore: settingsStore,
+                        schemaVersion: schemaVersion
+                    )
+                case .workspaces:
+                    builtBackup = try buildWorkspaceInitialBackup(
+                        modelContext: modelContext,
+                        settingsStore: settingsStore,
+                        schemaVersion: schemaVersion
+                    )
+                case .myDocuments:
+                    builtBackup = try buildMyDocumentInitialBackup(
+                        modelContext: modelContext,
+                        settingsStore: settingsStore,
+                        schemaVersion: schemaVersion
+                    )
+                case .progress:
+                    builtBackup = try buildProgressInitialBackup(
+                        settingsStore: settingsStore,
+                        schemaVersion: schemaVersion
+                    )
+                }
+                createdDatabaseURL = builtBackup.databaseURL
+                return builtBackup
+            }
+        } catch {
+            if let createdDatabaseURL {
+                try? fileManager.removeItem(at: createdDatabaseURL)
+            }
+            throw error
         }
     }
 
@@ -361,85 +932,92 @@ public final class RemoteSyncInitialBackupUploadService {
        - category: Logical sync category whose baseline was accepted remotely.
        - uploadedFile: Remote file metadata returned by the successful upload.
        - settingsStore: Local-only settings store backing sync bookkeeping.
-       - modelContext: SwiftData context used to refresh outbound fingerprints.
-       - workspaceHistoryAliases: Synthesized workspace history aliases that should be persisted after a workspace export.
-       - acceptedBaselineTimestamp: Optional timestamp captured while building the uploaded baseline; when supplied,
-         local `LogEntry` rows and `lastPatchWritten` reuse that value instead of taking a second clock sample.
-     - Side effects:
-       - clears category log-entry and patch-status rows
+       - modelContext: SwiftData context that owns the atomic settings transaction.
+       - acceptedInitialBackup: Immutable local manifest and side metadata captured with the uploaded archive.
+       - acceptedBaselineMutations: Caller-owned lifecycle mutations that must publish with baseline acceptance.
+     - Side Effects:
+       - clears category log entries and publishes the exact accepted-row identity manifest
        - records patch zero with the uploaded archive metadata
        - resets category progress state and advances `lastPatchWritten`
-       - refreshes category row-fingerprint baselines
+       - publishes the category row fingerprints captured with the uploaded archive
        - may rewrite workspace history aliases
-     - Failure modes: Local settings persistence remains best effort and swallows save failures through `SettingsStore`.
+       - commits caller lifecycle mutations in the same settings-backed transaction
+     - Throws: Rethrows strict fingerprint projection, settings fetch/save, cancellation, caller
+       mutation, and transaction failures after rolling the shared context back to its old generation.
      */
     private func resetAcceptedBaseline(
         for category: RemoteSyncCategory,
         uploadedFile: RemoteSyncFile,
         settingsStore: SettingsStore,
         modelContext: ModelContext,
-        workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias],
-        acceptedBaselineTimestamp: Int64? = nil
-    ) {
-        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
-        logEntryStore.clearCategory(category)
+        acceptedInitialBackup: AcceptedInitialBackup,
+        acceptedBaselineMutations: () throws -> Void
+    ) throws {
+        guard Self.category(for: acceptedInitialBackup.fingerprintGeneration) == category else {
+            throw RemoteSyncInitialBackupUploadError.invalidPendingUploadArtifact
+        }
+        do {
+            try settingsStore.performAtomicBatch(in: modelContext) {
+                RemoteSyncLogEntryStore(settingsStore: settingsStore).clearCategory(category)
 
-        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
-        patchStatusStore.clearCategory(category)
-        patchStatusStore.addStatus(
-            RemoteSyncPatchStatus(
-                sourceDevice: deviceIdentifier,
-                patchNumber: 0,
-                sizeBytes: uploadedFile.size,
-                appliedDate: uploadedFile.timestamp
-            ),
-            for: category
-        )
+                let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+                patchStatusStore.clearCategory(category)
+                patchStatusStore.addStatus(
+                    RemoteSyncPatchStatus(
+                        sourceDevice: deviceIdentifier,
+                        patchNumber: 0,
+                        sizeBytes: uploadedFile.size,
+                        appliedDate: uploadedFile.timestamp
+                    ),
+                    for: category
+                )
 
-        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
-        let acceptedAt = acceptedBaselineTimestamp ?? nowProvider()
-        stateStore.setProgressState(
-            RemoteSyncProgressState(
-                lastPatchWritten: acceptedAt,
-                lastSynchronized: nil,
-                disabledForVersion: nil
-            ),
-            for: category
-        )
+                let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+                stateStore.setProgressState(
+                    RemoteSyncProgressState(
+                        lastPatchWritten: acceptedInitialBackup.timestamp,
+                        lastSynchronized: nil,
+                        disabledForVersion: nil
+                    ),
+                    for: category
+                )
 
-        switch category {
-        case .readingPlans:
-            RemoteSyncReadingPlanSnapshotService().refreshBaselineFingerprints(
-                modelContext: modelContext,
-                settingsStore: settingsStore
-            )
-        case .bookmarks:
-            RemoteSyncBookmarkSnapshotService().refreshBaselineFingerprints(
-                modelContext: modelContext,
-                settingsStore: settingsStore
-            )
-        case .workspaces:
-            synchronizeWorkspaceHistoryAliases(workspaceHistoryAliases, settingsStore: settingsStore)
-            RemoteSyncWorkspaceSnapshotService().refreshBaselineFingerprints(
-                modelContext: modelContext,
-                settingsStore: settingsStore
-            )
-        case .myDocuments:
-            RemoteSyncMyDocumentSnapshotService().refreshBaselineFingerprints(
-                modelContext: modelContext,
-                settingsStore: settingsStore
-            )
-        case .progress:
-            let progressSnapshotService = RemoteSyncProgressSnapshotService()
-            logEntryStore.replaceEntries(
-                progressSnapshotService.acceptedBaselineLogEntries(
-                    settingsStore: settingsStore,
-                    sourceDevice: deviceIdentifier,
-                    lastUpdated: acceptedAt
-                ),
-                for: .progress
-            )
-            progressSnapshotService.refreshBaselineFingerprints(settingsStore: settingsStore)
+                switch acceptedInitialBackup.fingerprintGeneration {
+                case .readingPlans(let generation):
+                    try RemoteSyncReadingPlanSnapshotService().acceptBaselineFingerprints(
+                        generation,
+                        settingsStore: settingsStore
+                    )
+                case .bookmarks(let baseline):
+                    try RemoteSyncBookmarkSnapshotService().acceptBaseline(
+                        baseline,
+                        settingsStore: settingsStore
+                    )
+                case .workspaces(let generation):
+                    synchronizeWorkspaceHistoryAliases(
+                        acceptedInitialBackup.workspaceHistoryAliases.map(\.runtimeValue),
+                        settingsStore: settingsStore
+                    )
+                    try RemoteSyncWorkspaceSnapshotService().acceptBaselineFingerprints(
+                        generation,
+                        settingsStore: settingsStore
+                    )
+                case .myDocuments(let baseline):
+                    try RemoteSyncMyDocumentSnapshotService().acceptBaseline(
+                        baseline,
+                        settingsStore: settingsStore
+                    )
+                case .progress(let generation):
+                    try RemoteSyncProgressSnapshotService().acceptBaselineFingerprints(
+                        generation,
+                        settingsStore: settingsStore
+                    )
+                }
+                try acceptedBaselineMutations()
+            }
+        } catch {
+            modelContext.rollback()
+            throw error
         }
     }
 
@@ -452,7 +1030,8 @@ public final class RemoteSyncInitialBackupUploadService {
      - Side effects:
        - removes stale workspace-history alias rows
        - persists the supplied alias set
-     - Failure modes: Persistence failures are swallowed by `SettingsStore`.
+     - Failure modes: Ordinary callers retain `SettingsStore` soft-write behavior; when invoked by
+       accepted-baseline publication, any recorded settings failure invalidates the enclosing batch.
      */
     private func synchronizeWorkspaceHistoryAliases(
         _ aliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias],
@@ -484,17 +1063,40 @@ public final class RemoteSyncInitialBackupUploadService {
        - writes one temporary SQLite database beneath the configured temporary directory
      - Failure modes:
        - throws `RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase` when SQLite rejects schema creation or row insertion
+       - remote upload throws `unsupportedCustomReadingPlans` before creating a database for active
+         custom plans because Android's database sync does not carry local `.properties` files
+     - Note: Builder-only manual database export preserves Android's public Room rows for local
+       custom plans and never adds an iOS-only definition table.
      */
     private func buildReadingPlanInitialBackup(
         modelContext: ModelContext,
         settingsStore: SettingsStore,
         schemaVersion: Int
     ) throws -> BuiltInitialBackup {
-        let snapshotService = RemoteSyncReadingPlanSnapshotService()
-        let snapshot = snapshotService.snapshotCurrentState(
+        guard schemaVersion == RemoteSyncAndroidDatabaseContract.schemaVersion(for: .readingPlans) else {
+            throw RemoteSyncInitialBackupUploadError.unsupportedSchemaVersion(
+                category: .readingPlans,
+                version: schemaVersion
+            )
+        }
+        let snapshot = try readingPlanSnapshotService.snapshotCurrentStateStrict(
             modelContext: modelContext,
             settingsStore: settingsStore
         )
+        if adapter != nil {
+            let unsupportedPlanCodes = readingPlanSnapshotService
+                .unsupportedCustomPlanCodes(in: snapshot)
+            guard unsupportedPlanCodes.isEmpty else {
+                throw RemoteSyncInitialBackupUploadError.unsupportedCustomReadingPlans(
+                    unsupportedPlanCodes
+                )
+            }
+        }
+        let acceptedTimestamp = try nextAcceptedTimestamp(
+            for: .readingPlans,
+            settingsStore: settingsStore
+        )
+        let acceptedGeneration = readingPlanSnapshotService.acceptedGeneration(from: snapshot)
         let databaseURL = temporaryURL(prefix: "remote-sync-readingplans-initial-", suffix: ".sqlite3")
         do {
             var database: OpaquePointer?
@@ -509,44 +1111,7 @@ public final class RemoteSyncInitialBackupUploadService {
             defer { sqlite3_close(database) }
 
             try execute(
-                """
-                PRAGMA user_version = \(schemaVersion);
-                CREATE TABLE ReadingPlan (
-                    planCode TEXT NOT NULL,
-                    planStartDate INTEGER NOT NULL,
-                    planCurrentDay INTEGER NOT NULL DEFAULT 1,
-                    id BLOB NOT NULL PRIMARY KEY
-                );
-                CREATE TABLE ReadingPlanStatus (
-                    planCode TEXT NOT NULL,
-                    planDay INTEGER NOT NULL,
-                    readingStatus TEXT NOT NULL,
-                    id BLOB NOT NULL PRIMARY KEY
-                );
-                CREATE TABLE LogEntry (
-                    tableName TEXT NOT NULL,
-                    entityId1 BLOB NOT NULL,
-                    entityId2 BLOB NOT NULL,
-                    type TEXT NOT NULL,
-                    lastUpdated INTEGER NOT NULL DEFAULT 0,
-                    sourceDevice TEXT NOT NULL,
-                    PRIMARY KEY(tableName, entityId1, entityId2)
-                );
-                CREATE TABLE SyncConfiguration (
-                    keyName TEXT NOT NULL,
-                    stringValue TEXT,
-                    longValue INTEGER,
-                    booleanValue INTEGER,
-                    PRIMARY KEY(keyName)
-                );
-                CREATE TABLE SyncStatus (
-                    sourceDevice TEXT NOT NULL,
-                    patchNumber INTEGER NOT NULL,
-                    sizeBytes INTEGER NOT NULL,
-                    appliedDate INTEGER NOT NULL,
-                    PRIMARY KEY(sourceDevice, patchNumber)
-                );
-                """,
+                RemoteSyncAndroidDatabaseContract.createSchemaSQL(for: .readingPlans),
                 in: database
             )
 
@@ -556,8 +1121,14 @@ public final class RemoteSyncInitialBackupUploadService {
             for row in snapshot.statusRowsByKey.values.sorted(by: Self.readingPlanStatusSort) {
                 try insertReadingPlanStatusRow(row, in: database)
             }
-
-            return BuiltInitialBackup(databaseURL: databaseURL, workspaceHistoryAliases: [])
+            return BuiltInitialBackup(
+                databaseURL: databaseURL,
+                acceptedInitialBackup: AcceptedInitialBackup(
+                    timestamp: acceptedTimestamp,
+                    fingerprintGeneration: .readingPlans(acceptedGeneration),
+                    workspaceHistoryAliases: []
+                )
+            )
         } catch {
             try? fileManager.removeItem(at: databaseURL)
             throw error
@@ -579,13 +1150,20 @@ public final class RemoteSyncInitialBackupUploadService {
         settingsStore: SettingsStore,
         schemaVersion: Int
     ) throws -> BuiltInitialBackup {
+        guard schemaVersion == RemoteSyncAndroidDatabaseContract.schemaVersion(for: .progress) else {
+            throw RemoteSyncInitialBackupUploadError.unsupportedSchemaVersion(
+                category: .progress,
+                version: schemaVersion
+            )
+        }
         let databaseURL = temporaryURL(prefix: "remote-sync-progress-initial-", suffix: ".sqlite3")
-        let acceptedBaselineTimestamp = nowProvider()
-        let baselineLogEntries = RemoteSyncProgressSnapshotService().acceptedBaselineLogEntries(
-            settingsStore: settingsStore,
-            sourceDevice: deviceIdentifier,
-            lastUpdated: acceptedBaselineTimestamp
+        let snapshotService = RemoteSyncProgressSnapshotService()
+        let snapshot = try snapshotService.snapshotCurrentStateStrict(settingsStore: settingsStore)
+        let acceptedTimestamp = try nextAcceptedTimestamp(
+            for: .progress,
+            settingsStore: settingsStore
         )
+        let acceptedGeneration = snapshotService.acceptedGeneration(from: snapshot)
         do {
             try AndroidDatabaseBackupProgressMapper.writeDatabase(
                 at: databaseURL,
@@ -599,45 +1177,17 @@ public final class RemoteSyncInitialBackupUploadService {
             defer { sqlite3_close(database) }
 
             try execute(
-                """
-                PRAGMA user_version = \(schemaVersion);
-                CREATE TABLE LogEntry (
-                    tableName TEXT NOT NULL,
-                    entityId1 BLOB NOT NULL,
-                    entityId2 BLOB NOT NULL DEFAULT '',
-                    type TEXT NOT NULL,
-                    lastUpdated INTEGER NOT NULL DEFAULT 0,
-                    sourceDevice TEXT NOT NULL,
-                    PRIMARY KEY(tableName, entityId1, entityId2)
-                );
-                CREATE TABLE SyncConfiguration (
-                    keyName TEXT NOT NULL,
-                    stringValue TEXT,
-                    longValue INTEGER,
-                    booleanValue INTEGER,
-                    PRIMARY KEY(keyName)
-                );
-                CREATE TABLE SyncStatus (
-                    sourceDevice TEXT NOT NULL,
-                    patchNumber INTEGER NOT NULL,
-                    sizeBytes INTEGER NOT NULL,
-                    appliedDate INTEGER NOT NULL,
-                    PRIMARY KEY(sourceDevice, patchNumber)
-                );
-                CREATE INDEX index_LogEntry_tableName_entityId1 ON LogEntry (tableName, entityId1);
-                CREATE INDEX index_LogEntry_lastUpdated ON LogEntry (lastUpdated);
-                """,
+                RemoteSyncAndroidDatabaseContract.createSchemaSQL(for: .progress),
                 in: database
             )
 
-            for entry in baselineLogEntries {
-                try insertLogEntry(entry, in: database)
-            }
-
             return BuiltInitialBackup(
                 databaseURL: databaseURL,
-                workspaceHistoryAliases: [],
-                acceptedBaselineTimestamp: acceptedBaselineTimestamp
+                acceptedInitialBackup: AcceptedInitialBackup(
+                    timestamp: acceptedTimestamp,
+                    fingerprintGeneration: .progress(acceptedGeneration),
+                    workspaceHistoryAliases: []
+                )
             )
         } catch {
             try? fileManager.removeItem(at: databaseURL)
@@ -664,11 +1214,19 @@ public final class RemoteSyncInitialBackupUploadService {
         settingsStore: SettingsStore,
         schemaVersion: Int
     ) throws -> BuiltInitialBackup {
+        guard schemaVersion == AndroidBookmarkDatabaseContract.schemaVersion else {
+            throw RemoteSyncInitialBackupUploadError.unsupportedBookmarkSchemaVersion(schemaVersion)
+        }
         let snapshotService = RemoteSyncBookmarkSnapshotService()
-        let snapshot = snapshotService.snapshotCurrentState(
+        let snapshot = try snapshotService.snapshotCurrentStateThrowing(
             modelContext: modelContext,
             settingsStore: settingsStore
         )
+        let acceptedTimestamp = try nextAcceptedTimestamp(
+            for: .bookmarks,
+            settingsStore: settingsStore
+        )
+        let acceptedBaseline = snapshotService.acceptedBaseline(from: snapshot)
         let databaseURL = temporaryURL(prefix: "remote-sync-bookmarks-initial-", suffix: ".sqlite3")
         do {
             var database: OpaquePointer?
@@ -682,125 +1240,7 @@ public final class RemoteSyncInitialBackupUploadService {
             }
             defer { sqlite3_close(database) }
 
-            try execute(
-                """
-                PRAGMA user_version = \(schemaVersion);
-                CREATE TABLE Label (
-                    id BLOB NOT NULL PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    color INTEGER NOT NULL DEFAULT 0,
-                    markerStyle INTEGER NOT NULL DEFAULT 0,
-                    markerStyleWholeVerse INTEGER NOT NULL DEFAULT 0,
-                    underlineStyle INTEGER NOT NULL DEFAULT 0,
-                    underlineStyleWholeVerse INTEGER NOT NULL DEFAULT 0,
-                    hideStyle INTEGER NOT NULL DEFAULT 0,
-                    hideStyleWholeVerse INTEGER NOT NULL DEFAULT 0,
-                    favourite INTEGER NOT NULL DEFAULT 0,
-                    type TEXT DEFAULT NULL,
-                    customIcon TEXT DEFAULT NULL
-                );
-                CREATE TABLE BibleBookmark (
-                    kjvOrdinalStart INTEGER NOT NULL,
-                    kjvOrdinalEnd INTEGER NOT NULL,
-                    ordinalStart INTEGER NOT NULL,
-                    ordinalEnd INTEGER NOT NULL,
-                    v11n TEXT NOT NULL,
-                    playbackSettings TEXT DEFAULT NULL,
-                    id BLOB NOT NULL PRIMARY KEY,
-                    createdAt INTEGER NOT NULL,
-                    book TEXT DEFAULT NULL,
-                    startOffset INTEGER DEFAULT NULL,
-                    endOffset INTEGER DEFAULT NULL,
-                    primaryLabelId BLOB DEFAULT NULL,
-                    lastUpdatedOn INTEGER NOT NULL DEFAULT 0,
-                    wholeVerse INTEGER NOT NULL DEFAULT 0,
-                    type TEXT DEFAULT NULL,
-                    customIcon TEXT DEFAULT NULL,
-                    editAction_mode TEXT DEFAULT NULL,
-                    editAction_content TEXT DEFAULT NULL
-                );
-                CREATE TABLE BibleBookmarkNotes (
-                    bookmarkId BLOB NOT NULL PRIMARY KEY,
-                    notes TEXT NOT NULL,
-                    contentType TEXT DEFAULT NULL
-                );
-                CREATE TABLE BibleBookmarkToLabel (
-                    bookmarkId BLOB NOT NULL,
-                    labelId BLOB NOT NULL,
-                    orderNumber INTEGER NOT NULL DEFAULT -1,
-                    indentLevel INTEGER NOT NULL DEFAULT 0,
-                    expandContent INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY(bookmarkId, labelId)
-                );
-                CREATE TABLE GenericBookmark (
-                    id BLOB NOT NULL PRIMARY KEY,
-                    `key` TEXT NOT NULL,
-                    createdAt INTEGER NOT NULL,
-                    bookInitials TEXT NOT NULL DEFAULT '',
-                    ordinalStart INTEGER NOT NULL,
-                    ordinalEnd INTEGER NOT NULL,
-                    startOffset INTEGER DEFAULT NULL,
-                    endOffset INTEGER DEFAULT NULL,
-                    primaryLabelId BLOB DEFAULT NULL,
-                    lastUpdatedOn INTEGER NOT NULL DEFAULT 0,
-                    wholeVerse INTEGER NOT NULL DEFAULT 0,
-                    playbackSettings TEXT DEFAULT NULL,
-                    customIcon TEXT DEFAULT NULL,
-                    editAction_mode TEXT DEFAULT NULL,
-                    editAction_content TEXT DEFAULT NULL
-                );
-                CREATE TABLE GenericBookmarkNotes (
-                    bookmarkId BLOB NOT NULL PRIMARY KEY,
-                    notes TEXT NOT NULL,
-                    contentType TEXT DEFAULT NULL
-                );
-                CREATE TABLE GenericBookmarkToLabel (
-                    bookmarkId BLOB NOT NULL,
-                    labelId BLOB NOT NULL,
-                    orderNumber INTEGER NOT NULL DEFAULT -1,
-                    indentLevel INTEGER NOT NULL DEFAULT 0,
-                    expandContent INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY(bookmarkId, labelId)
-                );
-                CREATE TABLE StudyPadTextEntry (
-                    id BLOB NOT NULL PRIMARY KEY,
-                    labelId BLOB NOT NULL,
-                    orderNumber INTEGER NOT NULL,
-                    indentLevel INTEGER NOT NULL DEFAULT 0,
-                    contentType TEXT DEFAULT NULL
-                );
-                CREATE TABLE StudyPadTextEntryText (
-                    studyPadTextEntryId BLOB NOT NULL PRIMARY KEY,
-                    text TEXT NOT NULL
-                );
-                CREATE TABLE LogEntry (
-                    tableName TEXT NOT NULL,
-                    entityId1 BLOB NOT NULL,
-                    entityId2 BLOB NOT NULL,
-                    type TEXT NOT NULL,
-                    lastUpdated INTEGER NOT NULL DEFAULT 0,
-                    sourceDevice TEXT NOT NULL,
-                    PRIMARY KEY(tableName, entityId1, entityId2)
-                );
-                CREATE TABLE SyncConfiguration (
-                    keyName TEXT NOT NULL,
-                    stringValue TEXT,
-                    longValue INTEGER,
-                    booleanValue INTEGER,
-                    PRIMARY KEY(keyName)
-                );
-                CREATE TABLE SyncStatus (
-                    sourceDevice TEXT NOT NULL,
-                    patchNumber INTEGER NOT NULL,
-                    sizeBytes INTEGER NOT NULL,
-                    appliedDate INTEGER NOT NULL,
-                    PRIMARY KEY(sourceDevice, patchNumber)
-                );
-                CREATE INDEX index_LogEntry_tableName_entityId1 ON LogEntry (tableName, entityId1);
-                CREATE INDEX index_LogEntry_lastUpdated ON LogEntry (lastUpdated);
-                """,
-                in: database
-            )
+            try execute(AndroidBookmarkDatabaseContract.createSchemaSQL, in: database)
 
             for row in snapshot.labelRowsByKey.values.sorted(by: Self.bookmarkLabelSort) {
                 try insertLabelRow(row, in: database)
@@ -830,7 +1270,14 @@ public final class RemoteSyncInitialBackupUploadService {
                 try insertStudyPadTextRow(row, in: database)
             }
 
-            return BuiltInitialBackup(databaseURL: databaseURL, workspaceHistoryAliases: [])
+            return BuiltInitialBackup(
+                databaseURL: databaseURL,
+                acceptedInitialBackup: AcceptedInitialBackup(
+                    timestamp: acceptedTimestamp,
+                    fingerprintGeneration: .bookmarks(acceptedBaseline),
+                    workspaceHistoryAliases: []
+                )
+            )
         } catch {
             try? fileManager.removeItem(at: databaseURL)
             throw error
@@ -857,15 +1304,26 @@ public final class RemoteSyncInitialBackupUploadService {
         settingsStore: SettingsStore,
         schemaVersion: Int
     ) throws -> BuiltInitialBackup {
+        guard schemaVersion == RemoteSyncAndroidDatabaseContract.schemaVersion(for: .workspaces) else {
+            throw RemoteSyncInitialBackupUploadError.unsupportedSchemaVersion(
+                category: .workspaces,
+                version: schemaVersion
+            )
+        }
         let snapshotService = RemoteSyncWorkspaceSnapshotService()
-        let snapshot = snapshotService.snapshotCurrentState(
+        let snapshot = try snapshotService.snapshotCurrentStateStrict(
             modelContext: modelContext,
             settingsStore: settingsStore
         )
-        let projectedHistory = projectWorkspaceHistory(
+        let projectedHistory = try projectWorkspaceHistory(
             modelContext: modelContext,
             settingsStore: settingsStore
         )
+        let acceptedTimestamp = try nextAcceptedTimestamp(
+            for: .workspaces,
+            settingsStore: settingsStore
+        )
+        let acceptedGeneration = snapshotService.acceptedGeneration(from: snapshot)
         let databaseURL = temporaryURL(prefix: "remote-sync-workspaces-initial-", suffix: ".sqlite3")
         do {
             var database: OpaquePointer?
@@ -880,161 +1338,9 @@ public final class RemoteSyncInitialBackupUploadService {
             defer { sqlite3_close(database) }
 
             try execute(
-                """
-                PRAGMA user_version = \(schemaVersion);
-                CREATE TABLE "Workspace" (
-                    name TEXT NOT NULL,
-                    contentsText TEXT,
-                    id BLOB NOT NULL PRIMARY KEY,
-                    orderNumber INTEGER NOT NULL,
-                    unPinnedWeight REAL DEFAULT NULL,
-                    maximizedWindowId BLOB DEFAULT NULL,
-                    primaryTargetLinksWindowId BLOB DEFAULT NULL,
-                    text_display_settings_strongsMode INTEGER DEFAULT NULL,
-                    text_display_settings_showMorphology INTEGER DEFAULT NULL,
-                    text_display_settings_showFootNotes INTEGER DEFAULT NULL,
-                    text_display_settings_showFootNotesInline INTEGER DEFAULT NULL,
-                    text_display_settings_expandXrefs INTEGER DEFAULT NULL,
-                    text_display_settings_showXrefs INTEGER DEFAULT NULL,
-                    text_display_settings_showRedLetters INTEGER DEFAULT NULL,
-                    text_display_settings_showSectionTitles INTEGER DEFAULT NULL,
-                    text_display_settings_showVerseNumbers INTEGER DEFAULT NULL,
-                    text_display_settings_showVersePerLine INTEGER DEFAULT NULL,
-                    text_display_settings_showBookmarks INTEGER DEFAULT NULL,
-                    text_display_settings_showMyNotes INTEGER DEFAULT NULL,
-                    text_display_settings_justifyText INTEGER DEFAULT NULL,
-                    text_display_settings_hyphenation INTEGER DEFAULT NULL,
-                    text_display_settings_topMargin INTEGER DEFAULT NULL,
-                    text_display_settings_fontSize INTEGER DEFAULT NULL,
-                    text_display_settings_fontFamily TEXT DEFAULT NULL,
-                    text_display_settings_lineSpacing INTEGER DEFAULT NULL,
-                    text_display_settings_bookmarksHideLabels TEXT DEFAULT NULL,
-                    text_display_settings_showPageNumber INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_marginLeft INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_marginRight INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_maxWidth INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayTextColor INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayBackground INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayNoise INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightTextColor INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightBackground INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightNoise INTEGER DEFAULT NULL,
-                    workspace_settings_enableTiltToScroll INTEGER NOT NULL DEFAULT 0,
-                    workspace_settings_enableReverseSplitMode INTEGER NOT NULL DEFAULT 0,
-                    workspace_settings_autoPin INTEGER NOT NULL DEFAULT 0,
-                    workspace_settings_restoreButtonsVisible INTEGER NOT NULL DEFAULT 1,
-                    workspace_settings_speakSettings TEXT DEFAULT NULL,
-                    workspace_settings_recentLabels TEXT DEFAULT NULL,
-                    workspace_settings_autoAssignLabels TEXT DEFAULT NULL,
-                    workspace_settings_autoAssignPrimaryLabel BLOB DEFAULT NULL,
-                    workspace_settings_studyPadCursors TEXT DEFAULT NULL,
-                    workspace_settings_hideCompareDocuments TEXT DEFAULT NULL,
-                    workspace_settings_limitAmbiguousModalSize INTEGER NOT NULL DEFAULT 0,
-                    workspace_settings_workspaceColor INTEGER DEFAULT NULL
-                );
-                CREATE TABLE "Window" (
-                    workspaceId BLOB NOT NULL,
-                    isSynchronized INTEGER NOT NULL,
-                    isPinMode INTEGER NOT NULL,
-                    isLinksWindow INTEGER NOT NULL,
-                    id BLOB NOT NULL PRIMARY KEY,
-                    orderNumber INTEGER NOT NULL,
-                    targetLinksWindowId BLOB DEFAULT NULL,
-                    syncGroup INTEGER NOT NULL DEFAULT 0,
-                    window_layout_state TEXT NOT NULL,
-                    window_layout_weight REAL NOT NULL,
-                    FOREIGN KEY(workspaceId) REFERENCES "Workspace"(id) ON DELETE CASCADE
-                );
-                CREATE TABLE "HistoryItem" (
-                    windowId BLOB NOT NULL,
-                    createdAt INTEGER NOT NULL,
-                    document TEXT NOT NULL,
-                    key TEXT NOT NULL,
-                    anchorOrdinal INTEGER DEFAULT NULL,
-                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                    FOREIGN KEY(windowId) REFERENCES "Window"(id) ON DELETE CASCADE
-                );
-                CREATE TABLE "PageManager" (
-                    windowId BLOB NOT NULL PRIMARY KEY,
-                    currentCategoryName TEXT NOT NULL,
-                    jsState TEXT,
-                    bible_document TEXT,
-                    bible_verse_versification TEXT NOT NULL,
-                    bible_verse_bibleBook INTEGER NOT NULL,
-                    bible_verse_chapterNo INTEGER NOT NULL,
-                    bible_verse_verseNo INTEGER NOT NULL,
-                    commentary_document TEXT,
-                    commentary_anchorOrdinal INTEGER DEFAULT NULL,
-                    commentary_sourceBookAndKey TEXT DEFAULT NULL,
-                    dictionary_document TEXT,
-                    dictionary_key TEXT,
-                    dictionary_anchorOrdinal INTEGER DEFAULT NULL,
-                    general_book_document TEXT,
-                    general_book_key TEXT,
-                    general_book_anchorOrdinal INTEGER DEFAULT NULL,
-                    map_document TEXT,
-                    map_key TEXT,
-                    map_anchorOrdinal INTEGER DEFAULT NULL,
-                    text_display_settings_strongsMode INTEGER DEFAULT NULL,
-                    text_display_settings_showMorphology INTEGER DEFAULT NULL,
-                    text_display_settings_showFootNotes INTEGER DEFAULT NULL,
-                    text_display_settings_showFootNotesInline INTEGER DEFAULT NULL,
-                    text_display_settings_expandXrefs INTEGER DEFAULT NULL,
-                    text_display_settings_showXrefs INTEGER DEFAULT NULL,
-                    text_display_settings_showRedLetters INTEGER DEFAULT NULL,
-                    text_display_settings_showSectionTitles INTEGER DEFAULT NULL,
-                    text_display_settings_showVerseNumbers INTEGER DEFAULT NULL,
-                    text_display_settings_showVersePerLine INTEGER DEFAULT NULL,
-                    text_display_settings_showBookmarks INTEGER DEFAULT NULL,
-                    text_display_settings_showMyNotes INTEGER DEFAULT NULL,
-                    text_display_settings_justifyText INTEGER DEFAULT NULL,
-                    text_display_settings_hyphenation INTEGER DEFAULT NULL,
-                    text_display_settings_topMargin INTEGER DEFAULT NULL,
-                    text_display_settings_fontSize INTEGER DEFAULT NULL,
-                    text_display_settings_fontFamily TEXT DEFAULT NULL,
-                    text_display_settings_lineSpacing INTEGER DEFAULT NULL,
-                    text_display_settings_bookmarksHideLabels TEXT DEFAULT NULL,
-                    text_display_settings_showPageNumber INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_marginLeft INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_marginRight INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_maxWidth INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayTextColor INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayBackground INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayNoise INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightTextColor INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightBackground INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightNoise INTEGER DEFAULT NULL,
-                    FOREIGN KEY(windowId) REFERENCES "Window"(id) ON DELETE CASCADE
-                );
-                CREATE TABLE LogEntry (
-                    tableName TEXT NOT NULL,
-                    entityId1 BLOB NOT NULL,
-                    entityId2 BLOB NOT NULL DEFAULT '',
-                    type TEXT NOT NULL,
-                    lastUpdated INTEGER NOT NULL DEFAULT 0,
-                    sourceDevice TEXT NOT NULL,
-                    PRIMARY KEY(tableName, entityId1, entityId2)
-                );
-                CREATE TABLE SyncConfiguration (
-                    keyName TEXT NOT NULL,
-                    stringValue TEXT,
-                    longValue INTEGER,
-                    booleanValue INTEGER,
-                    PRIMARY KEY(keyName)
-                );
-                CREATE TABLE SyncStatus (
-                    sourceDevice TEXT NOT NULL,
-                    patchNumber INTEGER NOT NULL,
-                    sizeBytes INTEGER NOT NULL,
-                    appliedDate INTEGER NOT NULL,
-                    PRIMARY KEY(sourceDevice, patchNumber)
-                );
-                CREATE INDEX index_LogEntry_tableName_entityId1 ON LogEntry (tableName, entityId1);
-                CREATE INDEX index_LogEntry_lastUpdated ON LogEntry (lastUpdated);
-                """,
+                RemoteSyncAndroidDatabaseContract.createSchemaSQL(for: .workspaces),
                 in: database
             )
-
             for row in snapshot.workspaceRowsByKey.values.sorted(by: Self.workspaceSort) {
                 try insertWorkspaceRow(row, in: database)
             }
@@ -1044,11 +1350,26 @@ public final class RemoteSyncInitialBackupUploadService {
             for row in snapshot.pageManagerRowsByKey.values.sorted(by: Self.pageManagerSort) {
                 try insertPageManagerRow(row, in: database)
             }
+            for row in snapshot.labelOverrideRowsByKey.values.sorted(by: Self.labelOverrideSort) {
+                try insertWorkspaceLabelOverrideRow(row, in: database)
+            }
+            for row in snapshot.globalTextDisplayRowsByKey.values.sorted(by: {
+                $0.id.uuidString < $1.id.uuidString
+            }) {
+                try insertGlobalTextDisplaySettingsRow(row, in: database)
+            }
             for row in projectedHistory.rows {
                 try insertWorkspaceHistoryRow(row, in: database)
             }
 
-            return BuiltInitialBackup(databaseURL: databaseURL, workspaceHistoryAliases: projectedHistory.aliases)
+            return BuiltInitialBackup(
+                databaseURL: databaseURL,
+                acceptedInitialBackup: AcceptedInitialBackup(
+                    timestamp: acceptedTimestamp,
+                    fingerprintGeneration: .workspaces(acceptedGeneration),
+                    workspaceHistoryAliases: projectedHistory.aliases.map(StoredWorkspaceHistoryAlias.init)
+                )
+            )
         } catch {
             try? fileManager.removeItem(at: databaseURL)
             throw error
@@ -1074,11 +1395,22 @@ public final class RemoteSyncInitialBackupUploadService {
         settingsStore: SettingsStore,
         schemaVersion: Int
     ) throws -> BuiltInitialBackup {
+        guard schemaVersion == RemoteSyncAndroidDatabaseContract.schemaVersion(for: .myDocuments) else {
+            throw RemoteSyncInitialBackupUploadError.unsupportedSchemaVersion(
+                category: .myDocuments,
+                version: schemaVersion
+            )
+        }
         let snapshotService = RemoteSyncMyDocumentSnapshotService()
-        let snapshot = snapshotService.snapshotCurrentState(
+        let snapshot = try snapshotService.snapshotCurrentStateThrowing(
             modelContext: modelContext,
             settingsStore: settingsStore
         )
+        let acceptedTimestamp = try nextAcceptedTimestamp(
+            for: .myDocuments,
+            settingsStore: settingsStore
+        )
+        let acceptedBaseline = snapshotService.acceptedBaseline(from: snapshot)
         let databaseURL = temporaryURL(prefix: "remote-sync-mydocuments-initial-", suffix: ".sqlite3")
         do {
             var database: OpaquePointer?
@@ -1096,105 +1428,9 @@ public final class RemoteSyncInitialBackupUploadService {
             defer { sqlite3_close(database) }
 
             try execute(
-                """
-                PRAGMA foreign_keys = ON;
-                PRAGMA user_version = \(schemaVersion);
-                CREATE TABLE MyDocument (
-                    id BLOB NOT NULL PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    description TEXT DEFAULT NULL,
-                    initials TEXT NOT NULL,
-                    orderNumber INTEGER NOT NULL,
-                    createdAt INTEGER NOT NULL,
-                    updatedAt INTEGER NOT NULL,
-                    sourcePromptId BLOB DEFAULT NULL
-                );
-                CREATE TABLE MyDocumentPage (
-                    id BLOB NOT NULL PRIMARY KEY,
-                    documentId BLOB NOT NULL,
-                    title TEXT NOT NULL,
-                    pageKey TEXT NOT NULL,
-                    contentType TEXT NOT NULL,
-                    orderNumber INTEGER NOT NULL,
-                    createdAt INTEGER NOT NULL,
-                    updatedAt INTEGER NOT NULL,
-                    sourcePromptId BLOB DEFAULT NULL,
-                    languageCode TEXT DEFAULT NULL,
-                    FOREIGN KEY(documentId) REFERENCES MyDocument(id) ON DELETE CASCADE
-                );
-                CREATE TABLE MyDocumentPageContent (
-                    pageId BLOB NOT NULL PRIMARY KEY,
-                    content TEXT NOT NULL,
-                    FOREIGN KEY(pageId) REFERENCES MyDocumentPage(id) ON DELETE CASCADE
-                );
-                CREATE TABLE AiPageCacheEntry (
-                    pageId BLOB NOT NULL PRIMARY KEY,
-                    sourcePromptId BLOB NOT NULL,
-                    sourceContext TEXT DEFAULT NULL,
-                    kjvOrdinalStart INTEGER DEFAULT NULL,
-                    kjvOrdinalEnd INTEGER DEFAULT NULL,
-                    contextHash TEXT DEFAULT NULL,
-                    usedWriteTools INTEGER NOT NULL,
-                    sourceModelName TEXT DEFAULT NULL,
-                    sourceBookInitials TEXT DEFAULT NULL,
-                    sourceBookKey TEXT DEFAULT NULL,
-                    FOREIGN KEY(pageId) REFERENCES MyDocumentPage(id) ON DELETE CASCADE
-                );
-                CREATE TABLE LogEntry (
-                    tableName TEXT NOT NULL,
-                    entityId1 BLOB NOT NULL,
-                    entityId2 BLOB NOT NULL,
-                    type TEXT NOT NULL,
-                    lastUpdated INTEGER NOT NULL DEFAULT 0,
-                    sourceDevice TEXT NOT NULL,
-                    PRIMARY KEY(tableName, entityId1, entityId2)
-                );
-                CREATE TABLE SyncConfiguration (
-                    keyName TEXT NOT NULL,
-                    stringValue TEXT,
-                    longValue INTEGER,
-                    booleanValue INTEGER,
-                    PRIMARY KEY(keyName)
-                );
-                CREATE TABLE SyncStatus (
-                    sourceDevice TEXT NOT NULL,
-                    patchNumber INTEGER NOT NULL,
-                    sizeBytes INTEGER NOT NULL,
-                    appliedDate INTEGER NOT NULL,
-                    PRIMARY KEY(sourceDevice, patchNumber)
-                );
-                CREATE TABLE room_master_table (
-                    id INTEGER PRIMARY KEY,
-                    identity_hash TEXT
-                );
-                INSERT OR REPLACE INTO room_master_table (id, identity_hash)
-                    VALUES(42, '3f0946602099d896c8d47129233c1794');
-                CREATE UNIQUE INDEX index_MyDocument_initials ON MyDocument (initials);
-                CREATE INDEX index_MyDocumentPage_documentId ON MyDocumentPage (documentId);
-                CREATE UNIQUE INDEX index_MyDocumentPage_documentId_pageKey ON MyDocumentPage (documentId, pageKey);
-                CREATE INDEX index_AiPageCacheEntry_sourcePromptId_contextHash ON AiPageCacheEntry (sourcePromptId, contextHash);
-                CREATE INDEX index_AiPageCacheEntry_sourcePromptId_kjvOrdinalStart_kjvOrdinalEnd ON AiPageCacheEntry (sourcePromptId, kjvOrdinalStart, kjvOrdinalEnd);
-                CREATE INDEX index_AiPageCacheEntry_kjvOrdinalStart_kjvOrdinalEnd ON AiPageCacheEntry (kjvOrdinalStart, kjvOrdinalEnd);
-                CREATE INDEX index_AiPageCacheEntry_sourceBookInitials_sourceBookKey ON AiPageCacheEntry (sourceBookInitials, sourceBookKey);
-                CREATE INDEX index_LogEntry_lastUpdated ON LogEntry (lastUpdated);
-                CREATE INDEX index_LogEntry_sourceDevice ON LogEntry (sourceDevice);
-                CREATE VIEW MyDocumentPageWithContent AS
-                    SELECT p.*, c.content
-                    FROM MyDocumentPage p
-                    LEFT OUTER JOIN MyDocumentPageContent c ON p.id = c.pageId;
-                CREATE VIEW AiCachedPageWithContent AS
-                    SELECT c.pageId, c.sourcePromptId, c.sourceContext, c.kjvOrdinalStart,
-                           c.kjvOrdinalEnd, c.contextHash, c.usedWriteTools, c.sourceModelName,
-                           c.sourceBookInitials, c.sourceBookKey,
-                           p.title, p.pageKey, p.contentType, p.documentId,
-                           p.orderNumber, p.createdAt, p.updatedAt, p.languageCode, cnt.content
-                    FROM AiPageCacheEntry c
-                    INNER JOIN MyDocumentPage p ON c.pageId = p.id
-                    LEFT OUTER JOIN MyDocumentPageContent cnt ON p.id = cnt.pageId;
-                """,
+                RemoteSyncAndroidDatabaseContract.createSchemaSQL(for: .myDocuments),
                 in: database
             )
-
             try execute("BEGIN IMMEDIATE TRANSACTION;", in: database)
             do {
                 for row in snapshot.documentRowsByKey.values.sorted(by: Self.myDocumentSort) {
@@ -1215,7 +1451,14 @@ public final class RemoteSyncInitialBackupUploadService {
                 throw error
             }
 
-            return BuiltInitialBackup(databaseURL: databaseURL, workspaceHistoryAliases: [])
+            return BuiltInitialBackup(
+                databaseURL: databaseURL,
+                acceptedInitialBackup: AcceptedInitialBackup(
+                    timestamp: acceptedTimestamp,
+                    fingerprintGeneration: .myDocuments(acceptedBaseline),
+                    workspaceHistoryAliases: []
+                )
+            )
         } catch {
             try? fileManager.removeItem(at: databaseURL)
             throw error
@@ -1238,17 +1481,17 @@ public final class RemoteSyncInitialBackupUploadService {
        - reads current `HistoryItem` rows from `modelContext`
        - reads preserved history aliases from `RemoteSyncWorkspaceFidelityStore`
      - Failure modes:
-       - fetch failures from `ModelContext` are swallowed and treated as an empty local history set
+       - rethrows history fetch failures so an initial backup cannot omit history or alias rows
      */
     private func projectWorkspaceHistory(
         modelContext: ModelContext,
         settingsStore: SettingsStore
-    ) -> ProjectedWorkspaceHistory {
+    ) throws -> ProjectedWorkspaceHistory {
         let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
         let aliasesByLocalID = Dictionary(
             uniqueKeysWithValues: fidelityStore.allHistoryItemAliases().map { ($0.localHistoryItemID, $0.remoteHistoryItemID) }
         )
-        let historyItems = ((try? modelContext.fetch(FetchDescriptor<HistoryItem>())) ?? [])
+        let historyItems = try modelContext.fetch(FetchDescriptor<HistoryItem>())
             .sorted { lhs, rhs in
                 let lhsWindow = lhs.window?.id.uuidString ?? ""
                 let rhsWindow = rhs.window?.id.uuidString ?? ""
@@ -1502,6 +1745,26 @@ public final class RemoteSyncInitialBackupUploadService {
     }
 
     /**
+     Sorts workspace-label overrides by the complete Android composite identity.
+
+     - Parameters:
+       - lhs: First override row.
+       - rhs: Second override row.
+     - Returns: True when `lhs` should be serialized before `rhs`.
+     - Side Effects: none.
+     - Failure Modes: This helper cannot fail.
+     */
+    private static func labelOverrideSort(
+        _ lhs: RemoteSyncCurrentWorkspaceLabelOverrideRow,
+        _ rhs: RemoteSyncCurrentWorkspaceLabelOverrideRow
+    ) -> Bool {
+        if lhs.workspaceID == rhs.workspaceID {
+            return lhs.labelID.uuidString < rhs.labelID.uuidString
+        }
+        return lhs.workspaceID.uuidString < rhs.workspaceID.uuidString
+    }
+
+    /**
      Sorts My Documents rows into a deterministic export order.
      */
     private static func myDocumentSort(_ lhs: RemoteSyncAndroidMyDocument, _ rhs: RemoteSyncAndroidMyDocument) -> Bool {
@@ -1603,7 +1866,14 @@ public final class RemoteSyncInitialBackupUploadService {
 
         bindText(row.planCode, to: statement, index: 1)
         sqlite3_bind_int64(statement, 2, row.planStartDateMillis)
-        sqlite3_bind_int(statement, 3, Int32(row.planCurrentDay))
+        sqlite3_bind_int(
+            statement,
+            3,
+            try RemoteSyncWireInteger.int32(
+                exactly: row.planCurrentDay,
+                field: "ReadingPlan.planCurrentDay"
+            )
+        )
         bindUUIDBlob(row.id, to: statement, index: 4)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
@@ -1629,7 +1899,14 @@ public final class RemoteSyncInitialBackupUploadService {
         defer { sqlite3_finalize(statement) }
 
         bindText(row.planCode, to: statement, index: 1)
-        sqlite3_bind_int(statement, 2, Int32(row.planDay))
+        sqlite3_bind_int(
+            statement,
+            2,
+            try RemoteSyncWireInteger.int32(
+                exactly: row.planDay,
+                field: "ReadingPlanStatus.planDay"
+            )
+        )
         bindText(row.readingStatusJSON, to: statement, index: 3)
         bindUUIDBlob(row.id, to: statement, index: 4)
         guard sqlite3_step(statement) == SQLITE_DONE else {
@@ -1683,7 +1960,7 @@ public final class RemoteSyncInitialBackupUploadService {
        - throws `RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase` when SQLite rejects prepare, bind, or step work
      */
     private func insertBibleBookmarkRow(_ row: RemoteSyncAndroidBibleBookmark, in database: OpaquePointer) throws {
-        let sql = "INSERT INTO BibleBookmark (kjvOrdinalStart, kjvOrdinalEnd, ordinalStart, ordinalEnd, v11n, playbackSettings, id, createdAt, book, startOffset, endOffset, primaryLabelId, lastUpdatedOn, wholeVerse, type, customIcon, editAction_mode, editAction_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        let sql = "INSERT INTO BibleBookmark (kjvOrdinalStart, kjvOrdinalEnd, ordinalStart, ordinalEnd, v11n, playbackSettings, id, createdAt, book, startOffset, endOffset, primaryLabelId, lastUpdatedOn, wholeVerse, type, customIcon, sourcePromptId, editAction_mode, editAction_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
@@ -1706,8 +1983,9 @@ public final class RemoteSyncInitialBackupUploadService {
         bindBool(row.wholeVerse, to: statement, index: 14)
         bindOptionalText(row.type, to: statement, index: 15)
         bindOptionalText(row.customIcon, to: statement, index: 16)
-        bindOptionalText(row.editAction?.mode?.rawValue, to: statement, index: 17)
-        bindOptionalText(row.editAction?.content, to: statement, index: 18)
+        bindOptionalUUIDBlob(row.sourcePromptId, to: statement, index: 17)
+        bindOptionalText(row.editAction?.mode?.rawValue, to: statement, index: 18)
+        bindOptionalText(row.editAction?.content, to: statement, index: 19)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
         }
@@ -1729,7 +2007,7 @@ public final class RemoteSyncInitialBackupUploadService {
         tableName: String,
         in database: OpaquePointer
     ) throws {
-        let sql = "INSERT INTO \(tableName) (bookmarkId, notes, contentType) VALUES (?, ?, ?)"
+        let sql = "INSERT INTO \(tableName) (bookmarkId, notes, contentType, sourcePromptId) VALUES (?, ?, ?, ?)"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
@@ -1739,6 +2017,7 @@ public final class RemoteSyncInitialBackupUploadService {
         bindUUIDBlob(row.bookmarkID, to: statement, index: 1)
         bindText(row.notes, to: statement, index: 2)
         bindOptionalText(row.contentType, to: statement, index: 3)
+        bindOptionalUUIDBlob(row.sourcePromptId, to: statement, index: 4)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
         }
@@ -1788,7 +2067,7 @@ public final class RemoteSyncInitialBackupUploadService {
        - throws `RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase` when SQLite rejects prepare, bind, or step work
      */
     private func insertGenericBookmarkRow(_ row: RemoteSyncAndroidGenericBookmark, in database: OpaquePointer) throws {
-        let sql = "INSERT INTO GenericBookmark (id, `key`, createdAt, bookInitials, ordinalStart, ordinalEnd, startOffset, endOffset, primaryLabelId, lastUpdatedOn, wholeVerse, playbackSettings, customIcon, editAction_mode, editAction_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        let sql = "INSERT INTO GenericBookmark (id, `key`, createdAt, bookInitials, ordinalStart, ordinalEnd, startOffset, endOffset, primaryLabelId, lastUpdatedOn, wholeVerse, playbackSettings, customIcon, sourcePromptId, editAction_mode, editAction_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
@@ -1799,8 +2078,8 @@ public final class RemoteSyncInitialBackupUploadService {
         bindText(row.key, to: statement, index: 2)
         sqlite3_bind_int64(statement, 3, Int64(row.createdAt.timeIntervalSince1970 * 1000.0))
         bindText(row.bookInitials, to: statement, index: 4)
-        sqlite3_bind_int(statement, 5, Int32(row.ordinalStart))
-        sqlite3_bind_int(statement, 6, Int32(row.ordinalEnd))
+        bindOptionalInt(row.ordinalStart, to: statement, index: 5)
+        bindOptionalInt(row.ordinalEnd, to: statement, index: 6)
         bindOptionalInt(row.startOffset, to: statement, index: 7)
         bindOptionalInt(row.endOffset, to: statement, index: 8)
         bindOptionalUUIDBlob(row.primaryLabelID, to: statement, index: 9)
@@ -1808,8 +2087,9 @@ public final class RemoteSyncInitialBackupUploadService {
         bindBool(row.wholeVerse, to: statement, index: 11)
         bindOptionalText(row.playbackSettingsJSON, to: statement, index: 12)
         bindOptionalText(row.customIcon, to: statement, index: 13)
-        bindOptionalText(row.editAction?.mode?.rawValue, to: statement, index: 14)
-        bindOptionalText(row.editAction?.content, to: statement, index: 15)
+        bindOptionalUUIDBlob(row.sourcePromptId, to: statement, index: 14)
+        bindOptionalText(row.editAction?.mode?.rawValue, to: statement, index: 15)
+        bindOptionalText(row.editAction?.content, to: statement, index: 16)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
         }
@@ -1826,7 +2106,7 @@ public final class RemoteSyncInitialBackupUploadService {
        - throws `RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase` when SQLite rejects prepare, bind, or step work
      */
     private func insertStudyPadEntryRow(_ row: RemoteSyncAndroidStudyPadEntry, in database: OpaquePointer) throws {
-        let sql = "INSERT INTO StudyPadTextEntry (id, labelId, orderNumber, indentLevel, contentType) VALUES (?, ?, ?, ?, ?)"
+        let sql = "INSERT INTO StudyPadTextEntry (id, labelId, orderNumber, indentLevel, contentType, sourcePromptId) VALUES (?, ?, ?, ?, ?, ?)"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
@@ -1838,6 +2118,7 @@ public final class RemoteSyncInitialBackupUploadService {
         sqlite3_bind_int(statement, 3, Int32(row.orderNumber))
         sqlite3_bind_int(statement, 4, Int32(row.indentLevel))
         bindOptionalText(row.contentType, to: statement, index: 5)
+        bindOptionalUUIDBlob(row.sourcePromptId, to: statement, index: 6)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
         }
@@ -1880,7 +2161,30 @@ public final class RemoteSyncInitialBackupUploadService {
        - rethrows JSON-encoding failures from `bindTextDisplaySettings` and `bindWorkspaceSettings`
      */
     private func insertWorkspaceRow(_ row: RemoteSyncCurrentWorkspaceRow, in database: OpaquePointer) throws {
-        let sql = "INSERT INTO \"Workspace\" (name, contentsText, id, orderNumber, unPinnedWeight, maximizedWindowId, primaryTargetLinksWindowId, text_display_settings_strongsMode, text_display_settings_showMorphology, text_display_settings_showFootNotes, text_display_settings_showFootNotesInline, text_display_settings_expandXrefs, text_display_settings_showXrefs, text_display_settings_showRedLetters, text_display_settings_showSectionTitles, text_display_settings_showVerseNumbers, text_display_settings_showVersePerLine, text_display_settings_showBookmarks, text_display_settings_showMyNotes, text_display_settings_justifyText, text_display_settings_hyphenation, text_display_settings_topMargin, text_display_settings_fontSize, text_display_settings_fontFamily, text_display_settings_lineSpacing, text_display_settings_bookmarksHideLabels, text_display_settings_showPageNumber, text_display_settings_margin_size_marginLeft, text_display_settings_margin_size_marginRight, text_display_settings_margin_size_maxWidth, text_display_settings_colors_dayTextColor, text_display_settings_colors_dayBackground, text_display_settings_colors_dayNoise, text_display_settings_colors_nightTextColor, text_display_settings_colors_nightBackground, text_display_settings_colors_nightNoise, workspace_settings_enableTiltToScroll, workspace_settings_enableReverseSplitMode, workspace_settings_autoPin, workspace_settings_restoreButtonsVisible, workspace_settings_speakSettings, workspace_settings_recentLabels, workspace_settings_autoAssignLabels, workspace_settings_autoAssignPrimaryLabel, workspace_settings_studyPadCursors, workspace_settings_hideCompareDocuments, workspace_settings_limitAmbiguousModalSize, workspace_settings_workspaceColor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        let columns = [
+            "name",
+            "contentsText",
+            "id",
+            "orderNumber",
+            "unPinnedWeight",
+            "maximizedWindowId",
+            "primaryTargetLinksWindowId",
+        ] + RemoteSyncWorkspaceTextDisplaySettingsWire.columns() + [
+            "workspace_settings_enableTiltToScroll",
+            "workspace_settings_enableReverseSplitMode",
+            "workspace_settings_autoPin",
+            "workspace_settings_restoreButtonsVisible",
+            "workspace_settings_speakSettings",
+            "workspace_settings_recentLabels",
+            "workspace_settings_autoAssignLabels",
+            "workspace_settings_autoAssignPrimaryLabel",
+            "workspace_settings_studyPadCursors",
+            "workspace_settings_hideCompareDocuments",
+            "workspace_settings_limitAmbiguousModalSize",
+            "workspace_settings_workspaceColor",
+        ]
+        let placeholders = Array(repeating: "?", count: columns.count).joined(separator: ", ")
+        let sql = "INSERT INTO Workspace (\(columns.joined(separator: ", "))) VALUES (\(placeholders))"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
@@ -1902,7 +2206,12 @@ public final class RemoteSyncInitialBackupUploadService {
         index += 1
         bindOptionalUUIDBlob(row.primaryTargetLinksWindowID, to: statement, index: index)
         index += 1
-        try bindTextDisplaySettings(row.textDisplaySettings, to: statement, index: &index)
+        try bindTextDisplaySettings(
+            row.textDisplaySettings,
+            fidelity: row.textDisplayFidelity,
+            to: statement,
+            index: &index
+        )
         try bindWorkspaceSettings(
             row.workspaceSettings,
             speakSettingsJSON: row.speakSettingsJSON,
@@ -1989,7 +2298,30 @@ public final class RemoteSyncInitialBackupUploadService {
        - rethrows JSON-encoding failures from `bindTextDisplaySettings`
      */
     private func insertPageManagerRow(_ row: RemoteSyncCurrentWorkspacePageManagerRow, in database: OpaquePointer) throws {
-        let sql = "INSERT INTO PageManager (windowId, currentCategoryName, jsState, bible_document, bible_verse_versification, bible_verse_bibleBook, bible_verse_chapterNo, bible_verse_verseNo, commentary_document, commentary_anchorOrdinal, commentary_sourceBookAndKey, dictionary_document, dictionary_key, dictionary_anchorOrdinal, general_book_document, general_book_key, general_book_anchorOrdinal, map_document, map_key, map_anchorOrdinal, text_display_settings_strongsMode, text_display_settings_showMorphology, text_display_settings_showFootNotes, text_display_settings_showFootNotesInline, text_display_settings_expandXrefs, text_display_settings_showXrefs, text_display_settings_showRedLetters, text_display_settings_showSectionTitles, text_display_settings_showVerseNumbers, text_display_settings_showVersePerLine, text_display_settings_showBookmarks, text_display_settings_showMyNotes, text_display_settings_justifyText, text_display_settings_hyphenation, text_display_settings_topMargin, text_display_settings_fontSize, text_display_settings_fontFamily, text_display_settings_lineSpacing, text_display_settings_bookmarksHideLabels, text_display_settings_showPageNumber, text_display_settings_margin_size_marginLeft, text_display_settings_margin_size_marginRight, text_display_settings_margin_size_maxWidth, text_display_settings_colors_dayTextColor, text_display_settings_colors_dayBackground, text_display_settings_colors_dayNoise, text_display_settings_colors_nightTextColor, text_display_settings_colors_nightBackground, text_display_settings_colors_nightNoise) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        let columns = [
+            "windowId",
+            "currentCategoryName",
+            "jsState",
+            "bible_document",
+            "bible_verse_versification",
+            "bible_verse_bibleBook",
+            "bible_verse_chapterNo",
+            "bible_verse_verseNo",
+            "commentary_document",
+            "commentary_anchorOrdinal",
+            "commentary_sourceBookAndKey",
+            "dictionary_document",
+            "dictionary_key",
+            "dictionary_anchorOrdinal",
+            "general_book_document",
+            "general_book_key",
+            "general_book_anchorOrdinal",
+            "map_document",
+            "map_key",
+            "map_anchorOrdinal",
+        ] + RemoteSyncWorkspaceTextDisplaySettingsWire.columns()
+        let placeholders = Array(repeating: "?", count: columns.count).joined(separator: ", ")
+        let sql = "INSERT INTO PageManager (\(columns.joined(separator: ", "))) VALUES (\(placeholders))"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
@@ -2037,7 +2369,78 @@ public final class RemoteSyncInitialBackupUploadService {
         index += 1
         bindOptionalInt(row.mapAnchorOrdinal, to: statement, index: index)
         index += 1
-        try bindTextDisplaySettings(row.textDisplaySettings, to: statement, index: &index)
+        try bindTextDisplaySettings(
+            row.textDisplaySettings,
+            fidelity: row.textDisplayFidelity,
+            to: statement,
+            index: &index
+        )
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+    }
+
+    /**
+     Inserts one Android workspace-label override into the full initial database.
+
+     - Parameters:
+       - row: Composite-key override row to serialize.
+       - database: Open writable SQLite database.
+     - Side Effects: Inserts one `WorkspaceLabelOverride` row.
+     - Throws: `invalidSQLiteDatabase` when SQLite cannot prepare or execute the insert.
+     */
+    private func insertWorkspaceLabelOverrideRow(
+        _ row: RemoteSyncCurrentWorkspaceLabelOverrideRow,
+        in database: OpaquePointer
+    ) throws {
+        let sql = "INSERT INTO WorkspaceLabelOverride (workspaceId, labelId, overrideMode) VALUES (?, ?, ?)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        bindUUIDBlob(row.workspaceID, to: statement, index: 1)
+        bindUUIDBlob(row.labelID, to: statement, index: 2)
+        bindOptionalInt(row.overrideMode, to: statement, index: 3)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+    }
+
+    /**
+     Inserts Android's complete global text-display singleton into the full initial database.
+
+     - Parameters:
+       - row: Canonical singleton with all native and Android-only fields.
+       - database: Open writable SQLite database.
+     - Side Effects: Inserts one `GlobalTextDisplaySettings` row.
+     - Throws: SQLite failures or hidden-label JSON encoding errors.
+     */
+    private func insertGlobalTextDisplaySettingsRow(
+        _ row: RemoteSyncCurrentGlobalTextDisplaySettingsRow,
+        in database: OpaquePointer
+    ) throws {
+        let columns = ["id"] + RemoteSyncWorkspaceTextDisplaySettingsWire.columns()
+        let placeholders = Array(repeating: "?", count: columns.count).joined(separator: ", ")
+        let sql = "INSERT INTO GlobalTextDisplaySettings (\(columns.joined(separator: ", "))) VALUES (\(placeholders))"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        var index: Int32 = 1
+        bindUUIDBlob(row.id, to: statement, index: index)
+        index += 1
+        try bindTextDisplaySettings(
+            row.textDisplaySettings,
+            fidelity: row.fidelity,
+            to: statement,
+            index: &index
+        )
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
         }
@@ -2156,76 +2559,18 @@ public final class RemoteSyncInitialBackupUploadService {
      */
     private func bindTextDisplaySettings(
         _ value: TextDisplaySettings?,
+        fidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity,
         to statement: OpaquePointer,
         index: inout Int32
     ) throws {
-        let settings = value
-        bindOptionalInt(settings?.strongsMode, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.showMorphology, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.showFootNotes, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.showFootNotesInline, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.expandXrefs, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.showXrefs, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.showRedLetters, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.showSectionTitles, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.showVerseNumbers, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.showVersePerLine, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.showBookmarks, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.showMyNotes, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.justifyText, to: statement, index: index)
-        index += 1
-        bindOptionalBool(settings?.hyphenation, to: statement, index: index)
-        index += 1
-        bindOptionalInt(settings?.topMargin, to: statement, index: index)
-        index += 1
-        bindOptionalInt(settings?.fontSize, to: statement, index: index)
-        index += 1
-        bindOptionalText(settings?.fontFamily, to: statement, index: index)
-        index += 1
-        bindOptionalInt(settings?.lineSpacing, to: statement, index: index)
-        index += 1
-        if let bookmarksHideLabels = settings?.bookmarksHideLabels {
-            let bookmarksHideLabelsJSON = try encodeUUIDArrayJSON(
-                bookmarksHideLabels,
-                field: "text_display_settings_bookmarksHideLabels"
-            )
-            bindOptionalText(bookmarksHideLabelsJSON, to: statement, index: index)
-        } else {
-            sqlite3_bind_null(statement, index)
+        let values = try RemoteSyncWorkspaceTextDisplaySettingsWire(
+            settings: value,
+            fidelity: fidelity
+        ).sqliteValues()
+        for sqliteValue in values {
+            bindSQLiteValue(sqliteValue, to: statement, index: index)
+            index += 1
         }
-        index += 1
-        bindOptionalBool(settings?.showPageNumber, to: statement, index: index)
-        index += 1
-        bindOptionalInt(settings?.marginLeft, to: statement, index: index)
-        index += 1
-        bindOptionalInt(settings?.marginRight, to: statement, index: index)
-        index += 1
-        bindOptionalInt(settings?.maxWidth, to: statement, index: index)
-        index += 1
-        bindOptionalAndroidSignedInt32(settings?.dayTextColor, to: statement, index: index)
-        index += 1
-        bindOptionalAndroidSignedInt32(settings?.dayBackground, to: statement, index: index)
-        index += 1
-        bindOptionalAndroidSignedInt32(settings?.dayNoise, to: statement, index: index)
-        index += 1
-        bindOptionalAndroidSignedInt32(settings?.nightTextColor, to: statement, index: index)
-        index += 1
-        bindOptionalAndroidSignedInt32(settings?.nightBackground, to: statement, index: index)
-        index += 1
-        bindOptionalAndroidSignedInt32(settings?.nightNoise, to: statement, index: index)
-        index += 1
     }
 
     /**
@@ -2407,6 +2752,35 @@ public final class RemoteSyncInitialBackupUploadService {
         } catch {
             throw RemoteSyncInitialBackupUploadError.jsonEncodingFailed(field: field)
         }
+    }
+
+    /**
+     Allocates the accepted baseline timestamp for a full initial upload.
+
+     - Parameters:
+       - category: Category whose old accepted generation is being replaced.
+       - settingsStore: Local store containing log, status, and cursor high-water marks.
+     - Returns: A logical timestamp greater than wall time and every retained category mark.
+     - Side Effects: Reads strict category sync metadata.
+     - Throws: Rethrows malformed log/status metadata and
+       `RemoteSyncLogicalSequenceError.timestampExhausted`.
+     */
+    private func nextAcceptedTimestamp(
+        for category: RemoteSyncCategory,
+        settingsStore: SettingsStore
+    ) throws -> Int64 {
+        let logEntries = try RemoteSyncLogEntryStore(settingsStore: settingsStore)
+            .entriesStrict(for: category)
+        let statuses = try RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+            .statusesStrict(for: category)
+        let progress = RemoteSyncStateStore(settingsStore: settingsStore)
+            .progressState(for: category)
+        return try RemoteSyncLogicalSequence.nextTimestamp(
+            now: nowProvider(),
+            highWatermarks: logEntries.map(\.lastUpdated)
+                + statuses.map(\.appliedDate)
+                + [progress.lastPatchWritten, progress.lastSynchronized].compactMap { $0 }
+        )
     }
 
     /**

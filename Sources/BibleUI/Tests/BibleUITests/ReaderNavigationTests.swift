@@ -9,7 +9,6 @@ import SQLite3
 @testable import BibleView
 import struct SwiftUI.Binding
 import enum SwiftUI.ColorScheme
-import struct SwiftUI.EdgeInsets
 import struct SwiftUI.EmptyView
 #if os(iOS)
 import UIKit
@@ -985,6 +984,16 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             addDocumentsScript.contains("\"originalOrdinalRange\":[\(expectedOrdinal),\(expectedOrdinal)]"),
             "Expected explicit verse navigation to preserve the original highlighted target. Script: \(addDocumentsScript)"
         )
+        let setup = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "setup_content") as? [String: Any]
+        )
+        XCTAssertTrue(setup["jumpToOrdinal"] is NSNull)
+        XCTAssertEqual(setup["jumpToAnchor"] as? Int, expectedOrdinal)
+        XCTAssertEqual(setup["ordinalStart"] as? Int, expectedOrdinal)
+        XCTAssertEqual(setup["ordinalEnd"] as? Int, expectedOrdinal)
+        XCTAssertEqual(setup["highlight"] as? Bool, true)
+        XCTAssertEqual(setup["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(setup["osisRef"] as? String, "Gen.1")
     }
 
     /**
@@ -1032,24 +1041,18 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Protects commentary rendering against chapter-shaped fallbacks.
+     Verifies an installed commentary with no selected-verse entry emits Android's error document.
 
-     Android's `CurrentCommentaryPage` is a single-key page: when the current Bible verse is
-     Genesis 1:5, the commentary document is keyed to that verse even if the selected commentary
-     module has no entry there. The test uses a minimal empty `RawCom` module so the controller
-     enters the real commentary path while the missing-entry branch stays deterministic. A failure
-     means iOS has drifted back to whole-chapter commentary semantics or verse-1 placeholder ranges.
+     The empty `RawCom` fixture makes the missing-content branch deterministic. Android surfaces
+     that failure through `ErrorDocument`; fabricating a verse-shaped commentary fragment would
+     misrepresent missing content as successfully loaded module data.
      */
     @MainActor
-    func testCommentaryMissingEntryUsesSelectedVerseKeyAndOrdinalRange() throws {
+    func testCommentaryMissingEntryEmitsNoContentErrorDocument() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawCommentaryModule(in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
-        let bibleModule = try XCTUnwrap(manager.module(named: "KJV"))
-        let expectedOrdinal = try XCTUnwrap(
-            bibleModule.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 5)
-        )
         XCTAssertTrue(
             manager.installedModules(category: .commentary).contains { $0.name == "UITestComm" },
             "Expected the temporary RawCom fixture to be discovered as a commentary module."
@@ -1069,24 +1072,14 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
                 event: "add_documents"
             ) as? [String: Any]
         )
-        let fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
-        let xml = try XCTUnwrap(fragment["xml"] as? String)
 
-        XCTAssertEqual(payload["bookCategory"] as? String, "COMMENTARY")
-        XCTAssertEqual(payload["bookInitials"] as? String, "UITestComm")
-        XCTAssertEqual(payload["key"] as? String, "Gen.1.5")
-        XCTAssertEqual(payload["osisRef"] as? String, "Gen.1.5")
-        XCTAssertEqual(payload["ordinalRange"] as? [Int], [expectedOrdinal, expectedOrdinal])
-        XCTAssertEqual(fragment["key"] as? String, "Gen.1.5")
-        XCTAssertEqual(fragment["osisRef"] as? String, "Gen.1.5")
-        XCTAssertEqual(fragment["ordinalRange"] as? [Int], [expectedOrdinal, expectedOrdinal])
-        XCTAssertTrue(
-            xml.contains("No commentary available for this verse"),
-            "Expected missing commentary text to describe the selected verse. XML: \(xml)"
-        )
-        XCTAssertFalse(
-            xml.contains("No commentary available for this chapter"),
-            "Commentary is a single-key document on Android and must not report chapter-level absence. XML: \(xml)"
+        XCTAssertEqual(payload["type"] as? String, "error")
+        XCTAssertEqual(payload["errorMessage"] as? String, "No content for selected verse")
+        XCTAssertEqual(payload["severity"] as? String, "NORMAL")
+        XCTAssertNil(payload["osisFragment"])
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=commentary;module=UITestComm;book=Genesis;chapter=1;key=Gen.1.5"
         )
     }
 
@@ -1158,15 +1151,14 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies OSIS range links use JSword/SWORD passage semantics instead of endpoint splitting.
+     Verifies one contiguous OSIS range remains a normal Bible passage like Android.
 
-     Android parses `osis://` references with JSword `PassageKeyFactory`, so
-     `Gen.1.1-Gen.1.3` opens a multi-document containing verses 1, 2, and 3. The test drives the
-     native link handler with the KJV test fixture module and inspects the emitted Vue `MultiDocument`;
-     a failure means cross-reference links can omit middle verses while appearing to open normally.
+     Android only creates a `MultiDocument` when `Passage.countRanges(...)` is greater than one.
+     This range therefore navigates the active Bible to its first verse and carries its complete
+     ordinal span internally instead of changing the visible document category.
      */
     @MainActor
-    func testOsisRangeLinkExpandsEveryVerseInVueMultiDocument() throws {
+    func testContiguousOsisRangeNavigatesAsOneBiblePassage() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -1174,20 +1166,181 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         var showedCrossReferences = false
         controller.onShowCrossReferences = { _ in showedCrossReferences = true }
 
-        controller.bridge(bridge, openExternalLink: "osis://?osis=Gen.1.1-Gen.1.3&v11n=KJVA")
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+        controller.bridge(bridge, openExternalLink: "osis://?osis=Exod.2.1-Exod.2.3&v11n=KJVA")
 
         XCTAssertFalse(showedCrossReferences)
-        let addDocumentsScript = try XCTUnwrap(
-            recordedScripts().first(where: { $0.contains("emit('add_documents'") })
+        XCTAssertEqual(controller.currentBook, "Exodus")
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
+    }
+
+    /**
+     Verifies production pane routing retains a forced document's complete source passage identity.
+
+     The source controller parses a KJVA Psalm range through the real external-link bridge callback,
+     and the callback invokes `BibleWindowPane`'s production router against a separate destination
+     controller already displaying a Multi document. Android's `LinkControl.showLink` keeps the
+     `BookAndKey` source versification and range while selecting the forced target Bible. The
+     expected result replaces that existing links-window content with a normal Vulgate Bible
+     document whose first verse and highlighted ordinal range are both strictly mapped; any retained
+     Multi identity, KJV target, or endpoint-only widening fails the contract.
+     */
+    @MainActor
+    func testWindowPaneRouterPreservesForcedDocumentRangeAndVersification() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "VulgTest",
+            description: "Vulgate OSIS routing fixture",
+            versification: "Vulg",
+            in: modulePath
         )
-        XCTAssertTrue(
-            addDocumentsScript.contains(#""type":"multi""#),
-            "Expected OSIS range link to render a Vue MultiDocument. Script: \(addDocumentsScript)"
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (sourceBridge, sourceScripts) = makeRecordingBridge()
+        let (targetBridge, targetScripts) = makeRecordingBridge()
+        let sourceController = BibleReaderController(
+            bridge: sourceBridge,
+            swordManagerOverride: manager
         )
-        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Gen.1.1""#))
-        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Gen.1.2""#))
-        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Gen.1.3""#))
+        let targetController = BibleReaderController(
+            bridge: targetBridge,
+            swordManagerOverride: manager
+        )
+        let targetWindow = Window()
+        let targetPageManager = PageManager(id: targetWindow.id)
+        targetWindow.pageManager = targetPageManager
+        targetController.activeWindow = targetWindow
+        targetController.loadMultiReferenceDocument(
+            #"{"id":"existing-multi","type":"multi","osisFragments":[{"bookInitials":"KJV","osisRef":"Gen.1.1"}],"compare":false}"#
+        )
+        XCTAssertEqual(targetController.currentCategory, .generalBook)
+        let targetScriptBaseline = targetScripts().count
+        let targetModule = try XCTUnwrap(manager.module(named: "VulgTest"))
+        let expectedStart = try XCTUnwrap(
+            VersificationMapper.convertStrictly(
+                osisBookId: "Ps",
+                chapter: 10,
+                verse: 1,
+                from: JSwordKJVAVersification.name,
+                to: "Vulg"
+            )?.reference
+        )
+        let expectedEnd = try XCTUnwrap(
+            VersificationMapper.convertStrictly(
+                osisBookId: "Ps",
+                chapter: 10,
+                verse: 2,
+                from: JSwordKJVAVersification.name,
+                to: "Vulg"
+            )?.reference
+        )
+        let expectedStartOrdinal = try XCTUnwrap(
+            targetModule.verseOrdinal(
+                osisBookId: expectedStart.osisBookId,
+                chapter: expectedStart.chapter,
+                verse: expectedStart.verse
+            )
+        )
+        let expectedEndOrdinal = try XCTUnwrap(
+            targetModule.verseOrdinal(
+                osisBookId: expectedEnd.osisBookId,
+                chapter: expectedEnd.chapter,
+                verse: expectedEnd.verse
+            )
+        )
+        let expectedBook = try XCTUnwrap(
+            targetModule.getBookList().first(where: {
+                $0.osisId == expectedStart.osisBookId
+            })?.name
+        )
+        var routedReference: OsisRef?
+        var didRoute = false
+        sourceController.onOpenInLinksWindow = { reference in
+            routedReference = reference
+            didRoute = BibleWindowPaneReferenceRouter.navigate(
+                reference,
+                in: targetController
+            )
+        }
+
+        sourceController.bridge(
+            sourceBridge,
+            openExternalLink: "osis://?osis=Ps.10.1-Ps.10.2&v11n=KJVA&doc=VulgTest&force-doc=true"
+        )
+
+        let reference = try XCTUnwrap(routedReference)
+        XCTAssertTrue(didRoute)
+        XCTAssertEqual(reference.sourceVersification, JSwordKJVAVersification.name)
+        XCTAssertEqual(reference.targetBookInitials, "VulgTest")
+        XCTAssertEqual(reference.sourceOsisRef, "Ps.10.1-Ps.10.2")
+        XCTAssertEqual(
+            reference.sourceVerses,
+            [
+                OsisVerseCoordinate(osisBookId: "Ps", chapter: 10, verse: 1),
+                OsisVerseCoordinate(osisBookId: "Ps", chapter: 10, verse: 2),
+            ]
+        )
+        XCTAssertEqual(targetController.activeModuleName, "VulgTest")
+        XCTAssertEqual(targetController.currentCategory, .bible)
+        XCTAssertEqual(targetController.currentBook, expectedBook)
+        XCTAssertEqual(targetController.currentChapter, expectedStart.chapter)
+        XCTAssertEqual(targetController.currentVerse, expectedStart.verse)
+        XCTAssertEqual(targetPageManager.bibleDocument, "VulgTest")
+        XCTAssertFalse(sourceScripts().contains { $0.contains(#""type":"multi""#) })
+
+        targetController.loadCurrentContent()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(
+                from: Array(targetScripts().dropFirst(targetScriptBaseline)),
+                event: "add_documents"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(payload["bookInitials"] as? String, "VulgTest")
+        XCTAssertEqual(
+            payload["originalOrdinalRange"] as? [Int],
+            [expectedStartOrdinal, expectedEndOrdinal]
+        )
+        XCTAssertFalse(
+            expectedStart.chapter == 10 && expectedStart.verse == 1,
+            "Fixture must exercise a real KJVA-to-Vulgate coordinate change"
+        )
+        XCTAssertNotEqual(payload["type"] as? String, "multi")
+    }
+
+    /**
+     Guards the production `BibleWindowPane` callback against reducing `OsisRef` to coordinates.
+
+     The source slice covers the real `onOpenInLinksWindow` assignment through the adjacent Multi
+     callback. All three single-reference branches (current pane, delayed fallback, and registered
+     destination pane) must pass the same complete `reference` to the shared router. A return to a
+     `(book, chapter)` closure or direct `navigateTo(book:chapter:)` call would discard verses,
+     ranges, forced target initials, and source versification before behavior tests reach the router.
+     */
+    func testBibleWindowPaneProductionCallbackRoutesCompleteOsisReference() throws {
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift"
+        )
+        let callbackStart = try XCTUnwrap(
+            source.range(
+                of: "ctrl.onOpenInLinksWindow = { [weak ctrl, weak windowManager] reference in"
+            )
+        )
+        let callbackEnd = try XCTUnwrap(
+            source.range(
+                of: "ctrl.onOpenMultiReferenceDocumentInLinksWindow",
+                range: callbackStart.upperBound..<source.endIndex
+            )
+        )
+        let callbackSource = source[callbackStart.lowerBound..<callbackEnd.lowerBound]
+        let routeCount = callbackSource
+            .components(separatedBy: "BibleWindowPaneReferenceRouter.navigate(reference, in:")
+            .count - 1
+
+        XCTAssertEqual(routeCount, 3)
+        XCTAssertFalse(callbackSource.contains("navigateTo(book:"))
+        XCTAssertTrue(source.contains("controller.navigateToBibleLink(reference)"))
     }
 
     /**
@@ -1211,16 +1364,50 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
 
         XCTAssertFalse(showedCrossReferences)
-        let addDocumentsScript = try XCTUnwrap(
-            recordedScripts().first(where: { $0.contains("emit('add_documents'") })
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
         )
-        XCTAssertTrue(
-            addDocumentsScript.contains(#""type":"multi""#),
-            "Expected mixed OSIS list/range link to render a Vue MultiDocument. Script: \(addDocumentsScript)"
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertEqual(fragments.count, 2)
+        XCTAssertEqual(fragments[0]["osisRef"] as? String, "Gen.1.1-Gen.1.2")
+        XCTAssertTrue((fragments[0]["xml"] as? String)?.contains("osisID=\"Gen.1.1\"") == true)
+        XCTAssertTrue((fragments[0]["xml"] as? String)?.contains("osisID=\"Gen.1.2\"") == true)
+        XCTAssertEqual(fragments[1]["osisRef"] as? String, "Exod.2.1")
+    }
+
+    /**
+     Verifies space-delimited OSIS passages become semantic discontiguous ranges, never endpoints.
+
+     Android's `PassageKeyFactory` treats whitespace as a passage-list separator and
+     `Passage.countRanges(...)` reports two ranges here. The production bridge must emit two Multi
+     fragments, preserving the first contiguous range and the second verse independently. A single
+     `Gen.1.1-Exod.2.1` fragment would silently include every intervening canonical verse.
+     */
+    @MainActor
+    func testSpaceDelimitedDiscontiguousOsisListEmitsSeparateMultiFragments() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "osis://?osis=Gen.1.1-Gen.1.2%20Exod.2.1&v11n=KJVA"
         )
-        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Gen.1.1""#))
-        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Gen.1.2""#))
-        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Exod.2.1""#))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertEqual(fragments.count, 2)
+        XCTAssertEqual(fragments[0]["osisRef"] as? String, "Gen.1.1-Gen.1.2")
+        XCTAssertEqual(fragments[1]["osisRef"] as? String, "Exod.2.1")
+        XCTAssertFalse(
+            fragments.contains { $0["osisRef"] as? String == "Gen.1.1-Exod.2.1" }
+        )
     }
 
     /**
@@ -1228,14 +1415,17 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
      Android opens a single OSIS reference as normal reader navigation, while multi-reference links
      become MultiDocument content. Setup drives the bridge with one OSIS reference and a recording
-     bridge. The expected result is controller navigation to Exodus 2 without a multi-document payload
-     or cross-reference sheet. A failure means the resolver/link split changed user-visible
+     bridge backed by a temporary Bible module. The expected result is verse-level controller
+     navigation to Exodus 2:1 without a multi-document payload or cross-reference sheet. A failure
+     means the resolver/link split changed user-visible
      navigation semantics.
      */
     @MainActor
     func testSingleOsisReferenceStillNavigatesWithoutMultiDocument() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let controller = BibleReaderController(bridge: bridge)
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         var showedCrossReferences = false
         controller.onShowCrossReferences = { _ in showedCrossReferences = true }
 
@@ -1244,6 +1434,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse(showedCrossReferences)
         XCTAssertEqual(controller.currentBook, "Exodus")
         XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertEqual(controller.currentVerse, 1)
         XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
     }
 
@@ -1252,21 +1443,58 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
      Android's `SCHEME_REFERENCE` handler reads only `getQueryParameter("osis")`; repeated `osis`
      query values are not a MultiDocument signal. Setup sends a deliberately duplicated `osis://`
-     link through the native bridge with no SWORD module so the route is deterministic. The expected
-     result is navigation to the first reference only and no transient multi-document payload. A
+     link through the native bridge with a temporary Bible module. The expected result is navigation
+     to the first exact verse only and no transient multi-document payload. A
      failure means iOS widened single-reference links into invented multi-reference behavior instead
      of requiring Android's `multi://` route.
      */
     @MainActor
     func testOsisReferenceUsesFirstQueryValueLikeAndroidReferenceScheme() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
-        let controller = BibleReaderController(bridge: bridge)
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
         controller.bridge(bridge, openExternalLink: "osis://?osis=Exod.2.1&osis=Gen.1.1&v11n=KJVA")
 
         XCTAssertEqual(controller.currentBook, "Exodus")
         XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertEqual(controller.currentVerse, 1)
         XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
+    }
+
+    /**
+     Verifies OSIS and Multi pseudo-links fail closed when no Bible module is active.
+
+     Android `LinkControl.showLink` returns before navigation when `currentBible` or its document is
+     absent. A controller created with SWORD initialization disabled models that state. Neither the
+     single-reference pane route nor the Multi-document route may fire, and reader coordinates must
+     remain unchanged.
+     */
+    @MainActor
+    func testReferenceLinksFailClosedWithoutActiveBibleModule() {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, initializesSword: false)
+        let originalBook = controller.currentBook
+        let originalChapter = controller.currentChapter
+        let originalVerse = controller.currentVerse
+        var routedSingle = false
+        var routedMulti = false
+        controller.onOpenInLinksWindow = { _ in routedSingle = true }
+        controller.onOpenMultiReferenceDocumentInLinksWindow = { _ in routedMulti = true }
+
+        controller.bridge(bridge, openExternalLink: "osis://?osis=Exod.2.1&v11n=KJVA")
+        controller.bridge(
+            bridge,
+            openExternalLink: "multi://?osis=Gen.1.1&osis=Exod.2.1&v11n=KJVA"
+        )
+
+        XCTAssertFalse(routedSingle)
+        XCTAssertFalse(routedMulti)
+        XCTAssertEqual(controller.currentBook, originalBook)
+        XCTAssertEqual(controller.currentChapter, originalChapter)
+        XCTAssertEqual(controller.currentVerse, originalVerse)
+        XCTAssertFalse(recordedScripts().contains { $0.contains("emit('add_documents'") })
     }
 
     /**
@@ -1308,9 +1536,10 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             .epubReference(book: "Pilgrim", toKey: "chapter1.xhtml", toId: "anchor")
         )
         XCTAssertEqual(
-            router.route(for: "my-notes://?osis=Gen.1.1&ordinal=1"),
-            .myNotes(osisRef: "Gen.1.1", ordinal: 1)
+            router.route(for: "my-notes://?v11n=Vulg&ordinal=42"),
+            .myNotes(v11n: "Vulg", ordinal: 42)
         )
+        XCTAssertNil(router.route(for: "my-notes://?ordinal=42"))
         XCTAssertEqual(
             router.route(for: "journal://?id=00000000-0000-0000-0000-000000000001&bookmarkId=00000000-0000-0000-0000-000000000002"),
             .studyPad(
@@ -1319,12 +1548,17 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             )
         )
         XCTAssertEqual(
-            router.route(for: "osis://?osis=Gen.1.1,Exod.2.1&v11n=KJVA"),
-            .osisReferences(["Gen.1.1,Exod.2.1"])
+            router.route(for: "osis://?osis=Gen.1.1,Exod.2.1&v11n=Vulg&doc=VulgTest&force-doc=true"),
+            .osisReferences(
+                values: ["Gen.1.1,Exod.2.1"],
+                v11n: "Vulg",
+                documentInitials: "VulgTest",
+                forceDocument: true
+            )
         )
         XCTAssertEqual(
             router.route(for: "multi://?osis=Gen.1.1&osis=Exod.2.1&v11n=KJVA"),
-            .multiReferences(["Gen.1.1", "Exod.2.1"])
+            .multiReferences(values: ["Gen.1.1", "Exod.2.1"], v11n: "KJVA")
         )
         XCTAssertEqual(
             router.route(for: "sword://Bible/John.3.16"),
@@ -1357,21 +1591,41 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
      Android stores cross-reference results as `FakeBookFactory.multiDocument` backed by a
      `BookAndKeyList`, not as a controller-local sheet. The setup feeds parsed references into the
-     builder without an active SWORD module so fallback XML is deterministic. The expected JSON has
-     the Vue `type: "multi"` shape, one OSIS fragment per reference, stable module/key metadata, and
-     escaped fallback text. A failure means the extraction left document construction coupled to the
-     controller or changed the persisted/rendered document contract.
+     builder with KJV and Vulgate source modules. The expected JSON has one exact SWORD fragment per
+     reference and preserves each fragment's own module and versification metadata.
      */
     func testMultiReferenceDocumentBuilderCreatesAndroidMultiPayload() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "VulgTest",
+            description: "Vulgate mixed-reference fixture",
+            versification: "Vulg",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let kjv = try XCTUnwrap(manager.module(named: "KJV"))
+        let vulg = try XCTUnwrap(manager.module(named: "VulgTest"))
         let refs = [
-            OsisRef(book: "Genesis", chapter: 1, verse: 1, osisId: "Gen"),
-            OsisRef(book: "Exodus", chapter: 2, verse: 1, osisId: "Exod"),
+            OsisRef(
+                book: "Genesis",
+                chapter: 1,
+                verse: 1,
+                osisId: "Gen",
+                sourceVersification: "KJV"
+            ),
+            OsisRef(
+                book: "Psalms",
+                chapter: 10,
+                verse: 1,
+                osisId: "Ps",
+                sourceVersification: "Vulg",
+                targetBookInitials: "VulgTest"
+            ),
         ]
         let builder = BibleReaderMultiReferenceDocumentBuilder(
-            activeModule: nil,
-            activeModuleName: "KJV",
-            compatibilityOrdinal: { chapter, verse in chapter * 1_000 + verse },
-            isNewTestament: { $0 == "Matthew" }
+            swordManager: manager,
+            activeModule: kjv,
+            activeModuleName: "KJV"
         )
 
         let json = try XCTUnwrap(builder.buildDocumentJSON(refs: refs))
@@ -1385,13 +1639,13 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(fragments[0]["key"] as? String, "KJV--Gen.1.1")
         XCTAssertEqual(fragments[0]["osisRef"] as? String, "Gen.1.1")
         XCTAssertEqual(fragments[0]["bookCategory"] as? String, "BIBLE")
-        XCTAssertEqual(fragments[0]["ordinalRange"] as? [Int], [1001, 1001])
-        XCTAssertTrue(
-            (fragments[0]["xml"] as? String)?.contains("Genesis 1:1") == true,
-            "Expected fallback XML to include the display reference when no module is available."
-        )
-        XCTAssertEqual(fragments[1]["key"] as? String, "KJV--Exod.2.1")
-        XCTAssertEqual(fragments[1]["ordinalRange"] as? [Int], [2001, 2001])
+        XCTAssertEqual(fragments[0]["v11n"] as? String, "KJV")
+        let kjvOrdinal = try XCTUnwrap(kjv.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+        XCTAssertEqual(fragments[0]["ordinalRange"] as? [Int], [kjvOrdinal, kjvOrdinal])
+        XCTAssertEqual(fragments[1]["key"] as? String, "VulgTest--Ps.10.1")
+        XCTAssertEqual(fragments[1]["v11n"] as? String, "Vulg")
+        let vulgOrdinal = try XCTUnwrap(vulg.verseOrdinal(osisBookId: "Ps", chapter: 10, verse: 1))
+        XCTAssertEqual(fragments[1]["ordinalRange"] as? [Int], [vulgOrdinal, vulgOrdinal])
     }
 
     /**
@@ -1479,7 +1733,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         let controller = BibleReaderController(bridge: bridge)
         controller.settingsStore = settingsStore
-        controller.readingProgressStore?.saveSettings(
+        try controller.readingProgressStore?.saveSettings(
             ReadingProgressSettingsSnapshot(
                 autoTrackReading: true,
                 autoMarkMemorized: false,
@@ -1572,6 +1826,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
                 "enabledExperimentalFeatures",
                 "autoTrackReading",
                 "readingProgressSettings",
+                "llmConfigured",
+                "llmActionLabel",
             ]
         )
         let colors = try XCTUnwrap(config["colors"] as? [String: Any])
@@ -2121,11 +2377,17 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             sourcePromptId: sourcePromptId,
             languageCode: "en"
         )
-        let content = MyDocumentPageContent(pageId: pageId, content: "Raw <markdown> & \"quoted\"")
+        let content = MyDocumentPageContent(pageId: pageId, content: "Raw \\<markdown\\> & \"quoted\"")
         page.pageContent = content
         page.document = document
 
-        let json = try XCTUnwrap(coordinator.documentJSON(document: document, page: page))
+        let json = try XCTUnwrap(
+            coordinator.documentJSON(
+                document: document,
+                page: page,
+                bookLocale: Locale(identifier: "en")
+            )
+        )
         let renderedDocument = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
         )
@@ -2144,10 +2406,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(osisFragment["bookInitials"] as? String, "MYDOC")
         XCTAssertEqual(osisFragment["keyName"] as? String, "Intro")
         XCTAssertEqual(osisFragment["language"] as? String, "en")
-        XCTAssertEqual(
-            osisFragment["xml"] as? String,
-            "<div class=\"mydoc-markdown\"><markdown>Raw &lt;markdown&gt; &amp; &quot;quoted&quot;</markdown></div>"
-        )
+        let xml = try XCTUnwrap(osisFragment["xml"] as? String)
+        XCTAssertTrue(xml.contains("<div class=\"mydoc-markdown\"><p><BVA"))
+        XCTAssertTrue(xml.contains(">Raw &lt;markdown&gt; &amp; \"quoted\"</BVA>"), xml)
     }
 
     /**
@@ -2345,6 +2606,29 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies reference chooser cancellation matches Android's empty-string bridge contract.
+
+     A recording bridge exercises both native cancellation and the missing-handler fallback. Each
+     request must resolve under its original call ID with `""`; `null` would diverge from Android
+     and can break Vue callers expecting `Promise<string>`.
+     */
+    @MainActor
+    func testRefChooserDialogCancellationReturnsAndroidEmptyString() {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        controller.onRefChooserDialog = { completion in
+            completion(nil)
+        }
+
+        controller.bridge(bridge, refChooserDialog: 3704)
+        XCTAssertEqual(recordedScripts().last, #"bibleView.response(3704, "");"#)
+
+        controller.onRefChooserDialog = nil
+        controller.bridge(bridge, refChooserDialog: 3705)
+        XCTAssertEqual(recordedScripts().last, #"bibleView.response(3705, "");"#)
+    }
+
+    /**
      Verifies the bridge `parseRef` response preserves call IDs and JSword-compatible parsing.
 
      Setup uses a recording bridge and temporary KJV module so reference parsing goes through the
@@ -2536,8 +2820,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         let controller = BibleReaderController(bridge: bridge)
         controller.myDocumentStore = store
-        var sharedText: String?
-        controller.onShareVerseText = { sharedText = $0 }
+        var sharedPayload: MyDocumentSharePayload?
+        controller.onShareMyDocumentContent = { sharedPayload = $0 }
 
         controller.bridge(bridge, getMyDocumentPageRawContent: 3704, bookInitials: "MYDOC", pageKey: "intro")
         controller.bridge(bridge, shareMyDocumentContent: "MYDOC", pageKey: "intro")
@@ -2550,10 +2834,25 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(payloadScript.contains(#""content":"Raw *markdown*""#))
         XCTAssertTrue(payloadScript.contains(#""title":"Intro""#))
         XCTAssertTrue(payloadScript.contains(#""sourcePromptId":"22222222-2222-2222-2222-222222222222""#))
-        XCTAssertEqual(sharedText, "Intro\n\nRaw *markdown*")
+        XCTAssertEqual(
+            sharedPayload,
+            MyDocumentSharePayload(subject: "Intro", body: "Raw *markdown*")
+        )
         XCTAssertEqual(recordedScripts().last, "bibleView.response(3705, null);")
     }
 
+    /**
+     Verifies editing a visible My Documents page persists raw Markdown and reloads Android's
+     processed general-book document instead of stale source text.
+
+     - Setup: Stores one Markdown page, renders it, saves changed content through the bridge, and
+       requests an in-place reload while recording Vue emissions.
+     - Expected result: SwiftData retains the raw edit while the second `add_documents` payload
+       carries the new title and CommonMark output with Android-style `BVA` anchors.
+     - Failure meaning: The edit bridge lost persistence, reloaded stale content, or bypassed the
+       generic-document anchor pipeline used for selection and scroll tracking.
+     - Side effects: Uses an in-memory SwiftData store and an in-memory bridge recorder only.
+     */
     @MainActor
     func testMyDocumentEditBridgePersistsContentAndReloadsVisiblePage() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -2611,13 +2910,24 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(addDocumentScripts.count, 2)
 
         let reloadedScript = try XCTUnwrap(addDocumentScripts.last)
-        XCTAssertTrue(reloadedScript.contains(#""bookInitials":"MYDOC""#))
-        XCTAssertTrue(reloadedScript.contains(#""bookCategory":"GENERAL_BOOK""#))
-        XCTAssertTrue(reloadedScript.contains(#""isMyDocument":true"#))
-        XCTAssertTrue(reloadedScript.contains(#""myDocumentPageId":"33333333-3333-3333-3333-333333333333""#))
-        XCTAssertTrue(reloadedScript.contains(#""keyName":"Renamed""#))
-        XCTAssertTrue(reloadedScript.contains("Edited **markdown**"))
-        XCTAssertFalse(reloadedScript.contains("Original *markdown*"))
+        let reloadedDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: [reloadedScript], event: "add_documents") as? [String: Any]
+        )
+        let reloadedFragment = try XCTUnwrap(reloadedDocument["osisFragment"] as? [String: Any])
+        let reloadedXML = try XCTUnwrap(reloadedFragment["xml"] as? String)
+
+        XCTAssertEqual(reloadedDocument["bookInitials"] as? String, "MYDOC")
+        XCTAssertEqual(reloadedDocument["bookCategory"] as? String, "GENERAL_BOOK")
+        XCTAssertEqual(reloadedDocument["isMyDocument"] as? Bool, true)
+        XCTAssertEqual(
+            reloadedDocument["myDocumentPageId"] as? String,
+            "33333333-3333-3333-3333-333333333333"
+        )
+        XCTAssertEqual(reloadedFragment["keyName"] as? String, "Renamed")
+        XCTAssertTrue(reloadedXML.contains("<strong><BVA"))
+        XCTAssertTrue(reloadedXML.contains(">markdown</BVA></strong>"))
+        XCTAssertFalse(reloadedXML.contains("Edited **markdown**"))
+        XCTAssertFalse(reloadedXML.contains("Original *markdown*"))
     }
 
     @MainActor
@@ -2938,11 +3248,10 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      Protects Android's target-local synchronized scroll anchor conversion.
 
      Android synchronizes a `Verse` key, then converts it to the inactive window's own
-     versification before emitting `scroll_to_verse`. This fixture uses a KJV test fixture source
-     ordinal for Genesis 1:10, whose intro-inclusive SWORD ordinal differs from the placeholder
-     target ordinal, and expects the target WebView payload to use the target ordinal. A failure
-     means iOS is forwarding source ordinals directly and can land nearby instead of on the same
-     verse when panes use different ordinal spaces.
+     versification before emitting `scroll_to_verse`. This fixture uses a KJV source and a
+     generated no-module KJVA target; both must resolve Genesis 1:10 to the same intro-inclusive
+     JSword ordinal rather than remapping the target through legacy `chapter * 40` placeholder
+     math. Divergent source/target conversion is covered separately by non-KJVA bridge fixtures.
      */
     @MainActor
     func testSynchronizedScrollConvertsSourceVerseToTargetOrdinalSpace() throws {
@@ -2956,7 +3265,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let sourceOrdinal = try XCTUnwrap(
             sourceModule.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 10)
         )
-        XCTAssertNotEqual(sourceOrdinal, 10)
+        let targetOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 10)
+        )
+        XCTAssertEqual(sourceOrdinal, targetOrdinal)
+        XCTAssertNotEqual(targetOrdinal, 10)
 
         let sourceWindow = Window()
         let sourcePageManager = PageManager(id: sourceWindow.id)
@@ -2987,7 +3300,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: newScripts, event: "scroll_to_verse") as? [String: Any]
         )
-        XCTAssertEqual(payload["ordinal"] as? Int, 10)
+        XCTAssertEqual(payload["ordinal"] as? Int, targetOrdinal)
         XCTAssertEqual(payload["now"] as? Bool, false)
         XCTAssertEqual(targetController.currentVerse, 10)
         XCTAssertEqual(targetPageManager.bibleVerseNo, 10)
@@ -3511,11 +3824,19 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         controller.bridgeDidSetClientReady(bridge)
 
         XCTAssertFalse(emittedScripts.contains { $0.contains("scroll_to_verse") })
-        XCTAssertTrue(
-            emittedScripts.contains {
-                $0.contains("setup_content") && $0.contains("\"jumpToOrdinal\":\(ordinal)")
-            }
+        let setup = try XCTUnwrap(
+            bridgeEmissionPayload(
+                from: Array(emittedScripts.reversed()),
+                event: "setup_content"
+            ) as? [String: Any]
         )
+        XCTAssertEqual(setup["jumpToOrdinal"] as? Int, ordinal)
+        XCTAssertTrue(setup["jumpToAnchor"] is NSNull)
+        XCTAssertTrue(setup["ordinalStart"] is NSNull)
+        XCTAssertTrue(setup["ordinalEnd"] is NSNull)
+        XCTAssertEqual(setup["highlight"] as? Bool, false)
+        XCTAssertTrue(setup["bookInitials"] is NSNull)
+        XCTAssertTrue(setup["osisRef"] is NSNull)
         controller.bridge(bridge, didScrollToOrdinal: ordinal, key: "Gen.1", atChapterTop: false)
 
         XCTAssertEqual(windowManager.activeWindow?.id, sourceWindow.id)

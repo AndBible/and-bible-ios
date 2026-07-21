@@ -24,6 +24,9 @@ struct BibleReaderStrongsDocumentBuilder {
     /// Active SWORD manager used to resolve installed dictionary and morphology modules.
     private let swordManager: SwordManager?
 
+    /// Android-style global dictionary inventory used by production SWORD/SQLite lookup.
+    private let installedDictionarySources: (() -> [BibleReaderInstalledDictionarySource])?
+
     /// Preference reader for Android-parity Strong's and morphology module selections.
     private let selectedPreferenceValues: SelectedPreferenceValues
 
@@ -46,6 +49,15 @@ struct BibleReaderStrongsDocumentBuilder {
 
         /// User-facing tab label shown by the Vue `MultiDocument` tab rail.
         let abbreviation: String
+
+        /// SWORD versification for real SWORD books; custom Android drivers use `nil`.
+        let v11n: String?
+
+        /// Source language exposed to Vue.
+        let language: String
+
+        /// Source reading direction exposed to Vue.
+        let direction: String
 
         /// Exact-key dictionary lookup closure for the backing module type.
         let lookup: ([String]) -> DictionaryLookupResult?
@@ -71,8 +83,33 @@ struct BibleReaderStrongsDocumentBuilder {
         }
     ) {
         self.swordManager = swordManager
+        self.installedDictionarySources = nil
         self.selectedPreferenceValues = selectedPreferenceValues
         self.moduleDisplayLabel = moduleDisplayLabel
+        self.localizedString = localizedString
+    }
+
+    /**
+     Creates a Strong's builder from Android's global installed-book registry.
+
+     - Parameters:
+       - installedDictionarySources: Deferred globally resolved SWORD and SQLite dictionary sources.
+       - selectedPreferenceValues: Preference lookup for selected dictionary/morphology modules.
+       - localizedString: Localization lookup with default-value fallback.
+     - Side effects: None during construction; installed books and settings are read for each build.
+     - Failure modes: Missing, shadowed, wrong-category, and feature-incompatible sources are omitted.
+     */
+    init(
+        installedDictionarySources: @escaping () -> [BibleReaderInstalledDictionarySource],
+        selectedPreferenceValues: @escaping SelectedPreferenceValues,
+        localizedString: @escaping LocalizedString = { key, defaultValue in
+            Bundle.main.localizedString(forKey: key, value: defaultValue, table: nil)
+        }
+    ) {
+        self.swordManager = nil
+        self.installedDictionarySources = installedDictionarySources
+        self.selectedPreferenceValues = selectedPreferenceValues
+        self.moduleDisplayLabel = Self.moduleDisplayLabel
         self.localizedString = localizedString
     }
 
@@ -127,6 +164,9 @@ struct BibleReaderStrongsDocumentBuilder {
                         keyName: keyName,
                         bookInitials: mod.name,
                         bookAbbreviation: mod.abbreviation,
+                        v11n: mod.v11n,
+                        language: mod.language,
+                        direction: mod.direction,
                         features: features,
                         isNativeHtml: lookup.isNativeHtml
                     ))
@@ -139,7 +179,7 @@ struct BibleReaderStrongsDocumentBuilder {
             for code in robinson {
                 for mod in morphModules {
                     let morphKeys = [code, code.uppercased(), code.lowercased()]
-                    if let lookup = Self.lookupInModule(mod, keyOptions: morphKeys) {
+                    if let lookup = mod.lookup(morphKeys) {
                         let xml = lookup.isNativeHtml
                             ? Self.buildDictionaryEntryHTML(renderedText: lookup.renderedText)
                             : Self.buildDictionaryEntryXML(
@@ -149,10 +189,13 @@ struct BibleReaderStrongsDocumentBuilder {
                             )
                         fragments.append((
                             xml: xml,
-                            key: "\(mod.info.name)--\(code)",
+                            key: "\(mod.name)--\(code)",
                             keyName: code,
-                            bookInitials: mod.info.name,
-                            bookAbbreviation: moduleDisplayLabel(mod),
+                            bookInitials: mod.name,
+                            bookAbbreviation: mod.abbreviation,
+                            v11n: mod.v11n,
+                            language: mod.language,
+                            direction: mod.direction,
                             features: OsisFeatures(),
                             isNativeHtml: lookup.isNativeHtml
                         ))
@@ -219,6 +262,9 @@ struct BibleReaderStrongsDocumentBuilder {
             keyName: keyName,
             bookInitials: moduleName,
             bookAbbreviation: moduleName,
+            v11n: nil,
+            language: "en",
+            direction: "ltr",
             features: OsisFeatures(type: featureType, keyName: keyName),
             isNativeHtml: false
         )
@@ -762,15 +808,10 @@ struct BibleReaderStrongsDocumentBuilder {
      Finds all dictionary/glossary modules that can look up a given Strong's number.
      */
     private func findAllLexiconModules(for strongsNumber: String) -> [LexiconModule] {
-        guard let mgr = swordManager else {
-            strongsDocumentBuilderLogger.error("findAllLexiconModules: swordManager is nil")
-            return []
-        }
-
         let isHebrew = Self.isHebrewStrongsNumber(strongsNumber)
         let feature: ModuleFeatures = isHebrew ? .hebrewDef : .greekDef
 
-        let candidates = lexiconCandidates(feature: feature, manager: mgr)
+        let candidates = lexiconCandidates(feature: feature, manager: swordManager)
         strongsDocumentBuilderLogger.info("findAllLexiconModules: \(candidates.count) installed lexicon candidates, isHebrew=\(isHebrew)")
         var result: [LexiconModule] = []
         var seen = Set<String>()
@@ -801,6 +842,7 @@ struct BibleReaderStrongsDocumentBuilder {
         let lexiconNames = isHebrew
             ? ["StrongsHebrew", "OSHB", "BDB"]
             : ["StrongsGreek", "StrongsRealGreek", "Thayer", "ISBE"]
+        guard let mgr = swordManager else { return result }
         for name in lexiconNames {
             if seen.insert(name).inserted, let mod = mgr.module(named: name) {
                 result.append(swordLexiconModule(mod))
@@ -818,7 +860,23 @@ struct BibleReaderStrongsDocumentBuilder {
      not open directly; this method reads those configs and projects them into the same lookup
      contract when their database is a Strong's dictionary.
      */
-    private func lexiconCandidates(feature: ModuleFeatures, manager: SwordManager) -> [LexiconModule] {
+    private func lexiconCandidates(
+        feature: ModuleFeatures,
+        manager: SwordManager?
+    ) -> [LexiconModule] {
+        if let installedDictionarySources {
+            return installedDictionarySources().compactMap { source in
+                let info = source.info
+                guard (info.category == .dictionary || info.category == .glossary),
+                      StrongsDictionaryPolicy.isSupportedDictionaryModuleName(info.name),
+                      info.features.contains(feature) else {
+                    return nil
+                }
+                return lexiconModule(source)
+            }
+        }
+
+        guard let manager else { return [] }
         let swordModules = manager.installedModules().compactMap { info -> LexiconModule? in
             guard (info.category == .dictionary || info.category == .glossary),
                   StrongsDictionaryPolicy.isSupportedDictionaryModuleName(info.name),
@@ -832,6 +890,20 @@ struct BibleReaderStrongsDocumentBuilder {
         return swordModules + myBibleLexiconModules(feature: feature, modulePath: manager.modulePath)
     }
 
+    /** Projects one globally resolved SWORD/SQLite dictionary into the shared lookup facade. */
+    private func lexiconModule(
+        _ source: BibleReaderInstalledDictionarySource
+    ) -> LexiconModule {
+        LexiconModule(
+            name: source.info.name,
+            abbreviation: source.abbreviation,
+            v11n: source.versificationName,
+            language: source.info.language.isEmpty ? "en" : source.info.language,
+            direction: source.info.isRightToLeft ? "rtl" : "ltr",
+            lookup: { source.lookup(keyOptions: $0) }
+        )
+    }
+
     /**
      Wraps a SWORD dictionary module in the common lexicon lookup facade.
 
@@ -843,6 +915,9 @@ struct BibleReaderStrongsDocumentBuilder {
         LexiconModule(
             name: module.info.name,
             abbreviation: moduleDisplayLabel(module),
+            v11n: VersificationMapper.versificationName(for: module),
+            language: module.info.language.isEmpty ? "en" : module.info.language,
+            direction: module.info.isRightToLeft ? "rtl" : "ltr",
             lookup: { keyOptions in
                 Self.lookupInModule(module, keyOptions: keyOptions)
             }
@@ -906,9 +981,17 @@ struct BibleReaderStrongsDocumentBuilder {
         guard features.contains(requiredFeature) else { return nil }
 
         let abbreviation = Self.firstConfigValue("abbreviation", in: config.values) ?? config.name
+        let language = Self.firstConfigValue("lang", in: config.values) ?? "en"
+        let rtlLanguages = Set(["ar", "fa", "he", "iw", "ps", "ur", "yi"])
+        let direction = rtlLanguages.contains(language.split(separator: "-").first?.lowercased() ?? "")
+            ? "rtl"
+            : "ltr"
         return LexiconModule(
             name: config.name,
             abbreviation: abbreviation,
+            v11n: nil,
+            language: language,
+            direction: direction,
             lookup: { keyOptions in
                 Self.lookupInMyBibleDictionary(reader, keyOptions: keyOptions)
             }
@@ -937,18 +1020,37 @@ struct BibleReaderStrongsDocumentBuilder {
     /**
      Finds installed morphology dictionaries using Android's selected-first fallback order.
      */
-    private func findMorphologyModules() -> [SwordModule] {
-        guard let mgr = swordManager else { return [] }
-        let allModules = mgr.installedModules()
-        var result: [SwordModule] = []
+    private func findMorphologyModules() -> [LexiconModule] {
+        let candidates: [LexiconModule]
+        if let installedDictionarySources {
+            candidates = installedDictionarySources().compactMap { source in
+                let info = source.info
+                guard (info.category == .dictionary || info.category == .glossary),
+                      info.features.contains(.greekParse) else {
+                    return nil
+                }
+                return lexiconModule(source)
+            }
+        } else if let mgr = swordManager {
+            candidates = mgr.installedModules().compactMap { info in
+                guard (info.category == .dictionary || info.category == .glossary),
+                      info.features.contains(.greekParse),
+                      let module = mgr.module(named: info.name) else {
+                    return nil
+                }
+                return swordLexiconModule(module)
+            }
+        } else {
+            candidates = []
+        }
+
+        var result: [LexiconModule] = []
         var seen = Set<String>()
 
         let selectedNames = selectedPreferenceValues(.robinsonGreekMorphology)
         if !selectedNames.isEmpty {
             for name in selectedNames where seen.insert(name).inserted {
-                if let mod = mgr.module(named: name),
-                   (mod.info.category == .dictionary || mod.info.category == .glossary),
-                   mod.info.features.contains(.greekParse) {
+                if let mod = candidates.first(where: { $0.name == name }) {
                     result.append(mod)
                 }
             }
@@ -957,10 +1059,8 @@ struct BibleReaderStrongsDocumentBuilder {
             }
         }
 
-        for info in allModules where
-            (info.category == .dictionary || info.category == .glossary) &&
-                info.features.contains(.greekParse) {
-            if seen.insert(info.name).inserted, let mod = mgr.module(named: info.name) {
+        for mod in candidates {
+            if seen.insert(mod.name).inserted {
                 result.append(mod)
             }
         }
@@ -969,8 +1069,8 @@ struct BibleReaderStrongsDocumentBuilder {
             return result
         }
 
-        for name in ["Robinson"] {
-            if seen.insert(name).inserted, let mod = mgr.module(named: name) {
+        for name in ["Robinson"] where seen.insert(name).inserted {
+            if let mod = candidates.first(where: { $0.name == name }) {
                 result.append(mod)
             }
         }
@@ -1169,6 +1269,9 @@ enum BibleReaderMultiFragmentDocumentBuilder {
         keyName: String,
         bookInitials: String,
         bookAbbreviation: String,
+        v11n: String?,
+        language: String,
+        direction: String,
         features: OsisFeatures,
         isNativeHtml: Bool
     )
@@ -1187,7 +1290,7 @@ enum BibleReaderMultiFragmentDocumentBuilder {
                 xml: frag.xml.replacingOccurrences(of: "\r", with: ""),
                 key: frag.key,
                 keyName: frag.keyName,
-                v11n: "KJVA",
+                v11n: frag.v11n,
                 bookCategory: DocumentCategory.dictionary.rawValue,
                 bookInitials: frag.bookInitials,
                 bookAbbreviation: frag.bookAbbreviation,
@@ -1195,9 +1298,9 @@ enum BibleReaderMultiFragmentDocumentBuilder {
                 isNewTestament: false,
                 features: frag.features,
                 hasStrongs: frag.features.type != nil,
-                ordinalRange: [0, 0],
-                language: "en",
-                direction: "ltr",
+                ordinalRange: nil,
+                language: frag.language,
+                direction: frag.direction,
                 isNativeHtml: frag.isNativeHtml
             )
         }

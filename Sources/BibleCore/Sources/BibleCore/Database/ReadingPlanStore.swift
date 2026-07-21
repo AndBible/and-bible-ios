@@ -68,43 +68,46 @@ public final class ReadingPlanStore {
      * Inserts a new reading plan and immediately saves the context.
      * - Parameter plan: Plan to persist.
      * - Side Effects: Inserts the plan graph into SwiftData and saves `modelContext`.
-     * - Failure: Save errors are swallowed.
+     * - Throws: Mutation-journal or model-save failure.
      */
-    public func insert(_ plan: ReadingPlan) {
+    public func insert(_ plan: ReadingPlan) throws {
         modelContext.insert(plan)
-        save()
+        try save()
     }
 
     /**
      * Marks a reading-plan day as completed and stamps `completedDate`.
      * - Parameter day: Day record to mutate.
      * - Side Effects: Mutates the supplied `ReadingPlanDay` and saves `modelContext`.
-     * - Failure: Save errors are swallowed.
+     * - Throws: Mutation-journal or model-save failure.
      * - Note: This method is idempotent for already-completed days because it simply rewrites the same completion fields.
      */
-    public func completeDay(_ day: ReadingPlanDay) {
+    public func completeDay(_ day: ReadingPlanDay) throws {
         day.isCompleted = true
         day.completedDate = Date()
-        save()
+        try save()
     }
 
     /**
      * Deletes a reading plan and relies on cascade rules for child day records.
      * - Parameter plan: Plan to delete.
      * - Side Effects: Removes the plan graph from SwiftData and saves `modelContext`.
-     * - Failure: Save errors are swallowed.
+     * - Throws: Mutation-journal or model-save failure.
      */
-    public func delete(_ plan: ReadingPlan) {
+    public func delete(_ plan: ReadingPlan) throws {
         modelContext.delete(plan)
-        save()
+        try save()
     }
 
     /**
      * Saves pending reading-plan mutations.
-     * - Side Effects: Flushes `modelContext` to disk.
-     * - Failure: Save errors are swallowed.
+     * - Side Effects: Flushes `modelContext` and its remote-sync mutation journal atomically.
+     * - Throws: Journal or save errors.
      */
-    private func save() {
-        try? modelContext.save()
+    private func save() throws {
+        try RemoteSyncMutationJournalService.savePendingGraphChanges(
+            for: .readingPlans,
+            modelContext: modelContext
+        )
     }
 }

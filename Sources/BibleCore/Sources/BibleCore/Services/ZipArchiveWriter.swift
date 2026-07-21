@@ -1,6 +1,8 @@
 // ZipArchiveWriter.swift — ZIP archive writer for Android-compatible backup exports
 
+import Darwin
 import Foundation
+import SwordKit
 
 /**
  Errors raised while creating ZIP archives for backup export.
@@ -9,11 +11,23 @@ import Foundation
  parity instead of becoming a general-purpose archive library.
  */
 public enum ZipArchiveWriterError: Error, LocalizedError, Equatable {
-    /// One entry path or payload exceeds the non-ZIP64 limits supported by this writer.
+    /// One entry path exceeds a ZIP field limit that ZIP64 cannot extend.
     case entryTooLarge(String)
 
-    /// The number of entries or central-directory byte count exceeds the non-ZIP64 ZIP shape.
+    /// Archive metadata arithmetic or an internal ZIP invariant cannot be represented safely.
     case archiveTooLarge
+
+    /// The destination volume cannot hold a conservative bound for the streaming archive.
+    case insufficientStorage(required: UInt64, available: UInt64)
+
+    /// A file source is a symbolic link, hard link, special node, or otherwise unsafe to export.
+    case unsafeSource(String)
+
+    /// A pinned source changed while its bytes were being written.
+    case sourceChanged(String)
+
+    /// The raw-DEFLATE encoder could not complete a ZIP member.
+    case compressionFailed(String)
 
     /// User-visible error description.
     public var errorDescription: String? {
@@ -22,6 +36,135 @@ public enum ZipArchiveWriterError: Error, LocalizedError, Equatable {
             return "ZIP entry is too large for Android-compatible export: \(name)"
         case .archiveTooLarge:
             return "ZIP archive is too large for Android-compatible export."
+        case .insufficientStorage(let required, let available):
+            return "ZIP export needs \(required) bytes, but only \(available) bytes are available."
+        case .unsafeSource(let path):
+            return "ZIP export source is not a private regular file: \(path)"
+        case .sourceChanged(let path):
+            return "ZIP export source changed while it was being archived: \(path)"
+        case .compressionFailed(let name):
+            return "ZIP entry could not be compressed: \(name)"
+        }
+    }
+}
+
+/**
+ Pins one regular export source to a no-follow descriptor for the inventory-to-writer lifetime.
+
+ The descriptor, rather than a pathname reopen, is the source of truth for archive bytes. Hard
+ links are rejected so one selected family cannot alias another family's payload. A final `fstat`
+ comparison detects same-inode mutation during streaming.
+ */
+final class ZipArchiveWriterPinnedFileSource: @unchecked Sendable {
+    /// Original path retained only for diagnostics.
+    let fileURL: URL
+
+    /// Open no-follow descriptor owned by `handle`.
+    private let handle: FileHandle
+
+    /// Device/inode/size/time identity captured when the descriptor was opened.
+    private let initialStat: stat
+
+    /**
+     Opens and validates one immutable-by-contract export source.
+
+     - Parameter fileURL: Contained candidate file selected by the installed-content catalog.
+     - Side effects: Opens a read-only descriptor that remains live until this object is released.
+     - Throws: POSIX errors or `unsafeSource` for symlinks, special nodes, and hardlinks.
+     */
+    init(fileURL: URL) throws {
+        let descriptor = Darwin.open(fileURL.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard descriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        var metadata = stat()
+        guard Darwin.fstat(descriptor, &metadata) == 0 else {
+            let code = errno
+            Darwin.close(descriptor)
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+        guard metadata.st_mode & S_IFMT == S_IFREG,
+              metadata.st_nlink == 1,
+              metadata.st_size >= 0 else {
+            Darwin.close(descriptor)
+            throw ZipArchiveWriterError.unsafeSource(fileURL.path)
+        }
+        self.fileURL = fileURL
+        self.handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        self.initialStat = metadata
+    }
+
+    /// Declared uncompressed byte count captured from the pinned descriptor.
+    var byteCount: UInt64 { UInt64(initialStat.st_size) }
+
+    /// Stable device/inode key used to reject one source selected through multiple archive families.
+    var identityKey: String { "\(initialStat.st_dev):\(initialStat.st_ino)" }
+
+    /** Rewinds the pinned descriptor before its single sequential export read. */
+    func rewind() throws {
+        guard Darwin.lseek(handle.fileDescriptor, 0, SEEK_SET) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    /** Reads the next bounded source chunk from the pinned descriptor. */
+    func read(upToCount count: Int) throws -> Data {
+        try handle.read(upToCount: count) ?? Data()
+    }
+
+    /**
+     Reads small metadata with a descriptor stat preflight and a hard `limit + 1` boundary.
+
+     - Parameter maximumByteCount: Largest accepted metadata payload.
+     - Returns: Complete bytes when the pinned file fits within the limit.
+     - Side effects: Rewinds and reads this descriptor, then rewinds it for archive streaming.
+     - Throws: `entryTooLarge`, cancellation, descriptor read/seek errors, or `sourceChanged`.
+     */
+    func boundedData(maximumByteCount: Int) throws -> Data {
+        guard maximumByteCount >= 0,
+              byteCount <= UInt64(maximumByteCount) else {
+            throw ZipArchiveWriterError.entryTooLarge(fileURL.lastPathComponent)
+        }
+        try rewind()
+        var data = Data()
+        let hardLimit = maximumByteCount == Int.max ? Int.max : maximumByteCount + 1
+        while data.count < hardLimit {
+            try Task.checkCancellation()
+            let remaining = hardLimit - data.count
+            let chunk = try read(upToCount: min(64 * 1024, remaining))
+            if chunk.isEmpty { break }
+            data.append(chunk)
+        }
+        guard data.count <= maximumByteCount else {
+            throw ZipArchiveWriterError.entryTooLarge(fileURL.lastPathComponent)
+        }
+        try validateAfterStreaming(streamedByteCount: UInt64(data.count))
+        try rewind()
+        return data
+    }
+
+    /**
+     Confirms the same private inode supplied exactly the bytes recorded by the compressor.
+
+     - Parameter streamedByteCount: Uncompressed bytes consumed by the raw-DEFLATE encoder.
+     - Side effects: Reads descriptor metadata only.
+     - Throws: `sourceChanged` if size, identity, link count, or modification/change time differs.
+     */
+    func validateAfterStreaming(streamedByteCount: UInt64) throws {
+        var finalStat = stat()
+        guard Darwin.fstat(handle.fileDescriptor, &finalStat) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        guard streamedByteCount == byteCount,
+              finalStat.st_dev == initialStat.st_dev,
+              finalStat.st_ino == initialStat.st_ino,
+              finalStat.st_nlink == 1,
+              finalStat.st_size == initialStat.st_size,
+              finalStat.st_mtimespec.tv_sec == initialStat.st_mtimespec.tv_sec,
+              finalStat.st_mtimespec.tv_nsec == initialStat.st_mtimespec.tv_nsec,
+              finalStat.st_ctimespec.tv_sec == initialStat.st_ctimespec.tv_sec,
+              finalStat.st_ctimespec.tv_nsec == initialStat.st_ctimespec.tv_nsec else {
+            throw ZipArchiveWriterError.sourceChanged(fileURL.path)
         }
     }
 }
@@ -61,7 +204,7 @@ public struct ZipArchiveWriterEntry: Sendable, Equatable {
  local headers to contain those values up front, but file payloads are copied to the destination ZIP in
  chunks so large backup databases do not need to be loaded into memory as `Data`.
  */
-struct ZipArchiveWriterFileEntry: Sendable, Equatable {
+struct ZipArchiveWriterFileEntry: Sendable {
     /// Relative ZIP entry path using `/` separators.
     let name: String
 
@@ -74,12 +217,15 @@ struct ZipArchiveWriterFileEntry: Sendable, Equatable {
      `data` is intended for small generated entries such as manifests. `file` is intended for SQLite
      databases and other large backup payloads that should be copied incrementally.
      */
-    enum Payload: Sendable, Equatable {
+    enum Payload: Sendable {
         /// In-memory bytes for a small generated entry.
         case data(Data)
 
         /// File URL for an entry copied in chunks.
         case file(URL)
+
+        /// No-follow descriptor pinned while the installed-content inventory is validated.
+        case pinnedFile(ZipArchiveWriterPinnedFileSource)
     }
 
     /**
@@ -109,10 +255,16 @@ struct ZipArchiveWriterFileEntry: Sendable, Equatable {
         self.name = name
         payload = .file(fileURL)
     }
+
+    /** Creates a file-backed entry from an already validated, pinned source descriptor. */
+    init(name: String, pinnedFile: ZipArchiveWriterPinnedFileSource) {
+        self.name = name
+        payload = .pinnedFile(pinnedFile)
+    }
 }
 
 /**
- Creates non-ZIP64 stored ZIP archives with central-directory metadata.
+ Creates ZIP archives with central-directory metadata.
 
  Android backup import uses Java's `ZipInputStream`, which accepts stored entries when CRC and
  size metadata are present. This writer calculates CRC32 and writes central-directory records so
@@ -172,7 +324,7 @@ public enum ZipArchiveWriter {
             }
 
             localHeaderOffsets.append(UInt32(archive.count))
-            let checksum = crc32(entry.data)
+            let checksum = ArchiveCRC32.checksum(of: entry.data)
             appendUInt32(0x0403_4b50, to: &archive)
             appendUInt16(20, to: &archive)
             appendUInt16(Self.utf8FileNameFlag, to: &archive)
@@ -198,7 +350,7 @@ public enum ZipArchiveWriter {
                 throw ZipArchiveWriterError.entryTooLarge(entry.name)
             }
 
-            let checksum = crc32(entry.data)
+            let checksum = ArchiveCRC32.checksum(of: entry.data)
             appendUInt32(0x0201_4b50, to: &centralDirectory)
             appendUInt16(20, to: &centralDirectory)
             appendUInt16(20, to: &centralDirectory)
@@ -342,61 +494,6 @@ public enum ZipArchiveWriter {
     }
 
     /**
-     Calculates standard ZIP CRC32 for one uncompressed payload.
-
-     - Parameter data: Payload bytes to checksum.
-     - Returns: CRC32 value written into local and central ZIP headers.
-     - Side effects: none.
-     - Failure modes: none.
-     */
-    private static func crc32(_ data: Data) -> UInt32 {
-        var crc: UInt32 = 0xffff_ffff
-        crc = updateCRC32(crc, with: data)
-        return crc ^ 0xffff_ffff
-    }
-
-    /**
-     Calculates standard ZIP CRC32 for a file payload without loading it all into memory.
-
-     - Parameter fileURL: File whose bytes should be checksummed.
-     - Returns: CRC32 value written into local and central ZIP headers.
-     - Side effects: Opens and reads `fileURL` sequentially.
-     - Failure modes: Rethrows file-open and file-read failures.
-     */
-    private static func crc32(fileURL: URL) throws -> UInt32 {
-        let handle = try FileHandle(forReadingFrom: fileURL)
-        defer { try? handle.close() }
-        var crc: UInt32 = 0xffff_ffff
-        while true {
-            let chunk = try handle.read(upToCount: 64 * 1024) ?? Data()
-            if chunk.isEmpty {
-                break
-            }
-            crc = updateCRC32(crc, with: chunk)
-        }
-        return crc ^ 0xffff_ffff
-    }
-
-    /**
-     Advances an in-progress ZIP CRC32 checksum with additional bytes.
-
-     - Parameters:
-       - crc: Current unfinalized CRC accumulator.
-       - data: Additional payload bytes.
-     - Returns: Updated unfinalized CRC accumulator.
-     - Side effects: none.
-     - Failure modes: none.
-     */
-    private static func updateCRC32(_ crc: UInt32, with data: Data) -> UInt32 {
-        var crc = crc
-        for byte in data {
-            let tableIndex = Int((crc ^ UInt32(byte)) & 0xff)
-            crc = (crc >> 8) ^ crc32Table[tableIndex]
-        }
-        return crc
-    }
-
-    /**
      Validates one file-backed ZIP entry and precomputes stored-entry metadata.
 
      - Parameters:
@@ -421,11 +518,13 @@ public enum ZipArchiveWriter {
         switch entry.payload {
         case .data(let data):
             byteCount = UInt64(data.count)
-            checksum = crc32(data)
+            checksum = ArchiveCRC32.checksum(of: data)
         case .file(let fileURL):
             let attributes = try fileManager.attributesOfItem(atPath: fileURL.path)
             byteCount = (attributes[.size] as? NSNumber)?.uint64Value ?? UInt64.max
-            checksum = try crc32(fileURL: fileURL)
+            checksum = try ArchiveCRC32.checksum(fileAt: fileURL)
+        case .pinnedFile(let source):
+            throw ZipArchiveWriterError.unsafeSource(source.fileURL.path)
         }
         guard byteCount <= UInt64(UInt32.max) else {
             throw ZipArchiveWriterError.entryTooLarge(entry.name)
@@ -465,23 +564,10 @@ public enum ZipArchiveWriter {
                 }
                 try output.write(contentsOf: chunk)
             }
+        case .pinnedFile(let source):
+            throw ZipArchiveWriterError.unsafeSource(source.fileURL.path)
         }
     }
-
-    /// Lookup table used by `crc32(_:)`.
-    private static let crc32Table: [UInt32] = {
-        (0..<256).map { value in
-            var crc = UInt32(value)
-            for _ in 0..<8 {
-                if crc & 1 == 1 {
-                    crc = 0xedb8_8320 ^ (crc >> 1)
-                } else {
-                    crc >>= 1
-                }
-            }
-            return crc
-        }
-    }()
 
     /**
      Appends a little-endian 16-bit integer to ZIP output.

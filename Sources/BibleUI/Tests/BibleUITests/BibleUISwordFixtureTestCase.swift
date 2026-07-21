@@ -33,9 +33,10 @@ class BibleUISwordFixtureTestCase: XCTestCase {
 
      - Returns: Filesystem path to the temporary `sword` directory containing `mods.d` and module
        data files.
-     - Side effects: Creates a temporary directory and copies test fixture files into it.
-     - Failure modes: Throws filesystem errors from directory creation or recursive copying; records
-       an XCTest failure if the repository fixture path cannot be found.
+     - Side effects: Creates a temporary directory, copies test fixture files into it, and removes
+       any generated libsword module cache from the copy so per-test descriptors are discovered.
+     - Failure modes: Throws filesystem errors from directory creation, recursive copying, or stale
+       cache removal; records an XCTest failure if the repository fixture path cannot be found.
      */
     func makeTemporarySwordFixturePath() throws -> String {
         let fileManager = FileManager.default
@@ -59,6 +60,12 @@ class BibleUISwordFixtureTestCase: XCTestCase {
             .appendingPathComponent("sword", isDirectory: true)
         try fileManager.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         try copyDirectoryContents(from: fixtureSwordURL, to: tempRoot)
+        let copiedModuleCacheURL = tempRoot
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("modules-conf.cache", isDirectory: false)
+        if fileManager.fileExists(atPath: copiedModuleCacheURL.path) {
+            try fileManager.removeItem(at: copiedModuleCacheURL)
+        }
 
         temporarySwordModulePaths.append(tempRoot.path)
         return tempRoot.path
@@ -304,6 +311,7 @@ class BibleUISwordFixtureTestCase: XCTestCase {
        - moduleName: SWORD module initials to publish in `mods.d`.
        - description: Human-readable module name stored in the alias descriptor.
        - language: ISO language code used by quick-selector ordering and labels.
+       - versification: SWORD canon name assigned to the alias descriptor.
        - modulePath: Temporary SWORD root returned by `makeTemporarySwordFixturePath()`.
      - Side effects: Writes a `.conf` file under `modulePath/mods.d`.
      - Failure modes: Propagates filesystem read/write errors, including a missing KJV test fixture
@@ -313,6 +321,7 @@ class BibleUISwordFixtureTestCase: XCTestCase {
         named moduleName: String,
         description: String,
         language: String = "en",
+        versification: String = "KJV",
         in modulePath: String
     ) throws {
         let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
@@ -322,6 +331,7 @@ class BibleUISwordFixtureTestCase: XCTestCase {
         config = config.replacingOccurrences(of: "[KJV]", with: "[\(moduleName)]")
         config = replaceConfigLine(named: "Description", with: description, in: config)
         config = replaceConfigLine(named: "Lang", with: language, in: config)
+        config = replaceConfigLine(named: "Versification", with: versification, in: config)
 
         try config.write(
             to: modsDURL.appendingPathComponent("\(moduleName.lowercased()).conf", isDirectory: false),

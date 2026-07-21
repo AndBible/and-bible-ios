@@ -256,8 +256,66 @@ public final class RemoteSyncMyDocumentRestoreService {
 
     /**
      Replaces local iOS My Documents with the supplied staged Android snapshot.
+
+     - Parameters:
+       - snapshot: Validated or untrusted Android-shaped My Documents graph.
+       - modelContext: Context whose complete My Documents graph is replaced.
+     - Returns: Counts of the rows durably restored.
+     - Side Effects: Deletes and recreates My Documents models, then saves the context once.
+     - Throws: Rethrows validation, fetch, and save errors; save failure rolls all staged models back.
      */
     public func replaceLocalMyDocuments(
+        from snapshot: RemoteSyncAndroidMyDocumentSnapshot,
+        modelContext: ModelContext
+    ) throws -> RemoteSyncMyDocumentRestoreReport {
+        let report = try stageLocalMyDocuments(from: snapshot, modelContext: modelContext)
+        do {
+            try modelContext.save()
+            return report
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    /**
+     Replaces My Documents inside a settings-backed sync transaction.
+
+     Initial restore and patch replay use this overload so document models, Android `LogEntry`
+     metadata, patch status, and fingerprint baselines can share one outer transaction. Nested calls
+     join an existing batch rather than saving early.
+
+     - Parameters:
+       - snapshot: Android-shaped My Documents graph to publish.
+       - modelContext: Exact clean context shared by models and `settingsStore`.
+       - settingsStore: Settings store bound to `modelContext`.
+     - Returns: Counts of rows restored after the outer transaction commits.
+     - Side Effects: Stages the complete My Documents replacement without an intermediate save.
+     - Throws: Rethrows validation, context-contract, fetch, cancellation, and commit errors; the
+       complete shared context rolls back on failure.
+     */
+    func replaceLocalMyDocuments(
+        from snapshot: RemoteSyncAndroidMyDocumentSnapshot,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> RemoteSyncMyDocumentRestoreReport {
+        try settingsStore.performAtomicBatch(in: modelContext) {
+            try stageLocalMyDocuments(from: snapshot, modelContext: modelContext)
+        }
+    }
+
+    /**
+     Validates and stages one complete My Documents graph replacement without committing it.
+
+     - Parameters:
+       - snapshot: Android-shaped graph whose references and initials must be valid.
+       - modelContext: Context receiving all delete and insert mutations.
+     - Returns: Counts describing the staged replacement.
+     - Side Effects: Deletes existing My Documents models and inserts snapshot models in memory.
+     - Throws: Throws explicit orphan/duplicate validation errors and rethrows strict fetch errors.
+     - Important: The caller owns the commit or rollback boundary.
+     */
+    private func stageLocalMyDocuments(
         from snapshot: RemoteSyncAndroidMyDocumentSnapshot,
         modelContext: ModelContext
     ) throws -> RemoteSyncMyDocumentRestoreReport {
@@ -357,13 +415,6 @@ public final class RemoteSyncMyDocumentRestoreService {
                 page.aiPageCacheEntries?.append(cacheEntry)
             }
             modelContext.insert(cacheEntry)
-        }
-
-        do {
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            throw error
         }
 
         return RemoteSyncMyDocumentRestoreReport(

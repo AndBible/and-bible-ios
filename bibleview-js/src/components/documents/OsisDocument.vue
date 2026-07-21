@@ -21,6 +21,8 @@
       class="document"
       :data-book-initials="bookInitials"
       :data-osis-ref="osisRef"
+      :data-book-category="bookCategory"
+      :data-v11n="document.v11n"
   >
     <AreYouSure v-if="canUseMyDocumentAIPageActions" ref="areYouSureDelete">
       <template #title>
@@ -29,71 +31,27 @@
       {{ strings.deleteMyDocumentPageConfirmation }}
     </AreYouSure>
     <div v-if="editMode" class="mydoc-edit-container">
-      <textarea
-          v-model="editContent"
-          class="mydoc-raw-editor"
-          rows="12"
-          :aria-label="strings.editTextPlaceholder"
-          @keydown.escape.prevent.stop="closeEditor"
+      <EditableText
+          :text="editContent"
+          :content-type="editContentType"
+          :note-editor-context="editPageId ? { entityType: 'MY_DOCUMENT_PAGE', entityId: editPageId } : null"
+          :edit-directly="true"
+          @save="handleEditorSave"
+          @closed="handleEditorClosed"
       />
-      <div class="mydoc-editor-actions">
-        <button
-            type="button"
-            class="journal-button"
-            :aria-label="strings.saveMyDocumentPageAccessibilityLabel"
-            :title="strings.saveMyDocumentPageAccessibilityLabel"
-            @click="saveEditor"
-        >
-          <FontAwesomeIcon icon="save"/>
-        </button>
-        <button
-            type="button"
-            class="journal-button"
-            :aria-label="strings.cancel || 'Cancel'"
-            :title="strings.cancel || 'Cancel'"
-            @click="closeEditor"
-        >
-          <FontAwesomeIcon icon="times"/>
-        </button>
-      </div>
     </div>
 
     <template v-else>
-      <div
-          v-if="canUseMyDocumentActions"
-          class="mydoc-actions"
-      >
-        <button
-            type="button"
-            class="journal-button"
-            :aria-label="strings.editTextPlaceholder"
-            :title="strings.editTextPlaceholder"
-            @click.stop="startEditing"
-        >
-          <FontAwesomeIcon icon="edit"/>
-        </button>
-        <button
-            v-if="canUseMyDocumentAIPageActions"
-            type="button"
-            class="journal-button"
-            :aria-label="strings.regenerateMyDocumentPageAccessibilityLabel"
-            :title="strings.regenerateMyDocumentPageAccessibilityLabel"
-            @click.stop="regenerateAIPage"
-        >
-          <FontAwesomeIcon icon="arrows-rotate"/>
-        </button>
-        <button
-            v-if="canUseMyDocumentAIPageActions"
-            type="button"
-            class="journal-button"
-            :aria-label="strings.deleteMyDocumentPageAccessibilityLabel"
-            :title="strings.deleteMyDocumentPageAccessibilityLabel"
-            @click.stop="deleteAIPage"
-        >
-          <FontAwesomeIcon icon="trash"/>
-        </button>
-      </div>
+      <h2 v-if="bookCategory === 'COMMENTARY' && commentaryRange" class="commentary-range">
+        {{ commentaryRange.name }}
+      </h2>
       <OsisFragment :is-native-html="document.isNativeHtml" :fragment="osisFragment"/>
+      <DocumentActionMenu
+          ref="actionMenu"
+          :document="document"
+          @edit="startEditing"
+          @delete-ai-page="deleteAIPage"
+      />
       <button
           v-if="isMyDocument && isContentEmpty"
           type="button"
@@ -103,6 +61,15 @@
         <FontAwesomeIcon icon="edit" class="placeholder-icon"/>
         <span>{{ strings.editTextPlaceholder }}</span>
       </button>
+      <div v-if="isAiDocument && sourcePromptName" class="ai-footer">
+        <a
+            v-if="sourcePromptId"
+            class="prompt-link"
+            @click.prevent="android.openPromptEditor(sourcePromptId)"
+        >{{ sourcePromptName }}</a>
+        <span v-else>{{ sourcePromptName }}</span>
+        <span v-if="sourceModelName" class="model-name"> ({{ sourceModelName }})</span>
+      </div>
       <OpenAllLink v-if="document.bookCategory != 'GENERAL_BOOK'" :v11n="document.v11n"/>
       <FeaturesLink :fragment="osisFragment"/>
     </template>
@@ -110,16 +77,29 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * Renders one generic OSIS, commentary, My Documents, or AI-generated document page.
+ *
+ * @param document Typed source payload including exact module/key identity, rendered fragment,
+ * bookmarks, optional commentary range, and optional My Documents metadata.
+ * @remarks Registers source CSS and bookmark DOM behavior, injects an inline page-action trigger,
+ * and owns raw My Documents edit state. Native bridge failures leave the current rendered document
+ * unchanged; AI deletion is gated by the existing confirmation modal.
+ */
 import OsisFragment from "@/components/documents/OsisFragment.vue";
+import DocumentActionMenu from "@/components/documents/DocumentActionMenu.vue";
 import FeaturesLink from "@/components/FeaturesLink.vue";
 import OpenAllLink from "@/components/OpenAllLink.vue";
 import AreYouSure from "@/components/modals/AreYouSure.vue";
+import EditableText from "@/components/EditableText.vue";
 import {useCommon, useReferenceCollector} from "@/composables";
 import {androidKey, customCssKey, globalBookmarksKey, osisDocumentInfoKey, referenceCollectorKey} from "@/types/constants";
 import {computed, inject, provide, ref} from "vue";
 import {OsisDocument} from "@/types/documents";
+import {TextContentType} from "@/types/client-objects";
 import {useBookmarks} from "@/composables/bookmarks";
 import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
+import {useInlineActionIcons} from "@/composables/inline-action-icons";
 
 const props = defineProps<{ document: OsisDocument }>();
 
@@ -135,9 +115,13 @@ const {
     genericBookmarks,
     highlightedOrdinalRange,
     isMyDocument = false,
+    isAiDocument = false,
     myDocumentPageId = null,
     sourcePromptId = null,
+    sourcePromptName = null,
+    sourceModelName = null,
     aiDocMarkers = [],
+    commentaryRange = null,
 } = props.document;
 const referenceCollector = useReferenceCollector();
 
@@ -165,11 +149,19 @@ if (bookCategory === "COMMENTARY" || bookCategory === "GENERAL_BOOK") {
     provide(referenceCollectorKey, referenceCollector);
 }
 
+const actionMenu = ref<InstanceType<typeof DocumentActionMenu> | null>(null);
+
+useInlineActionIcons(id, bookInitials, annotateRef, anchor => {
+    actionMenu.value?.openMenu(anchor);
+});
+
 const editMode = ref(false);
 const editContent = ref("");
+const editContentType = ref<TextContentType>("MARKDOWN");
 const editPageId = ref("");
 const areYouSureDelete = ref<InstanceType<typeof AreYouSure> | null>(null);
 
+/** Loads exact native raw content and enters the editor only after a valid page response arrives. */
 async function startEditing() {
     if (!isMyDocument) return;
 
@@ -178,27 +170,24 @@ async function startEditing() {
 
     editPageId.value = info.pageId;
     editContent.value = info.content;
+    editContentType.value = info.contentType as TextContentType;
     editMode.value = true;
 }
 
-function saveEditor() {
+/** Persists each editor save against the exact resolved My Documents page. */
+function handleEditorSave(content: string) {
     if (!editPageId.value) return;
-
-    android.saveMyDocumentPageContent(bookInitials, editPageId.value, editContent.value, null);
-    closeEditor();
+    editContent.value = content;
+    android.saveMyDocumentPageContent(bookInitials, editPageId.value, content, null);
 }
 
-function closeEditor() {
+/** Leaves edit mode and asks native code to reload the source document from persisted content. */
+function handleEditorClosed() {
     editMode.value = false;
     android.reloadMyDocumentPage(bookInitials);
 }
 
-function regenerateAIPage() {
-    if (!myDocumentPageId || !sourcePromptId) return;
-
-    android.regenerateMyDocumentPage(myDocumentPageId);
-}
-
+/** Confirms and delegates deletion of a persisted AI-generated page without optimistic removal. */
 async function deleteAIPage() {
     if (!myDocumentPageId || !sourcePromptId) return;
 
@@ -211,13 +200,6 @@ async function deleteAIPage() {
 <style lang="scss" scoped>
 .document {
   overflow: hidden;
-}
-
-.mydoc-actions {
-  float: right;
-  display: flex;
-  gap: 0.25em;
-  margin: 0 0 0.5em 0.5em;
 }
 
 .mydoc-edit-container {
@@ -233,28 +215,6 @@ async function deleteAIPage() {
   .monochrome.night & {
     border-color: white;
   }
-}
-
-.mydoc-raw-editor {
-  box-sizing: border-box;
-  display: block;
-  width: 100%;
-  min-height: 16rem;
-  padding: 0.75em;
-  border: 0;
-  resize: vertical;
-  background: var(--background-color);
-  color: var(--text-color);
-  font: inherit;
-  line-height: 1.4;
-}
-
-.mydoc-editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.25em;
-  padding: 0.4em;
-  border-top: 1px solid rgba(0, 0, 0, 0.15);
 }
 
 .mydoc-placeholder {
@@ -275,5 +235,40 @@ async function deleteAIPage() {
 
 .placeholder-icon {
   font-size: 1.2em;
+}
+
+.commentary-range {
+  font-size: 1.15em;
+  margin: 0.5em 0;
+}
+
+.ai-footer {
+  margin-top: 1em;
+  padding-top: 0.5em;
+  font-size: 0.8em;
+  opacity: 0.6;
+  text-align: end;
+
+  .prompt-link {
+    color: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+}
+</style>
+
+<style lang="scss">
+.inline-action-icon {
+  display: inline;
+  margin-inline-end: 18px;
+  cursor: pointer;
+  opacity: 0.4;
+
+  svg {
+    width: 18px;
+    height: 18px;
+    vertical-align: middle;
+    fill: currentColor;
+  }
 }
 </style>

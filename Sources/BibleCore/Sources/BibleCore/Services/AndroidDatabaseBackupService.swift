@@ -102,7 +102,7 @@ public enum AndroidDatabaseBackupCategory: String, CaseIterable, Identifiable, S
         case .bookmarks:
             12
         case .workspaces:
-            22
+            RemoteSyncAndroidDatabaseContract.schemaVersion(for: .workspaces)
         case .readingPlans:
             1
         case .settings:
@@ -1361,7 +1361,10 @@ public final class AndroidDatabaseBackupService {
         guard category.supportsApply else {
             return .unsupportedCategory("iOS does not yet have a safe mapper for Android \(category.displayName) data.")
         }
-        if databaseVersion > category.supportedDatabaseVersion {
+        let isUnsupportedWorkspaceGeneration = category == .workspaces
+            && !RemoteSyncWorkspaceDatabaseMigrator.supportsSourceVersion(databaseVersion)
+        if databaseVersion > category.supportedDatabaseVersion
+            || isUnsupportedWorkspaceGeneration {
             return .unsupportedVersion(version: databaseVersion, supported: category.supportedDatabaseVersion)
         }
         return .supported
@@ -1522,15 +1525,17 @@ public final class AndroidDatabaseBackupService {
     }
 
     /**
-     Applies Android bookmark backup rows using restore or local-first import semantics.
+    Applies Android bookmark backup rows using restore or Android timestamp/log import semantics.
 
      - Parameters:
        - section: Extracted `bookmarks.sqlite3` section.
-       - mode: Restore replaces local bookmarks; Import adds missing Android rows only.
+       - mode: Restore replaces local bookmarks; Import resolves duplicate rows using Android logs.
        - modelContext: SwiftData context to mutate.
        - settingsStore: Settings store used for Android bookmark fidelity side stores.
      - Returns: Bookmark restore report from the shared Android restore engine.
-     - Side effects: rewrites local bookmark SwiftData rows and bookmark fidelity settings.
+     - Side effects: rewrites local bookmark SwiftData rows and bookmark fidelity settings. Import
+       preserves quarantined local rows that are intentionally absent from trusted snapshots;
+       restore remains an explicit destructive replacement.
      - Failure modes: rethrows malformed Android database or SwiftData save failures.
      */
     private func applyBookmarks(
@@ -1545,7 +1550,7 @@ public final class AndroidDatabaseBackupService {
         case .restore:
             finalSnapshot = backupSnapshot
         case .import:
-            finalSnapshot = mergeBookmarkSnapshots(
+            finalSnapshot = try mergeBookmarkSnapshots(
                 local: currentBookmarkSnapshot(modelContext: modelContext, settingsStore: settingsStore),
                 imported: backupSnapshot
             )
@@ -1553,7 +1558,8 @@ public final class AndroidDatabaseBackupService {
         return try bookmarkRestoreService.replaceLocalBookmarks(
             from: finalSnapshot,
             modelContext: modelContext,
-            settingsStore: settingsStore
+            settingsStore: settingsStore,
+            preserveUnverifiedLocalBookmarks: mode == .import
         )
     }
 
@@ -1603,7 +1609,8 @@ public final class AndroidDatabaseBackupService {
        - settingsStore: Settings store used for Android workspace fidelity side stores.
      - Returns: Workspace restore report from the shared Android restore engine.
      - Side effects: rewrites local workspace SwiftData rows and workspace fidelity settings.
-     - Failure modes: rethrows malformed serialized values, orphan references, or save failures.
+     - Failure modes: rethrows archive/file generation mismatches, malformed serialized values,
+       orphan references, or save failures.
      */
     private func applyWorkspaces(
         _ section: AndroidDatabaseBackupSection,
@@ -1611,7 +1618,10 @@ public final class AndroidDatabaseBackupService {
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> RemoteSyncWorkspaceRestoreReport {
-        let backupSnapshot = try workspaceRestoreService.readSnapshot(from: section.databaseFileURL)
+        let backupSnapshot = try workspaceRestoreService.readSnapshot(
+            from: section.databaseFileURL,
+            expectedSourceVersion: section.databaseVersion
+        )
         let finalSnapshot: RemoteSyncAndroidWorkspaceSnapshot
         switch mode {
         case .restore:
@@ -1716,277 +1726,28 @@ public final class AndroidDatabaseBackupService {
             labels: current.labelRowsByKey.values.sorted { $0.id.uuidString < $1.id.uuidString },
             bibleBookmarks: current.bibleBookmarkRowsByKey.values.sorted { $0.id.uuidString < $1.id.uuidString },
             genericBookmarks: current.genericBookmarkRowsByKey.values.sorted { $0.id.uuidString < $1.id.uuidString },
-            studyPadEntries: current.studyPadEntryRowsByKey.values.sorted { $0.id.uuidString < $1.id.uuidString }
+            studyPadEntries: current.studyPadEntryRowsByKey.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            logEntries: RemoteSyncLogEntryStore(settingsStore: settingsStore)
+                .entries(for: .bookmarks)
+                .map(AndroidBookmarkDatabaseContract.normalizedLogEntry)
         )
     }
 
     /**
-     Merges bookmark snapshots with Android Import's local-first uniqueness behavior.
+     Merges bookmark snapshots with Android's strict per-row log timestamp behavior.
 
      - Parameters:
        - local: Current local bookmark rows projected into Android form.
        - imported: Backup bookmark rows read from Android's database.
-     - Returns: Snapshot containing every local row plus imported rows whose Android keys are absent.
+     - Returns: Snapshot containing accepted imported rows and unaffected local rows.
      - Side effects: none.
-     - Failure modes: This helper cannot fail; system-label IDs are canonicalized during merge.
+     - Failure modes: Throws when an accepted upsert log lacks its source row or a log key is malformed.
      */
     private func mergeBookmarkSnapshots(
         local: RemoteSyncAndroidBookmarkSnapshot,
         imported: RemoteSyncAndroidBookmarkSnapshot
-    ) -> RemoteSyncAndroidBookmarkSnapshot {
-        let systemLabelIDByName = [
-            Label.speakLabelName: Label.speakLabelId,
-            Label.unlabeledName: Label.unlabeledId,
-            Label.paragraphBreakLabelName: Label.paragraphBreakLabelId,
-        ]
-        let importedLabelIDMap = Dictionary(
-            uniqueKeysWithValues: imported.labels.map { label in
-                (label.id, systemLabelIDByName[label.name] ?? label.id)
-            }
-        )
-
-        var labelsByID = Dictionary(uniqueKeysWithValues: local.labels.map { ($0.id, $0) })
-        for label in imported.labels {
-            let mappedID = importedLabelIDMap[label.id] ?? label.id
-            guard labelsByID[mappedID] == nil else {
-                continue
-            }
-            labelsByID[mappedID] = RemoteSyncAndroidLabel(
-                id: mappedID,
-                name: label.name,
-                color: label.color,
-                markerStyle: label.markerStyle,
-                markerStyleWholeVerse: label.markerStyleWholeVerse,
-                underlineStyle: label.underlineStyle,
-                underlineStyleWholeVerse: label.underlineStyleWholeVerse,
-                hideStyle: label.hideStyle,
-                hideStyleWholeVerse: label.hideStyleWholeVerse,
-                favourite: label.favourite,
-                type: label.type,
-                customIcon: label.customIcon
-            )
-        }
-
-        var bibleBookmarksByID = Dictionary(uniqueKeysWithValues: local.bibleBookmarks.map { ($0.id, $0) })
-        for bookmark in imported.bibleBookmarks.map({ remapBookmarkLabels($0, using: importedLabelIDMap) }) {
-            if let existing = bibleBookmarksByID[bookmark.id] {
-                bibleBookmarksByID[bookmark.id] = mergeBibleBookmark(local: existing, imported: bookmark)
-            } else {
-                bibleBookmarksByID[bookmark.id] = bookmark
-            }
-        }
-
-        var genericBookmarksByID = Dictionary(uniqueKeysWithValues: local.genericBookmarks.map { ($0.id, $0) })
-        for bookmark in imported.genericBookmarks.map({ remapBookmarkLabels($0, using: importedLabelIDMap) }) {
-            if let existing = genericBookmarksByID[bookmark.id] {
-                genericBookmarksByID[bookmark.id] = mergeGenericBookmark(local: existing, imported: bookmark)
-            } else {
-                genericBookmarksByID[bookmark.id] = bookmark
-            }
-        }
-
-        var studyPadEntriesByID = Dictionary(uniqueKeysWithValues: local.studyPadEntries.map { ($0.id, $0) })
-        for entry in imported.studyPadEntries {
-            guard studyPadEntriesByID[entry.id] == nil else {
-                continue
-            }
-            studyPadEntriesByID[entry.id] = RemoteSyncAndroidStudyPadEntry(
-                id: entry.id,
-                labelID: importedLabelIDMap[entry.labelID] ?? entry.labelID,
-                orderNumber: entry.orderNumber,
-                indentLevel: entry.indentLevel,
-                contentType: entry.contentType,
-                text: entry.text
-            )
-        }
-
-        return RemoteSyncAndroidBookmarkSnapshot(
-            labels: labelsByID.values.sorted { $0.id.uuidString < $1.id.uuidString },
-            bibleBookmarks: bibleBookmarksByID.values.sorted { $0.id.uuidString < $1.id.uuidString },
-            genericBookmarks: genericBookmarksByID.values.sorted { $0.id.uuidString < $1.id.uuidString },
-            studyPadEntries: studyPadEntriesByID.values.sorted { $0.id.uuidString < $1.id.uuidString }
-        )
-    }
-
-    /**
-     Rewrites imported Bible bookmark label references through canonical iOS system-label aliases.
-
-     - Parameters:
-       - bookmark: Imported Android Bible bookmark row.
-       - labelIDMap: Remote-to-local label ID map for Android system labels.
-     - Returns: Bookmark row whose primary label and label links reference local IDs.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private func remapBookmarkLabels(
-        _ bookmark: RemoteSyncAndroidBibleBookmark,
-        using labelIDMap: [UUID: UUID]
-    ) -> RemoteSyncAndroidBibleBookmark {
-        RemoteSyncAndroidBibleBookmark(
-            id: bookmark.id,
-            kjvOrdinalStart: bookmark.kjvOrdinalStart,
-            kjvOrdinalEnd: bookmark.kjvOrdinalEnd,
-            ordinalStart: bookmark.ordinalStart,
-            ordinalEnd: bookmark.ordinalEnd,
-            v11n: bookmark.v11n,
-            playbackSettingsJSON: bookmark.playbackSettingsJSON,
-            createdAt: bookmark.createdAt,
-            book: bookmark.book,
-            startOffset: bookmark.startOffset,
-            endOffset: bookmark.endOffset,
-            primaryLabelID: bookmark.primaryLabelID.map { labelIDMap[$0] ?? $0 },
-            notes: bookmark.notes,
-            notesContentType: bookmark.notesContentType,
-            lastUpdatedOn: bookmark.lastUpdatedOn,
-            wholeVerse: bookmark.wholeVerse,
-            type: bookmark.type,
-            customIcon: bookmark.customIcon,
-            editAction: bookmark.editAction,
-            labelLinks: bookmark.labelLinks.map {
-                RemoteSyncAndroidBookmarkLabelLink(
-                    labelID: labelIDMap[$0.labelID] ?? $0.labelID,
-                    orderNumber: $0.orderNumber,
-                    indentLevel: $0.indentLevel,
-                    expandContent: $0.expandContent
-                )
-            }
-        )
-    }
-
-    /**
-     Rewrites imported generic bookmark label references through canonical iOS system-label aliases.
-
-     - Parameters:
-       - bookmark: Imported Android generic bookmark row.
-       - labelIDMap: Remote-to-local label ID map for Android system labels.
-     - Returns: Bookmark row whose primary label and label links reference local IDs.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private func remapBookmarkLabels(
-        _ bookmark: RemoteSyncAndroidGenericBookmark,
-        using labelIDMap: [UUID: UUID]
-    ) -> RemoteSyncAndroidGenericBookmark {
-        RemoteSyncAndroidGenericBookmark(
-            id: bookmark.id,
-            key: bookmark.key,
-            createdAt: bookmark.createdAt,
-            bookInitials: bookmark.bookInitials,
-            ordinalStart: bookmark.ordinalStart,
-            ordinalEnd: bookmark.ordinalEnd,
-            startOffset: bookmark.startOffset,
-            endOffset: bookmark.endOffset,
-            primaryLabelID: bookmark.primaryLabelID.map { labelIDMap[$0] ?? $0 },
-            notes: bookmark.notes,
-            notesContentType: bookmark.notesContentType,
-            lastUpdatedOn: bookmark.lastUpdatedOn,
-            wholeVerse: bookmark.wholeVerse,
-            playbackSettingsJSON: bookmark.playbackSettingsJSON,
-            customIcon: bookmark.customIcon,
-            editAction: bookmark.editAction,
-            labelLinks: bookmark.labelLinks.map {
-                RemoteSyncAndroidBookmarkLabelLink(
-                    labelID: labelIDMap[$0.labelID] ?? $0.labelID,
-                    orderNumber: $0.orderNumber,
-                    indentLevel: $0.indentLevel,
-                    expandContent: $0.expandContent
-                )
-            }
-        )
-    }
-
-    /**
-     Merges a duplicate Bible bookmark using Android Import's "keep existing row" semantics.
-
-     - Parameters:
-       - local: Existing local Android-shaped bookmark row.
-       - imported: Imported row with the same Android bookmark ID.
-     - Returns: Local row with only missing optional fidelity filled from the imported row.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private func mergeBibleBookmark(
-        local: RemoteSyncAndroidBibleBookmark,
-        imported: RemoteSyncAndroidBibleBookmark
-    ) -> RemoteSyncAndroidBibleBookmark {
-        RemoteSyncAndroidBibleBookmark(
-            id: local.id,
-            kjvOrdinalStart: local.kjvOrdinalStart,
-            kjvOrdinalEnd: local.kjvOrdinalEnd,
-            ordinalStart: local.ordinalStart,
-            ordinalEnd: local.ordinalEnd,
-            v11n: local.v11n,
-            playbackSettingsJSON: local.playbackSettingsJSON ?? imported.playbackSettingsJSON,
-            createdAt: local.createdAt,
-            book: local.book,
-            startOffset: local.startOffset,
-            endOffset: local.endOffset,
-            primaryLabelID: local.primaryLabelID ?? imported.primaryLabelID,
-            notes: local.notes ?? imported.notes,
-            notesContentType: local.notesContentType ?? imported.notesContentType,
-            lastUpdatedOn: local.lastUpdatedOn,
-            wholeVerse: local.wholeVerse,
-            type: local.type,
-            customIcon: local.customIcon,
-            editAction: local.editAction,
-            labelLinks: mergeLabelLinks(local: local.labelLinks, imported: imported.labelLinks)
-        )
-    }
-
-    /**
-     Merges a duplicate generic bookmark using Android Import's "keep existing row" semantics.
-
-     - Parameters:
-       - local: Existing local Android-shaped generic bookmark row.
-       - imported: Imported row with the same Android bookmark ID.
-     - Returns: Local row with only missing optional fidelity filled from the imported row.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private func mergeGenericBookmark(
-        local: RemoteSyncAndroidGenericBookmark,
-        imported: RemoteSyncAndroidGenericBookmark
-    ) -> RemoteSyncAndroidGenericBookmark {
-        RemoteSyncAndroidGenericBookmark(
-            id: local.id,
-            key: local.key,
-            createdAt: local.createdAt,
-            bookInitials: local.bookInitials,
-            ordinalStart: local.ordinalStart,
-            ordinalEnd: local.ordinalEnd,
-            startOffset: local.startOffset,
-            endOffset: local.endOffset,
-            primaryLabelID: local.primaryLabelID ?? imported.primaryLabelID,
-            notes: local.notes ?? imported.notes,
-            notesContentType: local.notesContentType ?? imported.notesContentType,
-            lastUpdatedOn: local.lastUpdatedOn,
-            wholeVerse: local.wholeVerse,
-            playbackSettingsJSON: local.playbackSettingsJSON ?? imported.playbackSettingsJSON,
-            customIcon: local.customIcon,
-            editAction: local.editAction,
-            labelLinks: mergeLabelLinks(local: local.labelLinks, imported: imported.labelLinks)
-        )
-    }
-
-    /**
-     Unions bookmark label links without replacing existing local link metadata.
-
-     - Parameters:
-       - local: Existing label links for one bookmark.
-       - imported: Imported label links for the same bookmark.
-     - Returns: Deterministically sorted links keyed by label ID.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private func mergeLabelLinks(
-        local: [RemoteSyncAndroidBookmarkLabelLink],
-        imported: [RemoteSyncAndroidBookmarkLabelLink]
-    ) -> [RemoteSyncAndroidBookmarkLabelLink] {
-        var linksByLabelID = Dictionary(uniqueKeysWithValues: local.map { ($0.labelID, $0) })
-        for link in imported where linksByLabelID[link.labelID] == nil {
-            linksByLabelID[link.labelID] = link
-        }
-        return linksByLabelID.values.sorted { $0.labelID.uuidString < $1.labelID.uuidString }
+    ) throws -> RemoteSyncAndroidBookmarkSnapshot {
+        try AndroidBookmarkSnapshotMergeService().merge(local: local, imported: imported)
     }
 
     /**
@@ -2213,7 +1974,8 @@ public final class AndroidDatabaseBackupService {
                 orderNumber: workspace.orderNumber,
                 textDisplaySettings: workspace.textDisplaySettings,
                 workspaceSettings: workspaceSettings,
-                speakSettingsJSON: workspaceFidelityByID[workspace.id]?.speakSettingsJSON,
+                speakSettingsJSON: (try? workspaceSettings.speakSettings.androidJSON())
+                    ?? workspaceFidelityByID[workspace.id]?.speakSettingsJSON,
                 unPinnedWeight: workspace.unPinnedWeight,
                 maximizedWindowID: workspace.maximizedWindowId,
                 primaryTargetLinksWindowID: workspace.primaryTargetLinksWindowId,

@@ -1,6 +1,12 @@
 import Foundation
 import SwiftUI
 
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
+
 /**
  Android-style startup document setup screen.
 
@@ -76,7 +82,11 @@ struct StartupDocumentSetupView: View {
             .padding(15)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Color(.systemBackground))
+        #if os(iOS)
+        .background(Color(uiColor: .systemBackground))
+        #elseif os(macOS)
+        .background(Color(nsColor: .windowBackgroundColor))
+        #endif
         .navigationBarBackButtonHidden(true)
         .accessibilityIdentifier("startupDocumentSetupScreen")
     }

@@ -130,7 +130,7 @@ enum AndroidDatabaseBackupSQLite {
             uuid.uuid.14,
             uuid.uuid.15,
         ]
-        bytes.withUnsafeBytes { buffer in
+        _ = bytes.withUnsafeBytes { buffer in
             sqlite3_bind_blob(statement, index, buffer.baseAddress, Int32(bytes.count), androidDatabaseBackupSQLiteTransient)
         }
     }

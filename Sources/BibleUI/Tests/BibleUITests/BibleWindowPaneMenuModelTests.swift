@@ -176,6 +176,23 @@ final class BibleWindowPaneMenuModelTests: XCTestCase {
 
         XCTAssertEqual(url, "https://read.andbible.org/Gen.1.1?document=KJV&ordinal=42")
     }
+
+    /**
+     Protects Android's configured-only window AI action visibility.
+
+     Android exposes `llmActionsSubMenu` for a visible pane only after AI configuration exists.
+     The row must route as a dialog action and must not appear for an unconfigured installation.
+     */
+    func testAIActionsRequireConfiguredAIAndVisibleWindow() {
+        let configured = BibleWindowPaneMenuModel(snapshot: .fixture(isAIConfigured: true))
+        let unconfigured = BibleWindowPaneMenuModel(snapshot: .fixture(isAIConfigured: false))
+
+        XCTAssertEqual(
+            configured.items.first(where: { $0.id == "aiActions" })?.action,
+            .openAIActions
+        )
+        XCTAssertFalse(unconfigured.items.contains { $0.id == "aiActions" })
+    }
 }
 
 private extension BibleWindowPaneMenuSnapshot {
@@ -188,6 +205,7 @@ private extension BibleWindowPaneMenuSnapshot {
         isMaximized: Bool = false,
         sectionTitlesEnabled: Bool = true,
         verseNumbersEnabled: Bool = true,
+        isAIConfigured: Bool = false,
         allWindowsInPersistedOrder: [BibleWindowPaneMenuWindowSummary] = [
             .fixture(position: 0, document: "KJV", reference: "Gen 1"),
             .fixture(position: 1, document: "ESV", reference: "Rom 1"),
@@ -210,6 +228,7 @@ private extension BibleWindowPaneMenuSnapshot {
             moduleHasStrongs: true,
             sectionTitlesEnabled: sectionTitlesEnabled,
             verseNumbersEnabled: verseNumbersEnabled,
+            isAIConfigured: isAIConfigured,
             allWindowsInPersistedOrder: allWindowsInPersistedOrder,
             visibleWindows: visibleWindows ?? allWindowsInPersistedOrder
         )

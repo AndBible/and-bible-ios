@@ -111,7 +111,9 @@ npm run build-debug
 - `project.yml` exists, but it can lag behind manual Xcode project changes. Validate against the real project and scheme, not just the YAML
 - Package-owned tests run through the app-host-free package schemes (`SwordKitTests`, `BibleCoreTests`, `BibleViewTests`, `BibleUITests`)
 - Whole-package `swift build` / `swift test` is currently a host-compile optimization only; it does not replace the package simulator schemes or app-target validation
-- If you change `bibleview-js`, rebuild the frontend bundle before app validation
+- If you change `bibleview-js`, rebuild and atomically sync the production fallback with
+  `scripts/manage_bibleview_bundle.py` before app validation; CI separately verifies and packages its
+  build-owned Debug artifact
 - Local secrets belong in `Config/Secrets.xcconfig.local`; do not commit real credentials
 
 ## Testing
@@ -269,8 +271,10 @@ storage concerns into SwiftUI views.
    - `npm run test:ci`
    - `npm run lint`
    - `npm run type-check`
-3. Rebuild the bundle with `npm run build-debug`
-4. Re-run relevant app validation
+3. Run `npm run build-debug` for deterministic debug diagnostics
+4. Build and atomically sync the production fallback as documented in
+   `docs/howto/working-with-vuejs.md`
+5. Re-run relevant app validation against the synchronized resource
 
 ### Rebuilding libsword
 

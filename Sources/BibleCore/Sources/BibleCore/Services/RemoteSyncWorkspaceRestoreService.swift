@@ -152,6 +152,9 @@ public struct RemoteSyncAndroidWorkspacePageManager: Sendable, Equatable {
     /// Optional Android per-window text display overrides.
     public let textDisplaySettings: TextDisplaySettings?
 
+    /// Android-only Room text-display fields retained outside the native model.
+    public let textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity
+
     /// Raw Android serialized JS state blob.
     public let jsState: String?
 
@@ -204,6 +207,7 @@ public struct RemoteSyncAndroidWorkspacePageManager: Sendable, Equatable {
         mapAnchorOrdinal: Int?,
         currentCategoryName: String,
         textDisplaySettings: TextDisplaySettings?,
+        textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity = .init(),
         jsState: String?
     ) {
         self.windowID = windowID
@@ -226,6 +230,7 @@ public struct RemoteSyncAndroidWorkspacePageManager: Sendable, Equatable {
         self.mapAnchorOrdinal = mapAnchorOrdinal
         self.currentCategoryName = currentCategoryName
         self.textDisplaySettings = textDisplaySettings
+        self.textDisplayFidelity = textDisplayFidelity
         self.jsState = jsState
     }
 }
@@ -337,6 +342,9 @@ public struct RemoteSyncAndroidWorkspace: Sendable {
     /// Optional Android workspace-level text display overrides.
     public let textDisplaySettings: TextDisplaySettings?
 
+    /// Android-only Room text-display fields retained outside the native model.
+    public let textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity
+
     /// Android workspace-scoped behavior settings projected into iOS form.
     public let workspaceSettings: WorkspaceSettings
 
@@ -383,6 +391,7 @@ public struct RemoteSyncAndroidWorkspace: Sendable {
         contentsText: String?,
         orderNumber: Int,
         textDisplaySettings: TextDisplaySettings?,
+        textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity = .init(),
         workspaceSettings: WorkspaceSettings,
         speakSettingsJSON: String?,
         unPinnedWeight: Float?,
@@ -396,6 +405,7 @@ public struct RemoteSyncAndroidWorkspace: Sendable {
         self.contentsText = contentsText
         self.orderNumber = orderNumber
         self.textDisplaySettings = textDisplaySettings
+        self.textDisplayFidelity = textDisplayFidelity
         self.workspaceSettings = workspaceSettings
         self.speakSettingsJSON = speakSettingsJSON
         self.unPinnedWeight = unPinnedWeight
@@ -416,6 +426,12 @@ public struct RemoteSyncAndroidWorkspaceSnapshot: Sendable {
     /// Staged Android workspaces sorted by display order.
     public let workspaces: [RemoteSyncAndroidWorkspace]
 
+    /// Staged Android workspace-label overrides sorted by composite identifier.
+    public let labelOverrides: [RemoteSyncCurrentWorkspaceLabelOverrideRow]
+
+    /// Staged Android global text-display singleton, when the row exists.
+    public let globalTextDisplaySettings: RemoteSyncCurrentGlobalTextDisplaySettingsRow?
+
     /**
      Creates a staged Android workspace snapshot.
 
@@ -423,8 +439,14 @@ public struct RemoteSyncAndroidWorkspaceSnapshot: Sendable {
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
-    public init(workspaces: [RemoteSyncAndroidWorkspace]) {
+    public init(
+        workspaces: [RemoteSyncAndroidWorkspace],
+        labelOverrides: [RemoteSyncCurrentWorkspaceLabelOverrideRow] = [],
+        globalTextDisplaySettings: RemoteSyncCurrentGlobalTextDisplaySettingsRow? = nil
+    ) {
         self.workspaces = workspaces
+        self.labelOverrides = labelOverrides
+        self.globalTextDisplaySettings = globalTextDisplaySettings
     }
 }
 
@@ -450,6 +472,15 @@ public struct RemoteSyncWorkspaceRestoreReport: Sendable, Equatable {
     /// Number of Android-to-iOS history-item identifier aliases preserved locally.
     public let preservedHistoryItemAliasCount: Int
 
+    /// Number of Android-only text-display fidelity rows preserved locally.
+    public let preservedTextDisplayFidelityCount: Int
+
+    /// Number of workspace-label overrides preserved locally.
+    public let preservedLabelOverrideCount: Int
+
+    /// Whether the Android global text-display singleton was restored.
+    public let restoredGlobalTextDisplaySettings: Bool
+
     /**
      Creates one workspace restore summary.
 
@@ -469,7 +500,10 @@ public struct RemoteSyncWorkspaceRestoreReport: Sendable, Equatable {
         restoredHistoryItemCount: Int,
         preservedWorkspaceFidelityCount: Int,
         preservedPageManagerFidelityCount: Int,
-        preservedHistoryItemAliasCount: Int
+        preservedHistoryItemAliasCount: Int,
+        preservedTextDisplayFidelityCount: Int = 0,
+        preservedLabelOverrideCount: Int = 0,
+        restoredGlobalTextDisplaySettings: Bool = false
     ) {
         self.restoredWorkspaceCount = restoredWorkspaceCount
         self.restoredWindowCount = restoredWindowCount
@@ -477,6 +511,9 @@ public struct RemoteSyncWorkspaceRestoreReport: Sendable, Equatable {
         self.preservedWorkspaceFidelityCount = preservedWorkspaceFidelityCount
         self.preservedPageManagerFidelityCount = preservedPageManagerFidelityCount
         self.preservedHistoryItemAliasCount = preservedHistoryItemAliasCount
+        self.preservedTextDisplayFidelityCount = preservedTextDisplayFidelityCount
+        self.preservedLabelOverrideCount = preservedLabelOverrideCount
+        self.restoredGlobalTextDisplaySettings = restoredGlobalTextDisplaySettings
     }
 }
 
@@ -489,7 +526,8 @@ public struct RemoteSyncWorkspaceRestoreReport: Sendable, Equatable {
    keys
  - Android stores additional page-manager anchor/source fields that iOS does not model directly
  - Android uses integer primary keys for `HistoryItem`, while iOS uses UUIDs
- - Android stores raw workspace `speakSettings` JSON that iOS does not model yet
+ - Android stores workspace `speakSettings` JSON; iOS decodes the current schema into native
+   `SpeakSettings` and retains the original payload for exact round-trip provenance
 
  This restore service replaces the entire local workspace graph from one staged Android backup and
  preserves the non-isomorphic Android fields locally through `RemoteSyncWorkspaceFidelityStore`.
@@ -500,28 +538,98 @@ public struct RemoteSyncWorkspaceRestoreReport: Sendable, Equatable {
 
  Side effects:
  - `replaceLocalWorkspaces(from:modelContext:settingsStore:)` deletes and recreates the local
-   workspace/window/page-manager/history graph
- - successful restores clear and repopulate Android-only workspace fidelity rows in local settings
- - successful restores repair `SettingsStore.activeWorkspaceId` to point at a restored workspace
-   when possible
+   workspace/window/page-manager/history graph in the caller's shared model context
+ - successful restores replace Android-only workspace fidelity rows and repair
+   `SettingsStore.activeWorkspaceId` in the same atomic settings batch as the graph replacement
 
  Failure modes:
  - staged snapshot parsing fails explicitly when required tables are missing, required columns are
    unusable, serialized JSON payloads are malformed, or foreign-key-like references are broken
- - restore rethrows `ModelContext.save()` failures after mutating the in-memory SwiftData graph
- - local-only fidelity storage inherits `SettingsStore`'s soft-fail semantics
+ - restore rethrows SwiftData fetch and batch-save failures after rolling the shared context back
+ - restore rejects a settings store bound to a different model context
 
  Concurrency:
  - this type is not `Sendable`; callers must respect the confinement of the supplied
    `ModelContext` and `SettingsStore`
  */
 public final class RemoteSyncWorkspaceRestoreService {
+    /// Store-independent value snapshot of the complete persisted workspace relationship graph.
+    private struct DurableGraph: Equatable {
+        let workspaces: [DurableWorkspace]
+        let windows: [DurableWindow]
+        let pageManagers: [DurablePageManager]
+        let historyItems: [DurableHistoryItem]
+    }
+
+    /// Durable value representation of one `Workspace` row.
+    private struct DurableWorkspace: Equatable {
+        let id: UUID
+        let name: String
+        let contentsText: String?
+        let orderNumber: Int
+        let textDisplaySettings: TextDisplaySettings?
+        let workspaceSettingsData: Data?
+        let unPinnedWeight: Float?
+        let maximizedWindowID: UUID?
+        let primaryTargetLinksWindowID: UUID?
+        let workspaceColor: Int?
+    }
+
+    /// Durable value representation of one `Window` row and its optional parent identity.
+    private struct DurableWindow: Equatable {
+        let id: UUID
+        let workspaceID: UUID?
+        let isSynchronized: Bool
+        let isPinMode: Bool
+        let isLinksWindow: Bool
+        let orderNumber: Int
+        let targetLinksWindowID: UUID?
+        let syncGroup: Int
+        let layoutWeight: Float
+        let layoutState: String
+    }
+
+    /// Durable value representation of one `PageManager` row and its optional window identity.
+    private struct DurablePageManager: Equatable {
+        let id: UUID
+        let windowID: UUID?
+        let bibleDocument: String?
+        let bibleVersification: String?
+        let bibleBook: Int?
+        let bibleChapterNo: Int?
+        let bibleVerseNo: Int?
+        let commentaryDocument: String?
+        let commentaryAnchorOrdinal: Int?
+        let dictionaryDocument: String?
+        let dictionaryKey: String?
+        let generalBookDocument: String?
+        let generalBookKey: String?
+        let mapDocument: String?
+        let mapKey: String?
+        let epubIdentifier: String?
+        let epubHref: String?
+        let currentCategoryName: String
+        let textDisplaySettings: TextDisplaySettings?
+        let jsState: String?
+    }
+
+    /// Durable value representation of one `HistoryItem` row and its optional window identity.
+    private struct DurableHistoryItem: Equatable {
+        let id: UUID
+        let windowID: UUID?
+        let createdAt: Date
+        let document: String
+        let key: String
+        let anchorOrdinal: Int?
+    }
+
     private struct RawWorkspaceRow {
         let id: UUID
         let name: String
         let contentsText: String?
         let orderNumber: Int
         let textDisplaySettings: TextDisplaySettings?
+        let textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity
         let workspaceSettings: WorkspaceSettings
         let speakSettingsJSON: String?
         let unPinnedWeight: Float?
@@ -564,7 +672,14 @@ public final class RemoteSyncWorkspaceRestoreService {
         let mapAnchorOrdinal: Int?
         let currentCategoryName: String
         let textDisplaySettings: TextDisplaySettings?
+        let textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity
         let jsState: String?
+    }
+
+    /// Decoded result for one complete embedded Room text-display block.
+    private struct DecodedTextDisplaySettings {
+        let settings: TextDisplaySettings?
+        let fidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity
     }
 
     private struct AndroidRecentLabelPayload: Decodable {
@@ -585,26 +700,47 @@ public final class RemoteSyncWorkspaceRestoreService {
     /**
      Reads one staged Android workspace SQLite database into a typed snapshot.
 
-     - Parameter databaseURL: Local URL of the extracted Android `workspaces.sqlite3` backup.
+     - Parameters:
+       - databaseURL: Local URL of the extracted Android `workspaces.sqlite3` backup.
+       - expectedSourceVersion: Archive-declared Room generation, or `nil` when the staged file is
+         the only source of version authority.
      - Returns: Typed snapshot of staged workspaces, windows, page managers, and history rows.
      - Side effects:
-       - opens the staged SQLite database in read-only mode
+       - migrates the writable staged copy through Android's supported Room chain when needed
+       - validates the complete Room v24 schema and row-storage contract
+       - opens the validated staged SQLite database in read-only mode for decoding
      - Failure modes:
        - throws `RemoteSyncWorkspaceRestoreError.invalidSQLiteDatabase` when the file cannot be opened as SQLite
+       - throws a workspace migration error when the archive-declared generation disagrees with the staged file
        - throws `RemoteSyncWorkspaceRestoreError.missingTable` when required Android tables are absent
        - throws `RemoteSyncWorkspaceRestoreError.invalidIdentifierBlob` when Android UUID-like BLOB columns cannot be converted into `UUID`
        - throws `RemoteSyncWorkspaceRestoreError.invalidColumnValue` when required staged values are missing or unusable
        - throws `RemoteSyncWorkspaceRestoreError.malformedSerializedValue` when one serialized Android JSON payload cannot be decoded safely
        - throws `RemoteSyncWorkspaceRestoreError.orphanReferences` when staged rows reference missing parent or sibling records
      */
-    public func readSnapshot(from databaseURL: URL) throws -> RemoteSyncAndroidWorkspaceSnapshot {
+    public func readSnapshot(
+        from databaseURL: URL,
+        expectedSourceVersion: Int? = nil
+    ) throws -> RemoteSyncAndroidWorkspaceSnapshot {
+        try RemoteSyncWorkspaceDatabaseMigrator.migrateAndValidateStagedDatabase(
+            at: databaseURL,
+            expectedSourceVersion: expectedSourceVersion
+        )
+
         var db: OpaquePointer?
         guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
             throw RemoteSyncWorkspaceRestoreError.invalidSQLiteDatabase
         }
         defer { sqlite3_close(db) }
 
-        for tableName in ["Workspace", "Window", "PageManager", "HistoryItem"] {
+        for tableName in [
+            "Workspace",
+            "Window",
+            "PageManager",
+            "HistoryItem",
+            "WorkspaceLabelOverride",
+            "GlobalTextDisplaySettings",
+        ] {
             try requireTable(named: tableName, in: db)
         }
 
@@ -612,12 +748,16 @@ public final class RemoteSyncWorkspaceRestoreService {
         let windows = try fetchWindows(from: db)
         let pageManagers = try fetchPageManagers(from: db)
         let historyItems = try fetchHistoryItems(from: db)
+        let labelOverrides = try fetchWorkspaceLabelOverrides(from: db)
+        let globalTextDisplaySettings = try fetchGlobalTextDisplaySettings(from: db)
 
         return try buildSnapshot(
             workspaces: workspaces,
             windows: windows,
             pageManagers: pageManagers,
-            historyItems: historyItems
+            historyItems: historyItems,
+            labelOverrides: labelOverrides,
+            globalTextDisplaySettings: globalTextDisplaySettings
         )
     }
 
@@ -625,9 +765,11 @@ public final class RemoteSyncWorkspaceRestoreService {
      Replaces local iOS workspaces with the supplied staged Android snapshot.
 
      The restore is category-wide and all-or-nothing at the persistence level. Existing local
-     workspaces are deleted first, then the restored workspace/window/page-manager/history graph is
-     inserted and saved, and only after that succeeds are Android-only fidelity rows repopulated in
-     local settings.
+     workspaces, the replacement workspace/window/page-manager/history graph, Android-only fidelity
+     rows, and the active-workspace setting are staged in one shared settings batch. The batch saves
+     the supplied `ModelContext` once. If one physical store rejects the coordinated save after its
+     sibling commits, fresh-context recovery restores both stores to the captured generation before
+     the original error escapes.
 
      - Parameters:
        - snapshot: Staged Android snapshot previously read from `readSnapshot(from:)`.
@@ -637,161 +779,437 @@ public final class RemoteSyncWorkspaceRestoreService {
      - Side effects:
        - deletes existing local `Workspace` graphs
        - inserts replacement `Workspace`, `Window`, `PageManager`, and `HistoryItem` rows
-       - clears and repopulates Android-only fidelity rows in local settings
+       - replaces Android-only fidelity rows in local settings
        - rewrites `SettingsStore.activeWorkspaceId`
-       - saves `modelContext`
+       - saves `modelContext` exactly once through `SettingsStore.performAtomicBatch(in:_:)`
      - Failure modes:
-       - rethrows SwiftData save errors from `modelContext.save()`
+       - rethrows SwiftData fetch or save errors
+       - rejects a `SettingsStore` that is not bound to `modelContext`
+       - throws `SettingsStoreAtomicRecoveryError` when a failed coordinated save cannot restore the
+         captured graph or settings generation
      */
     public func replaceLocalWorkspaces(
         from snapshot: RemoteSyncAndroidWorkspaceSnapshot,
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> RemoteSyncWorkspaceRestoreReport {
-        let previousActiveWorkspaceID = settingsStore.activeWorkspaceId
         let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+        let durableGraph = try Self.captureDurableGraph(from: modelContext)
 
-        let existingWorkspaces = (try? modelContext.fetch(FetchDescriptor<Workspace>())) ?? []
-        for workspace in existingWorkspaces {
-            modelContext.delete(workspace)
-        }
-        try modelContext.save()
+        return try settingsStore.performAtomicBatch(
+            in: modelContext,
+            durableRecovery: { container in
+                try Self.restoreDurableGraph(durableGraph, in: container)
+            }
+        ) {
+            let existingWorkspaces = try modelContext.fetch(FetchDescriptor<Workspace>())
+            let previousActiveWorkspaceID = settingsStore.activeWorkspaceId
+            let existingWorkspaceFidelityEntries = fidelityStore.allWorkspaceEntries()
+            let existingPageManagerFidelityEntries = fidelityStore.allPageManagerEntries()
+            let existingHistoryAliases = fidelityStore.allHistoryItemAliases()
 
-        var restoredWorkspaceCount = 0
-        var restoredWindowCount = 0
-        var restoredHistoryItemCount = 0
-        var preservedWorkspaceFidelityCount = 0
-        var preservedPageManagerFidelityCount = 0
-        var historyAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias] = []
-        var restoredWorkspaceIDs: [UUID] = []
+            for workspace in existingWorkspaces {
+                modelContext.delete(workspace)
+            }
 
-        for workspaceSnapshot in snapshot.workspaces {
-            let workspace = Workspace(
-                id: workspaceSnapshot.id,
-                name: workspaceSnapshot.name,
-                orderNumber: workspaceSnapshot.orderNumber
-            )
-            workspace.contentsText = workspaceSnapshot.contentsText
-            workspace.textDisplaySettings = workspaceSnapshot.textDisplaySettings
-            workspace.workspaceSettings = workspaceSnapshot.workspaceSettings
-            workspace.unPinnedWeight = workspaceSnapshot.unPinnedWeight
-            workspace.maximizedWindowId = workspaceSnapshot.maximizedWindowID
-            workspace.primaryTargetLinksWindowId = workspaceSnapshot.primaryTargetLinksWindowID
-            workspace.workspaceColor = workspaceSnapshot.workspaceColor
-            modelContext.insert(workspace)
+            var restoredWorkspaceCount = 0
+            var restoredWindowCount = 0
+            var restoredHistoryItemCount = 0
+            var preservedWorkspaceFidelityCount = 0
+            var preservedPageManagerFidelityCount = 0
+            var preservedTextDisplayFidelityCount = 0
+            var historyAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias] = []
+            var restoredWorkspaceIDs: [UUID] = []
 
-            restoredWorkspaceCount += 1
-            restoredWorkspaceIDs.append(workspace.id)
+            fidelityStore.clearWorkspaceRoomFidelity()
 
-            for windowSnapshot in workspaceSnapshot.windows {
-                let window = Window(
-                    id: windowSnapshot.id,
-                    isSynchronized: windowSnapshot.isSynchronized,
-                    isPinMode: windowSnapshot.isPinMode,
-                    isLinksWindow: windowSnapshot.isLinksWindow,
-                    orderNumber: windowSnapshot.orderNumber,
-                    syncGroup: windowSnapshot.syncGroup,
-                    layoutWeight: windowSnapshot.layoutWeight,
-                    layoutState: windowSnapshot.layoutState
+            for workspaceSnapshot in snapshot.workspaces {
+                let workspace = Workspace(
+                    id: workspaceSnapshot.id,
+                    name: workspaceSnapshot.name,
+                    orderNumber: workspaceSnapshot.orderNumber
                 )
-                window.workspace = workspace
-                window.targetLinksWindowId = windowSnapshot.targetLinksWindowID
-                modelContext.insert(window)
-                restoredWindowCount += 1
+                workspace.contentsText = workspaceSnapshot.contentsText
+                workspace.textDisplaySettings = workspaceSnapshot.textDisplaySettings
+                workspace.workspaceSettings = workspaceSnapshot.workspaceSettings
+                workspace.unPinnedWeight = workspaceSnapshot.unPinnedWeight
+                workspace.maximizedWindowId = workspaceSnapshot.maximizedWindowID
+                workspace.primaryTargetLinksWindowId = workspaceSnapshot.primaryTargetLinksWindowID
+                workspace.workspaceColor = workspaceSnapshot.workspaceColor
+                modelContext.insert(workspace)
 
-                let pageManager = PageManager(
-                    id: windowSnapshot.pageManager.windowID,
-                    currentCategoryName: Self.normalizedCurrentCategoryName(
-                        from: windowSnapshot.pageManager.currentCategoryName
+                if workspaceSnapshot.textDisplayFidelity.hasValue {
+                    try fidelityStore.setTextDisplayFidelity(
+                        workspaceSnapshot.textDisplayFidelity,
+                        forWorkspaceID: workspaceSnapshot.id
                     )
-                )
-                pageManager.window = window
-                pageManager.bibleDocument = windowSnapshot.pageManager.bibleDocument
-                pageManager.bibleVersification = windowSnapshot.pageManager.bibleVersification
-                pageManager.bibleBibleBook = windowSnapshot.pageManager.bibleBook
-                pageManager.bibleChapterNo = windowSnapshot.pageManager.bibleChapterNo
-                pageManager.bibleVerseNo = windowSnapshot.pageManager.bibleVerseNo
-                pageManager.commentaryDocument = windowSnapshot.pageManager.commentaryDocument
-                pageManager.commentaryAnchorOrdinal = windowSnapshot.pageManager.commentaryAnchorOrdinal
-                pageManager.dictionaryDocument = windowSnapshot.pageManager.dictionaryDocument
-                pageManager.dictionaryKey = windowSnapshot.pageManager.dictionaryKey
-                pageManager.generalBookDocument = windowSnapshot.pageManager.generalBookDocument
-                pageManager.generalBookKey = windowSnapshot.pageManager.generalBookKey
-                pageManager.mapDocument = windowSnapshot.pageManager.mapDocument
-                pageManager.mapKey = windowSnapshot.pageManager.mapKey
-                pageManager.textDisplaySettings = windowSnapshot.pageManager.textDisplaySettings
-                pageManager.jsState = windowSnapshot.pageManager.jsState
-                modelContext.insert(pageManager)
+                    preservedTextDisplayFidelityCount += 1
+                }
 
-                for historySnapshot in windowSnapshot.historyItems {
-                    let historyItem = HistoryItem(
-                        id: UUID(),
-                        createdAt: historySnapshot.createdAt,
-                        document: historySnapshot.document,
-                        key: historySnapshot.key
+                restoredWorkspaceCount += 1
+                restoredWorkspaceIDs.append(workspace.id)
+
+                for windowSnapshot in workspaceSnapshot.windows {
+                    let window = Window(
+                        id: windowSnapshot.id,
+                        isSynchronized: windowSnapshot.isSynchronized,
+                        isPinMode: windowSnapshot.isPinMode,
+                        isLinksWindow: windowSnapshot.isLinksWindow,
+                        orderNumber: windowSnapshot.orderNumber,
+                        syncGroup: windowSnapshot.syncGroup,
+                        layoutWeight: windowSnapshot.layoutWeight,
+                        layoutState: windowSnapshot.layoutState
                     )
-                    historyItem.window = window
-                    historyItem.anchorOrdinal = historySnapshot.anchorOrdinal
-                    modelContext.insert(historyItem)
-                    restoredHistoryItemCount += 1
-                    historyAliases.append(
-                        .init(
-                            remoteHistoryItemID: historySnapshot.remoteID,
-                            localHistoryItemID: historyItem.id
+                    window.workspace = workspace
+                    window.targetLinksWindowId = windowSnapshot.targetLinksWindowID
+                    modelContext.insert(window)
+                    restoredWindowCount += 1
+
+                    let pageManager = PageManager(
+                        id: windowSnapshot.pageManager.windowID,
+                        currentCategoryName: Self.normalizedCurrentCategoryName(
+                            from: windowSnapshot.pageManager.currentCategoryName
                         )
                     )
+                    pageManager.window = window
+                    pageManager.bibleDocument = windowSnapshot.pageManager.bibleDocument
+                    pageManager.bibleVersification = windowSnapshot.pageManager.bibleVersification
+                    pageManager.bibleBibleBook = windowSnapshot.pageManager.bibleBook
+                    pageManager.bibleChapterNo = windowSnapshot.pageManager.bibleChapterNo
+                    pageManager.bibleVerseNo = windowSnapshot.pageManager.bibleVerseNo
+                    pageManager.commentaryDocument = windowSnapshot.pageManager.commentaryDocument
+                    pageManager.commentaryAnchorOrdinal = windowSnapshot.pageManager.commentaryAnchorOrdinal
+                    pageManager.dictionaryDocument = windowSnapshot.pageManager.dictionaryDocument
+                    pageManager.dictionaryKey = windowSnapshot.pageManager.dictionaryKey
+                    pageManager.generalBookDocument = windowSnapshot.pageManager.generalBookDocument
+                    pageManager.generalBookKey = windowSnapshot.pageManager.generalBookKey
+                    pageManager.mapDocument = windowSnapshot.pageManager.mapDocument
+                    pageManager.mapKey = windowSnapshot.pageManager.mapKey
+                    pageManager.textDisplaySettings = windowSnapshot.pageManager.textDisplaySettings
+                    pageManager.jsState = windowSnapshot.pageManager.jsState
+                    modelContext.insert(pageManager)
+
+                    if windowSnapshot.pageManager.textDisplayFidelity.hasValue {
+                        try fidelityStore.setTextDisplayFidelity(
+                            windowSnapshot.pageManager.textDisplayFidelity,
+                            forPageManagerWindowID: windowSnapshot.id
+                        )
+                        preservedTextDisplayFidelityCount += 1
+                    }
+
+                    for historySnapshot in windowSnapshot.historyItems {
+                        let historyItem = HistoryItem(
+                            id: UUID(),
+                            createdAt: historySnapshot.createdAt,
+                            document: historySnapshot.document,
+                            key: historySnapshot.key
+                        )
+                        historyItem.window = window
+                        historyItem.anchorOrdinal = historySnapshot.anchorOrdinal
+                        modelContext.insert(historyItem)
+                        restoredHistoryItemCount += 1
+                        historyAliases.append(
+                            .init(
+                                remoteHistoryItemID: historySnapshot.remoteID,
+                                localHistoryItemID: historyItem.id
+                            )
+                        )
+                    }
                 }
             }
-        }
 
-        try modelContext.save()
+            let restoredWorkspaceIDSet = Set(restoredWorkspaceIDs)
+            let restoredWindowIDSet = Set(
+                snapshot.workspaces.flatMap { workspace in workspace.windows.map(\.id) }
+            )
+            let restoredRemoteHistoryIDSet = Set(historyAliases.map(\.remoteHistoryItemID))
 
-        fidelityStore.clearAll()
-
-        for workspaceSnapshot in snapshot.workspaces {
-            if let speakSettingsJSON = workspaceSnapshot.speakSettingsJSON, !speakSettingsJSON.isEmpty {
-                fidelityStore.setSpeakSettingsJSON(speakSettingsJSON, for: workspaceSnapshot.id)
-                preservedWorkspaceFidelityCount += 1
+            for entry in existingWorkspaceFidelityEntries where !restoredWorkspaceIDSet.contains(entry.workspaceID) {
+                fidelityStore.removeWorkspaceEntry(for: entry.workspaceID)
+            }
+            for entry in existingPageManagerFidelityEntries where !restoredWindowIDSet.contains(entry.windowID) {
+                fidelityStore.removePageManagerEntry(for: entry.windowID)
+            }
+            for alias in existingHistoryAliases where !restoredRemoteHistoryIDSet.contains(alias.remoteHistoryItemID) {
+                fidelityStore.removeHistoryItemAlias(for: alias.remoteHistoryItemID)
             }
 
-            for windowSnapshot in workspaceSnapshot.windows {
-                fidelityStore.setPageManagerEntry(
-                    .init(
-                        windowID: windowSnapshot.id,
-                        rawCurrentCategoryName: windowSnapshot.pageManager.currentCategoryName,
-                        commentarySourceBookAndKey: windowSnapshot.pageManager.commentarySourceBookAndKey,
-                        dictionaryAnchorOrdinal: windowSnapshot.pageManager.dictionaryAnchorOrdinal,
-                        generalBookAnchorOrdinal: windowSnapshot.pageManager.generalBookAnchorOrdinal,
-                        mapAnchorOrdinal: windowSnapshot.pageManager.mapAnchorOrdinal
+            for workspaceSnapshot in snapshot.workspaces {
+                if let speakSettingsJSON = workspaceSnapshot.speakSettingsJSON, !speakSettingsJSON.isEmpty {
+                    fidelityStore.setSpeakSettingsJSON(speakSettingsJSON, for: workspaceSnapshot.id)
+                    preservedWorkspaceFidelityCount += 1
+                } else {
+                    fidelityStore.removeWorkspaceEntry(for: workspaceSnapshot.id)
+                }
+
+                for windowSnapshot in workspaceSnapshot.windows {
+                    fidelityStore.setPageManagerEntry(
+                        .init(
+                            windowID: windowSnapshot.id,
+                            rawCurrentCategoryName: windowSnapshot.pageManager.currentCategoryName,
+                            commentarySourceBookAndKey: windowSnapshot.pageManager.commentarySourceBookAndKey,
+                            dictionaryAnchorOrdinal: windowSnapshot.pageManager.dictionaryAnchorOrdinal,
+                            generalBookAnchorOrdinal: windowSnapshot.pageManager.generalBookAnchorOrdinal,
+                            mapAnchorOrdinal: windowSnapshot.pageManager.mapAnchorOrdinal
+                        )
                     )
-                )
-                preservedPageManagerFidelityCount += 1
+                    preservedPageManagerFidelityCount += 1
+                }
             }
-        }
 
-        for alias in historyAliases {
-            fidelityStore.setHistoryItemAlias(
-                remoteHistoryItemID: alias.remoteHistoryItemID,
-                localHistoryItemID: alias.localHistoryItemID
+            for alias in historyAliases {
+                fidelityStore.setHistoryItemAlias(
+                    remoteHistoryItemID: alias.remoteHistoryItemID,
+                    localHistoryItemID: alias.localHistoryItemID
+                )
+            }
+
+            for labelOverride in snapshot.labelOverrides {
+                try fidelityStore.setLabelOverride(labelOverride)
+            }
+
+            if let globalSettings = snapshot.globalTextDisplaySettings {
+                if let nativeSettings = globalSettings.textDisplaySettings {
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = [.sortedKeys]
+                    let data = try encoder.encode(nativeSettings)
+                    settingsStore.setString(
+                        SettingsStore.globalTextDisplaySettingsKey,
+                        value: String(decoding: data, as: UTF8.self)
+                    )
+                } else {
+                    settingsStore.remove(SettingsStore.globalTextDisplaySettingsKey)
+                }
+                try fidelityStore.setGlobalTextDisplayEntry(
+                    id: globalSettings.id,
+                    fidelity: globalSettings.fidelity
+                )
+                if globalSettings.fidelity.hasValue {
+                    preservedTextDisplayFidelityCount += 1
+                }
+            } else {
+                settingsStore.remove(SettingsStore.globalTextDisplaySettingsKey)
+            }
+
+            let preferredActiveWorkspaceID: UUID?
+            if let previousActiveWorkspaceID, restoredWorkspaceIDSet.contains(previousActiveWorkspaceID) {
+                preferredActiveWorkspaceID = previousActiveWorkspaceID
+            } else {
+                preferredActiveWorkspaceID = snapshot.workspaces.first?.id
+            }
+            settingsStore.activeWorkspaceId = preferredActiveWorkspaceID
+
+            return RemoteSyncWorkspaceRestoreReport(
+                restoredWorkspaceCount: restoredWorkspaceCount,
+                restoredWindowCount: restoredWindowCount,
+                restoredHistoryItemCount: restoredHistoryItemCount,
+                preservedWorkspaceFidelityCount: preservedWorkspaceFidelityCount,
+                preservedPageManagerFidelityCount: preservedPageManagerFidelityCount,
+                preservedHistoryItemAliasCount: historyAliases.count,
+                preservedTextDisplayFidelityCount: preservedTextDisplayFidelityCount,
+                preservedLabelOverrideCount: snapshot.labelOverrides.count,
+                restoredGlobalTextDisplaySettings: snapshot.globalTextDisplaySettings != nil
             )
         }
+    }
 
-        let preferredActiveWorkspaceID: UUID?
-        if let previousActiveWorkspaceID, restoredWorkspaceIDs.contains(previousActiveWorkspaceID) {
-            preferredActiveWorkspaceID = previousActiveWorkspaceID
-        } else {
-            preferredActiveWorkspaceID = snapshot.workspaces.first?.id
-        }
-        settingsStore.activeWorkspaceId = preferredActiveWorkspaceID
+    /**
+     Captures every persisted workspace graph row before replacement begins.
 
-        return RemoteSyncWorkspaceRestoreReport(
-            restoredWorkspaceCount: restoredWorkspaceCount,
-            restoredWindowCount: restoredWindowCount,
-            restoredHistoryItemCount: restoredHistoryItemCount,
-            preservedWorkspaceFidelityCount: preservedWorkspaceFidelityCount,
-            preservedPageManagerFidelityCount: preservedPageManagerFidelityCount,
-            preservedHistoryItemAliasCount: historyAliases.count
+     Parent identifiers are retained separately from model references so recovery can rebuild exact
+     relationships through a fresh context. Embedded workspace settings are encoded with sorted JSON
+     keys to make generation comparison deterministic without widening their public conformance.
+
+     - Parameter modelContext: Clean context that owns the durable workspace graph.
+     - Returns: Store-independent value snapshot suitable for fresh-context recovery.
+     - Side effects: Performs strict workspace, window, page-manager, and history fetches.
+     - Failure modes: Rethrows SwiftData fetch failures and workspace-settings encoding failures
+     before any replacement mutation begins.
+     */
+    private static func captureDurableGraph(from modelContext: ModelContext) throws -> DurableGraph {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+
+        let workspaces = try modelContext.fetch(FetchDescriptor<Workspace>()).map { workspace in
+            DurableWorkspace(
+                id: workspace.id,
+                name: workspace.name,
+                contentsText: workspace.contentsText,
+                orderNumber: workspace.orderNumber,
+                textDisplaySettings: workspace.textDisplaySettings,
+                workspaceSettingsData: try workspace.workspaceSettings.map(encoder.encode),
+                unPinnedWeight: workspace.unPinnedWeight,
+                maximizedWindowID: workspace.maximizedWindowId,
+                primaryTargetLinksWindowID: workspace.primaryTargetLinksWindowId,
+                workspaceColor: workspace.workspaceColor
+            )
+        }.sorted { $0.id.uuidString < $1.id.uuidString }
+        let windows = try modelContext.fetch(FetchDescriptor<Window>()).map { window in
+            DurableWindow(
+                id: window.id,
+                workspaceID: window.workspace?.id,
+                isSynchronized: window.isSynchronized,
+                isPinMode: window.isPinMode,
+                isLinksWindow: window.isLinksWindow,
+                orderNumber: window.orderNumber,
+                targetLinksWindowID: window.targetLinksWindowId,
+                syncGroup: window.syncGroup,
+                layoutWeight: window.layoutWeight,
+                layoutState: window.layoutState
+            )
+        }.sorted { $0.id.uuidString < $1.id.uuidString }
+        let pageManagers = try modelContext.fetch(FetchDescriptor<PageManager>()).map { pageManager in
+            DurablePageManager(
+                id: pageManager.id,
+                windowID: pageManager.window?.id,
+                bibleDocument: pageManager.bibleDocument,
+                bibleVersification: pageManager.bibleVersification,
+                bibleBook: pageManager.bibleBibleBook,
+                bibleChapterNo: pageManager.bibleChapterNo,
+                bibleVerseNo: pageManager.bibleVerseNo,
+                commentaryDocument: pageManager.commentaryDocument,
+                commentaryAnchorOrdinal: pageManager.commentaryAnchorOrdinal,
+                dictionaryDocument: pageManager.dictionaryDocument,
+                dictionaryKey: pageManager.dictionaryKey,
+                generalBookDocument: pageManager.generalBookDocument,
+                generalBookKey: pageManager.generalBookKey,
+                mapDocument: pageManager.mapDocument,
+                mapKey: pageManager.mapKey,
+                epubIdentifier: pageManager.epubIdentifier,
+                epubHref: pageManager.epubHref,
+                currentCategoryName: pageManager.currentCategoryName,
+                textDisplaySettings: pageManager.textDisplaySettings,
+                jsState: pageManager.jsState
+            )
+        }.sorted { $0.id.uuidString < $1.id.uuidString }
+        let historyItems = try modelContext.fetch(FetchDescriptor<HistoryItem>()).map { historyItem in
+            DurableHistoryItem(
+                id: historyItem.id,
+                windowID: historyItem.window?.id,
+                createdAt: historyItem.createdAt,
+                document: historyItem.document,
+                key: historyItem.key,
+                anchorOrdinal: historyItem.anchorOrdinal
+            )
+        }.sorted { $0.id.uuidString < $1.id.uuidString }
+
+        return DurableGraph(
+            workspaces: workspaces,
+            windows: windows,
+            pageManagers: pageManagers,
+            historyItems: historyItems
         )
+    }
+
+    /**
+     Restores a pre-commit workspace graph through a fresh graph-only save when needed.
+
+     A rejected graph-store commit leaves the graph equal to `expected`, so this method performs no
+     save against that still-rejecting store. A settings-store rejection can leave the replacement
+     graph durable; in that case every workspace relationship row is rebuilt from the captured values.
+
+     - Parameters:
+       - expected: Exact workspace generation captured before the failed batch.
+       - container: Production-shaped container spanning workspace and settings configurations.
+     - Side effects: When durable graph state differs, replaces all workspace graph rows and saves
+     only their persistent configuration through a fresh context.
+     - Failure modes: Rethrows strict fetch, workspace-settings decoding, or graph-save failures.
+     */
+    private static func restoreDurableGraph(
+        _ expected: DurableGraph,
+        in container: ModelContainer
+    ) throws {
+        let recoveryContext = ModelContext(container)
+        recoveryContext.autosaveEnabled = false
+        let current = try captureDurableGraph(from: recoveryContext)
+        guard current != expected else {
+            return
+        }
+
+        for historyItem in try recoveryContext.fetch(FetchDescriptor<HistoryItem>()) {
+            recoveryContext.delete(historyItem)
+        }
+        for pageManager in try recoveryContext.fetch(FetchDescriptor<PageManager>()) {
+            recoveryContext.delete(pageManager)
+        }
+        for window in try recoveryContext.fetch(FetchDescriptor<Window>()) {
+            recoveryContext.delete(window)
+        }
+        for workspace in try recoveryContext.fetch(FetchDescriptor<Workspace>()) {
+            recoveryContext.delete(workspace)
+        }
+
+        let decoder = JSONDecoder()
+        var workspacesByID: [UUID: Workspace] = [:]
+        for value in expected.workspaces {
+            let workspace = Workspace(id: value.id, name: value.name, orderNumber: value.orderNumber)
+            workspace.contentsText = value.contentsText
+            workspace.textDisplaySettings = value.textDisplaySettings
+            workspace.workspaceSettings = try value.workspaceSettingsData.map {
+                try decoder.decode(WorkspaceSettings.self, from: $0)
+            }
+            workspace.unPinnedWeight = value.unPinnedWeight
+            workspace.maximizedWindowId = value.maximizedWindowID
+            workspace.primaryTargetLinksWindowId = value.primaryTargetLinksWindowID
+            workspace.workspaceColor = value.workspaceColor
+            recoveryContext.insert(workspace)
+            workspacesByID[value.id] = workspace
+        }
+
+        var windowsByID: [UUID: Window] = [:]
+        for value in expected.windows {
+            let window = Window(
+                id: value.id,
+                isSynchronized: value.isSynchronized,
+                isPinMode: value.isPinMode,
+                isLinksWindow: value.isLinksWindow,
+                orderNumber: value.orderNumber,
+                syncGroup: value.syncGroup,
+                layoutWeight: value.layoutWeight,
+                layoutState: value.layoutState
+            )
+            window.workspace = value.workspaceID.flatMap { workspacesByID[$0] }
+            window.targetLinksWindowId = value.targetLinksWindowID
+            recoveryContext.insert(window)
+            windowsByID[value.id] = window
+        }
+
+        for value in expected.pageManagers {
+            let pageManager = PageManager(id: value.id, currentCategoryName: value.currentCategoryName)
+            pageManager.window = value.windowID.flatMap { windowsByID[$0] }
+            pageManager.bibleDocument = value.bibleDocument
+            pageManager.bibleVersification = value.bibleVersification
+            pageManager.bibleBibleBook = value.bibleBook
+            pageManager.bibleChapterNo = value.bibleChapterNo
+            pageManager.bibleVerseNo = value.bibleVerseNo
+            pageManager.commentaryDocument = value.commentaryDocument
+            pageManager.commentaryAnchorOrdinal = value.commentaryAnchorOrdinal
+            pageManager.dictionaryDocument = value.dictionaryDocument
+            pageManager.dictionaryKey = value.dictionaryKey
+            pageManager.generalBookDocument = value.generalBookDocument
+            pageManager.generalBookKey = value.generalBookKey
+            pageManager.mapDocument = value.mapDocument
+            pageManager.mapKey = value.mapKey
+            pageManager.epubIdentifier = value.epubIdentifier
+            pageManager.epubHref = value.epubHref
+            pageManager.textDisplaySettings = value.textDisplaySettings
+            pageManager.jsState = value.jsState
+            recoveryContext.insert(pageManager)
+        }
+
+        for value in expected.historyItems {
+            let historyItem = HistoryItem(
+                id: value.id,
+                createdAt: value.createdAt,
+                document: value.document,
+                key: value.key
+            )
+            historyItem.window = value.windowID.flatMap { windowsByID[$0] }
+            historyItem.anchorOrdinal = value.anchorOrdinal
+            recoveryContext.insert(historyItem)
+        }
+
+        try recoveryContext.save()
     }
 
     /**
@@ -811,7 +1229,9 @@ public final class RemoteSyncWorkspaceRestoreService {
         workspaces: [RawWorkspaceRow],
         windows: [RawWindowRow],
         pageManagers: [RawPageManagerRow],
-        historyItems: [RemoteSyncAndroidWorkspaceHistoryItem]
+        historyItems: [RemoteSyncAndroidWorkspaceHistoryItem],
+        labelOverrides: [RemoteSyncCurrentWorkspaceLabelOverrideRow],
+        globalTextDisplaySettings: RemoteSyncCurrentGlobalTextDisplaySettingsRow?
     ) throws -> RemoteSyncAndroidWorkspaceSnapshot {
         let workspacesByID = Dictionary(uniqueKeysWithValues: workspaces.map { ($0.id, $0) })
         let windowsByID = Dictionary(uniqueKeysWithValues: windows.map { ($0.id, $0) })
@@ -840,6 +1260,7 @@ public final class RemoteSyncWorkspaceRestoreService {
                         mapAnchorOrdinal: row.mapAnchorOrdinal,
                         currentCategoryName: row.currentCategoryName,
                         textDisplaySettings: row.textDisplaySettings,
+                        textDisplayFidelity: row.textDisplayFidelity,
                         jsState: row.jsState
                     )
                 )
@@ -870,6 +1291,12 @@ public final class RemoteSyncWorkspaceRestoreService {
         for historyItem in historyItems where windowsByID[historyItem.windowID] == nil {
             orphanReferences.append(
                 "HistoryItem.id=\(historyItem.remoteID) missing window \(historyItem.windowID.uuidString)"
+            )
+        }
+
+        for override in labelOverrides where workspacesByID[override.workspaceID] == nil {
+            orphanReferences.append(
+                "WorkspaceLabelOverride.workspaceId=\(override.workspaceID.uuidString) missing workspace"
             )
         }
 
@@ -942,6 +1369,7 @@ public final class RemoteSyncWorkspaceRestoreService {
                 contentsText: workspaceRow.contentsText,
                 orderNumber: workspaceRow.orderNumber,
                 textDisplaySettings: workspaceRow.textDisplaySettings,
+                textDisplayFidelity: workspaceRow.textDisplayFidelity,
                 workspaceSettings: workspaceRow.workspaceSettings,
                 speakSettingsJSON: workspaceRow.speakSettingsJSON,
                 unPinnedWeight: workspaceRow.unPinnedWeight,
@@ -958,7 +1386,16 @@ public final class RemoteSyncWorkspaceRestoreService {
             return lhs.orderNumber < rhs.orderNumber
         }
 
-        return RemoteSyncAndroidWorkspaceSnapshot(workspaces: assembledWorkspaces)
+        return RemoteSyncAndroidWorkspaceSnapshot(
+            workspaces: assembledWorkspaces,
+            labelOverrides: labelOverrides.sorted {
+                if $0.workspaceID == $1.workspaceID {
+                    return $0.labelID.uuidString < $1.labelID.uuidString
+                }
+                return $0.workspaceID.uuidString < $1.workspaceID.uuidString
+            },
+            globalTextDisplaySettings: globalTextDisplaySettings
+        )
     }
 
     /**
@@ -1017,6 +1454,12 @@ public final class RemoteSyncWorkspaceRestoreService {
                 statement: statement,
                 columns: columns
             )
+            let decodedTextDisplaySettings = try decodeTextDisplaySettings(
+                table: "Workspace",
+                statement: statement,
+                columns: columns,
+                prefix: "text_display_settings_"
+            )
             rows.append(
                 RawWorkspaceRow(
                     id: try requiredUUIDBlobColumn(
@@ -1043,12 +1486,8 @@ public final class RemoteSyncWorkspaceRestoreService {
                         statement: statement,
                         columns: columns
                     ),
-                    textDisplaySettings: try decodeTextDisplaySettings(
-                        table: "Workspace",
-                        statement: statement,
-                        columns: columns,
-                        prefix: "text_display_settings_"
-                    ),
+                    textDisplaySettings: decodedTextDisplaySettings.settings,
+                    textDisplayFidelity: decodedTextDisplaySettings.fidelity,
                     workspaceSettings: decodedWorkspaceSettings.settings,
                     speakSettingsJSON: decodedWorkspaceSettings.speakSettingsJSON,
                     unPinnedWeight: try optionalFloatColumn(
@@ -1195,6 +1634,12 @@ public final class RemoteSyncWorkspaceRestoreService {
         var rows: [RawPageManagerRow] = []
 
         while sqlite3_step(statement) == SQLITE_ROW {
+            let decodedTextDisplaySettings = try decodeTextDisplaySettings(
+                table: "PageManager",
+                statement: statement,
+                columns: columns,
+                prefix: "text_display_settings_"
+            )
             rows.append(
                 RawPageManagerRow(
                     windowID: try requiredUUIDBlobColumn(
@@ -1311,12 +1756,8 @@ public final class RemoteSyncWorkspaceRestoreService {
                         statement: statement,
                         columns: columns
                     ),
-                    textDisplaySettings: try decodeTextDisplaySettings(
-                        table: "PageManager",
-                        statement: statement,
-                        columns: columns,
-                        prefix: "text_display_settings_"
-                    ),
+                    textDisplaySettings: decodedTextDisplaySettings.settings,
+                    textDisplayFidelity: decodedTextDisplaySettings.fidelity,
                     jsState: try optionalTextColumn(
                         "jsState",
                         table: "PageManager",
@@ -1328,6 +1769,111 @@ public final class RemoteSyncWorkspaceRestoreService {
         }
 
         return rows
+    }
+
+    /**
+     Reads every Android workspace-label override row from the staged database.
+
+     - Parameter db: Open staged Android workspace database.
+     - Returns: Typed composite-key rows in database iteration order.
+     - Side Effects: Prepares and steps a read-only SQLite query.
+     - Throws: Identifier and required-column validation errors, or `invalidSQLiteDatabase` when
+       SQLite cannot prepare the query.
+     */
+    private func fetchWorkspaceLabelOverrides(
+        from db: OpaquePointer
+    ) throws -> [RemoteSyncCurrentWorkspaceLabelOverrideRow] {
+        let sql = "SELECT * FROM WorkspaceLabelOverride"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw RemoteSyncWorkspaceRestoreError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        let columns = columnIndexMap(for: statement)
+        var rows: [RemoteSyncCurrentWorkspaceLabelOverrideRow] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            rows.append(
+                .init(
+                    workspaceID: try requiredUUIDBlobColumn(
+                        "workspaceId",
+                        table: "WorkspaceLabelOverride",
+                        statement: statement,
+                        columns: columns
+                    ),
+                    labelID: try requiredUUIDBlobColumn(
+                        "labelId",
+                        table: "WorkspaceLabelOverride",
+                        statement: statement,
+                        columns: columns
+                    ),
+                    overrideMode: try optionalIntColumn(
+                        "overrideMode",
+                        table: "WorkspaceLabelOverride",
+                        statement: statement,
+                        columns: columns
+                    )
+                )
+            )
+        }
+        return rows
+    }
+
+    /**
+     Reads Android's optional global text-display singleton row.
+
+     - Parameter db: Open staged Android workspace database.
+     - Returns: Complete singleton row, or `nil` when Android has never persisted global settings.
+     - Side Effects: Prepares and steps a read-only SQLite query.
+     - Throws: `invalidColumnValue` for duplicate or noncanonical singleton identities, field
+       decoding errors, or `invalidSQLiteDatabase` when SQLite cannot prepare the query.
+     */
+    private func fetchGlobalTextDisplaySettings(
+        from db: OpaquePointer
+    ) throws -> RemoteSyncCurrentGlobalTextDisplaySettingsRow? {
+        let sql = "SELECT * FROM GlobalTextDisplaySettings"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw RemoteSyncWorkspaceRestoreError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        let columns = columnIndexMap(for: statement)
+        var result: RemoteSyncCurrentGlobalTextDisplaySettingsRow?
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard result == nil else {
+                throw RemoteSyncWorkspaceRestoreError.invalidColumnValue(
+                    table: "GlobalTextDisplaySettings",
+                    column: "id"
+                )
+            }
+            let id = try requiredUUIDBlobColumn(
+                "id",
+                table: "GlobalTextDisplaySettings",
+                statement: statement,
+                columns: columns
+            )
+            guard id == RemoteSyncCurrentGlobalTextDisplaySettingsRow.androidSingletonID else {
+                throw RemoteSyncWorkspaceRestoreError.invalidColumnValue(
+                    table: "GlobalTextDisplaySettings",
+                    column: "id"
+                )
+            }
+            let decoded = try decodeTextDisplaySettings(
+                table: "GlobalTextDisplaySettings",
+                statement: statement,
+                columns: columns,
+                prefix: "text_display_settings_"
+            )
+            result = .init(
+                id: id,
+                textDisplaySettings: decoded.settings,
+                fidelity: decoded.fidelity
+            )
+        }
+        return result
     }
 
     /**
@@ -1514,6 +2060,14 @@ public final class RemoteSyncWorkspaceRestoreService {
             statement: statement,
             columns: columns
         )
+        if let speakSettingsJSON, !speakSettingsJSON.isEmpty {
+            settings.speakSettings = try decodeJSON(
+                SpeakSettings.self,
+                from: speakSettingsJSON,
+                table: table,
+                column: "workspace_settings_speakSettings"
+            ).normalized
+        }
         let workspaceColor = try optionalIntColumn(
             "workspace_settings_workspaceColor",
             table: table,
@@ -1543,75 +2097,46 @@ public final class RemoteSyncWorkspaceRestoreService {
         statement: OpaquePointer,
         columns: [String: Int32],
         prefix: String
-    ) throws -> TextDisplaySettings? {
-        var settings = TextDisplaySettings()
-        var hasValue = false
-
-        func assignInt(_ column: String, _ keyPath: WritableKeyPath<TextDisplaySettings, Int?>) throws {
-            if let value = try optionalIntColumn(column, table: table, statement: statement, columns: columns) {
-                settings[keyPath: keyPath] = value
-                hasValue = true
+    ) throws -> DecodedTextDisplaySettings {
+        let wire = try RemoteSyncWorkspaceTextDisplaySettingsWire.decode(
+            integer: { suffix in
+                try self.optionalIntColumn(
+                    "\(prefix)\(suffix)",
+                    table: table,
+                    statement: statement,
+                    columns: columns
+                )
+            },
+            boolean: { suffix in
+                try self.optionalBoolColumn(
+                    "\(prefix)\(suffix)",
+                    table: table,
+                    statement: statement,
+                    columns: columns
+                )
+            },
+            text: { suffix in
+                try self.optionalTextColumn(
+                    "\(prefix)\(suffix)",
+                    table: table,
+                    statement: statement,
+                    columns: columns
+                )
+            },
+            hiddenLabels: {
+                let column = "\(prefix)bookmarksHideLabels"
+                guard let rawValue = try self.optionalTextColumn(
+                    column,
+                    table: table,
+                    statement: statement,
+                    columns: columns
+                ) else {
+                    return nil
+                }
+                return try self.decodeUUIDArray(rawValue, table: table, column: column)
             }
-        }
-
-        func assignString(_ column: String, _ keyPath: WritableKeyPath<TextDisplaySettings, String?>) throws {
-            if let value = try optionalTextColumn(column, table: table, statement: statement, columns: columns) {
-                settings[keyPath: keyPath] = value
-                hasValue = true
-            }
-        }
-
-        func assignBool(_ column: String, _ keyPath: WritableKeyPath<TextDisplaySettings, Bool?>) throws {
-            if let value = try optionalBoolColumn(column, table: table, statement: statement, columns: columns) {
-                settings[keyPath: keyPath] = value
-                hasValue = true
-            }
-        }
-
-        try assignInt("\(prefix)strongsMode", \.strongsMode)
-        try assignBool("\(prefix)showMorphology", \.showMorphology)
-        try assignBool("\(prefix)showFootNotes", \.showFootNotes)
-        try assignBool("\(prefix)showFootNotesInline", \.showFootNotesInline)
-        try assignBool("\(prefix)expandXrefs", \.expandXrefs)
-        try assignBool("\(prefix)showXrefs", \.showXrefs)
-        try assignBool("\(prefix)showRedLetters", \.showRedLetters)
-        try assignBool("\(prefix)showSectionTitles", \.showSectionTitles)
-        try assignBool("\(prefix)showVerseNumbers", \.showVerseNumbers)
-        try assignBool("\(prefix)showVersePerLine", \.showVersePerLine)
-        try assignBool("\(prefix)showBookmarks", \.showBookmarks)
-        try assignBool("\(prefix)showMyNotes", \.showMyNotes)
-        try assignBool("\(prefix)justifyText", \.justifyText)
-        try assignBool("\(prefix)hyphenation", \.hyphenation)
-        try assignInt("\(prefix)topMargin", \.topMargin)
-        try assignInt("\(prefix)fontSize", \.fontSize)
-        try assignString("\(prefix)fontFamily", \.fontFamily)
-        try assignInt("\(prefix)lineSpacing", \.lineSpacing)
-        try assignBool("\(prefix)showPageNumber", \.showPageNumber)
-        try assignInt("\(prefix)margin_size_marginLeft", \.marginLeft)
-        try assignInt("\(prefix)margin_size_marginRight", \.marginRight)
-        try assignInt("\(prefix)margin_size_maxWidth", \.maxWidth)
-        try assignInt("\(prefix)colors_dayTextColor", \.dayTextColor)
-        try assignInt("\(prefix)colors_dayBackground", \.dayBackground)
-        try assignInt("\(prefix)colors_dayNoise", \.dayNoise)
-        try assignInt("\(prefix)colors_nightTextColor", \.nightTextColor)
-        try assignInt("\(prefix)colors_nightBackground", \.nightBackground)
-        try assignInt("\(prefix)colors_nightNoise", \.nightNoise)
-
-        if let bookmarksHideLabelsJSON = try optionalTextColumn(
-            "\(prefix)bookmarksHideLabels",
-            table: table,
-            statement: statement,
-            columns: columns
-        ) {
-            settings.bookmarksHideLabels = try decodeUUIDArray(
-                bookmarksHideLabelsJSON,
-                table: table,
-                column: "\(prefix)bookmarksHideLabels"
-            )
-            hasValue = true
-        }
-
-        return hasValue ? settings : nil
+        )
+        return DecodedTextDisplaySettings(settings: wire.settings, fidelity: wire.fidelity)
     }
 
     /**
@@ -1781,6 +2306,24 @@ public final class RemoteSyncWorkspaceRestoreService {
     }
 
     /**
+     Decodes one SQLite TEXT cell by its authoritative byte count rather than C-string termination.
+
+     - Parameters:
+       - statement: SQLite statement positioned on the current row.
+       - index: TEXT result-column index.
+     - Returns: Exact UTF-8 text, including embedded NUL bytes, or `nil` for malformed UTF-8/storage.
+     - Side Effects: Copies the current SQLite cell bytes into an immutable Swift value.
+     - Failure modes: Returns `nil` when SQLite exposes no bytes or the bytes are not valid UTF-8.
+     */
+    private func decodedTextColumn(_ statement: OpaquePointer, index: Int32) -> String? {
+        let byteCount = Int(sqlite3_column_bytes(statement, index))
+        guard byteCount >= 0 else { return nil }
+        if byteCount == 0 { return "" }
+        guard let bytes = sqlite3_column_text(statement, index) else { return nil }
+        return String(data: Data(bytes: bytes, count: byteCount), encoding: .utf8)
+    }
+
+    /**
      Reads one required text column from the current SQLite row.
 
      - Parameters:
@@ -1790,8 +2333,7 @@ public final class RemoteSyncWorkspaceRestoreService {
        - columns: Precomputed column-name map.
      - Returns: Decoded UTF-8 string value.
      - Side effects: none.
-     - Failure modes:
-       - throws `RemoteSyncWorkspaceRestoreError.invalidColumnValue` when the column is null or not readable as text
+     - Failure modes: Throws `invalidColumnValue` for null, non-TEXT, or malformed UTF-8 data.
      */
     private func requiredTextColumn(
         _ name: String,
@@ -1800,11 +2342,11 @@ public final class RemoteSyncWorkspaceRestoreService {
         columns: [String: Int32]
     ) throws -> String {
         let index = try columnIndex(name, table: table, columns: columns)
-        guard sqlite3_column_type(statement, index) != SQLITE_NULL,
-              let cString = sqlite3_column_text(statement, index) else {
+        guard sqlite3_column_type(statement, index) == SQLITE_TEXT,
+              let value = decodedTextColumn(statement, index: index) else {
             throw RemoteSyncWorkspaceRestoreError.invalidColumnValue(table: table, column: name)
         }
-        return String(cString: cString)
+        return value
     }
 
     /**
@@ -1817,8 +2359,7 @@ public final class RemoteSyncWorkspaceRestoreService {
        - columns: Precomputed column-name map.
      - Returns: Decoded UTF-8 string, or `nil` when the SQLite value is null.
      - Side effects: none.
-     - Failure modes:
-       - throws `RemoteSyncWorkspaceRestoreError.invalidColumnValue` when the expected column is absent from the result set
+     - Failure modes: Throws `invalidColumnValue` for absent, non-TEXT, or malformed UTF-8 data.
      */
     private func optionalTextColumn(
         _ name: String,
@@ -1827,11 +2368,15 @@ public final class RemoteSyncWorkspaceRestoreService {
         columns: [String: Int32]
     ) throws -> String? {
         let index = try columnIndex(name, table: table, columns: columns)
-        guard sqlite3_column_type(statement, index) != SQLITE_NULL,
-              let cString = sqlite3_column_text(statement, index) else {
+        let storageClass = sqlite3_column_type(statement, index)
+        guard storageClass != SQLITE_NULL else {
             return nil
         }
-        return String(cString: cString)
+        guard storageClass == SQLITE_TEXT,
+              let value = decodedTextColumn(statement, index: index) else {
+            throw RemoteSyncWorkspaceRestoreError.invalidColumnValue(table: table, column: name)
+        }
+        return value
     }
 
     /**
@@ -1844,8 +2389,7 @@ public final class RemoteSyncWorkspaceRestoreService {
        - columns: Precomputed column-name map.
      - Returns: Integer value decoded from the current row.
      - Side effects: none.
-     - Failure modes:
-       - throws `RemoteSyncWorkspaceRestoreError.invalidColumnValue` when the column is null
+     - Failure modes: Throws `invalidColumnValue` for null, non-INTEGER, or out-of-Int32 data.
      */
     private func requiredIntColumn(
         _ name: String,
@@ -1854,10 +2398,11 @@ public final class RemoteSyncWorkspaceRestoreService {
         columns: [String: Int32]
     ) throws -> Int {
         let index = try columnIndex(name, table: table, columns: columns)
-        guard sqlite3_column_type(statement, index) != SQLITE_NULL else {
+        guard sqlite3_column_type(statement, index) == SQLITE_INTEGER,
+              let value = Int32(exactly: sqlite3_column_int64(statement, index)) else {
             throw RemoteSyncWorkspaceRestoreError.invalidColumnValue(table: table, column: name)
         }
-        return Int(sqlite3_column_int(statement, index))
+        return Int(value)
     }
 
     /**
@@ -1896,8 +2441,7 @@ public final class RemoteSyncWorkspaceRestoreService {
        - columns: Precomputed column-name map.
      - Returns: Integer value, or `nil` when the SQLite value is null.
      - Side effects: none.
-     - Failure modes:
-       - throws `RemoteSyncWorkspaceRestoreError.invalidColumnValue` when the expected column is absent from the result set
+     - Failure modes: Throws `invalidColumnValue` for absent, non-INTEGER, or out-of-Int32 data.
      */
     private func optionalIntColumn(
         _ name: String,
@@ -1906,10 +2450,15 @@ public final class RemoteSyncWorkspaceRestoreService {
         columns: [String: Int32]
     ) throws -> Int? {
         let index = try columnIndex(name, table: table, columns: columns)
-        guard sqlite3_column_type(statement, index) != SQLITE_NULL else {
+        let storageClass = sqlite3_column_type(statement, index)
+        guard storageClass != SQLITE_NULL else {
             return nil
         }
-        return Int(sqlite3_column_int(statement, index))
+        guard storageClass == SQLITE_INTEGER,
+              let value = Int32(exactly: sqlite3_column_int64(statement, index)) else {
+            throw RemoteSyncWorkspaceRestoreError.invalidColumnValue(table: table, column: name)
+        }
+        return Int(value)
     }
 
     /**
@@ -1923,8 +2472,7 @@ public final class RemoteSyncWorkspaceRestoreService {
        - defaultValue: Fallback used when the SQLite value is null.
      - Returns: Integer column value or the provided default.
      - Side effects: none.
-     - Failure modes:
-       - throws `RemoteSyncWorkspaceRestoreError.invalidColumnValue` when the expected column is absent from the result set
+     - Failure modes: Throws `invalidColumnValue` for non-INTEGER or out-of-Int32 values.
      */
     private func intOrDefaultColumn(
         _ name: String,
@@ -1946,8 +2494,8 @@ public final class RemoteSyncWorkspaceRestoreService {
        - columns: Precomputed column-name map.
      - Returns: Boolean value, or `nil` when the SQLite value is null.
      - Side effects: none.
-     - Failure modes:
-       - throws `RemoteSyncWorkspaceRestoreError.invalidColumnValue` when the expected column is absent from the result set
+     - Failure modes: Throws `invalidColumnValue` for absent, non-INTEGER, or values other than
+       exact `0` and `1`.
      */
     private func optionalBoolColumn(
         _ name: String,
@@ -1956,10 +2504,19 @@ public final class RemoteSyncWorkspaceRestoreService {
         columns: [String: Int32]
     ) throws -> Bool? {
         let index = try columnIndex(name, table: table, columns: columns)
-        guard sqlite3_column_type(statement, index) != SQLITE_NULL else {
+        let storageClass = sqlite3_column_type(statement, index)
+        guard storageClass != SQLITE_NULL else {
             return nil
         }
-        return sqlite3_column_int(statement, index) != 0
+        guard storageClass == SQLITE_INTEGER else {
+            throw RemoteSyncWorkspaceRestoreError.invalidColumnValue(table: table, column: name)
+        }
+        switch sqlite3_column_int64(statement, index) {
+        case 0: return false
+        case 1: return true
+        default:
+            throw RemoteSyncWorkspaceRestoreError.invalidColumnValue(table: table, column: name)
+        }
     }
 
     /**
@@ -1972,8 +2529,7 @@ public final class RemoteSyncWorkspaceRestoreService {
        - columns: Precomputed column-name map.
      - Returns: Boolean value decoded from the current row.
      - Side effects: none.
-     - Failure modes:
-       - throws `RemoteSyncWorkspaceRestoreError.invalidColumnValue` when the column is null
+     - Failure modes: Throws `invalidColumnValue` unless the value is exact INTEGER `0` or `1`.
      */
     private func requiredBoolColumn(
         _ name: String,
@@ -1982,10 +2538,15 @@ public final class RemoteSyncWorkspaceRestoreService {
         columns: [String: Int32]
     ) throws -> Bool {
         let index = try columnIndex(name, table: table, columns: columns)
-        guard sqlite3_column_type(statement, index) != SQLITE_NULL else {
+        guard sqlite3_column_type(statement, index) == SQLITE_INTEGER else {
             throw RemoteSyncWorkspaceRestoreError.invalidColumnValue(table: table, column: name)
         }
-        return sqlite3_column_int(statement, index) != 0
+        switch sqlite3_column_int64(statement, index) {
+        case 0: return false
+        case 1: return true
+        default:
+            throw RemoteSyncWorkspaceRestoreError.invalidColumnValue(table: table, column: name)
+        }
     }
 
     /**

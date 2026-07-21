@@ -788,9 +788,9 @@ struct BibleReaderReferenceResolver {
     /**
      Validates and resolves an OSIS-format reference like `Gen.1.1`.
 
-     `navigateToRef` uses this narrower path before human parsing so legacy navigation semantics stay
-     intact: a valid OSIS reference is returned exactly as entered and then handed to
-     `navigateToOsisRef`.
+     The full resolver uses this as a validated fallback when active-module parsing does not consume
+     the input. A valid single OSIS coordinate is returned exactly as entered; range and passage-list
+     input is owned by `resolveReference(_:)` and the active module parser.
 
      - Parameter text: Candidate OSIS text with dot-separated book, chapter, and optional verse.
      - Returns: The original text when the book and coordinate validate, otherwise `nil`.

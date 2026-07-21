@@ -1,10 +1,11 @@
 // BibleReaderController.swift — Handles bridge delegate for BibleReaderView
 
-import Foundation
-import BibleView
 import BibleCore
+import BibleView
+import Foundation
 import SwordKit
 import os.log
+
 #if os(iOS)
 import UIKit
 #elseif os(macOS)
@@ -12,6 +13,51 @@ import AppKit
 #endif
 
 private let logger = Logger(subsystem: "org.andbible", category: "BibleReaderController")
+
+/// Fail-closed reasons an exact bookmark target cannot be committed by the active reader.
+enum BibleReaderBookmarkNavigationCommitFailure: Error, Equatable, LocalizedError {
+  /// The active reader or one of its required persistence backends is unavailable.
+  case readerUnavailable
+  /// A backend identity changed between validation and the single commit boundary.
+  case destinationChanged
+  /// The exact destination could not be serialized for the Vue reader.
+  case serializationFailed
+
+  /** Returns Android's shared reader error instead of introducing iOS-only message keys. */
+  var errorDescription: String? {
+    String(localized: "error_occurred", defaultValue: "An error has occurred")
+  }
+}
+
+/**
+ Typed native WebView selection metadata used to route Speak through Android's source providers.
+
+ Bible and generic documents expose category, module, key, versification, and ordinal identity from
+ the selected DOM document. The text-only fallback is retained solely for selections outside a
+ structured document; partially populated source identity fails closed instead of speaking through
+ the wrong provider.
+ */
+struct BibleReaderSpeechSelection: Equatable {
+    let text: String
+    let bookInitials: String?
+    let osisRef: String?
+    let bookCategory: String?
+    let versification: String?
+    let startOrdinal: Int?
+    let endOrdinal: Int?
+    let startOffset: Int?
+    let endOffset: Int?
+
+    /// Whether the bridge supplied any source field that must be treated atomically.
+    var hasSourceMetadata: Bool {
+        bookInitials != nil
+            || osisRef != nil
+            || bookCategory != nil
+            || versification != nil
+            || startOrdinal != nil
+            || endOrdinal != nil
+    }
+}
 
 /**
  Coordinates BibleView bridge events, SWORD content loading, and native presentation callbacks.
@@ -34,6 +80,9 @@ private let logger = Logger(subsystem: "org.andbible", category: "BibleReaderCon
 @Observable
 public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     let bridge: BibleBridge
+  /// Cancellable app-owned subscription that keeps this pane's Vue marker state current.
+  @ObservationIgnored
+  private var aiDocMarkerEventObservation: MyDocumentAIDocMarkerEventObservation?
     var bookmarkService: BookmarkService?
     var myDocumentStore: MyDocumentStore?
     private(set) var currentBook: String = "Genesis"
@@ -45,8 +94,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Whether the WebView is currently showing the My Notes document (vs Bible text).
     private(set) var showingMyNotes = false
-    /// Optional KJVA My Notes row ordinal requested before the Vue client was ready.
-    private var pendingClientReadyMyNotesJumpOrdinal: Int?
+    /// KJVA-owned My Notes destination retained independently from the active Bible pane.
+    private struct MyNotesTarget {
+        let bookName: String
+        let osisBookId: String
+        let chapter: Int
+        let jumpOrdinal: Int?
+    }
+    /// My Notes destination currently rendered or awaiting a client-ready replay.
+    private var activeMyNotesTarget: MyNotesTarget?
+    /// Explicit KJVA My Notes destination requested before the Vue client was ready.
+    private var pendingClientReadyMyNotesTarget: MyNotesTarget?
     /// Monotonic marker used by lightweight UI-test exports when My Notes state or documents rebuild.
     private(set) var myNotesMutationRevision = 0
 
@@ -77,6 +135,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var swordManager: SwordManager?
     private(set) var activeModule: SwordModule?
     private(set) var activeModuleName: String = "KJV"
+  /// Android SQLite discovery, canonical identity, and category-selection policy.
+  private var sqliteRuntimeCoordinator = BibleReaderSQLiteRuntimeCoordinator()
+  /// Exact-key preflight shared by SQLite dictionary switching and chooser presentation.
+  private let sqliteDictionaryChooser = BibleReaderSQLiteDictionaryChooser()
+  /// Active MyBible, MySword, or e-Sword Bible when the selected document is not SWORD-backed.
+  private var activeSQLiteBibleModule: BibleReaderSQLiteModuleHandle?
     /// All installed Bible modules (for module switching)
     private(set) var installedBibleModules: [ModuleInfo] = []
 
@@ -95,17 +159,51 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Commentary module support
     private(set) var installedCommentaryModules: [ModuleInfo] = []
     private(set) var activeCommentaryModule: SwordModule?
+  /// Active MyBible or MySword commentary selected through Android's custom-book catalog.
+  private var activeSQLiteCommentaryModule: BibleReaderSQLiteModuleHandle?
     private(set) var activeCommentaryModuleName: String?
     private(set) var currentCategory: DocumentCategory = .bible
     /// Pure planner for Android-style module/category PageManager transitions.
     private let moduleSwitchCoordinator = BibleReaderModuleSwitchCoordinator()
+  /// SQLite switch sequencing over controller-owned state and persistence seams.
+  private let sqliteModuleSwitchCoordinator = BibleReaderSQLiteModuleSwitchCoordinator()
+  /// SQLite speech source selection, DOM presentation, and exact-key callback routing.
+  private let sqliteSpeechDispatchCoordinator = BibleReaderSQLiteSpeechDispatchCoordinator()
     /// State machine for Android-style Bible navigation and visible-position persistence.
     @ObservationIgnored
     private let navigationCoordinator = BibleReaderNavigationCoordinator()
+    /// Source-aware link range consumed by the next Bible document setup emission.
+    private var pendingLinkNavigationOrdinalRange: [Int]?
+
+  /**
+   Complete target-owned identity for one contiguous Android Bible link.
+
+   The source `OsisRef` remains unchanged while this value records the destination module's
+   strictly mapped first verse and inclusive ordinal span. It is created only after every source
+   verse maps to an exact target-module verse in canonical order.
+   */
+  private struct BibleLinkNavigationTarget {
+    /// Installed Bible module that must own the visible destination page.
+    let moduleName: String
+
+    /// Target-module display name for the mapped first book.
+    let book: String
+
+    /// Target-versification chapter containing the mapped first verse.
+    let chapter: Int
+
+    /// Target-versification first verse used as Android's visible navigation anchor.
+    let verse: Int
+
+    /// Inclusive target-module ordinal range retained for highlight and scroll setup.
+    let ordinalRange: [Int]
+  }
 
     /// Dictionary/Lexicon module support
     private(set) var installedDictionaryModules: [ModuleInfo] = []
     private(set) var activeDictionaryModule: SwordModule?
+  /// Active MyBible or MySword dictionary selected through Android's custom-book catalog.
+  private var activeSQLiteDictionaryModule: BibleReaderSQLiteModuleHandle?
     private(set) var activeDictionaryModuleName: String?
     private(set) var currentDictionaryKey: String?
 
@@ -157,12 +255,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Catalog boundary for active-module book metadata and SWORD/JSword versification lookup.
     private var bookCatalog: BibleReaderBookCatalog {
-        BibleReaderBookCatalog(activeModule: activeModule, moduleBookList: moduleBookList)
-    }
-
-    /// Legacy ordinal fallback used only when no SWORD verse-key module can resolve the reference.
-    private func compatibilityOrdinal(chapter: Int, verse: Int) -> Int {
-        BibleReaderBookCatalog.compatibilityOrdinal(chapter: chapter, verse: verse)
+    BibleReaderBookCatalog(
+      activeModule: activeModule,
+      moduleBookList: moduleBookList,
+      usesExactKJVAOrdinals: activeSQLiteBibleModule != nil
+    )
     }
 
     /**
@@ -172,13 +269,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - osisBookId: OSIS book identifier for the verse.
        - chapter: One-based chapter number.
        - verse: One-based verse number.
-     - Returns: The SWORD/JSword-style ordinal when available, the legacy placeholder ordinal when
-       no module is present, or `nil` when the active module rejects the reference.
+     - Returns: The active module's SWORD ordinal when available, the generated placeholder's
+       genuine KJVA ordinal when no module is present, or `nil` for an invalid reference.
      - Side effects: May temporarily move the active SWORD module cursor; `SwordModule` restores it
        before returning.
      */
     private func verseOrdinal(osisBookId: String, chapter: Int, verse: Int) -> Int? {
-        bookCatalog.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
+        if activeModule == nil {
+            return JSwordKJVAVersification.verseOrdinal(
+                osisId: osisBookId,
+                chapter: chapter,
+                verse: verse
+            )
+        }
+        return bookCatalog.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
     }
 
     /**
@@ -186,8 +290,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Android resolves these values through JSword's versification when building bookmark,
      memorization, and note payloads. iOS mirrors that by asking the active SWORD module to position
-     a `VerseKey` by index, falling back to the historical placeholder calculation only when there
-     is no active module available.
+     a `VerseKey` by index. Generated no-module documents already use KJVA verse ordinals, so their
+     reverse lookup stays in that explicit synthetic domain instead of applying compatibility math.
 
      - Parameters:
        - book: User-facing book name used to derive the OSIS identifier.
@@ -197,7 +301,23 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        before returning.
      */
     private func verseReference(book: String, ordinal: Int) -> VerseKeyReference? {
-        bookCatalog.verseReference(book: book, ordinal: ordinal)
+        if activeModule == nil {
+            let expectedOsisId = osisBookId(for: book)
+      guard
+        let reference = JSwordKJVAVersification.referenceIncludingIntroductions(
+                ordinal: ordinal
+        ), reference.osisId == expectedOsisId
+      else {
+                return nil
+            }
+            return VerseKeyReference(
+                osisBookId: reference.osisId,
+                chapter: reference.chapter,
+                verse: reference.verse,
+                ordinal: reference.ordinal
+            )
+        }
+        return bookCatalog.verseReference(book: book, ordinal: ordinal)
     }
 
     /**
@@ -246,17 +366,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      `BookmarkItemAdapter`), so a bookmark stored at a KJVA ordinal shows and navigates to the active
      module's mapped verse — KJVA Psalm 10 in a Vulgate module is Psalm 9. But KJV-family modules
      (KJV/KJVA, or no module) render identically to KJVA, so this returns `nil` for them and the list
-     keeps its fast in-memory KJVA path with no per-row SWORD work. For a divergent canon it reads the
-     versification once and returns a closure that memoizes per ordinal, so a large list performs at
-     most one SWORD mapping per unique ordinal — never a serialized SWORD call per row.
+     keeps its fast in-memory KJVA path with no per-row mapping work. For a divergent canon it returns
+     a closure that memoizes the pinned JSword projection and target-module lookup per ordinal.
 
      - Returns: A resolver mapping a KJVA ordinal to the active versification's book name plus
        chapter/verse, or `nil` when the active module is KJVA-compatible.
-     - Side effects: Reads the active module's `Versification` conf once through the SWORD queue.
+     - Side effects: May temporarily move the active SWORD module cursor once per unique ordinal;
+       each lookup restores the prior key.
      - Failure modes: The returned resolver yields `nil` for malformed or unmappable ordinals.
      */
-    func bookmarkListActiveReferenceResolver() -> ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? {
-        let activeVersification = activeModule?.configEntry("Versification") ?? ""
+  func bookmarkListActiveReferenceResolver() -> (
+    (Int) -> (bookName: String, reference: BookmarkListVerseReference)?
+  )? {
+        guard let activeModule else { return nil }
+        let activeVersification = VersificationMapper.versificationName(for: activeModule)
         let normalized = normalizedVersificationName(activeVersification)
         guard normalized != JSwordKJVAVersification.name, normalized != "KJV" else { return nil }
 
@@ -265,7 +388,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             if let cached = cache[kjvOrdinal] { return cached }
             let resolved = self?.bookmarkListActiveReference(
                 kjvOrdinal: kjvOrdinal,
-                versification: activeVersification
+                activeModule: activeModule
             )
             cache[kjvOrdinal] = resolved
             return resolved
@@ -273,28 +396,31 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Reverse-maps one stored KJVA ordinal into a target versification for bookmark-list rows.
+     Projects one stored KJVA ordinal into the active module for bookmark-list rows.
 
      - Parameters:
        - kjvOrdinal: Persisted Android-compatible KJVA ordinal.
-       - activeVersification: Target module versification, read once by the resolver builder.
+       - activeModule: Target module whose versification and ordinal domain own the result.
      - Returns: Active-versification display book name plus chapter/verse, or `nil` when the ordinal
        cannot be resolved or mapped.
-     - Side effects: Runs inside the SWORD serialization queue via `SwordVersification`.
-     - Failure modes: Returns `nil` for malformed KJVA ordinals or unmappable references.
+     - Side effects: Reads pinned JSword mapping resources and temporarily moves the target module
+       cursor while resolving its ordinal, restoring the prior key before returning.
+     - Failure modes: Returns `nil` for malformed KJVA ordinals, unsupported versifications,
+       non-authoritative mappings, or references the target module cannot address.
      */
     private func bookmarkListActiveReference(
         kjvOrdinal: Int,
-        versification activeVersification: String
+        activeModule: SwordModule
     ) -> (bookName: String, reference: BookmarkListVerseReference)? {
-        guard let kjva = JSwordKJVAVersification.verseReference(ordinal: kjvOrdinal) else { return nil }
-        guard let mapped = SwordVersification.mapVerseFromKJVA(
-            osisBookId: kjva.osisId,
-            chapter: kjva.chapter,
-            verse: kjva.verse,
-            targetVersification: activeVersification
-        ) else { return nil }
-        let displayName = bookName(forOsisId: mapped.osisBookId)
+    guard
+      let projection = VersificationMapper.moduleProjection(
+                  forKJVAOrdinal: kjvOrdinal,
+                  targetModule: activeModule
+      ), projection.isAddressable
+    else { return nil }
+        let mapped = projection.reference
+    let displayName =
+      bookName(forOsisId: mapped.osisBookId)
             ?? JSwordKJVAVersification.longBookName(osisId: mapped.osisBookId)
             ?? mapped.osisBookId
         return (
@@ -308,71 +434,150 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Android builds the link from `bookmark.verseRange.start.ordinal` plus its source
      versification, then opens a My Notes document whose row ordinals are KJVA. iOS mirrors that by
-     decoding the source ordinal from versification metadata alone (Android's `Verse(v11n, ordinal)`)
-     and converting the resulting verse identity to a KJVA ordinal before scrolling — no installed
-     source module is required. Resolution through an installed module remains only as a fallback for
-     a mis-cased or otherwise unrecognized versification name.
+     decoding the source ordinal from canon metadata and converting the resulting verse identity
+     through the pinned JSword mapper before selecting the KJVA-owned destination.
 
      - Parameters:
        - v11nName: Source versification emitted by the bookmark payload.
        - sourceOrdinal: Bookmark start ordinal in `v11nName`.
-     - Returns: KJVA ordinal for the same verse, or `nil` when the source ordinal cannot be resolved.
-     - Side effects: Runs inside the SWORD serialization queue; the fallback may move SWORD modules
-       through `verseReference`.
-     - Failure modes: Returns `nil` for invalid ordinals or versifications SWORD cannot resolve.
+     - Returns: KJVA ordinal for the same verse, or `nil` when the declared versification cannot
+       soundly resolve or map the source ordinal.
+     - Side effects: Reads the compiled SWORD canon and pinned JSword mapping resources.
+     - Failure modes: Returns `nil` for invalid ordinals, unsupported versifications, and missing
+       authoritative mappings. It never depends on an installed source module or relabels the
+       source ordinal as KJVA.
      */
     private func kjvaMyNotesOrdinal(v11nName: String, sourceOrdinal: Int) -> Int? {
         guard sourceOrdinal > 0 else { return nil }
-        let wanted = normalizedVersificationName(v11nName)
-        if wanted == JSwordKJVAVersification.name {
-            return sourceOrdinal
+        let sourceVersification = v11nName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sourceVersification.isEmpty else { return nil }
+        if normalizedVersificationName(sourceVersification) == JSwordKJVAVersification.name {
+            return JSwordKJVAVersification.referenceIncludingIntroductions(ordinal: sourceOrdinal) == nil
+                ? nil
+                : sourceOrdinal
         }
+    guard
+      let reference = SwordVersification.reference(
+                  forIndex: sourceOrdinal,
+                  versification: sourceVersification
+      )
+    else { return nil }
+        return kjvaOrdinal(
+            osisBookId: reference.osisBookId,
+            chapter: reference.chapter,
+            verse: reference.verse,
+            sourceVersification: sourceVersification
+        )
+    }
 
-        // Primary, module-independent path: decode the source ordinal from the versification table
-        // itself and map the reference to KJVA. Mirrors Android's Verse(v11n, ordinal).toV11n(KJVA).
-        if let decoded = SwordVersification.decodeOrdinal(versification: v11nName, ordinal: sourceOrdinal),
-           let ordinal = kjvaOrdinal(
-               osisBookId: decoded.osisBookId,
-               chapter: decoded.chapter,
-               verse: decoded.verse,
-               sourceVersification: v11nName
-           ) {
-            return ordinal
+    /** Resolves one KJVA ordinal into the complete synthetic My Notes page destination. */
+    private func myNotesTarget(kjvaOrdinal: Int) -> MyNotesTarget? {
+    guard
+      let reference = JSwordKJVAVersification.referenceIncludingIntroductions(
+                  ordinal: kjvaOrdinal
+              ),
+              let bookName = JSwordKJVAVersification.localizedLongBookName(
+                  osisId: reference.osisId
+      )
+    else {
+            return nil
         }
+        return MyNotesTarget(
+            bookName: bookName,
+            osisBookId: reference.osisId,
+            chapter: reference.chapter,
+            jumpOrdinal: kjvaOrdinal
+        )
+    }
 
-        // Fallback: resolve through an installed module whose versification matches case-insensitively
-        // (SWORD's lookup is case-sensitive, so `wanted` is used only for matching), using its
-        // real-cased conf value for the mapping.
-        let activeVersification = activeModule?.configEntry("Versification") ?? ""
-        if normalizedVersificationName(activeVersification) == wanted,
-           let reference = activeModule?.verseReference(ordinal: sourceOrdinal),
-           let ordinal = kjvaOrdinal(forReference: reference, sourceVersification: activeVersification) {
-            return ordinal
+    /** Resolves an Android My Notes route from its source domain into a KJVA-owned page target. */
+    private func myNotesTarget(v11nName: String, sourceOrdinal: Int) -> MyNotesTarget? {
+    guard
+      let ordinal = kjvaMyNotesOrdinal(
+                  v11nName: v11nName,
+                  sourceOrdinal: sourceOrdinal
+      )
+    else {
+            return nil
         }
+        return myNotesTarget(kjvaOrdinal: ordinal)
+    }
 
-        for info in installedBibleModules
-        where normalizedVersificationName(info.aboutMetadata.versification) == wanted {
-            guard let module = swordManager?.module(named: info.name),
-                  let reference = module.verseReference(ordinal: sourceOrdinal),
-                  let ordinal = kjvaOrdinal(
-                      forReference: reference,
-                      sourceVersification: info.aboutMetadata.versification
-                  ) else {
-                continue
+    /** Resolves the active pane verse into the KJVA page selected by Android's My Notes document. */
+    private func currentMyNotesTarget(jumpToOrdinal: Int?) -> MyNotesTarget? {
+        if let jumpToOrdinal {
+            return myNotesTarget(kjvaOrdinal: jumpToOrdinal)
+        }
+    guard
+      let ordinal = kjvaOrdinal(
+                  osisBookId: osisBookId(for: currentBook),
+                  chapter: currentChapter,
+                  verse: max(1, currentVerse),
+                  sourceVersification: activeSourceVersificationName()
+              ),
+      let target = myNotesTarget(kjvaOrdinal: ordinal)
+    else {
+            return nil
+        }
+        return MyNotesTarget(
+            bookName: target.bookName,
+            osisBookId: target.osisBookId,
+            chapter: target.chapter,
+            jumpOrdinal: nil
+        )
+    }
+
+    /** Returns the exact KJVA chapter span owned by one synthetic My Notes page. */
+    private func myNotesChapterRange(
+        for target: MyNotesTarget
+    ) -> (start: Int, end: Int, verseCount: Int)? {
+    guard
+      let verseCount = JSwordKJVAVersification.verseCount(
+                  osisId: target.osisBookId,
+                  chapter: target.chapter
+              ),
+              let start = JSwordKJVAVersification.chapterIntroOrdinal(
+                  osisId: target.osisBookId,
+                  chapter: target.chapter
+              ),
+              let end = JSwordKJVAVersification.verseOrdinal(
+                  osisId: target.osisBookId,
+                  chapter: target.chapter,
+                  verse: verseCount
+      )
+    else {
+            return nil
+        }
+        return (start: start, end: end, verseCount: verseCount)
+    }
+
+    /** Returns note-backed bookmarks inside one explicit KJVA My Notes page. */
+    private func myNotesBookmarks(for target: MyNotesTarget) -> [BibleBookmark] {
+        guard let service = bookmarkService,
+      let range = myNotesChapterRange(for: target)
+    else { return [] }
+        return service.bookmarks(
+            for: range.start,
+            endOrdinal: range.end,
+            book: target.bookName
+        )
+        .filter { $0.notes?.notes.isEmpty == false }
+        .sorted {
+            if $0.kjvOrdinalStart != $1.kjvOrdinalStart {
+                return $0.kjvOrdinalStart < $1.kjvOrdinalStart
             }
-            return ordinal
+            return $0.id.uuidString < $1.id.uuidString
         }
-        return nil
     }
 
     /**
      Maps a source-versification verse reference to its KJVA ordinal via SWORD's `VersificationMgr`.
 
      Mirrors Android's `Verse.toV11n(KJVA)`: the reference is translated through SWORD's own
-     versification mapping tables (identical to the av11n data JSword ships), so divergent canons
-     (Vulgate/LXX/Synodal and similar) resolve onto their true KJVA verses rather than being
-     re-interpreted under KJVA numbering, and out-of-range references clamp to the nearest KJVA
-     verse. The mapped reference is then converted to the JSword intro-inclusive KJVA ordinal.
+     pinned JSword mapping resources, so divergent canons (Vulgate/LXX/Synodal and similar)
+     resolve onto their true KJVA verses rather than being re-interpreted under KJVA numbering.
+     Persistence rejects JSword's coordinate-retaining public fallback; the mapped reference is
+     converted to the JSword intro-inclusive KJVA ordinal only after authoritative conversion.
 
      - Parameters:
        - reference: Verse reference in `sourceVersification`.
@@ -381,11 +586,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Side effects: Runs inside the SWORD serialization queue via `SwordVersification`.
      - Failure modes: Returns `nil` for unknown versifications or references SWORD cannot map.
      */
-    private func kjvaOrdinal(forReference reference: VerseKeyReference, sourceVersification: String) -> Int? {
-        kjvaOrdinal(
-            osisBookId: reference.osisBookId,
-            chapter: reference.chapter,
-            verse: reference.verse,
+  private func kjvaOrdinal(forReference reference: VerseKeyReference, sourceVersification: String)
+    -> Int?
+  {
+        VersificationMapper.kjvaOrdinal(
+            for: reference,
             sourceVersification: sourceVersification
         )
     }
@@ -408,27 +613,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         verse: Int,
         sourceVersification: String
     ) -> Int? {
-        guard let mapped = SwordVersification.mapVerseToKJVA(
+        VersificationMapper.kjvaOrdinal(
             osisBookId: osisBookId,
             chapter: chapter,
             verse: verse,
             sourceVersification: sourceVersification
-        ) else {
-            return nil
-        }
-        // A mapped verse of 0 is a KJVA chapter superscription/introduction (e.g. a divergent-canon
-        // Psalm-title verse); resolve it to the reserved chapter-intro ordinal, matching Android's
-        // Versification.getOrdinal, rather than losing it to a nil result.
-        if mapped.verse == 0 {
-            return JSwordKJVAVersification.chapterIntroOrdinal(
-                osisId: mapped.osisBookId,
-                chapter: mapped.chapter
-            )
-        }
-        return JSwordKJVAVersification.verseOrdinal(
-            osisId: mapped.osisBookId,
-            chapter: mapped.chapter,
-            verse: mapped.verse
         )
     }
 
@@ -455,12 +644,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         chapter: Int,
         sourceVersification: String
     ) -> Int? {
-        guard let mapped = SwordVersification.mapVerseToKJVA(
+    guard
+      let mapped = VersificationMapper.convertStrictly(
             osisBookId: osisBookId,
             chapter: chapter,
             verse: 1,
-            sourceVersification: sourceVersification
-        ) else {
+            from: sourceVersification,
+            to: JSwordKJVAVersification.name
+      )?.reference
+    else {
             return nil
         }
         return JSwordKJVAVersification.chapterIntroOrdinal(
@@ -479,7 +671,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func activeSourceVersificationName() -> String {
         guard let activeModule else { return JSwordKJVAVersification.name }
-        let raw = activeModule.configEntry("Versification")?
+    let raw =
+      activeModule.configEntry("Versification")?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return raw.isEmpty ? "KJV" : raw
     }
@@ -504,13 +697,36 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - book: User-facing book name.
        - chapter: One-based chapter number.
        - verseCount: Optional known last verse count; when omitted, the method asks the active
-         module, or uses the static compatibility table only when there is no active module.
+         module or the KJVA canon that owns generated no-module documents.
      - Returns: Start/end ordinals and the verse count used to compute the end, or `nil` when an
        active module cannot resolve the chapter exactly.
      - Side effects: May query the active SWORD module for verse counts and ordinals.
      */
-    private func chapterOrdinalRange(book: String, chapter: Int, verseCount: Int? = nil) -> (start: Int, end: Int, verseCount: Int)? {
-        bookCatalog.chapterOrdinalRange(book: book, chapter: chapter, verseCount: verseCount)
+  private func chapterOrdinalRange(book: String, chapter: Int, verseCount: Int? = nil) -> (
+    start: Int, end: Int, verseCount: Int
+  )? {
+        if activeModule == nil {
+            let osisId = osisBookId(for: book)
+      guard
+        let resolvedVerseCount = verseCount
+                ?? JSwordKJVAVersification.verseCount(osisId: osisId, chapter: chapter),
+                resolvedVerseCount > 0,
+                let start = JSwordKJVAVersification.verseOrdinal(
+                    osisId: osisId,
+                    chapter: chapter,
+                    verse: 1
+                ),
+                let end = JSwordKJVAVersification.verseOrdinal(
+                    osisId: osisId,
+                    chapter: chapter,
+                    verse: resolvedVerseCount
+        )
+      else {
+                return nil
+            }
+            return (start, end, resolvedVerseCount)
+        }
+        return bookCatalog.chapterOrdinalRange(book: book, chapter: chapter, verseCount: verseCount)
     }
 
     /// Ordinal range for the current chapter using the active module's SWORD versification.
@@ -542,7 +758,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Notes with non-empty payloads that belong to the currently visible chapter.
     private func currentChapterMyNotesBookmarks() -> [BibleBookmark] {
-        accessibilitySnapshotFactory().currentChapterMyNotesBookmarks()
+        if showingMyNotes, let activeMyNotesTarget {
+            return myNotesBookmarks(for: activeMyNotesTarget)
+        }
+        return accessibilitySnapshotFactory().currentChapterMyNotesBookmarks()
     }
 
     /// Typed My Notes state used to produce compact UI-test accessibility exports.
@@ -581,7 +800,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     ) {
         myDocumentCoordinator.clearActivePageUnless(category: category, moduleName: moduleName)
         renderedDocumentKind = documentKind
-        renderedContentState = BibleReaderRenderedContentState(
+    renderedContentState =
+      BibleReaderRenderedContentState(
             category: category,
             moduleName: moduleName,
             book: book,
@@ -614,10 +834,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      mirror Android's display title, for example `BDBT: H430`, without mutating the durable document
      identity to the selected dictionary tab.
      */
-    var androidMultiDocumentHeaderSummary: AndroidSpecialDocumentIdentity.MultiDocumentHeaderSummary? {
-        guard let activeRequest = specialDocumentCoordinator.activeRequest(
+  var androidMultiDocumentHeaderSummary: AndroidSpecialDocumentIdentity.MultiDocumentHeaderSummary?
+  {
+    guard
+      let activeRequest = specialDocumentCoordinator.activeRequest(
             isShowingAndroidMultiDocument: isShowingAndroidMultiDocument
-        ) else {
+      )
+    else {
             return nil
         }
         return AndroidSpecialDocumentIdentity.multiDocumentHeaderSummary(
@@ -635,8 +858,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         switch currentCategory {
         case .bible:
             return activeModule?.info.features.contains(.strongsNumbers) == true
+        || activeSQLiteBibleModule?.metadata.hasStrongs == true
         case .commentary:
             return activeCommentaryModule?.info.features.contains(.strongsNumbers) == true
+        || activeSQLiteCommentaryModule?.metadata.hasStrongs == true
         case .generalBook:
             return isShowingAndroidMultiDocument
         default:
@@ -665,8 +890,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Android delegates toolbar search visibility to `CurrentPage.isSearchable`: Bible and regular
      commentary pages are searchable, dictionary pages are not, and general-book pages are searchable
-     only for EPUB-backed content. The iOS reader currently represents EPUB with its own category, so
-     non-EPUB general books, including `Multi`, remain non-searchable. Android also marks hidden
+     only for EPUB-backed content. Non-EPUB general books, including `Multi`, remain non-searchable.
+     Android also marks hidden
      commentary fake documents such as Memorize as special documents, so they do not expose ordinary
      commentary search.
 
@@ -675,8 +900,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     var isCurrentPageSearchable: Bool {
         switch currentCategory {
-        case .bible, .commentary, .epub:
+        case .bible, .commentary:
             return !isShowingAndroidMultiDocument && !isShowingAndroidMemorizeDocument
+        case .generalBook, .epub:
+            return activeEpubReader != nil && !isShowingAndroidMultiDocument
         default:
             return false
         }
@@ -686,19 +913,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Whether the current page can be spoken by Android's page-level speak action.
 
      Android disables speech for special documents such as `Multi` and Memorize, while ordinary
-     Bible/commentary pages remain speakable. iOS page-level speech is backed by the current SWORD
-     text context, so this property intentionally suppresses special links-window pages instead of
-     invoking speech with stale Bible coordinates.
+     Bible and generic pages, including maps, remain speakable. iOS suppresses the same special
+     links-window pages and routes every supported visible category through its source-owned
+     provider instead of borrowing Bible coordinates.
 
      - Returns: `true` when page-level speech is valid for the visible page.
      - Side effects: None.
      */
     var isCurrentPageSpeakable: Bool {
         switch currentCategory {
-        case .bible, .commentary:
+        case .bible, .commentary, .dictionary, .generalBook, .map, .epub, .dailyDevotion:
             return !isShowingAndroidMultiDocument && !isShowingAndroidMemorizeDocument
-        default:
-            return false
         }
     }
 
@@ -729,8 +954,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Night mode toggle
     var nightMode: Bool = false
 
-    /// Latest asynchronous compare request used to ignore stale background payloads.
-    private var compareDocumentRequestID = UUID()
+    /// Monotonic owner token for every native intent that can replace reader content.
+    private var contentIntentGeneration: UInt64 = 0
+    /// Injectable asynchronous Compare build boundary used by deterministic race coverage.
+    @ObservationIgnored
+    private let compareDocumentBuildOperation: (BibleReaderCompareDocumentBuilder.Request) -> String?
     /// TTS service
     var speakService: SpeakService?
     /// Speech-specific collaborator that builds TTS payloads and owns word-highlight state.
@@ -755,6 +983,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - initializesSword: Whether to initialize SWORD immediately. Pane controllers that will
          copy an existing controller's shared module state pass `false` to avoid creating a
          transient extra `SwordManager`.
+     - aiDocMarkerEventCenter: App-owned typed marker event channel shared by reader panes.
 
      Side effects:
      - assigns itself as the bridge delegate
@@ -767,23 +996,100 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public init(
         bridge: BibleBridge,
         bookmarkService: BookmarkService? = nil,
-        initializesSword: Bool = true
+    initializesSword: Bool = true,
+    aiDocMarkerEventCenter: MyDocumentAIDocMarkerEventCenter = .shared
     ) {
         self.bridge = bridge
         self.bookmarkService = bookmarkService
+        self.compareDocumentBuildOperation = BibleReaderCompareDocumentBuilder.buildDocumentJSON
         super.init()
         bridge.delegate = self
+    observeAIDocMarkerEvents(aiDocMarkerEventCenter)
         if initializesSword {
             initializeSwordIfNeeded()
         }
     }
 
-    init(bridge: BibleBridge, bookmarkService: BookmarkService? = nil, swordManagerOverride: SwordManager) {
+    init(
+        bridge: BibleBridge,
+        bookmarkService: BookmarkService? = nil,
+        swordManagerOverride: SwordManager,
+    compareDocumentBuildOperation:
+      @escaping (BibleReaderCompareDocumentBuilder.Request) -> String? =
+      BibleReaderCompareDocumentBuilder.buildDocumentJSON,
+    aiDocMarkerEventCenter: MyDocumentAIDocMarkerEventCenter = .shared
+    ) {
         self.bridge = bridge
         self.bookmarkService = bookmarkService
+        self.compareDocumentBuildOperation = compareDocumentBuildOperation
         super.init()
         bridge.delegate = self
+    observeAIDocMarkerEvents(aiDocMarkerEventCenter)
         configureSwordManager(swordManagerOverride)
+    }
+
+  /**
+   Subscribes this pane to committed AI marker changes from app persistence owners.
+
+   - Parameter eventCenter: Typed event center shared by all open reader controllers.
+   - Side effects: Retains one observation token and emits future marker changes to this bridge.
+   - Failure modes: None; deinitializing the controller cancels the retained observation token.
+   */
+  private func observeAIDocMarkerEvents(_ eventCenter: MyDocumentAIDocMarkerEventCenter) {
+    aiDocMarkerEventObservation = eventCenter.observe { [weak self] event in
+      self?.emitAIDocMarkerChanges(event)
+    }
+  }
+
+  /**
+   Serializes one marker change event for this pane's displayed versification.
+
+   - Parameter event: Committed marker upserts and generated-page deletions.
+   - Side effects: Emits Vue `add_or_update_ai_doc_markers` and `delete_ai_doc_markers` events.
+   - Failure modes: Marker JSON serialization failure suppresses only the upsert emission; delete
+     identifiers still emit. Non-Bible panes retain stored KJVA marker ordinals like Android.
+   */
+  private func emitAIDocMarkerChanges(_ event: MyDocumentAIDocMarkersChangedEvent) {
+    if !event.markers.isEmpty {
+      let targetVersification =
+        currentCategory == .bible
+        ? activeModule.map(VersificationMapper.versificationName)
+        : nil
+      let markerObjects = event.markers.map {
+        BibleReaderMyDocumentCoordinator.markerJSON(
+          $0,
+          targetVersification: targetVersification
+        )
+      }
+      if let data = try? JSONSerialization.data(
+        withJSONObject: markerObjects,
+        options: [.sortedKeys]
+      ), let json = String(data: data, encoding: .utf8) {
+        bridge.emit(event: "add_or_update_ai_doc_markers", data: json)
+      } else {
+        logger.error("Failed to serialize AI document marker change event")
+      }
+    }
+
+    if !event.deletedPageIDs.isEmpty {
+      bridge.emitEncoded(
+        event: "delete_ai_doc_markers",
+        data: event.deletedPageIDs.map(\.uuidString)
+      )
+    }
+  }
+
+    /**
+     Starts one reader-content replacement intent and invalidates every older asynchronous result.
+
+     - Returns: Monotonic generation owned by the new intent.
+     - Side effects: Advances controller-local replacement state.
+     - Failure modes: None; wrapping increment preserves ordering for the practical process lifetime.
+     */
+    @discardableResult
+    private func beginReplacingContentIntent() -> UInt64 {
+        contentIntentGeneration &+= 1
+        return contentIntentGeneration
     }
 
     /**
@@ -876,8 +1182,47 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     var onOpenMemorizeDocumentInLinksWindow: ((MemorizeDocumentEmission) -> Void)?
 
+  /**
+   Callback for routing an exact AI-generated page through the pane-owned links-window policy.
+
+   The owning pane chooses the current or dedicated links controller using the same preference,
+   window creation, and registration retry path as other links. Without an owner, the bridge
+   retains its exact current-pane fallback for standalone controller use.
+   */
+  var onOpenAIDocumentPageInLinksWindow: ((AIDocumentPageRequest) -> Void)?
+
     /// Callback for presenting native AI regeneration for a validated My Documents page.
     var onRegenerateMyDocumentPage: ((MyDocumentAIPageActionContext) -> Void)?
+
+  /// Callback for presenting bridge-requested help through the pane-owned native help surface.
+  var onShowReaderHelp: ((AIReaderHelpPresentation) -> Void)?
+
+  /// Callback for resolving an exact BibleView selection into the native AI prompt workflow.
+  var onRequestAIAction: ((AISelectionActionRequest) -> Void)?
+
+  /// Callback for resolving an exact note-editor destination into the native AI prompt workflow.
+  var onRequestNoteEditorAIAction: ((AINoteEditorActionRequest) -> Void)?
+
+  /// Callback for presenting or directly opening exact AI document marker destinations.
+  var onChooseAIDocumentPage: (([AIDocumentPageMarker]) -> Void)?
+
+  /// Callback for opening an exact built-in, add-on, or user source prompt.
+  var onOpenAIPromptEditor: ((UUID) -> Void)?
+
+  /// Callback for Android's workspace-level AI action menu entry.
+  var onRequestWorkspaceAIAction: (() -> Void)?
+
+  /// Live Android-compatible provider-row predicate used by native and Vue AI action visibility.
+  var isAIProviderConfigured: (() -> Bool)?
+
+  /**
+   Resolves pane ownership after the active AI My Documents page is deleted successfully.
+
+   The owning `BibleWindowPane` closes removable windows through `WindowManager`. A missing owner
+   or `.showBible` result preserves the standalone/primary-pane fallback used by controller tests
+   and the app's sole non-removable pane.
+   */
+  var onDeleteActiveMyDocumentPage: (() -> MyDocumentPageDeletionResolution)?
 
     /// Callback for presenting native label assignment UI (bookmarkId).
     var onAssignLabels: ((UUID) -> Void)?
@@ -991,7 +1336,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             recordHistory: { [weak self] book, chapter, verse in
                 guard let self,
                       let store = self.workspaceStore,
-                      let window = self.activeWindow else {
+          let window = self.activeWindow
+        else {
                     return
                 }
                 let osisId = self.osisBookId(for: book)
@@ -1015,7 +1361,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      The coordinator owns module/category switching rules while this controller remains the owner of
      observed active-module state, current keys, persistence callbacks, and WebView reloads. Closures
-     capture the controller weakly so a pending switch action cannot extend pane lifetime.
+   capture the controller weakly so a pending switch action cannot extend pane lifetime. Generic
+   exact-key validation and key-list enumeration remain throwing so the coordinator can abort
+   before mutating controller or persisted pane state. `SwordModule` shares a successful immutable
+   key snapshot with the chooser, avoiding a second native traversal.
      */
     private func makeModuleSwitchContext() -> BibleReaderModuleSwitchContext {
         BibleReaderModuleSwitchContext(
@@ -1023,28 +1372,50 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             activeWindow: activeWindow,
             clientReady: clientReady,
             currentCategory: currentCategory,
+      currentDictionaryKey: currentDictionaryKey,
+      currentGeneralBookKey: currentGeneralBookKey,
+      currentMapKey: currentMapKey,
+      containsExactGenericKey: { module, key in
+        try module.containsExactKey(key)
+      },
+      loadGenericKeys: { module in
+        try module.loadAllKeys()
+      },
             setBibleModule: { [weak self] module, moduleName in
                 self?.activeModule = module
+        self?.activeSQLiteBibleModule = nil
                 self?.activeModuleName = moduleName
             },
             setCommentaryModule: { [weak self] module, moduleName in
                 self?.activeCommentaryModule = module
+        self?.activeSQLiteCommentaryModule = nil
                 self?.activeCommentaryModuleName = moduleName
             },
             setDictionaryModule: { [weak self] module, moduleName in
                 self?.activeDictionaryModule = module
+        self?.activeSQLiteDictionaryModule = nil
                 self?.activeDictionaryModuleName = moduleName
-                self?.currentDictionaryKey = nil
             },
             setGeneralBookModule: { [weak self] module, moduleName in
                 self?.activeGeneralBookModule = module
                 self?.activeGeneralBookModuleName = moduleName
-                self?.currentGeneralBookKey = nil
+                self?.activeEpubReader = nil
+                self?.activeEpubIdentifier = nil
+                self?.activeEpubTitle = nil
+                self?.currentEpubTitle = nil
             },
             setMapModule: { [weak self] module, moduleName in
                 self?.activeMapModule = module
                 self?.activeMapModuleName = moduleName
-                self?.currentMapKey = nil
+      },
+      setDictionaryKey: { [weak self] key in
+        self?.currentDictionaryKey = key
+      },
+      setGeneralBookKey: { [weak self] key in
+        self?.currentGeneralBookKey = key
+      },
+      setMapKey: { [weak self] key in
+        self?.currentMapKey = key
             },
             setCurrentCategory: { [weak self] category in
                 self?.currentCategory = category
@@ -1063,6 +1434,78 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             }
         )
     }
+
+  /**
+   Builds state, persistence, and render seams for the SQLite switch coordinator.
+
+   The coordinator owns switch ordering and preflight while this controller remains the only
+   owner of observable backend handles and pane fields. Closures capture weakly so an in-flight
+   action cannot extend pane lifetime.
+
+   - Returns: Ephemeral synchronous switch context for one user/runtime operation.
+   - Side effects: None during construction; invoked callbacks mutate active category state,
+     PageManager selection fields, persistence, and reader content.
+   - Failure modes: Callbacks become no-ops after controller deallocation or without a pane.
+   */
+  private func makeSQLiteModuleSwitchContext() -> BibleReaderSQLiteModuleSwitchContext {
+    BibleReaderSQLiteModuleSwitchContext(
+      resolveModule: { [weak self] name, category in
+        self?.sqliteRuntimeCoordinator.preferredModule(named: name, category: category)
+      },
+      currentDictionaryKey: { [weak self] in
+        self?.currentDictionaryKey
+      },
+      currentCategory: { [weak self] in
+        self?.currentCategory ?? .bible
+      },
+      isClientReady: { [weak self] in
+        self?.clientReady == true
+      },
+      activateBible: { [weak self] module in
+        self?.activeModule = nil
+        self?.activeSQLiteBibleModule = module
+        self?.activeModuleName = module.info.name
+      },
+      activateCommentary: { [weak self] module in
+        self?.activeCommentaryModule = nil
+        self?.activeSQLiteCommentaryModule = module
+        self?.activeCommentaryModuleName = module.info.name
+      },
+      activateDictionary: { [weak self] module, key in
+        self?.activeDictionaryModule = nil
+        self?.activeSQLiteDictionaryModule = module
+        self?.activeDictionaryModuleName = module.info.name
+        self?.currentDictionaryKey = key
+      },
+      setCurrentCategory: { [weak self] category in
+        self?.currentCategory = category
+      },
+      refreshBookList: { [weak self] in
+        self?.refreshBookList()
+      },
+      persistSelection: { [weak self] category, moduleName, key, updatesVisible in
+        guard let self, let pageManager = self.activeWindow?.pageManager else { return }
+        switch category {
+        case .bible:
+          pageManager.bibleDocument = moduleName
+        case .commentary:
+          pageManager.commentaryDocument = moduleName
+        case .dictionary:
+          pageManager.dictionaryDocument = moduleName
+          pageManager.dictionaryKey = key
+        default:
+          return
+        }
+        if updatesVisible {
+          pageManager.currentCategoryName = category.pageManagerKey
+        }
+        self.onPersistState?()
+      },
+      reloadContent: { [weak self] in
+        self?.loadCurrentContent()
+      }
+    )
+  }
 
     /**
      Builds the coordinator for Android-compatible reading-progress and memorization bridge actions.
@@ -1086,8 +1529,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     chapter: chapter
                 )
             },
-            resolveMemorizationRange: { [weak self] startOrdinal, endOrdinal in
+            resolveMemorizationRange: { [weak self] bookInitials, startOrdinal, endOrdinal in
                 self?.memorizationOrdinalResolution(
+                    bookInitials: bookInitials,
                     startOrdinal: startOrdinal,
                     endOrdinal: endOrdinal
                 )
@@ -1134,15 +1578,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private func applyNightModeBackground() {
         let s = displaySettings
         let d = TextDisplaySettings.appDefaults
-        let bgInt = nightMode
-            ? (s.nightBackground ?? d.nightBackground ?? -16777216)
+    let bgInt =
+      nightMode
+      ? (s.nightBackground ?? d.nightBackground ?? -16_777_216)
             : (s.dayBackground ?? d.dayBackground ?? -1)
-        let fgInt = nightMode
+    let fgInt =
+      nightMode
             ? (s.nightTextColor ?? d.nightTextColor ?? -1)
-            : (s.dayTextColor ?? d.dayTextColor ?? -16777216)
+      : (s.dayTextColor ?? d.dayTextColor ?? -16_777_216)
         let bg = Self.cssColor(fromArgbInt: bgInt)
         let fg = Self.cssColor(fromArgbInt: fgInt)
-        bridge.webView?.evaluateJavaScript("""
+    bridge.webView?.evaluateJavaScript(
+      """
         document.documentElement.style.backgroundColor = '\(bg)';
         document.body.style.backgroundColor = '\(bg)';
         document.body.style.color = '\(fg)';
@@ -1182,38 +1629,161 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func speakCurrentChapter() {
         guard isCurrentPageSpeakable else { return }
-        guard let service = speakService, let context = makeSpeechContext() else { return }
-        speechCoordinator.speakCurrentChapter(service: service, context: context)
+        guard let service = speakService else { return }
+        service.bookmarkManager = bookmarkService
+
+        switch currentCategory {
+        case .bible:
+            guard let session = defaultSpeechSession(service: service) else { return }
+            service.currentTitle = session.title
+            service.currentSubtitle = session.subtitle
+            service.speak(provider: session.provider, callbacks: session.callbacks)
+        case .commentary:
+            guard let name = activeCommentaryModuleName else { return }
+            let key = "\(osisBookId(for: currentBook)) \(currentChapter):\(currentVerse)"
+            _ = startGenericSpeech(
+                bookInitials: name,
+                key: key,
+                startOrdinal: nil,
+                endOrdinal: nil,
+                expectedCategory: .commentary,
+                service: service
+            )
+        case .dictionary:
+            guard let name = activeDictionaryModuleName else { return }
+            _ = startGenericSpeech(
+                bookInitials: name,
+                key: currentDictionaryKey,
+                startOrdinal: nil,
+                endOrdinal: nil,
+                expectedCategory: .dictionary,
+                service: service
+            )
+        case .generalBook, .epub, .dailyDevotion:
+            speakCurrentGeneralDocument(service: service)
+        case .map:
+            guard let name = activeMapModuleName else { return }
+            _ = startGenericSpeech(
+                bookInitials: name,
+                key: currentMapKey,
+                startOrdinal: nil,
+                endOrdinal: nil,
+                expectedCategory: .generalBook,
+                service: service
+            )
+        }
     }
 
     /**
-     Speak a specific verse range using TTS.
+     Starts an explicitly identified Bible or memorization source through strict v11n conversion.
 
-     See `speakCurrentChapter()` for details on why Strong's/Morphology options
-     are temporarily disabled during text extraction.
+     - Parameters describe the Android bridge category, requested installed module, source
+       versification, and inclusive source ordinals.
+     - Returns: `true` only when the requested source resolves and starts.
+     - Side effects: Replaces active speech and installs generation-scoped reader callbacks.
+     - Failure modes: Missing modules, wrong categories, unsupported versifications, and unmappable
+       or unaddressable ordinals fail closed without using the active Bible.
      */
-    private func speakVerseRange(startOrdinal: Int, endOrdinal: Int) {
-        guard let service = speakService, let context = makeSpeechContext() else { return }
-        speechCoordinator.speakVerseRange(
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal,
+    @discardableResult
+    private func startBibleSpeech(
+        category: SpeakDocumentCategory,
+        bookInitials: String,
+        versification: String,
+        startOrdinal: Int,
+        endOrdinal: Int,
+        service: SpeakService
+    ) -> Bool {
+    if let module = sqliteRuntimeCoordinator.preferredModule(
+      named: bookInitials,
+      category: .bible
+    ),
+      let session = sqliteBibleSpeechSession(
+        module: module,
+        category: category,
+        sourceVersification: versification,
+        startOrdinal: startOrdinal,
+        endOrdinal: category == .memorization ? endOrdinal : startOrdinal,
+        service: service
+      )
+    {
+      service.currentTitle = session.title
+      service.currentSubtitle = session.subtitle
+      service.speak(provider: session.provider, callbacks: session.callbacks)
+      return true
+    }
+        guard let requestedModule = swordManager?.module(named: bookInitials),
+      let context = makeSpeechContext(module: requestedModule)
+    else {
+            return false
+        }
+        let effectiveEnd = category == .memorization ? endOrdinal : startOrdinal
+        return speechCoordinator.speakBibleRequest(
+            SpeakSelectionRequest(
+                category: category,
+                bookInitials: bookInitials,
+                key: "",
+                startOrdinal: startOrdinal,
+                endOrdinal: effectiveEnd,
+                versification: versification
+            ),
             service: service,
             context: context
         )
     }
 
-    /**
-     Speak a specific verse range repeatedly for Android memorization-loop parity.
-     */
-    private func speakMemorizationLoopRange(startOrdinal: Int, endOrdinal: Int) {
-        guard let service = speakService, let context = makeSpeechContext() else { return }
-        speechCoordinator.speakMemorizationLoopRange(
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal,
-            service: service,
-            context: context
-        )
-    }
+  /**
+   Builds a serialized SQLite Bible speech session and pane-owned synchronization callbacks.
+
+   - Parameters describe exact source identity/ordinals or an optional persisted checkpoint.
+   - Returns: A complete session, or nil when source mapping or real verse addressability fails.
+   - Side effects: Enumerates real SQLite verses; lazy text reads remain serialized by the handle.
+   - Failure modes: Never falls back to SWORD or placeholder text.
+   */
+  private func sqliteBibleSpeechSession(
+    module: BibleReaderSQLiteModuleHandle,
+    category: SpeakDocumentCategory,
+    sourceVersification: String = JSwordKJVAVersification.name,
+    startOrdinal: Int?,
+    endOrdinal: Int?,
+    checkpoint: SpeakProviderCheckpoint? = nil,
+    service: SpeakService
+  ) -> SpeakSessionReconstruction? {
+    sqliteSpeechDispatchCoordinator.bibleSession(
+      module: module,
+      category: category,
+      sourceVersification: sourceVersification,
+      startOrdinal: startOrdinal,
+      endOrdinal: endOrdinal,
+      checkpoint: checkpoint,
+      service: service,
+      context: BibleReaderSQLiteBibleSpeechContext(
+        evaluateJavaScript: { [weak bridge] script in
+          bridge?.webView?.evaluateJavaScript(script)
+        },
+        shouldSynchronize: { [weak service] in
+          service?.advancedSettings.synchronize == true
+        },
+        synchronize: { [weak self] sourceModule, position in
+          guard let self,
+            let ordinal = position.ordinalStart,
+            let chapter = position.chapter
+          else {
+            return
+          }
+          if self.activeModuleName.caseInsensitiveCompare(sourceModule.info.name)
+            != .orderedSame
+          {
+            self.switchBibleDocument(to: sourceModule.info.name)
+          }
+          self.navigateToSynchronizedPosition(
+            book: position.bookName,
+            chapter: chapter,
+            ordinal: ordinal
+          )
+        }
+      )
+    )
+  }
 
     /**
      Builds the speech collaborator context from the controller's current reader state.
@@ -1222,14 +1792,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      emission. Closures capture the controller or bridge weakly so `SpeakService` callbacks do not
      retain the reader controller after the pane is dismissed.
      */
-    private func makeSpeechContext() -> BibleReaderSpeechContext? {
-        guard let module = activeModule else { return nil }
+  private func makeSpeechContext(module requestedModule: SwordModule? = nil)
+    -> BibleReaderSpeechContext?
+  {
+        guard let module = requestedModule ?? activeModule else { return nil }
         return BibleReaderSpeechContext(
             module: module,
             swordManager: swordManager,
             currentBook: currentBook,
             currentChapter: currentChapter,
-            activeModuleName: activeModuleName,
+            currentVerse: currentVerse,
+            activeModuleName: module.info.name,
             displaySettings: displaySettings,
             osisBookId: { [weak self] bookName in
                 self?.osisBookId(for: bookName) ?? BibleReaderController.osisBookId(for: bookName)
@@ -1237,18 +1810,823 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             parseVerseKey: { [weak self] key in
                 self?.parseVerseKey(key)
             },
-            verseOrdinal: { [weak self] osisBookId, chapter, verse in
-                self?.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
+            verseOrdinal: { osisBookId, chapter, verse in
+                module.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
             },
             evaluateJavaScript: { [weak bridge] js in
                 bridge?.webView?.evaluateJavaScript(js)
+            },
+            synchronizePosition: { [weak self] book, chapter, ordinal in
+                guard let self else { return }
+                if self.activeModuleName != module.info.name {
+                    self.switchBibleDocument(to: module.info.name)
+                }
+                self.navigateToSynchronizedPosition(book: book, chapter: chapter, ordinal: ordinal)
             }
         )
     }
 
-    /// Switch to a different installed Bible module.
+  /**
+   Loads Android's optional raw versification property for one reading-plan definition.
+
+   - Parameter planCode: Stable Android reading-plan code selected in the reader.
+   - Returns: The selected definition's raw versification value, or nil when it omits the key.
+   - Side effects: Reads bundled, user, and add-on plan definitions from the active module tree.
+   - Throws: ReadingPlanDefinitionError when no valid definition exists for the supplied code.
+   */
+  @MainActor
+  func readingPlanVersificationProperty(forPlanCode planCode: String) throws -> String? {
+    try ReadingPlanService.versificationProperty(
+      forPlanCode: planCode,
+      modulePath: swordManager?.modulePath ?? SwordManager.defaultModulePath()
+    )
+  }
+
+  /**
+   Performs one Android-compatible Daily Reading request in the active Bible.
+
+   Every passage is converted through the selected SWORD or Android SQLite source and proven
+   addressable before either callback runs. Read preserves the complete mapped ordinal range for
+   reader highlighting. Speak queues the ordered bounded passage list and succeeds only after the
+   first utterance reaches the synthesizer acceptance boundary, allowing Daily Reading to persist
+   progress only after a real action starts.
+
+   - Parameter request: Exact plan-canon Read, Speak, or Speak All request.
+   - Side effects: Navigates the exact active Bible once or appends one ordered passage list to
+     source-owned speech.
+   - Throws: Cancellation or BibleReaderDailyReadingActionFailure. Validation failures perform no
+     navigation, speech, or progress mutation. Backend identity changes fail without fallback.
+   */
+  @MainActor
+  func performDailyReadingAction(_ request: DailyReadingActionRequest) async throws {
+    try Task.checkCancellation()
+    let source: BibleReaderInstalledScriptureSource
+    if let module = activeSQLiteBibleModule, module.info.category == .bible {
+      source = .sqlite(module)
+    } else if let module = activeModule, module.info.category == .bible {
+      source = .sword(module)
+    } else {
+      throw BibleReaderDailyReadingActionFailure.activeBibleUnavailable
+    }
+    try BibleReaderDailyReadingActionCoordinator.perform(
+      request,
+      source: source,
+      navigate: { [self] passage in
+        switch source {
+        case .sword(let module):
+          guard activeModule === module, activeSQLiteBibleModule == nil else {
+            throw BibleReaderDailyReadingActionFailure.activeBibleUnavailable
+          }
+        case .sqlite(let module):
+          guard activeSQLiteBibleModule === module, activeModule == nil else {
+            throw BibleReaderDailyReadingActionFailure.activeBibleUnavailable
+          }
+        }
+        guard let bookName = try source.bookList().first(where: {
+          $0.osisId == passage.start.osisBookId
+        })?.name else {
+          throw BibleReaderDailyReadingActionFailure.activeBibleUnavailable
+        }
+        pendingLinkNavigationOrdinalRange = [
+          passage.ordinalRange.lowerBound,
+          passage.ordinalRange.upperBound,
+        ]
+        navigationCoordinator.navigateTo(
+          book: bookName,
+          chapter: passage.start.chapter,
+          verse: passage.start.verse,
+          context: makeNavigationContext()
+        )
+      },
+      speak: { [self] passages in
+        guard let service = speakService else { return false }
+        service.bookmarkManager = bookmarkService
+        switch source {
+        case .sword(let module):
+          guard activeModule === module,
+            activeSQLiteBibleModule == nil,
+            let context = makeSpeechContext(module: module)
+          else {
+            return false
+          }
+          return speechCoordinator.speakBiblePassageList(
+            ranges: passages.map(\.speechRange),
+            service: service,
+            context: context
+          )
+        case .sqlite(let module):
+          guard activeSQLiteBibleModule === module, activeModule == nil,
+            let session = sqliteSpeechDispatchCoordinator.biblePassageListSession(
+              module: module,
+              ranges: passages.map(\.speechRange),
+              service: service,
+              context: BibleReaderSQLiteBibleSpeechContext(
+                evaluateJavaScript: { [weak bridge] script in
+                  bridge?.webView?.evaluateJavaScript(script)
+                },
+                shouldSynchronize: { [weak service] in
+                  service?.advancedSettings.synchronize == true
+                },
+                synchronize: { [weak self] sourceModule, position in
+                  guard let self,
+                    let ordinal = position.ordinalStart,
+                    let chapter = position.chapter
+                  else {
+                    return
+                  }
+                  if self.activeModuleName.caseInsensitiveCompare(sourceModule.info.name)
+                    != .orderedSame
+                  {
+                    self.switchBibleDocument(to: sourceModule.info.name)
+                  }
+                  self.navigateToSynchronizedPosition(
+                    book: position.bookName,
+                    chapter: chapter,
+                    ordinal: ordinal
+                  )
+                }
+              )
+            )
+          else {
+            return false
+          }
+          let result = service.start(
+            provider: session.provider,
+            callbacks: session.callbacks,
+            queue: true
+          )
+          guard result.succeeded else { return false }
+          service.currentTitle = session.title
+          service.currentSubtitle = session.subtitle
+          return true
+        }
+      }
+    )
+  }
+
+    /** One exact non-Bible source resolved from Android module initials. */
+    private enum GenericSpeechSource {
+        case sword(module: SwordModule, category: SpeakDocumentCategory)
+        case epub(EpubReader)
+        case myDocument(MyDocument)
+    }
+
+    /** Builds category-correct SWORD generic context with source-owned document-switch navigation. */
+    func makeGenericSpeechContext(
+        module: SwordModule,
+        moduleName: String,
+        category: SpeakDocumentCategory,
+        currentKey: String?
+    ) -> BibleReaderGenericSpeechContext? {
+        guard module.info.name == moduleName else { return nil }
+        return BibleReaderGenericSpeechContext(
+            category: category,
+            module: module,
+            currentKey: currentKey,
+            moduleName: moduleName,
+            displayName: module.info.description.isEmpty ? moduleName : module.info.description,
+            displaySettings: displaySettings,
+            swordManager: swordManager,
+            ordinalForKey: { [weak self] sourceKey, index in
+                guard category == .commentary,
+          let (book, chapter, verse) = self?.parseVerseKey(sourceKey)
+        else {
+                    return index
+                }
+                let osisID = self?.osisBookId(for: book) ?? BibleReaderController.osisBookId(for: book)
+                return module.verseOrdinal(osisBookId: osisID, chapter: chapter, verse: verse) ?? index
+            },
+            synchronizeKey: { [weak self] sourceKey, _ in
+                guard let self else { return }
+                switch category {
+                case .commentary:
+                    if self.activeCommentaryModuleName != moduleName {
+                        self.switchCommentaryDocument(to: moduleName)
+                    }
+                    if let (book, chapter, verse) = self.parseVerseKey(sourceKey) {
+                        self.currentBook = book
+                        self.currentChapter = chapter
+                        self.currentVerse = verse
+                        self.loadCommentaryForCurrentVerse()
+                    }
+                case .dictionary:
+                    if self.activeDictionaryModuleName != moduleName {
+                        self.switchDictionaryDocument(to: moduleName)
+                    }
+                    self.loadDictionaryEntry(key: sourceKey)
+                case .generalBook:
+                    if module.info.category == .map {
+                        if self.activeMapModuleName != moduleName {
+                            self.switchMapDocument(to: moduleName)
+                        }
+                        self.loadMapEntry(key: sourceKey)
+                    } else {
+                        if self.activeGeneralBookModuleName != moduleName {
+                            self.switchGeneralBookDocument(to: moduleName)
+                        }
+                        self.loadGeneralBookEntry(key: sourceKey)
+                    }
+                case .myDocument, .bible, .memorization, .selection:
+                    break
+                }
+            }
+        )
+    }
+
+    /** Maps one SWORD category to Android's corresponding generic speech provider. */
+  private static func genericSpeechCategory(for category: ModuleCategory) -> SpeakDocumentCategory?
+  {
+        BibleReaderSpeechProviderFactory.category(for: category)
+    }
+
+    /** Resolves a generic identity exactly and rejects ambiguous cross-store collisions. */
+    private func genericSpeechSource(
+        bookInitials: String,
+        expectedCategory: SpeakDocumentCategory?
+    ) -> GenericSpeechSource? {
+        var candidates: [GenericSpeechSource] = []
+    if expectedCategory == nil || expectedCategory == .generalBook
+      || expectedCategory == .myDocument,
+      let document = myDocumentStore?.document(initials: bookInitials)
+    {
+            candidates.append(.myDocument(document))
+        }
+        if expectedCategory == nil || expectedCategory == .generalBook,
+           let reader = activeEpubReader?.initials == bookInitials
+               ? activeEpubReader
+        : EpubReader(initials: bookInitials)
+    {
+            candidates.append(.epub(reader))
+        }
+        if let module = swordManager?.module(named: bookInitials),
+           let category = Self.genericSpeechCategory(for: module.info.category),
+      expectedCategory == nil || expectedCategory == category
+    {
+            candidates.append(.sword(module: module, category: category))
+        }
+        guard candidates.count == 1 else {
+            if candidates.count > 1 {
+                logger.error("Ambiguous speech source identity: \(bookInitials, privacy: .public)")
+            }
+            return nil
+        }
+        return candidates[0]
+    }
+
+    /** Projects My Documents pages into deterministic provider order. */
+    private func myDocumentSpeechPages(_ document: MyDocument) -> [BibleReaderSpeechPage] {
+        (document.pages ?? []).sorted {
+            if $0.orderNumber != $1.orderNumber { return $0.orderNumber < $1.orderNumber }
+            return $0.pageKey < $1.pageKey
+        }.map { page in
+            let content = page.pageContent?.content ?? ""
+            return BibleReaderSpeechPage(
+                key: page.pageKey,
+                title: page.title,
+                plainText: GenericBookmarkSourceTextProjection.myDocumentText(
+                    content,
+                    contentType: page.contentType
+                ),
+                rawMarkup: page.contentType == .osis ? content : "",
+                ordinalRange: 0...0,
+                language: page.languageCode ?? "en"
+            )
+        }
+    }
+
+    /**
+     Builds one exact generic session without falling back to the visible Bible or another source.
+
+     The optional checkpoint selects reconstruction mode; otherwise `key` and local ordinal bounds
+     represent Android's `BookAndKey`. An expected category is authoritative, except that Android's
+     generated MyDocument modules arrive through the general-book DOM category and are reclassified.
+     */
+    private func genericSpeechSession(
+        bookInitials: String,
+        key: String?,
+        startOrdinal: Int?,
+        endOrdinal: Int?,
+        expectedCategory: SpeakDocumentCategory?,
+        checkpoint: SpeakProviderCheckpoint? = nil,
+        service: SpeakService
+    ) -> SpeakSessionReconstruction? {
+    if let session = sqliteGenericSpeechSession(
+      bookInitials: bookInitials,
+      key: key,
+      startOrdinal: startOrdinal,
+      endOrdinal: endOrdinal,
+      expectedCategory: expectedCategory,
+      checkpoint: checkpoint,
+      service: service
+    ) {
+      return session
+    }
+    guard
+      let source = genericSpeechSource(
+            bookInitials: bookInitials,
+            expectedCategory: expectedCategory
+      )
+    else {
+            return nil
+        }
+        switch source {
+        case .sword(let module, let category):
+      guard
+        let context = makeGenericSpeechContext(
+                module: module,
+                moduleName: bookInitials,
+                category: category,
+                currentKey: key
+        )
+      else {
+                return nil
+            }
+            if let checkpoint {
+                return speechCoordinator.reconstructGenericModuleSession(
+                    checkpoint: checkpoint,
+                    service: service,
+                    context: context
+                )
+            }
+            return speechCoordinator.genericModuleSession(
+                service: service,
+                context: context,
+                requestedKey: key,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal
+            )
+        case .epub(let reader):
+            let synchronize: @MainActor (String, Int) -> Void = { [weak self] sourceKey, ordinal in
+                guard let self else { return }
+                if self.activeEpubReader?.initials != reader.initials {
+                    self.activateEpub(reader, identifier: reader.identifier, requestedKey: sourceKey)
+                }
+                self.loadEpubEntry(key: sourceKey, jumpToOrdinal: ordinal)
+            }
+            if let checkpoint {
+                return speechCoordinator.reconstructPageSession(
+                    checkpoint: checkpoint,
+                    category: .generalBook,
+                    bookInitials: reader.initials,
+                    bookName: reader.title,
+                    pages: epubSpeechPages(reader),
+                    service: service,
+                    synchronize: synchronize
+                )
+            }
+            return speechCoordinator.pageSession(
+                category: .generalBook,
+                bookInitials: reader.initials,
+                bookName: reader.title,
+                pages: epubSpeechPages(reader),
+                currentKey: key,
+                service: service,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal,
+                synchronize: synchronize
+            )
+        case .myDocument(let document):
+            let synchronize: @MainActor (String, Int) -> Void = { [weak self] sourceKey, _ in
+                _ = self?.loadMyDocumentPage(bookInitials: document.initials, pageKey: sourceKey)
+            }
+            if let checkpoint {
+                return speechCoordinator.reconstructPageSession(
+                    checkpoint: checkpoint,
+                    category: .myDocument,
+                    bookInitials: document.initials,
+                    bookName: document.name,
+                    pages: myDocumentSpeechPages(document),
+                    service: service,
+                    synchronize: synchronize
+                )
+            }
+            return speechCoordinator.pageSession(
+                category: .myDocument,
+                bookInitials: document.initials,
+                bookName: document.name,
+                pages: myDocumentSpeechPages(document),
+                currentKey: key,
+                service: service,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal,
+                synchronize: synchronize
+            )
+        }
+    }
+
+  /** Builds an exact SQLite commentary/dictionary speech session before SWORD resolution. */
+  private func sqliteGenericSpeechSession(
+    bookInitials: String,
+    key: String?,
+    startOrdinal: Int?,
+    endOrdinal: Int?,
+    expectedCategory: SpeakDocumentCategory?,
+    checkpoint: SpeakProviderCheckpoint?,
+    service: SpeakService
+  ) -> SpeakSessionReconstruction? {
+    sqliteSpeechDispatchCoordinator.genericSession(
+      bookInitials: bookInitials,
+      key: key,
+      startOrdinal: startOrdinal,
+      endOrdinal: endOrdinal,
+      expectedCategory: expectedCategory,
+      checkpoint: checkpoint,
+      service: service,
+      context: BibleReaderSQLiteGenericSpeechContext(
+        resolveModule: { [weak self] name, category in
+          self?.sqliteRuntimeCoordinator.preferredModule(
+            named: name,
+            category: category
+          )
+        },
+        synchronize: { [weak self] module, category, sourceKey in
+          guard let self else { return }
+          switch category {
+          case .commentary:
+            if self.activeCommentaryModuleName?.caseInsensitiveCompare(module.info.name)
+              != .orderedSame
+            {
+              self.switchCommentaryDocument(to: module.info.name)
+            }
+            guard
+              let reference = SQLiteReaderNavigationResolver.commentaryCoordinate(
+                for: sourceKey
+              ), let bookName = self.bookName(forOsisId: reference.osisBookId)
+            else {
+              return
+            }
+            self.currentBook = bookName
+            self.currentChapter = reference.chapter
+            self.currentVerse = reference.verse
+            self.loadCommentaryForCurrentVerse()
+          case .dictionary:
+            if self.activeDictionaryModuleName?.caseInsensitiveCompare(module.info.name)
+              != .orderedSame
+            {
+              _ = self.switchDictionaryDocument(to: module.info.name)
+            }
+            self.loadDictionaryEntry(key: sourceKey)
+          case .bible, .memorization, .generalBook, .myDocument, .selection:
+            break
+          }
+        }
+      )
+    )
+  }
+
+    /** Starts one exact generic session and publishes its source-owned Now Playing metadata. */
+    @discardableResult
+    private func startGenericSpeech(
+        bookInitials: String,
+        key: String?,
+        startOrdinal: Int?,
+        endOrdinal: Int?,
+        expectedCategory: SpeakDocumentCategory?,
+        service: SpeakService
+    ) -> Bool {
+    guard
+      let session = genericSpeechSession(
+            bookInitials: bookInitials,
+            key: key,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
+            expectedCategory: expectedCategory,
+            service: service
+      )
+    else {
+            return false
+        }
+        service.currentTitle = session.title
+        service.currentSubtitle = session.subtitle
+        service.speak(provider: session.provider, callbacks: session.callbacks)
+        return true
+    }
+
+    /** Routes page-level Speak to the exact active EPUB, MyDocument, or SWORD general book. */
+    private func speakCurrentGeneralDocument(service: SpeakService) {
+        guard let initials = activeGeneralBookModuleName else { return }
+        _ = startGenericSpeech(
+            bookInitials: initials,
+            key: currentGeneralBookKey,
+            startOrdinal: nil,
+            endOrdinal: nil,
+            expectedCategory: .generalBook,
+            service: service
+        )
+    }
+
+    /** Builds deterministic EPUB speech pages in spine order without flattening them into one utterance. */
+    private func epubSpeechPages(_ reader: EpubReader) -> [BibleReaderSpeechPage] {
+        var pages: [BibleReaderSpeechPage] = []
+        var visited = Set<String>()
+        var key = reader.firstKey()
+        while let currentKey = key, visited.insert(currentKey).inserted {
+            if let content = reader.content(forKey: currentKey) {
+                pages.append(
+                    BibleReaderSpeechPage(
+                        key: content.persistedKey,
+                        title: content.title,
+                        plainText: GenericBookmarkSourceTextProjection.xhtmlText(content.html),
+                        rawMarkup: content.html,
+                        ordinalRange: content.ordinalRange,
+                        language: reader.language
+                    )
+                )
+            }
+            key = reader.nextKey(after: currentKey)
+        }
+        return pages
+    }
+
+    /** Reconstructs a persisted pause/last-position checkpoint from its exact source identity. */
+    func reconstructSpeechSession(
+        from checkpoint: SpeakProviderCheckpoint,
+        service: SpeakService
+    ) -> SpeakSessionReconstruction? {
+        let cursor = checkpoint.current
+        switch cursor.category {
+        case .bible, .memorization:
+      if let module = sqliteRuntimeCoordinator.preferredModule(
+        named: cursor.bookInitials,
+        category: .bible
+      ) {
+        return sqliteBibleSpeechSession(
+          module: module,
+          category: cursor.category,
+          startOrdinal: cursor.ordinalStart,
+          endOrdinal: cursor.ordinalEnd,
+          checkpoint: checkpoint,
+          service: service
+        )
+      }
+            guard let module = swordManager?.module(named: cursor.bookInitials),
+        let context = makeSpeechContext(module: module)
+      else {
+                return nil
+            }
+            return speechCoordinator.reconstructBibleSession(
+                checkpoint: checkpoint,
+                service: service,
+                context: context
+            )
+        case .commentary, .dictionary, .generalBook, .myDocument:
+            return genericSpeechSession(
+                bookInitials: cursor.bookInitials,
+                key: cursor.key,
+                startOrdinal: cursor.ordinalStart,
+                endOrdinal: cursor.ordinalEnd,
+                expectedCategory: cursor.category,
+                checkpoint: checkpoint,
+                service: service
+            )
+        case .selection:
+            return nil
+        }
+    }
+
+    /** Builds Android remote Play's default provider from the exact currently visible source. */
+    func defaultSpeechSession(service: SpeakService) -> SpeakSessionReconstruction? {
+        switch currentCategory {
+        case .bible:
+      if let module = activeSQLiteBibleModule,
+        let coordinate = SQLiteReaderNavigationResolver.coordinate(
+          osisBookId: osisBookId(for: currentBook),
+          chapter: currentChapter,
+          verse: currentVerse
+        ),
+        let session = sqliteBibleSpeechSession(
+          module: module,
+          category: .bible,
+          startOrdinal: coordinate.ordinal,
+          endOrdinal: coordinate.ordinal,
+          service: service
+        )
+      {
+        _ = service.resetPassageRepeatIfOutsideRange(for: session.provider)
+        return session
+      }
+            guard let module = activeModule,
+                  let context = makeSpeechContext(module: module),
+                  let ordinal = module.verseOrdinal(
+                      osisBookId: osisBookId(for: currentBook),
+                      chapter: currentChapter,
+                      verse: currentVerse
+        )
+      else {
+                return nil
+            }
+      guard
+        let session = speechCoordinator.bibleSession(
+                request: SpeakSelectionRequest(
+                    category: .bible,
+                    bookInitials: module.info.name,
+                    key: "\(osisBookId(for: currentBook)).\(currentChapter).\(currentVerse)",
+                    startOrdinal: ordinal,
+                    endOrdinal: ordinal,
+                    versification: VersificationMapper.versificationName(for: module)
+                ),
+                service: service,
+                context: context
+        )
+      else {
+                return nil
+            }
+            _ = service.resetPassageRepeatIfOutsideRange(for: session.provider)
+            return session
+        case .commentary:
+            guard let initials = activeCommentaryModuleName else { return nil }
+            return genericSpeechSession(
+                bookInitials: initials,
+                key: "\(osisBookId(for: currentBook)) \(currentChapter):\(currentVerse)",
+                startOrdinal: nil,
+                endOrdinal: nil,
+                expectedCategory: .commentary,
+                service: service
+            )
+        case .dictionary:
+            guard let initials = activeDictionaryModuleName else { return nil }
+            return genericSpeechSession(
+                bookInitials: initials,
+                key: currentDictionaryKey,
+                startOrdinal: nil,
+                endOrdinal: nil,
+                expectedCategory: .dictionary,
+                service: service
+            )
+        case .generalBook, .epub, .dailyDevotion:
+            guard let initials = activeGeneralBookModuleName else { return nil }
+            return genericSpeechSession(
+                bookInitials: initials,
+                key: currentGeneralBookKey,
+                startOrdinal: nil,
+                endOrdinal: nil,
+                expectedCategory: .generalBook,
+                service: service
+            )
+        case .map:
+            guard let initials = activeMapModuleName else { return nil }
+            return genericSpeechSession(
+                bookInitials: initials,
+                key: currentMapKey,
+                startOrdinal: nil,
+                endOrdinal: nil,
+                expectedCategory: .generalBook,
+                service: service
+            )
+        }
+    }
+
+    /** Returns the visible Bible position used when settings change while playback is stopped. */
+    func stoppedBibleSpeechPosition(service: SpeakService) -> SpeakStreamPosition? {
+        guard currentCategory == .bible else { return nil }
+        return defaultSpeechSession(service: service)?.provider.currentPosition
+    }
+
+    /**
+     Creates the backend-neutral installed-Bible registry used by one Search presentation.
+
+     Genuine readable SWORD modules are registered first. Android-compatible SQLite modules are
+     discovered through `SQLiteDocumentModuleLibrary`, preserving its exact/full-name/Java-folded
+     ordering while `BibleSearchIndexSourceRegistry` keeps native SWORD ownership of collisions.
+
+     - Returns: Immutable source snapshot, or nil before a SWORD manager is configured.
+     - Side effects: Enumerates installed SQLite files and validates their metadata read-only.
+     - Failure modes: Malformed SQLite files remain library diagnostics and are absent from Search;
+       unreadable or synthetic SWORD projection rows are excluded.
+     */
+    @MainActor
+    func makeSearchIndexSourceRegistry() -> BibleSearchIndexSourceRegistry? {
+        guard let swordManager else { return nil }
+
+        var registeredSwordIdentities = Set<SQLiteDocumentIdentity>()
+        var swordSources: [any BibleSearchIndexSource] = []
+        for info in swordManager.installedModules() where info.category == .bible {
+            guard sqliteRuntimeCoordinator.hasGenuineSwordModule(named: info.name) else { continue }
+            let canonicalName = sqliteRuntimeCoordinator.canonicalSwordModuleName(info.name)
+            let identity = SQLiteDocumentIdentity(canonicalName)
+            guard registeredSwordIdentities.insert(identity).inserted,
+                  let module = swordManager.module(named: canonicalName),
+                  module.info.category == .bible else {
+                continue
+            }
+            swordSources.append(module)
+        }
+
+        let sqliteLibrary = SQLiteDocumentModuleLibrary(
+            moduleRootURL: URL(fileURLWithPath: swordManager.modulePath, isDirectory: true)
+        )
+        let sqliteSources: [any BibleSearchIndexSource] = sqliteLibrary
+            .modules(category: .bible)
+            .map { $0 }
+        return BibleSearchIndexSourceRegistry(
+            primarySources: swordSources,
+            additionalSources: sqliteSources
+        )
+    }
+
+    /**
+     Opens the exact module and canonical verse carried by a Search result.
+
+     - Parameter target: Search-owned module identity and canonical OSIS coordinate.
+     - Returns: True only after the requested backend became active and navigation was dispatched.
+     - Side effects: May switch the visible Bible, persist pane selection, and load the target verse.
+     - Failure modes: Missing/stale modules, failed switches, category mismatches, and unresolved book
+       names return false without navigating through the previously active Bible.
+     */
+    @MainActor
+    @discardableResult
+    func navigateToSearchResult(_ target: SearchNavigationTarget) -> Bool {
+        guard target.chapter > 0,
+              target.verse > 0,
+              !target.osisBookId.isEmpty,
+              let source = makeSearchIndexSourceRegistry()?.source(named: target.moduleName) else {
+            return false
+        }
+        let resolvedName = source.searchIndexModuleInfo.name
+        if activeModuleName != resolvedName || currentCategory != .bible {
+            switchBibleDocument(to: resolvedName)
+        }
+        guard activeModuleName == resolvedName,
+              currentCategory == .bible,
+              let bookName = bookName(forOsisId: target.osisBookId)
+                ?? (!target.displayBook.isEmpty ? target.displayBook : nil) else {
+            return false
+        }
+        navigateTo(book: bookName, chapter: target.chapter, verse: target.verse)
+        return true
+    }
+
+    /** Reconstructs the correct provider for an Android Speak-label bookmark selection. */
+    @MainActor
+    func resumeSpeech(from bookmark: SpeakResumeBookmark) {
+        guard let service = speakService else { return }
+        service.bookmarkManager = bookmarkService
+        let position = bookmark.position
+        if position.category == .bible || position.category == .memorization {
+            let verified = position.verifiedBibleRange
+      let requestedInitials =
+        position.bookInitials.isEmpty
+                ? (verified?.sourceBookInitials ?? activeModuleName)
+                : position.bookInitials
+      let sourceVersification =
+        position.versification
+                ?? verified?.sourceVersification
+        ?? sqliteRuntimeCoordinator.preferredModule(
+          named: requestedInitials,
+          category: .bible
+        )
+        .map { _ in JSwordKJVAVersification.name }
+        ?? swordManager?.module(named: requestedInitials)
+        .map(VersificationMapper.versificationName(for:))
+      guard let sourceVersification else { return }
+            guard let startOrdinal = position.ordinalStart ?? verified?.sourceOrdinalStart else {
+                return
+            }
+            let endOrdinal = position.ordinalEnd ?? verified?.sourceOrdinalEnd ?? startOrdinal
+            _ = startBibleSpeech(
+                category: position.category,
+                bookInitials: requestedInitials,
+                versification: sourceVersification,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal,
+                service: service
+            )
+            service.reloadResumeBookmarks()
+            return
+        }
+
+        guard let startOrdinal = position.ordinalStart else { return }
+        _ = startGenericSpeech(
+            bookInitials: position.bookInitials,
+            key: position.key,
+            startOrdinal: startOrdinal,
+            endOrdinal: nil,
+            expectedCategory: position.category,
+            service: service
+        )
+        service.reloadResumeBookmarks()
+    }
+
+  /**
+   Switches the selected Bible module without changing the visible category.
+
+   - Parameter moduleName: Case-insensitive installed SWORD or Android SQLite initials.
+   - Side effects: Updates the active backend, refreshes its real book list, persists
+     `PageManager.bibleDocument`, and reloads current content when the client is ready.
+   - Failure modes: Unknown modules leave controller and persisted state unchanged.
+  */
     public func switchModule(to moduleName: String) {
-        moduleSwitchCoordinator.switchModule(to: moduleName, context: makeModuleSwitchContext())
+    if sqliteModuleSwitchCoordinator.switchBible(
+      to: moduleName,
+      updatesVisibleCategory: false,
+      context: makeSQLiteModuleSwitchContext()
+    ) {
+      return
+    }
+    moduleSwitchCoordinator.switchModule(
+      to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
+      context: makeModuleSwitchContext()
+    )
     }
 
     /**
@@ -1275,12 +2653,39 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     @MainActor
     public func switchBibleDocument(to moduleName: String) {
-        moduleSwitchCoordinator.switchBibleDocument(to: moduleName, context: makeModuleSwitchContext())
+    if sqliteModuleSwitchCoordinator.switchBible(
+      to: moduleName,
+      updatesVisibleCategory: true,
+      context: makeSQLiteModuleSwitchContext()
+    ) {
+      return
+    }
+    moduleSwitchCoordinator.switchBibleDocument(
+      to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
+      context: makeModuleSwitchContext()
+    )
     }
 
-    /// Switch to a different installed commentary module.
+  /**
+   Switches the selected commentary module without changing the visible category.
+
+   - Parameter moduleName: Case-insensitive installed SWORD or Android SQLite initials.
+   - Side effects: Updates and persists the commentary backend, reloading only when commentary is
+     already visible and the client is ready.
+   - Failure modes: Unknown modules leave controller and persisted state unchanged.
+  */
     public func switchCommentaryModule(to moduleName: String) {
-        moduleSwitchCoordinator.switchCommentaryModule(to: moduleName, context: makeModuleSwitchContext())
+    if sqliteModuleSwitchCoordinator.switchCommentary(
+      to: moduleName,
+      updatesVisibleCategory: false,
+      context: makeSQLiteModuleSwitchContext()
+    ) {
+      return
+    }
+    moduleSwitchCoordinator.switchCommentaryModule(
+      to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
+      context: makeModuleSwitchContext()
+    )
     }
 
     /**
@@ -1303,40 +2708,133 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     @MainActor
     public func switchCommentaryDocument(to moduleName: String) {
-        moduleSwitchCoordinator.switchCommentaryDocument(to: moduleName, context: makeModuleSwitchContext())
+    if sqliteModuleSwitchCoordinator.switchCommentary(
+      to: moduleName,
+      updatesVisibleCategory: true,
+      context: makeSQLiteModuleSwitchContext()
+    ) {
+      return
+    }
+    moduleSwitchCoordinator.switchCommentaryDocument(
+      to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
+      context: makeModuleSwitchContext()
+    )
     }
 
-    /// Switch the active dictionary module.
-    public func switchDictionaryModule(to moduleName: String) {
-        moduleSwitchCoordinator.switchDictionaryModule(to: moduleName, context: makeModuleSwitchContext())
+  /**
+   Switches the selected dictionary module without changing the visible category.
+
+   - Parameter moduleName: Installed dictionary initials to select.
+   - Returns: Exact-key preservation, required key selection, or a retryable SWORD failure.
+   - Side effects: On successful preflight, updates controller and `PageManager` dictionary state
+     and invokes `onPersistState` when pane state exists.
+   - Failure modes: Missing modules and validation/enumeration errors return `.failed` without
+     changing module, key, category, or persistence state.
+   */
+  @discardableResult
+  public func switchDictionaryModule(to moduleName: String) -> BibleReaderGenericModuleSwitchOutcome
+  {
+    if let outcome = sqliteModuleSwitchCoordinator.switchDictionary(
+      to: moduleName,
+      updatesVisibleCategory: false,
+      context: makeSQLiteModuleSwitchContext()
+    ) {
+      return outcome
+    }
+    return moduleSwitchCoordinator.switchDictionaryModule(
+      to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
+      context: makeModuleSwitchContext()
+    )
     }
 
     /**
      Switches the visible document to a dictionary module in one Android-parity transition.
 
      Android's commentary quick popup can include dictionaries and selects them through the same
-     current-document path as commentaries. The selected dictionary, cleared entry key, and visible
-     document category must therefore be persisted together before rendering dictionary content.
+   current-document path as commentaries. The selected dictionary, exact retained key (or cleared
+   invalid key), and visible category are persisted together before rendering content.
 
      - Parameter moduleName: Installed SWORD dictionary module abbreviation to make current.
+   - Returns: Whether the previous exact key was retained, selection is required, or validation
+     failed without mutating state.
      Side effects:
-     - mutates the active dictionary module, clears the selected dictionary key, and sets the
-       current category to dictionary
+   - mutates the active dictionary module, retains a valid exact key or clears an invalid one, and
+     sets the current category to dictionary
      - writes `dictionaryDocument`, `dictionaryKey`, and `currentCategoryName` to `PageManager`
      - invokes `onPersistState` once when pane state is available
-     - reloads the visible reader document once when the JavaScript client is ready
+   - reloads the visible reader document only when an exact retained key can render immediately;
+     missing or empty keys wait for the caller's chooser selection
      Failure modes:
      - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
      - if the resolved module is not a dictionary, logs a warning and leaves state unchanged
+   - if SWORD cannot validate the current key or enumerate a required chooser, returns `.failed`
+     and leaves state unchanged
      */
     @MainActor
-    public func switchDictionaryDocument(to moduleName: String) {
-        moduleSwitchCoordinator.switchDictionaryDocument(to: moduleName, context: makeModuleSwitchContext())
+  @discardableResult
+  public func switchDictionaryDocument(
+    to moduleName: String
+  ) -> BibleReaderGenericModuleSwitchOutcome {
+    if let outcome = sqliteModuleSwitchCoordinator.switchDictionary(
+      to: moduleName,
+      updatesVisibleCategory: true,
+      context: makeSQLiteModuleSwitchContext()
+    ) {
+      return outcome
+    }
+    return moduleSwitchCoordinator.switchDictionaryDocument(
+      to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
+      context: makeModuleSwitchContext()
+    )
+  }
+
+  /**
+   Returns exact chooser keys for the active dictionary backend.
+
+   - Returns: Source-order SQLite keys or the SWORD module's immutable key snapshot.
+   - Side effects: May populate the selected backend's bounded key cache.
+   - Throws: The underlying SQLite or SWORD key-enumeration error.
+   */
+  public func activeDictionaryKeys() throws -> [String] {
+    try sqliteDictionaryChooser.keys(
+      sqliteModule: activeSQLiteDictionaryModule,
+      swordModule: activeDictionaryModule
+    )
+  }
+
+  /**
+   Captures the active dictionary as one backend-independent browser source.
+
+   - Returns: An immutable SQLite or SWORD source snapshot, or `nil` when no dictionary is active.
+   - Side effects: None; key and entry reads remain lazy until the browser requests them.
+   - Failure modes: None. Backend failures are surfaced by the browser source's read operations.
+   */
+  func activeDictionaryBrowserSource() -> DictionaryBrowserSource? {
+    if let module = activeSQLiteDictionaryModule {
+      return DictionaryBrowserSource(sqliteModule: module)
+    }
+    if let module = activeDictionaryModule {
+      return DictionaryBrowserSource(swordModule: module)
+    }
+    return nil
     }
 
-    /// Switch the active general book module.
-    public func switchGeneralBookModule(to moduleName: String) {
-        moduleSwitchCoordinator.switchGeneralBookModule(to: moduleName, context: makeModuleSwitchContext())
+  /**
+   Switches the selected general-book module without changing the visible category.
+
+   - Parameter moduleName: Installed general-book initials to select.
+   - Returns: Exact-key preservation, required key selection, or a retryable SWORD failure.
+   - Side effects: On successful preflight, updates controller and `PageManager` general-book
+     state and invokes `onPersistState` when pane state exists.
+   - Failure modes: Missing modules and validation/enumeration errors return `.failed` without
+     changing module, key, category, or persistence state.
+   */
+  @discardableResult
+  public func switchGeneralBookModule(to moduleName: String)
+    -> BibleReaderGenericModuleSwitchOutcome
+  {
+    moduleSwitchCoordinator.switchGeneralBookModule(
+      to: moduleName, context: makeModuleSwitchContext())
     }
 
     /**
@@ -1347,23 +2845,42 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      and category updates because that can persist partial pane state or reload stale content.
 
      - Parameter moduleName: Installed SWORD general-book module abbreviation to make current.
+   - Returns: Whether the previous exact key was retained, selection is required, or validation
+     failed without mutating state.
      Side effects:
-     - mutates the active general-book module, clears the selected general-book key, and sets the
-       current category to general book
+   - mutates the active general-book module, retains a valid exact key or clears an invalid one, and
+     sets the current category to general book
      - writes `generalBookDocument`, `generalBookKey`, and `currentCategoryName` to `PageManager`
      - invokes `onPersistState` once when pane state is available
-     - reloads the visible reader document once when the JavaScript client is ready
+   - reloads the visible reader document only when an exact retained key can render immediately;
+     missing or empty keys wait for the caller's chooser selection
      Failure modes:
      - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
      - if the resolved module is not a general book, logs a warning and leaves state unchanged
+   - if SWORD cannot validate the current key or enumerate a required chooser, returns `.failed`
+     and leaves state unchanged
      */
     @MainActor
-    public func switchGeneralBookDocument(to moduleName: String) {
-        moduleSwitchCoordinator.switchGeneralBookDocument(to: moduleName, context: makeModuleSwitchContext())
+  @discardableResult
+  public func switchGeneralBookDocument(
+    to moduleName: String
+  ) -> BibleReaderGenericModuleSwitchOutcome {
+    moduleSwitchCoordinator.switchGeneralBookDocument(
+      to: moduleName, context: makeModuleSwitchContext())
     }
 
-    /// Switch the active map module.
-    public func switchMapModule(to moduleName: String) {
+  /**
+   Switches the selected map module without changing the visible category.
+
+   - Parameter moduleName: Installed map initials to select.
+   - Returns: Exact-key preservation, required key selection, or a retryable SWORD failure.
+   - Side effects: On successful preflight, updates controller and `PageManager` map state and
+     invokes `onPersistState` when pane state exists.
+   - Failure modes: Missing modules and validation/enumeration errors return `.failed` without
+     changing module, key, category, or persistence state.
+   */
+  @discardableResult
+  public func switchMapModule(to moduleName: String) -> BibleReaderGenericModuleSwitchOutcome {
         moduleSwitchCoordinator.switchMapModule(to: moduleName, context: makeModuleSwitchContext())
     }
 
@@ -1371,23 +2888,28 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Switches the visible document to a map module in one Android-parity transition.
 
      Android routes map rows through the same `setCurrentDocument(book)` path as Bible,
-     commentary, dictionary, and general-book rows. iOS must therefore persist the selected map,
-     clear stale map entry state, and switch the visible category together instead of splitting map
-     selection and category selection across separate controller mutations.
+   commentary, dictionary, and general-book rows. iOS therefore persists the selected map, exact
+   retained key (or cleared invalid key), and visible category together.
 
      - Parameter moduleName: Installed SWORD map module abbreviation to make current.
+   - Returns: Whether the previous exact key was retained, selection is required, or validation
+     failed without mutating state.
      Side effects:
-     - mutates the active map module, clears the selected map key, and sets the current category to
-       map
+   - mutates the active map module, retains a valid exact key or clears an invalid one, and sets the
+     current category to map
      - writes `mapDocument`, `mapKey`, and `currentCategoryName` to `PageManager`
      - invokes `onPersistState` once when pane state is available
-     - reloads the visible reader document once when the JavaScript client is ready
+   - reloads the visible reader document only when an exact retained key can render immediately;
+     missing or empty keys wait for the caller's chooser selection
      Failure modes:
      - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
      - if the resolved module is not a map, logs a warning and leaves state unchanged
+   - if SWORD cannot validate the current key or enumerate a required chooser, returns `.failed`
+     and leaves state unchanged
      */
     @MainActor
-    public func switchMapDocument(to moduleName: String) {
+  @discardableResult
+  public func switchMapDocument(to moduleName: String) -> BibleReaderGenericModuleSwitchOutcome {
         moduleSwitchCoordinator.switchMapDocument(to: moduleName, context: makeModuleSwitchContext())
     }
 
@@ -1476,7 +2998,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        installed source documents, or cannot be encoded.
      */
     private func loadRestoredAndroidMultiDocument() -> Bool {
-        guard let restored = restoredMultiDocumentBuilder().build(pageKey: currentGeneralBookKey) else { return false }
+    guard let restored = restoredMultiDocumentBuilder().build(pageKey: currentGeneralBookKey) else {
+      return false
+    }
         loadTransientMultiDocument(
             restored.documentJSON,
             renderedBook: AndroidSpecialDocumentIdentity.multiDocumentInitials,
@@ -1510,7 +3034,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         guard let anchorOrdinal = activeWindow?.pageManager?.commentaryAnchorOrdinal,
-              let kjvaReference = JSwordKJVAVersification.verseReference(ordinal: anchorOrdinal) else {
+      let kjvaReference = JSwordKJVAVersification.verseReference(ordinal: anchorOrdinal)
+    else {
             return false
         }
         let reference = VerseKeyReference(
@@ -1537,7 +3062,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
               let windowID = activeWindow?.id,
               let sourceBookAndKey = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
                 .pageManagerEntry(for: windowID)?
-                .commentarySourceBookAndKey else {
+        .commentarySourceBookAndKey
+    else {
             return nil
         }
         return restoredMemorizeSource(serializedSourceBookAndKey: sourceBookAndKey)
@@ -1554,13 +3080,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Side effects: None.
      - Failure modes: Malformed JSON falls back to plain OSIS parsing; invalid OSIS returns `nil`.
      */
-    private func restoredMemorizeSource(serializedSourceBookAndKey: String) -> RestoredMemorizeSource? {
+  private func restoredMemorizeSource(serializedSourceBookAndKey: String) -> RestoredMemorizeSource?
+  {
         let trimmed = serializedSourceBookAndKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
         if let data = trimmed.data(using: .utf8),
            let payload = try? JSONDecoder().decode(SerializedBookAndKey.self, from: data),
-           let references = memorizeReferences(fromOsisKey: payload.key) {
+      let references = memorizeReferences(fromOsisKey: payload.key)
+    {
             let document = payload.document?.isEmpty == false ? payload.document! : activeModuleName
             return RestoredMemorizeSource(bookInitials: document, references: references)
         }
@@ -1578,20 +3106,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Failure modes: Unsupported books, malformed chapters/verses, or reversed ranges return `nil`.
      */
     private func memorizeReferences(fromOsisKey key: String) -> [VerseKeyReference]? {
-        let pieces = key
+    let pieces =
+      key
             .split(separator: "-", maxSplits: 1, omittingEmptySubsequences: true)
             .map { String($0) }
         guard let startToken = pieces.first,
-              let start = parseOsisVerseReference(startToken) else {
+      let start = parseOsisVerseReference(startToken)
+    else {
             return nil
         }
-        let end = pieces.count > 1 ?
-            parseOsisVerseReference(
+    let end =
+      pieces.count > 1
+      ? parseOsisVerseReference(
                 pieces[1],
                 defaultBook: start.osisBookId,
                 defaultChapter: start.chapter
-            ) :
-            start
+      ) : start
         guard let end, start.ordinal <= end.ordinal else { return nil }
 
         let references = (start.ordinal...end.ordinal).compactMap { ordinal -> VerseKeyReference? in
@@ -1624,7 +3154,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         defaultBook: String? = nil,
         defaultChapter: Int? = nil
     ) -> VerseKeyReference? {
-        let components = token
+    let components =
+      token
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .split(separator: ".", omittingEmptySubsequences: true)
             .map { String($0) }
@@ -1636,20 +3167,23 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         case 3:
             osisId = components[0]
             guard let parsedChapter = Int(components[1]),
-                  let parsedVerse = Int(components[2]) else { return nil }
+        let parsedVerse = Int(components[2])
+      else { return nil }
             chapter = parsedChapter
             verse = parsedVerse
         case 2:
             guard let defaultBook,
                   let parsedChapter = Int(components[0]),
-                  let parsedVerse = Int(components[1]) else { return nil }
+        let parsedVerse = Int(components[1])
+      else { return nil }
             osisId = defaultBook
             chapter = parsedChapter
             verse = parsedVerse
         case 1:
             guard let defaultBook,
                   let defaultChapter,
-                  let parsedVerse = Int(components[0]) else { return nil }
+        let parsedVerse = Int(components[0])
+      else { return nil }
             osisId = defaultBook
             chapter = defaultChapter
             verse = parsedVerse
@@ -1657,11 +3191,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return nil
         }
 
-        guard let ordinal = JSwordKJVAVersification.verseOrdinal(
+    guard
+      let ordinal = JSwordKJVAVersification.verseOrdinal(
             osisId: osisId,
             chapter: chapter,
             verse: verse
-        ) else {
+      )
+    else {
             return nil
         }
         return VerseKeyReference(osisBookId: osisId, chapter: chapter, verse: verse, ordinal: ordinal)
@@ -1677,7 +3213,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func loadRestoredAndroidMemorizeDocument(source: RestoredMemorizeSource) -> Bool {
         guard let request = restoredMemorizeDocumentRequest(source: source),
-              let emission = annotationDocumentLoader().makeMemorizeDocumentEmission(request: request) else {
+      let emission = annotationDocumentLoader().makeMemorizeDocumentEmission(request: request)
+    else {
             return false
         }
         renderMemorizeDocument(emission)
@@ -1692,11 +3229,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Side effects: None during request construction.
      - Failure modes: Returns `nil` when the source has no concrete references.
      */
-    private func restoredMemorizeDocumentRequest(source: RestoredMemorizeSource) -> MemorizeDocumentRequest? {
+  private func restoredMemorizeDocumentRequest(source: RestoredMemorizeSource)
+    -> MemorizeDocumentRequest?
+  {
         guard let firstReference = source.references.first,
-              let lastReference = source.references.last else { return nil }
+      let lastReference = source.references.last
+    else { return nil }
         let bookInitials = source.bookInitials.isEmpty ? activeModuleName : source.bookInitials
-        let sourceModule = swordManager?.module(named: bookInitials)
+    let sourceModule =
+      swordManager?.module(named: bookInitials)
             ?? (bookInitials == activeModuleName ? activeModule : nil)
         let referenceOrdinals = Set(source.references.map(\.ordinal))
         let request = MemorizeDocumentRequest(
@@ -1749,25 +3290,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Builds the restored Android `Multi` payload builder bound to this pane's SWORD/catalog state.
 
      The controller keeps only the orchestration decision of whether a restored fake document should
-     render now. The builder owns Android's `BookAndKeyList` reconstruction rules while these
-     closures preserve the active module versification used elsewhere in the reader.
+     render now. The builder owns Android's `BookAndKeyList` reconstruction rules and resolves each
+     child against its persisted source module instead of the active pane's book catalog.
 
-     - Returns: A builder configured with the active SWORD manager, active Bible module, and
-       active-versification book metadata.
+     - Returns: A builder configured with the active SWORD manager and active Bible fallback used
+       only for Android's persisted `null:` source marker.
      - Side effects: None.
      - Failure modes: Missing SWORD/module state is deferred to the builder, which returns `nil`
        when it cannot rebuild a valid document.
      */
     private func restoredMultiDocumentBuilder() -> BibleReaderRestoredMultiDocumentBuilder {
         BibleReaderRestoredMultiDocumentBuilder(
-            swordManager: swordManager,
-            activeModule: activeModule,
-            bookNameForOsisId: { [weak self] osisId in
-                self?.bookName(forOsisId: osisId) ?? Self.bookName(forOsisId: osisId)
-            },
-            isNewTestament: { [weak self] bookName in
-                self?.isNewTestament(bookName) ?? Self.isNewTestament(bookName)
-            }
+            moduleResolver: installedModuleResolver(),
+            activeModuleName: activeInstalledScriptureSource()?.info.name
         )
     }
 
@@ -1786,22 +3321,34 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        installed Bible module can render the requested range, or the compare payload cannot be
        serialized.
      */
-    func loadCompareDocument(startVerse: Int? = nil, endVerse: Int? = nil) {
-        guard let request = makeBibleCompareDocumentRequest(startVerse: startVerse, endVerse: endVerse) else {
+    func loadCompareDocument(
+        bookInitials: String? = nil,
+        startOrdinal: Int? = nil,
+        endOrdinal: Int? = nil
+    ) {
+    guard
+      let request = makeBibleCompareDocumentRequest(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+      )
+    else {
             return
         }
-        let requestID = UUID()
-        compareDocumentRequestID = requestID
+        let generation = beginReplacingContentIntent()
+        let buildDocument = compareDocumentBuildOperation
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let documentJSON = BibleReaderCompareDocumentBuilder.buildDocumentJSON(request)
+            let documentJSON = buildDocument(request)
             DispatchQueue.main.async { [weak self] in
                 guard let self,
-                      self.compareDocumentRequestID == requestID,
-                      let documentJSON else {
+                      self.contentIntentGeneration == generation,
+          let documentJSON
+        else {
                     return
                 }
-                self.loadTransientMultiDocument(documentJSON, renderedBook: "Compare", renderedKey: "compare")
+        self.loadTransientMultiDocument(
+          documentJSON, renderedBook: "Compare", renderedKey: "compare")
             }
         }
     }
@@ -1861,6 +3408,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        transient document contract.
      */
     private func emitTransientMultiDocument(_ request: BibleReaderTransientDocumentRequest) {
+        beginReplacingContentIntent()
         showingMyNotes = false
         showingStudyPad = false
         activeStudyPadLabelId = nil
@@ -1872,9 +3420,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         bridge.emit(event: "clear_document")
         sendLabelsToVueJS()
         bridge.emit(event: "add_documents", data: request.documentJSON)
-        bridge.emit(event: "setup_content", data: """
-        {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
-        """)
+        emitSetupContent(ReaderSetupContentPayload())
         setRenderedContentState(
             category: request.renderedCategory,
             moduleName: request.renderedModuleName ?? activeModuleName,
@@ -1917,7 +3463,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             self.currentGeneralBookKey = currentGeneralBookKey
         }
         guard update.persistsPageManagerState,
-              let pm = activeWindow?.pageManager else { return }
+      let pm = activeWindow?.pageManager
+    else { return }
         if let pageManagerCategoryName = update.pageManagerCategoryName {
             pm.currentCategoryName = pageManagerCategoryName
         }
@@ -1931,24 +3478,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Loads commentary for the currently selected Bible verse.
-
-     Android's `CurrentCommentaryPage` is a single-key page backed by JSword `BookData(book, key)`;
-     it does not walk the current chapter when the user switches to a commentary. iOS mirrors that
-     contract by resolving the selected verse once, reading exactly that SWORD key, and emitting a
-     verse-level document key and ordinal range. Missing commentary entries are still represented as
-     the selected verse so tabs, highlights, and restored state stay tied to the same passage.
+     Loads Android's exact commentary entry and linked-block metadata for the selected Bible verse.
 
      Side effects:
-     - clears the current Vue document, emits labels and a commentary document, updates rendered
-       content state, emits active-window state, clears selection, and reapplies the reader
-       background.
+     - converts the active Bible verse into the commentary module's versification
+     - reads structural OSIS and resolves the complete equal-content commentary block
+     - clears and replaces the Vue document, emits typed setup/state events, and clears selection
 
      Failure modes:
-     - when no commentary module is selected or the selected module has no exact entry for the
-       current verse, emits a deterministic no-content commentary document for the selected verse.
+     - missing modules, unsupported verse mappings, empty blocks, malformed OSIS, and encoding
+       failures produce a deterministic no-content error document; no rendered-text or synthetic
+       XML fallback is fabricated.
      */
     private func loadCommentaryForCurrentVerse() {
+        beginReplacingContentIntent()
         showingMyNotes = false
         showingStudyPad = false
         activeStudyPadLabelId = nil
@@ -1956,187 +3499,221 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         editingInWebView = false
         clearNativeSelectionState()
 
-        let osisBookId = osisBookId(for: currentBook)
-        let chapter = currentChapter
-        let verse = max(1, currentVerse)
-        let verseKey = "\(osisBookId).\(chapter).\(verse)"
-        let verseTitle = "\(currentBook) \(chapter):\(verse)"
-        guard let selectedOrdinal = activeCommentaryModule?.verseOrdinal(
-            osisBookId: osisBookId,
-            chapter: chapter,
-            verse: verse
-        ) ?? verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse) else {
-            logger.error("Failed to resolve commentary ordinal for \(osisBookId, privacy: .public).\(chapter).\(verse)")
-            return
-        }
-        let selectedOrdinalRange = [selectedOrdinal, selectedOrdinal]
-        let selectedVerseBookmarks = bookmarkService?.bookmarks(
-            for: selectedOrdinal,
-            endOrdinal: selectedOrdinal,
-            book: currentBook
-        ) ?? []
+    if let module = activeSQLiteCommentaryModule {
+      loadSQLiteCommentaryForCurrentVerse(module: module)
+      return
+    }
 
         guard let module = activeCommentaryModule else {
-            // No commentary module selected — show a message
-            bridge.emit(event: "clear_document")
-            let xml = buildCommentaryVerseXML(
-                osisBookId: osisBookId,
-                bookName: currentBook,
-                chapter: chapter,
-                verse: verse,
-                ordinal: selectedOrdinal,
-                bodyXML: "<p>No commentary module is installed. Download one from the module browser.</p>",
-                title: "No Commentary"
+            emitCommentaryErrorDocument(
+                key: "\(osisBookId(for: currentBook)).\(currentChapter).\(max(1, currentVerse))",
+                message: "No commentary module is installed. Download one from the module browser."
             )
-            guard let document = buildDocumentJSON(
-                osisBookId: osisBookId,
-                bookName: currentBook,
-                chapter: chapter,
-                verseCount: 1,
-                isNT: isNewTestament(currentBook),
-                xml: xml,
-                bookmarks: [],
-                bookCategory: "COMMENTARY",
-                bookInitials: "none",
-                addChapter: false,
-                documentKey: verseKey,
-                keyName: verseTitle,
-                ordinalRangeOverride: selectedOrdinalRange
-            ) else { return }
-            bridge.emit(event: "add_documents", data: document)
-            bridge.emit(event: "setup_content", data: """
-            {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
-            """)
-            setRenderedContentState(
-                category: .commentary,
-                moduleName: activeCommentaryModuleName,
-                book: currentBook,
-                chapter: chapter,
-                key: verseKey
-            )
-            applyNightModeBackground()
             return
         }
 
-        let isNT = isNewTestament(currentBook)
-        let moduleName = activeCommentaryModuleName ?? "Commentary"
-        let inspection = module.inspectVerseKeyAndRawEntryRestoringPrevious("=\(verseKey)")
-        let rawText = inspection.verseKey.flatMap { key -> String? in
-            guard key.osisBookName == osisBookId,
-                  key.chapter == chapter,
-                  key.verse == verse else {
-                return nil
-            }
-            let trimmed = inspection.rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+        let walker = SwordModuleCommentaryWalker(module: module)
+        guard let selected = commentaryReferenceForCurrentVerse(module: module, walker: walker) else {
+            emitCommentaryErrorDocument(
+                key: "\(osisBookId(for: currentBook)).\(currentChapter).\(max(1, currentVerse))",
+        message: String(
+          localized: "error_no_content", defaultValue: "No content for selected verse")
+            )
+            return
         }
-        let bodyXML = rawText.map(Self.commentaryVerseBodyXML(from:))
-            ?? "<p>No commentary available for this verse in \(moduleName).</p>"
-        let xml = buildCommentaryVerseXML(
-            osisBookId: osisBookId,
-            bookName: currentBook,
-            chapter: chapter,
-            verse: verse,
-            ordinal: selectedOrdinal,
-            bodyXML: bodyXML,
-            title: verseTitle
-        )
+        let block = SwordCommentaryBlockResolver(walker: walker).resolveBlock(containing: selected)
+        guard let fragment = block.fragment, fragment.hasRenderableContent else {
+            emitCommentaryErrorDocument(
+                key: selected.osisRef,
+        message: String(
+          localized: "error_no_content", defaultValue: "No content for selected verse")
+            )
+            return
+        }
 
         bridge.emit(event: "clear_document")
         sendLabelsToVueJS()
-
-        guard let document = buildDocumentJSON(
-            osisBookId: osisBookId,
-            bookName: currentBook,
-            chapter: chapter,
-            verseCount: 1,
-            isNT: isNT,
-            xml: xml,
-            bookmarks: selectedVerseBookmarks,
-            bookCategory: "COMMENTARY",
-            bookInitials: moduleName,
-            addChapter: false,
-            documentKey: verseKey,
-            keyName: verseTitle,
-            ordinalRangeOverride: selectedOrdinalRange
-        ) else { return }
+        let source = fragment.source
+        let localRange = fragment.contentOrdinalRange
+        let commentaryRange = ReaderCommentaryRangePayload(
+            startOsisRef: block.range.start.osisRef,
+            endOsisRef: block.range.end.osisRef,
+            name: block.range.name
+        )
+    guard
+      let document = documentPayloadFactory().documentJSON(
+            BibleReaderDocumentPayloadRequest(
+                osisBookId: selected.osisBookId,
+                bookName: fragment.keyName,
+                chapter: selected.chapter,
+                verseCount: 1,
+                isNewTestament: fragment.isNewTestament,
+                xml: fragment.xml,
+                bookCategory: DocumentCategory.commentary.rawValue,
+                bookInitials: source.initials,
+                addChapter: false,
+                documentKey: fragment.key,
+                keyName: fragment.keyName,
+                ordinalRangeOverride: [localRange.lowerBound, localRange.upperBound],
+          fragmentOrdinalRange: fragment.keyOrdinalRange.map {
+            [$0.lowerBound, $0.upperBound]
+          },
+                fragmentKey: fragment.fragmentKey,
+                fragmentOsisRef: fragment.osisRef,
+                annotateRef: fragment.annotateRef,
+                fragmentFeatures: fragment.features,
+                commentaryRange: commentaryRange,
+                moduleName: source.name.isEmpty ? source.initials : source.name,
+                moduleAbbreviation: source.abbreviation,
+                versificationName: source.versification,
+                language: source.language,
+                direction: source.direction,
+                sourceHasStrongs: source.hasStrongs
+            )
+      )
+    else { return }
         bridge.emit(event: "add_documents", data: document)
-
-        bridge.emit(event: "setup_content", data: """
-        {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
-        """)
+        emitSetupContent(ReaderSetupContentPayload())
         setRenderedContentState(
             category: .commentary,
-            moduleName: moduleName,
-            book: currentBook,
-            chapter: chapter,
-            key: verseKey
+            moduleName: source.initials,
+            book: selected.name,
+            chapter: selected.chapter,
+            key: fragment.key
         )
         emitActiveState()
-
         bridge.clearSelection()
         applyNightModeBackground()
     }
 
+  /**
+   Emits covering SQLite commentary for the selected KJVA verse.
+
+   - Parameter module: Serialized active commentary handle.
+   - Side effects: Performs one covering lookup, replaces Vue content, and updates rendered state.
+   - Failure modes: Missing rows, reader errors, malformed markup, and serialization failure use
+     the deterministic no-content error path; no SWORD or placeholder content is substituted.
+   */
+  private func loadSQLiteCommentaryForCurrentVerse(
+    module: BibleReaderSQLiteModuleHandle
+  ) {
+    let sourceReference = SwordVersification.Reference(
+      osisBookId: osisBookId(for: currentBook),
+      chapter: currentChapter,
+      verse: max(1, currentVerse)
+    )
+    let sourceKey =
+      "\(sourceReference.osisBookId).\(sourceReference.chapter).\(sourceReference.verse)"
+    guard
+      let selected = SQLiteCommentaryReferenceRouter.kjvaReference(
+        for: sourceReference,
+        sourceVersification: activeSourceVersificationName()
+      ), let selectedBookName = bookName(forOsisId: selected.osisId)
+    else {
+      emitCommentaryErrorDocument(
+        key: sourceKey,
+        message: String(
+          localized: "error_no_content",
+          defaultValue: "No content for selected verse"
+        )
+      )
+      return
+    }
+    let content: BibleReaderSQLiteAuxiliaryDocument
+    do {
+      content = try SQLiteReaderDocumentContentBuilder(module: module).commentary(
+        osisBookId: selected.osisId,
+        bookName: selectedBookName,
+        chapter: selected.chapter,
+        verse: selected.verse,
+        isNewTestament: isNewTestament(selectedBookName)
+      )
+    } catch {
+      emitCommentaryErrorDocument(
+        key: selected.osisRef,
+        message: String(
+          localized: "error_no_content",
+          defaultValue: "No content for selected verse"
+        )
+      )
+      return
+    }
+
+    bridge.emit(event: "clear_document")
+    sendLabelsToVueJS()
+    guard let document = documentPayloadFactory().documentJSON(content.request) else { return }
+    bridge.emit(event: "add_documents", data: document)
+    emitSetupContent(ReaderSetupContentPayload())
+    setRenderedContentState(
+      category: .commentary,
+      moduleName: module.info.name,
+      book: selectedBookName,
+      chapter: selected.chapter,
+      key: content.key
+    )
+    emitActiveState()
+    bridge.clearSelection()
+    applyNightModeBackground()
+  }
+
     /**
-     Builds a verse-scoped commentary OSIS fragment for the Vue reader.
+     Resolves the active Bible verse into one exact key in the commentary module's versification.
 
      - Parameters:
-       - osisBookId: OSIS book identifier for the selected Bible verse.
-       - bookName: Display book name for titles.
-       - chapter: Selected chapter.
-       - verse: Selected verse.
-       - ordinal: JSword/SWORD ordinal for the selected verse.
-       - bodyXML: Commentary body XML or no-content message already prepared for the verse body.
-       - title: Title to display above the commentary content.
-     - Returns: A small OSIS fragment with one verse wrapper and paragraph milestones.
-     - Side effects: None.
-     - Failure modes: None; callers supply XML that the reader already accepts.
+       - module: Active commentary module.
+       - walker: Module-backed exact commentary reader.
+   - Returns: Exact commentary verse metadata, or `nil` when conversion/read fails.
+     - Side effects: Reads the commentary's exact structural fragment once.
+   - Failure modes: Unknown books and unavailable exact commentary keys return `nil`. Public
+     conversion retains Android's same-coordinate fallback before module addressability is tested.
      */
-    private func buildCommentaryVerseXML(
-        osisBookId: String,
-        bookName: String,
-        chapter: Int,
-        verse: Int,
-        ordinal: Int,
-        bodyXML: String,
-        title: String
-    ) -> String {
-        let osisRef = "\(osisBookId).\(chapter).\(verse)"
-        let body = bodyXML.trimmingCharacters(in: .whitespacesAndNewlines)
-        return """
-        <div><title type="x-gen">\(title)</title><div sID="p1" type="paragraph"/><verse osisID="\(osisRef)" verseOrdinal="\(ordinal)">\(body) </verse><div eID="p1" type="paragraph"/></div>
-        """
+    private func commentaryReferenceForCurrentVerse(
+        module: SwordModule,
+        walker: SwordModuleCommentaryWalker
+    ) -> SwordCommentaryVerseReference? {
+        let sourceOsisBookId = osisBookId(for: currentBook)
+        let targetVersification = VersificationMapper.versificationName(for: module)
+    return BibleReaderCommentaryVersificationRouter.resolve(
+      reference: .init(
+                  osisBookId: sourceOsisBookId,
+                  chapter: currentChapter,
+        verse: max(1, currentVerse)
+      ),
+                  from: activeSourceVersificationName(),
+                  to: targetVersification
+    ) { mapped in
+      try? walker.reference(
+        forKey: "\(mapped.osisBookId).\(mapped.chapter).\(mapped.verse)"
+      )
+    }
     }
 
     /**
-     Mirrors JSword's single-key commentary unwrap behavior.
+     Emits Android's error-document path for a commentary key without fabricating OSIS content.
 
-     Android removes the outer `<verse>` element returned by `BookData(book, key)` for a
-     single-key commentary, then renders that verse's children. SWORD raw entries may already be
-     verse-wrapped, while no-content messages are not; this helper strips exactly one whole outer
-     verse wrapper and otherwise preserves the raw body unchanged.
-
-     - Parameter rawEntry: Raw SWORD OSIS entry for one exact commentary verse key.
-     - Returns: The verse body XML to embed in the reader's own verse wrapper.
-     - Side effects: None.
-     - Failure modes: If the raw entry is not a single outer `<verse>`, returns it unchanged.
+     - Parameters:
+       - key: Requested commentary OSIS key retained in native rendered state.
+       - message: User-visible failure or no-content message.
+     - Side effects: Clears/replaces Vue content, emits the typed setup payload and active state,
+       clears selection, and reapplies the reader background.
+     - Failure modes: If error-document encoding fails, the reader remains cleared.
      */
-    private static func commentaryVerseBodyXML(from rawEntry: String) -> String {
-        let trimmed = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let regex = try? NSRegularExpression(
-            pattern: #"^<verse\b[^>]*>([\s\S]*)</verse>$"#,
-            options: []
-        ) else {
-            return trimmed
+    private func emitCommentaryErrorDocument(key: String, message: String) {
+        bridge.emit(event: "clear_document")
+        if let document = documentPayloadFactory().errorDocumentJSON(message: message) {
+            bridge.emit(event: "add_documents", data: document)
         }
-        let range = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
-        guard let match = regex.firstMatch(in: trimmed, range: range),
-              match.numberOfRanges == 2,
-              let bodyRange = Range(match.range(at: 1), in: trimmed) else {
-            return trimmed
-        }
-        return String(trimmed[bodyRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        emitSetupContent(ReaderSetupContentPayload())
+        setRenderedContentState(
+            category: .commentary,
+            moduleName: activeCommentaryModuleName,
+            book: currentBook,
+            chapter: currentChapter,
+            key: key
+        )
+        emitActiveState()
+        bridge.clearSelection()
+        applyNightModeBackground()
     }
 
     // MARK: - Dictionary/GenBook/Map Content Loading
@@ -2189,10 +3766,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Load a dictionary entry and display it in the WebView.
-     Uses renderText() since dictionary entries are typically HTML-formatted definitions.
+   Loads one exact dictionary entry from the active backend into the reader WebView.
+
+   - Parameter key: Exact requested key, or nil to reuse the retained pane key.
+   - Side effects: Starts a replacement intent, dispatches to serialized SQLite structural
+     content or the shared SWORD auxiliary loader, and persists only a successfully resolved key.
+   - Failure modes: Missing selections, case mismatches, unreadable content, and malformed markup
+     emit deterministic error documents without snapping keys or crossing backends.
      */
     public func loadDictionaryEntry(key: String? = nil) {
+        beginReplacingContentIntent()
+    if let module = activeSQLiteDictionaryModule {
+      loadSQLiteDictionaryEntry(module: module, requestedKey: key)
+      return
+    }
         auxiliaryContentLoader().loadModuleEntry(
             BibleReaderAuxiliaryModuleEntryRequest(
                 category: .dictionary,
@@ -2203,7 +3790,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 osisBookId: "Dict",
                 fallbackBookName: "Dictionary",
                 bookCategory: DocumentCategory.dictionary.rawValue,
-                noModuleTitle: "No Dictionary",
                 noModuleMessage: "No dictionary module is selected. Download one from the module browser.",
                 noSelectionMessage: "Select an entry from the key browser to view its definition.",
                 noContentNoun: "definition",
@@ -2218,8 +3804,109 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
+  /**
+   Loads and emits one exact SQLite dictionary entry.
+
+   - Parameters:
+     - module: Serialized active dictionary handle.
+     - requestedKey: Exact chooser key, or nil to reuse the persisted exact key.
+   - Side effects: Replaces reader content and persists only a successfully resolved exact key.
+   - Failure modes: Missing selection, case mismatch, missing content, reader failure, malformed
+     markup, and serialization failure never snap to a neighboring key or fallback backend.
+   */
+  private func loadSQLiteDictionaryEntry(
+    module: BibleReaderSQLiteModuleHandle,
+    requestedKey: String?
+  ) {
+    resetAuxiliaryContentState()
+    guard let key = requestedKey ?? currentDictionaryKey else {
+      emitSQLiteAuxiliaryError(
+        category: .dictionary,
+        moduleName: module.info.name,
+        book: module.info.description,
+        key: "none",
+        message: "Select an entry from the key browser to view its definition."
+      )
+      return
+    }
+    let content: BibleReaderSQLiteAuxiliaryDocument
+    do {
+      content = try SQLiteReaderDocumentContentBuilder(module: module).dictionary(key: key)
+    } catch {
+      emitSQLiteAuxiliaryError(
+        category: .dictionary,
+        moduleName: module.info.name,
+        book: key,
+        key: key,
+        message: "No definition available for \"\(key)\" in \(module.info.name)."
+      )
+      return
+    }
+
+    currentDictionaryKey = content.key
+    if let pageManager = activeWindow?.pageManager {
+      pageManager.dictionaryKey = content.key
+      onPersistState?()
+    }
+    bridge.emit(event: "clear_document")
+    guard let document = documentPayloadFactory().documentJSON(content.request) else { return }
+    bridge.emit(event: "add_documents", data: document)
+    emitSetupContent(ReaderSetupContentPayload())
+    setRenderedContentState(
+      category: .dictionary,
+      moduleName: module.info.name,
+      book: content.keyName,
+      key: content.key
+    )
+    applyNightModeBackground()
+  }
+
+  /** Emits one deterministic SQLite auxiliary error without fabricating source markup. */
+  private func emitSQLiteAuxiliaryError(
+    category: DocumentCategory,
+    moduleName: String,
+    book: String,
+    key: String,
+    message: String
+  ) {
+    bridge.emit(event: "clear_document")
+    if let document = documentPayloadFactory().errorDocumentJSON(message: message) {
+      bridge.emit(event: "add_documents", data: document)
+    }
+    emitSetupContent(ReaderSetupContentPayload())
+    setRenderedContentState(
+      category: category,
+      moduleName: moduleName,
+      book: book,
+      key: key
+    )
+    applyNightModeBackground()
+  }
+
     /// Load a general book entry and display it in the WebView.
     public func loadGeneralBookEntry(key: String? = nil) {
+        if activeEpubReader != nil {
+            loadEpubEntry(key: key)
+            return
+        }
+        if let initials = activeGeneralBookModuleName,
+      let document = myDocumentStore?.document(initials: initials)
+    {
+            let requestedKey = key ?? currentGeneralBookKey
+      let resolvedKey =
+        requestedKey.flatMap {
+                myDocumentStore?.page(bookInitials: initials, pageKey: $0)?.pageKey
+        }
+        ?? (document.pages ?? []).sorted {
+                if $0.orderNumber != $1.orderNumber { return $0.orderNumber < $1.orderNumber }
+                return $0.pageKey < $1.pageKey
+            }.first?.pageKey
+            if let resolvedKey {
+                _ = loadMyDocumentPage(bookInitials: initials, pageKey: resolvedKey)
+            }
+            return
+        }
+        beginReplacingContentIntent()
         auxiliaryContentLoader().loadModuleEntry(
             BibleReaderAuxiliaryModuleEntryRequest(
                 category: .generalBook,
@@ -2230,8 +3917,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 osisBookId: "GenBook",
                 fallbackBookName: "General Book",
                 bookCategory: DocumentCategory.generalBook.rawValue,
-                noModuleTitle: "No General Book",
-                noModuleMessage: "No general book module is selected. Download one from the module browser.",
+        noModuleMessage:
+          "No general book module is selected. Download one from the module browser.",
                 noSelectionMessage: "Select an entry from the key browser to view its content.",
                 noContentNoun: "content",
                 persistResolvedKey: { [self] entryKey in
@@ -2247,6 +3934,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Load a map entry and display it in the WebView.
     public func loadMapEntry(key: String? = nil) {
+        beginReplacingContentIntent()
         auxiliaryContentLoader().loadModuleEntry(
             BibleReaderAuxiliaryModuleEntryRequest(
                 category: .map,
@@ -2257,7 +3945,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 osisBookId: "Map",
                 fallbackBookName: "Map",
                 bookCategory: DocumentCategory.map.rawValue,
-                noModuleTitle: "No Map",
                 noModuleMessage: "No map module is selected. Download one from the module browser.",
                 noSelectionMessage: "Select an entry from the key browser to view the map.",
                 noContentNoun: "content",
@@ -2272,124 +3959,204 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
+    /**
+     Handles Android's null selection from an empty general-book or map chooser.
+
+     Android's `ChooseGeneralBookKey.itemSelected(null)` returns the owning document initials plus
+     `document.globalKeyList.first().osisRef`. The chooser's displayed list may be empty after
+   malformed keys are filtered, so the browser passes its already-loaded first raw key through to
+   the same document loader as an ordinary selection.
+
+     - Parameters:
+       - module: Exact module that owned the dismissed chooser.
+       - category: `.generalBook` or `.map`, identifying the destination page contract.
+     - firstGlobalKey: First raw key from the browser's successful module enumeration.
+     - Side effects: Loads the module's first global key when the same module still owns the pane.
+     - Failure modes: Stale chooser callbacks, unsupported categories, and truly keyless modules
+       fail closed. Empty/malformed first keys reach the structural loader and surface its explicit
+       error document rather than selecting a neighboring key.
+     */
+  func handleEmptyGenericKeyChooser(
+    module: SwordModule,
+    category: DocumentCategory,
+    firstGlobalKey: String?
+  ) {
+    guard let firstGlobalKey else { return }
+        switch category {
+        case .generalBook:
+            guard activeGeneralBookModuleName == module.info.name else { return }
+            loadGeneralBookEntry(key: firstGlobalKey)
+        case .map:
+            guard activeMapModuleName == module.info.name else { return }
+            loadMapEntry(key: firstGlobalKey)
+        default:
+            return
+        }
+    }
+
     // MARK: - EPUB Support
 
-    /// Switch to an EPUB by identifier.
+    /**
+     Switches to an EPUB through Android's general-book document contract.
+
+     - Parameter identifier: Stable local EPUB library identifier.
+     - Side effects: Activates the EPUB adapter, stores its initials/key in general-book PageManager
+       fields, clears legacy EPUB fields, and reloads the reader when ready.
+     - Failure modes: An unreadable identifier is logged and leaves the current document unchanged.
+     */
     public func switchEpub(identifier: String) {
         guard let reader = EpubReader(identifier: identifier) else {
             logger.warning("Failed to open EPUB: \(identifier)")
             return
         }
+        activateEpub(reader, identifier: identifier, requestedKey: reader.firstKey())
+        if clientReady {
+            loadEpubEntry()
+        }
+    }
+
+  /**
+   Releases a deleted EPUB and returns its pane to the selected Bible document.
+
+   The library removes the EPUB's stable pointer before invoking this method. Existing readers own
+   immutable-generation leases, so clearing the active adapter releases that lease only after the
+   storage transaction has committed. Other EPUBs and SWORD general books are left untouched.
+
+   - Parameter identifier: Stable library identifier whose deletion committed successfully.
+   - Side effects: Clears matching EPUB/general-book state, removes persisted EPUB page identity,
+     switches to the pane's selected Bible, and reloads visible content when the bridge is ready.
+   - Failure modes: A nonmatching identifier is ignored. If no Bible is selected, the pane enters
+     the Bible category and renders the controller's ordinary no-content state.
+   */
+  @MainActor
+  public func reconcileDeletedEpub(identifier: String) {
+    guard activeEpubIdentifier == identifier else { return }
+
+    activeEpubReader = nil
+    activeEpubIdentifier = nil
+    activeEpubTitle = nil
+    currentEpubHref = nil
+    currentEpubTitle = nil
+    activeGeneralBookModule = nil
+    activeGeneralBookModuleName = nil
+    currentGeneralBookKey = nil
+
+    if let pageManager = activeWindow?.pageManager {
+      pageManager.generalBookDocument = nil
+      pageManager.generalBookKey = nil
+      pageManager.epubIdentifier = nil
+      pageManager.epubHref = nil
+    }
+
+    if activeModule != nil {
+      switchBibleDocument(to: activeModuleName)
+      return
+    }
+
+    currentCategory = .bible
+    activeWindow?.pageManager?.currentCategoryName = DocumentCategory.bible.pageManagerKey
+    onPersistState?()
+    if clientReady {
+      loadCurrentContent()
+    }
+  }
+
+    /// Applies one opened adapter as the active general-book document and persists its identity.
+    private func activateEpub(_ reader: EpubReader, identifier: String, requestedKey: String?) {
         activeEpubReader = reader
         activeEpubIdentifier = identifier
         activeEpubTitle = reader.title
-        currentEpubHref = nil
+        activeGeneralBookModule = nil
+        activeGeneralBookModuleName = reader.initials
+    currentGeneralBookKey =
+      requestedKey.flatMap { reader.content(forKey: $0)?.persistedKey }
+            ?? reader.firstKey().flatMap { reader.content(forKey: $0)?.persistedKey }
+        currentCategory = .generalBook
+        currentEpubHref = nil // Legacy PageManager migration input only.
         currentEpubTitle = nil
 
         if let pm = activeWindow?.pageManager {
-            pm.epubIdentifier = identifier
+            pm.currentCategoryName = DocumentCategory.generalBook.pageManagerKey
+            pm.generalBookDocument = reader.initials
+            pm.generalBookKey = currentGeneralBookKey
+            pm.epubIdentifier = nil
             pm.epubHref = nil
             onPersistState?()
         }
     }
 
-    /// Load EPUB content for a given section href (or current section).
-    public func loadEpubEntry(href: String? = nil) {
-        showingMyNotes = false
-        showingStudyPad = false
-        activeStudyPadLabelId = nil
-        activeStudyPadLabelName = nil
-        editingInWebView = false
-        clearNativeSelectionState()
+    /**
+     Loads one EPUB fragment through the active general-book adapter.
 
-        guard let reader = activeEpubReader else {
+     - Parameters:
+       - key: Numeric general-book key, TOC composite key, manifest id, or legacy href.
+       - jumpToOrdinal: Optional BVA ordinal selected from EPUB search.
+     - Side effects: Replaces the Vue document, persists the resolved numeric key in general-book
+       PageManager state, emits the optional HTML-id jump, and updates rendered pane identity.
+     - Failure modes: Missing adapters or keys emit a reader error document instead of leaving an
+       indefinite loading state or substituting an unrelated fragment.
+     */
+    public func loadEpubEntry(key: String? = nil, jumpToOrdinal: Int? = nil) {
+        beginReplacingContentIntent()
+        resetAuxiliaryContentState()
+        guard let reader = activeEpubReader,
+              let requestedKey = key ?? currentGeneralBookKey ?? reader.firstKey(),
+      let content = reader.content(forKey: requestedKey)
+    else {
             bridge.emit(event: "clear_document")
-            let xml = "<div><title type=\"x-gen\">No EPUB</title><div type=\"paragraph\"><p>No EPUB is selected. Import one from the Import &amp; Export screen, then open it from the EPUB Library.</p></div></div>"
-            guard let document = buildDocumentJSON(
-                osisBookId: "Epub", bookName: "EPUB", chapter: 1, verseCount: 1,
-                isNT: false, xml: xml, bookCategory: "GENERAL_BOOK", bookInitials: "none"
-            ) else { return }
-            bridge.emit(event: "add_documents", data: document)
-            bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+            if let errorDocument = documentPayloadFactory().errorDocumentJSON(
+                message: String(localized: "error_no_content", defaultValue: "No content for this passage")
+            ) {
+                bridge.emit(event: "add_documents", data: errorDocument)
+            }
+            emitEpubSetupContent(fragment: nil, ordinal: nil)
             setRenderedContentState(
-                category: .epub,
-                moduleName: activeEpubTitle,
-                book: "EPUB",
-                key: "none"
+                category: .generalBook,
+                moduleName: activeGeneralBookModuleName,
+                book: activeEpubTitle ?? "",
+                key: currentGeneralBookKey
             )
             applyNightModeBackground()
             return
         }
 
-        let entryHref = href ?? currentEpubHref
-        guard let entryHref else {
-            // No section selected — show prompt
-            bridge.emit(event: "clear_document")
-            let title = activeEpubTitle ?? "EPUB"
-            let xml = "<div><title type=\"x-gen\">\(title)</title><div type=\"paragraph\"><p>Select a section from the Table of Contents to begin reading.</p></div></div>"
-            guard let document = buildDocumentJSON(
-                osisBookId: "Epub", bookName: title, chapter: 1, verseCount: 1,
-                isNT: false, xml: xml, bookCategory: "GENERAL_BOOK", bookInitials: title
-            ) else { return }
-            bridge.emit(event: "add_documents", data: document)
-            bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
-            setRenderedContentState(
-                category: .epub,
-                moduleName: title,
-                book: title,
-                key: "none"
-            )
-            applyNightModeBackground()
-            return
-        }
-
-        // Strip fragment from href for content lookup
-        let parts = entryHref.components(separatedBy: "#")
-        let baseHref = parts.first ?? entryHref
-        let fragment = parts.count > 1 ? parts[1] : nil
-
-        // If same base file is already loaded, just scroll to fragment (avoid re-rendering large content)
-        if baseHref == currentEpubHref, fragment != nil {
-            let jumpToId = "\"\(fragment!)\""
-            bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":\(jumpToId),\"topOffset\":0,\"bottomOffset\":0}")
-            return
-        }
-
-        currentEpubHref = baseHref
-        let htmlContent = reader.getContent(href: baseHref) ?? ""
-        // Look up section title — try TOC first, then content table, then derive from filename
-        let sectionTitle = reader.getTitle(href: baseHref)
-            ?? (baseHref as NSString).deletingPathExtension.components(separatedBy: "_").last
-            ?? baseHref
-        currentEpubTitle = sectionTitle
-        let epubTitle = activeEpubTitle ?? "EPUB"
-
-        // Persist state
+        currentCategory = .generalBook
+        activeGeneralBookModuleName = reader.initials
+        currentGeneralBookKey = content.persistedKey
+        currentEpubTitle = content.title
+        currentEpubHref = nil
         if let pm = activeWindow?.pageManager {
-            pm.epubHref = baseHref
+            pm.currentCategoryName = DocumentCategory.generalBook.pageManagerKey
+            pm.generalBookDocument = reader.initials
+            pm.generalBookKey = content.persistedKey
+            pm.epubIdentifier = nil
+            pm.epubHref = nil
             onPersistState?()
         }
 
-        // Build document JSON with isNativeHtml flag (using JSONSerialization for proper escaping)
-        let document = buildEpubDocumentJSON(
-            bookName: sectionTitle,
-            bookInitials: epubTitle,
-            content: htmlContent
-        )
-
+        let document = buildEpubDocumentJSON(reader: reader, content: content)
         bridge.emit(event: "clear_document")
+        sendLabelsToVueJS()
         bridge.emit(event: "add_documents", data: document)
-
-        // If href has a fragment, jump to it
-        let jumpToId = fragment.map { "\"\($0)\"" } ?? "null"
-        bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":\(jumpToId),\"topOffset\":0,\"bottomOffset\":0}")
+        emitEpubSetupContent(fragment: content.fragment, ordinal: jumpToOrdinal)
         setRenderedContentState(
-            category: .epub,
-            moduleName: epubTitle,
-            book: sectionTitle,
-            key: baseHref
+            category: .generalBook,
+            moduleName: reader.initials,
+            book: content.title,
+            key: content.persistedKey
         )
+        emitActiveState()
+        bridge.clearSelection()
         applyNightModeBackground()
+    }
+
+    /// Emits a safely serialized setup-content request for an optional XHTML id.
+    private func emitEpubSetupContent(fragment: String?, ordinal: Int? = nil) {
+    emitSetupContent(
+      ReaderSetupContentPayload(
+            jumpToOrdinal: ordinal,
+            jumpToId: fragment
+        ))
     }
 
     /**
@@ -2399,19 +4166,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      `BibleReaderDocumentPayloadFactory` owns the Vue document schema and serialization details.
 
      - Parameters:
-       - bookName: Visible EPUB section title.
-       - bookInitials: Parent EPUB title used as document initials.
-       - content: Rewritten EPUB XHTML/HTML loaded from the EPUB index.
+       - reader: Active EPUB adapter supplying stable initials and package language.
+       - content: Resolved numeric fragment and rewritten native HTML.
      - Returns: Serialized Vue document JSON, or `{}` when serialization fails.
      - Side effects: None directly; failures are logged by the payload factory.
      - Failure modes: Returns `{}` if the payload cannot be serialized, preserving the legacy
        controller behavior for malformed native HTML payloads.
      */
-    private func buildEpubDocumentJSON(bookName: String, bookInitials: String, content: String) -> String {
+    private func buildEpubDocumentJSON(reader: EpubReader, content: EpubReader.Content) -> String {
         documentPayloadFactory().epubDocumentJSON(
-            bookName: bookName,
-            bookInitials: bookInitials,
-            content: content
+            bookName: reader.title,
+            bookInitials: reader.initials,
+            key: content.persistedKey,
+            keyName: content.title,
+            content: content.html,
+            ordinalRange: [content.ordinalRange.lowerBound, content.ordinalRange.upperBound],
+            language: reader.language
         )
     }
 
@@ -2423,7 +4193,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         case .dictionary: return activeDictionaryModuleName
         case .generalBook: return activeGeneralBookModuleName
         case .map: return activeMapModuleName
-        case .epub: return activeEpubTitle
+        case .epub: return activeEpubReader?.initials
         default: return nil
         }
     }
@@ -2441,11 +4211,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Refresh the list of installed Bible modules (call after install/uninstall).
-     Recreates the SwordManager so newly installed modules are detected.
+   Refreshes installed modules while retaining the active manager's module root.
+
+   - Side effects: Recreates SWORD and SQLite runtime catalogs, resolves prior category
+     selections, refreshes books, and updates observable module inventories.
+   - Failure modes: If manager recreation fails, existing runtime state remains unchanged.
+   - Note: Retaining `modulePath` keeps injected, migrated, and test module roots authoritative.
      */
     public func refreshInstalledModules() {
-        guard let newMgr = SwordManager() else { return }
+    let refreshedManager: SwordManager?
+    if let modulePath = swordManager?.modulePath {
+      refreshedManager = SwordManager(modulePath: modulePath)
+    } else {
+      refreshedManager = SwordManager()
+    }
+    guard let newMgr = refreshedManager else { return }
         configureSwordManager(newMgr)
     }
 
@@ -2478,22 +4258,53 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         configureSwordManager(mgr)
     }
 
+  /**
+   Rebuilds the pane runtime from genuine SWORD modules and Android-compatible SQLite modules.
+
+   - Parameter mgr: Configured manager whose module root owns both backend inventories.
+   - Side effects: Applies SWORD options, replaces installed inventories and backend handles,
+     opens a fresh serialized SQLite catalog, resolves prior category selections, and refreshes
+     the active Bible book list.
+   - Failure modes: Unreadable SQLite payloads are omitted by discovery; absent supported Bibles
+     retain the explicit no-backend state used by placeholder rendering.
+   - Important: SQLite discovery and precedence decisions remain in the runtime coordinator; this
+     method only applies its immutable results to controller state.
+   */
     private func configureSwordManager(_ mgr: SwordManager) {
         swordManager = mgr
 
+    let requestedSelection = currentSwordSelection()
         let state = swordCoordinator.configure(
             manager: mgr,
-            selection: currentSwordSelection(),
+      selection: requestedSelection,
             displaySettings: displaySettings
         )
         logger.info("SWORD found \(state.installedModules.count) installed modules")
         for mod in state.installedModules {
             let hasStrongs = mod.features.contains(.strongsNumbers)
-            logger.info("  Module: \(mod.name) (\(mod.description)) [\(mod.category.rawValue)] strongs=\(hasStrongs)")
+      logger.info(
+        "  Module: \(mod.name) (\(mod.description)) [\(mod.category.rawValue)] strongs=\(hasStrongs)"
+      )
         }
 
         applySwordState(state)
-        if activeModule == nil {
+    let sqliteInventories = sqliteRuntimeCoordinator.reload(
+      manager: mgr,
+      primaryBibles: installedBibleModules,
+      primaryCommentaries: installedCommentaryModules,
+      primaryDictionaries: installedDictionaryModules
+    )
+    installedBibleModules = sqliteInventories.bibles
+    installedCommentaryModules = sqliteInventories.commentaries
+    installedDictionaryModules = sqliteInventories.dictionaries
+    let sqliteSelections = sqliteRuntimeCoordinator.resolveSelections(
+      requestedSelection,
+      hasActiveSwordBible: activeModule != nil,
+      hasActiveSwordCommentary: activeCommentaryModule != nil
+    )
+    applySQLiteRuntimeSelections(sqliteSelections)
+    refreshBookList()
+    if activeModule == nil && activeSQLiteBibleModule == nil {
             logger.warning("No Bible modules installed — using placeholder text")
         } else {
             logger.info("Using Bible module: \(self.activeModuleName)")
@@ -2501,6 +4312,54 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         logBookListRefresh(module: activeModule, books: moduleBookList)
     }
+
+  /**
+   Applies pure SQLite selection decisions to mutually exclusive controller backend handles.
+
+   - Parameter selections: Category handles resolved by the SQLite runtime coordinator.
+   - Side effects: Replaces category-specific SWORD handles when SQLite is authoritative, clears
+     stale SQLite handles otherwise, and canonicalizes retained SWORD names.
+   - Failure modes: Nil selections retain supported SWORD state; no persistence or rendering is
+     performed until the surrounding setup completes.
+   */
+  private func applySQLiteRuntimeSelections(
+    _ selections: BibleReaderSQLiteSelectionResolution
+  ) {
+    if let sqliteBible = selections.bible {
+      activeModule = nil
+      activeSQLiteBibleModule = sqliteBible
+      activeModuleName = sqliteBible.info.name
+    } else {
+      activeSQLiteBibleModule = nil
+      if activeModule != nil {
+        activeModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(
+          activeModuleName
+        )
+      }
+    }
+
+    if let sqliteCommentary = selections.commentary {
+      activeCommentaryModule = nil
+      activeSQLiteCommentaryModule = sqliteCommentary
+      activeCommentaryModuleName = sqliteCommentary.info.name
+    } else {
+      activeSQLiteCommentaryModule = nil
+      if let name = activeCommentaryModuleName, activeCommentaryModule != nil {
+        activeCommentaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(name)
+      }
+    }
+
+    if let sqliteDictionary = selections.dictionary {
+      activeDictionaryModule = nil
+      activeSQLiteDictionaryModule = sqliteDictionary
+      activeDictionaryModuleName = sqliteDictionary.info.name
+    } else {
+      activeSQLiteDictionaryModule = nil
+      if let name = activeDictionaryModuleName, activeDictionaryModule != nil {
+        activeDictionaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(name)
+      }
+    }
+  }
 
     /**
      Builds the current module-selection DTO consumed by the SWORD setup coordinator.
@@ -2553,8 +4412,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameter other: Controller whose shared `SwordManager` and installed-module caches should
        seed this controller.
      - Returns: `true` when shared state was copied; `false` when `other` has no manager yet.
-     - Side Effects: Reuses `other`'s `SwordManager`, copies installed-module caches, resolves this
-       controller's own active module handles from that manager, and reapplies SWORD options.
+   - Side Effects: Reuses `other`'s `SwordManager`, resolves this controller's own SWORD handles,
+     opens an independent SQLite catalog/connection set, and reapplies SWORD options.
      - Failure Modes: Returns `false` without mutation when the source controller has no
        `SwordManager`.
      - Important: This avoids constructing multiple C++ `SWMgr` instances during pane creation.
@@ -2562,102 +4421,235 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     @discardableResult
     public func copyModuleState(from other: BibleReaderController) -> Bool {
         guard let mgr = other.swordManager else { return false }
-        self.swordManager = mgr
-        self.installedBibleModules = other.installedBibleModules
-        self.installedCommentaryModules = other.installedCommentaryModules
-        self.installedDictionaryModules = other.installedDictionaryModules
-        self.installedGeneralBookModules = other.installedGeneralBookModules
-        self.installedMapModules = other.installedMapModules
-        self.moduleBookList = other.moduleBookList
+    activeModuleName = other.activeModuleName
+    activeCommentaryModuleName = other.activeCommentaryModuleName
+    activeDictionaryModuleName = other.activeDictionaryModuleName
+    activeGeneralBookModuleName = other.activeGeneralBookModuleName
+    activeMapModuleName = other.activeMapModuleName
+    activeModule = nil
+    activeSQLiteBibleModule = nil
+    activeCommentaryModule = nil
+    activeSQLiteCommentaryModule = nil
+    activeDictionaryModule = nil
+    activeSQLiteDictionaryModule = nil
+    activeGeneralBookModule = nil
+    activeMapModule = nil
 
-        // Get own module handles from the shared manager (for independent cursor state).
-        // `module(named:)` returns nil for an unsupported module, so an unsupported active Bible name
-        // is not re-resolved into this pane. See ADR-0010.
-        if let mod = mgr.module(named: other.activeModuleName) {
-            self.activeModule = mod
-            self.activeModuleName = other.activeModuleName
-        }
-        if let commName = other.activeCommentaryModuleName,
-           let commMod = mgr.module(named: commName) {
-            self.activeCommentaryModule = commMod
-            self.activeCommentaryModuleName = commName
-        }
-        if let dictName = other.activeDictionaryModuleName,
-           let dictMod = mgr.module(named: dictName) {
-            self.activeDictionaryModule = dictMod
-            self.activeDictionaryModuleName = dictName
-        }
-        if let gbName = other.activeGeneralBookModuleName,
-           let gbMod = mgr.module(named: gbName) {
-            self.activeGeneralBookModule = gbMod
-            self.activeGeneralBookModuleName = gbName
-        }
-        if let mapName = other.activeMapModuleName,
-           let mapMod = mgr.module(named: mapName) {
-            self.activeMapModule = mapMod
-            self.activeMapModuleName = mapName
-        }
+    // Configuration reuses the SWORD manager but creates a new SQLite library so concurrent
+    // pane rendering never shares one unchecked SQLite connection.
+    configureSwordManager(mgr)
 
-        swordCoordinator.applyBaseOptions(to: mgr)
-        applySwordOptions()
+        if let epubIdentifier = other.activeEpubIdentifier,
+      let epubReader = EpubReader(identifier: epubIdentifier)
+    {
+            self.activeEpubReader = epubReader
+            self.activeEpubIdentifier = epubIdentifier
+            self.activeEpubTitle = epubReader.title
+            self.activeGeneralBookModule = nil
+            self.activeGeneralBookModuleName = epubReader.initials
+        }
         return true
     }
 
     /**
-     Restore saved module and position from PageManager.
-     Must be called after `activeWindow` is set.
+   Restores category-owned module selections, exact generic keys, and Bible position from a pane.
+
+   - Side effects: Resolves genuine SWORD or serialized SQLite handles for Bible, commentary, and
+     dictionary fields; restores other document categories; canonicalizes persisted module
+     spelling; validates exact SQLite dictionary keys; refreshes books; and restores navigation.
+   - Failure modes: Missing, wrong-category, unreadable, and SWORD-shadowed SQLite selections are
+     ignored without replacing the supported setup fallback. Invalid SQLite dictionary keys are
+     cleared rather than normalized. The method is a no-op before `activeWindow` is attached.
+   - Note: Canonicalized fields invoke `onPersistState` once after all restore decisions.
      */
     public func restoreSavedPosition() {
         guard let pm = activeWindow?.pageManager else { return }
+    var normalizedPersistedSelection = false
 
         // Restore the saved Bible module. `module(named:)` returns nil for an unsupported
         // (e.g. unknown-versification) module, so a persisted or synced selection naming one is not
         // restored and the supported module chosen during SWORD configuration remains. ADR-0010.
-        if let saved = pm.bibleDocument,
-           let mgr = swordManager,
-           let mod = mgr.module(named: saved) {
+    if let saved = pm.bibleDocument {
+      let canonicalSaved = sqliteRuntimeCoordinator.canonicalSwordModuleName(saved)
+      if sqliteRuntimeCoordinator.hasGenuineSwordModule(named: saved),
+        let mod = swordManager?.module(named: canonicalSaved),
+        mod.info.category == .bible
+      {
+        activeSQLiteBibleModule = nil
             activeModule = mod
-            activeModuleName = saved
+        activeModuleName = canonicalSaved
+        if pm.bibleDocument != canonicalSaved {
+          pm.bibleDocument = canonicalSaved
+          normalizedPersistedSelection = true
+        }
             refreshBookList()
             logger.info("Restored saved Bible module: \(saved)")
+      } else if let mod = sqliteRuntimeCoordinator.preferredModule(
+        named: saved,
+        category: .bible
+      ) {
+        activeModule = nil
+        activeSQLiteBibleModule = mod
+        activeModuleName = mod.info.name
+        if pm.bibleDocument != mod.info.name {
+          pm.bibleDocument = mod.info.name
+          normalizedPersistedSelection = true
+        }
+        refreshBookList()
+        logger.info("Restored saved SQLite Bible module: \(saved)")
+      }
         }
 
         // Restore saved commentary module or Android synthetic Memorize document
         if pm.commentaryDocument == AndroidSpecialDocumentIdentity.memorizeDocumentInitials {
             activeCommentaryModule = nil
+      activeSQLiteCommentaryModule = nil
             activeCommentaryModuleName = AndroidSpecialDocumentIdentity.memorizeDocumentInitials
             logger.info("Restored Android synthetic Memorize document")
         } else if let savedComm = pm.commentaryDocument,
-           let mgr = swordManager,
-           let mod = mgr.module(named: savedComm) {
+      sqliteRuntimeCoordinator.hasGenuineSwordModule(named: savedComm),
+      let mod = swordManager?.module(
+        named: sqliteRuntimeCoordinator.canonicalSwordModuleName(savedComm)
+      ),
+      mod.info.category == .commentary
+    {
+      activeSQLiteCommentaryModule = nil
             activeCommentaryModule = mod
-            activeCommentaryModuleName = savedComm
+      activeCommentaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedComm)
+      if pm.commentaryDocument != activeCommentaryModuleName {
+        pm.commentaryDocument = activeCommentaryModuleName
+        normalizedPersistedSelection = true
+      }
             logger.info("Restored saved commentary module: \(savedComm)")
-        } else if let firstComm = installedCommentaryModules.first,
-                  let mgr = swordManager {
-            activeCommentaryModule = mgr.module(named: firstComm.name)
-            activeCommentaryModuleName = firstComm.name
+    } else if let savedComm = pm.commentaryDocument,
+      let mod = sqliteRuntimeCoordinator.preferredModule(
+        named: savedComm,
+        category: .commentary
+      )
+    {
+      activeCommentaryModule = nil
+      activeSQLiteCommentaryModule = mod
+      activeCommentaryModuleName = mod.info.name
+      if pm.commentaryDocument != mod.info.name {
+        pm.commentaryDocument = mod.info.name
+        normalizedPersistedSelection = true
+      }
+      logger.info("Restored saved SQLite commentary module: \(savedComm)")
+    } else if let firstComm = installedCommentaryModules.first {
+      if sqliteRuntimeCoordinator.hasGenuineSwordModule(named: firstComm.name),
+        let mod = swordManager?.module(
+          named: sqliteRuntimeCoordinator.canonicalSwordModuleName(firstComm.name)
+        ),
+        mod.info.category == .commentary
+      {
+        activeSQLiteCommentaryModule = nil
+        activeCommentaryModule = mod
+        activeCommentaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(
+          firstComm.name
+        )
+      } else if let mod = sqliteRuntimeCoordinator.preferredModule(
+        named: firstComm.name,
+        category: .commentary
+      ) {
+        activeCommentaryModule = nil
+        activeSQLiteCommentaryModule = mod
+        activeCommentaryModuleName = mod.info.name
+      }
         }
 
         // Restore dictionary module
         if let savedDict = pm.dictionaryDocument,
-           let mgr = swordManager,
-           let mod = mgr.module(named: savedDict) {
+      sqliteRuntimeCoordinator.hasGenuineSwordModule(named: savedDict),
+      let mod = swordManager?.module(
+        named: sqliteRuntimeCoordinator.canonicalSwordModuleName(savedDict)
+      ),
+      mod.info.category == .dictionary || mod.info.category == .glossary
+    {
+      activeSQLiteDictionaryModule = nil
             activeDictionaryModule = mod
-            activeDictionaryModuleName = savedDict
+      activeDictionaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedDict)
             currentDictionaryKey = pm.dictionaryKey
+      if pm.dictionaryDocument != activeDictionaryModuleName {
+        pm.dictionaryDocument = activeDictionaryModuleName
+        normalizedPersistedSelection = true
+      }
             logger.info("Restored saved dictionary module: \(savedDict)")
+    } else if let savedDict = pm.dictionaryDocument,
+      let mod = sqliteRuntimeCoordinator.preferredModule(
+        named: savedDict,
+        category: .dictionary
+      )
+    {
+      let restoredKey: String?
+      do {
+        let keys = try mod.dictionaryKeys()
+        restoredKey = BibleReaderSQLiteDictionaryChooser.exactSourceKey(
+          matching: pm.dictionaryKey,
+          in: keys
+        )
+      } catch {
+        restoredKey = nil
+      }
+      activeDictionaryModule = nil
+      activeSQLiteDictionaryModule = mod
+      activeDictionaryModuleName = mod.info.name
+      currentDictionaryKey = restoredKey
+      if pm.dictionaryDocument != mod.info.name {
+        pm.dictionaryDocument = mod.info.name
+        normalizedPersistedSelection = true
+      }
+      if pm.dictionaryKey != restoredKey {
+        pm.dictionaryKey = restoredKey
+        normalizedPersistedSelection = true
+      }
+      logger.info("Restored saved SQLite dictionary module: \(savedDict)")
         }
 
-        // Restore general book module or Android synthetic Multi document
+        var restoredEpub = false
+
+        // Restore general book module, My Document, EPUB adapter, or Android synthetic Multi document.
         if pm.generalBookDocument == AndroidSpecialDocumentIdentity.multiDocumentInitials {
             activeGeneralBookModule = nil
             activeGeneralBookModuleName = AndroidSpecialDocumentIdentity.multiDocumentInitials
             currentGeneralBookKey = pm.generalBookKey
             logger.info("Restored Android synthetic Multi document")
         } else if let savedGB = pm.generalBookDocument,
+      let document = myDocumentStore?.document(initials: savedGB)
+    {
+            activeEpubReader = nil
+            activeEpubIdentifier = nil
+            activeEpubTitle = nil
+            activeGeneralBookModule = nil
+            activeGeneralBookModuleName = savedGB
+      currentGeneralBookKey =
+        pm.generalBookKey.flatMap {
+                myDocumentStore?.page(bookInitials: savedGB, pageKey: $0)?.pageKey
+        }
+        ?? (document.pages ?? []).sorted {
+                if $0.orderNumber != $1.orderNumber { return $0.orderNumber < $1.orderNumber }
+                return $0.pageKey < $1.pageKey
+            }.first?.pageKey
+            logger.info("Restored My Documents general book: \(savedGB)")
+        } else if let savedGB = pm.generalBookDocument,
+      let reader = EpubReader(initials: savedGB)
+    {
+            activeEpubReader = reader
+            activeEpubIdentifier = reader.identifier
+            activeEpubTitle = reader.title
+            activeGeneralBookModule = nil
+            activeGeneralBookModuleName = reader.initials
+      currentGeneralBookKey =
+        pm.generalBookKey
+                .flatMap { reader.content(forKey: $0)?.persistedKey }
+                ?? reader.firstKey().flatMap { reader.content(forKey: $0)?.persistedKey }
+            currentEpubTitle = currentGeneralBookKey.flatMap { reader.content(forKey: $0)?.title }
+            currentEpubHref = nil
+            restoredEpub = true
+            logger.info("Restored EPUB general book: \(savedGB)")
+        } else if let savedGB = pm.generalBookDocument,
                   let mgr = swordManager,
-                  let mod = mgr.module(named: savedGB) {
+      let mod = mgr.module(named: savedGB)
+    {
             activeGeneralBookModule = mod
             activeGeneralBookModuleName = savedGB
             currentGeneralBookKey = pm.generalBookKey
@@ -2667,22 +4659,38 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         // Restore map module
         if let savedMap = pm.mapDocument,
            let mgr = swordManager,
-           let mod = mgr.module(named: savedMap) {
+      let mod = mgr.module(named: savedMap)
+    {
             activeMapModule = mod
             activeMapModuleName = savedMap
             currentMapKey = pm.mapKey
             logger.info("Restored saved map module: \(savedMap)")
         }
 
-        // Restore EPUB
-        if let savedEpub = pm.epubIdentifier,
-           let reader = EpubReader(identifier: savedEpub) {
+        // Migrate legacy iOS-only EPUB PageManager fields into Android's general-book fields.
+        var migratedLegacyEpub = false
+        if !restoredEpub,
+           let savedEpub = pm.epubIdentifier,
+      let reader = EpubReader(identifier: savedEpub)
+    {
             activeEpubReader = reader
             activeEpubIdentifier = savedEpub
             activeEpubTitle = reader.title
-            currentEpubHref = pm.epubHref
-            currentEpubTitle = pm.epubHref.flatMap { reader.getTitle(href: $0) }
-            logger.info("Restored saved EPUB: \(savedEpub)")
+            activeGeneralBookModule = nil
+            activeGeneralBookModuleName = reader.initials
+      currentGeneralBookKey =
+        pm.epubHref
+                .flatMap { reader.content(forKey: $0)?.persistedKey }
+                ?? reader.firstKey().flatMap { reader.content(forKey: $0)?.persistedKey }
+            currentEpubTitle = currentGeneralBookKey.flatMap { reader.content(forKey: $0)?.title }
+            currentEpubHref = nil
+            pm.generalBookDocument = reader.initials
+            pm.generalBookKey = currentGeneralBookKey
+            pm.epubIdentifier = nil
+            pm.epubHref = nil
+            restoredEpub = true
+            migratedLegacyEpub = true
+            logger.info("Migrated saved EPUB into general-book state: \(savedEpub)")
         }
 
         // Restore category
@@ -2692,13 +4700,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         case "dictionary": currentCategory = .dictionary
         case "general_book": currentCategory = .generalBook
         case "map": currentCategory = .map
-        case "epub": currentCategory = .epub
+        case "epub" where restoredEpub:
+            currentCategory = .generalBook
+            pm.currentCategoryName = DocumentCategory.generalBook.pageManagerKey
+            migratedLegacyEpub = true
         default: currentCategory = .bible
+        }
+    if migratedLegacyEpub || normalizedPersistedSelection {
+            onPersistState?()
         }
 
         // Restore saved book and chapter
         if let bookIndex = pm.bibleBibleBook,
-           bookIndex >= 0, bookIndex < bookList.count {
+      bookIndex >= 0, bookIndex < bookList.count
+    {
             currentBook = bookList[bookIndex].name
         }
         if let chapter = pm.bibleChapterNo, chapter > 0 {
@@ -2723,7 +4738,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 verse: verse
             )
         }
-        logger.info("Restored position: \(self.currentBook) \(self.currentChapter):\(self.currentVerse)")
+    logger.info(
+      "Restored position: \(self.currentBook) \(self.currentChapter):\(self.currentVerse)")
     }
 
     /// Apply SWORD global options based on current display settings.
@@ -2734,8 +4750,123 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - Public Navigation API
 
+    /**
+     Resolves the adjacent non-empty commentary block in the module's own versification.
+
+     - Parameters:
+       - forward: `true` for the next block; `false` for the previous block.
+       - module: Active commentary module.
+     - Returns: First verse of the adjacent block, or `nil` at a boundary/unresolvable selection.
+     - Side effects: Reads structural commentary fragments while walking equal/empty blocks.
+   - Failure modes: Public versification conversion or structural read failure returns `nil`.
+     */
+    private func commentaryBlockNavigationTarget(
+        forward: Bool,
+        module: SwordModule
+    ) -> SwordCommentaryVerseReference? {
+        let walker = SwordModuleCommentaryWalker(module: module)
+        guard let selected = commentaryReferenceForCurrentVerse(module: module, walker: walker) else {
+            return nil
+        }
+        let resolver = SwordCommentaryBlockResolver(walker: walker)
+        let block = resolver.resolveBlock(containing: selected)
+        return forward
+            ? resolver.nextBlockStart(after: block.range.end)
+            : resolver.previousBlockStart(before: block.range.start)
+    }
+
+    /**
+     Handles Android commentary previous/next as linked-block navigation.
+
+     - Parameter forward: `true` for next, `false` for previous.
+     - Returns: `true` whenever a real commentary module owns the action, including boundaries;
+       `false` for synthetic/non-module commentary so ordinary navigation can handle it.
+     - Side effects: Converts the adjacent commentary target back into the active Bible's
+       versification and performs one regular persisted reader navigation.
+   - Failure modes: Missing conversion or an unaddressable fallback coordinate stays on the
+     current block rather than navigating to a neighboring or fabricated Bible key.
+     */
+    @discardableResult
+    private func navigateCommentaryBlock(forward: Bool) -> Bool {
+    if let module = activeSQLiteCommentaryModule {
+      let source = SwordVersification.Reference(
+        osisBookId: osisBookId(for: currentBook),
+        chapter: currentChapter,
+        verse: max(1, currentVerse)
+      )
+      guard
+        let selected = SQLiteCommentaryReferenceRouter.kjvaReference(
+          for: source,
+          sourceVersification: activeSourceVersificationName()
+        ),
+        let target = SQLiteCommentaryBlockNavigator(module: module).adjacentBlockStart(
+          osisId: selected.osisId,
+          chapter: selected.chapter,
+          verse: selected.verse,
+          forward: forward
+        )
+      else {
+        return true
+      }
+      guard
+        let mapped = SQLiteCommentaryReferenceRouter.sourceReference(
+          for: target,
+          destinationVersification: activeSourceVersificationName(),
+          resolve: { [activeModule] candidate in
+            guard let activeModule else {
+              return SQLiteReaderNavigationResolver.coordinate(
+                osisBookId: candidate.osisBookId,
+                chapter: candidate.chapter,
+                verse: candidate.verse
+              ) == nil ? nil : candidate
+            }
+            return activeModule.verseOrdinal(
+              osisBookId: candidate.osisBookId,
+              chapter: candidate.chapter,
+              verse: candidate.verse
+            ) == nil ? nil : candidate
+          }
+        ), let bookName = bookName(forOsisId: mapped.osisBookId)
+      else {
+        return true
+      }
+      navigateTo(book: bookName, chapter: mapped.chapter, verse: mapped.verse)
+      return true
+    }
+
+        guard let module = activeCommentaryModule else { return false }
+        guard let target = commentaryBlockNavigationTarget(forward: forward, module: module) else {
+            return true
+        }
+        let commentaryVersification = VersificationMapper.versificationName(for: module)
+    guard
+      let mapped = BibleReaderCommentaryVersificationRouter.resolve(
+        reference: .init(
+                  osisBookId: target.osisBookId,
+                  chapter: target.chapter,
+          verse: target.verse
+        ),
+                  from: commentaryVersification,
+        to: activeSourceVersificationName(),
+        resolve: { [activeModule] candidate in
+          guard let activeModule else { return candidate }
+          return activeModule.verseOrdinal(
+            osisBookId: candidate.osisBookId,
+            chapter: candidate.chapter,
+            verse: candidate.verse
+          ) == nil ? nil : candidate
+        }),
+      let bookName = bookName(forOsisId: mapped.osisBookId)
+    else {
+            return true
+        }
+        navigateTo(book: bookName, chapter: mapped.chapter, verse: mapped.verse)
+        return true
+    }
+
     /// Navigate to a specific book and chapter. Sends content to the WebView.
     public func navigateTo(book: String, chapter: Int, verse: Int? = nil) {
+        pendingLinkNavigationOrdinalRange = nil
         navigationCoordinator.navigateTo(
             book: book,
             chapter: chapter,
@@ -2746,11 +4877,31 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Navigate to the next chapter, wrapping to the next book if needed.
     public func navigateNext() {
+        if currentCategory == .commentary, navigateCommentaryBlock(forward: true) {
+            return
+        }
+        if currentCategory == .generalBook,
+           let reader = activeEpubReader,
+      let key = reader.nextKey(after: currentGeneralBookKey)
+    {
+            loadEpubEntry(key: key)
+            return
+        }
         navigationCoordinator.navigateNext(context: makeNavigationContext())
     }
 
     /// Navigate to the previous chapter, wrapping to the previous book if needed.
     public func navigatePrevious() {
+        if currentCategory == .commentary, navigateCommentaryBlock(forward: false) {
+            return
+        }
+        if currentCategory == .generalBook,
+           let reader = activeEpubReader,
+      let key = reader.previousKey(before: currentGeneralBookKey)
+    {
+            loadEpubEntry(key: key)
+            return
+        }
         navigationCoordinator.navigatePrevious(context: makeNavigationContext())
     }
 
@@ -2768,12 +4919,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Whether there's a next chapter available.
     public var hasNext: Bool {
-        navigationCoordinator.hasNext(context: makeNavigationContext())
+        if currentCategory == .commentary, let module = activeCommentaryModule {
+            return commentaryBlockNavigationTarget(forward: true, module: module) != nil
+        }
+        if currentCategory == .generalBook, let reader = activeEpubReader {
+            return reader.nextKey(after: currentGeneralBookKey) != nil
+        }
+        return navigationCoordinator.hasNext(context: makeNavigationContext())
     }
 
     /// Whether there's a previous chapter available.
     public var hasPrevious: Bool {
-        navigationCoordinator.hasPrevious(context: makeNavigationContext())
+        if currentCategory == .commentary, let module = activeCommentaryModule {
+            return commentaryBlockNavigationTarget(forward: false, module: module) != nil
+        }
+        if currentCategory == .generalBook, let reader = activeEpubReader {
+            return reader.previousKey(before: currentGeneralBookKey) != nil
+        }
+        return navigationCoordinator.hasPrevious(context: makeNavigationContext())
     }
 
     // MARK: - BibleBridgeDelegate — State
@@ -2790,7 +4953,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func bridgeDidSetClientReady(_ bridge: BibleBridge) {
         logger.info("Client ready, sending initial content")
         clientReady = true
-        let deferredSynchronizedScrollOrdinal = synchronizedScrollCoordinator
+    let deferredSynchronizedScrollOrdinal =
+      synchronizedScrollCoordinator
             .consumeDeferredClientReadyOrdinalForReplay()
         loadRecentLabels()
         applyNightModeBackground()
@@ -2814,15 +4978,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      accessibility/export state aligned.
      */
     private func reloadVisibleDocumentAfterClientReady() {
-        if let pendingClientReadyRequest = specialDocumentCoordinator.consumePendingClientReadyRequest() {
+    if let pendingClientReadyRequest = specialDocumentCoordinator.consumePendingClientReadyRequest()
+    {
             emitTransientMultiDocument(pendingClientReadyRequest)
             return
         }
 
         if showingMyNotes {
-            let pendingJumpOrdinal = pendingClientReadyMyNotesJumpOrdinal
-            pendingClientReadyMyNotesJumpOrdinal = nil
-            loadMyNotesDocument(jumpToOrdinal: pendingJumpOrdinal)
+            guard let target = pendingClientReadyMyNotesTarget ?? activeMyNotesTarget else { return }
+            pendingClientReadyMyNotesTarget = nil
+            loadMyNotesDocument(target: target)
             return
         }
 
@@ -2878,7 +5043,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private func updateDefinitionRenderedModuleIfNeeded(from state: String) {
         let currentTokens = renderedContentStateTokens()
         guard currentTokens["category"] == DocumentCategory.dictionary.pageManagerKey,
-              let moduleName = selectedDefinitionModuleName(from: state) else {
+      let moduleName = selectedDefinitionModuleName(from: state)
+    else {
             return
         }
 
@@ -2911,7 +5077,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func selectedDefinitionModuleName(from state: String) -> String? {
         guard let data = state.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
             return nil
         }
         return nonEmptyString(root["selectedStrongsDict"])
@@ -3008,11 +5175,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        from explicit user interaction, the callback did not acknowledge sync-origin feedback, and
        the visible Bible position actually changed
      */
-    public func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String, atChapterTop: Bool) {
+  public func bridge(
+    _ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String, atChapterTop: Bool
+  ) {
         let previousBook = currentBook
         let previousChapter = currentChapter
         let previousVerse = currentVerse
-        let acknowledgedSynchronizedScroll = synchronizedScrollCoordinator
+    let acknowledgedSynchronizedScroll =
+      synchronizedScrollCoordinator
             .acknowledgeVisibleOrdinal(ordinal)
         navigationCoordinator.updateVisiblePosition(
             ordinal: ordinal,
@@ -3021,10 +5191,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             context: makeNavigationContext()
         )
 
-        let visibleVerseChanged = previousBook != currentBook
+    let visibleVerseChanged =
+      previousBook != currentBook
             || previousChapter != currentChapter
             || previousVerse != currentVerse
-        let shouldBroadcastSynchronizedScroll = !acknowledgedSynchronizedScroll
+    let shouldBroadcastSynchronizedScroll =
+      !acknowledgedSynchronizedScroll
             && visibleVerseChanged
             && computeIsActiveWindow()
 
@@ -3128,7 +5300,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     func scrollToSynchronizedVerse(osisBookId: String, chapter: Int, verse: Int) {
         guard let book = bookName(forOsisId: osisBookId),
-              let targetOrdinal = verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse) else {
+      let targetOrdinal = verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
+    else {
             return
         }
 
@@ -3136,7 +5309,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         synchronizedScrollCoordinator.armSynchronizedFeedback(ordinal: targetOrdinal)
 
         if alreadyShowingChapter {
-            applySynchronizedVersePosition(book: book, chapter: chapter, verse: verse, ordinal: targetOrdinal)
+      applySynchronizedVersePosition(
+        book: book, chapter: chapter, verse: verse, ordinal: targetOrdinal)
             guard clientReady else {
                 synchronizedScrollCoordinator.deferUntilClientReady(ordinal: targetOrdinal)
                 return
@@ -3223,7 +5397,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Failure modes: none.
      */
-    private func applySynchronizedVersePosition(book: String, chapter: Int, verse: Int, ordinal: Int) {
+  private func applySynchronizedVersePosition(book: String, chapter: Int, verse: Int, ordinal: Int)
+  {
         navigationCoordinator.applySynchronizedVersePosition(
             book: book,
             chapter: chapter,
@@ -3251,10 +5426,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             bridge.sendResponse(callId: callId, value: "null")
             return
         }
-        guard let candidate = infiniteScrollCoordinator.previousCandidate(
+    guard
+      let candidate = infiniteScrollCoordinator.previousCandidate(
             previousBook: { [self] in previousBook(before: $0) },
             chapterCount: { [self] in chapterCount(for: $0) }
-        ) else {
+      )
+    else {
             bridge.sendResponse(callId: callId, value: "null")
             return
         }
@@ -3284,10 +5461,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             bridge.sendResponse(callId: callId, value: "null")
             return
         }
-        guard let candidate = infiniteScrollCoordinator.nextCandidate(
+    guard
+      let candidate = infiniteScrollCoordinator.nextCandidate(
             nextBook: { [self] in nextBook(after: $0) },
             chapterCount: { [self] in chapterCount(for: $0) }
-        ) else {
+      )
+    else {
             bridge.sendResponse(callId: callId, value: "null")
             return
         }
@@ -3319,7 +5498,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             addNote: addNote,
             wholeVerse: wholeVerse,
             startOffset: startOffset,
-            endOffset: endOffset
+            endOffset: endOffset,
+            identity: .create
         )
     }
 
@@ -3336,13 +5516,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - delegates to the shared Bible-bookmark creation path, emits bookmark updates, and may open
        the bookmark modal in the web client
      */
-    public func bridge(_ bridge: BibleBridge, addBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool) {
+  public func bridge(
+    _ bridge: BibleBridge, addBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int,
+    addNote: Bool
+  ) {
         annotationBridgeHandler.addBookmark(
             bridge: bridge,
             bookInitials: bookInitials,
             startOrdinal: startOrdinal,
             endOrdinal: endOrdinal,
-            addNote: addNote
+            addNote: addNote,
+            wholeVerse: true,
+            startOffset: nil,
+            endOffset: nil
         )
     }
 
@@ -3362,19 +5548,56 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Failure modes:
      - returns without side effects when bookmark services are unavailable
      */
-    public func bridge(_ bridge: BibleBridge, addGenericBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool) {
+  public func bridge(
+    _ bridge: BibleBridge, addGenericBookmark bookInitials: String, osisRef: String,
+    startOrdinal: Int, endOrdinal: Int, addNote: Bool
+  ) {
         annotationBridgeHandler.addGenericBookmark(
             bridge: bridge,
             bookInitials: bookInitials,
             osisRef: osisRef,
             startOrdinal: startOrdinal,
             endOrdinal: endOrdinal,
-            addNote: addNote
+            addNote: addNote,
+            wholeVerse: true,
+            startOffset: nil,
+            endOffset: nil
         )
     }
 
+  /**
+   Creates Android's selection-free bookmark for one exact non-Bible page.
+
+   - Parameters:
+     - bridge: Reader bridge that receives the resulting bookmark and modal events.
+     - request: Exact source initials and key supplied by the rendered document.
+   - Side effects: Persists a generic bookmark with nullable ordinals/offsets, applies workspace
+     auto-label behavior, and emits the same annotation updates as other generic bookmarks.
+   - Failure modes: Missing bookmark services leave persistence unchanged; this path never
+     substitutes current Bible identity for the supplied source.
+   */
+  public func bridge(
+    _ bridge: BibleBridge,
+    createGenericWholePageBookmark request: GenericWholePageBookmarkRequest
+  ) {
+    annotationBridgeHandler.addGenericBookmark(
+      bridge: bridge,
+      bookInitials: request.sourceInitials,
+      osisRef: request.sourceKey,
+      startOrdinal: nil,
+      endOrdinal: nil,
+      addNote: false,
+      wholeVerse: true,
+      startOffset: nil,
+      endOffset: nil
+    )
+  }
+
     /// Creates a Bible paragraph-break bookmark requested from the web client.
-    public func bridge(_ bridge: BibleBridge, addParagraphBreakBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
+  public func bridge(
+    _ bridge: BibleBridge, addParagraphBreakBookmark bookInitials: String, startOrdinal: Int,
+    endOrdinal: Int
+  ) {
         annotationBridgeHandler.addParagraphBreakBookmark(
             bridge: bridge,
             bookInitials: bookInitials,
@@ -3384,7 +5607,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /// Creates a generic paragraph-break bookmark requested from the web client.
-    public func bridge(_ bridge: BibleBridge, addGenericParagraphBreakBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int) {
+  public func bridge(
+    _ bridge: BibleBridge, addGenericParagraphBreakBookmark bookInitials: String, osisRef: String,
+    startOrdinal: Int, endOrdinal: Int
+  ) {
         annotationBridgeHandler.addGenericParagraphBreakBookmark(
             bridge: bridge,
             bookInitials: bookInitials,
@@ -3464,36 +5690,45 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Toggles one label assignment on a bookmark and re-emits the updated bookmark state.
      */
-    public func bridge(_ bridge: BibleBridge, toggleBookmarkLabel bookmarkId: String, labelId: String) {
-        annotationBridgeHandler.toggleBookmarkLabel(bridge: bridge, bookmarkId: bookmarkId, labelId: labelId)
+  public func bridge(_ bridge: BibleBridge, toggleBookmarkLabel bookmarkId: String, labelId: String)
+  {
+    annotationBridgeHandler.toggleBookmarkLabel(
+      bridge: bridge, bookmarkId: bookmarkId, labelId: labelId)
     }
 
     /**
      Removes one label assignment from a bookmark and re-emits the updated bookmark state.
      */
-    public func bridge(_ bridge: BibleBridge, removeBookmarkLabel bookmarkId: String, labelId: String) {
-        annotationBridgeHandler.removeBookmarkLabel(bridge: bridge, bookmarkId: bookmarkId, labelId: labelId)
+  public func bridge(_ bridge: BibleBridge, removeBookmarkLabel bookmarkId: String, labelId: String)
+  {
+    annotationBridgeHandler.removeBookmarkLabel(
+      bridge: bridge, bookmarkId: bookmarkId, labelId: labelId)
     }
 
     /**
      Sets the primary label used to style a bookmark in Vue.js.
      */
     public func bridge(_ bridge: BibleBridge, setPrimaryLabel bookmarkId: String, labelId: String) {
-        annotationBridgeHandler.setPrimaryLabel(bridge: bridge, bookmarkId: bookmarkId, labelId: labelId)
+    annotationBridgeHandler.setPrimaryLabel(
+      bridge: bridge, bookmarkId: bookmarkId, labelId: labelId)
     }
 
     /**
      Updates whether a bookmark should highlight whole verses or a text-range selection.
      */
     public func bridge(_ bridge: BibleBridge, setBookmarkWholeVerse bookmarkId: String, value: Bool) {
-        annotationBridgeHandler.setBookmarkWholeVerse(bridge: bridge, bookmarkId: bookmarkId, value: value)
+    annotationBridgeHandler.setBookmarkWholeVerse(
+      bridge: bridge, bookmarkId: bookmarkId, value: value)
     }
 
     /**
      Updates the custom icon attached to a bookmark.
      */
-    public func bridge(_ bridge: BibleBridge, setBookmarkCustomIcon bookmarkId: String, value: String?) {
-        annotationBridgeHandler.setBookmarkCustomIcon(bridge: bridge, bookmarkId: bookmarkId, value: value)
+  public func bridge(
+    _ bridge: BibleBridge, setBookmarkCustomIcon bookmarkId: String, value: String?
+  ) {
+    annotationBridgeHandler.setBookmarkCustomIcon(
+      bridge: bridge, bookmarkId: bookmarkId, value: value)
     }
 
     // MARK: - BibleBridgeDelegate — StudyPad
@@ -3512,7 +5747,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Failure modes:
      - returns without side effects when identifiers are invalid or StudyPad creation fails
      */
-    public func bridge(_ bridge: BibleBridge, createNewStudyPadEntry labelId: String, entryType: String, afterEntryId: String) {
+  public func bridge(
+    _ bridge: BibleBridge, createNewStudyPadEntry labelId: String, entryType: String,
+    afterEntryId: String
+  ) {
         annotationBridgeHandler.createNewStudyPadEntry(
             bridge: bridge,
             labelId: labelId,
@@ -3566,8 +5804,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Persists an optional bookmark edit action configured in the web client.
      */
-    public func bridge(_ bridge: BibleBridge, setBookmarkEditAction bookmarkId: String, value: String) {
-        annotationBridgeHandler.setBookmarkEditAction(bridge: bridge, bookmarkId: bookmarkId, value: value)
+  public func bridge(_ bridge: BibleBridge, setBookmarkEditAction bookmarkId: String, value: String)
+  {
+    annotationBridgeHandler.setBookmarkEditAction(
+      bridge: bridge, bookmarkId: bookmarkId, value: value)
     }
 
     /**
@@ -3581,7 +5821,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Persists the current insertion cursor position for a StudyPad label.
      */
     public func bridge(_ bridge: BibleBridge, setStudyPadCursor labelId: String, orderNumber: Int) {
-        annotationBridgeHandler.setStudyPadCursor(bridge: bridge, labelId: labelId, orderNumber: orderNumber)
+    annotationBridgeHandler.setStudyPadCursor(
+      bridge: bridge, labelId: labelId, orderNumber: orderNumber)
     }
 
     // MARK: - BibleBridgeDelegate — Selection
@@ -3650,15 +5891,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        selections return `nil` or the lightweight fallback rather than throwing.
      */
     @MainActor
-    private func querySelectionDetails() async -> (
-        text: String,
-        bookInitials: String?,
-        osisRef: String?,
-        startOrdinal: Int?,
-        endOrdinal: Int?,
-        startOffset: Int?,
-        endOffset: Int?
-    )? {
+    private func querySelectionDetails() async -> BibleReaderSpeechSelection? {
         if let webView = bridge.webView {
             let js = """
             (function() {
@@ -3677,7 +5910,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 let result = try await webView.evaluateJavaScript(js)
                 if let jsonStr = result as? String,
                    let data = jsonStr.data(using: .utf8),
-                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+          let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
                     /// Coerces JSON bridge values into optional `Int` values while treating `NSNull` as missing.
                     func asInt(_ value: Any?) -> Int? {
                         if value is NSNull { return nil }
@@ -3689,13 +5923,25 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     let text = dict["text"] as? String ?? ""
                     let bookInitials = dict["bookInitials"] as? String
                     let osisRef = dict["osisRef"] as? String
+                    let bookCategory = dict["bookCategory"] as? String
+                    let versification = dict["v11n"] as? String
                     let startOrdinal = asInt(dict["startOrdinal"])
                     let endOrdinal = asInt(dict["endOrdinal"])
                     let startOffset = asInt(dict["startOffset"])
                     let endOffset = asInt(dict["endOffset"])
 
                     if !text.isEmpty || startOrdinal != nil || endOrdinal != nil {
-                        return (text, bookInitials, osisRef, startOrdinal, endOrdinal, startOffset, endOffset)
+                        return BibleReaderSpeechSelection(
+                            text: text,
+                            bookInitials: bookInitials,
+                            osisRef: osisRef,
+                            bookCategory: bookCategory,
+                            versification: versification,
+                            startOrdinal: startOrdinal,
+                            endOrdinal: endOrdinal,
+                            startOffset: startOffset,
+                            endOffset: endOffset
+                        )
                     }
                 }
             } catch {
@@ -3704,7 +5950,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         if let fallback = await bridge.querySelection() {
-            return (fallback.text, nil, nil, fallback.startOrdinal, fallback.endOrdinal, nil, nil)
+            return BibleReaderSpeechSelection(
+                text: fallback.text,
+                bookInitials: nil,
+                osisRef: nil,
+                bookCategory: nil,
+                versification: nil,
+                startOrdinal: nil,
+                endOrdinal: nil,
+                startOffset: nil,
+                endOffset: nil
+            )
         }
         return nil
     }
@@ -3719,8 +5975,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             if !canUseBibleReferenceActions {
                 guard let bookInitials = sel.bookInitials,
                       let osisRef = sel.osisRef,
-                      let startOrdinal = sel.startOrdinal else {
-                    logger.warning("Generic selection bookmark ignored because selection metadata is incomplete")
+          let startOrdinal = sel.startOrdinal
+        else {
+          logger.warning(
+            "Generic selection bookmark ignored because selection metadata is incomplete")
                     return
                 }
                 addGenericBookmark(
@@ -3728,19 +5986,26 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     osisRef: osisRef,
                     startOrdinal: startOrdinal,
                     endOrdinal: sel.endOrdinal ?? startOrdinal,
-                    addNote: false
+                    addNote: false,
+                    wholeVerse: wholeVerse,
+                    startOffset: wholeVerse ? nil : sel.startOffset,
+                    endOffset: wholeVerse ? nil : sel.endOffset
                 )
                 bridge.clearSelection()
                 return
             }
 
-            let startOrd = sel.startOrdinal ?? verseOrdinal(
+      let startOrd =
+        sel.startOrdinal
+        ?? verseOrdinal(
                 osisBookId: osisBookId(for: currentBook),
                 chapter: currentChapter,
                 verse: 1
             )
             guard let startOrd else {
-                logger.error("Failed to resolve selection bookmark start ordinal for \(self.currentBook, privacy: .public) \(self.currentChapter)")
+        logger.error(
+          "Failed to resolve selection bookmark start ordinal for \(self.currentBook, privacy: .public) \(self.currentChapter)"
+        )
                 return
             }
             let endOrd = sel.endOrdinal ?? startOrd
@@ -3784,7 +6049,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         osisRef: String,
         startOrdinal: Int,
         endOrdinal: Int,
-        addNote: Bool
+        addNote: Bool,
+        wholeVerse: Bool,
+        startOffset: Int? = nil,
+        endOffset: Int? = nil
     ) {
         annotationBridgeHandler.addGenericBookmark(
             bridge: bridge,
@@ -3792,7 +6060,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             osisRef: osisRef,
             startOrdinal: startOrdinal,
             endOrdinal: endOrdinal,
-            addNote: addNote
+            addNote: addNote,
+            wholeVerse: wholeVerse,
+            startOffset: startOffset,
+            endOffset: endOffset
         )
     }
 
@@ -3833,44 +6104,141 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Share the selected text.
     func shareSelection() {
-        guard let shareText = selectionCoordinator.shareText(context: selectionPageContext()) else { return }
+    guard let shareText = selectionCoordinator.shareText(context: selectionPageContext()) else {
+      return
+    }
         onShareVerseText?(shareText)
         bridge.clearSelection()
     }
 
-    /// Speak the selected text.
+    /**
+     Starts Speak from the selected document's typed source identity.
+
+     The asynchronous DOM query captures the current service generation before suspension. A newer
+     transport request invalidates the result, preventing an old selection from replacing it after
+     JavaScript returns.
+     */
     func speakSelection() {
+        guard let service = speakService else { return }
+        let expectedGeneration = service.currentSessionGeneration
         Task { @MainActor in
             guard let sel = await querySelectionDetails(), !sel.text.isEmpty else { return }
-            guard let service = speakService else { return }
-            if canUseBibleReferenceActions {
-                service.currentTitle = "\(currentBook) \(currentChapter)"
-                service.currentSubtitle = activeModuleName
-            } else {
-                service.currentTitle = sel.bookInitials ?? activeGeneralBookModuleName ?? activeCommentaryModuleName ?? activeModuleName
-                service.currentSubtitle = sel.osisRef
-            }
-            let lang = activeModule?.info.language
-                ?? activeCommentaryModule?.info.language
-                ?? activeGeneralBookModule?.info.language
-                ?? "en"
-            let speechLang = lang.hasPrefix("en") ? "en-US" : lang
-            service.speak(text: sel.text, language: speechLang)
-            bridge.clearSelection()
+            guard self.speakService === service else { return }
+            _ = startSpeech(
+                for: sel,
+                expectedSessionGeneration: expectedGeneration,
+                service: service
+            )
         }
+    }
+
+    /**
+     Routes one captured native selection without crossing source categories.
+
+     - Parameters:
+       - selection: Atomic DOM source identity plus selected text.
+       - expectedSessionGeneration: Generation captured before the asynchronous WebView query.
+       - service: Controller-owned live speech service.
+     - Returns: `true` only when the unchanged session accepted a category-correct provider.
+     - Side effects: Starts speech and clears the WebView selection on success.
+     - Failure modes: Stale generations, partial identity, unsupported categories, source collisions,
+       and invalid ranges fail closed. Only a completely metadata-free selection uses plain text.
+     */
+    @MainActor
+    @discardableResult
+    func startSpeech(
+        for selection: BibleReaderSpeechSelection,
+        expectedSessionGeneration: UInt64,
+        service: SpeakService
+    ) -> Bool {
+        guard service.currentSessionGeneration == expectedSessionGeneration else { return false }
+        service.bookmarkManager = bookmarkService
+
+        if !selection.hasSourceMetadata {
+            let locale = Locale.current.identifier.replacingOccurrences(of: "_", with: "-")
+            service.currentTitle = nil
+            service.currentSubtitle = nil
+            service.speak(text: selection.text, language: locale)
+            bridge.clearSelection()
+            return true
+        }
+
+        guard let rawCategory = selection.bookCategory,
+              let category = DocumentCategory(rawValue: rawCategory),
+              let bookInitials = selection.bookInitials,
+              !bookInitials.isEmpty,
+              let key = selection.osisRef,
+              !key.isEmpty,
+              let startOrdinal = selection.startOrdinal,
+              startOrdinal >= 0,
+              let endOrdinal = selection.endOrdinal,
+      endOrdinal >= startOrdinal
+    else {
+            return false
+        }
+
+        let started: Bool
+        switch category {
+        case .bible:
+            guard let versification = selection.versification,
+        !versification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else {
+                return false
+            }
+            started = startBibleSpeech(
+                category: .bible,
+                bookInitials: bookInitials,
+                versification: versification,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal,
+                service: service
+            )
+        case .commentary:
+            started = startGenericSpeech(
+                bookInitials: bookInitials,
+                key: key,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal,
+                expectedCategory: .commentary,
+                service: service
+            )
+        case .dictionary:
+            started = startGenericSpeech(
+                bookInitials: bookInitials,
+                key: key,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal,
+                expectedCategory: .dictionary,
+                service: service
+            )
+        case .generalBook, .map, .epub, .dailyDevotion:
+            started = startGenericSpeech(
+                bookInitials: bookInitials,
+                key: key,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal,
+                expectedCategory: .generalBook,
+                service: service
+            )
+        }
+        if started { bridge.clearSelection() }
+        return started
     }
 
     /// Compare translations for the selected verse(s) through the Vue document pipeline.
     func compareSelection() {
         guard canUseBibleReferenceActions else { return }
         Task { @MainActor in
-            var startVerse: Int? = nil
-            var endVerse: Int? = nil
-            if let sel = await bridge.querySelection() {
-                startVerse = sel.startOrdinal.flatMap { ordinalToVerse($0) }
-                endVerse = sel.endOrdinal.flatMap { ordinalToVerse($0) }
+            if let selection = await querySelectionDetails(),
+               let bookInitials = selection.bookInitials,
+        let startOrdinal = selection.startOrdinal
+      {
+                loadCompareDocument(
+                    bookInitials: bookInitials,
+                    startOrdinal: startOrdinal,
+                    endOrdinal: selection.endOrdinal ?? startOrdinal
+                )
             }
-            loadCompareDocument(startVerse: startVerse, endVerse: endVerse)
             bridge.clearSelection()
         }
     }
@@ -3904,15 +6272,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     func lookupSelectionInDictionaries() {
         guard let query = selectionCoordinator.normalizedDictionaryQuery() else { return }
         guard !query.isEmpty else {
-            onShowToast?(String(
+      onShowToast?(
+        String(
                 localized: "word_not_found_in_dictionaries",
                 defaultValue: "Word not found in any dictionary"
             ))
             return
         }
-        guard let multiDocJSON = wordLookupDocumentBuilder()
-            .buildWordLookupMultiDocumentJSON(query: query) else {
-            onShowToast?(String(
+    guard
+      let multiDocJSON = wordLookupDocumentBuilder()
+        .buildWordLookupMultiDocumentJSON(query: query)
+    else {
+      onShowToast?(
+        String(
                 localized: "word_not_found_in_dictionaries",
                 defaultValue: "Word not found in any dictionary"
             ))
@@ -3931,6 +6303,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Callback for presenting action sheets (set by BibleReaderView)
     var onShareVerseText: ((String) -> Void)?
 
+    /// Callback for native My Documents sharing with Android's separate subject/body contract.
+    var onShareMyDocumentContent: ((MyDocumentSharePayload) -> Void)?
+
     /**
      Callback for presenting Downloads with an optional Android-compatible search seed.
 
@@ -3947,14 +6322,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Whether any plain word-lookup dictionaries are currently available.
     var hasWordLookupDictionaries: Bool { wordLookupDocumentBuilder().hasWordLookupDictionaries }
 
-    /**
-     Builds a shareable verse string for the current module and forwards it to native sharing UI.
-     */
-    public func bridge(_ bridge: BibleBridge, shareVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        let text = getVerseText(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
-        guard !text.isEmpty else { return }
-        let reference = "\(currentBook) \(currentChapter)"
-        let shareText = "\(text)\n— \(reference) (\(activeModuleName))"
+    /** Builds source-owned verse text and forwards it to native sharing UI. */
+  public func bridge(
+    _ bridge: BibleBridge, shareVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int
+  ) {
+        guard let shareText = verseActionText(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        ) else { return }
         onShareVerseText?(shareText)
     }
 
@@ -3964,13 +6340,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func bridge(_ bridge: BibleBridge, shareBookmarkVerse bookmarkId: String) {
         guard let service = bookmarkService,
               let uuid = UUID(uuidString: bookmarkId),
-              let bookmark = service.bibleBookmark(id: uuid) else {
+      let bookmark = service.bibleBookmark(id: uuid)
+    else {
             logger.warning("shareBookmarkVerse: bookmark not found for id=\(bookmarkId)")
             return
         }
         self.bridge(
             bridge,
-            shareVerse: activeModuleName,
+            shareVerse: bookmark.bookInitials,
             startOrdinal: bookmark.ordinalStart,
             endOrdinal: bookmark.ordinalEnd
         )
@@ -3979,11 +6356,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Copies a verse selection and its reference to the platform pasteboard.
      */
-    public func bridge(_ bridge: BibleBridge, copyVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        let text = getVerseText(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
-        guard !text.isEmpty else { return }
-        let reference = "\(currentBook) \(currentChapter)"
-        let copyText = "\(text)\n— \(reference) (\(activeModuleName))"
+  public func bridge(
+    _ bridge: BibleBridge, copyVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int
+  ) {
+        guard let copyText = verseActionText(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        ) else { return }
         #if os(iOS)
         UIPasteboard.general.string = copyText
         #elseif os(macOS)
@@ -3995,8 +6375,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Returns the Android-compatible raw My Documents page payload for the supplied document/page key.
      */
-    public func bridge(_ bridge: BibleBridge, getMyDocumentPageRawContent callId: Int, bookInitials: String, pageKey: String) {
-        guard let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey) else {
+  public func bridge(
+    _ bridge: BibleBridge, getMyDocumentPageRawContent callId: Int, bookInitials: String,
+    pageKey: String
+  ) {
+    guard
+      let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey)
+    else {
             bridge.sendResponse(callId: callId, value: "null")
             return
         }
@@ -4013,14 +6398,34 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func loadMyDocumentPage(bookInitials: String, pageKey: String) -> Bool {
         guard let store = myDocumentStore,
               let document = store.document(initials: bookInitials),
-              let page = store.page(bookInitials: bookInitials, pageKey: pageKey) else {
+      let page = store.page(bookInitials: bookInitials, pageKey: pageKey)
+    else {
             return false
         }
 
-        guard let documentJSON = myDocumentCoordinator.documentJSON(document: document, page: page) else {
-            logger.error("Failed to serialize My Documents page JSON for \(document.initials, privacy: .public)")
+        let metadata = store.readerMetadata(
+            for: page,
+            bookInitials: bookInitials,
+            pageKey: pageKey,
+            unknownPromptName: String(localized: "ai_unknown_prompt", defaultValue: "AI")
+        )
+    guard
+      let documentJSON = myDocumentCoordinator.documentJSON(
+            document: document,
+            page: page,
+        metadata: metadata,
+        genericBookmarks: genericBookmarkPayloads(
+          bookInitials: document.initials,
+          key: page.pageKey
+        )
+      )
+    else {
+      logger.error(
+        "Failed to serialize My Documents page JSON for \(document.initials, privacy: .public)")
             return false
         }
+
+        beginReplacingContentIntent()
 
         showingMyNotes = false
         showingStudyPad = false
@@ -4028,8 +6433,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeStudyPadLabelName = nil
         editingInWebView = false
         clearNativeSelectionState()
+        activeEpubReader = nil
+        activeEpubIdentifier = nil
+        activeEpubTitle = nil
+        currentEpubTitle = nil
+        currentEpubHref = nil
+        activeGeneralBookModule = nil
+        activeGeneralBookModuleName = document.initials
+        currentGeneralBookKey = page.pageKey
         currentCategory = .generalBook
         myDocumentCoordinator.setActivePage(bookInitials: bookInitials, pageKey: pageKey)
+        if let pageManager = activeWindow?.pageManager {
+            pageManager.currentCategoryName = DocumentCategory.generalBook.pageManagerKey
+            pageManager.generalBookDocument = document.initials
+            pageManager.generalBookKey = page.pageKey
+            pageManager.epubIdentifier = nil
+            pageManager.epubHref = nil
+            onPersistState?()
+        }
         setRenderedContentState(
             category: .generalBook,
             moduleName: document.initials,
@@ -4039,10 +6460,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         bridge.emit(event: "clear_document")
         bridge.emit(event: "add_documents", data: documentJSON)
-        bridge.emit(
-            event: "setup_content",
-            data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}"
-        )
+        emitSetupContent(ReaderSetupContentPayload())
         bridge.clearSelection()
         applyNightModeBackground()
         return true
@@ -4051,8 +6469,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Copies the stored raw My Documents page content to the platform pasteboard.
      */
-    public func bridge(_ bridge: BibleBridge, copyMyDocumentContent bookInitials: String, pageKey: String) {
-        guard let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey) else {
+  public func bridge(
+    _ bridge: BibleBridge, copyMyDocumentContent bookInitials: String, pageKey: String
+  ) {
+    guard
+      let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey)
+    else {
             return
         }
 
@@ -4067,30 +6489,41 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Shares the stored raw My Documents page content through native sharing UI.
      */
-    public func bridge(_ bridge: BibleBridge, shareMyDocumentContent bookInitials: String, pageKey: String) {
-        guard let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey) else {
+  public func bridge(
+    _ bridge: BibleBridge, shareMyDocumentContent bookInitials: String, pageKey: String
+  ) {
+    guard
+      let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey)
+    else {
             return
         }
 
-        onShareVerseText?(myDocumentCoordinator.shareText(for: payload))
+        onShareMyDocumentContent?(myDocumentCoordinator.sharePayload(for: payload))
     }
 
     /**
      Persists raw My Documents editor content without rebuilding the document immediately.
      */
-    public func bridge(_ bridge: BibleBridge, saveMyDocumentPageContent bookInitials: String, pageId: String, content: String, title: String?) {
+  public func bridge(
+    _ bridge: BibleBridge, saveMyDocumentPageContent bookInitials: String, pageId: String,
+    content: String, title: String?
+  ) {
         guard let pageUUID = UUID(uuidString: pageId) else {
             logger.warning("saveMyDocumentPageContent: malformed page id=\(pageId, privacy: .public)")
             return
         }
 
-        guard myDocumentStore?.savePageContent(
+    guard
+      myDocumentStore?.savePageContent(
             bookInitials: bookInitials,
             pageId: pageUUID,
             content: content,
             title: title
-        ) == true else {
-            logger.warning("saveMyDocumentPageContent: page not found or save failed for document=\(bookInitials, privacy: .public)")
+      ) == true
+    else {
+      logger.warning(
+        "saveMyDocumentPageContent: page not found or save failed for document=\(bookInitials, privacy: .public)"
+      )
             return
         }
     }
@@ -4120,7 +6553,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         guard let context = myDocumentStore?.aiPageActionContext(pageId: pageUUID) else {
-            logger.warning("regenerateMyDocumentPage: source prompt metadata missing for page id=\(pageId, privacy: .public)")
+      logger.warning(
+        "regenerateMyDocumentPage: source prompt metadata missing for page id=\(pageId, privacy: .public)"
+      )
             return
         }
 
@@ -4157,7 +6592,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Keeps the visible WebView in sync after an AI My Documents page deletion.
+   Applies Android's reader-window lifecycle after an AI My Documents page deletion.
+
+   Deleting an inactive marker leaves the active page selected and reloads its metadata. Deleting
+   the rendered page asks the pane owner to close a removable window; only an ownerless or sole
+   non-removable pane switches to its selected Bible.
+
+   - Parameter context: Store-validated identity captured before the page was deleted.
+   - Side effects: Clears reader-local My Documents identity, may invoke the pane lifecycle callback,
+     or persists and renders Bible fallback content.
+   - Failure modes: Actions for another document are ignored. A missing lifecycle owner safely
+     falls back to the selected Bible instead of leaving deleted content visible.
      */
     private func refreshMyDocumentAfterDeletingPage(_ context: MyDocumentAIPageActionContext) {
         guard myDocumentCoordinator.isActiveDocument(context) else {
@@ -4166,6 +6611,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         if myDocumentCoordinator.isActivePage(context) {
             myDocumentCoordinator.clearActivePage()
+      if onDeleteActiveMyDocumentPage?() == .paneClosed {
+        return
+      }
             currentCategory = .bible
             if let pageManager = activeWindow?.pageManager {
                 pageManager.currentCategoryName = DocumentCategory.bible.pageManagerKey
@@ -4183,66 +6631,135 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Opens the Android-style compare document for the selected verse range.
      */
-    public func bridge(_ bridge: BibleBridge, compareVerses bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
+  public func bridge(
+    _ bridge: BibleBridge, compareVerses bookInitials: String, startOrdinal: Int, endOrdinal: Int
+  ) {
         logger.info("Compare verses requested: \(startOrdinal)-\(endOrdinal)")
-        let startVerse = ordinalToVerse(startOrdinal)
-        let endVerse = ordinalToVerse(endOrdinal)
-        loadCompareDocument(startVerse: startVerse, endVerse: endVerse)
+        loadCompareDocument(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal > 0 ? endOrdinal : startOrdinal
+        )
     }
 
     /**
      Starts TTS playback for the selected verse range.
      */
-    public func bridge(_ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int) {
-        speakVerseRange(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+  public func bridge(
+    _ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int,
+    endOrdinal: Int
+  ) {
+        guard let service = speakService else { return }
+        service.bookmarkManager = bookmarkService
+        _ = startBibleSpeech(
+            category: .bible,
+            bookInitials: bookInitials,
+            versification: v11n,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
+            service: service
+        )
+    }
+
+    /** Starts Android's generic speech provider without routing through Bible coordinates. */
+    public func bridge(
+        _ bridge: BibleBridge,
+        speakGeneric bookInitials: String,
+        osisRef: String,
+        startOrdinal: Int,
+        endOrdinal: Int
+    ) {
+        guard let service = speakService else { return }
+        guard startOrdinal >= 0 else { return }
+        service.bookmarkManager = bookmarkService
+        _ = startGenericSpeech(
+            bookInitials: bookInitials,
+            key: osisRef,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal >= 0 ? endOrdinal : nil,
+            expectedCategory: nil,
+            service: service
+        )
     }
 
     /**
      Starts repeated TTS playback for the selected memorization range.
      */
-    public func bridge(_ bridge: BibleBridge, speakMemorizationLoop bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int) {
-        speakMemorizationLoopRange(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+  public func bridge(
+    _ bridge: BibleBridge, speakMemorizationLoop bookInitials: String, v11n: String,
+    startOrdinal: Int, endOrdinal: Int
+  ) {
+        guard let service = speakService else { return }
+        service.bookmarkManager = bookmarkService
+        _ = startBibleSpeech(
+            category: .memorization,
+            bookInitials: bookInitials,
+            versification: v11n,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
+            service: service
+        )
     }
 
     /**
      Adds the selected verse range as a memorization target and opens the bundled Memorize document.
      */
-    public func bridge(_ bridge: BibleBridge, memorize bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        progressBridgeCoordinator.memorize(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+  public func bridge(
+    _ bridge: BibleBridge, memorize bookInitials: String, startOrdinal: Int, endOrdinal: Int
+  ) {
+    progressBridgeCoordinator.memorize(
+      bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     /**
      Marks the selected verse range as memorized in local iOS memorization state.
      */
-    public func bridge(_ bridge: BibleBridge, markAsMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        progressBridgeCoordinator.markAsMemorized(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+  public func bridge(
+    _ bridge: BibleBridge, markAsMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int
+  ) {
+    progressBridgeCoordinator.markAsMemorized(
+      bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     /**
      Adds the selected verse range to local iOS memorization targets.
      */
-    public func bridge(_ bridge: BibleBridge, addMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        progressBridgeCoordinator.addMemorizationTarget(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+  public func bridge(
+    _ bridge: BibleBridge, addMemorizationTarget bookInitials: String, startOrdinal: Int,
+    endOrdinal: Int
+  ) {
+    progressBridgeCoordinator.addMemorizationTarget(
+      bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     /**
      Removes the selected verse range from local iOS memorization targets.
      */
-    public func bridge(_ bridge: BibleBridge, removeMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        progressBridgeCoordinator.removeMemorizationTarget(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+  public func bridge(
+    _ bridge: BibleBridge, removeMemorizationTarget bookInitials: String, startOrdinal: Int,
+    endOrdinal: Int
+  ) {
+    progressBridgeCoordinator.removeMemorizationTarget(
+      bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     /**
      Removes the selected verse range from local iOS memorized ranges.
      */
-    public func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        progressBridgeCoordinator.unmarkMemorized(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+  public func bridge(
+    _ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int
+  ) {
+    progressBridgeCoordinator.unmarkMemorized(
+      bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     /**
      Records one chapter-read history row in local iOS reading-progress state.
      */
-    public func bridge(_ bridge: BibleBridge, recordChapterRead bookInitials: String, startOrdinal: Int, chapter: Int, source: String) {
+  public func bridge(
+    _ bridge: BibleBridge, recordChapterRead bookInitials: String, startOrdinal: Int, chapter: Int,
+    source: String
+  ) {
         progressBridgeCoordinator.recordChapterRead(
             bookInitials: bookInitials,
             startOrdinal: startOrdinal,
@@ -4254,7 +6771,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Opens native chapter-read history for the active Bible chapter identity.
      */
-    public func bridge(_ bridge: BibleBridge, openChapterReadHistory bookInitials: String, startOrdinal: Int, chapter: Int) {
+  public func bridge(
+    _ bridge: BibleBridge, openChapterReadHistory bookInitials: String, startOrdinal: Int,
+    chapter: Int
+  ) {
         progressBridgeCoordinator.openChapterReadHistory(
             bookInitials: bookInitials,
             startOrdinal: startOrdinal,
@@ -4286,8 +6806,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Clears chapter-read status for the active reading-progress cycle.
      */
-    public func bridge(_ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int) {
-        progressBridgeCoordinator.unmarkChapterRead(bookInitials: bookInitials, startOrdinal: startOrdinal, chapter: chapter)
+  public func bridge(
+    _ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int
+  ) {
+    progressBridgeCoordinator.unmarkChapterRead(
+      bookInitials: bookInitials, startOrdinal: startOrdinal, chapter: chapter)
     }
 
     // MARK: - BibleBridgeDelegate — Navigation Actions
@@ -4336,26 +6859,68 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - v11n: Source versification name associated with `ordinal`.
        - ordinal: Source-versification ordinal from the bookmark modal link.
      - Side effects: Loads or queues the My Notes document through `loadMyNotesDocument`.
-     - Failure modes: If the source ordinal cannot be projected to KJVA, the document opens without
-       a scroll target rather than sending an ordinal from the wrong domain.
+     - Failure modes: If the source ordinal cannot be projected to KJVA, the route fails closed
+       rather than opening an unrelated active chapter or sending an ordinal from the wrong domain.
      */
     public func bridge(_ bridge: BibleBridge, openMyNotes v11n: String, ordinal: Int) {
-        loadMyNotesDocument(jumpToOrdinal: kjvaMyNotesOrdinal(v11nName: v11n, sourceOrdinal: ordinal))
+        guard let target = myNotesTarget(v11nName: v11n, sourceOrdinal: ordinal) else { return }
+        loadMyNotesDocument(target: target)
+    }
+
+  /**
+   Opens the exact generated document page referenced by an AI marker.
+
+   - Parameters:
+     - bridge: Reader bridge that delivered the marker navigation request.
+     - request: Exact generated-book initials and page key encoded in the marker.
+   - Side effects: Delegates to pane-owned link routing when configured, otherwise loads the
+     requested My Documents page and updates pane persistence when it exists.
+   - Failure modes: Missing documents or keys fail closed without changing the current page,
+     matching Android's exact `Books.getBook` and `book.getKey` lookup behavior.
+   */
+  public func bridge(_ bridge: BibleBridge, openAIDocumentPage request: AIDocumentPageRequest) {
+    if let route = onOpenAIDocumentPageInLinksWindow {
+      route(request)
+      return
+    }
+    loadMyDocumentPage(
+      bookInitials: request.documentInitials,
+      pageKey: request.pageKey
+    )
+  }
+
+    /**
+     Loads the KJVA My Notes chapter containing the requested row or active-pane verse.
+
+     - Parameter jumpToOrdinal: Optional KJVA My Notes row ordinal to scroll to after loading.
+     - Side effects: Resolves an immutable KJVA target, marks My Notes as visible, clears competing
+       StudyPad/editing state, emits the target chapter when the client is ready, or stores that
+       complete target for client-ready replay.
+     - Failure modes: If the requested row or active verse cannot resolve to a KJVA My Notes page,
+       logs the failure and leaves the current reader document unchanged.
+     */
+    public func loadMyNotesDocument(jumpToOrdinal: Int? = nil) {
+        guard let target = currentMyNotesTarget(jumpToOrdinal: jumpToOrdinal) else {
+            logger.error("Failed to resolve the KJVA My Notes target")
+            return
+        }
+        loadMyNotesDocument(target: target)
     }
 
     /**
-     Loads the My Notes document for the current chapter into the WebView.
+     Loads one explicit KJVA-owned My Notes chapter.
 
-     - Parameter jumpToOrdinal: Optional KJVA My Notes row ordinal to scroll to after loading.
-     - Side effects: Marks My Notes as the visible reader document, clears competing StudyPad and
-       editing state, rebuilds the chapter's note-backed bookmarks, emits the My Notes document to
-       Vue when the client is ready, or stores the request for client-ready replay when it is not.
-     - Failure modes: If the current chapter range cannot be resolved, logs the failure and leaves
-       the visible My Notes intent in place for the native header/state export.
+     - Parameter target: KJVA book, chapter, and optional row ordinal resolved at the route boundary.
+     - Side effects: Invalidates older content intents, retains the complete target for client-ready
+       replay, emits a target-owned My Notes document, and updates visible annotation state.
+     - Failure modes: An unresolved target chapter fails in the annotation loader without falling
+       back to the active pane's chapter.
      */
-    public func loadMyNotesDocument(jumpToOrdinal: Int? = nil) {
+    private func loadMyNotesDocument(target: MyNotesTarget) {
+        beginReplacingContentIntent()
         guard clientReady else {
-            pendingClientReadyMyNotesJumpOrdinal = jumpToOrdinal
+            pendingClientReadyMyNotesTarget = target
+            activeMyNotesTarget = target
             showingMyNotes = true
             showingStudyPad = false
             activeStudyPadLabelId = nil
@@ -4364,17 +6929,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             clearNativeSelectionState()
             return
         }
-        pendingClientReadyMyNotesJumpOrdinal = nil
+        pendingClientReadyMyNotesTarget = nil
+        activeMyNotesTarget = target
         annotationDocumentLoader().loadMyNotesDocument(
-            currentBook: currentBook,
-            currentChapter: currentChapter,
-            osisBookId: osisBookId(for: currentBook),
-            jumpToOrdinal: jumpToOrdinal,
+            currentBook: target.bookName,
+            currentChapter: target.chapter,
+            osisBookId: target.osisBookId,
+            jumpToOrdinal: target.jumpOrdinal,
             chapterRange: { [weak self] in
-                guard let self else { return nil }
-                return self.bookmarkQueryOrdinalRange(book: self.currentBook, chapter: self.currentChapter)
+                self?.myNotesChapterRange(for: target)
             },
-            bookmarks: { [weak self] in self?.currentChapterMyNotesBookmarks() ?? [] },
+            bookmarks: { [weak self] in self?.myNotesBookmarks(for: target) ?? [] },
             bookmarkPayload: { [self] bookmark in buildBookmarkJSONForMyNotes(bookmark) },
             prepareVisibleState: { [weak self] in
                 self?.showingMyNotes = true
@@ -4398,6 +6963,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        transient document contract.
      */
     func renderMemorizeDocument(_ emission: MemorizeDocumentEmission) {
+        beginReplacingContentIntent()
         activeMemorizeEmission = emission
         annotationDocumentLoader().emitMemorizeDocument(emission) { [weak self] in
             self?.prepareMemorizeVisibleState(emission: emission)
@@ -4429,7 +6995,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeCommentaryModuleName = AndroidSpecialDocumentIdentity.memorizeDocumentInitials
 
         guard let pageManager = activeWindow?.pageManager else { return }
-        pageManager.currentCategoryName = AndroidSpecialDocumentIdentity.memorizeDocumentCategory.pageManagerKey
+    pageManager.currentCategoryName =
+      AndroidSpecialDocumentIdentity.memorizeDocumentCategory.pageManagerKey
         pageManager.commentaryDocument = AndroidSpecialDocumentIdentity.memorizeDocumentInitials
         pageManager.commentaryAnchorOrdinal = emission.startOrdinal
         preserveMemorizeSourceBookAndKey(emission.sourceBookAndKeyJSON)
@@ -4448,7 +7015,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private func preserveMemorizeSourceBookAndKey(_ sourceBookAndKey: String?) {
         guard let sourceBookAndKey,
               let settingsStore,
-              let windowID = activeWindow?.id else { return }
+      let windowID = activeWindow?.id
+    else { return }
 
         let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
         let existing = fidelityStore.pageManagerEntry(for: windowID)
@@ -4475,7 +7043,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     @discardableResult
     private func openMemorizeDocument(request: MemorizeDocumentRequest) -> Bool {
-        guard let emission = annotationDocumentLoader().makeMemorizeDocumentEmission(request: request) else {
+    guard let emission = annotationDocumentLoader().makeMemorizeDocumentEmission(request: request)
+    else {
             return false
         }
         if let openInLinksWindow = onOpenMemorizeDocumentInLinksWindow {
@@ -4577,7 +7146,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 startOrdinal: effectiveStart,
                 endOrdinal: effectiveEnd,
                 activeModuleName: activeModuleName,
-                currentBook: Self.bookName(forOsisId: firstReference.osisBookId) ?? firstReference.osisBookId,
+        currentBook: Self.bookName(forOsisId: firstReference.osisBookId)
+          ?? firstReference.osisBookId,
                 currentChapter: firstReference.chapter,
                 osisBookId: firstReference.osisBookId,
                 activeModule: activeModule,
@@ -4642,6 +7212,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        unchanged and emits no bridge event.
      */
     public func loadStudyPadDocument(labelId: UUID, bookmarkId: UUID? = nil) {
+        beginReplacingContentIntent()
         guard clientReady else {
             guard let labelName = bookmarkService?.label(id: labelId)?.name else { return }
             showingMyNotes = false
@@ -4661,7 +7232,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             bookmarkPayload: { [self] bookmark in buildBookmarkJSONForStudyPad(bookmark) },
             genericBookmarkPayload: { [self] bookmark in buildGenericBookmarkJSONForStudyPad(bookmark) },
             bibleBookmarkToLabelPayload: { [self] relation in buildBibleBookmarkToLabelJSON(relation) },
-            genericBookmarkToLabelPayload: { [self] relation in buildGenericBookmarkToLabelJSON(relation) },
+      genericBookmarkToLabelPayload: { [self] relation in buildGenericBookmarkToLabelJSON(relation)
+      },
             studyPadEntryPayload: { [self] entry in buildStudyPadEntryJSON(entry) },
             prepareVisibleState: { [weak self] labelName in
                 self?.showingMyNotes = false
@@ -4712,13 +7284,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func handleExternalLinkRoute(_ route: BibleReaderExternalLinkRouter.Route) {
         switch route {
-        case let .definition(strongs, robinson):
+    case .definition(let strongs, let robinson):
             logger.info("handleExternalLinkRoute.definition: strongs=\(strongs), robinson=\(robinson)")
-            guard let multiDocJSON = buildStrongsMultiDocJSON(
+      guard
+        let multiDocJSON = buildStrongsMultiDocJSON(
                 strongs: strongs,
                 robinson: robinson,
                 stateJSON: currentStrongsDocumentStateJSON()
-            ) else {
+        )
+      else {
                 return
             }
             openDefinitionDocument(
@@ -4726,30 +7300,36 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 renderedBook: "Strongs",
                 renderedKey: "strongs"
             )
-        case let .findAllOccurrences(name):
+    case .findAllOccurrences(let name):
             onShowStrongsSearch?(name)
         case .errorReport:
             handleErrorReportLink()
-        case let .epubReference(book, toKey, toId):
+    case .epubReference(let book, let toKey, let toId):
             bridge(self.bridge, openEpubLink: book, toKey: toKey, toId: toId)
-        case let .downloads(searchText):
+    case .downloads(let searchText):
             bridgeEventRouter.requestOpenDownloads(searchText: searchText)
-        case let .myNotes(osisRef, ordinal):
-            if let osisRef, let ref = parseOsisReferences(osisRef).first {
-                navigateTo(book: ref.book, chapter: ref.chapter, verse: ref.verse)
-                loadMyNotesDocument(jumpToOrdinal: ordinal)
-            } else {
-                loadMyNotesDocument(jumpToOrdinal: ordinal)
-            }
-        case let .studyPad(labelId, bookmarkId):
+    case .myNotes(let v11n, let ordinal):
+      guard
+        let target = myNotesTarget(
+                v11nName: v11n,
+                sourceOrdinal: ordinal
+        )
+      else { return }
+            loadMyNotesDocument(target: target)
+    case .studyPad(let labelId, let bookmarkId):
             loadStudyPadDocument(labelId: labelId, bookmarkId: bookmarkId)
-        case let .osisReferences(values):
-            handleOsisReferenceValues(values)
-        case let .multiReferences(values):
-            handleMultiReferenceValues(values)
-        case let .swordReference(ref), let .osisNavigation(ref):
+    case .osisReferences(let values, let v11n, let documentInitials, let forceDocument):
+            handleOsisReferenceValues(
+                values,
+                sourceVersification: v11n,
+                documentInitials: documentInitials,
+                forceDocument: forceDocument
+            )
+    case .multiReferences(let values, let v11n):
+            handleMultiReferenceValues(values, sourceVersification: v11n)
+    case .swordReference(let ref), .osisNavigation(let ref):
             _ = navigateToOsisRef(ref)
-        case let .platformURL(url):
+    case .platformURL(let url):
             openPlatformURL(url)
         }
     }
@@ -4830,7 +7410,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Failure modes: A missing links-window owner is treated as a direct render fallback; JSON
        validation remains owned by the downstream Vue document pipeline.
      */
-    private func openDefinitionDocument(_ documentJSON: String, renderedBook: String, renderedKey: String) {
+  private func openDefinitionDocument(
+    _ documentJSON: String, renderedBook: String, renderedKey: String
+  ) {
         if let openInLinksWindow = onOpenDefinitionDocumentInLinksWindow {
             openInLinksWindow(documentJSON, renderedBook, renderedKey)
         } else {
@@ -4874,7 +7456,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      The controller only supplies pane dependencies; lookup, module selection, linkification, and
      fallback-document construction are owned by `BibleReaderStrongsDocumentBuilder`.
      */
-    func buildStrongsMultiDocJSON(strongs: [String], robinson: [String], stateJSON: String? = nil) -> String? {
+  func buildStrongsMultiDocJSON(strongs: [String], robinson: [String], stateJSON: String? = nil)
+    -> String?
+  {
         strongsDocumentBuilder().buildStrongsMultiDocumentJSON(
             strongs: strongs,
             robinson: robinson,
@@ -4887,11 +7471,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func strongsDocumentBuilder() -> BibleReaderStrongsDocumentBuilder {
         BibleReaderStrongsDocumentBuilder(
-            swordManager: swordManager,
+            installedDictionarySources: { [weak self] in
+                self?.installedDictionarySources() ?? []
+            },
             selectedPreferenceValues: { [weak self] key in
                 self?.settingsStore?.getStringSet(key) ?? []
             },
-            moduleDisplayLabel: BibleReaderStrongsDocumentBuilder.moduleDisplayLabel,
             localizedString: { key, defaultValue in
                 Bundle.main.localizedString(forKey: key, value: defaultValue, table: nil)
             }
@@ -4906,7 +7491,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func wordLookupDocumentBuilder() -> BibleReaderWordLookupDocumentBuilder {
         BibleReaderWordLookupDocumentBuilder(
-            swordManager: swordManager,
+            installedDictionarySources: { [weak self] in
+                self?.installedDictionarySources() ?? []
+            },
             disabledDictionaryNames: { [weak self] in
                 Set(self?.settingsStore?.getStringSet(.disabledWordLookupDictionaries) ?? [])
             }
@@ -4918,9 +7505,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func compareDocumentBuilder() -> BibleReaderCompareDocumentBuilder {
         BibleReaderCompareDocumentBuilder(
-            swordManager: swordManager,
-            installedBibleModules: installedBibleModules,
-            activeModuleName: activeModuleName
+            moduleResolver: installedModuleResolver(),
+            installedBibleModules: installedBibleModules
         )
     }
 
@@ -4931,19 +7517,27 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      module ordering and payload construction.
      */
     private func makeBibleCompareDocumentRequest(
-        startVerse: Int?,
-        endVerse: Int?
+        bookInitials: String?,
+        startOrdinal: Int?,
+        endOrdinal: Int?
     ) -> BibleReaderCompareDocumentBuilder.Request? {
-        let bookName = currentBook
-        let chapter = currentChapter
-        let osisBookId = osisBookId(for: bookName)
+        if let bookInitials, let startOrdinal {
+            return compareDocumentBuilder().makeRequest(
+                bookInitials: bookInitials,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal ?? startOrdinal
+            )
+        }
+
+        guard let activeSource = activeInstalledScriptureSource(),
+      let range = chapterOrdinalRange(book: currentBook, chapter: currentChapter)
+    else {
+            return nil
+        }
         return compareDocumentBuilder().makeRequest(
-            osisBookId: osisBookId,
-            bookName: bookName,
-            chapter: chapter,
-            isNewTestament: isNewTestament(bookName),
-            startVerse: startVerse,
-            endVerse: endVerse
+            bookInitials: activeSource.info.name,
+            startOrdinal: range.start,
+            endOrdinal: range.end
         )
     }
 
@@ -4954,24 +7548,37 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        multi-reference `osis://` link. Empty input produces no document.
      - Returns: Serialized JSON for a transient multi-document, or `nil` if there are no references
        or JSON serialization fails.
-     - Side effects: reads the active SWORD Bible module and moves its key cursor while extracting
-       verse OSIS. Missing module content is represented by a fallback verse label so the link still
-       opens a document instead of falling back to the native cross-reference sheet.
-     - Note: The payload intentionally omits `contentType`; Vue routes non-Strong's `type: "multi"`
+     - Side effects: Reads exact source-module entries through cursor-restoring inspectors.
+     - Failure modes: Returns `nil` when a source module, versification mapping, exact entry, or JSON
+       serialization is unavailable. Partial or relabeled fragments are never emitted.
+     - Note: The payload encodes `contentType: null`; Vue routes non-Strong's `type: "multi"`
        documents to `MultiDocument`, matching Android's `FakeBookFactory.multiDocument` path.
      */
     private func buildBibleMultiReferenceDocumentJSON(refs: [OsisRef]) -> String? {
         BibleReaderMultiReferenceDocumentBuilder(
-            activeModule: activeModule,
-            activeModuleName: activeModuleName,
-            compatibilityOrdinal: { [weak self] chapter, verse in
-                self?.compatibilityOrdinal(chapter: chapter, verse: verse)
-                    ?? BibleChapterDocumentBuilder.ordinal(chapter: chapter, verse: verse)
-            },
-            isNewTestament: { [weak self] bookName in
-                self?.isNewTestament(bookName) ?? Self.isNewTestament(bookName)
-            }
+            moduleResolver: installedModuleResolver(),
+            activeModuleName: activeModuleName
         ).buildDocumentJSON(refs: refs)
+    }
+
+    /** Captures Android's exact global installed-book registry for one reader operation. */
+    private func installedModuleResolver() -> BibleReaderInstalledModuleResolver {
+        BibleReaderInstalledModuleResolver(
+            swordManager: swordManager,
+            sqliteModules: sqliteRuntimeCoordinator.unshadowedSQLiteModules()
+        )
+    }
+
+    /** Resolves the pane's selected Bible without substituting another installed source. */
+    private func activeInstalledScriptureSource() -> BibleReaderInstalledScriptureSource? {
+        installedModuleResolver().scripture(named: activeModuleName)
+    }
+
+    /** Returns Android's globally registered dictionary/glossary inventory in backend order. */
+    private func installedDictionarySources() -> [BibleReaderInstalledDictionarySource] {
+        installedModuleResolver()
+            .modules(categories: [.dictionary, .glossary])
+            .compactMap(\.dictionary)
     }
 
     /**
@@ -4987,7 +7594,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Failure modes: if the module cannot resolve the exact verse or returns empty raw OSIS, the
        fragment contains an escaped display label rather than throwing.
      */
-    private func buildBibleMultiReferenceXML(ref: OsisRef, module: SwordModule?, ordinal: Int) -> String {
+  private func buildBibleMultiReferenceXML(ref: OsisRef, module: SwordModule?, ordinal: Int)
+    -> String?
+  {
         BibleReaderMultiReferenceDocumentBuilder.buildBibleMultiReferenceXML(
             ref: ref,
             module: module,
@@ -5009,21 +7618,32 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Handles already-classified `osis://` query values from Android-compatible links.
 
      - Parameter values: Raw OSIS query values preserved in link order.
-     - Side effects: Navigates a single reference or opens Android's transient `Multi` document for
-       range/list references.
-     - Failure modes: Invalid values are ignored; no side effects occur when nothing parses.
+   - Side effects: Navigates one contiguous passage or opens Android's transient `Multi` document
+     when parsing produces more than one discontiguous range.
+   - Failure modes: Invalid values and requests without an active Bible are ignored; no side
+     effects occur when nothing parses.
      */
-    private func handleOsisReferenceValues(_ values: [String]) {
+    private func handleOsisReferenceValues(
+        _ values: [String],
+        sourceVersification: String,
+        documentInitials: String?,
+        forceDocument: Bool
+    ) {
+    guard activeModule?.info.category == .bible else { return }
         guard let value = values.first else { return }
-        let refs = parseOsisReferences(value)
+        let targetInitials = forceDocument ? documentInitials : nil
+        let refs = parseOsisReferences(
+            value,
+            sourceVersification: sourceVersification,
+            targetBookInitials: targetInitials
+        )
         if refs.count == 1, let ref = refs.first {
             if let openInLinks = onOpenInLinksWindow {
-                openInLinks(ref.book, ref.chapter)
+        openInLinks(ref)
             } else {
-                navigateTo(book: ref.book, chapter: ref.chapter)
+        _ = navigateToBibleLink(ref)
             }
         } else if !refs.isEmpty {
-            // Multiple references in one osis param (e.g. "Matt.1.1-Matt.1.3")
             openMultiReferenceDocument(refs: refs)
         }
     }
@@ -5032,19 +7652,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Handles already-classified `multi://` OSIS query values from Android-compatible links.
 
      - Parameter values: OSIS query values from the pseudo-link.
-     - Side effects: Navigates a single parsed reference or opens a transient `Multi` document for
-       multiple parsed references.
-     - Failure modes: Invalid values are ignored; no side effects occur when nothing parses.
+   - Side effects: Opens every parsed range in one transient `Multi` document.
+   - Failure modes: Invalid values and requests without an active Bible are ignored; no side
+     effects occur when nothing parses.
      */
-    private func handleMultiReferenceValues(_ values: [String]) {
-        let allRefs = values.flatMap(parseOsisReferences)
-        guard !allRefs.isEmpty else { return }
-
-        if allRefs.count == 1, let ref = allRefs.first {
-            navigateTo(book: ref.book, chapter: ref.chapter)
-        } else {
-            openMultiReferenceDocument(refs: allRefs)
+    private func handleMultiReferenceValues(
+        _ values: [String],
+        sourceVersification: String
+    ) {
+    guard activeModule?.info.category == .bible else { return }
+        let allRefs = values.flatMap {
+            parseOsisReferences($0, sourceVersification: sourceVersification)
         }
+        guard !allRefs.isEmpty else { return }
+        openMultiReferenceDocument(refs: allRefs)
     }
 
     /**
@@ -5070,10 +7691,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Parses an OSIS reference string into structured verse references.
 
-     Android resolves cross-reference passages through JSword `PassageKeyFactory`, which expands
-     ranges and lists against the active document versification. For range/list inputs iOS now
-     delegates to the active SWORD module's key parser and uses the previous string splitter only
-     as a no-module fallback.
+   Android resolves cross-reference passages through JSword `PassageKeyFactory`, then checks
+   `Passage.countRanges(...)`: one contiguous range remains ordinary Bible navigation and each
+   discontiguous run becomes a separate `Multi` fragment. SWORD expands ranges into concrete
+   verse keys, so iOS partitions that output by canonical adjacency instead of widening the first
+   and last parsed verses into one invented range. Commas and space-delimited lists share this
+   path. The static canon parser remains a fallback when no installed module owns the declared
+   source versification.
 
      - Parameter osisString: OSIS reference text such as `Matt.1.1`, `Gen.1.1-Gen.1.3`, or a
        comma-separated list.
@@ -5081,41 +7705,151 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Side effects: May temporarily move the active module cursor through `SwordModule`; that
        method restores the previous key before returning.
      */
-    private func parseOsisReferences(_ osisString: String) -> [OsisRef] {
+    private func parseOsisReferences(
+        _ osisString: String,
+        sourceVersification: String,
+        targetBookInitials: String? = nil
+    ) -> [OsisRef] {
         let trimmed = osisString.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let activeModule {
-            let parsedKeys = trimmed.components(separatedBy: ",")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .flatMap { activeModule.parseKeyList($0) }
-            if !parsedKeys.isEmpty {
-                return parsedKeys.compactMap { key in
-                    guard let ref = parseOsisRef(key),
-                          isValidResolvedReference(osisBookId: ref.osisId, chapter: ref.chapter, verse: ref.verse) else {
-                        return nil
-                    }
-                    return ref
-                }
+    let components = trimmed.split {
+      $0 == "," || $0.isWhitespace
+    }.map(String.init)
+        if let parserModule = moduleForVersification(sourceVersification) {
+      let parsed = components.flatMap { component -> [OsisRef] in
+        guard
+          let references = BibleReaderMultiReferenceDocumentBuilder.concreteReferences(
+                    parsedKeys: parserModule.parseKeyList(component),
+                    module: parserModule
+          )
+        else { return [] }
+        return contiguousReferenceRuns(references, module: parserModule).compactMap {
+          makeOsisRef(
+            references: $0,
+                    sourceModule: parserModule,
+                    sourceVersification: sourceVersification,
+                    targetBookInitials: targetBookInitials
+                )
+            }
+      }
+            if !parsed.isEmpty {
+                return parsed
             }
         }
 
-        // Fallback for no-module startup paths and parser failures.
-        let parts = trimmed.components(separatedBy: CharacterSet(charactersIn: ",-"))
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-
-        var refs: [OsisRef] = []
-        for part in parts {
-            if let ref = parseOsisRef(part),
-               isValidResolvedReference(osisBookId: ref.osisId, chapter: ref.chapter, verse: ref.verse) {
-                refs.append(ref)
-            }
+        return components.flatMap { component in
+            expandCanonicalReference(
+                component,
+                sourceVersification: sourceVersification,
+                targetBookInitials: targetBookInitials
+            )
         }
-        return refs
     }
 
-    /// Parse a single OSIS ref like "Matt.1.1" → OsisRef(book: "Matthew", chapter: 1, verse: 1)
-    private func parseOsisRef(_ osis: String) -> OsisRef? {
+  /**
+   Partitions SWORD's concrete parser output into Android `Passage`-equivalent contiguous ranges.
+
+   - Parameters:
+     - references: Ordered exact verses returned by the source module parser.
+     - module: Source module whose ordinal domain determines canonical adjacency.
+   - Returns: Ordered non-empty verse runs. Adjacent verses across chapter introductions remain in
+     one run; a skipped canonical verse starts a new run.
+   - Side effects: Reads source-module references by ordinal through serialized SWORD access.
+   - Failure modes: An unavailable intermediate ordinal is treated as a range boundary so a
+     malformed parser result can never be widened.
+   */
+  private func contiguousReferenceRuns(
+    _ references: [VerseKeyReference],
+    module: SwordModule
+  ) -> [[VerseKeyReference]] {
+    var runs: [[VerseKeyReference]] = []
+    for reference in references {
+      guard let previous = runs.last?.last else {
+        runs.append([reference])
+        continue
+      }
+      if isCanonicallyAdjacent(reference, after: previous, module: module) {
+        runs[runs.count - 1].append(reference)
+      } else {
+        runs.append([reference])
+      }
+    }
+    return runs
+  }
+
+  /**
+   Checks whether `candidate` is the next concrete verse after `previous` in one SWORD canon.
+
+   Verse-zero introduction slots may sit between the final verse of one chapter and verse one of
+   the next. Those slots are skipped, matching JSword passage contiguity, while any intervening
+   positive verse proves the references are discontiguous.
+
+   - Parameters:
+     - candidate: Later parser result being considered for the current range.
+     - previous: Last concrete verse already in that range.
+     - module: Source module that owns both ordinals.
+   - Returns: `true` only when `candidate` is the next positive verse in the module canon.
+   - Side effects: Reads source-module references by ordinal through serialized SWORD access.
+   - Failure modes: Reversed, duplicate, or unresolvable ordinals return `false`.
+   */
+  private func isCanonicallyAdjacent(
+    _ candidate: VerseKeyReference,
+    after previous: VerseKeyReference,
+    module: SwordModule
+  ) -> Bool {
+    guard candidate.ordinal > previous.ordinal else { return false }
+    for ordinal in (previous.ordinal + 1)...candidate.ordinal {
+      guard let reference = module.verseReference(ordinal: ordinal) else { return false }
+      if reference.verse > 0 {
+        return reference == candidate
+      }
+    }
+    return false
+  }
+
+    /** Builds one ordered source passage without consulting the active pane's book catalog. */
+    private func makeOsisRef(
+        references: [VerseKeyReference],
+        sourceModule: SwordModule?,
+        sourceVersification: String,
+        targetBookInitials: String?
+    ) -> OsisRef? {
+        guard let first = references.first,
+      let last = references.last
+    else { return nil }
+        let coordinates = references.map {
+            OsisVerseCoordinate(
+                osisBookId: $0.osisBookId,
+                chapter: $0.chapter,
+                verse: $0.verse
+            )
+        }
+        return OsisRef(
+            book: sourceBookName(osisBookId: first.osisBookId, module: sourceModule),
+            chapter: first.chapter,
+            verse: first.verse,
+            osisId: first.osisBookId,
+            sourceVersification: sourceVersification,
+            targetBookInitials: targetBookInitials,
+            sourceVerses: coordinates,
+            sourceOsisRef: OsisRef.normalizedOsisRef(for: coordinates),
+            endBook: sourceBookName(osisBookId: last.osisBookId, module: sourceModule)
+        )
+    }
+
+    /** Resolves display metadata from the source module/canon, never the active Bible catalog. */
+    private func sourceBookName(osisBookId: String, module: SwordModule?) -> String {
+        module?.getBookList().first(where: { $0.osisId == osisBookId })?.name
+            ?? JSwordKJVAVersification.longBookName(osisId: osisBookId)
+            ?? osisBookId
+    }
+
+    /// Parses one concrete source-domain OSIS verse without consulting active-pane coordinates.
+    private func parseOsisRef(
+        _ osis: String,
+        sourceVersification: String = JSwordKJVAVersification.name,
+        targetBookInitials: String? = nil,
+        sourceModule: SwordModule? = nil
+    ) -> OsisRef? {
         // Format: BookId.Chapter.Verse or BookId.Chapter
         let components = osis.components(separatedBy: ".")
         guard components.count >= 2 else { return nil }
@@ -5124,25 +7858,743 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         guard let chapter = Int(components[1]) else { return nil }
         let verse = components.count >= 3 ? Int(components[2]) : nil
 
-        guard let bookName = bookName(forOsisId: osisId) else {
+    guard
+      SwordVersification.referenceIndex(
+                  for: .init(osisBookId: osisId, chapter: chapter, verse: verse ?? 1),
+                  versification: sourceVersification
+      ) != nil
+    else {
             logger.warning("Unknown OSIS book ID: \(osisId)")
             return nil
         }
 
-        return OsisRef(book: bookName, chapter: chapter, verse: verse ?? 1, osisId: osisId)
+        return OsisRef(
+            book: sourceBookName(osisBookId: osisId, module: sourceModule),
+            chapter: chapter,
+            verse: verse ?? 1,
+            osisId: osisId,
+            sourceVersification: sourceVersification,
+            targetBookInitials: targetBookInitials
+        )
     }
 
-    /// Look up verse text for each reference from the active SWORD module.
-    private func lookupCrossReferences(_ refs: [OsisRef]) -> [CrossReference] {
-        guard let module = activeModule else {
-            return refs.map { CrossReference(ref: $0, text: "") }
+    /** Resolves an installed parser module whose canon exactly matches a link's source domain. */
+    private func moduleForVersification(_ sourceVersification: String) -> SwordModule? {
+        if let activeModule,
+           normalizedVersificationName(VersificationMapper.versificationName(for: activeModule))
+        == normalizedVersificationName(sourceVersification)
+    {
+            return activeModule
         }
+        for info in installedBibleModules {
+            guard let module = swordManager?.module(named: info.name) else { continue }
+            if normalizedVersificationName(VersificationMapper.versificationName(for: module))
+        == normalizedVersificationName(sourceVersification)
+      {
+                return module
+            }
+        }
+        return nil
+    }
 
+    /** Expands one source-canon range through SWORD's canon indexes when no module parser exists. */
+    private func expandCanonicalReference(
+        _ value: String,
+        sourceVersification: String,
+        targetBookInitials: String?
+    ) -> [OsisRef] {
+        let endpoints = value.split(separator: "-", maxSplits: 1).map(String.init)
+    guard
+      let start = parseOsisRef(
+            endpoints[0].trimmingCharacters(in: .whitespacesAndNewlines),
+            sourceVersification: sourceVersification,
+            targetBookInitials: targetBookInitials
+      )
+    else { return [] }
+        guard endpoints.count == 2 else { return [start] }
+    guard
+      let end = parseOsisRef(
+                  endpoints[1].trimmingCharacters(in: .whitespacesAndNewlines),
+                  sourceVersification: sourceVersification,
+                  targetBookInitials: targetBookInitials
+              ),
+              let startIndex = SwordVersification.referenceIndex(
+                  for: .init(osisBookId: start.osisId, chapter: start.chapter, verse: start.verse),
+                  versification: sourceVersification
+              ),
+              let endIndex = SwordVersification.referenceIndex(
+                  for: .init(osisBookId: end.osisId, chapter: end.chapter, verse: end.verse),
+                  versification: sourceVersification
+              ),
+      startIndex <= endIndex
+    else { return [] }
+        let references = (startIndex...endIndex).compactMap { index -> VerseKeyReference? in
+      guard
+        let reference = SwordVersification.reference(
+                      forIndex: index,
+                      versification: sourceVersification
+        ), reference.verse > 0
+      else { return nil }
+            return VerseKeyReference(
+                osisBookId: reference.osisBookId,
+                chapter: reference.chapter,
+                verse: reference.verse,
+                ordinal: index
+            )
+        }
+    return makeOsisRef(
+      references: references,
+      sourceModule: nil,
+      sourceVersification: sourceVersification,
+      targetBookInitials: targetBookInitials
+    ).map { [$0] } ?? []
+  }
+
+  /**
+   Applies one contiguous Android `BookAndKey`-equivalent reference to this controller.
+
+   The destination controller, not the source pane, owns target-module selection and strict
+   source-to-target mapping. This is required for dedicated links windows because their active
+   document can differ from the pane that emitted the link.
+
+   - Parameter ref: Complete source passage, source versification, and optional forced target
+     module retained from the link parser.
+   - Returns: `true` after exact target mapping and navigation; otherwise `false` with no
+     navigation mutation.
+   - Side effects: May switch the visible Bible document/category, persist pane state, record
+     navigation history, and emit a reader document when the web client is ready.
+   - Failure modes: Missing current/target Bible modules, unsupported strict mappings, invalid
+     target entries, non-monotonic mapped ranges, and unavailable target book metadata fail
+     closed.
+   */
+  @discardableResult
+  func navigateToBibleLink(_ ref: OsisRef) -> Bool {
+    guard let target = navigationReference(for: ref) else { return false }
+
+    if activeInstalledScriptureSource()?.info.name != target.moduleName
+        || currentCategory != .bible {
+      if !sqliteModuleSwitchCoordinator.switchBible(
+        to: target.moduleName,
+        updatesVisibleCategory: true,
+        context: makeSQLiteModuleSwitchContext()
+      ) {
+        moduleSwitchCoordinator.switchBibleDocument(
+          to: sqliteRuntimeCoordinator.canonicalSwordModuleName(target.moduleName),
+          context: makeModuleSwitchContext()
+        )
+      }
+    }
+    guard activeInstalledScriptureSource()?.info.name == target.moduleName,
+      currentCategory == .bible
+    else { return false }
+
+    pendingLinkNavigationOrdinalRange = target.ordinalRange
+    navigationCoordinator.navigateTo(
+      book: target.book,
+      chapter: target.chapter,
+      verse: target.verse,
+      context: makeNavigationContext()
+    )
+    return true
+  }
+
+  /**
+   Opens one persisted bookmark through an exact Android-compatible identity proof.
+
+   The planner runs before any pane mutation. A successful plan is revalidated against the live
+   backend and serialized before one category-specific commit, so stale modules, duplicate local
+   documents, replaced EPUB generations, malformed content, and unsupported mappings leave the
+   bookmark list open without selecting current, first, or neighboring content.
+
+   - Parameter target: Exact Bible or generic bookmark destination resolved from persistence.
+   - Side effects: On success, updates one pane's durable document state and emits one reader
+     navigation or one exact generic document. Failure performs no pane or WebView mutation.
+   - Throws: Typed bookmark planning failures or `BibleReaderBookmarkNavigationCommitFailure`
+     when the active reader changes before commit or payload serialization fails.
+   */
+  @MainActor
+  func navigate(toBookmarkTarget target: BookmarkNavigationTarget) throws {
+    let inventory = try bookmarkNavigationInventory(for: target)
+    let plan = try BibleReaderBookmarkNavigationCoordinator().plan(
+      target: target,
+      inventory: inventory
+    )
+
+    switch plan {
+    case .bible(let biblePlan):
+      try commitBibleBookmarkNavigation(biblePlan)
+    case .sword(let swordPlan):
+      try commitSwordBookmarkNavigation(swordPlan)
+    case .myDocument(let documentPlan):
+      try commitMyDocumentBookmarkNavigation(documentPlan)
+    case .epub(let epubPlan):
+      try commitEpubBookmarkNavigation(epubPlan)
+    }
+  }
+
+  /** Builds the complete exact-identity inventory needed by one bookmark target. */
+  @MainActor
+  private func bookmarkNavigationInventory(
+    for target: BookmarkNavigationTarget
+  ) throws -> BibleReaderBookmarkNavigationInventory {
+    let swordModules =
+      swordManager?.installedModules().compactMap { info in
+        swordManager?.module(named: info.name)
+      } ?? []
+    let resolver = installedModuleResolver()
+    let scriptureCandidates = resolver.modules(categories: [.bible])
+      .compactMap(\.scripture)
+      .map(BibleReaderBookmarkNavigationSwordCandidate.init(source:))
+    let genericSwordCandidates = swordModules
+      .filter { $0.info.category != .bible }
+      .map(BibleReaderBookmarkNavigationSwordCandidate.init(module:))
+    let destinationCandidate = activeInstalledScriptureSource().map(
+      BibleReaderBookmarkNavigationSwordCandidate.init(source:)
+    )
+
+    guard case .generic(let genericTarget) = target else {
+      return BibleReaderBookmarkNavigationInventory(
+        destinationBible: destinationCandidate,
+        swordCandidates: scriptureCandidates
+      )
+    }
+
+    var documentCandidates: [MyDocument] = []
+    if let store = myDocumentStore {
+      do {
+        documentCandidates = [try store.exactDocument(initials: genericTarget.moduleInitials)]
+      } catch let error as MyDocumentExactLookupError {
+        switch error {
+        case .documentNotFound, .invalidDocumentInitials:
+          break
+        case .duplicateDocuments:
+          throw BibleReaderBookmarkNavigationFailure.genericModuleAmbiguous(
+            genericTarget.moduleInitials
+          )
+        case .documentReadFailed, .pageNotFound, .duplicatePages, .pageReadFailed:
+          throw BibleReaderBookmarkNavigationFailure.genericKeyLookupFailed(
+            moduleInitials: genericTarget.moduleInitials,
+            key: genericTarget.key
+          )
+        }
+      }
+    }
+
+    let epubReaders = EpubReader.installedEpubs()
+      .filter { $0.initials == genericTarget.moduleInitials }
+      .compactMap { EpubReader(identifier: $0.identifier) }
+    return BibleReaderBookmarkNavigationInventory(
+      destinationBible: destinationCandidate,
+      swordCandidates: scriptureCandidates + genericSwordCandidates,
+      myDocumentCandidates: myDocumentStore.map { store in
+        documentCandidates.map {
+          BibleReaderBookmarkNavigationMyDocumentCandidate(document: $0, store: store)
+        }
+      } ?? [],
+      epubCandidates: epubReaders.map(BibleReaderBookmarkNavigationEpubCandidate.init(reader:))
+    )
+  }
+
+  /** Commits one fully mapped Bible range into the already-selected destination module. */
+  @MainActor
+  private func commitBibleBookmarkNavigation(
+    _ plan: BibleReaderBookmarkNavigationBiblePlan
+  ) throws {
+    guard let source = activeInstalledScriptureSource(),
+      source.info.category == .bible,
+      source.info.name == plan.destinationModuleInitials,
+      source.versificationName == plan.destinationVersification,
+      let first = plan.destinationVerses.first,
+      let last = plan.destinationVerses.last,
+      first.ordinal == plan.destinationOrdinalRange.lowerBound,
+      last.ordinal == plan.destinationOrdinalRange.upperBound,
+      let resolvedFirst = source.verseReference(ordinal: first.ordinal),
+      resolvedFirst.osisBookId == first.reference.osisBookID,
+      resolvedFirst.chapter == first.reference.chapter,
+      resolvedFirst.verse == first.reference.verse,
+      let resolvedLast = source.verseReference(ordinal: last.ordinal),
+      resolvedLast.osisBookId == last.reference.osisBookID,
+      resolvedLast.chapter == last.reference.chapter,
+      resolvedLast.verse == last.reference.verse,
+      let book = (try? source.bookList())?.first(where: {
+        $0.osisId == first.reference.osisBookID
+      })?.name
+    else {
+      throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
+    }
+
+    if currentCategory != .bible {
+      switchBibleDocument(to: source.info.name)
+      guard activeInstalledScriptureSource()?.info.name == source.info.name,
+        currentCategory == .bible
+      else {
+        throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
+      }
+    }
+
+    pendingLinkNavigationOrdinalRange = [first.ordinal, last.ordinal]
+    navigationCoordinator.navigateTo(
+      book: book,
+      chapter: first.reference.chapter,
+      verse: first.reference.verse,
+      context: makeNavigationContext()
+    )
+  }
+
+  /** Prepares and commits one exact installed SWORD generic fragment. */
+  @MainActor
+  private func commitSwordBookmarkNavigation(
+    _ plan: BibleReaderBookmarkNavigationSwordPlan
+  ) throws {
+    guard let module = swordManager?.module(named: plan.moduleInitials),
+      module.info.category == plan.category
+    else {
+      throw BibleReaderBookmarkNavigationFailure.genericModuleNotFound(plan.moduleInitials)
+    }
+    let currentFragment: SwordRawOSISFragment
+    do {
+      currentFragment = try module.rawOSISFragment(forKey: plan.key)
+    } catch {
+      throw BibleReaderBookmarkNavigationFailure.genericKeyLookupFailed(
+        moduleInitials: plan.moduleInitials,
+        key: plan.key
+      )
+    }
+    guard currentFragment == plan.fragment,
+      currentFragment.hasRenderableContent,
+      let category = Self.bookmarkDocumentCategory(for: plan.category)
+    else {
+      throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
+    }
+
+    let source = currentFragment.source
+    let contentOrdinalRange = currentFragment.contentOrdinalRange
+    guard
+      let documentJSON = documentPayloadFactory().documentJSON(
+        BibleReaderDocumentPayloadRequest(
+          osisBookId: Self.bookmarkPseudoOSISBookID(for: category),
+          bookName: currentFragment.keyName,
+          chapter: 1,
+          verseCount: 1,
+          isNewTestament: currentFragment.isNewTestament,
+          xml: currentFragment.xml,
+          bookCategory: category.rawValue,
+          bookInitials: source.initials,
+          addChapter: false,
+          originalOrdinalRange: plan.selectedOrdinalRange.map {
+            [$0.lowerBound, $0.upperBound]
+          },
+          documentKey: currentFragment.key,
+          keyName: currentFragment.keyName,
+          ordinalRangeOverride: [
+            contentOrdinalRange.lowerBound,
+            contentOrdinalRange.upperBound,
+          ],
+          fragmentOrdinalRange: currentFragment.keyOrdinalRange.map {
+            [$0.lowerBound, $0.upperBound]
+          },
+          fragmentKey: currentFragment.fragmentKey,
+          fragmentOsisRef: currentFragment.osisRef,
+          annotateRef: currentFragment.annotateRef,
+          fragmentFeatures: currentFragment.features,
+          moduleName: source.name,
+          moduleAbbreviation: source.abbreviation,
+          versificationName: source.versification,
+          language: source.language,
+          direction: source.direction,
+          sourceHasStrongs: source.hasStrongs
+        )
+      )
+    else {
+      throw BibleReaderBookmarkNavigationCommitFailure.serializationFailed
+    }
+
+    beginReplacingContentIntent()
+    resetAuxiliaryContentState()
+    applyExactSwordBookmarkState(
+      module: module,
+      category: category,
+      key: currentFragment.key
+    )
+    emitExactGenericBookmarkDocument(
+      documentJSON: documentJSON,
+      category: category,
+      moduleName: plan.moduleInitials,
+      bookName: currentFragment.keyName,
+      key: currentFragment.key,
+      selectedOrdinalRange: plan.selectedOrdinalRange,
+      jumpToID: nil
+    )
+  }
+
+  /** Revalidates and commits one exact My Documents page without permissive fetch fallback. */
+  @MainActor
+  private func commitMyDocumentBookmarkNavigation(
+    _ plan: BibleReaderBookmarkNavigationMyDocumentPlan
+  ) throws {
+    guard let store = myDocumentStore else {
+      throw BibleReaderBookmarkNavigationCommitFailure.readerUnavailable
+    }
+    let document: MyDocument
+    let page: MyDocumentPage
+    do {
+      document = try store.exactDocument(initials: plan.fragment.moduleInitials)
+      page = try store.exactPage(
+        bookInitials: plan.fragment.moduleInitials,
+        pageKey: plan.fragment.key
+      )
+    } catch {
+      throw BibleReaderBookmarkNavigationFailure.genericKeyLookupFailed(
+        moduleInitials: plan.fragment.moduleInitials,
+        key: plan.fragment.key
+      )
+    }
+    guard document.id == plan.fragment.documentID,
+      document.name == plan.fragment.documentName,
+      page.id == plan.fragment.pageID,
+      page.document?.id == document.id,
+      page.title == plan.fragment.title,
+      page.contentTypeRawValue == plan.fragment.contentTypeRawValue,
+      page.pageContent?.content ?? "" == plan.fragment.rawContent,
+      page.languageCode == plan.fragment.languageCode
+    else {
+      throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
+    }
+
+    let metadata = store.readerMetadata(
+      for: page,
+      bookInitials: document.initials,
+      pageKey: page.pageKey,
+      unknownPromptName: String(localized: "ai_unknown_prompt", defaultValue: "AI")
+    )
+    guard
+      let documentJSON = myDocumentCoordinator.documentJSON(
+        document: document,
+        page: page,
+        metadata: metadata,
+        genericBookmarks: genericBookmarkPayloads(
+          bookInitials: document.initials,
+          key: page.pageKey
+        )
+      )
+    else {
+      throw BibleReaderBookmarkNavigationCommitFailure.serializationFailed
+    }
+
+    beginReplacingContentIntent()
+    resetAuxiliaryContentState()
+    activeEpubReader = nil
+    activeEpubIdentifier = nil
+    activeEpubTitle = nil
+    currentEpubTitle = nil
+    currentEpubHref = nil
+    activeGeneralBookModule = nil
+    activeGeneralBookModuleName = document.initials
+    currentGeneralBookKey = page.pageKey
+    currentCategory = .generalBook
+    myDocumentCoordinator.setActivePage(
+      bookInitials: document.initials,
+      pageKey: page.pageKey
+    )
+    if let pageManager = activeWindow?.pageManager {
+      pageManager.currentCategoryName = DocumentCategory.generalBook.pageManagerKey
+      pageManager.generalBookDocument = document.initials
+      pageManager.generalBookKey = page.pageKey
+      pageManager.epubIdentifier = nil
+      pageManager.epubHref = nil
+      onPersistState?()
+    }
+    emitExactGenericBookmarkDocument(
+      documentJSON: documentJSON,
+      category: .generalBook,
+      moduleName: document.initials,
+      bookName: document.name,
+      key: page.pageKey,
+      selectedOrdinalRange: plan.selectedOrdinalRange,
+      jumpToID: nil
+    )
+  }
+
+  /** Revalidates and commits one exact immutable EPUB generation and numeric key. */
+  @MainActor
+  private func commitEpubBookmarkNavigation(
+    _ plan: BibleReaderBookmarkNavigationEpubPlan
+  ) throws {
+    guard let reader = EpubReader(identifier: plan.identifier),
+      reader.generationIdentifier == plan.generationIdentifier,
+      reader.initials == plan.moduleInitials,
+      reader.title == plan.title,
+      reader.language == plan.language
+    else {
+      throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
+    }
+    let content: EpubReader.Content
+    do {
+      content = try reader.exactContent(forPersistedKey: plan.content.persistedKey)
+    } catch {
+      throw BibleReaderBookmarkNavigationFailure.genericKeyLookupFailed(
+        moduleInitials: plan.moduleInitials,
+        key: plan.content.persistedKey
+      )
+    }
+    guard content == plan.content else {
+      throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
+    }
+    let documentJSON = documentPayloadFactory().epubDocumentJSON(
+      bookName: reader.title,
+      bookInitials: reader.initials,
+      key: content.persistedKey,
+      keyName: content.title,
+      content: content.html,
+      ordinalRange: [content.ordinalRange.lowerBound, content.ordinalRange.upperBound],
+      language: reader.language
+    )
+    guard documentJSON != "{}" else {
+      throw BibleReaderBookmarkNavigationCommitFailure.serializationFailed
+    }
+
+    beginReplacingContentIntent()
+    resetAuxiliaryContentState()
+    activeEpubReader = reader
+    activeEpubIdentifier = reader.identifier
+    activeEpubTitle = reader.title
+    currentEpubTitle = content.title
+    currentEpubHref = nil
+    activeGeneralBookModule = nil
+    activeGeneralBookModuleName = reader.initials
+    currentGeneralBookKey = content.persistedKey
+    currentCategory = .generalBook
+    if let pageManager = activeWindow?.pageManager {
+      pageManager.currentCategoryName = DocumentCategory.generalBook.pageManagerKey
+      pageManager.generalBookDocument = reader.initials
+      pageManager.generalBookKey = content.persistedKey
+      pageManager.epubIdentifier = nil
+      pageManager.epubHref = nil
+      onPersistState?()
+    }
+    emitExactGenericBookmarkDocument(
+      documentJSON: documentJSON,
+      category: .generalBook,
+      moduleName: reader.initials,
+      bookName: content.title,
+      key: content.persistedKey,
+      selectedOrdinalRange: plan.selectedOrdinalRange,
+      jumpToID: content.fragment
+    )
+  }
+
+  /** Applies category-owned SWORD module and exact key state without triggering a second read. */
+  @MainActor
+  private func applyExactSwordBookmarkState(
+    module: SwordModule,
+    category: DocumentCategory,
+    key: String
+  ) {
+    activeEpubReader = nil
+    activeEpubIdentifier = nil
+    activeEpubTitle = nil
+    currentEpubTitle = nil
+    currentEpubHref = nil
+    switch category {
+    case .commentary:
+      activeCommentaryModule = module
+      activeCommentaryModuleName = module.info.name
+    case .dictionary:
+      activeDictionaryModule = module
+      activeDictionaryModuleName = module.info.name
+      currentDictionaryKey = key
+    case .generalBook:
+      activeGeneralBookModule = module
+      activeGeneralBookModuleName = module.info.name
+      currentGeneralBookKey = key
+    case .map:
+      activeMapModule = module
+      activeMapModuleName = module.info.name
+      currentMapKey = key
+    case .bible, .epub, .dailyDevotion:
+      return
+    }
+    currentCategory = category
+    if let pageManager = activeWindow?.pageManager {
+      BibleReaderModuleSwitchPlan(
+        moduleName: module.info.name,
+        category: category,
+        updatesVisibleCategory: true,
+        retainedGenericKey: key
+      ).apply(to: pageManager)
+      onPersistState?()
+    }
+    }
+
+  /** Emits one pre-serialized exact generic destination and its optional BVA highlight. */
+  private func emitExactGenericBookmarkDocument(
+    documentJSON: String,
+    category: DocumentCategory,
+    moduleName: String,
+    bookName: String,
+    key: String,
+    selectedOrdinalRange: ClosedRange<Int>?,
+    jumpToID: String?
+  ) {
+    bridge.emit(event: "clear_document")
+    bridge.emit(event: "add_documents", data: documentJSON)
+    bridge.emit(
+      event: "setup_content",
+      data: ReaderSetupContentPayload(
+        jumpToOrdinal: selectedOrdinalRange?.lowerBound,
+        jumpToId: jumpToID,
+        ordinalStart: selectedOrdinalRange?.lowerBound,
+        ordinalEnd: selectedOrdinalRange?.upperBound,
+        highlight: selectedOrdinalRange != nil,
+        bookInitials: moduleName,
+        osisRef: key
+      )
+    )
+    setRenderedContentState(
+      category: category,
+      moduleName: moduleName,
+      book: bookName,
+      key: key
+        )
+    emitActiveState()
+    bridge.clearSelection()
+    applyNightModeBackground()
+    }
+
+  /** Maps bookmark-owning SWORD categories onto reader document categories. */
+  private static func bookmarkDocumentCategory(
+    for moduleCategory: ModuleCategory
+  ) -> DocumentCategory? {
+    switch moduleCategory {
+    case .commentary:
+      return .commentary
+    case .dictionary, .glossary:
+      return .dictionary
+    case .generalBook, .dailyDevotion:
+      return .generalBook
+    case .map:
+      return .map
+    case .bible, .addon, .unknown:
+      return nil
+    }
+  }
+
+  /** Returns the stable pseudo-book identifier used by generic Vue documents. */
+  private static func bookmarkPseudoOSISBookID(for category: DocumentCategory) -> String {
+    switch category {
+    case .commentary:
+      return "Commentary"
+    case .dictionary:
+      return "Dict"
+    case .generalBook, .dailyDevotion:
+      return "GenBook"
+    case .map:
+      return "Map"
+    case .bible, .epub:
+      return "Document"
+    }
+  }
+
+  /**
+   Resolves one complete source passage into a strict destination-module navigation identity.
+
+   Every source verse is converted independently and validated against the requested module. The
+   first mapped verse anchors the visible chapter, while the first and last exact target ordinals
+   preserve the full contiguous range for Vue setup.
+
+   - Parameter ref: Source-owned contiguous passage plus optional forced target initials.
+   - Returns: Destination module, first verse, and inclusive ordinal range, or `nil` when any part
+     cannot be mapped exactly.
+   - Side effects: Reads installed module metadata and exact target ordinals; reader state is not
+     mutated.
+   - Failure modes: Returns `nil` for missing/non-Bible modules, unsupported versifications,
+     absent target verses, duplicate-only passages, reversed mappings, or missing book metadata.
+   */
+  private func navigationReference(for ref: OsisRef) -> BibleLinkNavigationTarget? {
+    let resolver = installedModuleResolver()
+    let targetSource: BibleReaderInstalledScriptureSource
+    if let requestedInitials = ref.targetBookInitials?
+      .trimmingCharacters(in: .whitespacesAndNewlines),
+      !requestedInitials.isEmpty
+    {
+      guard let requestedSource = resolver.scripture(named: requestedInitials) else { return nil }
+      targetSource = requestedSource
+    } else {
+      guard let activeSource = resolver.scripture(named: activeModuleName) else { return nil }
+      targetSource = activeSource
+    }
+
+    var mappedReferences: [VerseKeyReference] = []
+        for source in ref.sourceVerses {
+      guard let reference = targetSource.mappedReference(
+        osisBookId: source.osisBookId,
+        chapter: source.chapter,
+        verse: source.verse,
+        from: ref.sourceVersification
+      ) else { return nil }
+      if let previous = mappedReferences.last {
+        guard
+          previous == reference
+            || targetSource.isCanonicallyAdjacent(reference, after: previous)
+        else { return nil }
+        if previous == reference {
+          continue
+        }
+            }
+      mappedReferences.append(reference)
+        }
+    guard let first = mappedReferences.first,
+      let last = mappedReferences.last,
+      let book = (try? targetSource.bookList())?.first(where: {
+        $0.osisId == first.osisBookId
+      })?.name
+    else { return nil }
+    return BibleLinkNavigationTarget(
+      moduleName: targetSource.info.name,
+      book: book,
+      chapter: first.chapter,
+      verse: first.verse,
+      ordinalRange: [first.ordinal, last.ordinal]
+    )
+    }
+
+    /** Resolves cross-reference previews through each link's selected installed Bible backend. */
+    private func lookupCrossReferences(_ refs: [OsisRef]) -> [CrossReference] {
         return refs.map { ref in
-            let key = "\(ref.osisId) \(ref.chapter):\(ref.verse)"
-            module.setKey(key)
-            let text = module.stripText().trimmingCharacters(in: .whitespacesAndNewlines)
-            return CrossReference(ref: ref, text: text)
+            let requestedName = ref.targetBookInitials?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let sourceName = requestedName?.isEmpty == false ? requestedName! : activeModuleName
+            guard let source = installedModuleResolver().scripture(named: sourceName) else {
+                return CrossReference(ref: ref, text: "")
+            }
+            var references: [VerseKeyReference] = []
+            for sourceReference in ref.sourceVerses {
+                guard let mapped = source.mappedReference(
+                          osisBookId: sourceReference.osisBookId,
+                          chapter: sourceReference.chapter,
+                          verse: sourceReference.verse,
+                          from: ref.sourceVersification
+                      ) else {
+                    return CrossReference(ref: ref, text: "")
+                }
+                if let previous = references.last {
+                    if previous == mapped { continue }
+                    guard source.isCanonicallyAdjacent(mapped, after: previous) else {
+                        return CrossReference(ref: ref, text: "")
+                    }
+                }
+                references.append(mapped)
+            }
+            guard let first = references.first,
+                  let last = references.last,
+                  let passage = try? source.passage(
+                      startOrdinal: first.ordinal,
+                      endOrdinal: last.ordinal
+                  ),
+                  !passage.plainText.isEmpty else {
+                return CrossReference(ref: ref, text: "")
+            }
+            return CrossReference(ref: ref, text: passage.plainText)
         }
     }
 
@@ -5155,33 +8607,28 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - BibleBridgeDelegate — Dialogs
 
-    /// Callback for presenting a reference chooser dialog (returns OSIS ref via completion).
+  /// Callback for presenting a reference chooser dialog (returns JSword short `Verse.name`).
     var onRefChooserDialog: ((@escaping (String?) -> Void) -> Void)?
 
     /**
-     Opens the native reference chooser and returns the selected OSIS reference to Vue.js.
+   Opens the native reference chooser and returns Android's JSword short `Verse.name` to Vue.js.
 
      - Parameter callId: Bridge response identifier for the pending chooser callback.
 
      Side effects:
-     - invokes the native chooser callback and sends the resolved OSIS string or `null` back
+   - invokes the native chooser callback and sends the resolved short verse name or Android's empty
+     cancellation string back
 
      Failure modes:
-     - returns `null` immediately when no native chooser handler is configured
+   - returns an empty string immediately when no native chooser handler is configured
      */
     public func bridge(_ bridge: BibleBridge, refChooserDialog callId: Int) {
-        // Show a reference picker and return the selected OSIS ref
         if let handler = onRefChooserDialog {
-            handler { [weak bridge] osisRef in
-                guard let bridge else { return }
-                if let ref = osisRef {
-                    bridge.sendResponse(callId: callId, value: "\"\(ref)\"")
-                } else {
-                    bridge.sendResponse(callId: callId, value: "null")
-                }
+      handler { [weak bridge] verseName in
+        bridge?.sendResponse(callId: callId, value: "\"\(verseName ?? "")\"")
             }
         } else {
-            bridge.sendResponse(callId: callId, value: "null")
+      bridge.sendResponse(callId: callId, value: "\"\"")
         }
     }
 
@@ -5228,7 +8675,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         guard chapter > 0, let book = bookName(forOsisId: osisBookId) else { return false }
         if let activeModule {
             if let verse {
-                return activeModule.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse) != nil
+        return activeModule.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
+          != nil
             }
             return activeModule.verseCount(osisBookId: osisBookId, chapter: chapter) != nil
         }
@@ -5264,25 +8712,47 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Navigate to a reference entered as human-readable text (e.g. "Genesis 1:1", "Gen 1", "Matt 5:3")
-     or OSIS format (e.g. "Gen.1.1"). Returns true if navigation succeeded.
+   Navigates reference text through the full active-module parser used by Android Search.
+
+   Human-readable, localized/module-language, OSIS, range, and passage-list input all resolve
+   through `BibleReaderReferenceResolver.resolveReference`. One contiguous passage remains normal
+   Bible navigation with its complete ordinal range. Multiple discontiguous passages render in one
+   transient `MultiDocument` in the current pane, matching Android Search's force-open-here result.
+
+   - Parameter text: User-entered Search or window-tab reference text.
+   - Returns: `true` only when parsing and the complete navigation/document commit succeed.
+   - Side effects: May update Bible position and history or replace current rendered content with a
+     transient multi-reference document.
+   - Failure modes: Empty or invalid text, unavailable active-module metadata, unmappable ranges,
+     and multi-document serialization failures return `false` without partial navigation.
      */
     @discardableResult
     public func navigateToRef(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
 
-        let resolver = referenceResolver()
-        if let osisRef = resolver.resolveOsisRef(trimmed) {
-            return navigateToOsisRef(osisRef)
+    guard let resolvedReference = referenceResolver().resolveReference(trimmed) else {
+      return false
         }
 
-        if let osisRef = resolver.resolveHumanRef(trimmed) {
-            return navigateToOsisRef(osisRef)
+    guard let activeModule else {
+      return navigateToOsisRef(resolvedReference)
+    }
+    let references = parseOsisReferences(
+      resolvedReference,
+      sourceVersification: VersificationMapper.versificationName(for: activeModule)
+    )
+    guard !references.isEmpty else { return false }
+    if references.count == 1, let reference = references.first {
+      return navigateToBibleLink(reference)
         }
 
+    guard let documentJSON = buildBibleMultiReferenceDocumentJSON(refs: references) else {
         return false
     }
+    loadMultiReferenceDocument(documentJSON)
+    return true
+  }
 
     /// Navigate to a resolved OSIS ref like "Gen.1.1" or "Gen.1"
     private func navigateToOsisRef(_ osisRef: String) -> Bool {
@@ -5294,13 +8764,52 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return true
     }
 
-    /**
-     Receives help-dialog requests from the web client.
-
-     - Note: iOS currently logs the request only; native help presentation is handled elsewhere.
-     */
+  /** Routes trusted generic BibleView help HTML to the pane-owned native help presenter. */
     public func bridge(_ bridge: BibleBridge, helpDialog content: String, title: String?) {
-        logger.info("Help dialog: \(title ?? "Help")")
+    onShowReaderHelp?(AIReaderHelpCatalog.generic(content: content, title: title))
+  }
+
+  /** Routes Android's localized Bookmarks and My Notes help contract to native presentation. */
+  public func bridgeDidRequestBookmarkHelp(_ bridge: BibleBridge) {
+    guard let presentation = AIReaderHelpCatalog.bookmarks() else { return }
+    onShowReaderHelp?(presentation)
+  }
+
+  /** Routes one allowlisted scoped help request to its native localized presentation. */
+  public func bridge(_ bridge: BibleBridge, showHelp scope: BibleBridgeHelpScope) {
+    switch scope {
+    case .memorize:
+      guard let presentation = AIReaderHelpCatalog.memorize() else { return }
+      onShowReaderHelp?(presentation)
+    }
+  }
+
+  // MARK: - BibleBridgeDelegate — AI Actions
+
+  /** Forwards an exact web selection to the pane-owned AI action coordinator. */
+  public func bridge(_ bridge: BibleBridge, requestAIAction request: AISelectionActionRequest) {
+    onRequestAIAction?(request)
+  }
+
+  /** Forwards an exact note-editor request to the pane-owned AI action coordinator. */
+  public func bridge(
+    _ bridge: BibleBridge,
+    requestNoteEditorAIAction request: AINoteEditorActionRequest
+  ) {
+    onRequestNoteEditorAIAction?(request)
+  }
+
+  /** Forwards exact generated-page markers to the pane-owned native chooser. */
+  public func bridge(
+    _ bridge: BibleBridge,
+    chooseAIDocumentPage markers: [AIDocumentPageMarker]
+  ) {
+    onChooseAIDocumentPage?(markers)
+  }
+
+  /** Forwards an exact source prompt identity to the pane-owned prompt editor route. */
+  public func bridge(_ bridge: BibleBridge, openPromptEditor promptID: UUID) {
+    onOpenAIPromptEditor?(promptID)
     }
 
     // MARK: - BibleBridgeDelegate — Toast & Sharing
@@ -5313,8 +8822,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     var onInteraction: (() -> Void)?
     /// Reference to the WindowManager for synchronized scrolling.
     weak var windowManagerRef: WindowManager?
-    /// Callback to open content in a links window (book, chapter).
-    var onOpenInLinksWindow: ((String, Int) -> Void)?
+  /// Callback to open one complete source-owned Bible passage in a links window.
+  var onOpenInLinksWindow: ((OsisRef) -> Void)?
 
     /**
      Forwards a toast/banner message request to the owning SwiftUI view.
@@ -5334,7 +8843,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Toggles whether one compare document should be hidden in the current compare session.
      */
     public func bridge(_ bridge: BibleBridge, toggleCompareDocument documentId: String) {
-        configurationCoordinator.toggleHiddenCompareDocument(documentId, activeWindow: activeWindow) { [weak self] in
+    configurationCoordinator.toggleHiddenCompareDocument(documentId, activeWindow: activeWindow) {
+      [weak self] in
             self?.onPersistState?()
         }
         // Notify Vue.js of updated settings
@@ -5369,24 +8879,50 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     // MARK: - EPUB Link Navigation
 
     /**
-     Navigates EPUB links emitted by the web client either to another spine entry or an in-page anchor.
+     Navigates an EPUB link through the exact general-book identity supplied by the web client.
+
+     - Parameters:
+       - bridge: Reader bridge that emitted the navigation request.
+       - bookInitials: EPUB module initials embedded in the transformed link.
+       - toKey: Original EPUB manifest key; an empty key denotes a same-page anchor.
+       - toId: Optional XHTML element id within the target manifest item.
+     - Side effects: Loads the resolved numeric EPUB fragment or emits an in-page setup request.
+     - Failure modes: Ignores links whose initials do not match the active EPUB, and leaves the
+       visible page unchanged when the target manifest key or id is not indexed.
      */
-    public func bridge(_ bridge: BibleBridge, openEpubLink bookInitials: String, toKey: String, toId: String) {
-        guard activeEpubReader != nil else { return }
+  public func bridge(
+    _ bridge: BibleBridge, openEpubLink bookInitials: String, toKey: String, toId: String
+  ) {
+        guard let reader = activeEpubReader,
+      bookInitials == reader.initials
+    else { return }
         if !toKey.isEmpty {
-            // Navigate to section (loadEpubEntry handles fragment scrolling)
-            let href = toId.isEmpty ? toKey : "\(toKey)#\(toId)"
-            loadEpubEntry(href: href)
+      guard
+        let content = reader.content(
+                originalKey: toKey,
+                htmlID: toId.isEmpty ? nil : toId
+        )
+      else { return }
+            loadEpubEntry(key: content.key + (content.fragment.map { "#\($0)" } ?? ""))
         } else if !toId.isEmpty {
-            // Same-page fragment navigation
-            bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":\"\(toId)\",\"topOffset\":0,\"bottomOffset\":0}")
+            emitEpubSetupContent(fragment: toId)
         }
     }
 
-    /// Update active languages in the WebView based on installed SWORD modules.
+  /**
+   Updates active WebView languages from every readable runtime module inventory.
+
+   - Side effects: Emits the sorted distinct SWORD and SQLite language list to the bridge.
+   - Failure modes: Empty or unavailable inventories emit English as the existing fallback.
+   */
     public func updateActiveLanguages() {
-        guard let manager = swordManager else { return }
-        let languages = Array(Set(manager.installedModules().map { $0.language })).sorted()
+    let languages = sqliteRuntimeCoordinator.activeLanguages(
+      inventories: BibleReaderSQLiteRuntimeInventories(
+        bibles: installedBibleModules,
+        commentaries: installedCommentaryModules,
+        dictionaries: installedDictionaryModules
+      )
+    )
         bridge.updateActiveLanguages(languages.isEmpty ? ["en"] : languages)
     }
 
@@ -5395,53 +8931,94 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func ordinalToVerse(_ ordinal: Int) -> Int? {
         guard let reference = verseReference(book: currentBook, ordinal: ordinal),
-              reference.chapter == currentChapter else {
+      reference.chapter == currentChapter
+    else {
             return nil
         }
         return reference.verse
     }
 
-    /// Get plain text for a verse range using SWORD stripText.
-    private func getVerseText(startOrdinal: Int, endOrdinal: Int) -> String {
-        guard let module = activeModule else { return "" }
-        let osisBookId = osisBookId(for: currentBook)
-        let chapter = currentChapter
+  /**
+   Builds Android-compatible share/copy text from one explicit installed Bible source.
 
-        module.setKey("\(osisBookId) \(chapter):1")
-        var text = ""
-
-        while true {
-            let key = module.currentKey()
-            guard let (_, parsedChapter, parsedVerse) = parseVerseKey(key) else { break }
-            if parsedChapter != chapter { break }
-
-            guard let ordinal = verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: parsedVerse) else {
-                break
-            }
-            if ordinal >= startOrdinal && ordinal <= endOrdinal {
-                let verseText = module.stripText()
-                if !verseText.isEmpty {
-                    text += verseText.trimmingCharacters(in: .whitespacesAndNewlines) + " "
-                }
-            }
-            if ordinal > endOrdinal { break }
-            if !module.next() { break }
-        }
-
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+   - Parameters:
+     - bookInitials: Bridge- or bookmark-owned installed module identity.
+     - startOrdinal: First source-domain verse ordinal.
+     - endOrdinal: Last source-domain verse ordinal.
+   - Returns: Plain passage text plus exact source reference and module, or nil on any identity,
+     address, content, or formatting failure.
+   - Side effects: SWORD performs one cursor-restoring bounded read; SQLite uses operation-owned
+     chapter reads. The active pane is never consulted as a substitute.
+   - Failure modes: Missing/wrong-category sources, reversed or oversized ranges, non-verse
+     endpoints, empty passages, and backend errors fail closed.
+   */
+    func verseActionText(
+        bookInitials: String,
+        startOrdinal: Int,
+        endOrdinal: Int
+    ) -> String? {
+        BibleReaderVerseActionTextBuilder(
+            moduleResolver: installedModuleResolver()
+        ).build(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
     }
 
     // MARK: - Content Loading
 
+    /** Encodes and emits one typed Android-compatible `setup_content` payload. */
+    private func emitSetupContent(_ payload: ReaderSetupContentPayload) {
+        guard let data = try? bridgeEncoder.encode(payload),
+      let json = String(data: data, encoding: .utf8)
+    else {
+            logger.error("Failed to encode setup_content payload")
+            return
+        }
+        bridge.emit(event: "setup_content", data: json)
+    }
+
+    /**
+     Presents one reader-local AI status document without changing the selected source or storage.
+
+     Android uses `BibleView.loadDocument(ErrorDocument(...))` while an AI document regenerates.
+     Keeping this path bridge-only prevents loading, cancellation, and failure states from entering
+     My Documents, CloudKit, or Android remote-sync patches.
+
+     - Parameter document: Localized message and Vue error-document severity.
+     - Side effects: Replaces the current WebView payload, clears selection, and reapplies styling.
+     - Failure modes: If payload serialization fails, the reader is cleared and no fabricated
+       persisted document is created.
+     */
+    func loadTransientAIDocument(_ document: AIReaderTransientDocument) {
+        beginReplacingContentIntent()
+        bridge.emit(event: "clear_document")
+        let severity: BibleReaderDocumentPayloadFactory.ErrorDocumentSeverity =
+            document.severity == .error ? .error : .normal
+        if let payload = documentPayloadFactory().errorDocumentJSON(
+            message: document.message,
+            severity: severity
+        ) {
+            bridge.emit(event: "add_documents", data: payload)
+        }
+        emitSetupContent(ReaderSetupContentPayload(jumpToId: "top"))
+        bridge.clearSelection()
+        applyNightModeBackground()
+    }
+
     /**
      Loads the currently selected Bible chapter into the embedded Vue.js reader.
 
-     Side effects:
-     - clears selection and special-document state, loads SWORD or placeholder content, emits labels
-       and document JSON to the bridge, restores scroll position when needed, and reapplies active
-       window/background styling
+   - Side effects: Clears transient state, reads serialized SQLite or active SWORD content, emits
+     labels/document/setup/state events, restores navigation, and reapplies reader styling.
+   - Failure modes: An active backend that cannot return real content emits the deterministic
+     no-content document. Placeholder chapters are permitted only when neither backend is active;
+     SQLite rows are never replaced by generated verses.
+   - Important: SQLite chapter ordinals come from exact intro-inclusive JSword KJVA coordinates.
      */
     private func loadCurrentChapter() {
+        beginReplacingContentIntent()
         showingMyNotes = false
         showingStudyPad = false
         activeStudyPadLabelId = nil
@@ -5451,11 +9028,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let osisBookId = osisBookId(for: currentBook)
         let isNT = isNewTestament(currentBook)
 
-        // Try loading from SWORD module first
-        let loadedChapter = loadChapterFromSword(
+    let loadedChapter: BibleChapterDocumentBuilder.LoadedChapterContent?
+    if let sqliteModule = activeSQLiteBibleModule {
+      loadedChapter = SQLiteBibleChapterDocumentBuilder(module: sqliteModule).loadChapter(
+        osisBookId: osisBookId,
+        chapter: currentChapter
+      )
+    } else {
+      loadedChapter = loadChapterFromSword(
             osisBookId: osisBookId,
             chapter: currentChapter
         )
+    }
         let xml: String
         let verseCount: Int
         let addChapter: Bool
@@ -5463,14 +9047,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             xml = loadedChapter.xml
             verseCount = loadedChapter.verseCount
             addChapter = loadedChapter.addChapter
-        } else if activeModule == nil {
+    } else if activeModule == nil && activeSQLiteBibleModule == nil {
             let fallbackChapter = loadPlaceholderChapter(osisBookId: osisBookId, bookName: currentBook)
             xml = fallbackChapter.0
             verseCount = fallbackChapter.1
             addChapter = true
         } else {
             let renderedOsisBookId = osisBookId.isEmpty ? Self.osisBookId(for: currentBook) : osisBookId
-            logger.error("Failed to load SWORD chapter for \(renderedOsisBookId, privacy: .public).\(self.currentChapter)")
+      logger.error(
+        "Failed to load active Bible chapter for \(renderedOsisBookId, privacy: .public).\(self.currentChapter)"
+      )
             bridge.emit(event: "clear_document")
             if let document = documentPayloadFactory().errorDocumentJSON(
                 message: String(
@@ -5480,9 +9066,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             ) {
                 bridge.emit(event: "add_documents", data: document)
             }
-            bridge.emit(event: "setup_content", data: """
-            {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":"top","topOffset":0,"bottomOffset":0}
-            """)
+            emitSetupContent(ReaderSetupContentPayload(jumpToId: "top"))
             setRenderedContentState(
                 category: .bible,
                 moduleName: activeModuleName,
@@ -5505,7 +9089,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         // Send bookmark labels before the document (Vue.js needs labels to render bookmark highlights)
         sendLabelsToVueJS()
 
-        guard let document = buildDocumentJSON(
+    let navigationAnchorRange =
+      pendingLinkNavigationOrdinalRange
+            ?? navigationCoordinator.originalNavigationOrdinalRange
+        pendingLinkNavigationOrdinalRange = nil
+    guard
+      let document = buildDocumentJSON(
             osisBookId: osisBookId,
             bookName: currentBook,
             chapter: currentChapter,
@@ -5514,8 +9103,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             xml: xml,
             bookmarks: chapterBookmarks,
             addChapter: addChapter,
-            originalOrdinalRange: navigationCoordinator.originalNavigationOrdinalRange
-        ) else { return }
+            originalOrdinalRange: navigationAnchorRange
+      )
+    else { return }
         bridge.emit(event: "add_documents", data: document)
 
         infiniteScrollCoordinator.reset(book: currentBook, chapter: currentChapter)
@@ -5535,19 +9125,28 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 verse: verse
             )
         }
-        let jumpOrdinal: String
-        let jumpToId: String
-        switch restoreTarget {
-        case .chapterTop:
-            jumpOrdinal = "null"
-            jumpToId = "\"top\""
-        case .ordinal(let ordinal):
-            jumpOrdinal = String(ordinal)
-            jumpToId = "null"
+        let setupPayload: ReaderSetupContentPayload
+        if let navigationAnchorRange,
+           let anchorStart = navigationAnchorRange.first,
+      let anchorEnd = navigationAnchorRange.last
+    {
+            setupPayload = ReaderSetupContentPayload(
+                jumpToAnchor: anchorStart,
+                ordinalStart: anchorStart,
+                ordinalEnd: anchorEnd,
+                highlight: true,
+                bookInitials: activeModule?.info.name ?? activeModuleName,
+                osisRef: "\(osisBookId).\(currentChapter)"
+            )
+        } else {
+            switch restoreTarget {
+            case .chapterTop:
+                setupPayload = ReaderSetupContentPayload(jumpToId: "top")
+            case .ordinal(let ordinal):
+                setupPayload = ReaderSetupContentPayload(jumpToOrdinal: ordinal)
+            }
         }
-        bridge.emit(event: "setup_content", data: """
-        {"jumpToOrdinal":\(jumpOrdinal),"jumpToAnchor":null,"jumpToId":\(jumpToId),"topOffset":0,"bottomOffset":0}
-        """)
+        emitSetupContent(setupPayload)
         setRenderedContentState(
             category: .bible,
             moduleName: activeModuleName,
@@ -5569,7 +9168,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      because controllers can share a manager whose global filter state is mutable.
      Returns (xml, verseCount) or nil if no module is available.
      */
-    private func loadChapterFromSword(osisBookId: String, chapter: Int) -> BibleChapterDocumentBuilder.LoadedChapterContent? {
+  private func loadChapterFromSword(osisBookId: String, chapter: Int) -> BibleChapterDocumentBuilder
+    .LoadedChapterContent?
+  {
         guard let module = activeModule else { return nil }
         applySwordOptions()
         let builder = BibleChapterDocumentBuilder(
@@ -5584,31 +9185,43 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Used by infinite scroll to load adjacent chapters without navigating.
      */
     private func loadChapterJSON(book: String, chapter: Int) -> String? {
-        guard let module = activeModule else { return nil }
+    guard activeModule != nil || activeSQLiteBibleModule != nil else { return nil }
 
         let osisBookId = osisBookId(for: book)
         let isNT = isNewTestament(book)
+    let swordModule = activeModule
         let restoreKey = "\(self.osisBookId(for: currentBook)) \(currentChapter):1"
         defer {
-            module.setKey(restoreKey)
+      swordModule?.setKey(restoreKey)
         }
 
-        guard let loadedChapter = loadChapterFromSword(
+    let loadedChapter: BibleChapterDocumentBuilder.LoadedChapterContent?
+    if let sqliteModule = activeSQLiteBibleModule {
+      loadedChapter = SQLiteBibleChapterDocumentBuilder(module: sqliteModule).loadChapter(
             osisBookId: osisBookId,
             chapter: chapter
-        ) else {
+      )
+    } else {
+      loadedChapter = loadChapterFromSword(osisBookId: osisBookId, chapter: chapter)
+    }
+    guard let loadedChapter else {
             return nil
         }
 
         // Query bookmarks through Android's KJVA range so restored rows with module initials or
         // NULL in `book` still highlight in infinite-scroll chapters.
-        guard let range = bookmarkQueryOrdinalRange(book: book, chapter: chapter, verseCount: loadedChapter.verseCount) else {
-            logger.error("Failed to resolve bookmark range for \(osisBookId, privacy: .public).\(chapter)")
+    guard
+      let range = bookmarkQueryOrdinalRange(
+        book: book, chapter: chapter, verseCount: loadedChapter.verseCount)
+    else {
+      logger.error(
+        "Failed to resolve bookmark range for \(osisBookId, privacy: .public).\(chapter)")
             return nil
         }
         let chapterBookmarks = bookmarkService?.bookmarks(for: range.start, endOrdinal: range.end) ?? []
 
-        guard let document = buildDocumentJSON(
+    guard
+      let document = buildDocumentJSON(
             osisBookId: osisBookId,
             bookName: book,
             chapter: chapter,
@@ -5618,7 +9231,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             bookmarks: chapterBookmarks,
             addChapter: loadedChapter.addChapter,
             originalOrdinalRange: nil
-        ) else { return nil }
+      )
+    else { return nil }
 
         return document
     }
@@ -5647,7 +9261,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         verseOrdinal(osisBookId: osisBookId(for: currentBook), chapter: chapter, verse: verse)
     }
 
-    private func buildSwordChapterXML(osisBookId: String, bookName: String, chapter: Int, verses: [(Int, String)]) -> String {
+  private func buildSwordChapterXML(
+    osisBookId: String, bookName: String, chapter: Int, verses: [(Int, String)]
+  ) -> String {
         var xml = "<div>"
         xml += "<title type=\"x-gen\">\(bookName) \(chapter)</title>"
         xml += "<div sID=\"p1\" type=\"paragraph\"/>"
@@ -5674,7 +9290,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let prefix = isOT ? "H" : "G"
 
         // Match the full SWORD Strong's HTML pattern
-        let pattern = #"<small><em>&lt;<a href="passagestudy\.jsp\?showStrong=(\d+)#cv">\d+</a>&gt;</em></small>"#
+    let pattern =
+      #"<small><em>&lt;<a href="passagestudy\.jsp\?showStrong=(\d+)#cv">\d+</a>&gt;</em></small>"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
         let nsText = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
@@ -5698,7 +9315,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             "1Sam", "2Sam", "1Kgs", "2Kgs", "1Chr", "2Chr", "Ezra", "Neh",
             "Esth", "Job", "Ps", "Prov", "Eccl", "Song", "Isa", "Jer",
             "Lam", "Ezek", "Dan", "Hos", "Joel", "Amos", "Obad", "Jonah",
-            "Mic", "Nah", "Hab", "Zeph", "Hag", "Zech", "Mal"
+      "Mic", "Nah", "Hab", "Zeph", "Hag", "Zech", "Mal",
         ]
         return otBooks.contains(osisBookId)
     }
@@ -5722,16 +9339,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Android persists Bible bookmark membership in KJVA-compatible ordinals. Prefer that range for
      highlight, My Notes, and list membership so restored Android rows with module initials or NULL
-     in `BibleBookmark.book` still match the visible chapter. The active-module range remains a
-     fallback for unsupported canons and legacy rows whose KJVA columns mirror source ordinals.
+     in `BibleBookmark.book` still match the visible chapter. Source-module ordinals are never used
+     as a fallback because they belong to a different coordinate domain.
 
      - Parameters:
        - book: Display book name for the visible chapter.
        - chapter: One-based chapter number.
        - verseCount: Optional rendered non-empty verse count, used only as a fallback when the
          active module cannot report the chapter's maximum verse number.
-     - Returns: Inclusive storage range and verse count, or `nil` when neither KJVA nor active
-       module versification can resolve the chapter.
+     - Returns: Inclusive KJVA storage range and verse count, or `nil` when the visible chapter
+       cannot be mapped authoritatively.
      - Side effects: May query the active SWORD module through `chapterOrdinalRange`.
      - Failure modes: Returns `nil` for unknown books, out-of-range chapters, or unsupported
        module/canon combinations.
@@ -5758,7 +9375,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         // chapters that render a verse empty (e.g. Matthew 17:21 in many modern translations) and
         // drop bookmarks on the trailing verses. Fall back to the caller's count, then the KJVA canon
         // count, only when no module can resolve the chapter.
-        let sourceLastVerse = chapterOrdinalRange(book: book, chapter: chapter)?.verseCount
+    let sourceLastVerse =
+      chapterOrdinalRange(book: book, chapter: chapter)?.verseCount
             ?? verseCount
             ?? JSwordKJVAVersification.verseCount(osisId: osisId, chapter: chapter)
         if let sourceLastVerse, sourceLastVerse > 0,
@@ -5766,22 +9384,29 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                osisBookId: osisId, chapter: chapter, sourceVersification: sourceVersification
            ),
            let lastKJVA = kjvaOrdinal(
-               osisBookId: osisId, chapter: chapter, verse: sourceLastVerse, sourceVersification: sourceVersification
-           ) {
+        osisBookId: osisId, chapter: chapter, verse: sourceLastVerse,
+        sourceVersification: sourceVersification
+      )
+    {
             return (
                 start: min(firstKJVA, lastKJVA),
                 end: max(firstKJVA, lastKJVA),
                 verseCount: verseCount ?? sourceLastVerse
             )
         }
-        return chapterOrdinalRange(book: book, chapter: chapter, verseCount: verseCount)
+        return nil
     }
 
     /// Query bookmarks for the current chapter's Android-compatible KJVA ordinal range.
     private func bookmarksForCurrentChapter(verseCount: Int) -> [BibleBookmark] {
         guard let service = bookmarkService else { return [] }
-        guard let range = bookmarkQueryOrdinalRange(book: currentBook, chapter: currentChapter, verseCount: verseCount) else {
-            logger.error("Failed to resolve bookmark range for \(self.currentBook, privacy: .public) \(self.currentChapter)")
+    guard
+      let range = bookmarkQueryOrdinalRange(
+        book: currentBook, chapter: currentChapter, verseCount: verseCount)
+    else {
+      logger.error(
+        "Failed to resolve bookmark range for \(self.currentBook, privacy: .public) \(self.currentChapter)"
+      )
             return []
         }
         return service.bookmarks(for: range.start, endOrdinal: range.end)
@@ -5868,18 +9493,117 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      - Returns: A factory that can project bookmark, label, My Notes, and StudyPad models into
        typed bridge DTOs.
-     - Side effects: None during construction; factory methods may read from the active SWORD
-       module.
-     - Failure modes: None during construction.
+     - Side effects: None during construction; factory methods may read from the bookmark's stored
+       SWORD, My Documents, or EPUB source.
+     - Failure modes: Missing stored sources fail closed inside the factory without substituting the
+       active reader document.
      */
     private func annotationPayloadFactory() -> BibleReaderAnnotationPayloadFactory {
         BibleReaderAnnotationPayloadFactory(
             currentBook: currentBook,
             activeModuleName: activeModuleName,
             activeModule: activeModule,
+            sourceModuleResolver: { [weak self] initials in
+                self?.swordManager?.module(named: initials)
+            },
+            genericSourceResolver: { [weak self] initials, key in
+                self?.genericBookmarkSourceContent(bookInitials: initials, key: key)
+            },
             bookCatalog: bookCatalog,
             unlabeledLabelID: Self.unlabeledLabelId
         )
+    }
+
+    /**
+     Resolves a generic bookmark's persisted My Documents or EPUB source without active-document
+     substitution.
+
+     - Parameters:
+       - bookInitials: Exact source initials stored on the generic bookmark.
+       - key: Exact persisted page or EPUB fragment key.
+     - Returns: Android-shaped source metadata, visible text, and render fragment, or `nil` when the
+       stored source/key is unavailable.
+     - Side effects: Reads SwiftData or opens the installed EPUB index identified by the stored
+       initials.
+     - Failure modes: Missing documents, ambiguous EPUB identities, and stale keys return `nil`;
+       no current reader source is used as a fallback.
+     */
+    private func genericBookmarkSourceContent(
+        bookInitials: String,
+        key: String
+    ) -> GenericBookmarkSourceContent? {
+        if let store = myDocumentStore,
+           let document = store.document(initials: bookInitials),
+      let page = store.page(bookInitials: bookInitials, pageKey: key)
+    {
+            let rawContent = page.pageContent?.content ?? ""
+            let language = page.languageCode ?? Locale.current.language.languageCode?.identifier ?? "en"
+            return GenericBookmarkSourceContent(
+                bookName: document.name,
+                bookAbbreviation: document.initials,
+                keyName: page.title,
+                plainText: GenericBookmarkSourceTextProjection.myDocumentText(
+                    rawContent,
+                    contentType: page.contentType
+                ),
+                osisFragment: OsisFragment(
+                    xml: MyDocumentContentRenderer.render(rawContent, contentType: page.contentType),
+                    key: page.pageKey,
+                    keyName: page.title,
+                    v11n: nil,
+                    bookCategory: DocumentCategory.generalBook.rawValue,
+                    bookInitials: document.initials,
+                    bookAbbreviation: document.initials,
+                    osisRef: page.pageKey,
+                    ordinalRange: nil,
+                    language: language,
+                    direction: Self.annotationTextDirection(language: language),
+                    isNativeHtml: true
+                )
+            )
+        }
+
+        let reader: EpubReader?
+        if activeEpubReader?.initials == bookInitials {
+            reader = activeEpubReader
+        } else {
+            reader = EpubReader(initials: bookInitials)
+        }
+        guard let reader, let content = reader.content(forKey: key) else { return nil }
+        let ordinalRange = [content.ordinalRange.lowerBound, content.ordinalRange.upperBound]
+        return GenericBookmarkSourceContent(
+            bookName: reader.title,
+            bookAbbreviation: reader.title,
+            keyName: content.title,
+            plainText: GenericBookmarkSourceTextProjection.xhtmlText(content.html),
+            osisFragment: OsisFragment(
+                xml: content.html,
+                key: "\(reader.initials)--\(content.persistedKey)",
+                keyName: content.title,
+                v11n: nil,
+                bookCategory: DocumentCategory.generalBook.rawValue,
+                bookInitials: reader.initials,
+                bookAbbreviation: reader.title,
+                osisRef: content.persistedKey,
+                ordinalRange: ordinalRange,
+                language: reader.language,
+                direction: Self.annotationTextDirection(language: reader.language),
+                isNativeHtml: true
+            )
+        )
+    }
+
+    /**
+     Maps a BCP-47 language identifier to the reader direction used by annotation fragments.
+
+     - Parameter language: Source language from My Documents or EPUB metadata.
+     - Returns: `rtl` for Android-supported right-to-left language families, otherwise `ltr`.
+     - Side effects: None.
+     - Failure modes: Missing or malformed primary subtags safely produce `ltr`.
+     */
+    private static func annotationTextDirection(language: String) -> String {
+        let primary = language.split(separator: "-").first?.lowercased() ?? ""
+        return ["ar", "fa", "he", "iw", "ps", "ur", "yi"].contains(primary) ? "rtl" : "ltr"
     }
 
     /**
@@ -5921,7 +9645,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Builds a typed generic bookmark-to-label payload for Vue.js.
      */
-    private func buildGenericBookmarkToLabelJSON(_ gbtl: GenericBookmarkToLabel) -> BookmarkToLabelData? {
+  private func buildGenericBookmarkToLabelJSON(_ gbtl: GenericBookmarkToLabel)
+    -> BookmarkToLabelData?
+  {
         annotationPayloadFactory().genericBookmarkToLabelJSON(gbtl)
     }
 
@@ -5942,9 +9668,31 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Builds a typed generic bookmark payload for StudyPad and bookmark update events.
     */
-    private func buildGenericBookmarkJSONForStudyPad(_ bookmark: GenericBookmark) -> GenericBookmarkData {
+  private func buildGenericBookmarkJSONForStudyPad(_ bookmark: GenericBookmark)
+    -> GenericBookmarkData
+  {
         annotationPayloadFactory().genericBookmarkJSONForStudyPad(bookmark)
     }
+
+  /**
+   Projects persisted generic annotations for one exact Android document identity.
+
+   - Parameters:
+     - bookInitials: Source module or generated-book initials from the rendered document.
+     - key: Exact source key within `bookInitials`.
+   - Returns: Deterministically ordered Vue bookmark payloads for the exact identity.
+   - Side effects: Reads bookmark persistence and may resolve exact source metadata for each row.
+   - Failure modes: Missing bookmark services produce an empty list; the method never substitutes
+     the active reader module or a nearest key.
+   */
+  private func genericBookmarkPayloads(
+    bookInitials: String,
+    key: String
+  ) -> [GenericBookmarkData] {
+    bookmarkService?.genericBookmarks(bookInitials: bookInitials, key: key).map {
+      buildGenericBookmarkJSONForStudyPad($0)
+    } ?? []
+  }
 
     /**
      Parses an optional raw JSON state blob into a typed bridge JSON value.
@@ -5956,12 +9704,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func bridgeJSONValue(from json: String?) -> BridgeJSONValue? {
         guard let json,
-              let data = json.data(using: .utf8) else { return nil }
+      let data = json.data(using: .utf8)
+    else { return nil }
         do {
             let object = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
             return BridgeJSONValue(object)
         } catch {
-            logger.error("Failed to parse saved bridge state JSON: \(error.localizedDescription, privacy: .public)")
+      logger.error(
+        "Failed to parse saved bridge state JSON: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -5987,7 +9737,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             sendLabels: { [weak self] in
                 self?.sendLabelsToVueJS()
             },
-            setRenderedContentState: { [weak self] category, moduleName, book, chapter, key, documentKind in
+      setRenderedContentState: {
+        [weak self] category, moduleName, book, chapter, key, documentKind in
                 self?.setRenderedContentState(
                     category: category,
                     moduleName: moduleName,
@@ -6064,20 +9815,33 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Failure modes: Returns `nil` rather than accepting annotation bridge actions without
        persistence.
      */
-    private func annotationBridgeCoordinator(bridge: BibleBridge) -> BibleReaderAnnotationBridgeCoordinator? {
+  private func annotationBridgeCoordinator(bridge: BibleBridge)
+    -> BibleReaderAnnotationBridgeCoordinator?
+  {
         guard let bookmarkService else { return nil }
         return BibleReaderAnnotationBridgeCoordinator(
             bridge: bridge,
             bookmarkService: bookmarkService,
             payloadFactory: annotationPayloadFactory(),
             currentBook: currentBook,
-            currentV11n: { [weak self] in
-                let versification = self?.activeModule?.configEntry("Versification")?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                return versification.isEmpty ? "KJV" : versification
-            },
-            kjvaOrdinalRange: { [weak self] startOrdinal, endOrdinal in
-                self?.bookmarkStorageKJVARange(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+            verifiedKJVAOrdinalRange: { [weak self] bookInitials, startOrdinal, endOrdinal in
+                guard let self else { return nil }
+        guard
+          let range = self.bookmarkStorageKJVARange(
+                    bookInitials: bookInitials,
+                    startOrdinal: startOrdinal,
+                    endOrdinal: endOrdinal
+          )
+        else {
+                    self.bridgeEventRouter.showToast(
+                        String(
+                            localized: "error_occurred",
+                            defaultValue: "An error has occurred"
+                        )
+                    )
+                    return nil
+                }
+                return range
             },
             currentNotesContentType: { [weak self] in
                 self?.currentNotesContentType() ?? "HTML"
@@ -6205,7 +9969,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func buildConfigContext() -> BibleReaderConfigurationContext {
         let fontSizeMultiplierPercent = max(10, appPreferenceInt(.fontSizeMultiplier))
-        let readingProgressSettings = readingProgressStore?.snapshot().settings ?? ReadingProgressSettingsSnapshot()
+    let readingProgressSettings =
+      readingProgressStore?.snapshot().settings ?? ReadingProgressSettingsSnapshot()
         return BibleReaderConfigurationContext(
             displaySettings: displaySettings,
             defaults: .appDefaults,
@@ -6227,6 +9992,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             notesContentType: currentNotesContentType(),
             fontSizeMultiplier: Double(fontSizeMultiplierPercent) / 100.0,
             enabledExperimentalFeatures: appPreferenceStringSet(.experimentalFeatures),
+            llmConfigured: isAIProviderConfigured?() ?? false,
             autoTrackReading: readingProgressSettings.autoTrackReading,
             readingProgressSettings: ReadingProgressSettingsBundle(settings: readingProgressSettings)
         )
@@ -6243,10 +10009,26 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      - Returns: OSIS XML fragment with generated verse and paragraph structure.
      */
-    private func buildChapterXML(osisBookId: String, bookName: String, chapter: Int, verseCount: Int) -> String {
+  private func buildChapterXML(osisBookId: String, bookName: String, chapter: Int, verseCount: Int)
+    -> String
+  {
         // For Genesis 1, use the real ESV-like content
         if osisBookId == "Gen" && chapter == 1 {
-            return genesis1OSISXML()
+            var xml = genesis1OSISXML()
+            for verse in stride(from: 31, through: 1, by: -1) {
+        guard
+          let ordinal = JSwordKJVAVersification.verseOrdinal(
+                    osisId: osisBookId,
+                    chapter: chapter,
+                    verse: verse
+          )
+        else { continue }
+                xml = xml.replacingOccurrences(
+                    of: "verseOrdinal=\"\(verse)\"",
+                    with: "verseOrdinal=\"\(ordinal)\""
+                )
+            }
+            return xml
         }
 
         // For other chapters, generate placeholder OSIS XML with verse structure
@@ -6255,7 +10037,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         xml += "<div sID=\"p1\" type=\"paragraph\"/>"
 
         for verse in 1...verseCount {
-            let ordinal = compatibilityOrdinal(chapter: chapter, verse: verse)
+      guard
+        let ordinal = JSwordKJVAVersification.verseOrdinal(
+                osisId: osisBookId,
+                chapter: chapter,
+                verse: verse
+        )
+      else { continue }
             let text = Self.placeholderVerseText(book: bookName, chapter: chapter, verse: verse)
             xml += "<verse osisID=\"\(osisBookId).\(chapter).\(verse)\" verseOrdinal=\"\(ordinal)\">"
             xml += "\(text) "
@@ -6313,6 +10101,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     startOrdinal: startOrdinal,
                     endOrdinal: endOrdinal
                 ) ?? []
+      },
+      genericBookmarks: { [weak self] bookInitials, key in
+        self?.genericBookmarkPayloads(bookInitials: bookInitials, key: key) ?? []
+      },
+      aiDocMarkersForPage: { [weak self] bookInitials, key in
+        self?.myDocumentStore?.aiDocMarkers(
+          bookInitials: bookInitials,
+          pageKey: key
+        ) ?? []
+      },
+      aiDocMarkersForKJVARange: { [weak self] startOrdinal, endOrdinal in
+        self?.myDocumentStore?.aiDocMarkers(
+          kjvaRange: min(startOrdinal, endOrdinal)...max(startOrdinal, endOrdinal)
+        ) ?? []
             }
         )
     }
@@ -6341,7 +10143,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Returns: JSON string for one Vue.js document record, or `nil` when a Bible document cannot
        resolve its active-module ordinal range.
      */
-    private func buildDocumentJSON(osisBookId: String,
+  private func buildDocumentJSON(
+    osisBookId: String,
                                    bookName: String,
                                    chapter: Int,
                                    verseCount: Int,
@@ -6354,8 +10157,61 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                                    originalOrdinalRange: [Int]? = nil,
                                    documentKey: String? = nil,
                                    keyName: String? = nil,
-                                   ordinalRangeOverride: [Int]? = nil) -> String? {
-        documentPayloadFactory().documentJSON(
+    ordinalRangeOverride: [Int]? = nil
+  ) -> String? {
+        let initials = bookInitials ?? activeModuleName
+        let sourceModule: SwordModule? = {
+            if activeModule?.info.name == initials { return activeModule }
+            if activeCommentaryModule?.info.name == initials { return activeCommentaryModule }
+            if activeGeneralBookModule?.info.name == initials { return activeGeneralBookModule }
+            return swordManager?.module(named: initials)
+        }()
+    let sqliteSourceModule = [
+      activeSQLiteBibleModule,
+      activeSQLiteCommentaryModule,
+      activeSQLiteDictionaryModule,
+    ].compactMap { $0 }.first {
+      $0.info.name.caseInsensitiveCompare(initials) == .orderedSame
+    }
+    let sqliteSource = sqliteSourceModule.map(BibleReaderSQLiteSourceMetadata.init(module:))
+        let isBibleDocument = bookCategory == DocumentCategory.bible.rawValue
+    let isSyntheticKJVA =
+      isBibleDocument
+      && sourceModule == nil
+      && sqliteSourceModule == nil
+      && activeModule == nil
+      && activeSQLiteBibleModule == nil
+    let sourceVersification =
+      sourceModule.map(VersificationMapper.versificationName(for:))
+      ?? sqliteSource?.versification
+            ?? (isSyntheticKJVA ? JSwordKJVAVersification.name : nil)
+    let sourceLanguage =
+      sqliteSource?.language
+      ?? (sourceModule?.info.language.isEmpty == false ? sourceModule?.info.language ?? "en" : "en")
+    let sourceDirection =
+      sqliteSource?.direction
+      ?? (sourceModule?.info.isRightToLeft == true ? "rtl" : "ltr")
+    let sourceDescription =
+      sqliteSource?.name ?? sourceModule?.info.description
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let aiMarkerKJVAOrdinalRange = sourceVersification.flatMap { versification in
+      VersificationMapper.kjvaOrdinalRange(
+        start: VerseKeyReference(
+          osisBookId: osisBookId,
+          chapter: chapter,
+          verse: 1,
+          ordinal: 0
+        ),
+        end: VerseKeyReference(
+          osisBookId: osisBookId,
+          chapter: chapter,
+          verse: max(1, verseCount),
+          ordinal: 0
+        ),
+        sourceVersification: versification
+      ).map { [$0.lowerBound, $0.upperBound] }
+    }
+        return documentPayloadFactory().documentJSON(
             BibleReaderDocumentPayloadRequest(
                 osisBookId: osisBookId,
                 bookName: bookName,
@@ -6365,12 +10221,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 xml: xml,
                 bookmarks: bookmarks,
                 bookCategory: bookCategory,
-                bookInitials: bookInitials,
+                bookInitials: initials,
                 addChapter: addChapter,
                 originalOrdinalRange: originalOrdinalRange,
                 documentKey: documentKey,
                 keyName: keyName,
-                ordinalRangeOverride: ordinalRangeOverride
+                ordinalRangeOverride: ordinalRangeOverride,
+                moduleName: sourceDescription.isEmpty ? initials : sourceDescription,
+        moduleAbbreviation: sqliteSource?.abbreviation
+          ?? sourceModule.map(BibleReaderStrongsDocumentBuilder.moduleDisplayLabel)
+                    ?? initials,
+                versificationName: sourceVersification,
+                language: sourceLanguage,
+                direction: sourceDirection,
+        sourceHasStrongs: sqliteSource?.hasStrongs
+          ?? sourceModule?.info.features.contains(.strongsNumbers),
+        aiMarkerKJVAOrdinalRange: aiMarkerKJVAOrdinalRange
             )
         )
     }
@@ -6394,8 +10260,29 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Backward-compatible static accessor — returns just the book names from the default list.
     static let allBooks: [String] = defaultBooks.map(\.name)
 
-    /// Refresh the book list from the active module's versification.
+  /**
+   Refreshes the active Bible book list from the authoritative backend.
+
+   - Side effects: Replaces `moduleBookList` with real serialized SQLite key metadata or SWORD
+     versification books and writes diagnostics for empty/error results.
+   - Failure modes: Reader failures clear the active list; no static canon is substituted while a
+     backend remains active. With no backend, the list is cleared for the explicit fallback path.
+   */
     private func refreshBookList() {
+    if let module = activeSQLiteBibleModule {
+      do {
+        moduleBookList = try module.bookList()
+        if moduleBookList.isEmpty {
+          logger.error("SQLite module \(module.info.name, privacy: .public) returned no books")
+        }
+      } catch {
+        moduleBookList = []
+        logger.error(
+          "SQLite module \(module.info.name, privacy: .public) book list failed: \(error.localizedDescription, privacy: .public)"
+        )
+      }
+      return
+    }
         guard let mod = activeModule else {
             moduleBookList = []
             return
@@ -6417,9 +10304,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private func logBookListRefresh(module: SwordModule?, books: [BookInfo]) {
         guard let module else { return }
         if books.isEmpty {
-            logger.error("Module \(module.info.name, privacy: .public) returned no books; refusing static canon fallback while active")
+      logger.error(
+        "Module \(module.info.name, privacy: .public) returned no books; refusing static canon fallback while active"
+      )
         } else {
-            logger.info("Module \(module.info.name) has \(books.count) books (versification: \(module.configEntry("Versification") ?? "KJV"))")
+      logger.info(
+        "Module \(module.info.name) has \(books.count) books (versification: \(module.configEntry("Versification") ?? "KJV"))"
+      )
         }
     }
 
@@ -6448,9 +10339,35 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         bookCatalog.osisBookId(for: bookName)
     }
 
-    /// KJVA-compatible ordinal for the canonical book position used by local reading progress.
+    /**
+     Resolves a visible source-versification book into Android's KJVA `BibleBook.ordinal`.
+
+     Android derives reading-progress identity from `Verse(v11n, book, 1, 1).toV11n(KJVA).book`
+     rather than assuming the source and KJVA book enumerations are identical. Public-converter
+     fallback remains acceptable here because Android uses the same best-effort conversion for
+     reading-progress book identity.
+
+     - Parameter bookName: Active-module display book name.
+     - Returns: JSword KJVA book ordinal, or `nil` for unknown source books or versifications.
+     - Side effects: Lazily reads JSword mapping resources and SWORD canon tables.
+     - Failure modes: Returns `nil` when the source coordinate or resulting KJVA book is unknown.
+     */
     private func kjvBookOrdinal(for bookName: String) -> Int? {
-        bookCatalog.kjvBookOrdinal(for: bookName)
+        let sourceOsisId = osisBookId(for: bookName)
+        guard !sourceOsisId.isEmpty,
+              let conversion = VersificationMapper.convert(
+                  osisBookId: sourceOsisId,
+                  chapter: 1,
+                  verse: 1,
+                  from: activeSourceVersificationName(),
+                  to: JSwordKJVAVersification.name
+      )
+    else {
+            return nil
+        }
+        return JSwordKJVAVersification.bibleBookOrdinal(
+            forOsisId: conversion.reference.osisBookId
+        )
     }
 
     /// Resolves the active Bible chapter into the JSword/KJVA identity used by reading progress.
@@ -6459,18 +10376,36 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         startOrdinal: Int,
         chapter: Int
     ) -> BibleReaderProgressBridgeCoordinator.ReadingProgressBridgeTarget? {
-        guard let chapterRange = currentChapterOrdinalRange(),
+        let requestedInitials = bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let sourceModule = activeModule,
+              let chapterRange = currentChapterOrdinalRange(),
               currentCategory == .bible,
-              !bookInitials.isEmpty,
-              bookInitials == activeModuleName,
+              !requestedInitials.isEmpty,
+              requestedInitials.caseInsensitiveCompare(sourceModule.info.name) == .orderedSame,
               startOrdinal >= chapterRange.start,
               startOrdinal <= chapterRange.end,
               chapter == currentChapter,
-              let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
+              !osisBookId(for: currentBook).isEmpty,
+              let sourceBookAnchorOrdinal = verseOrdinal(
+                  osisBookId: osisBookId(for: currentBook),
+                  chapter: 1,
+                  verse: 1
+              ),
+              let verifiedBookAnchor = VerifiedKJVAOrdinalRange(
+                  resolvingSourceBookInitials: sourceModule.info.name,
+                  sourceVersification: activeSourceVersificationName(),
+                  sourceOrdinalStart: sourceBookAnchorOrdinal,
+                  sourceOrdinalEnd: sourceBookAnchorOrdinal
+              ),
+              let identity = ReadingProgressKJVAIdentity(
+                  verifiedBookAnchor: verifiedBookAnchor,
+                  sourceChapter: chapter
+      )
+    else {
             return nil
         }
         return BibleReaderProgressBridgeCoordinator.ReadingProgressBridgeTarget(
-            kjvBookOrdinal: kjvBookOrdinal,
+            identity: identity,
             bookName: currentBook
         )
     }
@@ -6483,25 +10418,320 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      rendered-to-KJVA path so bookmark creation, restore, and chapter queries share one durable key.
 
      - Parameters:
+       - bookInitials: Exact source module initials supplied by the bridge event.
        - startOrdinal: First rendered ordinal reported by Vue.
        - endOrdinal: Last rendered ordinal reported by Vue.
-     - Returns: Inclusive KJVA span, or `nil` when the rendered selection cannot be represented in
-       KJVA.
+     - Returns: Exact source coordinates and their verified inclusive KJVA span, or `nil` when the
+       rendered selection cannot be represented in KJVA.
      - Side effects: May temporarily move the active SWORD module cursor through
        `memorizationOrdinalResolution`.
-     - Failure modes: Returns `nil` for invalid endpoints or references outside KJVA.
+     - Failure modes: Returns `nil` for missing or mismatched source-module identity, invalid
+       endpoints, unsupported source versification, or references without an authoritative KJVA
+       mapping.
      */
     private func bookmarkStorageKJVARange(
+        bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int
-    ) -> (start: Int, end: Int)? {
+    ) -> VerifiedKJVAOrdinalRange? {
         let effectiveEndOrdinal = endOrdinal > 0 ? endOrdinal : startOrdinal
         let lower = min(startOrdinal, effectiveEndOrdinal)
         let upper = max(startOrdinal, effectiveEndOrdinal)
-        guard let resolution = memorizationOrdinalResolution(startOrdinal: lower, endOrdinal: upper) else {
+        guard let resolution = memorizationOrdinalResolution(
+            bookInitials: bookInitials,
+            startOrdinal: lower,
+            endOrdinal: upper
+        ) else {
             return nil
         }
-        return (start: resolution.startOrdinal, end: resolution.endOrdinal)
+        return resolution.verifiedRange
+    }
+
+    /**
+     Captures Android's immutable AI source context from one exact active backend generation.
+
+     The bridge-supplied initials and generic key are compared byte-for-byte with pane state before
+     extraction. Category, initials, key, and `contentIntentGeneration` are checked again afterward,
+     so a stale callback cannot label content from a later module or page as its earlier source.
+
+     - Parameters:
+       - expectedDocumentInitials: Exact bridge initials. Omit only for native whole-window actions.
+       - requestedSourceKey: Exact generic bridge key, including meaningful whitespace.
+       - selectionOrdinalStart: Raw source-versification Bible start ordinal.
+       - selectionOrdinalEnd: Raw source-versification Bible end ordinal.
+     - Returns: Source-bound identity plus independently optional canonical text and structured OSIS.
+     - Side effects: Executes read-only source queries. SWORD reads restore their prior cursor.
+     - Failure modes: Stale identity/generation, partial endpoint pairs, invalid/excessive ranges,
+       missing exact keys, and unreadable backends fail closed without substituting pane content.
+     */
+    func aiSourceContext(
+        expectedDocumentInitials: String? = nil,
+        requestedSourceKey: String? = nil,
+        selectionOrdinalStart: Int? = nil,
+        selectionOrdinalEnd: Int? = nil
+    ) -> AIReaderSourceContext? {
+        let selectionBounds: AIReaderSourceBounds?
+        switch (selectionOrdinalStart, selectionOrdinalEnd) {
+        case (nil, nil):
+            selectionBounds = nil
+        case (.some(let start), .some(let end)):
+            guard let bounds = AIReaderSourceRange.bibleBounds(start: start, end: end) else {
+                return nil
+            }
+            selectionBounds = bounds
+        default:
+            return nil
+        }
+
+        let generation = contentIntentGeneration
+        let category = currentCategory
+        guard let initials = aiCurrentSourceInitials(for: category), !initials.isEmpty,
+              expectedDocumentInitials == nil || expectedDocumentInitials == initials,
+              let pageKey = aiCurrentSourceKey(for: category),
+              requestedSourceKey == nil || requestedSourceKey == pageKey else {
+            return nil
+        }
+
+        let context: AIReaderSourceContext?
+        switch category {
+        case .bible:
+            let osisBookId = osisBookId(for: currentBook)
+            guard !osisBookId.isEmpty else { return nil }
+            let request: AIReaderBibleSourceRequest = selectionBounds.map {
+                .selection(
+                    sourceBookKey: pageKey,
+                    startOrdinal: $0.start,
+                    endOrdinal: $0.end
+                )
+            } ?? .page(
+                sourceBookKey: pageKey,
+                osisBookId: osisBookId,
+                chapter: currentChapter
+            )
+            if let module = activeSQLiteBibleModule, module.info.name == initials {
+                context = AIReaderSourceContextExtractor.sqliteBible(
+                    module: module,
+                    request: request
+                )
+            } else if let module = activeModule, module.info.name == initials {
+                context = AIReaderSourceContextExtractor.swordBible(
+                    module: module,
+                    request: request
+                )
+            } else {
+                return nil
+            }
+
+        case .commentary:
+            guard selectionBounds == nil else { return nil }
+            let osisBookId = osisBookId(for: currentBook)
+            guard !osisBookId.isEmpty else { return nil }
+            if let module = activeSQLiteCommentaryModule, module.info.name == initials {
+                context = AIReaderSourceContextExtractor.sqliteCommentary(
+                    module: module,
+                    osisBookId: osisBookId,
+                    bookName: currentBook,
+                    chapter: currentChapter,
+                    verse: currentVerse,
+                    isNewTestament: isNewTestament(currentBook)
+                )
+            } else if let module = activeCommentaryModule, module.info.name == initials {
+                context = AIReaderSourceContextExtractor.swordDocument(module: module, key: pageKey)
+            } else {
+                return nil
+            }
+
+        case .dictionary:
+            guard selectionBounds == nil else { return nil }
+            if let module = activeSQLiteDictionaryModule, module.info.name == initials {
+                context = AIReaderSourceContextExtractor.sqliteDictionary(module: module, key: pageKey)
+            } else if let module = activeDictionaryModule, module.info.name == initials {
+                context = AIReaderSourceContextExtractor.swordDocument(module: module, key: pageKey)
+            } else {
+                return nil
+            }
+
+        case .generalBook:
+            guard selectionBounds == nil else { return nil }
+            if let reader = activeEpubReader, reader.initials == initials {
+                context = AIReaderSourceContextExtractor.epub(reader: reader, key: pageKey)
+            } else if let store = myDocumentStore,
+                      (try? store.exactDocument(initials: initials)) != nil {
+                context = AIReaderSourceContextExtractor.myDocument(
+                    store: store,
+                    bookInitials: initials,
+                    pageKey: pageKey
+                )
+            } else if let module = activeGeneralBookModule, module.info.name == initials {
+                context = AIReaderSourceContextExtractor.swordDocument(module: module, key: pageKey)
+            } else {
+                return nil
+            }
+
+        case .map:
+            guard selectionBounds == nil,
+                  let module = activeMapModule,
+                  module.info.name == initials else {
+                return nil
+            }
+            context = AIReaderSourceContextExtractor.swordDocument(module: module, key: pageKey)
+
+        case .epub:
+            guard selectionBounds == nil,
+                  let reader = activeEpubReader,
+                  reader.initials == initials else {
+                return nil
+            }
+            context = AIReaderSourceContextExtractor.epub(reader: reader, key: pageKey)
+
+        case .dailyDevotion:
+            guard selectionBounds == nil,
+                  let module = activeGeneralBookModule,
+                  module.info.name == initials,
+                  module.info.category == .dailyDevotion else {
+                return nil
+            }
+            context = AIReaderSourceContextExtractor.swordDocument(module: module, key: pageKey)
+        }
+
+        guard let context,
+              context.sourceDocumentInitials == initials,
+              context.sourceBookKey == pageKey,
+              contentIntentGeneration == generation,
+              currentCategory == category,
+              aiCurrentSourceInitials(for: category) == initials,
+              aiCurrentSourceKey(for: category) == pageKey else {
+            return nil
+        }
+        return context
+    }
+
+    /**
+     Captures source context from a Bible bookmark's own installed module and source ordinals.
+
+     - Parameters:
+       - bookInitials: Exact module initials persisted by the bookmark entity.
+       - startOrdinal: Inclusive source-versification start ordinal persisted by the bookmark.
+       - endOrdinal: Inclusive source-versification end ordinal persisted by the bookmark.
+     - Returns: Exact source context, or `nil` when the module/endpoints cannot be proven.
+     - Side effects: Reads the installed SWORD or SQLite source without changing active pane state.
+     - Failure modes: Missing/case-mismatched modules, invalid/excessive endpoints, and backend or
+       cursor failures return `nil`; active pane content is never used as fallback.
+     */
+    func aiBibleSourceContext(
+        bookInitials: String,
+        startOrdinal: Int,
+        endOrdinal: Int
+    ) -> AIReaderSourceContext? {
+        guard !bookInitials.isEmpty,
+              let bounds = AIReaderSourceRange.bibleBounds(
+                  start: startOrdinal,
+                  end: endOrdinal
+              ) else {
+            return nil
+        }
+        let request = AIReaderBibleSourceRequest.selection(
+            sourceBookKey: nil,
+            startOrdinal: bounds.start,
+            endOrdinal: bounds.end
+        )
+        let context: AIReaderSourceContext?
+        if let module = swordManager?.module(named: bookInitials),
+           module.info.name == bookInitials,
+           module.info.category == .bible {
+            context = AIReaderSourceContextExtractor.swordBible(module: module, request: request)
+        } else if let module = sqliteRuntimeCoordinator.preferredModule(
+            named: bookInitials,
+            category: .bible
+        ), module.info.name == bookInitials {
+            context = AIReaderSourceContextExtractor.sqliteBible(module: module, request: request)
+        } else {
+            return nil
+        }
+        guard let context,
+              context.sourceDocumentInitials == bookInitials,
+              context.sourceOrdinalRange == bounds.closedRange,
+              context.sourceOSISRange?.isEmpty == false else {
+            return nil
+        }
+        return context
+    }
+
+    /** Returns exact active source initials for AI generation binding. */
+    private func aiCurrentSourceInitials(for category: DocumentCategory) -> String? {
+        switch category {
+        case .dailyDevotion:
+            return activeGeneralBookModuleName
+        default:
+            return activeModuleName(for: category)
+        }
+    }
+
+    /** Returns the exact current source key without trimming or alias normalization. */
+    private func aiCurrentSourceKey(for category: DocumentCategory) -> String? {
+        switch category {
+        case .bible:
+            let osisBookId = osisBookId(for: currentBook)
+            return osisBookId.isEmpty || currentChapter <= 0
+                ? nil
+                : "\(osisBookId).\(currentChapter)"
+        case .commentary:
+            let osisBookId = osisBookId(for: currentBook)
+            return osisBookId.isEmpty || currentChapter <= 0 || currentVerse <= 0
+                ? nil
+                : "\(osisBookId).\(currentChapter).\(currentVerse)"
+        case .dictionary:
+            return currentDictionaryKey
+        case .generalBook, .dailyDevotion:
+            return currentGeneralBookKey
+        case .map:
+            return currentMapKey
+        case .epub:
+            return currentEpubHref ?? currentGeneralBookKey
+        }
+    }
+
+    /**
+     Verifies a bridge selection through the same source-to-KJVA mapping used for bookmarks.
+
+     - Parameters:
+       - bookInitials: Exact active Bible initials carried by the bridge payload.
+       - startOrdinal: Inclusive rendered start ordinal.
+       - endOrdinal: Inclusive rendered end ordinal.
+     - Returns: Verified KJVA span, or nil when source identity or versification mapping fails.
+     - Side effects: May temporarily inspect the active SWORD verse cursor and restores it before
+       returning.
+     - Failure modes: Fails closed; AI actions never receive unverified source ordinals as KJVA.
+     */
+    func aiVerifiedKJVARange(
+        bookInitials: String,
+        startOrdinal: Int,
+        endOrdinal: Int
+    ) -> ClosedRange<Int>? {
+        guard aiCurrentSourceInitials(for: .bible) == bookInitials,
+              let sourceBounds = AIReaderSourceRange.bibleBounds(
+                  start: startOrdinal,
+                  end: endOrdinal
+              ) else {
+            return nil
+        }
+        if let sqliteModule = activeSQLiteBibleModule,
+           sqliteModule.info.name == bookInitials,
+           JSwordKJVAVersification.verseReference(ordinal: startOrdinal) != nil,
+           JSwordKJVAVersification.verseReference(ordinal: endOrdinal) != nil {
+            return sourceBounds.closedRange
+        }
+        guard let range = bookmarkStorageKJVARange(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        ), let cacheBounds = AIReaderSourceRange.bibleBounds(
+            start: range.kjvaOrdinalStart,
+            end: range.kjvaOrdinalEnd
+        ) else {
+            return nil
+        }
+        return cacheBounds.closedRange
     }
 
     /**
@@ -6522,23 +10752,40 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Failure modes: Returns `nil` for invalid endpoints or references outside KJVA.
      */
     private func memorizationOrdinalResolution(
+        bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int
     ) -> BibleReaderProgressBridgeCoordinator.MemorizationOrdinalResolution? {
+        let requestedInitials = bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let sourceModule = activeModule,
+              !requestedInitials.isEmpty,
+      requestedInitials.caseInsensitiveCompare(sourceModule.info.name) == .orderedSame
+    else {
+            return nil
+        }
         let sourceVersification = activeSourceVersificationName()
         guard startOrdinal > 0,
               endOrdinal >= startOrdinal,
               let startReference = memorizationVerseReference(renderedOrdinal: startOrdinal),
               let endReference = memorizationVerseReference(renderedOrdinal: endOrdinal),
-              let kjvaStart = kjvaOrdinal(forReference: startReference, sourceVersification: sourceVersification),
-              let kjvaEnd = kjvaOrdinal(forReference: endReference, sourceVersification: sourceVersification) else {
+              let verifiedRange = VerifiedKJVAOrdinalRange(
+                  sourceBookInitials: sourceModule.info.name,
+                  sourceVersification: sourceVersification,
+                  sourceOrdinalStart: startOrdinal,
+                  sourceOrdinalEnd: endOrdinal,
+                  sourceReferenceStart: startReference,
+                  sourceReferenceEnd: endReference
+      )
+    else {
             return nil
         }
-        let projections = memorizationOrdinalProjections(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+        let projections = memorizationOrdinalProjections(
+            kjvaStartOrdinal: verifiedRange.kjvaOrdinalStart,
+            kjvaEndOrdinal: verifiedRange.kjvaOrdinalEnd
+        )
         guard !projections.isEmpty else { return nil }
         return BibleReaderProgressBridgeCoordinator.MemorizationOrdinalResolution(
-            startOrdinal: min(kjvaStart, kjvaEnd),
-            endOrdinal: max(kjvaStart, kjvaEnd),
+            verifiedRange: verifiedRange,
             projections: projections
         )
     }
@@ -6553,47 +10800,95 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Failure modes: Returns `nil` when the active module or fallback catalog rejects the ordinal.
      */
     private func memorizationVerseReference(renderedOrdinal ordinal: Int) -> VerseKeyReference? {
-        activeModule?.verseReference(ordinal: ordinal) ??
-            verseReference(book: currentBook, ordinal: ordinal)
+    activeModule?.verseReference(ordinal: ordinal)
+      ?? verseReference(book: currentBook, ordinal: ordinal)
     }
 
     /**
-     Projects visible rendered reader ordinals into Android's KJVA memorization-progress domain.
+     Projects Android KJVA memorization ordinals into the active document's rendered domain.
 
-     This projection intentionally skips rendered ordinals that are not visible KJVA verses, such
-     as chapter-intro ordinals. Storage callers must use `memorizationOrdinalResolution` so those
-     skipped ordinals remain inside the persisted Android range.
+     Android emits memorization deltas by constructing each stored ordinal as `Verse(KJVA, ordinal)`
+     and converting it to the open document's versification. Enumerating the KJVA span preserves
+     one-to-many and many-to-one mappings that cannot be recovered by converting rendered ordinals
+     in the opposite direction. JSword can address chapter-introduction ordinals in Android's
+     document model, while `SwordModule.verseOrdinal` reports ordinal `0` for the same verse-zero
+     coordinate. In that one case, the target versification's canonical intro-inclusive index is
+     used after an index-to-reference round trip proves that the module's declared canon owns the
+     exact converted reference.
+
+     - Parameters:
+       - kjvaStartOrdinal: Inclusive first stored KJVA ordinal.
+       - kjvaEndOrdinal: Inclusive last stored KJVA ordinal.
+     - Returns: Android-equivalent target-versification projections in the requested span.
+     - Side effects: May temporarily move the active SWORD module cursor for each mapped verse.
+     - Failure modes: Invalid ranges return an empty list; unsupported target versifications omit
+       projections rather than treating KJVA ordinals as target-module ordinals.
      */
     private func memorizationOrdinalProjections(
-        startOrdinal: Int,
-        endOrdinal: Int
+        kjvaStartOrdinal: Int,
+        kjvaEndOrdinal: Int
     ) -> [BibleReaderProgressBridgeCoordinator.MemorizationOrdinalProjection] {
-        guard startOrdinal > 0, endOrdinal >= startOrdinal else { return [] }
-        let sourceVersification = activeSourceVersificationName()
-        return (startOrdinal...endOrdinal).compactMap { ordinal in
-            guard let reference = memorizationVerseReference(renderedOrdinal: ordinal),
-                  let mappedKJVAOrdinal = kjvaOrdinal(
-                      forReference: reference,
-                      sourceVersification: sourceVersification
-                  ) else {
-                return nil
+        guard kjvaStartOrdinal > 0, kjvaEndOrdinal >= kjvaStartOrdinal else { return [] }
+        return (kjvaStartOrdinal...kjvaEndOrdinal).compactMap { kjvaOrdinal in
+            let renderedOrdinal: Int
+            if let activeModule {
+        guard
+          let projection = VersificationMapper.moduleProjection(
+                    forKJVAOrdinal: kjvaOrdinal,
+                    targetModule: activeModule
+          )
+        else {
+                    return nil
+                }
+                if projection.isAddressable {
+                    renderedOrdinal = projection.ordinal
+                } else {
+                    let targetVersification = VersificationMapper.versificationName(for: activeModule)
+                    guard projection.reference.verse == 0,
+                          let canonicalOrdinal = SwordVersification.referenceIndex(
+                              for: projection.reference,
+                              versification: targetVersification
+                          ),
+                          canonicalOrdinal > 0,
+                          SwordVersification.reference(
+                              forIndex: canonicalOrdinal,
+                              versification: targetVersification
+            ) == projection.reference
+          else {
+                        return nil
+                    }
+                    renderedOrdinal = canonicalOrdinal
+                }
+            } else {
+        guard
+          JSwordKJVAVersification.referenceIncludingIntroductions(
+                    ordinal: kjvaOrdinal
+          ) != nil
+        else {
+                    return nil
+                }
+                renderedOrdinal = kjvaOrdinal
             }
             return BibleReaderProgressBridgeCoordinator.MemorizationOrdinalProjection(
-                renderedOrdinal: ordinal,
-                kjvaOrdinal: mappedKJVAOrdinal
+                renderedOrdinal: renderedOrdinal,
+                kjvaOrdinal: kjvaOrdinal
             )
         }
     }
 
     private func memorizedRenderedOrdinals(startOrdinal: Int, endOrdinal: Int) -> [Int] {
-        renderedMemorizationOrdinals(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
-            store.memorizedOrdinals(bookInitials: "", startOrdinal: range.startOrdinal, endOrdinal: range.endOrdinal)
+    renderedMemorizationOrdinals(startOrdinal: startOrdinal, endOrdinal: endOrdinal) {
+      store, range in
+      store.memorizedOrdinals(
+        bookInitials: "", startOrdinal: range.startOrdinal, endOrdinal: range.endOrdinal)
         }
     }
 
     private func targetRenderedOrdinals(startOrdinal: Int, endOrdinal: Int) -> [Int] {
-        renderedMemorizationOrdinals(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
-            store.targetOrdinals(bookInitials: "", startOrdinal: range.startOrdinal, endOrdinal: range.endOrdinal)
+    renderedMemorizationOrdinals(startOrdinal: startOrdinal, endOrdinal: endOrdinal) {
+      store, range in
+      store.targetOrdinals(
+        bookInitials: "", startOrdinal: range.startOrdinal, endOrdinal: range.endOrdinal)
         }
     }
 
@@ -6603,11 +10898,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         storedOrdinals: (MemorizationProgressStore, (startOrdinal: Int, endOrdinal: Int)) -> [Int]
     ) -> [Int] {
         guard let store = memorizationProgressStore else { return [] }
-        guard let resolution = memorizationOrdinalResolution(
+    guard
+      let resolution = memorizationOrdinalResolution(
+            bookInitials: activeModuleName,
             startOrdinal: startOrdinal,
             endOrdinal: endOrdinal
-        ) else { return [] }
-        let stored = Set(storedOrdinals(
+      )
+    else { return [] }
+    let stored = Set(
+      storedOrdinals(
             store,
             (startOrdinal: resolution.startOrdinal, endOrdinal: resolution.endOrdinal)
         ))
@@ -6618,7 +10917,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     @discardableResult
-    func saveReadingProgressSettings(_ settings: ReadingProgressSettingsSnapshot) -> ReadingProgressSettingsSnapshot? {
+  func saveReadingProgressSettings(_ settings: ReadingProgressSettingsSnapshot)
+    -> ReadingProgressSettingsSnapshot?
+  {
         progressBridgeCoordinator.saveReadingProgressSettings(settings)
     }
 
@@ -6650,21 +10951,28 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Returns the verse count for a book/chapter using the active Bible module when available.
 
-     Android's passage chooser asks the current document versification for
-     `getLastVerse(book, chapterNo)`. The iOS reader obtains the same value from the active SWORD
-     module's `VerseKey` metadata and falls back to the legacy static table only when no module is
-     active.
+   Android's passage chooser asks the current document for `getLastVerse(book, chapterNo)`. The
+   iOS reader reads real SQLite rows when an Android-compatible module is active, otherwise it
+   uses SWORD `VerseKey` metadata and retains the legacy static table only with no active backend.
 
      - Parameters:
        - book: Display book name from the active module book list.
        - chapter: One-based chapter number selected in the chooser.
      - Returns: The last selectable verse number for the chapter, or `nil` when the active module
        cannot resolve the chapter exactly.
-     - Side effects: May temporarily move the active module cursor through `SwordModule`; that
-       method restores the previous key before returning.
+   - Side effects: Executes serialized SQLite chapter access or may temporarily move the active
+     SWORD cursor; SWORD restores the previous key before returning.
+   - Failure modes: Active SQLite/SWORD read failures return nil without static fallback.
      */
     func verseCountForActiveModule(book: String, chapter: Int) -> Int? {
-        bookCatalog.verseCount(book: book, chapter: chapter)
+    if let module = activeSQLiteBibleModule {
+      return SQLiteReaderNavigationResolver.verseCount(
+        module: module,
+        osisBookId: osisBookId(for: book),
+        chapter: chapter
+      )
+    }
+    return bookCatalog.verseCount(book: book, chapter: chapter)
     }
 
     /// Returns the verse count for a book/chapter. Defaults to 30 if unknown.
@@ -6714,8 +11022,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
 // MARK: - Cross-Reference Types
 
+/// One source-versification verse retained inside an Android passage/range reference.
+struct OsisVerseCoordinate: Equatable {
+    let osisBookId: String
+    let chapter: Int
+    let verse: Int
+}
+
 /**
- Parsed OSIS verse reference used by cross-reference resolution.
+ Parsed OSIS passage used by cross-reference resolution.
+
+ `sourceVerses` retains the ordered source-canon expansion of one Android `BookAndKey`. This keeps
+ ranges and source-only books intact until a target module performs explicit versification mapping.
  */
 struct OsisRef {
     /// Human-readable book name.
@@ -6730,15 +11048,73 @@ struct OsisRef {
     /// Original OSIS book identifier.
     let osisId: String
 
+    /// Versification that owns `osisId`, `chapter`, and `verse`.
+    let sourceVersification: String
+
+    /// Optional target module requested by an Android `doc`/specific-document link.
+    let targetBookInitials: String?
+
+    /// Ordered concrete verses owned by `sourceVersification`.
+    let sourceVerses: [OsisVerseCoordinate]
+
+    /// Normalized source key represented by this passage.
+    let sourceOsisRef: String
+
+    /// Human-readable final book name for a cross-book range.
+    let endBook: String
+
+    /** Creates one source-domain OSIS reference without inferring active-pane identity. */
+    init(
+        book: String,
+        chapter: Int,
+        verse: Int,
+        osisId: String,
+        sourceVersification: String = JSwordKJVAVersification.name,
+        targetBookInitials: String? = nil,
+        sourceVerses: [OsisVerseCoordinate]? = nil,
+        sourceOsisRef: String? = nil,
+        endBook: String? = nil
+    ) {
+        let verses: [OsisVerseCoordinate]
+        if let sourceVerses, !sourceVerses.isEmpty {
+            verses = sourceVerses
+        } else {
+            verses = [OsisVerseCoordinate(osisBookId: osisId, chapter: chapter, verse: verse)]
+        }
+        self.book = book
+        self.chapter = chapter
+        self.verse = verse
+        self.osisId = osisId
+        self.sourceVersification = sourceVersification
+        self.targetBookInitials = targetBookInitials
+        self.sourceVerses = verses
+        self.sourceOsisRef = sourceOsisRef ?? Self.normalizedOsisRef(for: verses)
+        self.endBook = endBook ?? book
+    }
+
+    /** Formats one ordered passage using Android/JSword full-endpoint range notation. */
+    static func normalizedOsisRef(for verses: [OsisVerseCoordinate]) -> String {
+        guard let first = verses.first else { return "" }
+        let firstRef = "\(first.osisBookId).\(first.chapter).\(first.verse)"
+        guard verses.count > 1, let last = verses.last else { return firstRef }
+        return "\(firstRef)-\(last.osisBookId).\(last.chapter).\(last.verse)"
+    }
+
     /// Human-readable display string for the reference.
     var displayName: String {
-        "\(book) \(chapter):\(verse)"
+        guard let last = sourceVerses.last,
+      sourceVerses.count > 1
+    else {
+            return "\(book) \(chapter):\(verse)"
+        }
+        if last.osisBookId == osisId, last.chapter == chapter {
+            return "\(book) \(chapter):\(verse)-\(last.verse)"
+        }
+        return "\(book) \(chapter):\(verse)-\(endBook) \(last.chapter):\(last.verse)"
     }
 }
 
-/**
- Cross-reference row containing both the parsed reference and preview verse text.
- */
+/// Cross-reference row containing both the parsed reference and preview verse text.
 public struct CrossReference: Identifiable {
     /// Stable identifier for SwiftUI list rendering.
     public let id = UUID()

@@ -98,7 +98,11 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
     func testDictionaryDocumentSwitchPersistsModuleCategoryAndClearsKeyTogether() throws {
         let (bridge, _) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
-        try seedEmptyRawDictionaryModule(named: "UITestDict", in: modulePath)
+        try seedReadableRawDictionaryModule(
+            named: "UITestDict",
+            entryKey: "available-key",
+            in: modulePath
+        )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
@@ -109,8 +113,9 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
 
-        controller.switchDictionaryDocument(to: "UITestDict")
+        let outcome = controller.switchDictionaryDocument(to: "UITestDict")
 
+        XCTAssertEqual(outcome, .switchedRequiringKeySelection)
         XCTAssertEqual(controller.currentCategory, .dictionary)
         XCTAssertEqual(controller.activeDictionaryModuleName, "UITestDict")
         XCTAssertNil(controller.currentDictionaryKey)
@@ -142,8 +147,9 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
 
-        controller.switchGeneralBookDocument(to: "UITestGB")
+        let outcome = controller.switchGeneralBookDocument(to: "UITestGB")
 
+        XCTAssertEqual(outcome, .switchedRequiringKeySelection)
         XCTAssertEqual(controller.currentCategory, .generalBook)
         XCTAssertEqual(controller.activeGeneralBookModuleName, "UITestGB")
         XCTAssertNil(controller.currentGeneralBookKey)
@@ -175,8 +181,9 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
 
-        controller.switchMapDocument(to: "UITestMap")
+        let outcome = controller.switchMapDocument(to: "UITestMap")
 
+        XCTAssertEqual(outcome, .switchedRequiringKeySelection)
         XCTAssertEqual(controller.currentCategory, .map)
         XCTAssertEqual(controller.activeMapModuleName, "UITestMap")
         XCTAssertNil(controller.currentMapKey)
@@ -380,5 +387,38 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
 
         XCTAssertEqual(controller.activeModuleName, "KJV", "A persisted unknown-versification Bible must not be restored as active.")
         XCTAssertEqual(controller.activeModule?.info.name, "KJV")
+    }
+
+    /**
+     Seeds one readable dictionary entry so a stale key is an ordinary exact-key miss.
+
+     - Parameters:
+       - moduleName: SWORD module initials to publish through the inherited fixture helper.
+       - entryKey: Exact key written to the RawLD record.
+       - modulePath: Temporary SWORD root that receives the module files.
+     - Side effects: Creates a dictionary module and replaces its empty data/index files with one
+       valid RawLD record.
+     - Failure modes: Propagates fixture filesystem errors and fails when the record exceeds RawLD's
+       two-byte length field.
+     */
+    private func seedReadableRawDictionaryModule(
+        named moduleName: String,
+        entryKey: String,
+        in modulePath: String
+    ) throws {
+        try seedEmptyRawDictionaryModule(named: moduleName, in: modulePath)
+
+        let moduleKey = moduleName.lowercased()
+        let prefix = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("modules/lexdict/rawld/\(moduleKey)/\(moduleKey)")
+        let record = Data("\(entryKey)\r\n<div type=\"entry\">Readable fixture</div>".utf8)
+        var recordLength = try XCTUnwrap(UInt16(exactly: record.count)).littleEndian
+        var index = Data([0, 0, 0, 0])
+        withUnsafeBytes(of: &recordLength) { index.append(contentsOf: $0) }
+        var data = record
+        data.append(0x0A)
+
+        try data.write(to: prefix.appendingPathExtension("dat"))
+        try index.write(to: prefix.appendingPathExtension("idx"))
     }
 }

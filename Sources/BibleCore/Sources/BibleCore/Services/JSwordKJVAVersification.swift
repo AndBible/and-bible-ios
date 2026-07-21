@@ -1,5 +1,7 @@
 // JSwordKJVAVersification.swift - Android JSword KJVA ordinal compatibility contract
 
+import Foundation
+
 /**
  One real book in Android's JSword `SystemKJVA` scripture domain.
 
@@ -232,6 +234,32 @@ public enum JSwordKJVAVersification {
     }
 
     /**
+     Returns JSword's locale-sensitive long display name for a KJVA book.
+
+     Android installs its application locale through `LocaleProviderManager`, so
+     `VerseRange.name` resolves from the matching JSword `BibleNames` resource. iOS reads the same
+     pinned resource set and falls back to the source-derived English name only when the requested
+     locale catalog cannot provide the canonical book.
+
+     - Parameters:
+       - osisId: Canonical OSIS id or supported alias.
+       - locale: Interface locale used to select JSword's nearest resource bundle.
+     - Returns: Localized JSword long name, or `nil` when the id is outside `SystemKJVA`.
+     - Side effects: Loads immutable bundled JSword name catalogs on first use.
+     - Failure modes: Missing locale resources fall back to the English KJVA table; unknown ids
+       return `nil`.
+     */
+    public static func localizedLongBookName(
+        osisId: String,
+        locale: Locale = .current
+    ) -> String? {
+        guard let canonicalOsisID = bookSummary(forOsisId: osisId)?.osisId else { return nil }
+        return JSwordBibleNameCatalog.catalog(for: locale, in: localizedNameCatalogs)?
+            .longName(forOsisID: canonicalOsisID)
+            ?? longBookName(osisId: canonicalOsisID)
+    }
+
+    /**
      Returns JSword's short display name for a KJVA book.
 
      Android Reading Progress calls `kjva.getShortName(book)` for memorization overview book cells.
@@ -393,6 +421,65 @@ public enum JSwordKJVAVersification {
     }
 
     /**
+     Resolves a concrete KJVA book/chapter coordinate, including JSword introduction slots.
+
+     JSword ranges are ordinal-contiguous and may contain a book introduction (`chapter 0,
+     verse 0`) or a chapter superscription (`verse 0`) between real verses. Android reconstructs
+     those ordinals with `Verse(KJVA, ordinal)` before cross-versification conversion, so bridge
+     projection needs the same concrete coordinates. Global OT/NT introduction pseudo-books do not
+     have an OSIS scripture-book identifier and are intentionally not returned.
+
+     - Parameter ordinal: Addressable JSword KJVA ordinal.
+     - Returns: Concrete book coordinate for real verses and book/chapter introductions, or `nil`
+       for global/pseudo-book introductions and out-of-domain ordinals.
+     - Side effects: None.
+     - Failure modes: Returns `nil` when no concrete scripture book owns the ordinal.
+     */
+    public static func referenceIncludingIntroductions(
+        ordinal: Int
+    ) -> JSwordKJVAVerseReference? {
+        guard containsProgressOrdinal(ordinal) else { return nil }
+
+        for (index, book) in JSwordKJVAVersificationData.bookTable.enumerated() {
+            guard let ordinalIndex = ordinalIndexByBookIndex[index],
+                  let firstChapterStart = ordinalIndex.chapterStartOrdinals.first else {
+                continue
+            }
+            let bookIntroductionOrdinal = firstChapterStart - 2
+            if ordinal == bookIntroductionOrdinal {
+                return JSwordKJVAVerseReference(
+                    osisId: book.osisId,
+                    chapter: 0,
+                    verse: 0,
+                    ordinal: ordinal
+                )
+            }
+
+            for (chapterIndex, chapterStart) in ordinalIndex.chapterStartOrdinals.enumerated() {
+                let chapter = chapterIndex + 1
+                if ordinal == chapterStart - 1 {
+                    return JSwordKJVAVerseReference(
+                        osisId: book.osisId,
+                        chapter: chapter,
+                        verse: 0,
+                        ordinal: ordinal
+                    )
+                }
+                let lastVerse = book.chapterVerseCounts[chapterIndex]
+                let chapterEnd = chapterStart + lastVerse - 1
+                guard ordinal >= chapterStart, ordinal <= chapterEnd else { continue }
+                return JSwordKJVAVerseReference(
+                    osisId: book.osisId,
+                    chapter: chapter,
+                    verse: ordinal - chapterStart + 1,
+                    ordinal: ordinal
+                )
+            }
+        }
+        return nil
+    }
+
+    /**
      Computes the JSword KJVA ordinal range for a chapter's real verses.
 
      - Parameters:
@@ -454,6 +541,9 @@ public enum JSwordKJVAVersification {
         }
         return books[index]
     }
+
+    /// Pinned JSword locale catalogs used by locale-sensitive KJVA display-name projections.
+    private static let localizedNameCatalogs = JSwordBibleNameCatalog.loadBundledCatalogs()
 
     /**
      Resolves a source-derived KJVA book entry.

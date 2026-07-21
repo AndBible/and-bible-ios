@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Security";
 "discrete_mode" = "Discrete Mode";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "Haqida";
 "version" = "Version";
 "export" = "Export";
@@ -405,10 +405,6 @@
 "calculator_pin_description" = "PIN code to enter the app when the calculator is shown.";
 "discrete_help_title" = "Read this first!";
 "discrete_help_summary" = "Instructions for the settings and information about specific discrete build.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Application behavior";
 "prefs_display_customization_cat" = "Look & feel";
@@ -479,7 +475,6 @@
 
 "prefs_volume_keys_scroll_title" = "Volume buttons scroll";
 "prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Experimental features";
 "prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
@@ -552,3 +547,79 @@
 "windowMinimise" = "Kamaytirish";
 "windowSynchronise" = "Sinxronlashtiring";
 "error_no_content" = "Belgilangan oyat mavjud emas";
+
+/* Android shared translations */
+"calculator_par1" = "Before entering the app, calculator screen is displayed.";
+"calculator_par2" = "In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press \"=\" button.";
+"calculator_par3" = "You can set up a custom PIN code by \"Calculator PIN\" setting.";
+"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
+"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
+"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
+"discrete_mode_info_par1" = "You are using standard application version, which means that it is still possible to see the real name and icon of the application in app info.";
+"discrete_mode_info_par2" = "For improved security in persecuted environment, we highly recommend using discrete version of the app, which always displays calculator, even if the app data is deleted.";
+"discrete_mode_link" = "You can download the latest version of discrete version from %@.";
+
+/* Android shared translations */
+"extracting_zip_file" = "Extracting Zip file now…";
+"install_failed_reason" = "Installing module failed for the following reason: %@.";
+"install_zip_successfull" = "Module muvaffaqiyatli o'rnatildi";
+"module_install_phase_committing" = "Iltimos kuting. Zip fayli yuklanyapti.";
+"module_install_phase_downloading" = "Yuklab oling";
+"module_install_phase_queued" = "Please wait…";
+"storage_space_warning" = "Xotirada yetarli joy qo'q.";
+
+/* Android shared translations */
+"error_occurred" = "Xato ro'y berdi";
+
+/* Android shared translations */
+"conf_change_chapter" = "Bobga kiritilgan o'zgarishlar";
+"conf_change_title" = "Sarlavhalar";
+"conf_replace_divinename" = "Xudovand ismini Yahvega o'zgartirish";
+"conf_save_playback_settings_to_bookmarks" = "Multimedia sozlamalarini xatcho'pda saqlash";
+"conf_speak_auto_bookmark" = "Avtomatik xatcho'p qo'yish";
+"conf_speak_footnotes" = "Izohlar";
+"conf_speak_sleep_timer" = "Uxlash taymerini qo'yish";
+"conf_speak_synchronize" = "Text follows speech";
+"forward" = "Oldinga";
+"playback_settings_title" = "Multimediya Sozlamalari";
+"rewind" = "Boshiga qaytar";
+"speak_bookmarks_menu_title" = "Xatcho'plarni Gapirish";
+"speak_next" = "Keyingi";
+"speak_previous" = "Oldingi";
+"speak_settings_title" = "Gapirishning Umumiy Sozlamalari";
+
+/* Android shared translations */
+"sleep_timer_title" = "Uxlash va";
+"speak_beginning_of_passage" = "Matnning boshlanish nuqtasini tanlang";
+"speak_ending_of_passage" = "Matnning tugash nuqtasini tanlang";
+"speak_ending_verse_must_be_later" = "Oxirgi tanlangan oyat boshlash oyatidan oldinda";
+"speak_verse_range_to_repeat" = "Oyatning takrorlash chegarasini tanlang";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Bu til mavjud emas";
+
+/* Android shared translations */
+"errorTitle" = "Xato ro'y berdi";
+"error_executing_search" = "Noto'g'ri qidiruv iborasi";
+"install_zip_module" = "Muqaddas Kitob modulini o'rnatish";
+"okay" = "Bo'ladi";
+"overwrite" = "Ha";
+"search_all_words" = "Barcha so'zlar";
+"search_any_word" = "Har bir so'z";
+"search_phrase" = "Jumla";
+"search_words_group_prompt" = "Oyatlarni qidiring";
+"speak_book_changed" = "Kitob o'zgartirildi.";
+"speak_chapter_changed" = "Bob";
+"success" = "Tugadi";
+"undo" = "Bekor qil";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Hech qanday fayl topilmadi";
+"system_items1" = "Ko'proq";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Strong raqamlari mavjud Muqaddas Kitobni yuklab olishingiz va Qidiruv katagi orqali uning indekslarini yuklab olishingiz kerak";
+
+/* Android shared translations */
+"save_and_exit" = "Saqla";
+"watch_tutorial_video" = "Videodarsni tomosha qilish (Ingliz tilida)";

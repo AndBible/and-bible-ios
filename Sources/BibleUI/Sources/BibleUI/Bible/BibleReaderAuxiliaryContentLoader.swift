@@ -9,12 +9,12 @@ import SwordKit
  Describes one SWORD-backed auxiliary document load request.
 
  Dictionary, general book, and map modules all follow the same Android-style reader workflow:
- resolve a module/key, wrap rendered module HTML in an OSIS-like fragment, emit a single Vue
- document, and update the native rendered-content state. This request captures the category-specific
- labels and fallback messages while keeping mutable controller state outside the loader.
+ resolve an exact module/key, read structural OSIS, emit a single Vue document, and update the
+ native rendered-content state. This request captures the category-specific labels and error
+ messages while keeping mutable controller state outside the loader.
 
  - Side effects: None; this is an immutable request value.
- - Failure modes: None during initialization. Missing module/key cases are rendered as fallback
+ - Failure modes: None during initialization. Missing module/key cases are rendered as error
    documents by `BibleReaderAuxiliaryContentLoader`.
  */
 struct BibleReaderAuxiliaryModuleEntryRequest {
@@ -34,8 +34,6 @@ struct BibleReaderAuxiliaryModuleEntryRequest {
     let fallbackBookName: String
     /// Bridge category raw value emitted into document metadata.
     let bookCategory: String
-    /// Title shown when no module is selected.
-    let noModuleTitle: String
     /// Paragraph shown when no module is selected.
     let noModuleMessage: String
     /// Paragraph shown when a module exists but no entry key is selected.
@@ -51,27 +49,25 @@ struct BibleReaderAuxiliaryModuleEntryRequest {
 
  `BibleReaderController` owns active module state, persistence, and public entry points. This
  collaborator owns the repeated auxiliary-module rendering workflow shared by dictionaries, general
- books, and maps: reset transient reader state, build fallback or entry XML, emit bridge events, and
- update the rendered-content state token.
+ books, and maps: reset transient reader state, read exact structural fragments, emit bridge events,
+ and update the rendered-content state token.
 
  Side effects:
  - invokes controller-supplied reset, rendered-state, persistence, and background closures
- - moves the selected `SwordModule` cursor to the requested key before rendering text
+ - reads the selected exact `SwordModule` key through `SwordRawOSISFragment`
  - emits `clear_document`, `add_documents`, and `setup_content` events through `BibleBridge`
 
  Failure modes:
  - if document JSON serialization fails, no document event is emitted after any required state reset
- - missing modules and missing keys produce deterministic fallback documents instead of throwing
- - empty rendered module text produces a no-content document for the selected key
+ - missing modules, keys, empty entries, and malformed structural content produce deterministic
+   error documents instead of rendered-text or synthetic-XML fallbacks
  */
 struct BibleReaderAuxiliaryContentLoader {
     /// Updates the controller's compact rendered-content state after a document is emitted.
     typealias RenderedContentStateSetter = (DocumentCategory, String?, String, String?) -> Void
 
     /// Shared setup payload used by auxiliary single-document loads.
-    private static let setupContentPayload = """
-    {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
-    """
+    private static let setupContentPayload = ReaderSetupContentPayload()
 
     /// Bridge used to emit Vue reader events.
     private let bridge: BibleBridge
@@ -118,7 +114,7 @@ struct BibleReaderAuxiliaryContentLoader {
      - Side effects: Resets transient reader state, may persist the resolved key, moves the module
        cursor, emits Vue document/setup events, updates rendered-content state, and reapplies the
        reader background.
-     - Failure modes: Missing module/key states render fallback documents; document serialization
+     - Failure modes: Missing module/key states render error documents; document serialization
        failure stops before emitting `add_documents`.
      */
     @discardableResult
@@ -126,12 +122,9 @@ struct BibleReaderAuxiliaryContentLoader {
         resetReaderState()
 
         guard let module = request.module else {
-            emitFallbackDocument(
+            emitErrorDocument(
                 request: request,
-                title: request.noModuleTitle,
                 message: request.noModuleMessage,
-                bookName: request.fallbackBookName,
-                bookInitials: "none",
                 renderedModuleName: request.moduleName,
                 renderedBook: request.fallbackBookName,
                 renderedKey: "none"
@@ -142,12 +135,9 @@ struct BibleReaderAuxiliaryContentLoader {
         let entryKey = request.requestedKey ?? request.currentKey
         guard let entryKey else {
             let moduleName = request.moduleName ?? request.fallbackBookName
-            emitFallbackDocument(
+            emitErrorDocument(
                 request: request,
-                title: moduleName,
                 message: request.noSelectionMessage,
-                bookName: moduleName,
-                bookInitials: moduleName,
                 renderedModuleName: moduleName,
                 renderedBook: moduleName,
                 renderedKey: "none"
@@ -155,67 +145,40 @@ struct BibleReaderAuxiliaryContentLoader {
             return nil
         }
 
-        module.setKey(entryKey)
-        let text = module.renderText()
         let moduleName = request.moduleName ?? request.fallbackBookName
-        request.persistResolvedKey(entryKey)
-
-        let xml: String
-        if text.isEmpty {
-            xml = paragraphDocumentXML(
-                title: entryKey,
-                message: "No \(request.noContentNoun) available for \"\(entryKey)\" in \(moduleName)."
+        let fragment: SwordRawOSISFragment
+        do {
+            fragment = try module.rawOSISFragment(forKey: entryKey)
+        } catch {
+            emitErrorDocument(
+                request: request,
+                message: error.localizedDescription,
+                renderedModuleName: moduleName,
+                renderedBook: entryKey,
+                renderedKey: entryKey
             )
-        } else {
-            xml = htmlDocumentXML(title: entryKey, html: text)
+            return nil
         }
+        guard fragment.hasRenderableContent else {
+            emitErrorDocument(
+                request: request,
+                message: "No \(request.noContentNoun) available for \"\(entryKey)\" in \(moduleName).",
+                renderedModuleName: moduleName,
+                renderedBook: entryKey,
+                renderedKey: entryKey
+            )
+            return nil
+        }
+        request.persistResolvedKey(fragment.key)
 
         emitDocument(
             request: request,
-            xml: xml,
-            bookName: entryKey,
-            bookInitials: moduleName,
+            fragment: fragment,
             renderedModuleName: moduleName,
-            renderedBook: entryKey,
-            renderedKey: entryKey
+            renderedBook: fragment.keyName,
+            renderedKey: fragment.key
         )
-        return entryKey
-    }
-
-    /**
-     Emits a deterministic reader document for missing-module or missing-key auxiliary states.
-
-     - Parameters:
-       - request: Category-specific document metadata and fallback copy.
-       - title: Title written into the generated OSIS-like XML.
-       - message: Paragraph shown to the user inside the reader surface.
-       - bookName: Document book name sent to Vue.
-       - bookInitials: Module initials sent to Vue, or `"none"` when no module exists.
-       - renderedModuleName: Module token recorded in the compact rendered-content state.
-       - renderedBook: Book token recorded in rendered-content state.
-       - renderedKey: Key token recorded in rendered-content state.
-     - Side effects: Emits the same bridge events and rendered-state update as concrete content.
-     - Failure modes: Delegates serialization failure handling to `emitDocument`.
-     */
-    private func emitFallbackDocument(
-        request: BibleReaderAuxiliaryModuleEntryRequest,
-        title: String,
-        message: String,
-        bookName: String,
-        bookInitials: String,
-        renderedModuleName: String?,
-        renderedBook: String,
-        renderedKey: String
-    ) {
-        emitDocument(
-            request: request,
-            xml: paragraphDocumentXML(title: title, message: message),
-            bookName: bookName,
-            bookInitials: bookInitials,
-            renderedModuleName: renderedModuleName,
-            renderedBook: renderedBook,
-            renderedKey: renderedKey
-        )
+        return fragment.key
     }
 
     /**
@@ -223,9 +186,7 @@ struct BibleReaderAuxiliaryContentLoader {
 
      - Parameters:
        - request: Category metadata for the generated document.
-       - xml: OSIS-like fragment containing fallback copy or rendered module HTML.
-       - bookName: Document book name sent to Vue.
-       - bookInitials: Module initials sent to Vue.
+       - fragment: Exact structural fragment read from SWORD.
        - renderedModuleName: Module token recorded in rendered-content state.
        - renderedBook: Book token recorded in rendered-content state.
        - renderedKey: Key token recorded in rendered-content state.
@@ -236,24 +197,44 @@ struct BibleReaderAuxiliaryContentLoader {
      */
     private func emitDocument(
         request: BibleReaderAuxiliaryModuleEntryRequest,
-        xml: String,
-        bookName: String,
-        bookInitials: String,
+        fragment: SwordRawOSISFragment,
         renderedModuleName: String?,
         renderedBook: String,
         renderedKey: String
     ) {
         bridge.emit(event: "clear_document")
+        let source = fragment.source
+        let contentOrdinalRange = fragment.contentOrdinalRange
         guard let document = documentPayloadFactory.documentJSON(
             BibleReaderDocumentPayloadRequest(
                 osisBookId: request.osisBookId,
-                bookName: bookName,
+                bookName: fragment.keyName,
                 chapter: 1,
                 verseCount: 1,
-                isNewTestament: false,
-                xml: xml,
+                isNewTestament: fragment.isNewTestament,
+                xml: fragment.xml,
                 bookCategory: request.bookCategory,
-                bookInitials: bookInitials
+                bookInitials: source.initials,
+                addChapter: false,
+                documentKey: fragment.key,
+                keyName: fragment.keyName,
+                ordinalRangeOverride: [
+                    contentOrdinalRange.lowerBound,
+                    contentOrdinalRange.upperBound,
+                ],
+                fragmentOrdinalRange: fragment.keyOrdinalRange.map {
+                    [$0.lowerBound, $0.upperBound]
+                },
+                fragmentKey: fragment.fragmentKey,
+                fragmentOsisRef: fragment.osisRef,
+                annotateRef: fragment.annotateRef,
+                fragmentFeatures: fragment.features,
+                moduleName: source.name,
+                moduleAbbreviation: source.abbreviation,
+                versificationName: source.versification,
+                language: source.language,
+                direction: source.direction,
+                sourceHasStrongs: source.hasStrongs
             )
         ) else {
             return
@@ -265,32 +246,29 @@ struct BibleReaderAuxiliaryContentLoader {
     }
 
     /**
-     Wraps plain fallback copy in the OSIS-like structure accepted by the Vue document renderer.
+     Emits a non-structural auxiliary failure as a Vue error document.
 
      - Parameters:
-       - title: Visible generated title.
-       - message: Plain paragraph text.
-     - Returns: XML fragment matching the legacy auxiliary fallback document shape.
-     - Side effects: None.
-     - Failure modes: Input is inserted verbatim, preserving the previous caller-owned escaping
-       contract for these fixed/native strings.
+       - request: Category metadata used for rendered-state projection.
+       - message: User-visible no-content or structural failure message.
+       - renderedModuleName: Module token recorded in rendered state.
+       - renderedBook: Book token recorded in rendered state.
+       - renderedKey: Key token recorded in rendered state.
+     - Side effects: Emits clear/add/setup events and updates rendered state/background.
+     - Failure modes: Serialization failure leaves the reader cleared without fabricated XML.
      */
-    private func paragraphDocumentXML(title: String, message: String) -> String {
-        "<div><title type=\"x-gen\">\(title)</title><div type=\"paragraph\"><p>\(message)</p></div></div>"
-    }
-
-    /**
-     Wraps rendered module HTML in the OSIS-like paragraph shell expected by Vue.
-
-     - Parameters:
-       - title: Resolved module key shown as the generated title.
-       - html: HTML returned by SWORD `renderText()`.
-     - Returns: XML fragment containing the rendered HTML without additional escaping.
-     - Side effects: None.
-     - Failure modes: Preserves the previous trust boundary where SWORD-rendered HTML is passed
-       through for web rendering.
-     */
-    private func htmlDocumentXML(title: String, html: String) -> String {
-        "<div><title type=\"x-gen\">\(title)</title><div type=\"paragraph\">\(html)</div></div>"
+    private func emitErrorDocument(
+        request: BibleReaderAuxiliaryModuleEntryRequest,
+        message: String,
+        renderedModuleName: String?,
+        renderedBook: String,
+        renderedKey: String
+    ) {
+        bridge.emit(event: "clear_document")
+        guard let document = documentPayloadFactory.errorDocumentJSON(message: message) else { return }
+        bridge.emit(event: "add_documents", data: document)
+        bridge.emit(event: "setup_content", data: Self.setupContentPayload)
+        setRenderedContentState(request.category, renderedModuleName, renderedBook, renderedKey)
+        applyNightModeBackground()
     }
 }

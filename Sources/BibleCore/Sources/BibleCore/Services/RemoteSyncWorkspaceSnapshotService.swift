@@ -23,10 +23,13 @@ public struct RemoteSyncCurrentWorkspaceRow: Sendable, Codable {
     /// Android-compatible text-display settings block embedded in the workspace row.
     public let textDisplaySettings: TextDisplaySettings?
 
+    /// Android-only Room text-display fields not represented by the native reader model.
+    public let textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity
+
     /// Android-compatible workspace settings block excluding Android-only fidelity fields.
     public let workspaceSettings: WorkspaceSettings
 
-    /// Raw Android `speakSettings` JSON preserved in the fidelity store.
+    /// Complete Android `speakSettings` JSON synthesized from native state or preserved as fallback.
     public let speakSettingsJSON: String?
 
     /// Android unpinned-window layout weight.
@@ -51,7 +54,7 @@ public struct RemoteSyncCurrentWorkspaceRow: Sendable, Codable {
        - orderNumber: Android display order within the workspace list.
        - textDisplaySettings: Android-compatible text-display settings block embedded in the workspace row.
        - workspaceSettings: Android-compatible workspace settings block excluding Android-only fidelity fields.
-       - speakSettingsJSON: Raw Android `speakSettings` JSON preserved in the fidelity store.
+       - speakSettingsJSON: Complete Android `speakSettings` JSON synthesized from native state or preserved as fallback.
        - unPinnedWeight: Android unpinned-window layout weight.
        - maximizedWindowID: Android maximized-window identifier.
        - primaryTargetLinksWindowID: Android primary links-target window identifier.
@@ -65,6 +68,7 @@ public struct RemoteSyncCurrentWorkspaceRow: Sendable, Codable {
         contentsText: String?,
         orderNumber: Int,
         textDisplaySettings: TextDisplaySettings?,
+        textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity = .init(),
         workspaceSettings: WorkspaceSettings,
         speakSettingsJSON: String?,
         unPinnedWeight: Float?,
@@ -77,6 +81,7 @@ public struct RemoteSyncCurrentWorkspaceRow: Sendable, Codable {
         self.contentsText = contentsText
         self.orderNumber = orderNumber
         self.textDisplaySettings = textDisplaySettings
+        self.textDisplayFidelity = textDisplayFidelity
         self.workspaceSettings = workspaceSettings
         self.speakSettingsJSON = speakSettingsJSON
         self.unPinnedWeight = unPinnedWeight
@@ -226,6 +231,9 @@ public struct RemoteSyncCurrentWorkspacePageManagerRow: Sendable, Equatable, Cod
     /// Android-compatible text-display settings block embedded in the page-manager row.
     public let textDisplaySettings: TextDisplaySettings?
 
+    /// Android-only Room text-display fields not represented by the native reader model.
+    public let textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity
+
     /// Serialized JavaScript reader state.
     public let jsState: String?
 
@@ -278,6 +286,7 @@ public struct RemoteSyncCurrentWorkspacePageManagerRow: Sendable, Equatable, Cod
         mapAnchorOrdinal: Int?,
         currentCategoryName: String,
         textDisplaySettings: TextDisplaySettings?,
+        textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity = .init(),
         jsState: String?
     ) {
         self.windowID = windowID
@@ -300,6 +309,7 @@ public struct RemoteSyncCurrentWorkspacePageManagerRow: Sendable, Equatable, Cod
         self.mapAnchorOrdinal = mapAnchorOrdinal
         self.currentCategoryName = currentCategoryName
         self.textDisplaySettings = textDisplaySettings
+        self.textDisplayFidelity = textDisplayFidelity
         self.jsState = jsState
     }
 }
@@ -321,8 +331,17 @@ public struct RemoteSyncWorkspaceCurrentSnapshot: Sendable {
     /// Android-shaped current `PageManager` rows keyed by Android composite key.
     public let pageManagerRowsByKey: [String: RemoteSyncCurrentWorkspacePageManagerRow]
 
+    /// Android-shaped `WorkspaceLabelOverride` rows keyed by composite workspace/label identity.
+    public let labelOverrideRowsByKey: [String: RemoteSyncCurrentWorkspaceLabelOverrideRow]
+
+    /// Android-shaped global text-display singleton rows keyed by Android identity.
+    public let globalTextDisplayRowsByKey: [String: RemoteSyncCurrentGlobalTextDisplaySettingsRow]
+
     /// Stable content fingerprints for every current row keyed by Android composite key.
     public let fingerprintsByKey: [String: String]
+
+    /// Quarantined row keys omitted from export whose accepted baseline must remain intact.
+    public let suppressedKeys: Set<String>
 
     /**
      Creates one current-state workspace snapshot.
@@ -332,6 +351,7 @@ public struct RemoteSyncWorkspaceCurrentSnapshot: Sendable {
        - windowRowsByKey: Android-shaped current `Window` rows keyed by Android composite key.
        - pageManagerRowsByKey: Android-shaped current `PageManager` rows keyed by Android composite key.
        - fingerprintsByKey: Stable content fingerprints for every current row keyed by Android composite key.
+       - suppressedKeys: Quarantined keys omitted from export and protected from inferred deletes.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
@@ -339,13 +359,79 @@ public struct RemoteSyncWorkspaceCurrentSnapshot: Sendable {
         workspaceRowsByKey: [String: RemoteSyncCurrentWorkspaceRow],
         windowRowsByKey: [String: RemoteSyncCurrentWorkspaceWindowRow],
         pageManagerRowsByKey: [String: RemoteSyncCurrentWorkspacePageManagerRow],
-        fingerprintsByKey: [String: String]
+        labelOverrideRowsByKey: [String: RemoteSyncCurrentWorkspaceLabelOverrideRow] = [:],
+        globalTextDisplayRowsByKey: [String: RemoteSyncCurrentGlobalTextDisplaySettingsRow] = [:],
+        fingerprintsByKey: [String: String],
+        suppressedKeys: Set<String> = []
     ) {
         self.workspaceRowsByKey = workspaceRowsByKey
         self.windowRowsByKey = windowRowsByKey
         self.pageManagerRowsByKey = pageManagerRowsByKey
+        self.labelOverrideRowsByKey = labelOverrideRowsByKey
+        self.globalTextDisplayRowsByKey = globalTextDisplayRowsByKey
         self.fingerprintsByKey = fingerprintsByKey
+        self.suppressedKeys = suppressedKeys
     }
+}
+
+/**
+ Identifies one workspace-category row in an accepted restore, replay, or upload generation.
+
+ The durable identity manifest allows a later local deletion to emit an Android `DELETE` even when
+ the initial database did not carry a corresponding `LogEntry` row.
+ */
+struct RemoteSyncWorkspaceAcceptedRowIdentity: Codable, Sendable, Equatable {
+    /// Android table that owns the accepted row.
+    let tableName: String
+
+    /// First Android composite-key component.
+    let entityID1: RemoteSyncSQLiteValue
+
+    /// Second Android composite-key component.
+    let entityID2: RemoteSyncSQLiteValue
+}
+
+/**
+ Immutable workspace baseline accepted after restore, replay, or outbound upload.
+ */
+struct RemoteSyncWorkspaceAcceptedGeneration: Codable, Sendable, Equatable {
+    /// Exact row fingerprints carried by the accepted generation.
+    let fingerprintsByKey: [String: String]
+
+    /// Exact accepted row identities keyed by Android's canonical composite key.
+    let rowsByKey: [String: RemoteSyncWorkspaceAcceptedRowIdentity]
+
+    /// Quarantined keys whose prior accepted identity and fingerprint remain preserved.
+    let suppressedKeys: Set<String>
+}
+
+/** Durable revisioned workspace baseline used for compare-and-swap publication. */
+struct RemoteSyncWorkspaceAcceptedBaseline: Codable, Sendable, Equatable {
+    /// Monotonic local revision incremented by every inbound or outbound baseline acceptance.
+    let revision: Int64
+
+    /// Complete accepted generation associated with `revision`.
+    let generation: RemoteSyncWorkspaceAcceptedGeneration
+}
+
+/**
+ Errors raised while reading or publishing the durable workspace accepted-row manifest.
+ */
+enum RemoteSyncWorkspaceSnapshotError: Error, Equatable {
+    /// The stored accepted baseline could not be decoded safely.
+    case invalidAcceptedBaseline
+
+    /// A projected fingerprint had no matching typed row identity.
+    case incompleteAcceptedGeneration(String)
+
+    /// One exportable typed row did not have a stable content fingerprint.
+    case missingProjectedFingerprint(String)
+
+    /// Preserved workspace fidelity metadata could not be projected completely.
+    case invalidStoredFidelityMetadata
+
+    /// Another accepted generation advanced while an outbound archive was in flight.
+    case staleAcceptedBaseline(expected: Int64, actual: Int64)
 }
 
 /**
@@ -354,14 +440,14 @@ public struct RemoteSyncWorkspaceCurrentSnapshot: Sendable {
  Outbound workspace sync needs the inverse of restore and patch replay:
  - convert local `Workspace`, `Window`, and `PageManager` SwiftData models back into Android row
    shapes
- - preserve Android-only fidelity payloads from `RemoteSyncWorkspaceFidelityStore` so outbound
-   rows retain raw category names, speak settings, and unsupported anchor metadata
+ - synthesize complete Android speak settings from native workspace state while preserving fidelity
+   payloads for raw category names, unsupported anchor metadata, and encoding fallback
  - compute stable content fingerprints keyed by Android's composite identifier so later patch
    creation can detect inserts, updates, and deletes without hidden SQLite triggers
 
  Mapping notes:
- - workspace rows reuse the persisted iOS `WorkspaceSettings` payload for the supported field set
-   while reading Android-only `speakSettings` JSON from the fidelity store
+ - workspace rows encode native `WorkspaceSettings.speakSettings` into Android JSON first and use
+   the preserved fidelity payload only if that encoding is unavailable
  - page-manager rows preserve Android raw category names and anchor-ordinal/source payloads from
    the fidelity store when present, and otherwise normalize iOS category keys back into Android raw
    enum strings
@@ -377,10 +463,13 @@ public struct RemoteSyncWorkspaceCurrentSnapshot: Sendable {
  Side effects:
  - `snapshotCurrentState` reads workspace-category SwiftData rows and local-only fidelity settings
  - `refreshBaselineFingerprints` rewrites local fingerprint rows for the workspace category
+ - strict projection and refresh variants provide the same behavior while participating in an
+   explicit atomic restore or replay batch
 
  Failure modes:
- - fetch failures from `ModelContext` are swallowed and treated as an empty local workspace set to
-   stay aligned with the repo's existing settings-store behavior
+ - legacy projection/refresh methods swallow graph fetch failures as an empty workspace set
+ - strict projection/refresh methods rethrow graph fetch failures; otherwise-soft settings failures
+   invalidate their containing `SettingsStore` atomic batch
 
  Concurrency:
  - this type is not `Sendable`; callers must respect the confinement rules of the supplied
@@ -394,13 +483,41 @@ public final class RemoteSyncWorkspaceSnapshotService {
         static let bibleVerse = 1
     }
 
+    /// Local-only setting containing the revisioned accepted workspace generation.
+    static let acceptedBaselineKey = "remote_sync.workspaces.accepted_baseline"
+
+    /// Settings prefixes used by fidelity metadata consumed during workspace projection.
+    private static let workspaceFidelityPrefix = "remote_sync.workspaces.fidelity.workspace"
+    private static let pageManagerFidelityPrefix = "remote_sync.workspaces.fidelity.page_manager"
+
+    /// Fetches the complete local workspace graph for strict projection.
+    private let workspaceFetcher: (ModelContext) throws -> [Workspace]
+
     /**
      Creates a workspace snapshot service.
 
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
-    public init() {}
+    public init() {
+        workspaceFetcher = { modelContext in
+            try modelContext.fetch(FetchDescriptor<Workspace>())
+        }
+    }
+
+    /**
+     Creates a workspace snapshot service with an explicit graph-fetch behavior.
+
+     This initializer supports deterministic failure-path tests without weakening production's
+     strict SwiftData projection.
+
+     - Parameter workspaceFetcher: Throwing operation that returns every current workspace root.
+     - Side effects: none until projection is requested.
+     - Failure modes: The initializer cannot fail; fetch failures are surfaced by strict projection.
+     */
+    init(workspaceFetcher: @escaping (ModelContext) throws -> [Workspace]) {
+        self.workspaceFetcher = workspaceFetcher
+    }
 
     /**
      Projects the current local workspace state into Android-shaped rows and row fingerprints.
@@ -419,20 +536,87 @@ public final class RemoteSyncWorkspaceSnapshotService {
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) -> RemoteSyncWorkspaceCurrentSnapshot {
+        (try? snapshotCurrentStateStrict(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )) ?? RemoteSyncWorkspaceCurrentSnapshot(
+            workspaceRowsByKey: [:],
+            windowRowsByKey: [:],
+            pageManagerRowsByKey: [:],
+            fingerprintsByKey: [:]
+        )
+    }
+
+    /**
+     Projects the current workspace graph without swallowing SwiftData fetch failures.
+
+     Atomic restore and patch-replay paths use this variant so a failed graph read invalidates the
+     containing transaction instead of replacing baseline metadata with an empty snapshot. Settings
+     reads retain their normal API shape; when called inside `SettingsStore.performAtomicBatch`, any
+     otherwise-soft settings fetch failure is recorded and aborts that outer batch.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns the current workspace graph.
+       - settingsStore: Local-only settings store that holds preserved Android fidelity payloads.
+     - Returns: Android-shaped current rows and stable fingerprints keyed by Android composite key.
+     - Side effects: Reads workspace graph and fidelity rows from the supplied shared context.
+     - Failure modes: Rethrows workspace fetch failures from `modelContext`.
+     */
+    func snapshotCurrentStateStrict(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> RemoteSyncWorkspaceCurrentSnapshot {
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+        let rawWorkspaceFidelity = settingsStore.entries(withPrefix: "\(Self.workspaceFidelityPrefix).")
+        let rawPageManagerFidelity = settingsStore.entries(withPrefix: "\(Self.pageManagerFidelityPrefix).")
+        let rawWorkspaceTextDisplayFidelity = settingsStore.entries(
+            withPrefix: "\(RemoteSyncWorkspaceFidelityStore.workspaceTextDisplayFidelityPrefix)."
+        )
+        let rawPageManagerTextDisplayFidelity = settingsStore.entries(
+            withPrefix: "\(RemoteSyncWorkspaceFidelityStore.pageManagerTextDisplayFidelityPrefix)."
+        )
+        let rawLabelOverrides = settingsStore.entries(
+            withPrefix: "\(RemoteSyncWorkspaceFidelityStore.labelOverrideFidelityPrefix)."
+        )
+        let rawGlobalTextDisplayFidelity = settingsStore.entries(
+            withPrefix: RemoteSyncWorkspaceFidelityStore.globalTextDisplayFidelityKey
+        ).filter { $0.key == RemoteSyncWorkspaceFidelityStore.globalTextDisplayFidelityKey }
+        let workspaceFidelity = fidelityStore.allWorkspaceEntries()
+        let pageManagerFidelity = fidelityStore.allPageManagerEntries()
+        let workspaceTextDisplayFidelity = fidelityStore.allWorkspaceTextDisplayFidelityEntries()
+        let pageManagerTextDisplayFidelity = fidelityStore.allPageManagerTextDisplayFidelityEntries()
+        let labelOverrides = fidelityStore.allLabelOverrides()
+        let globalTextDisplayFidelity = fidelityStore.globalTextDisplayEntry()
+        guard workspaceFidelity.count == rawWorkspaceFidelity.count,
+              pageManagerFidelity.count == rawPageManagerFidelity.count,
+              workspaceTextDisplayFidelity.count == rawWorkspaceTextDisplayFidelity.count,
+              pageManagerTextDisplayFidelity.count == rawPageManagerTextDisplayFidelity.count,
+              labelOverrides.count == rawLabelOverrides.count,
+              (globalTextDisplayFidelity == nil ? 0 : 1) == rawGlobalTextDisplayFidelity.count else {
+            throw RemoteSyncWorkspaceSnapshotError.invalidStoredFidelityMetadata
+        }
         let workspaceFidelityByID = Dictionary(
-            uniqueKeysWithValues: fidelityStore.allWorkspaceEntries().map { ($0.workspaceID, $0) }
+            uniqueKeysWithValues: workspaceFidelity.map { ($0.workspaceID, $0) }
         )
         let pageManagerFidelityByWindowID = Dictionary(
-            uniqueKeysWithValues: fidelityStore.allPageManagerEntries().map { ($0.windowID, $0) }
+            uniqueKeysWithValues: pageManagerFidelity.map { ($0.windowID, $0) }
         )
-        let workspaces = ((try? modelContext.fetch(FetchDescriptor<Workspace>())) ?? [])
+        let workspaceTextDisplayFidelityByID = Dictionary(
+            uniqueKeysWithValues: workspaceTextDisplayFidelity.map { ($0.ownerID, $0.fidelity) }
+        )
+        let pageManagerTextDisplayFidelityByWindowID = Dictionary(
+            uniqueKeysWithValues: pageManagerTextDisplayFidelity.map { ($0.ownerID, $0.fidelity) }
+        )
+        let workspaces = try workspaceFetcher(modelContext)
             .sorted(by: Self.sortWorkspaces)
+        let workspaceIDs = Set(workspaces.map(\.id))
 
         var workspaceRowsByKey: [String: RemoteSyncCurrentWorkspaceRow] = [:]
         var windowRowsByKey: [String: RemoteSyncCurrentWorkspaceWindowRow] = [:]
         var pageManagerRowsByKey: [String: RemoteSyncCurrentWorkspacePageManagerRow] = [:]
+        var labelOverrideRowsByKey: [String: RemoteSyncCurrentWorkspaceLabelOverrideRow] = [:]
+        var globalTextDisplayRowsByKey: [String: RemoteSyncCurrentGlobalTextDisplaySettingsRow] = [:]
         var fingerprintsByKey: [String: String] = [:]
 
         for workspace in workspaces {
@@ -444,8 +628,10 @@ public final class RemoteSyncWorkspaceSnapshotService {
                 contentsText: workspace.contentsText,
                 orderNumber: workspace.orderNumber,
                 textDisplaySettings: workspace.textDisplaySettings,
+                textDisplayFidelity: workspaceTextDisplayFidelityByID[workspace.id] ?? .init(),
                 workspaceSettings: workspaceSettings,
-                speakSettingsJSON: workspaceFidelityByID[workspace.id]?.speakSettingsJSON,
+                speakSettingsJSON: (try? workspaceSettings.speakSettings.androidJSON())
+                    ?? workspaceFidelityByID[workspace.id]?.speakSettingsJSON,
                 unPinnedWeight: workspace.unPinnedWeight,
                 maximizedWindowID: workspace.maximizedWindowId,
                 primaryTargetLinksWindowID: workspace.primaryTargetLinksWindowId,
@@ -507,6 +693,7 @@ public final class RemoteSyncWorkspaceSnapshotService {
                     currentCategoryName: pageManagerFidelity?.rawCurrentCategoryName
                         ?? Self.remoteCurrentCategoryName(from: pageManager?.currentCategoryName ?? "bible"),
                     textDisplaySettings: pageManager?.textDisplaySettings,
+                    textDisplayFidelity: pageManagerTextDisplayFidelityByWindowID[window.id] ?? .init(),
                     jsState: pageManager?.jsState
                 )
                 let pageManagerKey = logEntryStore.key(
@@ -520,10 +707,50 @@ public final class RemoteSyncWorkspaceSnapshotService {
             }
         }
 
+        for row in labelOverrides where workspaceIDs.contains(row.workspaceID) {
+            let key = logEntryStore.key(
+                for: .workspaces,
+                tableName: "WorkspaceLabelOverride",
+                entityID1: .blob(Self.uuidBlob(row.workspaceID)),
+                entityID2: .blob(Self.uuidBlob(row.labelID))
+            )
+            labelOverrideRowsByKey[key] = row
+            fingerprintsByKey[key] = Self.fingerprintHex(for: row)
+        }
+
+        let storedGlobalSettings: TextDisplaySettings?
+        if let rawGlobalSettings = settingsStore.getString(SettingsStore.globalTextDisplaySettingsKey) {
+            guard let data = rawGlobalSettings.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode(TextDisplaySettings.self, from: data) else {
+                throw RemoteSyncWorkspaceSnapshotError.invalidStoredFidelityMetadata
+            }
+            storedGlobalSettings = decoded
+        } else {
+            storedGlobalSettings = nil
+        }
+        if storedGlobalSettings != nil || globalTextDisplayFidelity != nil {
+            let row = RemoteSyncCurrentGlobalTextDisplaySettingsRow(
+                id: globalTextDisplayFidelity?.id
+                    ?? RemoteSyncCurrentGlobalTextDisplaySettingsRow.androidSingletonID,
+                textDisplaySettings: storedGlobalSettings,
+                fidelity: globalTextDisplayFidelity?.fidelity ?? .init()
+            )
+            let key = logEntryStore.key(
+                for: .workspaces,
+                tableName: "GlobalTextDisplaySettings",
+                entityID1: .blob(Self.uuidBlob(row.id)),
+                entityID2: .text("")
+            )
+            globalTextDisplayRowsByKey[key] = row
+            fingerprintsByKey[key] = Self.fingerprintHex(for: row)
+        }
+
         return RemoteSyncWorkspaceCurrentSnapshot(
             workspaceRowsByKey: workspaceRowsByKey,
             windowRowsByKey: windowRowsByKey,
             pageManagerRowsByKey: pageManagerRowsByKey,
+            labelOverrideRowsByKey: labelOverrideRowsByKey,
+            globalTextDisplayRowsByKey: globalTextDisplayRowsByKey,
             fingerprintsByKey: fingerprintsByKey
         )
     }
@@ -548,60 +775,243 @@ public final class RemoteSyncWorkspaceSnapshotService {
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) {
-        let snapshot = snapshotCurrentState(modelContext: modelContext, settingsStore: settingsStore)
-        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
-        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        try? refreshBaselineFingerprintsStrict(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+    }
 
-        for entry in logEntryStore.entries(for: .workspaces) {
-            let key = logEntryStore.key(for: .workspaces, entry: entry)
-            if snapshot.fingerprintsByKey[key] == nil {
-                fingerprintStore.removeFingerprint(
-                    for: .workspaces,
-                    tableName: entry.tableName,
-                    entityID1: entry.entityID1,
-                    entityID2: entry.entityID2
-                )
-            }
-        }
+    /**
+     Replaces workspace baseline fingerprints after a strict current-graph projection.
 
-        for (key, row) in snapshot.workspaceRowsByKey {
-            guard let fingerprint = snapshot.fingerprintsByKey[key] else {
-                continue
-            }
-            fingerprintStore.setFingerprint(
-                fingerprint,
-                for: .workspaces,
+     This opt-in variant is for atomic restore and patch replay. It prevents a failed SwiftData fetch
+     from being interpreted as an empty graph while the surrounding transaction publishes replay
+     bookkeeping.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns the current workspace graph.
+       - settingsStore: Local-only settings store used by the fingerprint store.
+     - Side effects: Rewrites current workspace fingerprint rows and removes stale rows.
+     - Failure modes: Rethrows graph fetch failures from `snapshotCurrentStateStrict`; settings fetch
+       failures invalidate an active `SettingsStore` atomic batch.
+     */
+    func refreshBaselineFingerprintsStrict(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws {
+        let snapshot = try snapshotCurrentStateStrict(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let previousBaseline = try storedAcceptedBaseline(settingsStore: settingsStore)
+        try validateExportableFingerprints(in: snapshot)
+        try acceptBaselineFingerprints(
+            acceptedGeneration(from: snapshot, preserving: previousBaseline?.generation),
+            settingsStore: settingsStore
+        )
+    }
+
+    /**
+     Builds the immutable accepted baseline represented by one projected workspace snapshot.
+
+     - Parameter snapshot: Complete workspace projection whose rows and fingerprints belong to the
+       same generation.
+     - Returns: Exact fingerprints and accepted row identities suitable for durable outbox storage.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail because every projected row has a typed identity.
+     */
+    func acceptedGeneration(
+        from snapshot: RemoteSyncWorkspaceCurrentSnapshot,
+        preserving previousGeneration: RemoteSyncWorkspaceAcceptedGeneration? = nil
+    ) -> RemoteSyncWorkspaceAcceptedGeneration {
+        var rowsByKey: [String: RemoteSyncWorkspaceAcceptedRowIdentity] = [:]
+        for (key, row) in snapshot.workspaceRowsByKey where !snapshot.suppressedKeys.contains(key) {
+            rowsByKey[key] = RemoteSyncWorkspaceAcceptedRowIdentity(
                 tableName: "Workspace",
                 entityID1: .blob(Self.uuidBlob(row.id)),
                 entityID2: .text("")
             )
         }
-
-        for (key, row) in snapshot.windowRowsByKey {
-            guard let fingerprint = snapshot.fingerprintsByKey[key] else {
-                continue
-            }
-            fingerprintStore.setFingerprint(
-                fingerprint,
-                for: .workspaces,
+        for (key, row) in snapshot.windowRowsByKey where !snapshot.suppressedKeys.contains(key) {
+            rowsByKey[key] = RemoteSyncWorkspaceAcceptedRowIdentity(
                 tableName: "Window",
                 entityID1: .blob(Self.uuidBlob(row.id)),
                 entityID2: .text("")
             )
         }
-
-        for (key, row) in snapshot.pageManagerRowsByKey {
-            guard let fingerprint = snapshot.fingerprintsByKey[key] else {
-                continue
-            }
-            fingerprintStore.setFingerprint(
-                fingerprint,
-                for: .workspaces,
+        for (key, row) in snapshot.pageManagerRowsByKey where !snapshot.suppressedKeys.contains(key) {
+            rowsByKey[key] = RemoteSyncWorkspaceAcceptedRowIdentity(
                 tableName: "PageManager",
                 entityID1: .blob(Self.uuidBlob(row.windowID)),
                 entityID2: .text("")
             )
         }
+        for (key, row) in snapshot.labelOverrideRowsByKey where !snapshot.suppressedKeys.contains(key) {
+            rowsByKey[key] = RemoteSyncWorkspaceAcceptedRowIdentity(
+                tableName: "WorkspaceLabelOverride",
+                entityID1: .blob(Self.uuidBlob(row.workspaceID)),
+                entityID2: .blob(Self.uuidBlob(row.labelID))
+            )
+        }
+        for (key, row) in snapshot.globalTextDisplayRowsByKey where !snapshot.suppressedKeys.contains(key) {
+            rowsByKey[key] = RemoteSyncWorkspaceAcceptedRowIdentity(
+                tableName: "GlobalTextDisplaySettings",
+                entityID1: .blob(Self.uuidBlob(row.id)),
+                entityID2: .text("")
+            )
+        }
+        var fingerprintsByKey = snapshot.fingerprintsByKey.filter {
+            !snapshot.suppressedKeys.contains($0.key)
+        }
+        for key in snapshot.suppressedKeys {
+            if let priorFingerprint = previousGeneration?.fingerprintsByKey[key] {
+                fingerprintsByKey[key] = priorFingerprint
+            }
+            if let priorIdentity = previousGeneration?.rowsByKey[key] {
+                rowsByKey[key] = priorIdentity
+            }
+        }
+        return RemoteSyncWorkspaceAcceptedGeneration(
+            fingerprintsByKey: fingerprintsByKey,
+            rowsByKey: rowsByKey,
+            suppressedKeys: snapshot.suppressedKeys
+        )
+    }
+
+    /**
+     Validates that every exportable projected row has one stable fingerprint and no orphan hash.
+
+     - Parameter snapshot: Strict current workspace projection to validate.
+     - Side effects: none.
+     - Throws: `missingProjectedFingerprint` or `incompleteAcceptedGeneration` when row and
+       fingerprint key sets differ outside explicitly suppressed quarantine keys.
+     */
+    func validateExportableFingerprints(
+        in snapshot: RemoteSyncWorkspaceCurrentSnapshot
+    ) throws {
+        let rowKeys = Set(snapshot.workspaceRowsByKey.keys)
+            .union(snapshot.windowRowsByKey.keys)
+            .union(snapshot.pageManagerRowsByKey.keys)
+            .union(snapshot.labelOverrideRowsByKey.keys)
+            .union(snapshot.globalTextDisplayRowsByKey.keys)
+            .subtracting(snapshot.suppressedKeys)
+        let fingerprintKeys = Set(snapshot.fingerprintsByKey.keys)
+            .subtracting(snapshot.suppressedKeys)
+        if let missingKey = rowKeys.subtracting(fingerprintKeys).sorted().first {
+            throw RemoteSyncWorkspaceSnapshotError.missingProjectedFingerprint(missingKey)
+        }
+        if let orphanKey = fingerprintKeys.subtracting(rowKeys).sorted().first {
+            throw RemoteSyncWorkspaceSnapshotError.incompleteAcceptedGeneration(orphanKey)
+        }
+    }
+
+    /**
+     Reads the complete revisioned accepted baseline when one has been published.
+
+     - Parameter settingsStore: Local-only settings store containing synchronization metadata.
+     - Returns: Accepted baseline, or `nil` before initial baseline publication.
+     - Side effects: Reads one settings row.
+     - Throws: `invalidAcceptedBaseline` for malformed persisted data; strict settings failures
+       invalidate an enclosing atomic batch.
+     */
+    func storedAcceptedBaseline(
+        settingsStore: SettingsStore
+    ) throws -> RemoteSyncWorkspaceAcceptedBaseline? {
+        guard let rawValue = settingsStore.getString(Self.acceptedBaselineKey) else {
+            return nil
+        }
+        guard let data = rawValue.data(using: .utf8),
+              let baseline = try? JSONDecoder().decode(
+                  RemoteSyncWorkspaceAcceptedBaseline.self,
+                  from: data
+              ), baseline.revision >= 0 else {
+            throw RemoteSyncWorkspaceSnapshotError.invalidAcceptedBaseline
+        }
+        return baseline
+    }
+
+    /**
+     Reads the durable accepted-row manifest used for deletion detection.
+
+     - Parameter settingsStore: Local-only settings store containing the manifest.
+     - Returns: Accepted identities keyed by Android composite key, or `nil` when no manifest has
+       ever been published for workspaces.
+     - Side effects: Reads one local setting row.
+     - Throws: `RemoteSyncWorkspaceSnapshotError.invalidAcceptedBaseline` when stored JSON is
+       malformed; callers fail closed rather than forgetting accepted rows.
+     */
+    func acceptedRowsByKey(
+        settingsStore: SettingsStore
+    ) throws -> [String: RemoteSyncWorkspaceAcceptedRowIdentity]? {
+        try storedAcceptedBaseline(settingsStore: settingsStore)?.generation.rowsByKey
+    }
+
+    /**
+     Atomically stages workspace fingerprints and identities from one immutable generation.
+
+     - Parameters:
+       - generation: Immutable fingerprints and row identities that were restored, replayed, or uploaded.
+       - settingsStore: Local-only settings store receiving the accepted baseline.
+     - Side effects: Replaces all workspace fingerprint settings and the accepted-row manifest.
+     - Throws:
+       - `RemoteSyncWorkspaceSnapshotError.incompleteAcceptedGeneration` when a fingerprint lacks a
+         matching identity
+       - rethrows JSON encoding failures
+       - settings persistence failures invalidate the enclosing atomic batch
+     */
+    @discardableResult
+    func acceptBaselineFingerprints(
+        _ generation: RemoteSyncWorkspaceAcceptedGeneration,
+        settingsStore: SettingsStore,
+        expectedRevision: Int64? = nil
+    ) throws -> Int64 {
+        let currentBaseline = try storedAcceptedBaseline(settingsStore: settingsStore)
+        let currentRevision = currentBaseline?.revision ?? 0
+        if let expectedRevision, expectedRevision != currentRevision {
+            throw RemoteSyncWorkspaceSnapshotError.staleAcceptedBaseline(
+                expected: expectedRevision,
+                actual: currentRevision
+            )
+        }
+
+        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let fingerprintPrefix = fingerprintStore.prefix(for: .workspaces)
+        let logPrefix = logEntryStore.prefix(for: .workspaces)
+        for entry in settingsStore.entries(withPrefix: fingerprintPrefix) {
+            let suffix = String(entry.key.dropFirst(fingerprintPrefix.count))
+            let logKey = "\(logPrefix)\(suffix)"
+            if !generation.suppressedKeys.contains(logKey) {
+                settingsStore.remove(entry.key)
+            }
+        }
+        for (key, fingerprint) in generation.fingerprintsByKey.sorted(by: { $0.key < $1.key }) {
+            guard let row = generation.rowsByKey[key] else {
+                throw RemoteSyncWorkspaceSnapshotError.incompleteAcceptedGeneration(key)
+            }
+            fingerprintStore.setFingerprint(
+                fingerprint,
+                for: .workspaces,
+                tableName: row.tableName,
+                entityID1: row.entityID1,
+                entityID2: row.entityID2
+            )
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let nextRevision = currentRevision + 1
+        let manifestData = try encoder.encode(
+            RemoteSyncWorkspaceAcceptedBaseline(
+                revision: nextRevision,
+                generation: generation
+            )
+        )
+        settingsStore.setString(
+            Self.acceptedBaselineKey,
+            value: String(decoding: manifestData, as: UTF8.self)
+        )
+        return nextRevision
     }
 
     /**
@@ -618,7 +1028,10 @@ public final class RemoteSyncWorkspaceSnapshotService {
             value.name,
             value.contentsText ?? "",
             String(value.orderNumber),
-            canonicalTextDisplaySettings(value.textDisplaySettings),
+            canonicalTextDisplaySettings(
+                value.textDisplaySettings,
+                fidelity: value.textDisplayFidelity
+            ),
             canonicalWorkspaceSettings(value.workspaceSettings),
             value.speakSettingsJSON ?? "",
             canonicalOptionalFloat(value.unPinnedWeight),
@@ -690,7 +1103,10 @@ public final class RemoteSyncWorkspaceSnapshotService {
             value.mapKey ?? "",
             canonicalOptionalInt(value.mapAnchorOrdinal),
             value.currentCategoryName,
-            canonicalTextDisplaySettings(value.textDisplaySettings),
+            canonicalTextDisplaySettings(
+                value.textDisplaySettings,
+                fidelity: value.textDisplayFidelity
+            ),
             value.jsState ?? "",
         ]
         let components = bibleComponents
@@ -699,6 +1115,30 @@ public final class RemoteSyncWorkspaceSnapshotService {
             + generalBookComponents
             + mapAndDisplayComponents
         return fingerprintHex(canonicalValue: components.joined(separator: "|"))
+    }
+
+    /** Computes one stable fingerprint for a workspace-label override row. */
+    static func fingerprintHex(for value: RemoteSyncCurrentWorkspaceLabelOverrideRow) -> String {
+        fingerprintHex(
+            canonicalValue: [
+                value.workspaceID.uuidString.lowercased(),
+                value.labelID.uuidString.lowercased(),
+                canonicalOptionalInt(value.overrideMode),
+            ].joined(separator: "|")
+        )
+    }
+
+    /** Computes one stable fingerprint for the global text-display singleton row. */
+    static func fingerprintHex(for value: RemoteSyncCurrentGlobalTextDisplaySettingsRow) -> String {
+        fingerprintHex(
+            canonicalValue: [
+                value.id.uuidString.lowercased(),
+                canonicalTextDisplaySettings(
+                    value.textDisplaySettings,
+                    fidelity: value.fidelity
+                ),
+            ].joined(separator: "|")
+        )
     }
 
     /**
@@ -794,40 +1234,14 @@ public final class RemoteSyncWorkspaceSnapshotService {
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    static func canonicalTextDisplaySettings(_ value: TextDisplaySettings?) -> String {
-        let settings = value ?? TextDisplaySettings()
-        let components = [
-            canonicalOptionalInt(settings.strongsMode),
-            canonicalOptionalBool(settings.showMorphology),
-            canonicalOptionalBool(settings.showFootNotes),
-            canonicalOptionalBool(settings.showFootNotesInline),
-            canonicalOptionalBool(settings.expandXrefs),
-            canonicalOptionalBool(settings.showXrefs),
-            canonicalOptionalBool(settings.showRedLetters),
-            canonicalOptionalBool(settings.showSectionTitles),
-            canonicalOptionalBool(settings.showVerseNumbers),
-            canonicalOptionalBool(settings.showVersePerLine),
-            canonicalOptionalBool(settings.showBookmarks),
-            canonicalOptionalBool(settings.showMyNotes),
-            canonicalOptionalBool(settings.justifyText),
-            canonicalOptionalBool(settings.hyphenation),
-            canonicalOptionalInt(settings.topMargin),
-            canonicalOptionalInt(settings.fontSize),
-            settings.fontFamily ?? "",
-            canonicalOptionalInt(settings.lineSpacing),
-            canonicalUUIDArray(settings.bookmarksHideLabels),
-            canonicalOptionalBool(settings.showPageNumber),
-            canonicalOptionalInt(settings.marginLeft),
-            canonicalOptionalInt(settings.marginRight),
-            canonicalOptionalInt(settings.maxWidth),
-            canonicalOptionalInt(settings.dayTextColor),
-            canonicalOptionalInt(settings.dayBackground),
-            canonicalOptionalInt(settings.dayNoise),
-            canonicalOptionalInt(settings.nightTextColor),
-            canonicalOptionalInt(settings.nightBackground),
-            canonicalOptionalInt(settings.nightNoise),
-        ]
-        return components.joined(separator: "^")
+    static func canonicalTextDisplaySettings(
+        _ value: TextDisplaySettings?,
+        fidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity = .init()
+    ) -> String {
+        RemoteSyncWorkspaceTextDisplaySettingsWire(
+            settings: value,
+            fidelity: fidelity
+        ).canonicalString()
     }
 
     /**

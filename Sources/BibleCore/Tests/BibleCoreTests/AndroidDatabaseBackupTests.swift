@@ -214,7 +214,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         let bookmarkDatabaseURL = try makeAndroidBookmarksDatabase(labels: [])
         try setSQLiteUserVersion(12, at: bookmarkDatabaseURL)
         let readingPlanDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 1)
-        let workspaceDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 22)
+        let workspaceDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 24)
         let settingsDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 1)
         let archiveData = try makeStoredZip(entries: [
             ("db/settings.sqlite3", try Data(contentsOf: settingsDatabaseURL)),
@@ -232,6 +232,22 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         XCTAssertEqual(archive.sections.first { $0.category == .readingPlans }?.support, .supported)
         XCTAssertEqual(archive.sections.first { $0.category == .workspaces }?.support, .supported)
         XCTAssertEqual(archive.sections.first { $0.category == .settings }?.support, .supported)
+    }
+
+    /** Rejects a workspace backup generation that Android does not preserve as a Room export. */
+    func testAndroidDatabaseBackupRejectsWorkspaceGenerationWithoutRoomExport() throws {
+        let workspaceDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 10)
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: ["workspaces.sqlite3": workspaceDatabaseURL],
+            contains: [.workspaces]
+        )
+
+        let archive = try AndroidDatabaseBackupService().loadArchive(from: archiveData)
+
+        XCTAssertEqual(
+            archive.sections.first { $0.category == .workspaces }?.support,
+            .unsupportedVersion(version: 10, supported: 24)
+        )
     }
 
     /**
@@ -444,23 +460,19 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         try modelContext.save()
         settingsStore.setBool(.screenKeepOnPref, value: true)
         settingsStore.setString(.localePref, value: "fi")
-        _ = ReadingProgressStore(settingsStore: settingsStore).recordChapterRead(
+        _ = try ReadingProgressStore(settingsStore: settingsStore).recordChapterRead(
             bookInitials: "KJV",
-            startOrdinal: 15,
-            kjvBookOrdinal: 1,
-            chapter: 1,
+            identity: try XCTUnwrap(
+                ReadingProgressKJVAIdentity(androidKJVBookOrdinal: 2, chapter: 1)
+            ),
             source: .manual,
             readAt: 1_700_000_200
         )
-        MemorizationProgressStore(settingsStore: settingsStore).markAsMemorized(
-            bookInitials: "KJV",
-            startOrdinal: 15,
-            endOrdinal: 15
+        try MemorizationProgressStore(settingsStore: settingsStore).markAsMemorized(
+            verifiedKJVARange(start: 15, end: 15)
         )
-        MemorizationProgressStore(settingsStore: settingsStore).addMemorizationTarget(
-            bookInitials: "KJV",
-            startOrdinal: 20,
-            endOrdinal: 21
+        try MemorizationProgressStore(settingsStore: settingsStore).addMemorizationTarget(
+            verifiedKJVARange(start: 20, end: 21)
         )
 
         let service = AndroidDatabaseBackupService(repositorySourceManager: repositoryManager)
@@ -511,7 +523,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         }
         XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["bookmarks.sqlite3"]!), 12)
         XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["readingplans.sqlite3"]!), 1)
-        XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["workspaces.sqlite3"]!), 22)
+        XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["workspaces.sqlite3"]!), 24)
         XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["repositories.sqlite3"]!), 1)
         XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["settings.sqlite3"]!), 1)
         XCTAssertEqual(
@@ -549,7 +561,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         )
         XCTAssertEqual(
             try readSQLiteInteger(
-                "SELECT COUNT(*) FROM ChapterReadHistory WHERE kjvBookOrdinal = 1 AND chapter = 1;",
+                "SELECT COUNT(*) FROM ChapterReadHistory WHERE kjvBookOrdinal = 2 AND chapter = 1;",
                 at: materializedDatabases["progress.sqlite3"]!
             ),
             1
@@ -994,8 +1006,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
 
      Setup:
      - seeds one local SwiftData repository row
-     - points `RepositorySourceManager` at a missing install-manager directory that cannot recreate
-       `InstallMgr.conf`
+     - injects a deterministic atomic-writer failure for the live `InstallMgr.conf` replacement
 
      Expected result:
      - reset throws the repository-source failure before deleting SwiftData rows
@@ -1022,9 +1033,24 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        let missingBasePath = tempDir.appendingPathComponent("missing", isDirectory: true)
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        let persistence = RepositorySourcePersistence(
+            write: { data, destination in
+                if destination.standardizedFileURL == configURL.standardizedFileURL {
+                    throw NSError(
+                        domain: "AndroidDatabaseBackupTests",
+                        code: 9001,
+                        userInfo: [NSLocalizedDescriptionKey: "repository write blocked"]
+                    )
+                }
+                try data.write(to: destination, options: .atomic)
+            }
+        )
         let service = AndroidBackupResetService(
-            repositorySourceManager: RepositorySourceManager(basePath: missingBasePath.path)
+            repositorySourceManager: RepositorySourceManager(
+                basePath: tempDir.path,
+                persistence: persistence
+            )
         )
 
         XCTAssertThrowsError(
@@ -1034,10 +1060,10 @@ final class AndroidDatabaseBackupTests: XCTestCase {
                 settingsStore: settingsStore
             )
         ) { error in
-            XCTAssertEqual(
-                error as? RepositorySourceManagementError,
-                .configWriteFailed("default configuration was not recreated")
-            )
+            guard case .configWriteFailed(let message) = error as? RepositorySourceManagementError else {
+                return XCTFail("Expected repository config write failure, got \(error)")
+            }
+            XCTAssertTrue(message.contains("repository write blocked"), message)
         }
         let repositories = try modelContext.fetch(FetchDescriptor<Repository>())
         XCTAssertEqual(repositories.map(\.name), ["Legacy"])
@@ -1048,11 +1074,13 @@ final class AndroidDatabaseBackupTests: XCTestCase {
 
      Setup:
      - first restores a local bookmark snapshot
+     - adds one legacy bookmark without trustworthy source metadata
      - then imports an Android backup containing one duplicate bookmark and one new bookmark
 
      Expected result:
      - duplicate local rows keep their local note content and note content type
      - new backup rows are added with their Android note content type
+     - the quarantined local row survives even though trusted snapshot projection omits it
 
      Failure meaning:
      - iOS Import would drift from Android's `INSERT OR IGNORE` semantics by overwriting local rows
@@ -1066,6 +1094,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         let labelID = UUID(uuidString: "15000000-0000-0000-0000-000000000101")!
         let existingBookmarkID = UUID(uuidString: "15000000-0000-0000-0000-000000000102")!
         let newBookmarkID = UUID(uuidString: "15000000-0000-0000-0000-000000000103")!
+        let quarantinedBookmarkID = UUID(uuidString: "15000000-0000-0000-0000-000000000104")!
 
         let localArchive = try service.loadArchive(
             from: makeAndroidBookmarkOnlyBackupData(
@@ -1082,6 +1111,13 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             modelContext: modelContext,
             settingsStore: settingsStore
         )
+        let quarantinedBookmark = BibleBookmark(
+            id: quarantinedBookmarkID,
+            kjvOrdinalStart: 22,
+            kjvOrdinalEnd: 22
+        )
+        modelContext.insert(quarantinedBookmark)
+        try modelContext.save()
 
         let importArchive = try service.loadArchive(
             from: makeAndroidBookmarkOnlyBackupData(
@@ -1101,11 +1137,18 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         )
 
         let bookmarks = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
-        XCTAssertEqual(Set(bookmarks.map(\.id)), Set([existingBookmarkID, newBookmarkID]))
+        XCTAssertEqual(
+            Set(bookmarks.map(\.id)),
+            Set([existingBookmarkID, newBookmarkID, quarantinedBookmarkID])
+        )
         XCTAssertEqual(bookmarks.first { $0.id == existingBookmarkID }?.notes?.notes, "Local note")
         XCTAssertEqual(bookmarks.first { $0.id == existingBookmarkID }?.notes?.contentType, "MARKDOWN")
         XCTAssertEqual(bookmarks.first { $0.id == newBookmarkID }?.notes?.notes, "Backup addition")
         XCTAssertEqual(bookmarks.first { $0.id == newBookmarkID }?.notes?.contentType, "HTML")
+        XCTAssertEqual(
+            bookmarks.first { $0.id == quarantinedBookmarkID }?.ordinalTrustState,
+            .legacyUnresolved
+        )
     }
 
     /**
@@ -1134,6 +1177,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             UserDefaults.standard.removeObject(forKey: AppPreferenceKey.localePref.rawValue)
         }
         settingsStore.setBool(.autoFullscreenPref, value: true)
+        settingsStore.setBool(.volumeKeysScroll, value: false)
         settingsStore.setString(.localePref, value: "en")
 
         let settingsDatabaseURL = try makeAndroidSettingsDatabase(
@@ -1175,6 +1219,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         XCTAssertEqual(settingsStore.getString(.localePref), "fi")
         XCTAssertEqual(settingsStore.getStringSet(.disabledWordLookupDictionaries), ["ESV", "KJV"])
         XCTAssertFalse(settingsStore.getBool(.autoFullscreenPref))
+        XCTAssertTrue(settingsStore.getBool(.volumeKeysScroll))
     }
 
     /**
@@ -1415,15 +1460,15 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         let settingsStore = SettingsStore(modelContext: modelContext)
         let readingStore = ReadingProgressStore(settingsStore: settingsStore)
         let memorizationStore = MemorizationProgressStore(settingsStore: settingsStore)
-        _ = readingStore.recordChapterRead(
+        _ = try readingStore.recordChapterRead(
             bookInitials: "ESV",
-            startOrdinal: 100,
-            kjvBookOrdinal: 1,
-            chapter: 1,
+            identity: try XCTUnwrap(
+                ReadingProgressKJVAIdentity(androidKJVBookOrdinal: 2, chapter: 1)
+            ),
             source: .manual,
             readAt: 1_700_000_000
         )
-        memorizationStore.markAsMemorized(bookInitials: "ESV", startOrdinal: 100, endOrdinal: 100)
+        try memorizationStore.markAsMemorized(verifiedKJVARange(start: 100, end: 100))
 
         let historyID = UUID(uuidString: "15000000-0000-0000-0000-000000000601")!
         let memorizedID = UUID(uuidString: "15000000-0000-0000-0000-000000000602")!
@@ -1439,7 +1484,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             chapterHistory: [
                 .init(
                     id: historyID,
-                    kjvBookOrdinal: 1,
+                    kjvBookOrdinal: 2,
                     chapter: 2,
                     cycle: 3,
                     readAt: 1_700_000_300,
@@ -1524,7 +1569,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         settingsStore.setString(
             ReadingProgressStore.settingsKey,
             value: """
-            {"history":[{"id":"\(duplicateHistoryID.uuidString)","bookInitials":"ESV","startOrdinal":10,"kjvBookOrdinal":1,"chapter":1,"cycle":1,"readAt":1000,"source":"MANUAL"}],"settings":{"autoTrackReading":false,"activeCycle":1,"autoMarkMemorized":true,"memorizeTypeFullWords":false,"memorizeWordVisibility":"light","memorizeErrorHeatmap":true,"memorizeScrambleHideUsed":false,"memorizeIncludeReference":true}}
+            {"history":[{"id":"\(duplicateHistoryID.uuidString)","bookInitials":"ESV","startOrdinal":10,"kjvBookOrdinal":2,"chapter":1,"cycle":1,"readAt":1000,"source":"MANUAL"}],"settings":{"autoTrackReading":false,"activeCycle":1,"autoMarkMemorized":true,"memorizeTypeFullWords":false,"memorizeWordVisibility":"light","memorizeErrorHeatmap":true,"memorizeScrambleHideUsed":false,"memorizeIncludeReference":true}}
             """
         )
         settingsStore.setString(
@@ -1543,7 +1588,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             chapterHistory: [
                 .init(
                     id: duplicateHistoryID,
-                    kjvBookOrdinal: 1,
+                    kjvBookOrdinal: 2,
                     chapter: 1,
                     cycle: 1,
                     readAt: 9_999,
@@ -1552,7 +1597,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
                 ),
                 .init(
                     id: newHistoryID,
-                    kjvBookOrdinal: 1,
+                    kjvBookOrdinal: 2,
                     chapter: 2,
                     cycle: 1,
                     readAt: 2_000,
@@ -1609,8 +1654,8 @@ final class AndroidDatabaseBackupTests: XCTestCase {
      - applies the archive through the normal destructive restore workflow
 
      Expected result:
-     - restore fails with the same invalid-SQLite section error used for malformed Android backup
-       databases
+     - the Android Room contract validator rejects the first out-of-domain ordinal as an invalid
+       `MemorizedVerse.kjvOrdinal` row value
      - no local progress snapshots are persisted after the failed restore
 
      Failure meaning:
@@ -1663,7 +1708,13 @@ final class AndroidDatabaseBackupTests: XCTestCase {
                 settingsStore: settingsStore
             )
         ) { error in
-            XCTAssertEqual(error as? AndroidDatabaseBackupError, .invalidSQLiteDatabase("progress.sqlite3"))
+            guard let contractError = error as? RemoteSyncAndroidDatabaseContractError else {
+                return XCTFail("Unexpected progress rejection error: \(String(reflecting: error))")
+            }
+            XCTAssertEqual(
+                contractError,
+                .invalidRowValue(table: "MemorizedVerse", column: "kjvOrdinal")
+            )
         }
         XCTAssertNil(settingsStore.getString(ReadingProgressStore.settingsKey))
         XCTAssertNil(settingsStore.getString(MemorizationProgressStore.settingsKey))
@@ -1744,14 +1795,15 @@ final class AndroidDatabaseBackupTests: XCTestCase {
      - corrupts the end-of-central-directory size so declared central-directory bounds no longer
        contain the declared entry
      - corrupts a central-directory filename to invalid UTF-8 while leaving the local header intact
-     - corrupts an end-of-central-directory entry count to ZIP64's sentinel value
+     - corrupts an end-of-central-directory entry count to ZIP64's sentinel value without adding
+       the required ZIP64 locator and end record
 
      Expected result:
      - central-directory size mismatches fail before the reader walks into bytes outside the
        declared directory
      - invalid central-directory names fail as malformed ZIP data rather than being silently skipped
-     - ZIP64 sentinels fail up front because this reader intentionally supports only non-ZIP64
-       Android backup archives
+     - ZIP64 sentinels require the canonical locator and end record instead of being interpreted as
+       classic metadata
 
      Failure meaning:
      - iOS could treat corrupted Android backup archives as incomplete but valid inputs, producing
@@ -1769,7 +1821,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         XCTAssertThrowsError(try ZipArchiveReader.entries(in: invalidSizeArchive)) { error in
             XCTAssertEqual(
                 error as? ZipArchiveReaderError,
-                .invalidArchive("Central directory entry is truncated")
+                .invalidArchive("Central-directory entry count is inconsistent")
             )
         }
 
@@ -1781,7 +1833,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         XCTAssertThrowsError(try ZipArchiveReader.entries(in: invalidNameArchive)) { error in
             XCTAssertEqual(
                 error as? ZipArchiveReaderError,
-                .invalidArchive("Central directory entry name is not UTF-8")
+                .invalidArchive("ZIP entry name is empty or not UTF-8")
             )
         }
 
@@ -1792,7 +1844,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         XCTAssertThrowsError(try ZipArchiveReader.entries(in: zip64EntryCountArchive)) { error in
             XCTAssertEqual(
                 error as? ZipArchiveReaderError,
-                .invalidArchive("ZIP64 archives are not supported")
+                .invalidArchive("ZIP64 locator is missing or describes multiple disks")
             )
         }
     }
@@ -1840,21 +1892,19 @@ final class AndroidDatabaseBackupTests: XCTestCase {
     }
 
     /**
-     Verifies ZIP bomb protection before the eager reader extracts or inflates payload bytes.
+     Verifies oversized central declarations cannot bypass local-header boundary validation.
 
      Setup:
-     - builds small ZIP fixtures and rewrites central-directory size metadata to oversized values
-     - keeps local payloads tiny so the test proves rejection is based on declared size guards, not
-       actual fixture allocation
+     - builds small ZIP fixtures and rewrites only central-directory sizes to oversized values
+     - keeps local headers and payloads unchanged so the declarations are contradictory
 
      Expected result:
-     - a single entry over the per-entry cap fails as malformed archive data
-     - multiple entries below the per-entry cap but above the aggregate cap also fail
-     - Android backup service error mapping preserves concrete ZIP parser reasons
+     - a single contradictory declaration fails before extraction
+     - multiple contradictory declarations fail at the first local/central mismatch
+     - Android backup service error mapping preserves the exact structural reason
 
      Failure meaning:
-     - iOS could allocate excessive memory while importing a crafted Android backup archive before
-       the restore path reaches SQLite validation.
+     - iOS could trust attacker-controlled central sizes that do not describe the local payload.
      */
     func testZipArchiveReaderRejectsOversizedDeclaredPayloadsBeforeExtraction() throws {
         var oversizedEntryArchive = try makeStoredZip(entries: [
@@ -1870,7 +1920,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         XCTAssertThrowsError(try ZipArchiveReader.entries(in: oversizedEntryArchive)) { error in
             XCTAssertEqual(
                 error as? ZipArchiveReaderError,
-                .invalidArchive("ZIP entry exceeds maximum supported size")
+                .invalidArchive("ZIP local and central entry sizes differ")
             )
         }
 
@@ -1891,7 +1941,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         XCTAssertThrowsError(try ZipArchiveReader.entries(in: oversizedTotalArchive)) { error in
             XCTAssertEqual(
                 error as? ZipArchiveReaderError,
-                .invalidArchive("ZIP archive exceeds maximum supported size")
+                .invalidArchive("ZIP local and central entry sizes differ")
             )
         }
 
@@ -1899,7 +1949,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         XCTAssertThrowsError(try service.loadArchive(from: oversizedEntryArchive)) { error in
             XCTAssertEqual(
                 error as? AndroidDatabaseBackupError,
-                .invalidArchive("ZIP entry exceeds maximum supported size")
+                .invalidArchive("ZIP local and central entry sizes differ")
             )
         }
     }
@@ -1953,7 +2003,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         var storedMismatchArchive = try makeStoredZip(entries: [
             ("db/bookmarks.sqlite3", Data([0x01, 0x02, 0x03])),
         ])
-        try replaceCentralDirectorySizes(
+        try replaceZIPEntrySizesEverywhere(
             compressedSize: 3,
             uncompressedSize: 2,
             for: "db/bookmarks.sqlite3",
@@ -1977,7 +2027,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             compressedData: compressedPayload,
             uncompressedData: payload
         )
-        try replaceCentralDirectorySizes(
+        try replaceZIPEntrySizesEverywhere(
             compressedSize: UInt32(compressedPayload.count),
             uncompressedSize: UInt32(payload.count + 1),
             for: "db/bookmarks.sqlite3",
@@ -2392,9 +2442,9 @@ final class AndroidDatabaseBackupTests: XCTestCase {
                 id BLOB NOT NULL PRIMARY KEY,
                 kjvBookOrdinal INTEGER NOT NULL,
                 chapter INTEGER NOT NULL,
-                cycle INTEGER NOT NULL DEFAULT 1,
+                cycle INTEGER NOT NULL,
                 readAt INTEGER NOT NULL,
-                bookInitials TEXT NOT NULL DEFAULT '',
+                bookInitials TEXT NOT NULL,
                 source TEXT NOT NULL DEFAULT 'MANUAL'
             );
             CREATE INDEX index_ChapterReadHistory_kjvBookOrdinal_chapter_cycle
@@ -2410,6 +2460,33 @@ final class AndroidDatabaseBackupTests: XCTestCase {
                 memorizeIncludeReference INTEGER NOT NULL DEFAULT 1,
                 activeCycle INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE LogEntry (
+                tableName TEXT NOT NULL,
+                entityId1 BLOB NOT NULL,
+                entityId2 BLOB NOT NULL,
+                type TEXT NOT NULL,
+                lastUpdated INTEGER NOT NULL DEFAULT 0,
+                sourceDevice TEXT NOT NULL,
+                PRIMARY KEY(tableName, entityId1, entityId2)
+            );
+            CREATE INDEX index_LogEntry_lastUpdated ON LogEntry (lastUpdated);
+            CREATE INDEX index_LogEntry_sourceDevice ON LogEntry (sourceDevice);
+            CREATE TABLE SyncConfiguration (
+                keyName TEXT NOT NULL PRIMARY KEY,
+                stringValue TEXT,
+                longValue INTEGER,
+                booleanValue INTEGER
+            );
+            CREATE TABLE SyncStatus (
+                sourceDevice TEXT NOT NULL,
+                patchNumber INTEGER NOT NULL,
+                sizeBytes INTEGER NOT NULL,
+                appliedDate INTEGER NOT NULL,
+                PRIMARY KEY(sourceDevice, patchNumber)
+            );
+            CREATE TABLE room_master_table (id INTEGER PRIMARY KEY, identity_hash TEXT);
+            INSERT OR REPLACE INTO room_master_table (id, identity_hash)
+            VALUES (42, '76330d8367020840e56e6b92d921522a');
             """,
             on: database,
             fileName: url.lastPathComponent
@@ -2831,6 +2908,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             StudyPadTextEntryText.self,
             ReadingPlan.self,
             ReadingPlanDay.self,
+            ReadingPlanDefinitionPublicationState.self,
             Workspace.self,
             Window.self,
             PageManager.self,
@@ -2991,7 +3069,8 @@ final class AndroidDatabaseBackupTests: XCTestCase {
      */
     private func makeStoredZip(entries: [(name: String, data: Data)]) throws -> Data {
         var archive = Data()
-        var localHeaderOffsets: [String: UInt32] = [:]
+        var localHeaderOffsets: [UInt32] = []
+        localHeaderOffsets.reserveCapacity(entries.count)
 
         for entry in entries {
             guard let nameData = entry.name.data(using: .utf8),
@@ -3000,14 +3079,15 @@ final class AndroidDatabaseBackupTests: XCTestCase {
                   archive.count <= Int(UInt32.max) else {
                 throw ZipArchiveReaderError.invalidArchive("Test ZIP entry is too large")
             }
-            localHeaderOffsets[entry.name] = UInt32(archive.count)
+            localHeaderOffsets.append(UInt32(archive.count))
+            let checksum = ArchiveCRC32.checksum(of: entry.data)
             appendUInt32(0x0403_4b50, to: &archive)
             appendUInt16(20, to: &archive)
             appendUInt16(0, to: &archive)
             appendUInt16(0, to: &archive)
             appendUInt16(0, to: &archive)
             appendUInt16(0, to: &archive)
-            appendUInt32(0, to: &archive)
+            appendUInt32(checksum, to: &archive)
             appendUInt32(UInt32(entry.data.count), to: &archive)
             appendUInt32(UInt32(entry.data.count), to: &archive)
             appendUInt16(UInt16(nameData.count), to: &archive)
@@ -3018,11 +3098,11 @@ final class AndroidDatabaseBackupTests: XCTestCase {
 
         let centralDirectoryOffset = UInt32(archive.count)
         var centralDirectory = Data()
-        for entry in entries {
-            guard let nameData = entry.name.data(using: .utf8),
-                  let localHeaderOffset = localHeaderOffsets[entry.name] else {
+        for (index, entry) in entries.enumerated() {
+            guard let nameData = entry.name.data(using: .utf8) else {
                 throw ZipArchiveReaderError.invalidArchive("Test ZIP entry is missing a local header")
             }
+            let checksum = ArchiveCRC32.checksum(of: entry.data)
             appendUInt32(0x0201_4b50, to: &centralDirectory)
             appendUInt16(20, to: &centralDirectory)
             appendUInt16(20, to: &centralDirectory)
@@ -3030,7 +3110,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             appendUInt16(0, to: &centralDirectory)
             appendUInt16(0, to: &centralDirectory)
             appendUInt16(0, to: &centralDirectory)
-            appendUInt32(0, to: &centralDirectory)
+            appendUInt32(checksum, to: &centralDirectory)
             appendUInt32(UInt32(entry.data.count), to: &centralDirectory)
             appendUInt32(UInt32(entry.data.count), to: &centralDirectory)
             appendUInt16(UInt16(nameData.count), to: &centralDirectory)
@@ -3039,7 +3119,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             appendUInt16(0, to: &centralDirectory)
             appendUInt16(0, to: &centralDirectory)
             appendUInt32(0, to: &centralDirectory)
-            appendUInt32(localHeaderOffset, to: &centralDirectory)
+            appendUInt32(localHeaderOffsets[index], to: &centralDirectory)
             centralDirectory.append(nameData)
         }
         guard centralDirectory.count <= Int(UInt32.max), entries.count <= Int(UInt16.max) else {
@@ -3126,8 +3206,9 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             appendUInt16(0, to: &archive)
             archive.append(nameData)
             archive.append(entry.compressedData)
+            let checksum = ArchiveCRC32.checksum(of: entry.uncompressedData)
             appendUInt32(0x0807_4b50, to: &archive)
-            appendUInt32(0, to: &archive)
+            appendUInt32(checksum, to: &archive)
             appendUInt32(UInt32(entry.compressedData.count), to: &archive)
             appendUInt32(UInt32(entry.uncompressedData.count), to: &archive)
         }
@@ -3147,7 +3228,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             appendUInt16(8, to: &centralDirectory)
             appendUInt16(0, to: &centralDirectory)
             appendUInt16(0, to: &centralDirectory)
-            appendUInt32(0, to: &centralDirectory)
+            appendUInt32(ArchiveCRC32.checksum(of: entry.uncompressedData), to: &centralDirectory)
             appendUInt32(UInt32(entry.compressedData.count), to: &centralDirectory)
             appendUInt32(UInt32(entry.uncompressedData.count), to: &centralDirectory)
             appendUInt16(UInt16(nameData.count), to: &centralDirectory)
@@ -3629,6 +3710,83 @@ final class AndroidDatabaseBackupTests: XCTestCase {
     }
 
     /**
+     Rewrites matching local, central, and signed-descriptor size metadata for one fixture entry.
+
+     This keeps the ZIP grammar internally consistent so extraction tests reach the intended
+     decompressor or stored-size validation rather than stopping at header comparison.
+
+     - Parameters:
+       - compressedSize: Coherent compressed byte count to declare.
+       - uncompressedSize: Coherent expanded byte count to declare.
+       - entryName: Exact UTF-8 central-directory identity to mutate.
+       - data: ZIP fixture bytes mutated in place.
+     - Side effects: Rewrites local/central size fields and a signed descriptor when present.
+     - Failure modes: Throws if ZIP metadata is malformed, missing, or uses an unsigned descriptor.
+     */
+    private func replaceZIPEntrySizesEverywhere(
+        compressedSize: UInt32,
+        uncompressedSize: UInt32,
+        for entryName: String,
+        in data: inout Data
+    ) throws {
+        let endRecordOffset = try endOfCentralDirectoryOffset(in: data)
+        let centralDirectoryOffset = Int(readUInt32(data, at: endRecordOffset + 16))
+        let centralDirectorySize = Int(readUInt32(data, at: endRecordOffset + 12))
+        let centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize
+        var offset = centralDirectoryOffset
+
+        while offset < centralDirectoryEnd {
+            guard offset + 46 <= centralDirectoryEnd,
+                  readUInt32(data, at: offset) == 0x0201_4b50 else {
+                throw ZipArchiveReaderError.invalidArchive("Test ZIP central directory is malformed")
+            }
+            let nameLength = Int(readUInt16(data, at: offset + 28))
+            let extraLength = Int(readUInt16(data, at: offset + 30))
+            let commentLength = Int(readUInt16(data, at: offset + 32))
+            let nameStart = offset + 46
+            let nameEnd = nameStart + nameLength
+            guard nameEnd <= centralDirectoryEnd,
+                  let name = String(data: data[nameStart..<nameEnd], encoding: .utf8) else {
+                throw ZipArchiveReaderError.invalidArchive(
+                    "Test ZIP central directory entry name is malformed"
+                )
+            }
+            if name == entryName {
+                let originalCompressedSize = Int(readUInt32(data, at: offset + 20))
+                let localHeaderOffset = Int(readUInt32(data, at: offset + 42))
+                guard localHeaderOffset + 30 <= data.count,
+                      readUInt32(data, at: localHeaderOffset) == 0x0403_4b50 else {
+                    throw ZipArchiveReaderError.invalidArchive("Test ZIP local header is malformed")
+                }
+                replaceUInt32(compressedSize, at: offset + 20, in: &data)
+                replaceUInt32(uncompressedSize, at: offset + 24, in: &data)
+                let flags = readUInt16(data, at: localHeaderOffset + 6)
+                if flags & 0x0008 == 0 {
+                    replaceUInt32(compressedSize, at: localHeaderOffset + 18, in: &data)
+                    replaceUInt32(uncompressedSize, at: localHeaderOffset + 22, in: &data)
+                } else {
+                    let localNameLength = Int(readUInt16(data, at: localHeaderOffset + 26))
+                    let localExtraLength = Int(readUInt16(data, at: localHeaderOffset + 28))
+                    let descriptorOffset = localHeaderOffset + 30 + localNameLength
+                        + localExtraLength + originalCompressedSize
+                    guard descriptorOffset + 16 <= data.count,
+                          readUInt32(data, at: descriptorOffset) == 0x0807_4b50 else {
+                        throw ZipArchiveReaderError.invalidArchive(
+                            "Test ZIP signed data descriptor is missing"
+                        )
+                    }
+                    replaceUInt32(compressedSize, at: descriptorOffset + 8, in: &data)
+                    replaceUInt32(uncompressedSize, at: descriptorOffset + 12, in: &data)
+                }
+                return
+            }
+            offset = nameEnd + extraLength + commentLength
+        }
+
+        throw ZipArchiveReaderError.invalidArchive("Test ZIP central directory entry is missing")
+    }
+
+    /**
      Finds the end-of-central-directory signature in a ZIP fixture.
 
      - Parameter data: Raw ZIP fixture bytes.
@@ -3647,6 +3805,27 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             offset -= 1
         }
         throw ZipArchiveReaderError.missingCentralDirectory
+    }
+
+    /**
+     Creates one deterministic KJVA-identity mapping contract for backup mutation fixtures.
+
+     - Parameters:
+       - start: Inclusive source and persisted KJVA start ordinal.
+       - end: Inclusive source and persisted KJVA end ordinal.
+     - Returns: Verified range accepted by native progress write APIs.
+     - Side effects: Reads bundled canon and mapping fixtures only.
+     - Failure modes: Throws an XCTest unwrap failure when fixture ordinals are invalid.
+     */
+    private func verifiedKJVARange(start: Int, end: Int) throws -> VerifiedKJVAOrdinalRange {
+        try XCTUnwrap(
+            VerifiedKJVAOrdinalRange(
+                resolvingSourceBookInitials: "KJVA",
+                sourceVersification: "KJVA",
+                sourceOrdinalStart: start,
+                sourceOrdinalEnd: end
+            )
+        )
     }
 
     /**

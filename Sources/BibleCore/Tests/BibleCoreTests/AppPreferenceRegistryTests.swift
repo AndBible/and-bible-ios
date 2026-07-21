@@ -17,7 +17,6 @@ final class AppPreferenceRegistryTests: XCTestCase {
      */
     func testAppPreferenceRegistryHasDefinitionForAllKeys() {
         let keys = AppPreferenceKey.allCases
-        XCTAssertEqual(keys.count, 40)
         XCTAssertEqual(Set(keys).count, keys.count)
         XCTAssertEqual(AppPreferenceRegistry.definitions.count, keys.count)
 
@@ -92,28 +91,61 @@ final class AppPreferenceRegistryTests: XCTestCase {
     }
 
     /**
-     Protects the Android application-preferences reset set.
+     Protects Android's exact application-preferences reset allowlist.
 
-     Resettable visible keys must be present, action rows must be excluded, and duplicate keys must
-     not appear. A failure means reset behavior can either skip real preferences or attempt to reset
-     command rows that do not own durable state.
+     The expected values are copied from `SettingsActivity.reset()` rather than inferred from iOS
+     storage or UI visibility. A failure means iOS has added or removed reset behavior without a
+     corresponding Android contract change.
      */
-    func testApplicationPreferencesResetContractExcludesActionRowsAndIncludesVisibleParityKeys() {
-        let resetKeys = AppPreferenceRegistry.applicationPreferencesResetKeys
+    func testApplicationPreferencesResetContractMatchesAndroidAllowlist() {
+        let expected: [AppPreferenceKey] = [
+            .strongsGreekDictionary,
+            .strongsHebrewDictionary,
+            .robinsonGreekMorphology,
+            .disabledWordLookupDictionaries,
+            .navigateToVersePref,
+            .openLinksInSpecialWindowPref,
+            .screenKeepOnPref,
+            .autoFullscreenPref,
+            .fullScreenHideButtonsPref,
+            .hideWindowButtons,
+            .hideBibleReferenceOverlay,
+            .showActiveWindowIndicator,
+            .toolbarButtonActions,
+            .disableTwoStepBookmarking,
+            .doubleTapToFullscreen,
+            .nightModePref3,
+            .requestSdcardPermissionPref,
+            .showErrorBox,
+            .showCalculator,
+            .calculatorPin,
+            .disableBibleBookmarkModalButtons,
+            .disableGenBookmarkModalButtons,
+            .monochromeMode,
+            .disableAnimations,
+            .disableClickToEdit,
+            .fontSizeMultiplier,
+            .bibleViewSwipeMode,
+            .experimentalFeatures,
+            .notesContentType,
+            .localePref,
+            .discreteMode,
+        ]
 
-        XCTAssertTrue(resetKeys.contains(.navigateToVersePref))
-        XCTAssertTrue(resetKeys.contains(.volumeKeysScroll))
-        XCTAssertTrue(resetKeys.contains(.localePref))
-        XCTAssertTrue(resetKeys.contains(.calculatorPin))
-        XCTAssertTrue(resetKeys.contains(.experimentalFeatures))
-        XCTAssertFalse(resetKeys.contains(.discreteHelp))
-        XCTAssertFalse(resetKeys.contains(.openLinks))
-        XCTAssertFalse(resetKeys.contains(.crashApp))
-        XCTAssertEqual(Set(resetKeys).count, resetKeys.count)
+        XCTAssertEqual(AppPreferenceRegistry.applicationPreferencesResetKeys, expected)
+        XCTAssertEqual(Set(expected).count, expected.count)
+        XCTAssertFalse(expected.contains(.volumeKeysScroll))
+        XCTAssertFalse(expected.contains(.bookGridLeftToRight))
+        XCTAssertFalse(expected.contains(.bookGridGroupByCategory))
+        XCTAssertFalse(expected.contains(.bookGridShowLongName))
+        XCTAssertFalse(expected.contains(.bookGridShowProgress))
+        XCTAssertFalse(expected.contains(.enableBluetoothPref))
+        XCTAssertFalse(expected.contains(.searchSelectedTranslations))
+        XCTAssertFalse(expected.contains(.epubSearchType))
     }
 
     /**
-     Verifies application preference reset restores registry defaults without clearing text display.
+     Verifies Settings reset clears Android's allowlist and preserves explicit non-reset sentinels.
 
      Setup:
      - uses an in-memory SwiftData `SettingsStore`
@@ -121,8 +153,8 @@ final class AppPreferenceRegistryTests: XCTestCase {
      - seeds the global text-display JSON to prove reset scope remains application-only
      - snapshots and restores any pre-existing `UserDefaults` values touched by the reset path
 
-     Failure means reset behavior may diverge from Android by either leaving stale application
-     values, resetting action rows indirectly, or clearing reader display settings unexpectedly.
+     Failure means reset behavior may diverge from Android by either leaving allowlisted values,
+     clearing intentionally preserved preferences, or clearing reader display settings unexpectedly.
      */
     func testSettingsStoreResetApplicationPreferencesRestoresRegistryDefaults() throws {
         let userDefaultsKeys: [AppPreferenceKey] = [.localePref, .showCalculator, .calculatorPin, .discreteMode]
@@ -154,6 +186,12 @@ final class AppPreferenceRegistryTests: XCTestCase {
         settingsStore.setBool(.showCalculator, value: true)
         settingsStore.setString(.calculatorPin, value: "9999")
         settingsStore.setBool(.discreteMode, value: true)
+        settingsStore.setBool(.volumeKeysScroll, value: false)
+        settingsStore.setBool(.bookGridLeftToRight, value: true)
+        settingsStore.setBool(.bookGridGroupByCategory, value: true)
+        settingsStore.setBool(.bookGridShowLongName, value: true)
+        settingsStore.setBool(.bookGridShowProgress, value: false)
+        settingsStore.setBool(.enableBluetoothPref, value: false)
         settingsStore.setString(SettingsStore.globalTextDisplaySettingsKey, value: #"{"fontSize":22}"#)
 
         settingsStore.resetApplicationPreferences()
@@ -167,6 +205,12 @@ final class AppPreferenceRegistryTests: XCTestCase {
         XCTAssertEqual(settingsStore.getBool(.showCalculator), false)
         XCTAssertEqual(settingsStore.getString(.calculatorPin), "1234")
         XCTAssertEqual(settingsStore.getBool(.discreteMode), false)
+        XCTAssertFalse(settingsStore.getBool(.volumeKeysScroll))
+        XCTAssertTrue(settingsStore.getBool(.bookGridLeftToRight))
+        XCTAssertTrue(settingsStore.getBool(.bookGridGroupByCategory))
+        XCTAssertTrue(settingsStore.getBool(.bookGridShowLongName))
+        XCTAssertFalse(settingsStore.getBool(.bookGridShowProgress))
+        XCTAssertFalse(settingsStore.getBool(.enableBluetoothPref))
         XCTAssertNotNil(settingsStore.getString(SettingsStore.globalTextDisplaySettingsKey))
     }
 }

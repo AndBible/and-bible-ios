@@ -21,7 +21,7 @@ import {isGenericBookmark} from "@/composables/bookmarks";
 export type TextContentType = "HTML" | "MARKDOWN"
 
 export type BookCategory = "BIBLE" | "COMMENTARY" | "GENERAL_BOOK" | "DICTIONARY"
-export type V11N = string
+export type V11N = Nullable<string>
 export type Features = {
     readonly type?: Nullable<"hebrew-and-greek" | "hebrew" | "greek">,
     readonly keyName?: Nullable<string>
@@ -51,7 +51,7 @@ export type OsisFragment = {
     readonly isNewTestament: boolean,
     readonly features: Features,
     readonly hasStrongs: boolean,
-    readonly ordinalRange: number[],
+    readonly ordinalRange: Nullable<number[]>,
     readonly language: string,
     readonly direction: "rtl" | "ltr",
     readonly isNativeHtml?: boolean,
@@ -128,6 +128,7 @@ export type GenericBookmark = BaseBookmark & {
     readonly keyName: string
     readonly bookmarkToLabels: GenericBookmarkToLabel[]
     readonly highlightedText: string
+    readonly osisFragment: OsisFragment | null
 }
 
 /**
@@ -145,6 +146,7 @@ export type AiDocMarker = BaseBookmark & {
     readonly title: string
     readonly documentInitials: string
     readonly pageKey: string
+    readonly sourcePromptId: Nullable<string>
     readonly sourceBookInitials: Nullable<string>
     readonly sourceBookKey: Nullable<string>
 }

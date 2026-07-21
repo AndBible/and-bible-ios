@@ -180,6 +180,28 @@ final class ReaderSourceGuardTests: XCTestCase {
     }
 
     /**
+     Guards synchronized panes against exchanging module-local ordinals across versifications.
+
+     Android copies one `Verse` identity and resolves it in every target document. The SwiftUI
+     callback is private coordinator state, so this source boundary asserts that the source ordinal
+     is first converted to a stable reference, every target uses `scrollToSynchronizedVerse`, and
+     neither of the former raw-ordinal fallback routes survives. A failure can move a divergent-canon
+     target to an unrelated verse while appearing to synchronize successfully.
+     */
+    func testSynchronizedWindowsRequireVerifiedVerseConversionBeforeTargetNavigation() throws {
+        let readerSource = try bibleUISource(named: "BibleReaderView.swift")
+        let synchronizationSource = try BibleUITestSourceLocator.extractFunction(
+            named: "installSynchronizedScrollingCallback",
+            from: readerSource
+        )
+
+        XCTAssertTrue(synchronizationSource.contains("synchronizedVerseReference(ordinal: ordinal)"))
+        XCTAssertTrue(synchronizationSource.contains("ctrl.scrollToSynchronizedVerse("))
+        XCTAssertFalse(synchronizationSource.contains("ctrl.scrollToOrdinal(ordinal)"))
+        XCTAssertFalse(synchronizationSource.contains("navigateToSynchronizedPosition"))
+    }
+
+    /**
      Loads a Bible reader UI source file for source-level contract tests.
 
      Source assertions are used only where SwiftUI coordinator state is intentionally private and a

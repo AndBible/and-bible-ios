@@ -19,6 +19,245 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
+     Verifies Downloads exposes Android's Unlock action for an installed encrypted row.
+
+     - Setup: Supplies the row planner with locked installed metadata and no active install.
+     - Expected result: Unlock appears after Android's About, Delete, and Delete Index actions.
+     - Failure meaning: Downloads has diverged from the reader picker or suppressed Android's cipher
+       flow again.
+     - Side effects: None.
+     */
+    func testDownloadsRowsExposeUnlockForEncryptedInstalledModules() {
+        let lockedModule = ModuleInfo(
+            name: "LOCKED",
+            description: "Locked Bible",
+            category: .bible,
+            language: "en",
+            moduleDriver: "RawText",
+            isEncrypted: true,
+            isUnlocked: false
+        )
+        let secondBible = ModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en"
+        )
+
+        XCTAssertEqual(
+            ModuleBrowserView.rowActions(
+                installedModule: lockedModule,
+                isBeingInstalled: false,
+                installedModules: [lockedModule, secondBible]
+            ),
+            [.about, .uninstall, .deleteIndex, .unlock]
+        )
+    }
+
+    /**
+     Verifies Downloads does not offer removal for the final installed Bible.
+
+     - Setup: Supplies the Downloads row planner with one installed Bible as both the row and the
+       complete Android-compatible inventory.
+     - Expected result: About and Delete Index remain available while Uninstall is absent.
+     - Failure meaning: The Downloads row can invite an operation that Android and the repository
+       service reject in order to preserve a readable Bible.
+     - Side effects: None.
+     */
+    func testDownloadsRowsHideUninstallForFinalInstalledBible() {
+        let onlyBible = ModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en"
+        )
+
+        XCTAssertEqual(
+            ModuleBrowserView.rowActions(
+                installedModule: onlyBible,
+                isBeingInstalled: false,
+                installedModules: [onlyBible]
+            ),
+            [.about, .deleteIndex]
+        )
+    }
+
+    /**
+     Verifies Downloads wires Unlock through the shared manager-backed submission contract.
+
+     - Setup: Extracts the production Downloads submission function.
+     - Expected result: It delegates key validation to `SwordManager`, refreshes installed rows only
+       from accepted work, and re-presents the module with shared invalid-key feedback on rejection.
+     - Failure meaning: Downloads can diverge from the reader picker by bypassing key verification,
+       omitting its successful refresh, or silently swallowing an invalid passphrase.
+     - Side effects: Reads production source through the test source locator.
+     */
+    func testDownloadsUnlockUsesSharedManagerRefreshAndRetryContract() throws {
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift"
+        )
+        let unlockSource = try BibleUITestSourceLocator.extractFunction(
+            named: "attemptUnlock",
+            from: source
+        )
+
+        XCTAssertTrue(unlockSource.contains("ModuleUnlockActionCoordinator.submit"))
+        XCTAssertTrue(unlockSource.contains("swordManager?.unlockModule"))
+        XCTAssertTrue(unlockSource.contains("refreshInstalledList()"))
+        XCTAssertTrue(unlockSource.contains("ModuleUnlockActionCoordinator.failureMessage"))
+        XCTAssertTrue(unlockSource.contains("pendingUnlockModule = module"))
+        XCTAssertFalse(unlockSource.contains("setCipherKey"))
+    }
+
+    /**
+     Verifies same-initials rows retain independent Android repository identities and row state.
+
+     Setup:
+     - creates two `KJV` rows from different repositories
+     - assigns active extraction to one and a retained error to the other
+     - marks only the first repository as the installed origin
+
+     Expected result:
+     - de-duplication preserves both rows
+     - each row resolves only its repository-scoped activity
+     - an installed origin does not make the other repository row appear installed
+
+     Failure meaning:
+     - starting, cancelling, retrying, or displaying one repository's module can mutate the other,
+       recreating Android parity finding 2.1.
+     */
+    func testModuleBrowserKeepsSameInitialsRepositoriesIndependent() {
+        let crossWire = RemoteModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            sourceName: "CrossWire",
+            version: "2.0"
+        )
+        let mirror = RemoteModuleInfo(
+            name: "KJV",
+            description: "King James Version mirror",
+            category: .bible,
+            language: "en",
+            sourceName: "Mirror",
+            version: "2.0"
+        )
+        let activities: [RemoteModuleIdentity: ModuleBrowserDownloadActivity] = [
+            crossWire.installIdentity: .inProgress(ModuleInstallProgress(phase: .extracting)),
+            mirror.installIdentity: .failed("mirror unavailable"),
+        ]
+        let installed = ModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            version: "2.0",
+            aboutMetadata: ModuleAboutMetadata(repository: "CrossWire")
+        )
+
+        let rows = ModuleBrowserView.deduplicatedModules(from: [crossWire, mirror, crossWire])
+
+        XCTAssertEqual(rows.map(\.installIdentity), [crossWire.installIdentity, mirror.installIdentity])
+        XCTAssertEqual(crossWire.installIdentity.rawValue, "CrossWire--KJV")
+        XCTAssertEqual(
+            ModuleBrowserView.displayStatus(
+                for: crossWire,
+                installedModules: [installed],
+                downloadActivities: activities
+            ),
+            .beingInstalled(progress: ModuleInstallProgress(phase: .extracting))
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.displayStatus(
+                for: mirror,
+                installedModules: [installed],
+                downloadActivities: activities
+            ),
+            .errorDownloading(message: "mirror unavailable")
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.displayStatus(
+                for: mirror,
+                installedModules: [installed],
+                downloadActivities: [:]
+            ),
+            .installable
+        )
+        XCTAssertTrue(
+            ModuleBrowserView.isModuleInstalledFromSelectedRepository(
+                crossWire,
+                installedModules: [installed]
+            )
+        )
+        XCTAssertFalse(
+            ModuleBrowserView.isModuleInstalledFromSelectedRepository(
+                mirror,
+                installedModules: [installed]
+            )
+        )
+    }
+
+    /**
+     Verifies Easy Start storage estimation sums only valid catalog byte counts and fails closed on
+     overflow.
+
+     Failure means the startup flow can skip Android's low-space gate when all sizes are unknown or
+     underestimate a multi-module batch before downloads begin.
+     */
+    func testModuleBrowserCombinesKnownEasyStartInstallSizes() {
+        let known = RemoteModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            sourceName: "CrossWire",
+            installSizeBytes: 12_000
+        )
+        let second = RemoteModuleInfo(
+            name: "NASB",
+            description: "New American Standard Bible",
+            category: .bible,
+            language: "en",
+            sourceName: "Lockman",
+            installSizeBytes: 8_000
+        )
+        let unknown = RemoteModuleInfo(
+            name: "WEB",
+            description: "World English Bible",
+            category: .bible,
+            language: "en",
+            sourceName: "CrossWire"
+        )
+
+        XCTAssertEqual(
+            ModuleBrowserView.combinedInstallSizeBytes(for: [known, unknown, second]),
+            20_000
+        )
+        XCTAssertNil(ModuleBrowserView.combinedInstallSizeBytes(for: [unknown]))
+        let maximum = RemoteModuleInfo(
+            name: "MAX",
+            description: "Maximum",
+            category: .bible,
+            language: "en",
+            sourceName: "Test",
+            installSizeBytes: Int64.max
+        )
+        let oneMore = RemoteModuleInfo(
+            name: "ONE",
+            description: "One more",
+            category: .bible,
+            language: "en",
+            sourceName: "Test",
+            installSizeBytes: 1
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.combinedInstallSizeBytes(for: [maximum, oneMore]),
+            Int64.max
+        )
+    }
+
+    /**
      Verifies module About metadata remains a shared Android-dialog payload rather than a sheet-local
      form.
 
@@ -435,9 +674,9 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
         let recommended = ModuleDownloadConfiguration(
             bibles: ["en": ["REC::CrossWire"]]
         )
-        let activities: [String: ModuleBrowserDownloadActivity] = [
-            "WARN": .inProgress(0.37),
-            "FAIL": .failed("testdict.idx download failed (HTTP 500)")
+        let activities: [RemoteModuleIdentity: ModuleBrowserDownloadActivity] = [
+            modules[3].installIdentity: .inProgress(0.37),
+            modules[4].installIdentity: .failed("testdict.idx download failed (HTTP 500)")
         ]
 
         let filtered = ModuleBrowserView.filteredDownloadModules(
@@ -458,7 +697,7 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
                 installedModules: installed,
                 downloadActivities: activities
             ),
-            .beingInstalled(progressPercent: 37)
+            .beingInstalled(progress: ModuleInstallProgress(phase: .downloading, fraction: 0.37))
         )
         XCTAssertEqual(
             ModuleBrowserView.displayStatus(
@@ -509,7 +748,9 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
         )
         XCTAssertFalse(
             ModuleBrowserView.shouldShowGenericBookmarkUpdateWarning(
-                status: .beingInstalled(progressPercent: 10),
+                status: .beingInstalled(
+                    progress: ModuleInstallProgress(phase: .downloading, fraction: 0.10)
+                ),
                 isInstalled: true,
                 hasGenericBookmarks: true
             )
@@ -602,8 +843,8 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
             badDocuments: nil
         )
 
-        let liveActivities: [String: ModuleBrowserDownloadActivity] = [
-            "WARN": .inProgress(0.25)
+        let liveActivities: [RemoteModuleIdentity: ModuleBrowserDownloadActivity] = [
+            modules[3].installIdentity: .inProgress(0.25)
         ]
         let visibleAfterRowActivity = ModuleBrowserView.filteredDownloadModules(
             modules,
@@ -624,7 +865,7 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
                 installedModules: installed,
                 downloadActivities: liveActivities
             ),
-            .beingInstalled(progressPercent: 25)
+            .beingInstalled(progress: ModuleInstallProgress(phase: .downloading, fraction: 0.25))
         )
 
         let rebuiltSortSnapshot = ModuleBrowserView.downloadListSortSnapshot(
@@ -740,7 +981,9 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
             selectedLanguage: "en",
             searchText: "",
             installedModules: installed,
-            downloadActivities: ["WARN": .inProgress(0.25)],
+            downloadActivities: [
+                RemoteModuleIdentity(repository: "CrossWire", initials: "WARN"): .inProgress(0.25)
+            ],
             recommendedDocuments: recommended,
             badDocuments: bad
         )
@@ -768,9 +1011,72 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
         XCTAssertEqual(ModuleBrowserView.installSizeText(for: modules[0].installSizeBytes), "1.3 MB")
         XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.10", installedVersion: "1.9"))
         XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.0", installedVersion: "1.0"))
-        XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "", installedVersion: "1.0"))
+        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "", installedVersion: "1.0"))
         XCTAssertNil(ModuleBrowserView.installSizeText(for: 0))
         XCTAssertNil(ModuleBrowserView.installSizeText(for: -1))
+    }
+
+    /**
+     Verifies same-repository invalid version metadata remains updateable like Android.
+
+     Android constructs both values with JSword `Version`; any constructor failure deliberately
+     returns `UPGRADE_AVAILABLE`. This test covers blank, malformed, excessive-component, and
+     overflowing metadata, JSword's arbitrary single-character separator, rejected line terminators,
+     and `-1` ordering for omitted components. A failure would hide the only reinstall/update
+     affordance for a damaged same-repository catalog or local descriptor.
+     - Side effects: None.
+     */
+    func testSameRepositoryInvalidVersionsRemainUpdateableLikeAndroid() {
+        let remote = RemoteModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            sourceName: "CrossWire",
+            version: ""
+        )
+        let installed = ModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            version: "1.0",
+            aboutMetadata: ModuleAboutMetadata(repository: "CrossWire")
+        )
+        let differentRepositoryRemote = RemoteModuleInfo(
+            name: "KJV",
+            description: "King James Version mirror",
+            category: .bible,
+            language: "en",
+            sourceName: "Mirror",
+            version: ""
+        )
+
+        XCTAssertEqual(
+            ModuleBrowserView.displayStatus(
+                for: remote,
+                installedModules: [installed],
+                downloadActivities: [:]
+            ),
+            .updateAvailable
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.displayStatus(
+                for: differentRepositoryRemote,
+                installedModules: [installed],
+                downloadActivities: [:]
+            ),
+            .installable
+        )
+        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "invalid", installedVersion: "1.0"))
+        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.0", installedVersion: "invalid"))
+        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.2.3.4.5", installedVersion: "1.0"))
+        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "2147483648", installedVersion: "1.0"))
+        XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1a2", installedVersion: "1.2"))
+        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1a3", installedVersion: "1.2"))
+        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1\n2", installedVersion: "1.2"))
+        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.0", installedVersion: "1"))
+        XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1", installedVersion: "1.0"))
     }
 
     /**
@@ -1146,22 +1452,90 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
-     Verifies install failures reuse the localized download-failure prefix.
+     Verifies install failures reuse Android's localized install-failure sentence.
 
      Android surfaces install failures through the same Download errors affordance as repository
      failures. iOS should keep that shared error contract and avoid introducing hard-coded English
      prefixes inside the overflow dialog.
      */
     func testModuleBrowserDownloadFailureMessageUsesLocalizedPrefix() {
-        let prefix = String(localized: "error_download_failed", defaultValue: "Download failed")
+        let format = String(
+            localized: "install_failed_reason",
+            defaultValue: "Installing module failed for the following reason: %@."
+        )
 
         XCTAssertEqual(
             ModuleBrowserView.downloadFailureMessage("Network unavailable"),
-            "\(prefix): Network unavailable"
+            String(format: format, "Network unavailable")
         )
         XCTAssertEqual(
             ModuleBrowserView.downloadFailureMessage(moduleName: "KJV", message: "Network unavailable"),
-            "\(prefix): KJV: Network unavailable"
+            String(format: format, "KJV: Network unavailable")
+        )
+    }
+
+    /**
+     Verifies phase labels use the Android-backed module-install localization contract.
+
+     Failure means a durable install phase can regress to an English-only key in shipped locales.
+     */
+    func testModuleBrowserInstallPhaseTextUsesLocalizedContracts() {
+        XCTAssertEqual(
+            ModuleBrowserView.installPhaseText(.queued, progressPercent: nil),
+            String(localized: "module_install_phase_queued", defaultValue: "Please wait…")
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.installPhaseText(.downloading, progressPercent: 42),
+            "\(String(localized: "module_install_phase_downloading", defaultValue: "Download")) 42%"
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.installPhaseText(.extracting, progressPercent: nil),
+            String(localized: "extracting_zip_file", defaultValue: "Extracting Zip file now…")
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.installPhaseText(.committing, progressPercent: nil),
+            String(
+                localized: "module_install_phase_committing",
+                defaultValue: "Please wait. Loading modules from a file."
+            )
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.installPhaseText(.complete, progressPercent: nil),
+            String(
+                localized: "install_zip_successfull",
+                defaultValue: "Module was installed successfully"
+            )
+        )
+    }
+
+    /**
+     Verifies cancellation stops being available once live-tree commit begins.
+
+     Failure means Downloads can clear a row as cancelled while publication or rollback is active.
+     */
+    func testModuleInstallProgressCancellationBoundaryMatchesTransactionContract() {
+        XCTAssertTrue(ModuleInstallProgress(phase: .queued).isCancellable)
+        XCTAssertTrue(ModuleInstallProgress(phase: .downloading).isCancellable)
+        XCTAssertTrue(ModuleInstallProgress(phase: .extracting).isCancellable)
+        XCTAssertFalse(ModuleInstallProgress(phase: .committing).isCancellable)
+        XCTAssertFalse(ModuleInstallProgress(phase: .complete).isCancellable)
+    }
+
+    /**
+     Verifies insufficient-storage errors are localized before entering row or alert state.
+
+     Failure means technical English repository descriptions can bypass module-install locale resources.
+     */
+    func testModuleInstallStorageFailureUsesAndroidLocalizedWarning() {
+        XCTAssertEqual(
+            ModuleInstallErrorPresentation.detail(for: ModuleRepositoryError.insufficientStorage(
+                requiredBytes: 2_000,
+                availableBytes: 1_000
+            )),
+            String(
+                localized: "storage_space_warning",
+                defaultValue: "Insufficient local storage space."
+            )
         )
     }
 

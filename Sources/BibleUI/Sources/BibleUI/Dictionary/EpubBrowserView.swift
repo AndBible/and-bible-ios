@@ -6,12 +6,12 @@ import BibleCore
 /**
  Table-of-contents browser for one installed EPUB.
 
- The view loads TOC entries from the selected `EpubReader` and lets the caller navigate to the
- chosen section by href.
+ The view loads TOC entries from the selected `EpubReader` and lets the caller navigate with the
+ numeric general-book key Android persists.
 
  Data dependencies:
  - `reader` provides EPUB metadata and TOC entries
- - `onSelectHref` notifies the parent when the user chooses one TOC target
+ - `onSelectKey` notifies the parent when the user chooses one TOC target
 
  Side effects:
  - loads the TOC when the view appears
@@ -21,8 +21,8 @@ struct EpubBrowserView: View {
     /// Reader for the EPUB whose TOC is being browsed.
     let reader: EpubReader
 
-    /// Callback invoked when the user chooses a TOC href.
-    let onSelectHref: (String) -> Void
+    /// Callback invoked when the user chooses a numeric/composite general-book key.
+    let onSelectKey: (String) -> Void
 
     /// Loaded table-of-contents entries for the EPUB.
     @State private var tocEntries: [EpubReader.TOCEntry] = []
@@ -51,7 +51,7 @@ struct EpubBrowserView: View {
                 } else {
                     List(tocEntries, id: \.ordinal) { entry in
                         Button {
-                            onSelectHref(entry.href)
+                            onSelectKey(entry.key)
                         } label: {
                             Text(entry.title)
                                 .lineLimit(2)

@@ -7,6 +7,212 @@ import UIKit
 
 extension AndBibleUITests {
     /**
+     Verifies the installed Calculator product enforces its launch gate and settings boundary.
+     *
+     * The test writes a persisted false value before launch to prove target bootstrap, rather than
+     * a previous user preference, owns the gate. Seven incorrect equals taps, backgrounding, and a
+     * full relaunch must retain the gate. The exact custom PIN then unlocks, after which the test
+     * confirms Calculator keeps in-app settings access and hides identity-weakening switches.
+     *
+     * - Side effects:
+     *   - resets and seeds the installed Calculator app container with the baseline fixture
+     *   - writes `show_calculator=false` and a custom PIN before launching it
+     *   - backgrounds, terminates, relaunches, and unlocks the Calculator SKU
+     *   - opens the Calculator Settings screen after authorization
+     * - Failure modes:
+     *   - fails when Calculator is not installed on the test simulator
+     *   - fails when target bootstrap does not override the persisted false launch-gate value
+     *   - fails when incorrect attempts or lifecycle transitions bypass exact PIN authorization
+     *   - fails when either hidden switch returns or Calculator-specific help/PIN rows disappear
+     */
+    func testDiscreteProductEnforcesCalculatorLaunchGateAndSettingsBoundary() {
+        let bundleIdentifier = "com.app.calculator.ios"
+        let app = XCUIApplication(bundleIdentifier: bundleIdentifier)
+        trackedApp = app
+        app.launchEnvironment["UITEST_SESSION_ID"] = UUID().uuidString
+        app.launchEnvironment["UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"] = "1"
+        app.launchArguments += ["-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+
+        guard let fixtureToolPath = ProcessInfo.processInfo.environment[
+            "UITEST_FIXTURE_TOOL_PATH"
+        ], !fixtureToolPath.isEmpty else {
+            XCTFail("UITEST_FIXTURE_TOOL_PATH is required for the Calculator launch smoke test.")
+            return
+        }
+        guard let dataContainerPath = ensureInstalledAppDataContainer(
+            for: app,
+            bundleIdentifier: bundleIdentifier
+        ) else {
+            return
+        }
+        let resetResult = runHostProcess(
+            executablePath: fixtureToolPath,
+            arguments: [
+                "reset",
+                "--data-container",
+                dataContainerPath,
+                "--bundle-id",
+                bundleIdentifier,
+            ],
+            timeout: 30
+        )
+        XCTAssertEqual(
+            resetResult.status,
+            0,
+            "Calculator fixture reset failed:\n\(resetResult.stderr)"
+        )
+        let seedResult = runHostProcess(
+            executablePath: fixtureToolPath,
+            arguments: [
+                "seed",
+                "--data-container",
+                dataContainerPath,
+                "--scenario",
+                "baseline",
+                "--bundle-id",
+                bundleIdentifier,
+            ],
+            timeout: 30
+        )
+        XCTAssertEqual(
+            seedResult.status,
+            0,
+            "Calculator fixture seed failed:\n\(seedResult.stderr)"
+        )
+
+        guard let simulatorID = resolveCurrentSimulatorID() else {
+            XCTFail("Unable to resolve the Calculator test simulator UDID.")
+            return
+        }
+        let persistedFalseResult = runHostProcess(
+            executablePath: "/usr/bin/xcrun",
+            arguments: [
+                "simctl",
+                "spawn",
+                simulatorID,
+                "defaults",
+                "write",
+                bundleIdentifier,
+                "show_calculator",
+                "-bool",
+                "false",
+            ],
+            timeout: 10
+        )
+        XCTAssertEqual(
+            persistedFalseResult.status,
+            0,
+            "Could not persist the false Calculator gate precondition:\n\(persistedFalseResult.stderr)"
+        )
+        let customPIN = "08642"
+        let customPINResult = runHostProcess(
+            executablePath: "/usr/bin/xcrun",
+            arguments: [
+                "simctl",
+                "spawn",
+                simulatorID,
+                "defaults",
+                "write",
+                bundleIdentifier,
+                "calculator_pin",
+                customPIN,
+            ],
+            timeout: 10
+        )
+        XCTAssertEqual(
+            customPINResult.status,
+            0,
+            "Could not persist the custom Calculator PIN:\n\(customPINResult.stderr)"
+        )
+
+        app.launch()
+        XCTAssertTrue(
+            app.otherElements["calculatorGateRoot"].waitForExistence(timeout: 20),
+            "Calculator must open at its launch gate even when show_calculator was persisted false."
+        )
+        for _ in 0..<7 {
+            tapElementReliably(requireElement("=", in: app, timeout: 10), timeout: 10)
+        }
+        XCTAssertTrue(
+            app.otherElements["calculatorGateRoot"].exists,
+            "Repeated incorrect equals taps must not unlock the Calculator product."
+        )
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(
+            app.otherElements["calculatorGateRoot"].waitForExistence(timeout: 10),
+            "Backgrounding and activation must retain the Calculator gate."
+        )
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(
+            app.otherElements["calculatorGateRoot"].waitForExistence(timeout: 20),
+            "Relaunch must discard calculator input without weakening PIN authorization."
+        )
+        for key in customPIN.map(String.init) + ["="] {
+            tapElementReliably(requireElement(key, in: app, timeout: 10), timeout: 10)
+        }
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 30),
+            "Only the exact persisted custom PIN should unlock the Calculator product."
+        )
+
+        openSettings(in: app)
+        let settingsForm = requireElement("settingsForm", in: app, timeout: 20)
+        let helpButton = resolveSettingsNavigationControlViaSearch(
+            title: "Read this first!",
+            settingsForm: settingsForm,
+            app: app,
+            timeout: 15,
+            resolveControl: { resolvedElement("discreteHelpButton", in: app) }
+        )
+        XCTAssertNotNil(helpButton, "Calculator Settings must retain its security help row.")
+        guard let helpButton else {
+            return
+        }
+        tapElementReliably(helpButton, timeout: 10)
+        XCTAssertTrue(
+            app.otherElements["calculatorProductSecurityHelp"].waitForExistence(timeout: 10)
+        )
+        XCTAssertTrue(
+            app.staticTexts[
+                "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings."
+            ].exists
+        )
+        tapElementReliably(requireElement("Done", in: app, timeout: 10), timeout: 10)
+
+        let pinRow = resolveSettingsNavigationControlViaSearch(
+            title: "Calculator PIN",
+            settingsForm: settingsForm,
+            app: app,
+            timeout: 15,
+            resolveControl: { resolvedElement("calculatorPinRow", in: app) }
+        )
+        XCTAssertNotNil(pinRow, "Calculator Settings must retain its PIN editor.")
+
+        let discreteModeToggle = resolveSettingsNavigationControlViaSearch(
+            title: "Hide religious symbols",
+            settingsForm: settingsForm,
+            app: app,
+            timeout: 10,
+            resolveControl: { resolvedElement("discreteModeToggle", in: app) }
+        )
+        XCTAssertNil(discreteModeToggle, "Calculator must not expose the runtime icon toggle.")
+
+        let showCalculatorToggle = resolveSettingsNavigationControlViaSearch(
+            title: "Calculator",
+            settingsForm: settingsForm,
+            app: app,
+            timeout: 10,
+            resolveControl: { resolvedElement("showCalculatorToggle", in: app) }
+        )
+        XCTAssertNil(showCalculatorToggle, "Calculator must not expose a launch-gate toggle.")
+    }
+
+    /**
      Verifies Android BackupActivity workflow rows plus iOS database-backup destination handling.
      *
      * Package tests own the backup archive, reset, and restore persistence contracts. This UI smoke

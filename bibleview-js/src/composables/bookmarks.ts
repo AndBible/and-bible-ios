@@ -44,7 +44,7 @@ import {
     OrdinalOffset,
     OrdinalRange,
 } from "@/types/client-objects";
-import {ColorParam} from "@/types/common";
+import {ColorParam, Nullable} from "@/types/common";
 import Color from "color";
 import {bookmarkIcon, customIconMap, editIcon, speakIcon} from "@/composables/fontawesome";
 import {EditActionMode} from "@/types/client-objects";
@@ -78,6 +78,19 @@ export function resolveIcon(bookmark: BaseBookmark, label: LabelAndStyle): Icon 
     return null;
 }
 
+/**
+ * Identifies generic bookmarks that cover a complete source page rather than an ordinal range.
+ *
+ * @param bookmark Bookmark payload received from native code. Android represents whole-page ranges
+ * as `[null, null]`, while older iOS payloads may use a top-level `null`.
+ * @returns `true` when either supported wire representation denotes a whole-page bookmark.
+ * @remarks This is a pure compatibility check and does not mutate bookmark state.
+ */
+export function isWholePageBookmark(bookmark: BaseBookmark): boolean {
+    const range = bookmark.ordinalRange as [number | null, number | null] | null;
+    return range === null || (range[0] === null && range[1] === null);
+}
+
 const allStyleRangeArrays = reactive<Set<Ref<StyleRange[]>>>(new Set());
 const allStyleRanges = computed(() => {
     const allStyles = [];
@@ -97,6 +110,25 @@ export function isGenericBookmark(bookmark: BaseBookmark): bookmark is GenericBo
 
 export function isAiDocMarker(bookmark: BaseBookmark): bookmark is AiDocMarker {
     return bookmark.type === "ai-doc-marker"
+}
+
+/**
+ * Matches a whole-page bookmark or AI marker to an exact generic document page.
+ *
+ * @param bookmark Bookmark or AI marker being considered for the page action menu.
+ * @param bookInitials Exact source document initials.
+ * @param bookKey Exact source page key.
+ * @returns `true` only when both identity fields and the item-specific whole-page contract match.
+ * @remarks This pure predicate performs no bridge calls or reactive mutations.
+ */
+export function isWholePageItem(bookmark: BaseBookmark, bookInitials: string, bookKey: string): boolean {
+    if (isAiDocMarker(bookmark)) {
+        return bookmark.sourceBookInitials === bookInitials && bookmark.sourceBookKey === bookKey;
+    }
+    return isGenericBookmark(bookmark)
+        && bookmark.bookInitials === bookInitials
+        && bookmark.key === bookKey
+        && isWholePageBookmark(bookmark);
 }
 
 export function verseHighlighting(
@@ -217,8 +249,9 @@ export function useGlobalBookmarks(config: Config) {
 
     bookmarkLabels.set(AI_DOC_LABEL_ID, AI_DOC_LABEL_STYLE);
 
+    /** Adds only concrete ordinal ranges to the chooser lookup map; whole-page sentinels have none. */
     function addBookmarkToOrdinalMap(b: BaseBookmark) {
-        if (!b.ordinalRange) return;
+        if (!b.ordinalRange || isWholePageBookmark(b)) return;
         for (let o = b.ordinalRange[0]; o <= b.ordinalRange[1]; o++) {
             const key = getBookmarkOrdinalKey(b, o);
             let bSet: Set<IdType> | undefined = bookmarkIdsByOrdinal.get(key);
@@ -230,8 +263,9 @@ export function useGlobalBookmarks(config: Config) {
         }
     }
 
+    /** Removes only concrete ordinal ranges, mirroring whole-page handling during insertion. */
     function removeBookmarkFromOrdinalMap(b: BaseBookmark) {
-        if (!b.ordinalRange) return;
+        if (!b.ordinalRange || isWholePageBookmark(b)) return;
         for (let o = b.ordinalRange[0]; o <= b.ordinalRange[1]; o++) {
             const bSet = bookmarkIdsByOrdinal.get(getBookmarkOrdinalKey(b, o))
             if (bSet) {
@@ -347,9 +381,26 @@ export function useGlobalBookmarks(config: Config) {
     }
 }
 
+/**
+ * Projects global bookmark state into highlights and marker affordances for one rendered document.
+ *
+ * @param documentId DOM identity of the owning document.
+ * @param ordinalRange Rendered ordinal range, or `null` for non-verse-key generic content.
+ * @param globalBookmarks Reactive bookmark maps and labels shared by the reader.
+ * @param bookInitials Exact source module initials.
+ * @param key Exact generic source key, or `null` for Bible documents.
+ * @param isBibleDocument Whether ordinal-based Bible filtering applies.
+ * @param documentReady Reactive readiness gate for DOM mutation.
+ * @param colorSupport Color adjustment dependency used for marker rendering.
+ * @param config Reactive bookmark visibility configuration.
+ * @param appSettings Reactive display settings.
+ * @returns Reactive style ranges and marker bookmarks for the rendered document.
+ * @remarks Registers mount/unmount hooks, watches bookmark/config state, and mutates generated DOM
+ * highlight and marker nodes. Cleanup removes every listener and node installed by the composable.
+ */
 export function useBookmarks(
     documentId: string,
-    ordinalRange: OrdinalRange,
+    ordinalRange: Nullable<OrdinalRange>,
     {bookmarks, bookmarkMap, bookmarkLabels, labelsUpdated}: {
         bookmarks: Ref<BaseBookmark[]>,
         bookmarkMap: Map<IdType, BaseBookmark>,
@@ -370,12 +421,12 @@ export function useBookmarks(
     onUnmounted(() => isMounted.value--);
 
     const checkOrdinal = (b: BaseBookmark) => {
-        return b.ordinalRange != null
+        return ordinalRange != null && b.ordinalRange != null
             && rangesOverlap(b.ordinalRange, ordinalRange, {addRange: true, inclusive: true})
     };
 
     const checkOrdinalEnd = (b: BaseBookmark) => {
-        if (b.ordinalRange == null) return false
+        if (b.ordinalRange == null || ordinalRange == null || isWholePageBookmark(b)) return false
         const bOrdinalRange: OrdinalRange = [b.ordinalRange[1], b.ordinalRange[1]]
         return rangesOverlap(bOrdinalRange, ordinalRange, {addRange: true, inclusive: true})
     };
@@ -394,7 +445,9 @@ export function useBookmarks(
         if (!documentReady.value) return [];
         return bookmarks.value.filter(b => {
             if (isAiDocMarker(b)) {
-                return isBibleDocument && checkOrdinal(b);
+                return isBibleDocument
+                    ? checkOrdinal(b)
+                    : key != null && isWholePageItem(b, bookInitials, key);
             } else if(isBibleDocument) {
                 return isBibleBookmark(b) && checkOrdinal(b);
             } else {
@@ -506,6 +559,7 @@ export function useBookmarks(
     }
 
     function showHighlight(b: BaseBookmark) {
+        if (isWholePageBookmark(b)) return false;
         return b.offsetRange == null || b.bookInitials === bookInitials;
     }
 
@@ -516,7 +570,7 @@ export function useBookmarks(
             isMounted.value;
             return documentBookmarks.value
                 .filter(b => {
-                    if (isAiDocMarker(b)) return config.showAiDocMarkers && checkOrdinal(b);
+                    if (isAiDocMarker(b)) return config.showAiDocMarkers && checkOrdinalEnd(b);
                     return !showHighlight(b) &&
                         checkOrdinalEnd(b) &&
                         ((b.hasNote && config.showMyNotes) || config.showBookmarks);

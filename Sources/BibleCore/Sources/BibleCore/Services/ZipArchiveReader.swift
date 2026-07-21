@@ -2,6 +2,7 @@
 
 import CLibSword
 import Foundation
+import SwordKit
 
 /**
  Errors raised while reading ZIP archives.
@@ -72,6 +73,9 @@ public struct ZipArchiveFileEntry: Sendable, Equatable {
     /// Uncompressed payload byte count from the central directory.
     public let uncompressedSize: UInt64
 
+    /// CRC32 of the uncompressed payload from the central directory.
+    let checksum: UInt32
+
     /// Offset of the local file header in the archive.
     let localHeaderOffset: UInt64
 
@@ -86,6 +90,7 @@ public struct ZipArchiveFileEntry: Sendable, Equatable {
        - compressionMethod: ZIP compression method.
        - compressedSize: Compressed payload byte count.
        - uncompressedSize: Uncompressed payload byte count.
+       - checksum: CRC32 of the uncompressed payload.
        - localHeaderOffset: Local file header offset.
        - dataOffset: Compressed payload byte offset.
      - Side effects: none.
@@ -96,6 +101,7 @@ public struct ZipArchiveFileEntry: Sendable, Equatable {
         compressionMethod: UInt16,
         compressedSize: UInt64,
         uncompressedSize: UInt64,
+        checksum: UInt32,
         localHeaderOffset: UInt64,
         dataOffset: UInt64
     ) {
@@ -103,6 +109,7 @@ public struct ZipArchiveFileEntry: Sendable, Equatable {
         self.compressionMethod = compressionMethod
         self.compressedSize = compressedSize
         self.uncompressedSize = uncompressedSize
+        self.checksum = checksum
         self.localHeaderOffset = localHeaderOffset
         self.dataOffset = dataOffset
     }
@@ -119,22 +126,39 @@ public enum ZipArchiveReader {
     private static let localFileHeaderSignature: UInt32 = 0x0403_4b50
     private static let centralDirectoryHeaderSignature: UInt32 = 0x0201_4b50
     private static let endOfCentralDirectorySignature: UInt32 = 0x0605_4b50
+    private static let zip64EndOfCentralDirectorySignature: UInt32 = 0x0606_4b50
+    private static let zip64EndOfCentralDirectoryLocatorSignature: UInt32 = 0x0706_4b50
+    private static let zip64ExtendedInformationExtraFieldID: UInt16 = 0x0001
     private static let zip64Sentinel: UInt32 = 0xffff_ffff
     private static let zip64EntryCountSentinel: UInt16 = 0xffff
+    private static let zip64DiskSentinel: UInt16 = 0xffff
     private static let encryptedEntryFlag: UInt16 = 0x0001
     private static let storedCompressionMethod: UInt16 = 0
     private static let deflatedCompressionMethod: UInt16 = 8
     private static let endOfCentralDirectoryMinimumByteCount = 22
+    private static let zip64EndOfCentralDirectoryMinimumByteCount = 56
+    private static let zip64EndOfCentralDirectoryLocatorByteCount = 20
     private static let maximumZipCommentByteCount = 0xffff
     private static let localFileHeaderByteCount = 30
     private static let centralDirectoryHeaderByteCount = 46
     private static let fileExtractionChunkByteCount = 64 * 1024
-    /// Maximum compressed or uncompressed bytes accepted for one eagerly materialized entry.
-    private static let maximumEntryByteCount = 256 * 1024 * 1024
-    /// Maximum compressed bytes accepted across all extracted entries.
-    private static let maximumTotalCompressedByteCount = 512 * 1024 * 1024
-    /// Maximum uncompressed bytes accepted across all extracted entries.
-    private static let maximumTotalUncompressedByteCount = 512 * 1024 * 1024
+    /// Hard metadata bound applied before reserving arrays or scanning central-directory entries.
+    private static let maximumCentralDirectoryEntryCount = 1_000_000
+
+    /// Shared parser policy for generic file-backed/eager ZIP APIs without arbitrary byte ceilings.
+    private static var sharedMetadataLimits: AndroidModuleBackupArchiveLimits {
+        AndroidModuleBackupArchiveLimits(
+            maximumArchiveByteCount: .max,
+            maximumEntryCount: maximumCentralDirectoryEntryCount,
+            maximumEntryCompressedByteCount: .max,
+            maximumEntryExpandedByteCount: .max,
+            maximumAggregateCompressedByteCount: .max,
+            maximumAggregateExpandedByteCount: .max,
+            maximumExpansionRatio: .max,
+            maximumMetadataEntryByteCount: .max,
+            maximumPathByteCount: UInt64(UInt16.max)
+        )
+    }
 
     /**
      Central-directory metadata for one file entry that passed pre-extraction validation.
@@ -144,6 +168,7 @@ public enum ZipArchiveReader {
         let method: UInt16
         let compressedSize: Int
         let uncompressedSize: Int
+        let checksum: UInt32
         let localHeaderOffset: Int
     }
 
@@ -154,6 +179,15 @@ public enum ZipArchiveReader {
         let offset: UInt64
         let size: UInt64
         let entryCount: Int
+    }
+
+    /**
+     Resolved central-directory fields after applying a ZIP64 extended-information record.
+     */
+    private struct ResolvedCentralDirectoryEntry {
+        let compressedSize: UInt64
+        let uncompressedSize: UInt64
+        let localHeaderOffset: UInt64
     }
 
     /**
@@ -169,8 +203,8 @@ public enum ZipArchiveReader {
      - Side effects: Opens, seeks, and reads `url`.
      - Throws:
        - `ZipArchiveReaderError.missingCentralDirectory` when no ZIP end record is present
-       - `ZipArchiveReaderError.invalidArchive` when central-directory metadata is malformed,
-         truncated, multi-disk, ZIP64-only, or contains a non-UTF-8 entry name
+      - `ZipArchiveReaderError.invalidArchive` when central-directory metadata is malformed,
+        truncated, multi-disk, or contains a non-UTF-8 entry name
        - file-system errors from opening, seeking, or reading the archive
      */
     public static func entryNames(inArchiveAt url: URL) throws -> [String] {
@@ -195,19 +229,35 @@ public enum ZipArchiveReader {
      - Side effects: Opens, seeks, and reads metadata from `url`.
      - Throws:
        - `ZipArchiveReaderError.missingCentralDirectory` when no ZIP end record is present
-       - `ZipArchiveReaderError.invalidArchive` for malformed, spanned, ZIP64, encrypted, or
-         out-of-bounds entries
+      - `ZipArchiveReaderError.invalidArchive` for malformed, spanned, encrypted, or out-of-bounds
+        entries
        - `ZipArchiveReaderError.unsupportedCompressionMethod` for non-stored/non-deflated entries
        - file-system errors from opening, seeking, or reading the archive
      */
     public static func fileEntries(inArchiveAt url: URL) throws -> [ZipArchiveFileEntry] {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer {
-            try? handle.close()
+        let metadata: AndroidModuleBackupZIPMetadata
+        do {
+            metadata = try AndroidModuleBackupZIPMetadataParser.parse(
+                at: url,
+                limits: sharedMetadataLimits
+            )
+        } catch let error as AndroidModuleBackupArchivePlannerError {
+            throw zipReaderError(error)
         }
-        let fileSize = try handle.seekToEnd()
-        let centralDirectory = try fileBackedCentralDirectory(from: handle, fileSize: fileSize)
-        return try fileBackedEntries(from: handle, centralDirectory: centralDirectory, fileSize: fileSize)
+        return metadata.entries
+            .filter { !$0.isDirectory }
+            .sorted { $0.centralDirectoryPosition < $1.centralDirectoryPosition }
+            .map { entry in
+                ZipArchiveFileEntry(
+                    name: entry.rawPath,
+                    compressionMethod: entry.compressionMethod,
+                    compressedSize: entry.compressedByteCount,
+                    uncompressedSize: entry.expandedByteCount,
+                    checksum: entry.crc32,
+                    localHeaderOffset: entry.localHeaderOffset,
+                    dataOffset: entry.payloadOffset
+                )
+            }
     }
 
     /**
@@ -238,6 +288,7 @@ public enum ZipArchiveReader {
         to destinationURL: URL,
         fileManager: FileManager = .default
     ) throws {
+        try Task.checkCancellation()
         try fileManager.createDirectory(
             at: destinationURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -252,6 +303,12 @@ public enum ZipArchiveReader {
                 try inflateDeflatedFileEntry(entry, fromArchiveAt: url, to: destinationURL, fileManager: fileManager)
             default:
                 throw ZipArchiveReaderError.unsupportedCompressionMethod(entry.compressionMethod)
+            }
+            try Task.checkCancellation()
+            guard try ArchiveCRC32.checksum(fileAt: destinationURL) == entry.checksum else {
+                throw ZipArchiveReaderError.invalidArchive(
+                    "ZIP entry checksum mismatch: \(entry.name)"
+                )
             }
         } catch {
             try? fileManager.removeItem(at: destinationURL)
@@ -296,9 +353,9 @@ public enum ZipArchiveReader {
     /**
      Extracts supported file entries from raw ZIP data.
 
-     The reader is intentionally eager because Android backup restore needs materialized database
-     bytes before staging SQLite files. Size limits are enforced before local payload extraction or
-     inflation so a malicious archive cannot force unbounded memory allocation.
+     This compatibility API is intentionally eager because its caller already owns complete archive
+     bytes. It applies platform-size checks but no fixed 256/512 MiB policy; production large-file
+     restore uses `fileEntries(inArchiveAt:)` plus bounded streaming extraction.
 
      - Parameter data: Raw ZIP archive bytes.
      - Returns: Uncompressed non-directory entries in central-directory order.
@@ -308,134 +365,282 @@ public enum ZipArchiveReader {
        - throws `ZipArchiveReaderError.invalidArchive` when a header is truncated or inconsistent
        - throws `ZipArchiveReaderError.invalidArchive` when the end record describes a spanned
          archive instead of the single-disk ZIP shape Android backups use
-       - throws `ZipArchiveReaderError.invalidArchive` when declared entry/archive sizes exceed
-         the eager extraction limits
+       - throws `ZipArchiveReaderError.invalidArchive` when declared sizes exceed platform indexes
        - throws `ZipArchiveReaderError.invalidArchive` when materialized entry sizes do not match
          central-directory declarations
        - throws `ZipArchiveReaderError.unsupportedCompressionMethod` for non-stored/non-deflated entries
        - throws `ZipArchiveReaderError.decompressionFailed` when the C inflater cannot decode an entry
      */
     public static func entries(in data: Data) throws -> [ZipArchiveEntry] {
-        let endRecordOffset = try endOfCentralDirectoryOffset(in: data)
-        let diskNumberRaw = readUInt16(data, at: endRecordOffset + 4)
-        let centralDirectoryDiskRaw = readUInt16(data, at: endRecordOffset + 6)
-        let diskEntryCountRaw = readUInt16(data, at: endRecordOffset + 8)
-        let entryCountRaw = readUInt16(data, at: endRecordOffset + 10)
-        let centralDirectorySizeRaw = readUInt32(data, at: endRecordOffset + 12)
-        let centralDirectoryOffsetRaw = readUInt32(data, at: endRecordOffset + 16)
-
-        guard diskEntryCountRaw != zip64EntryCountSentinel,
-              entryCountRaw != zip64EntryCountSentinel,
-              centralDirectorySizeRaw != zip64Sentinel,
-              centralDirectoryOffsetRaw != zip64Sentinel else {
-            throw ZipArchiveReaderError.invalidArchive("ZIP64 archives are not supported")
+        let metadata: AndroidModuleBackupZIPMetadata
+        do {
+            metadata = try AndroidModuleBackupZIPMetadataParser.parse(
+                data,
+                limits: sharedMetadataLimits
+            )
+        } catch let error as AndroidModuleBackupArchivePlannerError {
+            throw zipReaderError(error)
         }
+        return try metadata.entries
+            .filter { !$0.isDirectory }
+            .sorted { $0.centralDirectoryPosition < $1.centralDirectoryPosition }
+            .map { entry in
+            try Task.checkCancellation()
+            guard entry.payloadOffset <= UInt64(Int.max),
+                  entry.compressedByteCount <= UInt64(Int.max),
+                  entry.expandedByteCount <= UInt64(Int.max),
+                  entry.payloadOffset <= UInt64(data.count),
+                  entry.compressedByteCount <= UInt64(data.count) - entry.payloadOffset else {
+                throw ZipArchiveReaderError.invalidArchive("ZIP entry exceeds platform limits")
+            }
+            let start = Int(entry.payloadOffset)
+            let compressedSize = Int(entry.compressedByteCount)
+            let compressedData = Data(data[start..<(start + compressedSize)])
+            let fileData: Data
+            switch entry.compressionMethod {
+            case storedCompressionMethod:
+                fileData = compressedData
+            case deflatedCompressionMethod:
+                fileData = try inflateData(
+                    compressedData,
+                    uncompressedSize: Int(entry.expandedByteCount)
+                )
+                try validateInflatedEntrySize(
+                    fileData.count,
+                    expectedSize: Int(entry.expandedByteCount)
+                )
+            default:
+                throw ZipArchiveReaderError.unsupportedCompressionMethod(entry.compressionMethod)
+            }
+            guard ArchiveCRC32.checksum(of: fileData) == entry.crc32 else {
+                throw ZipArchiveReaderError.invalidArchive(
+                    "ZIP entry checksum mismatch: \(entry.rawPath)"
+                )
+            }
+            return ZipArchiveEntry(name: entry.rawPath, data: fileData)
+        }
+    }
+
+    /**
+     Resolves standard or ZIP64 central-directory metadata from an in-memory archive.
+
+     - Parameters:
+       - data: Complete ZIP archive bytes.
+       - endRecordOffset: Validated EOCD offset in `data`.
+     - Returns: Bounded central-directory location and entry count.
+     - Side effects: none.
+     - Failure modes: Throws for malformed ZIP64 locators/records, multi-disk metadata, excessive
+       entry counts, or directory ranges outside the archive.
+     */
+    private static func dataBackedCentralDirectory(
+        in data: Data,
+        endRecordOffset: Int
+    ) throws -> FileBackedCentralDirectory {
+        let endRecord = Data(
+            data[endRecordOffset..<(endRecordOffset + endOfCentralDirectoryMinimumByteCount)]
+        )
+        return try resolvedCentralDirectory(
+            endRecord: endRecord,
+            endRecordArchiveOffset: UInt64(endRecordOffset),
+            archiveSize: UInt64(data.count),
+            readBytes: { offset, count in
+                guard offset <= UInt64(data.count),
+                      UInt64(count) <= UInt64(data.count) - offset,
+                      offset <= UInt64(Int.max) else {
+                    throw ZipArchiveReaderError.invalidArchive("ZIP64 structure points outside archive")
+                }
+                let start = Int(offset)
+                return Data(data[start..<(start + count)])
+            }
+        )
+    }
+
+    /**
+     Resolves the central directory described by one classic EOCD and an optional ZIP64 trailer.
+
+     ZIP64 lookup is bounded to the fixed locator immediately before the classic EOCD. The locator
+     must point to a complete record ending exactly at that locator, preventing an attacker from
+     triggering an unbounded signature scan or redirecting metadata reads into entry payloads.
+
+     - Parameters:
+       - endRecord: The fixed 22-byte classic EOCD prefix.
+       - endRecordArchiveOffset: Absolute EOCD offset in the archive.
+       - archiveSize: Complete archive byte count.
+       - readBytes: Exact bounded archive reader.
+     - Returns: Validated central-directory location and count.
+     - Side effects: Invokes `readBytes` for ZIP64 metadata when classic fields contain sentinels.
+     - Failure modes: Throws for malformed, inconsistent, multi-disk, oversized, or out-of-bounds
+       central-directory metadata.
+     */
+    private static func resolvedCentralDirectory(
+        endRecord: Data,
+        endRecordArchiveOffset: UInt64,
+        archiveSize: UInt64,
+        readBytes: (UInt64, Int) throws -> Data
+    ) throws -> FileBackedCentralDirectory {
+        let diskNumberRaw = readUInt16(endRecord, at: 4)
+        let centralDirectoryDiskRaw = readUInt16(endRecord, at: 6)
+        let diskEntryCountRaw = readUInt16(endRecord, at: 8)
+        let entryCountRaw = readUInt16(endRecord, at: 10)
+        let centralDirectorySizeRaw = readUInt32(endRecord, at: 12)
+        let centralDirectoryOffsetRaw = readUInt32(endRecord, at: 16)
+        let requiresZip64 = diskNumberRaw == zip64DiskSentinel
+            || centralDirectoryDiskRaw == zip64DiskSentinel
+            || diskEntryCountRaw == zip64EntryCountSentinel
+            || entryCountRaw == zip64EntryCountSentinel
+            || centralDirectorySizeRaw == zip64Sentinel
+            || centralDirectoryOffsetRaw == zip64Sentinel
+
+        if requiresZip64 {
+            return try zip64CentralDirectory(
+                endRecordArchiveOffset: endRecordArchiveOffset,
+                archiveSize: archiveSize,
+                diskNumberRaw: diskNumberRaw,
+                centralDirectoryDiskRaw: centralDirectoryDiskRaw,
+                diskEntryCountRaw: diskEntryCountRaw,
+                entryCountRaw: entryCountRaw,
+                centralDirectorySizeRaw: centralDirectorySizeRaw,
+                centralDirectoryOffsetRaw: centralDirectoryOffsetRaw,
+                readBytes: readBytes
+            )
+        }
+
         guard diskNumberRaw == 0,
               centralDirectoryDiskRaw == 0,
               diskEntryCountRaw == entryCountRaw else {
             throw ZipArchiveReaderError.invalidArchive("Multi-disk ZIP archives are not supported")
         }
-        let entryCount = Int(entryCountRaw)
-        let centralDirectorySize = Int(centralDirectorySizeRaw)
-        let centralDirectoryOffset = Int(centralDirectoryOffsetRaw)
-        guard centralDirectoryOffset >= 0,
-              centralDirectorySize >= 0,
-              centralDirectoryOffset + centralDirectorySize <= data.count else {
+        return try validatedCentralDirectory(
+            offset: UInt64(centralDirectoryOffsetRaw),
+            size: UInt64(centralDirectorySizeRaw),
+            entryCount: UInt64(entryCountRaw),
+            trailerOffset: endRecordArchiveOffset,
+            archiveSize: archiveSize
+        )
+    }
+
+    /**
+     Parses a ZIP64 locator and EOCD record without scanning outside their fixed trailer positions.
+
+     - Parameters: Classic EOCD values plus archive bounds and an exact byte reader.
+     - Returns: ZIP64 central-directory metadata after consistency checks against non-sentinel
+       classic fields.
+     - Side effects: Reads the 20-byte locator and fixed ZIP64 EOCD prefix.
+     - Failure modes: Throws for missing/truncated records, multi-disk archives, inconsistent legacy
+       fields, invalid versions, or records that do not end at the locator.
+     */
+    private static func zip64CentralDirectory(
+        endRecordArchiveOffset: UInt64,
+        archiveSize: UInt64,
+        diskNumberRaw: UInt16,
+        centralDirectoryDiskRaw: UInt16,
+        diskEntryCountRaw: UInt16,
+        entryCountRaw: UInt16,
+        centralDirectorySizeRaw: UInt32,
+        centralDirectoryOffsetRaw: UInt32,
+        readBytes: (UInt64, Int) throws -> Data
+    ) throws -> FileBackedCentralDirectory {
+        guard endRecordArchiveOffset >= UInt64(zip64EndOfCentralDirectoryLocatorByteCount) else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP64 end-of-central-directory locator is missing")
+        }
+        let locatorOffset = endRecordArchiveOffset - UInt64(zip64EndOfCentralDirectoryLocatorByteCount)
+        let locator = try readBytes(locatorOffset, zip64EndOfCentralDirectoryLocatorByteCount)
+        guard readUInt32(locator, at: 0) == zip64EndOfCentralDirectoryLocatorSignature else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP64 end-of-central-directory locator is missing")
+        }
+        let recordDisk = readUInt32(locator, at: 4)
+        let recordOffset = readUInt64(locator, at: 8)
+        let totalDisks = readUInt32(locator, at: 16)
+        guard recordDisk == 0, totalDisks == 1 else {
+            throw ZipArchiveReaderError.invalidArchive("Multi-disk ZIP archives are not supported")
+        }
+        guard recordOffset <= locatorOffset,
+              UInt64(zip64EndOfCentralDirectoryMinimumByteCount) <= locatorOffset - recordOffset else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP64 end-of-central-directory record is truncated")
+        }
+
+        let record = try readBytes(recordOffset, zip64EndOfCentralDirectoryMinimumByteCount)
+        guard readUInt32(record, at: 0) == zip64EndOfCentralDirectorySignature else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP64 end-of-central-directory record is missing")
+        }
+        let recordPayloadSize = readUInt64(record, at: 4)
+        guard recordPayloadSize >= 44,
+              recordPayloadSize <= UInt64.max - 12,
+              recordPayloadSize + 12 == locatorOffset - recordOffset else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP64 end-of-central-directory record has an invalid size")
+        }
+        guard readUInt16(record, at: 14) >= 45 else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP64 end-of-central-directory version is invalid")
+        }
+
+        let diskNumber = readUInt32(record, at: 16)
+        let centralDirectoryDisk = readUInt32(record, at: 20)
+        let diskEntryCount = readUInt64(record, at: 24)
+        let entryCount = readUInt64(record, at: 32)
+        let centralDirectorySize = readUInt64(record, at: 40)
+        let centralDirectoryOffset = readUInt64(record, at: 48)
+        guard diskNumber == 0,
+              centralDirectoryDisk == 0,
+              diskEntryCount == entryCount else {
+            throw ZipArchiveReaderError.invalidArchive("Multi-disk ZIP archives are not supported")
+        }
+        guard (diskNumberRaw == zip64DiskSentinel || UInt32(diskNumberRaw) == diskNumber),
+              (centralDirectoryDiskRaw == zip64DiskSentinel
+                  || UInt32(centralDirectoryDiskRaw) == centralDirectoryDisk),
+              (diskEntryCountRaw == zip64EntryCountSentinel
+                  || UInt64(diskEntryCountRaw) == diskEntryCount),
+              (entryCountRaw == zip64EntryCountSentinel || UInt64(entryCountRaw) == entryCount),
+              (centralDirectorySizeRaw == zip64Sentinel
+                  || UInt64(centralDirectorySizeRaw) == centralDirectorySize),
+              (centralDirectoryOffsetRaw == zip64Sentinel
+                  || UInt64(centralDirectoryOffsetRaw) == centralDirectoryOffset) else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP64 metadata conflicts with the classic end record")
+        }
+
+        return try validatedCentralDirectory(
+            offset: centralDirectoryOffset,
+            size: centralDirectorySize,
+            entryCount: entryCount,
+            trailerOffset: recordOffset,
+            archiveSize: archiveSize
+        )
+    }
+
+    /**
+     Applies archive and allocation bounds to resolved central-directory metadata.
+
+     - Parameters:
+       - offset: Absolute central-directory offset.
+       - size: Central-directory byte count.
+       - entryCount: Declared number of central-directory entries.
+       - trailerOffset: First byte of the ZIP trailer following the directory.
+       - archiveSize: Complete archive byte count.
+     - Returns: Integer-sized metadata safe for parser loops and array reservation.
+     - Side effects: none.
+     - Failure modes: Throws for overflow, out-of-bounds ranges, impossible entry counts, or the
+       configured metadata-count limit.
+     */
+    private static func validatedCentralDirectory(
+        offset: UInt64,
+        size: UInt64,
+        entryCount: UInt64,
+        trailerOffset: UInt64,
+        archiveSize: UInt64
+    ) throws -> FileBackedCentralDirectory {
+        guard offset <= archiveSize,
+              size <= archiveSize - offset,
+              offset <= trailerOffset,
+              size <= trailerOffset - offset else {
             throw ZipArchiveReaderError.invalidArchive("Central directory points outside archive")
         }
-        let centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize
-
-        var fileEntries: [CentralDirectoryFileEntry] = []
-        var offset = centralDirectoryOffset
-        var totalCompressedSize = 0
-        var totalUncompressedSize = 0
-        for _ in 0..<entryCount {
-            guard offset + 46 <= centralDirectoryEnd else {
-                throw ZipArchiveReaderError.invalidArchive("Central directory entry is truncated")
-            }
-            guard readUInt32(data, at: offset) == centralDirectoryHeaderSignature else {
-                throw ZipArchiveReaderError.invalidArchive("Central directory entry has an invalid signature")
-            }
-
-            let method = readUInt16(data, at: offset + 10)
-            let compressedSizeRaw = readUInt32(data, at: offset + 20)
-            let uncompressedSizeRaw = readUInt32(data, at: offset + 24)
-            let nameLength = Int(readUInt16(data, at: offset + 28))
-            let extraLength = Int(readUInt16(data, at: offset + 30))
-            let commentLength = Int(readUInt16(data, at: offset + 32))
-            let localHeaderOffsetRaw = readUInt32(data, at: offset + 42)
-
-            guard compressedSizeRaw != zip64Sentinel,
-                  uncompressedSizeRaw != zip64Sentinel,
-                  localHeaderOffsetRaw != zip64Sentinel else {
-                throw ZipArchiveReaderError.invalidArchive("ZIP64 entry sizes are not supported")
-            }
-
-            let nameStart = offset + 46
-            let nameEnd = nameStart + nameLength
-            guard nameEnd <= centralDirectoryEnd else {
-                throw ZipArchiveReaderError.invalidArchive("Central directory entry name is truncated")
-            }
-            guard let name = String(data: data[nameStart..<nameEnd], encoding: .utf8) else {
-                throw ZipArchiveReaderError.invalidArchive("Central directory entry name is not UTF-8")
-            }
-            let nextOffset = nameEnd + extraLength + commentLength
-            guard nextOffset <= centralDirectoryEnd else {
-                throw ZipArchiveReaderError.invalidArchive("Central directory entry metadata is truncated")
-            }
-            offset = nextOffset
-
-            guard !name.isEmpty, !name.hasSuffix("/") else {
-                continue
-            }
-
-            let localHeaderOffset = Int(localHeaderOffsetRaw)
-            let compressedSize = Int(compressedSizeRaw)
-            let uncompressedSize = Int(uncompressedSizeRaw)
-            try validateEntrySize(compressedSize: compressedSize, uncompressedSize: uncompressedSize)
-            try validateCompressionMethod(method)
-            if method == storedCompressionMethod {
-                try validateStoredEntrySize(compressedSize: compressedSize, uncompressedSize: uncompressedSize)
-            }
-            try accumulateEntrySizes(
-                compressedSize: compressedSize,
-                uncompressedSize: uncompressedSize,
-                totalCompressedSize: &totalCompressedSize,
-                totalUncompressedSize: &totalUncompressedSize
-            )
-            fileEntries.append(
-                CentralDirectoryFileEntry(
-                    name: name,
-                    method: method,
-                    compressedSize: compressedSize,
-                    uncompressedSize: uncompressedSize,
-                    localHeaderOffset: localHeaderOffset
-                )
-            )
+        guard entryCount <= UInt64(maximumCentralDirectoryEntryCount),
+              entryCount <= UInt64(Int.max) else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP archive contains too many entries")
         }
-        guard offset == centralDirectoryEnd else {
-            throw ZipArchiveReaderError.invalidArchive("Central directory contains trailing bytes")
+        guard entryCount == 0 ? size == 0 : entryCount <= size / UInt64(centralDirectoryHeaderByteCount) else {
+            throw ZipArchiveReaderError.invalidArchive("Central directory entry count mismatch")
         }
-
-        return try fileEntries.map { entry in
-            let compressedData = try compressedEntryData(
-                archive: data,
-                localHeaderOffset: entry.localHeaderOffset,
-                compressedSize: entry.compressedSize
-            )
-
-            let fileData: Data
-            switch entry.method {
-            case storedCompressionMethod:
-                fileData = compressedData
-            case deflatedCompressionMethod:
-                fileData = try inflateData(compressedData, uncompressedSize: entry.uncompressedSize)
-                try validateInflatedEntrySize(fileData.count, expectedSize: entry.uncompressedSize)
-            default:
-                throw ZipArchiveReaderError.unsupportedCompressionMethod(entry.method)
-            }
-            return ZipArchiveEntry(name: entry.name, data: fileData)
-        }
+        return FileBackedCentralDirectory(offset: offset, size: size, entryCount: Int(entryCount))
     }
 
     /**
@@ -467,40 +672,17 @@ public enum ZipArchiveReader {
             count: Int(searchLength)
         )
         let endRecordOffset = try endOfCentralDirectoryOffset(inTail: tail)
-
-        let diskNumberRaw = readUInt16(tail, at: endRecordOffset + 4)
-        let centralDirectoryDiskRaw = readUInt16(tail, at: endRecordOffset + 6)
-        let diskEntryCountRaw = readUInt16(tail, at: endRecordOffset + 8)
-        let entryCountRaw = readUInt16(tail, at: endRecordOffset + 10)
-        let centralDirectorySizeRaw = readUInt32(tail, at: endRecordOffset + 12)
-        let centralDirectoryOffsetRaw = readUInt32(tail, at: endRecordOffset + 16)
-
-        guard diskEntryCountRaw != zip64EntryCountSentinel,
-              entryCountRaw != zip64EntryCountSentinel,
-              centralDirectorySizeRaw != zip64Sentinel,
-              centralDirectoryOffsetRaw != zip64Sentinel else {
-            throw ZipArchiveReaderError.invalidArchive("ZIP64 archives are not supported")
-        }
-        guard diskNumberRaw == 0,
-              centralDirectoryDiskRaw == 0,
-              diskEntryCountRaw == entryCountRaw else {
-            throw ZipArchiveReaderError.invalidArchive("Multi-disk ZIP archives are not supported")
-        }
-
-        let entryCount = Int(entryCountRaw)
-        let centralDirectorySize = UInt64(centralDirectorySizeRaw)
-        let centralDirectoryOffset = UInt64(centralDirectoryOffsetRaw)
-        guard centralDirectoryOffset <= fileSize,
-              centralDirectorySize <= fileSize - centralDirectoryOffset else {
-            throw ZipArchiveReaderError.invalidArchive("Central directory points outside archive")
-        }
-        guard centralDirectorySize > 0 || entryCount == 0 else {
-            throw ZipArchiveReaderError.invalidArchive("Central directory entry count mismatch")
-        }
-        return FileBackedCentralDirectory(
-            offset: centralDirectoryOffset,
-            size: centralDirectorySize,
-            entryCount: entryCount
+        let absoluteEndRecordOffset = fileSize - searchLength + UInt64(endRecordOffset)
+        let endRecord = Data(
+            tail[endRecordOffset..<(endRecordOffset + endOfCentralDirectoryMinimumByteCount)]
+        )
+        return try resolvedCentralDirectory(
+            endRecord: endRecord,
+            endRecordArchiveOffset: absoluteEndRecordOffset,
+            archiveSize: fileSize,
+            readBytes: { offset, count in
+                try readZipBytes(from: handle, offset: offset, count: count)
+            }
         )
     }
 
@@ -547,6 +729,19 @@ public enum ZipArchiveReader {
             guard metadataLength <= directoryEnd - offset else {
                 throw ZipArchiveReaderError.invalidArchive("Central directory entry metadata is truncated")
             }
+
+            let extraData = try readZipBytes(
+                from: handle,
+                offset: offset + UInt64(centralDirectoryHeaderByteCount) + nameLength,
+                count: Int(extraLength)
+            )
+            _ = try resolvedCentralDirectoryEntry(
+                compressedSizeRaw: readUInt32(header, at: 20),
+                uncompressedSizeRaw: readUInt32(header, at: 24),
+                localHeaderOffsetRaw: readUInt32(header, at: 42),
+                diskStartRaw: readUInt16(header, at: 34),
+                extraFieldData: extraData
+            )
 
             let nameData = try readZipBytes(
                 from: handle,
@@ -606,25 +801,15 @@ public enum ZipArchiveReader {
 
             let generalPurposeFlags = readUInt16(header, at: 8)
             let method = readUInt16(header, at: 10)
+            let checksum = readUInt32(header, at: 16)
             let compressedSizeRaw = readUInt32(header, at: 20)
             let uncompressedSizeRaw = readUInt32(header, at: 24)
             let nameLength = UInt64(readUInt16(header, at: 28))
             let extraLength = UInt64(readUInt16(header, at: 30))
             let commentLength = UInt64(readUInt16(header, at: 32))
+            let diskStartRaw = readUInt16(header, at: 34)
             let localHeaderOffsetRaw = readUInt32(header, at: 42)
-
-            guard compressedSizeRaw != zip64Sentinel,
-                  uncompressedSizeRaw != zip64Sentinel,
-                  localHeaderOffsetRaw != zip64Sentinel else {
-                throw ZipArchiveReaderError.invalidArchive("ZIP64 entry sizes are not supported")
-            }
             try validateCompressionMethod(method)
-            if method == storedCompressionMethod {
-                try validateStoredEntrySize(
-                    compressedSize: Int(compressedSizeRaw),
-                    uncompressedSize: Int(uncompressedSizeRaw)
-                )
-            }
             guard generalPurposeFlags & encryptedEntryFlag == 0 else {
                 throw ZipArchiveReaderError.invalidArchive("Encrypted ZIP entries are not supported")
             }
@@ -632,6 +817,23 @@ public enum ZipArchiveReader {
             let metadataLength = UInt64(centralDirectoryHeaderByteCount) + nameLength + extraLength + commentLength
             guard metadataLength <= directoryEnd - offset else {
                 throw ZipArchiveReaderError.invalidArchive("Central directory entry metadata is truncated")
+            }
+
+            let extraData = try readZipBytes(
+                from: handle,
+                offset: offset + UInt64(centralDirectoryHeaderByteCount) + nameLength,
+                count: Int(extraLength)
+            )
+            let resolved = try resolvedCentralDirectoryEntry(
+                compressedSizeRaw: compressedSizeRaw,
+                uncompressedSizeRaw: uncompressedSizeRaw,
+                localHeaderOffsetRaw: localHeaderOffsetRaw,
+                diskStartRaw: diskStartRaw,
+                extraFieldData: extraData
+            )
+            if method == storedCompressionMethod,
+               resolved.compressedSize != resolved.uncompressedSize {
+                throw ZipArchiveReaderError.invalidArchive("Stored ZIP entry size metadata is inconsistent")
             }
 
             let nameData = try readZipBytes(
@@ -648,15 +850,17 @@ public enum ZipArchiveReader {
                 continue
             }
 
-            let compressedSize = UInt64(compressedSizeRaw)
-            let uncompressedSize = UInt64(uncompressedSizeRaw)
-            let localHeaderOffset = UInt64(localHeaderOffsetRaw)
+            let compressedSize = resolved.compressedSize
+            let uncompressedSize = resolved.uncompressedSize
+            let localHeaderOffset = resolved.localHeaderOffset
             let dataOffset = try fileBackedDataOffset(
                 localHeaderOffset: localHeaderOffset,
                 from: handle,
                 fileSize: fileSize
             )
-            guard compressedSize <= fileSize - dataOffset else {
+            guard localHeaderOffset < centralDirectory.offset,
+                  dataOffset <= centralDirectory.offset,
+                  compressedSize <= centralDirectory.offset - dataOffset else {
                 throw ZipArchiveReaderError.invalidArchive("Local file payload points outside archive")
             }
 
@@ -666,6 +870,7 @@ public enum ZipArchiveReader {
                     compressionMethod: method,
                     compressedSize: compressedSize,
                     uncompressedSize: uncompressedSize,
+                    checksum: checksum,
                     localHeaderOffset: localHeaderOffset,
                     dataOffset: dataOffset
                 )
@@ -679,22 +884,98 @@ public enum ZipArchiveReader {
     }
 
     /**
-     Validates one central-directory entry's declared compressed and uncompressed sizes.
+     Resolves ZIP64 sentinel fields from one central-directory extended-information extra field.
 
-     The ZIP reader materializes each supported entry in memory, so both the compressed payload
-     slice and inflated result must stay below the per-entry cap before extraction starts.
+     Values are consumed in the order required by the ZIP specification and only when the matching
+     32-bit or 16-bit header field contains its sentinel. All extra-field TLVs are bounds checked,
+     duplicate ZIP64 fields are rejected, and disk-start metadata must describe a single-disk ZIP.
 
      - Parameters:
-       - compressedSize: Declared compressed byte count from the central directory.
-       - uncompressedSize: Declared uncompressed byte count from the central directory.
+       - compressedSizeRaw: Classic 32-bit compressed size.
+       - uncompressedSizeRaw: Classic 32-bit uncompressed size.
+       - localHeaderOffsetRaw: Classic 32-bit local-header offset.
+       - diskStartRaw: Classic 16-bit disk-start number.
+       - extraFieldData: Complete central-directory extra-field byte sequence.
+     - Returns: Fully resolved 64-bit sizes and local-header offset.
      - Side effects: none.
-     - Failure modes: Throws when either declared size exceeds the eager extraction cap.
+     - Failure modes: Throws for truncated/duplicate extra fields, missing required ZIP64 values, or
+       multi-disk metadata.
      */
-    private static func validateEntrySize(compressedSize: Int, uncompressedSize: Int) throws {
-        guard compressedSize <= maximumEntryByteCount,
-              uncompressedSize <= maximumEntryByteCount else {
-            throw ZipArchiveReaderError.invalidArchive("ZIP entry exceeds maximum supported size")
+    private static func resolvedCentralDirectoryEntry(
+        compressedSizeRaw: UInt32,
+        uncompressedSizeRaw: UInt32,
+        localHeaderOffsetRaw: UInt32,
+        diskStartRaw: UInt16,
+        extraFieldData: Data
+    ) throws -> ResolvedCentralDirectoryEntry {
+        var zip64Payload: Data?
+        var offset = 0
+        while offset < extraFieldData.count {
+            guard extraFieldData.count - offset >= 4 else {
+                throw ZipArchiveReaderError.invalidArchive("ZIP extra field header is truncated")
+            }
+            let identifier = readUInt16(extraFieldData, at: offset)
+            let payloadSize = Int(readUInt16(extraFieldData, at: offset + 2))
+            let payloadStart = offset + 4
+            guard payloadSize <= extraFieldData.count - payloadStart else {
+                throw ZipArchiveReaderError.invalidArchive("ZIP extra field payload is truncated")
+            }
+            let payloadEnd = payloadStart + payloadSize
+            if identifier == zip64ExtendedInformationExtraFieldID {
+                guard zip64Payload == nil else {
+                    throw ZipArchiveReaderError.invalidArchive("Duplicate ZIP64 extended-information field")
+                }
+                zip64Payload = Data(extraFieldData[payloadStart..<payloadEnd])
+            }
+            offset = payloadEnd
         }
+
+        let requiresZip64 = compressedSizeRaw == zip64Sentinel
+            || uncompressedSizeRaw == zip64Sentinel
+            || localHeaderOffsetRaw == zip64Sentinel
+            || diskStartRaw == zip64DiskSentinel
+        guard !requiresZip64 || zip64Payload != nil else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP64 extended-information field is missing")
+        }
+
+        let payload = zip64Payload ?? Data()
+        var payloadOffset = 0
+        func nextUInt64(_ field: String) throws -> UInt64 {
+            guard payload.count - payloadOffset >= 8 else {
+                throw ZipArchiveReaderError.invalidArchive("ZIP64 \(field) is truncated")
+            }
+            defer { payloadOffset += 8 }
+            return readUInt64(payload, at: payloadOffset)
+        }
+        func nextUInt32(_ field: String) throws -> UInt32 {
+            guard payload.count - payloadOffset >= 4 else {
+                throw ZipArchiveReaderError.invalidArchive("ZIP64 \(field) is truncated")
+            }
+            defer { payloadOffset += 4 }
+            return readUInt32(payload, at: payloadOffset)
+        }
+
+        let uncompressedSize = try uncompressedSizeRaw == zip64Sentinel
+            ? nextUInt64("uncompressed size")
+            : UInt64(uncompressedSizeRaw)
+        let compressedSize = try compressedSizeRaw == zip64Sentinel
+            ? nextUInt64("compressed size")
+            : UInt64(compressedSizeRaw)
+        let localHeaderOffset = try localHeaderOffsetRaw == zip64Sentinel
+            ? nextUInt64("local-header offset")
+            : UInt64(localHeaderOffsetRaw)
+        let diskStart = try diskStartRaw == zip64DiskSentinel
+            ? nextUInt32("disk-start number")
+            : UInt32(diskStartRaw)
+        guard diskStart == 0 else {
+            throw ZipArchiveReaderError.invalidArchive("Multi-disk ZIP archives are not supported")
+        }
+
+        return ResolvedCentralDirectoryEntry(
+            compressedSize: compressedSize,
+            uncompressedSize: uncompressedSize,
+            localHeaderOffset: localHeaderOffset
+        )
     }
 
     /**
@@ -708,35 +989,6 @@ public enum ZipArchiveReader {
         guard method == storedCompressionMethod || method == deflatedCompressionMethod else {
             throw ZipArchiveReaderError.unsupportedCompressionMethod(method)
         }
-    }
-
-    /**
-     Adds one entry's declared sizes to aggregate extraction totals.
-
-     Aggregate caps protect against archives containing many individually acceptable entries that
-     would still exhaust memory once the eager reader materializes them together.
-
-     - Parameters:
-       - compressedSize: Declared compressed byte count for the current file entry.
-       - uncompressedSize: Declared uncompressed byte count for the current file entry.
-       - totalCompressedSize: Running compressed byte total, mutated on success.
-       - totalUncompressedSize: Running uncompressed byte total, mutated on success.
-     - Side effects: Mutates the running totals after validating the addition.
-     - Failure modes: Throws when adding the entry would exceed aggregate extraction caps.
-     */
-    private static func accumulateEntrySizes(
-        compressedSize: Int,
-        uncompressedSize: Int,
-        totalCompressedSize: inout Int,
-        totalUncompressedSize: inout Int
-    ) throws {
-        guard totalCompressedSize <= maximumTotalCompressedByteCount - compressedSize,
-              totalUncompressedSize <= maximumTotalUncompressedByteCount - uncompressedSize else {
-            throw ZipArchiveReaderError.invalidArchive("ZIP archive exceeds maximum supported size")
-        }
-
-        totalCompressedSize += compressedSize
-        totalUncompressedSize += uncompressedSize
     }
 
     /**
@@ -792,8 +1044,12 @@ public enum ZipArchiveReader {
         var offset = data.count - endOfCentralDirectoryMinimumByteCount
         while offset >= minimumOffset {
             if readUInt32(data, at: offset) == endOfCentralDirectorySignature {
-                return offset
+                let commentLength = Int(readUInt16(data, at: offset + 20))
+                if offset + endOfCentralDirectoryMinimumByteCount + commentLength == data.count {
+                    return offset
+                }
             }
+            if offset == 0 { break }
             offset -= 1
         }
         throw ZipArchiveReaderError.missingCentralDirectory
@@ -834,6 +1090,7 @@ public enum ZipArchiveReader {
        - archive: Raw ZIP archive bytes.
        - localHeaderOffset: Offset of the matching local-file header.
        - compressedSize: Compressed payload size from the central directory.
+       - payloadUpperBound: First central-directory byte; entry payloads must end before it.
      - Returns: Compressed entry payload.
      - Side effects: none.
      - Failure modes: throws when the local header or payload range is malformed.
@@ -841,18 +1098,26 @@ public enum ZipArchiveReader {
     private static func compressedEntryData(
         archive: Data,
         localHeaderOffset: Int,
-        compressedSize: Int
+        compressedSize: Int,
+        payloadUpperBound: Int
     ) throws -> Data {
-        guard localHeaderOffset >= 0,
-              localHeaderOffset + 30 <= archive.count,
+        guard payloadUpperBound >= localFileHeaderByteCount,
+              payloadUpperBound <= archive.count,
+              localHeaderOffset >= 0,
+              localHeaderOffset <= payloadUpperBound - localFileHeaderByteCount,
               readUInt32(archive, at: localHeaderOffset) == localFileHeaderSignature else {
             throw ZipArchiveReaderError.invalidArchive("Local file header is missing or truncated")
         }
 
         let localNameLength = Int(readUInt16(archive, at: localHeaderOffset + 26))
         let localExtraLength = Int(readUInt16(archive, at: localHeaderOffset + 28))
-        let dataStart = localHeaderOffset + 30 + localNameLength + localExtraLength
-        guard compressedSize >= 0, dataStart >= 0, dataStart + compressedSize <= archive.count else {
+        let metadataLength = localFileHeaderByteCount + localNameLength + localExtraLength
+        guard metadataLength <= payloadUpperBound - localHeaderOffset else {
+            throw ZipArchiveReaderError.invalidArchive("Local file payload points outside archive")
+        }
+        let dataStart = localHeaderOffset + metadataLength
+        guard compressedSize >= 0,
+              compressedSize <= payloadUpperBound - dataStart else {
             throw ZipArchiveReaderError.invalidArchive("Local file payload points outside archive")
         }
 
@@ -935,6 +1200,7 @@ public enum ZipArchiveReader {
             try input.seek(toOffset: entry.dataOffset)
             var remaining = entry.compressedSize
             while remaining > 0 {
+                try Task.checkCancellation()
                 let chunkSize = Int(min(remaining, UInt64(fileExtractionChunkByteCount)))
                 guard let chunk = try input.read(upToCount: chunkSize),
                       !chunk.isEmpty else {
@@ -958,9 +1224,9 @@ public enum ZipArchiveReader {
        - url: ZIP archive URL.
        - destinationURL: Output file URL.
        - fileManager: File manager used to inspect the output file.
-     - Side effects: Invokes the shared zlib C bridge to create `destinationURL`.
-     - Failure modes: Throws malformed archive errors for oversized platform offsets and
-       `decompressionFailed` when zlib rejects the entry or writes an unexpected byte count.
+     - Side effects: Streams compressed bytes through the shared zlib bridge into `destinationURL`.
+     - Failure modes: Throws cancellation, malformed archive errors for oversized platform offsets,
+       or `decompressionFailed` when zlib rejects the entry or writes an unexpected byte count.
      */
     private static func inflateDeflatedFileEntry(
         _ entry: ZipArchiveFileEntry,
@@ -968,33 +1234,120 @@ public enum ZipArchiveReader {
         to destinationURL: URL,
         fileManager: FileManager
     ) throws {
-        guard entry.dataOffset <= UInt64(UInt.max),
-              entry.compressedSize <= UInt64(UInt.max) else {
-            throw ZipArchiveReaderError.invalidArchive("ZIP entry is too large")
+        guard let context = raw_inflater_create() else {
+            throw ZipArchiveReaderError.decompressionFailed
         }
-
-        let result = url.withUnsafeFileSystemRepresentation { inputPath in
-            destinationURL.withUnsafeFileSystemRepresentation { outputPath in
-                guard let inputPath, let outputPath else {
-                    return Int32(-1)
+        defer { raw_inflater_destroy(context) }
+        let input = try FileHandle(forReadingFrom: url)
+        defer { try? input.close() }
+        let archiveByteCount = try input.seekToEnd()
+        guard entry.dataOffset <= archiveByteCount,
+              entry.compressedSize <= archiveByteCount - entry.dataOffset else {
+            throw ZipArchiveReaderError.invalidArchive("Local file payload points outside archive")
+        }
+        fileManager.createFile(atPath: destinationURL.path, contents: nil)
+        let output = try FileHandle(forWritingTo: destinationURL)
+        do {
+            try input.seek(toOffset: entry.dataOffset)
+            var remaining = entry.compressedSize
+            var reachedStreamEnd = false
+            while remaining > 0 {
+                try Task.checkCancellation()
+                let chunkByteCount = Int(min(remaining, UInt64(fileExtractionChunkByteCount)))
+                guard let chunk = try input.read(upToCount: chunkByteCount),
+                      chunk.count == chunkByteCount else {
+                    throw ZipArchiveReaderError.invalidArchive("Truncated deflated ZIP entry")
                 }
-                return inflate_raw_file_range_to_file(
-                    inputPath,
-                    UInt(entry.dataOffset),
-                    UInt(entry.compressedSize),
-                    outputPath
+                remaining -= UInt64(chunk.count)
+                reachedStreamEnd = try consumeInflateInput(
+                    chunk,
+                    context: context,
+                    output: output,
+                    outputLimit: entry.uncompressedSize
+                )
+                if reachedStreamEnd, remaining != 0 {
+                    throw ZipArchiveReaderError.decompressionFailed
+                }
+            }
+            while !reachedStreamEnd {
+                try Task.checkCancellation()
+                reachedStreamEnd = try consumeInflateInput(
+                    Data(),
+                    context: context,
+                    output: output,
+                    outputLimit: entry.uncompressedSize
                 )
             }
-        }
-        guard result == 0 else {
-            throw ZipArchiveReaderError.decompressionFailed
+            try output.close()
+        } catch {
+            try? output.close()
+            throw error
         }
 
-        let attributes = try fileManager.attributesOfItem(atPath: destinationURL.path)
-        guard let writtenSize = (attributes[.size] as? NSNumber)?.uint64Value,
-              writtenSize == entry.uncompressedSize else {
+        var consumedByteCount: UInt64 = 0
+        var writtenByteCount: UInt64 = 0
+        guard raw_inflater_metadata(
+            context,
+            &consumedByteCount,
+            &writtenByteCount
+        ) == 0,
+            consumedByteCount == entry.compressedSize,
+            writtenByteCount == entry.uncompressedSize else {
             throw ZipArchiveReaderError.decompressionFailed
         }
+    }
+
+    /** Drains one compressed input slice through the cancellable raw inflater. */
+    private static func consumeInflateInput(
+        _ input: Data,
+        context: UnsafeMutableRawPointer,
+        output: FileHandle,
+        outputLimit: UInt64
+    ) throws -> Bool {
+        var inputOffset = 0
+        repeat {
+            try Task.checkCancellation()
+            var outputBuffer = Data(count: fileExtractionChunkByteCount)
+            let outputCapacity = UInt32(outputBuffer.count)
+            var consumed: UInt32 = 0
+            var produced: UInt32 = 0
+            let result: Int32 = outputBuffer.withUnsafeMutableBytes { outputBytes in
+                input.withUnsafeBytes { inputBytes in
+                    let inputPointer = inputBytes.baseAddress?
+                        .assumingMemoryBound(to: UInt8.self)
+                        .advanced(by: inputOffset)
+                    return raw_inflater_process(
+                        context,
+                        inputPointer,
+                        UInt32(input.count - inputOffset),
+                        outputBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                        outputCapacity,
+                        &consumed,
+                        &produced
+                    )
+                }
+            }
+            guard result >= 0 else { throw ZipArchiveReaderError.decompressionFailed }
+            if produced > 0 {
+                let currentOffset = try output.offset()
+                guard currentOffset <= outputLimit,
+                      UInt64(produced) <= outputLimit - currentOffset else {
+                    throw ZipArchiveReaderError.decompressionFailed
+                }
+                try output.write(contentsOf: outputBuffer.prefix(Int(produced)))
+            }
+            inputOffset += Int(consumed)
+            if result == 1 {
+                guard inputOffset == input.count else {
+                    throw ZipArchiveReaderError.decompressionFailed
+                }
+                return true
+            }
+            guard consumed > 0 || produced > 0 else {
+                throw ZipArchiveReaderError.decompressionFailed
+            }
+        } while inputOffset < input.count || input.isEmpty
+        return false
     }
 
     /**
@@ -1009,6 +1362,7 @@ public enum ZipArchiveReader {
      - Failure modes: Throws when the requested range cannot be read fully.
      */
     private static func readZipBytes(from handle: FileHandle, offset: UInt64, count: Int) throws -> Data {
+        try Task.checkCancellation()
         try handle.seek(toOffset: offset)
         guard count > 0 else {
             return Data()
@@ -1018,6 +1372,23 @@ public enum ZipArchiveReader {
             throw ZipArchiveReaderError.invalidArchive("Truncated ZIP structure")
         }
         return data
+    }
+
+    /** Maps the shared strict metadata parser into the stable generic ZIP-reader error contract. */
+    private static func zipReaderError(
+        _ error: AndroidModuleBackupArchivePlannerError
+    ) -> ZipArchiveReaderError {
+        if case .invalidArchive(let message) = error {
+            if message.contains("end-of-central-directory record is missing") {
+                return .missingCentralDirectory
+            }
+            if message.hasPrefix("Unsupported ZIP compression method "),
+               let method = UInt16(message.split(separator: " ").last ?? "") {
+                return .unsupportedCompressionMethod(method)
+            }
+            return .invalidArchive(message)
+        }
+        return .invalidArchive(error.localizedDescription)
     }
 
     /**
@@ -1052,6 +1423,24 @@ public enum ZipArchiveReader {
         let b2 = UInt32(data[offset + 2]) << 16
         let b3 = UInt32(data[offset + 3]) << 24
         return b0 | b1 | b2 | b3
+    }
+
+    /**
+     Reads a little-endian `UInt64` from the archive byte stream.
+
+     - Parameters:
+       - data: Source bytes.
+       - offset: Byte offset where the integer starts.
+     - Returns: Decoded little-endian integer.
+     - Side effects: none.
+     - Failure modes: Callers must ensure the range exists before invoking this helper.
+     */
+    private static func readUInt64(_ data: Data, at offset: Int) -> UInt64 {
+        var value: UInt64 = 0
+        for byteIndex in 0..<8 {
+            value |= UInt64(data[offset + byteIndex]) << UInt64(byteIndex * 8)
+        }
+        return value
     }
 
     /**

@@ -40,17 +40,45 @@ struct InstalledMyBibleModule: Codable, Sendable {
 
     /// Converts sidecar metadata into the common installed-module row model.
     var moduleInfo: ModuleInfo {
-        ModuleInfo(
+        let resolvedCategory = ModuleCategory(typeString: category)
+        return ModuleInfo(
             name: name,
             description: description,
-            category: ModuleCategory(typeString: category),
+            category: resolvedCategory,
             language: language,
+            moduleDriver: Self.moduleDriver(for: resolvedCategory),
             version: version,
             aboutMetadata: ModuleAboutMetadata(
+                versification: "KJVA",
                 osisId: name,
                 repository: sourceName
             )
         )
+    }
+
+    /**
+     Resolves the Android custom driver represented by a MyBible package sidecar.
+
+     The sidecar predates explicit driver storage but is written only by the MyBible repository
+     installer, so its category identifies the same three custom `BookType`s Android registers.
+
+     - Parameter category: Category captured from the MyBible repository manifest.
+     - Returns: Registered MyBible driver for Bible, commentary, or dictionary packages; otherwise an
+       empty unsupported value.
+     - Side effects: None.
+     - Failure modes: Categories MyBible cannot represent fail closed during module admission.
+     */
+    private static func moduleDriver(for category: ModuleCategory) -> String {
+        switch category {
+        case .bible:
+            return "MyBibleBible"
+        case .commentary:
+            return "MyBibleCommentary"
+        case .dictionary:
+            return "MyBibleDictionary"
+        default:
+            return ""
+        }
     }
 
     /**

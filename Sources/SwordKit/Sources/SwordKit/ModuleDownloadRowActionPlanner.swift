@@ -40,7 +40,7 @@ public enum ModuleDownloadRowAction: Sendable, Equatable {
  Inputs:
  - the matching installed module snapshot, when present
  - whether this row is currently in Android's `BEING_INSTALLED` state
- - whether the current platform has a real cipher-key coordinator for unlock
+ - the complete installed inventory, when available, so the last Bible cannot expose delete
 
  Outputs:
  - ordered actions to show in iOS row affordances
@@ -49,8 +49,7 @@ public enum ModuleDownloadRowAction: Sendable, Equatable {
  - none; this is a deterministic value mapper
 
  Failure modes:
- - unsupported unlock capability deliberately suppresses `.unlock` for encrypted modules rather
-   than surfacing a nonfunctional control
+ - none; every production consumer is wired to the shared manager-backed unlock coordinator
  */
 public struct ModuleDownloadRowActionPlanner: Sendable {
     /**
@@ -60,9 +59,8 @@ public struct ModuleDownloadRowActionPlanner: Sendable {
        - installedModule: Installed module with the same initials, or `nil` when the module is not
          installed locally.
        - isBeingInstalled: Whether the row is in the active install/update state.
-       - supportsUnlock: Whether the current iOS stack can persist and apply encrypted-module
-         cipher keys. Defaults to `false` because the current SWORD adapter only exposes a
-         module-level no-op setter.
+       - installedModules: Complete installed inventory. Pass `nil` only from compatibility callers
+         that cannot yet provide inventory; service-level uninstall remains authoritative.
      - Returns: Android-ordered row actions available for the supplied state.
      - Side effects: none.
      - Failure modes: none.
@@ -70,7 +68,7 @@ public struct ModuleDownloadRowActionPlanner: Sendable {
     public static func availableActions(
         installedModule: ModuleInfo?,
         isBeingInstalled: Bool,
-        supportsUnlock: Bool = false
+        installedModules: [ModuleInfo]? = nil
     ) -> [ModuleDownloadRowAction] {
         var actions: [ModuleDownloadRowAction] = []
 
@@ -82,10 +80,16 @@ public struct ModuleDownloadRowActionPlanner: Sendable {
             return actions
         }
 
-        actions.append(.uninstall)
+        let canUninstall = installedModule.category != .bible
+            || (installedModules.map { inventory in
+                inventory.lazy.filter { $0.category == .bible }.count > 1
+            } ?? true)
+        if canUninstall {
+            actions.append(.uninstall)
+        }
         actions.append(.deleteIndex)
 
-        if installedModule.isEncrypted, supportsUnlock {
+        if installedModule.isEncrypted {
             actions.append(.unlock)
         }
 

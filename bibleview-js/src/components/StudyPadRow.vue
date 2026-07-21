@@ -71,6 +71,7 @@
           :edit-directly="textEntry.new ?? false"
           :text="journalText"
           :content-type="journalContentType"
+          :note-editor-context="studyPadNoteEditorContext"
           :disable-click-to-edit="props.disableClickToEdit"
           :display-accessibility-label="studyPadEditAccessibilityLabel"
           :editor-accessibility-label="studyPadEditorAccessibilityLabel"
@@ -153,6 +154,22 @@ const journalContentType = computed(() => {
     if (isBookmark(props.journalEntry))
         return (props.journalEntry as BaseStudyPadBookmarkItem).notesContentType;
     else if (props.journalEntry.type === "journal") return (props.journalEntry as StudyPadTextItem).contentType;
+    return null;
+});
+
+/**
+ * Resolves the exact Android note-editor entity identity for this StudyPad row.
+ *
+ * @returns A typed bookmark or StudyPad text target; unsupported rows fail closed with null.
+ * @remarks This value is reactive to row replacement and does not mutate persistence.
+ */
+const studyPadNoteEditorContext = computed(() => {
+    if (isBookmark(props.journalEntry)) {
+        return {entityType: "BOOKMARK_NOTE" as const, entityId: props.journalEntry.id};
+    }
+    if (props.journalEntry.type === "journal") {
+        return {entityType: "STUDYPAD_TEXT" as const, entityId: props.journalEntry.id};
+    }
     return null;
 });
 

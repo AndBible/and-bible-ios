@@ -45,6 +45,9 @@ const char *SWMgr_getConfigPath(void *mgr);
 /// Get the prefix path (module install root).
 const char *SWMgr_getPrefixPath(void *mgr);
 
+/// Set the cipher key for a named encrypted module through its owning manager.
+void SWMgr_setCipherKey(void *mgr, const char *moduleName, const char *key);
+
 // --- SWModule (Bible Module) ---
 
 /// Get the module name (abbreviation, e.g., "KJV").
@@ -83,6 +86,14 @@ const char *SWModule_getRenderText(void *module);
 
 /// Get raw entry text at the current position (no markup).
 const char *SWModule_getRawEntry(void *module);
+
+/// Get the current entry converted from its declared source format to canonical OSIS XML.
+/// The returned pointer is thread-local and remains valid until the next call on that thread.
+const char *SWModule_getOSISFragment(void *module);
+
+/// Get the current key's Android-equivalent display name. TreeKey modules return the local node
+/// name while other modules return the key's short text. The pointer is thread-local.
+const char *SWModule_getCurrentKeyName(void *module);
 
 /// Get rendered text as HTML header (for chapter/book intros).
 const char *SWModule_getRenderHeader(void *module);
@@ -137,12 +148,22 @@ long SWModule_getVerseKeyIndex(void *module);
 /// Set the current VerseKey intro-inclusive index. Returns 0 on success and nonzero on failure.
 int SWModule_setVerseKeyIndex(void *module, long index);
 
-/// Map an OSIS book/chapter/verse from a source versification into KJVA using SWORD's
-/// VersificationMgr (the same av11n mapping data JSword uses on Android). Writes the KJVA OSIS
-/// book id, chapter, and verse to the out parameters. The returned book string is owned by the
-/// callee and remains valid until the next call on the same thread. An empty OR unrecognized source
-/// versification name is treated as KJV (iOS libsword renders such modules under KJV). Returns 0 on
-/// success and nonzero when KJVA is missing or the inputs are invalid.
+/// Map an OSIS book/chapter/verse between versifications using SWORD's VersificationMgr (the same
+/// av11n family used by JSword). Writes the target OSIS book id, chapter, and verse
+/// to the out parameters. The returned book string is owned by the callee and remains valid until
+/// the next call on the same thread. Empty source and target versification names are treated as
+/// KJV. An unknown source name follows SWORD module loading and falls back to KJV; an unknown
+/// target is rejected. Returns 0 on success and nonzero when inputs or the target are invalid.
+int SWVersification_mapVerse(const char *sourceVersification,
+                             const char *targetVersification,
+                             const char *osisBookName,
+                             int chapter,
+                             int verse,
+                             const char **targetOsisBookOut,
+                             int *targetChapterOut,
+                             int *targetVerseOut);
+
+/// Convenience wrapper that maps an OSIS book/chapter/verse from a source versification into KJVA.
 int SWVersification_mapVerseToKJVA(const char *sourceVersification,
                                    const char *osisBookName,
                                    int chapter,
@@ -151,12 +172,8 @@ int SWVersification_mapVerseToKJVA(const char *sourceVersification,
                                    int *kjvaChapterOut,
                                    int *kjvaVerseOut);
 
-/// Map an OSIS book/chapter/verse from KJVA into a target versification using SWORD's
-/// VersificationMgr — the reverse of SWVersification_mapVerseToKJVA. Writes the target OSIS book
-/// id, chapter, and verse to the out parameters. The returned book string is owned by the callee
-/// and remains valid until the next call on the same thread. An empty OR unrecognized target
-/// versification name is treated as KJV. Returns 0 on success and nonzero when KJVA is missing or
-/// the inputs are invalid.
+/// Convenience wrapper that maps an OSIS book/chapter/verse from KJVA into a target
+/// versification. Unknown targets are rejected rather than relabeled as KJV.
 int SWVersification_mapVerseFromKJVA(const char *targetVersification,
                                      const char *kjvaOsisBookName,
                                      int chapter,
@@ -165,20 +182,36 @@ int SWVersification_mapVerseFromKJVA(const char *targetVersification,
                                      int *targetChapterOut,
                                      int *targetVerseOut);
 
-/// Decode an intro-inclusive VerseKey index into an OSIS book/chapter/verse within the given
-/// versification, without an installed module. Writes the OSIS book id, chapter, and verse to the
-/// out parameters. The returned book string is owned by the callee and remains valid until the
-/// next call on the same thread. An empty OR unrecognized versification name is treated as KJV.
-/// Returns 0 on success and nonzero when the ordinal is out of range.
+/// Resolve a valid verse reference to its intro-inclusive index in the named versification.
+/// Verse 0 is accepted for chapter introductions. Empty versification names mean KJV; unknown
+/// names and out-of-range references are rejected. Returns 0 on success and nonzero on failure.
+int SWVersification_getReferenceIndex(const char *versification,
+                                      const char *osisBookName,
+                                      int chapter,
+                                      int verse,
+                                      long *indexOut);
+
+/// Resolve an intro-inclusive index to a chapter or verse reference in the named versification.
+/// Module, testament, and book heading indexes are rejected. The returned book string is owned by
+/// the callee and remains valid until the next call on the same thread. Returns 0 on success and
+/// nonzero on failure.
+int SWVersification_getReferenceForIndex(const char *versification,
+                                         long index,
+                                         const char **osisBookOut,
+                                         int *chapterOut,
+                                         int *verseOut);
+
+/// Compatibility alias for resolving a positive intro-inclusive ordinal. Unknown systems fail.
 int SWVersification_decodeOrdinal(const char *versification,
                                   long ordinal,
                                   const char **osisBookOut,
                                   int *chapterOut,
                                   int *verseOut);
 
-/// Reports whether SWORD's VersificationMgr recognizes the given versification name (mirrors
-/// JSword `Versifications.isDefined`). An empty name is the KJV default and is always defined.
-/// Returns 1 when defined, 0 when not.
+/// Return 1 when the named SWORD versification exists and 0 otherwise. Empty names mean KJV.
+int SWVersification_hasSystem(const char *versification);
+
+/// Compatibility alias for SWVersification_hasSystem.
 int SWVersification_isSystemDefined(const char *versification);
 
 /// Pop the last error code. Returns 0 if no error.
@@ -230,14 +263,6 @@ const char *InstallMgr_getRemoteModuleLanguage(void *installMgr,
                                                 const char *sourceName,
                                                 int index);
 
-/// Install a module from a remote source. Returns 0 on success.
-int InstallMgr_installModule(void *installMgr, void *mgr,
-                              const char *sourceName, const char *moduleName);
-
-/// Uninstall a module. Returns 0 on success.
-int InstallMgr_uninstallModule(void *installMgr, void *mgr,
-                                const char *moduleName);
-
 // --- Gzip Decompression (uses zlib, always available) ---
 
 /// Compress data into gzip format. Caller must free result with gunzip_free().
@@ -255,11 +280,57 @@ unsigned char *gunzip_data(const unsigned char *input, unsigned long input_len,
 unsigned char *inflate_raw_data(const unsigned char *input, unsigned long input_len,
                                 unsigned long expected_len, unsigned long *output_len);
 
-/// Decompress raw deflate bytes from a file range into an output file.
-/// Returns 0 on success and nonzero when input, output, seeking, or zlib streaming fails.
+/// Create a streaming raw-DEFLATE encoder for ZIP payloads. Returns NULL on allocation/init error.
+void *raw_deflater_create(void);
+
+/// Consume one raw input slice and produce at most output_capacity bytes. Pass finish=1 only after
+/// the final input slice has been supplied. Returns 1 at stream end, 0 while more calls are needed,
+/// and a negative value on invalid arguments or zlib failure.
+int raw_deflater_process(void *context,
+                         const unsigned char *input,
+                         unsigned int input_len,
+                         int finish,
+                         unsigned char *output,
+                         unsigned int output_capacity,
+                         unsigned int *consumed,
+                         unsigned int *produced);
+
+/// Return finalized ZIP CRC32 and cumulative uncompressed/compressed byte counts.
+int raw_deflater_metadata(void *context,
+                          unsigned int *crc32_value,
+                          unsigned long long *input_byte_count,
+                          unsigned long long *output_byte_count);
+
+/// Release a streaming raw-DEFLATE encoder.
+void raw_deflater_destroy(void *context);
+
+/// Create a streaming raw-DEFLATE decoder for cancellable ZIP extraction.
+void *raw_inflater_create(void);
+
+/// Consume one compressed slice and produce at most output_capacity bytes. Returns 1 at stream end,
+/// 0 while more calls are needed, and a negative value on invalid arguments or zlib failure.
+int raw_inflater_process(void *context,
+                         const unsigned char *input,
+                         unsigned int input_len,
+                         unsigned char *output,
+                         unsigned int output_capacity,
+                         unsigned int *consumed,
+                         unsigned int *produced);
+
+/// Return finalized compressed and expanded byte counts after stream end.
+int raw_inflater_metadata(void *context,
+                          unsigned long long *input_byte_count,
+                          unsigned long long *output_byte_count);
+
+/// Release a streaming raw-DEFLATE decoder.
+void raw_inflater_destroy(void *context);
+
+/// Decompress raw deflate bytes from a file range into an output file without writing more than
+/// output_limit bytes. Returns 0 on success and nonzero on I/O, zlib, or limit failure.
 int inflate_raw_file_range_to_file(const char *input_path,
                                    unsigned long input_offset,
                                    unsigned long input_len,
+                                   unsigned long output_limit,
                                    const char *output_path);
 
 /// Free buffer allocated by gunzip_data or inflate_raw_data.

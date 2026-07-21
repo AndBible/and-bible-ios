@@ -54,6 +54,51 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Builds one generic bookmark DTO for exact document hydration tests.
+
+     - Parameters:
+       - id: Stable bookmark identifier asserted in the serialized document.
+       - bookInitials: Exact source initials expected by the factory provider.
+       - key: Exact source key expected by the factory provider.
+     - Returns: Fully shaped whole-page generic bookmark payload.
+     - Side effects: None.
+     - Failure modes: None; the fixture uses only deterministic literal values.
+     */
+    private func genericBookmarkDataForFactoryTest(
+        id: String,
+        bookInitials: String,
+        key: String
+    ) -> GenericBookmarkData {
+        GenericBookmarkData(
+            id: id,
+            type: "generic-bookmark",
+            hashCode: 1,
+            ordinalRange: [nil, nil],
+            offsetRange: nil,
+            labels: [],
+            bookInitials: bookInitials,
+            bookName: bookInitials,
+            bookAbbreviation: bookInitials,
+            createdAt: 0,
+            text: "",
+            fullText: "",
+            bookmarkToLabels: [],
+            primaryLabelId: nil,
+            lastUpdatedOn: 0,
+            notes: nil,
+            notesContentType: nil,
+            hasNote: false,
+            wholeVerse: true,
+            customIcon: nil,
+            editAction: nil,
+            key: key,
+            keyName: key,
+            highlightedText: "",
+            osisFragment: nil
+        )
+    }
+
+    /**
      Protects Android/JSword ordinal parity for compare links.
 
      The web client sends verse ordinals into the native compare bridge. Android resolves those
@@ -108,16 +153,19 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
             emittedAddDocumentsScript,
             "Expected compare to emit an add_documents script after background payload creation"
         )
-        XCTAssertTrue(
-            addDocumentsScript.contains(#""type":"multi""#),
-            "Expected compare to render through Vue MultiDocument. Script: \(addDocumentsScript)"
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any],
+            "Expected Compare to emit a parsed MultiDocument. Script: \(addDocumentsScript)"
         )
-        XCTAssertTrue(addDocumentsScript.contains(#""compare":true"#))
-        XCTAssertTrue(addDocumentsScript.contains(#""bookCategory":"BIBLE""#))
-        XCTAssertTrue(addDocumentsScript.contains(#""bookInitials":"\#(activeModuleName)""#))
-        XCTAssertTrue(addDocumentsScript.contains(#""bookAbbreviation":"\#(activeModuleName)""#))
-        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"2Cor.2.5-2Cor.2.7""#))
-        XCTAssertTrue(addDocumentsScript.contains(#""keyName":"\#(secondCorinthians) 2:5-7""#))
+        XCTAssertEqual(document["type"] as? String, "multi")
+        XCTAssertEqual(document["compare"] as? Bool, true)
+        let fragments = try XCTUnwrap(document["osisFragments"] as? [[String: Any]])
+        let source = try XCTUnwrap(fragments.first)
+        XCTAssertEqual(source["bookCategory"] as? String, "BIBLE")
+        XCTAssertEqual(source["bookInitials"] as? String, activeModuleName)
+        XCTAssertEqual(source["bookAbbreviation"] as? String, activeModuleName)
+        XCTAssertEqual(source["osisRef"] as? String, "2Cor.2.5-2Cor.2.7")
+        XCTAssertEqual(source["keyName"] as? String, "2 Corinthians 2:5-7")
     }
 
     /**
@@ -134,18 +182,19 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
         let moduleInfo = try XCTUnwrap(manager.installedModules().first { $0.name == "KJV" })
         let builder = BibleReaderCompareDocumentBuilder(
             swordManager: manager,
-            installedBibleModules: [moduleInfo],
-            activeModuleName: "KJV"
+            installedBibleModules: [moduleInfo]
         )
+        let sourceModule = try XCTUnwrap(manager.module(named: "KJV"))
 
         let request = try XCTUnwrap(
             builder.makeRequest(
-                osisBookId: "2Cor",
-                bookName: "2 Corinthians",
-                chapter: 2,
-                isNewTestament: true,
-                startVerse: 5,
-                endVerse: 7
+                bookInitials: "KJV",
+                startOrdinal: try XCTUnwrap(
+                    sourceModule.verseOrdinal(osisBookId: "2Cor", chapter: 2, verse: 5)
+                ),
+                endOrdinal: try XCTUnwrap(
+                    sourceModule.verseOrdinal(osisBookId: "2Cor", chapter: 2, verse: 7)
+                )
             )
         )
         let json = try XCTUnwrap(BibleReaderCompareDocumentBuilder.buildDocumentJSON(request))
@@ -167,6 +216,7 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(fragment["hasStrongs"] as? Bool, true)
         XCTAssertEqual(fragment["language"] as? String, "en")
         XCTAssertEqual(fragment["direction"] as? String, "ltr")
+        XCTAssertEqual(fragment["v11n"] as? String, "KJV")
         XCTAssertEqual(fragment["ordinalRange"] as? [Int], [
             try XCTUnwrap(manager.module(named: "KJV")?.verseOrdinal(osisBookId: "2Cor", chapter: 2, verse: 5)),
             try XCTUnwrap(manager.module(named: "KJV")?.verseOrdinal(osisBookId: "2Cor", chapter: 2, verse: 7)),
@@ -182,6 +232,9 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
      carries them after the schema assembly moved out of `BibleReaderController`.
      */
     func testReaderDocumentPayloadFactoryBuildsBibleDocumentWithProgressContracts() throws {
+        let markerPageID = try XCTUnwrap(
+            UUID(uuidString: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        )
         let factory = BibleReaderDocumentPayloadFactory(
             activeModuleName: "KJV",
             hasStrongs: true,
@@ -215,6 +268,28 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
                 XCTAssertEqual(startOrdinal, 100)
                 XCTAssertEqual(endOrdinal, 103)
                 return [103]
+            },
+            aiDocMarkersForPage: { _, _ in
+                XCTFail("Bible documents must query AI markers by KJVA overlap, not source key")
+                return []
+            },
+            aiDocMarkersForKJVARange: { startOrdinal, endOrdinal in
+                XCTAssertEqual(startOrdinal, 4)
+                XCTAssertEqual(endOrdinal, 6)
+                return [
+                    MyDocumentAIDocMarker(
+                        pageId: markerPageID,
+                        documentId: markerPageID,
+                        documentInitials: "AIDocuments",
+                        pageTitle: "Creation notes",
+                        pageKey: "creation",
+                        kjvOrdinalStart: 4,
+                        kjvOrdinalEnd: 6,
+                        sourcePromptId: nil,
+                        sourceBookInitials: "Vulg",
+                        sourceBookKey: "Gen.1.1-3"
+                    ),
+                ]
             }
         )
 
@@ -226,26 +301,130 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
                     chapter: 1,
                     verseCount: 3,
                     isNewTestament: false,
-                    xml: #"<div><verse osisID="Gen.1.1">In the beginning</verse></div>"#
+                    xml: #"<div><verse osisID="Gen.1.1">In the beginning</verse></div>"#,
+                    moduleName: "King James Version",
+                    moduleAbbreviation: "KJV",
+                    versificationName: "KJV",
+                    aiMarkerKJVAOrdinalRange: [4, 6]
                 )
             )
         )
         let data = try XCTUnwrap(json.data(using: .utf8))
         let document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
+        let marker = try XCTUnwrap((document["aiDocMarkers"] as? [[String: Any]])?.first)
 
         XCTAssertEqual(document["type"] as? String, "bible")
         XCTAssertEqual(document["bookInitials"] as? String, "KJV")
         XCTAssertEqual(document["bookCategory"] as? String, "BIBLE")
+        XCTAssertEqual(document["bookName"] as? String, "King James Version")
+        XCTAssertEqual(document["v11n"] as? String, "KJV")
         XCTAssertEqual(document["key"] as? String, "Gen.1")
         XCTAssertEqual(document["ordinalRange"] as? [Int], [100, 103])
         XCTAssertEqual(document["chapterReadCount"] as? Int, 2)
         XCTAssertEqual(document["memorizedOrdinals"] as? [Int], [100, 101])
         XCTAssertEqual(document["targetOrdinals"] as? [Int], [103])
+        XCTAssertEqual(marker["id"] as? String, markerPageID.uuidString)
+        XCTAssertEqual(marker["sourceBookInitials"] as? String, "Vulg")
+        XCTAssertEqual(marker["sourceBookKey"] as? String, "Gen.1.1-3")
         XCTAssertEqual(fragment["bookInitials"] as? String, "KJV")
         XCTAssertEqual(fragment["bookCategory"] as? String, "BIBLE")
+        XCTAssertEqual(fragment["v11n"] as? String, "KJV")
         XCTAssertEqual(fragment["hasStrongs"] as? Bool, true)
         XCTAssertEqual(fragment["ordinalRange"] as? [Int], [100, 103])
+    }
+
+    /**
+     Verifies Bible AI markers leave KJVA storage ordinals before Vue payload serialization.
+
+     - Setup: Stores the KJVA Psalm 11 superscription through verse 1, whose Android mapping is
+       Vulgate Psalm 10:1-2, and builds a Vulgate Bible document.
+     - Expected result: Marker ordinals and abbreviated text belong to Vulgate, while the marker
+       provider query still receives the authoritative stored KJVA range.
+     - Failure meaning: A divergent-canon reader can place AI markers on unrelated displayed verses
+       by relabeling KJVA endpoints as target-module ordinals.
+     - Side effects: Lazily reads bundled JSword mapping and SWORD canon fixtures only.
+     */
+    func testBibleAIMarkerPayloadConvertsKJVAEndpointsToDisplayedVersification() throws {
+        let kjvaStart = try XCTUnwrap(
+            JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Ps", chapter: 11)
+        )
+        let kjvaEnd = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 11, verse: 1)
+        )
+        let targetStartReference = SwordVersification.Reference(
+            osisBookId: "Ps",
+            chapter: 10,
+            verse: 1
+        )
+        let targetEndReference = SwordVersification.Reference(
+            osisBookId: "Ps",
+            chapter: 10,
+            verse: 2
+        )
+        let targetStart = try XCTUnwrap(
+            SwordVersification.referenceIndex(for: targetStartReference, versification: "Vulg")
+        )
+        let targetEnd = try XCTUnwrap(
+            SwordVersification.referenceIndex(for: targetEndReference, versification: "Vulg")
+        )
+        let markerID = try XCTUnwrap(
+            UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")
+        )
+        let factory = BibleReaderDocumentPayloadFactory(
+            activeModuleName: "VulgFixture",
+            hasStrongs: false,
+            bookmarkPayload: { _ in self.emptyBibleBookmarkDataForFactoryTest() },
+            chapterOrdinalRange: { _, _, _ in
+                XCTFail("Explicit target ordinals must bypass chapter resolution")
+                return nil
+            },
+            kjvBookOrdinal: { _ in nil },
+            chapterReadCount: { _, _ in nil },
+            memorizedOrdinals: { _, _, _ in [] },
+            targetOrdinals: { _, _, _ in [] },
+            aiDocMarkersForKJVARange: { start, end in
+                XCTAssertEqual([start, end], [kjvaStart, kjvaEnd])
+                return [
+                    MyDocumentAIDocMarker(
+                        pageId: markerID,
+                        documentId: markerID,
+                        documentInitials: "AIDocuments",
+                        pageTitle: "Psalm context",
+                        pageKey: "psalm-context",
+                        kjvOrdinalStart: kjvaStart,
+                        kjvOrdinalEnd: kjvaEnd,
+                        sourcePromptId: nil,
+                        sourceBookInitials: "KJV",
+                        sourceBookKey: "Ps.11.0-Ps.11.1"
+                    ),
+                ]
+            }
+        )
+
+        let json = try XCTUnwrap(
+            factory.documentJSON(
+                BibleReaderDocumentPayloadRequest(
+                    osisBookId: "Ps",
+                    bookName: "Psalms",
+                    chapter: 10,
+                    verseCount: 2,
+                    isNewTestament: false,
+                    xml: #"<div><verse osisID="Ps.10.1">Psalm</verse></div>"#,
+                    ordinalRangeOverride: [targetStart, targetEnd],
+                    versificationName: "Vulg",
+                    aiMarkerKJVAOrdinalRange: [kjvaStart, kjvaEnd]
+                )
+            )
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let marker = try XCTUnwrap((payload["aiDocMarkers"] as? [[String: Any]])?.first)
+
+        XCTAssertEqual(marker["ordinalRange"] as? [Int], [targetStart, targetEnd])
+        XCTAssertNotEqual(marker["ordinalRange"] as? [Int], [kjvaStart, kjvaEnd])
+        XCTAssertEqual(marker["verseRangeAbbreviated"] as? String, "Psa 10:1-2")
     }
 
     /**
@@ -280,7 +459,8 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
                     chapter: 1,
                     verseCount: 31,
                     isNewTestament: false,
-                    xml: "<div></div>"
+                    xml: "<div></div>",
+                    versificationName: "KJV"
                 )
             )
         )
@@ -332,6 +512,10 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
      because Vue may try to parse XHTML as OSIS.
      */
     func testReaderDocumentPayloadFactoryBuildsEpubNativeHtmlDocument() throws {
+        let bookmarkID = "11111111-2222-3333-4444-555555555555"
+        let markerPageID = try XCTUnwrap(
+            UUID(uuidString: "66666666-7777-8888-9999-aaaaaaaaaaaa")
+        )
         let factory = BibleReaderDocumentPayloadFactory(
             activeModuleName: "KJV",
             hasStrongs: false,
@@ -346,68 +530,124 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
             kjvBookOrdinal: { _ in nil },
             chapterReadCount: { _, _ in nil },
             memorizedOrdinals: { _, _, _ in [] },
-            targetOrdinals: { _, _, _ in [] }
+            targetOrdinals: { _, _, _ in [] },
+            genericBookmarks: { initials, key in
+                XCTAssertEqual(initials, "Epub-[x]\\^_epub")
+                XCTAssertEqual(key, "17")
+                return [
+                    self.genericBookmarkDataForFactoryTest(
+                        id: bookmarkID,
+                        bookInitials: initials,
+                        key: key
+                    ),
+                ]
+            },
+            aiDocMarkersForPage: { initials, key in
+                XCTAssertEqual(initials, "Epub-[x]\\^_epub")
+                XCTAssertEqual(key, "17")
+                return [
+                    MyDocumentAIDocMarker(
+                        pageId: markerPageID,
+                        documentId: markerPageID,
+                        documentInitials: "AIDocuments",
+                        pageTitle: "Generated answer",
+                        pageKey: "answer",
+                        kjvOrdinalStart: 4,
+                        kjvOrdinalEnd: 4,
+                        sourcePromptId: nil,
+                        sourceBookInitials: initials,
+                        sourceBookKey: key
+                    ),
+                ]
+            }
         )
 
         let json = factory.epubDocumentJSON(
-            bookName: "Chapter One",
-            bookInitials: "Pilgrim",
-            content: #"<html><body><a id="start"></a>Text</body></html>"#
+            bookName: "Pilgrim's Progress",
+            bookInitials: "Epub-[x]\\^_epub",
+            key: "17",
+            keyName: "Chapter One",
+            content: #"<div><span class="ordinal" data-ordinal="8">Text</span></div>"#,
+            ordinalRange: [8, 21],
+            language: "ar"
         )
         let data = try XCTUnwrap(json.data(using: .utf8))
         let document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
+        let genericBookmark = try XCTUnwrap(
+            (document["genericBookmarks"] as? [[String: Any]])?.first
+        )
+        let marker = try XCTUnwrap((document["aiDocMarkers"] as? [[String: Any]])?.first)
 
         XCTAssertEqual(document["type"] as? String, "osis")
+        XCTAssertEqual(document["id"] as? String, "Epub__x____epub_17")
         XCTAssertEqual(document["bookCategory"] as? String, "GENERAL_BOOK")
-        XCTAssertEqual(document["bookInitials"] as? String, "Pilgrim")
-        XCTAssertEqual(document["bookName"] as? String, "Chapter One")
+        XCTAssertEqual(document["bookInitials"] as? String, "Epub-[x]\\^_epub")
+        XCTAssertEqual(document["bookName"] as? String, "Pilgrim's Progress")
+        XCTAssertEqual(document["bookAbbreviation"] as? String, "Pilgrim's Progress")
+        XCTAssertEqual(document["key"] as? String, "17")
+        XCTAssertEqual(document["osisRef"] as? String, "17")
+        XCTAssertEqual(document["annotateRef"] as? String, "17")
+        XCTAssertTrue(document["v11n"] is NSNull)
         XCTAssertEqual(document["isNativeHtml"] as? Bool, true)
-        XCTAssertEqual(document["ordinalRange"] as? [Int], [0, 0])
-        XCTAssertEqual(fragment["xml"] as? String, #"<html><body><a id="start"></a>Text</body></html>"#)
+        XCTAssertEqual(document["ordinalRange"] as? [Int], [8, 21])
+        XCTAssertEqual(genericBookmark["id"] as? String, bookmarkID)
+        XCTAssertEqual(genericBookmark["key"] as? String, "17")
+        XCTAssertEqual(marker["id"] as? String, markerPageID.uuidString)
+        XCTAssertEqual(marker["sourceBookInitials"] as? String, "Epub-[x]\\^_epub")
+        XCTAssertEqual(marker["sourceBookKey"] as? String, "17")
+        XCTAssertEqual(fragment["xml"] as? String, #"<div><span class="ordinal" data-ordinal="8">Text</span></div>"#)
         XCTAssertEqual(fragment["bookCategory"] as? String, "GENERAL_BOOK")
+        XCTAssertEqual(fragment["bookInitials"] as? String, "Epub-[x]\\^_epub")
+        XCTAssertEqual(fragment["bookAbbreviation"] as? String, "Pilgrim's Progress")
+        XCTAssertEqual(fragment["key"] as? String, "Epub-[x]\\^_epub--17")
+        XCTAssertEqual(fragment["keyName"] as? String, "Chapter One")
+        XCTAssertEqual(fragment["osisRef"] as? String, "17")
+        XCTAssertTrue(fragment["v11n"] is NSNull)
+        XCTAssertEqual(fragment["language"] as? String, "ar")
+        XCTAssertEqual(fragment["direction"] as? String, "rtl")
         XCTAssertEqual(fragment["hasStrongs"] as? Bool, false)
-        XCTAssertEqual(fragment["ordinalRange"] as? [Int], [0, 0])
+        XCTAssertEqual(fragment["ordinalRange"] as? [Int], [8, 21])
     }
 
     /**
-     Verifies the controller's auxiliary no-module fallbacks survive delegation to the loader.
+     Verifies missing auxiliary modules fail visibly without fabricating OSIS content.
 
      The module picker and auxiliary browsers can ask the reader to show dictionary, general-book,
-     or map content before a module is selected. Android keeps those as reader documents rather than
-     native alerts. A failure means the extraction changed the visible fallback document or the
-     compact rendered-content state UI tests use to observe the active reader.
+     or map content before a module is selected. The loader must emit the shared error document and
+     complete setup contract while retaining the compact rendered state used by native chrome.
+
+     - Side effects: Creates three controller/bridge pairs and emits one missing-module result for
+       each auxiliary category.
+     - Failure modes: Fails if a path fabricates XML, omits setup fields, loses its visible error, or
+       changes the category-specific rendered-state token.
      */
-    func testReaderAuxiliaryContentNoModuleFallbacksEmitReaderDocuments() throws {
+    func testReaderAuxiliaryContentMissingModulesEmitErrorDocuments() throws {
         let cases: [
             (
                 action: (BibleReaderController) -> Void,
                 category: String,
-                bookCategory: String,
                 renderedState: String,
-                expectedXML: String
+                expectedMessage: String
             )
         ] = [
             (
                 action: { $0.loadDictionaryEntry() },
                 category: "dictionary",
-                bookCategory: "DICTIONARY",
                 renderedState: "category=dictionary;module=none;book=Dictionary;chapter=none;key=none",
-                expectedXML: "No dictionary module is selected."
+                expectedMessage: "No dictionary module is selected. Download one from the module browser."
             ),
             (
                 action: { $0.loadGeneralBookEntry() },
                 category: "general_book",
-                bookCategory: "GENERAL_BOOK",
                 renderedState: "category=general_book;module=none;book=General Book;chapter=none;key=none",
-                expectedXML: "No general book module is selected."
+                expectedMessage: "No general book module is selected. Download one from the module browser."
             ),
             (
                 action: { $0.loadMapEntry() },
                 category: "map",
-                bookCategory: "MAP",
                 renderedState: "category=map;module=none;book=Map;chapter=none;key=none",
-                expectedXML: "No map module is selected."
+                expectedMessage: "No map module is selected. Download one from the module browser."
             ),
         ]
 
@@ -419,16 +659,16 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
 
             let document = try XCTUnwrap(
                 bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any],
-                "Expected \(testCase.category) to emit an auxiliary fallback document"
+                "Expected \(testCase.category) to emit an auxiliary error document"
             )
-            let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
+            let setup = try XCTUnwrap(
+                bridgeEmissionPayload(from: recordedScripts(), event: "setup_content") as? [String: Any]
+            )
 
-            XCTAssertEqual(document["bookCategory"] as? String, testCase.bookCategory)
-            XCTAssertEqual(fragment["bookCategory"] as? String, testCase.bookCategory)
-            XCTAssertTrue(
-                (fragment["xml"] as? String)?.contains(testCase.expectedXML) == true,
-                "Expected \(testCase.category) XML to contain fallback copy"
-            )
+            XCTAssertEqual(document["type"] as? String, "error")
+            XCTAssertEqual(document["errorMessage"] as? String, testCase.expectedMessage)
+            XCTAssertEqual(document["severity"] as? String, "NORMAL")
+            XCTAssertEqual(setup.keys.count, 10)
             XCTAssertEqual(controller.renderedContentState, testCase.renderedState)
         }
     }

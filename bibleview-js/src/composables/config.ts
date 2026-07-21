@@ -99,8 +99,8 @@ export type Config = {
     showOrdinals: boolean,
 }
 
-export type BibleModalButtonId = "BOOKMARK"|"BOOKMARK_NOTES"|"MY_NOTES"|"SHARE"|"COMPARE"|"SPEAK"|"MEMORIZE"|"ADD_PARAGRAPH_BREAK"
-export type GenericModalButtonId = "BOOKMARK"|"BOOKMARK_NOTES"|"SPEAK"|"ADD_PARAGRAPH_BREAK"
+export type BibleModalButtonId = "BOOKMARK"|"BOOKMARK_NOTES"|"MY_NOTES"|"SHARE"|"COMPARE"|"SPEAK"|"MEMORIZE"|"ADD_PARAGRAPH_BREAK"|"LLM_ACTION"
+export type GenericModalButtonId = "BOOKMARK"|"BOOKMARK_NOTES"|"SPEAK"|"ADD_PARAGRAPH_BREAK"|"LLM_ACTION"
 export type ModalButtonId = BibleModalButtonId | GenericModalButtonId
 export type AppSettings = {
     isBottomWindow: boolean,
@@ -130,6 +130,10 @@ export type AppSettings = {
     notesContentType: TextContentType,
     fontSizeMultiplier: number,
     enabledExperimentalFeatures: Feature[],
+    /** Whether at least one Android-compatible AI provider configuration exists. */
+    llmConfigured: boolean,
+    /** Native-localized accessible and visible label for the AI selection command. */
+    llmActionLabel: string,
     autoTrackReading: boolean,
     readingProgressSettings: ReadingProgressSettings,
 }
@@ -230,6 +234,8 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
         notesContentType: "HTML",
         fontSizeMultiplier: 1.0,
         enabledExperimentalFeatures: [],
+        llmConfigured: false,
+        llmActionLabel: "AI actions",
         autoTrackReading: false,
         readingProgressSettings: {
             autoMarkMemorized: true,

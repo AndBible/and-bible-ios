@@ -378,6 +378,113 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         )
     }
 
+    /**
+     Verifies initial My Documents restore includes sync metadata in the content transaction.
+
+     The local store begins with a document, log timestamp, and sentinel fingerprint. An incoming
+     initial backup stages replacement content, log and patch metadata, and new baselines before the
+     final dispatcher checkpoint throws. A fresh context must see the original complete state.
+     Failure means an initial-sync retry can mistake a partially published category for success.
+     */
+    func testRemoteSyncInitialBackupRestoreRollsBackMyDocumentsAndMetadataTogether() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let oldDocumentID = UUID(uuidString: "c1500000-0000-0000-0000-000000000001")!
+        let incomingDocumentID = UUID(uuidString: "c1500000-0000-0000-0000-000000000002")!
+        modelContext.insert(MyDocument(id: oldDocumentID, name: "Local", initials: "LOCAL"))
+        try modelContext.save()
+
+        let oldEntityID = RemoteSyncSQLiteValue.blob(uuidBlob(oldDocumentID))
+        let emptyEntityID = RemoteSyncSQLiteValue.text("")
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
+            [myDocumentLogEntry(tableName: "MyDocument", rowID: oldDocumentID, type: .upsert, timestamp: 1_000)],
+            for: .myDocuments
+        )
+        RemoteSyncRowFingerprintStore(settingsStore: settingsStore).setFingerprint(
+            "old-fingerprint",
+            for: .myDocuments,
+            tableName: "MyDocument",
+            entityID1: oldEntityID,
+            entityID2: emptyEntityID
+        )
+
+        let databaseURL = try makeAndroidMyDocumentsDatabase(
+            documents: [.init(id: incomingDocumentID, name: "Remote", initials: "REMOTE")],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: [],
+            logEntries: [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: incomingDocumentID,
+                    type: .upsert,
+                    timestamp: 2_000,
+                    sourceDevice: "android-initial"
+                )
+            ],
+            syncStatuses: [
+                .init(sourceDevice: "android-initial", patchNumber: 3, sizeBytes: 2_048, appliedDate: 2_500)
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let stagedBackup = RemoteSyncStagedInitialBackup(
+            remoteFile: RemoteSyncFile(
+                id: "/org.andbible.ios-sync-mydocuments/initial.sqlite3.gz",
+                name: "initial.sqlite3.gz",
+                size: 4_096,
+                timestamp: 2_000,
+                parentID: "/org.andbible.ios-sync-mydocuments",
+                mimeType: "application/gzip"
+            ),
+            databaseFileURL: databaseURL,
+            schemaVersion: 4
+        )
+        var checkpointCount = 0
+
+        XCTAssertThrowsError(
+            try RemoteSyncInitialBackupRestoreService().restoreInitialBackup(
+                stagedBackup,
+                category: .myDocuments,
+                modelContext: modelContext,
+                settingsStore: settingsStore,
+                publishCheckpoint: {
+                    checkpointCount += 1
+                    if checkpointCount == 2 {
+                        throw NSError(domain: "InitialRestoreAtomicity", code: 97)
+                    }
+                }
+            )
+        ) { error in
+            XCTAssertEqual((error as NSError).domain, "InitialRestoreAtomicity")
+            XCTAssertEqual((error as NSError).code, 97)
+        }
+        XCTAssertEqual(checkpointCount, 2)
+
+        let verificationContext = ModelContext(container)
+        XCTAssertEqual(try verificationContext.fetch(FetchDescriptor<MyDocument>()).map(\.id), [oldDocumentID])
+        let verificationSettings = SettingsStore(modelContext: verificationContext)
+        XCTAssertEqual(
+            RemoteSyncLogEntryStore(settingsStore: verificationSettings).entry(
+                for: .myDocuments,
+                tableName: "MyDocument",
+                entityID1: oldEntityID,
+                entityID2: emptyEntityID
+            )?.lastUpdated,
+            1_000
+        )
+        XCTAssertTrue(RemoteSyncPatchStatusStore(settingsStore: verificationSettings).statuses(for: .myDocuments).isEmpty)
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: verificationSettings).fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocument",
+                entityID1: oldEntityID,
+                entityID2: emptyEntityID
+            ),
+            "old-fingerprint"
+        )
+    }
+
     func testRemoteSyncMyDocumentSnapshotFiltersOrphansAndRefreshesBaseline() throws {
         let container = try makeModelContainer()
         let modelContext = ModelContext(container)
@@ -634,7 +741,13 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
                 )
             ]
         )
-        XCTAssertEqual(RemoteSyncStateStore(settingsStore: settingsStore).progressState(for: .myDocuments).lastPatchWritten, 1_900)
+        XCTAssertGreaterThan(
+            try XCTUnwrap(
+                RemoteSyncStateStore(settingsStore: settingsStore)
+                    .progressState(for: .myDocuments).lastPatchWritten
+            ),
+            1_735_689_600_000
+        )
         let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
         XCTAssertNotNil(
             fingerprintStore.fingerprint(
@@ -750,7 +863,13 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
                 withPrefix: RemoteSyncRowFingerprintStore(settingsStore: settingsStore).prefix(for: .myDocuments)
             ).isEmpty
         )
-        XCTAssertEqual(RemoteSyncStateStore(settingsStore: settingsStore).progressState(for: .myDocuments).lastPatchWritten, 2_400)
+        XCTAssertGreaterThan(
+            try XCTUnwrap(
+                RemoteSyncStateStore(settingsStore: settingsStore)
+                    .progressState(for: .myDocuments).lastPatchWritten
+            ),
+            2_400
+        )
     }
 
     func testRemoteSyncMyDocumentPatchReplayAppliesUpdatesDeletesAndSparseRows() throws {
@@ -957,6 +1076,215 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         )
     }
 
+    /**
+     Verifies My Documents patch graph and sync metadata roll back as one publish.
+
+     A newer Android patch stages a document rename, replacement log entry, patch status, and
+     refreshed fingerprint. The final publish checkpoint throws. A fresh context must retain the
+     old document, log timestamp, and sentinel fingerprint and must not mark the patch applied.
+     Failure means a retry could skip content that never committed or export from a stale baseline.
+     */
+    func testRemoteSyncMyDocumentPatchReplayRollsBackGraphAndBookkeepingTogether() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "d1500000-0000-0000-0000-000000000001")!
+        modelContext.insert(MyDocument(id: documentID, name: "Local name", initials: "LOCAL"))
+        try modelContext.save()
+
+        let entityID = RemoteSyncSQLiteValue.blob(uuidBlob(documentID))
+        let entityID2 = RemoteSyncSQLiteValue.text("")
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
+            [myDocumentLogEntry(tableName: "MyDocument", rowID: documentID, type: .upsert, timestamp: 1_000)],
+            for: .myDocuments
+        )
+        RemoteSyncRowFingerprintStore(settingsStore: settingsStore).setFingerprint(
+            "old-fingerprint",
+            for: .myDocuments,
+            tableName: "MyDocument",
+            entityID1: entityID,
+            entityID2: entityID2
+        )
+
+        let stagedArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "android-atomic",
+            patchNumber: 5,
+            timestamp: 7_000,
+            documents: [.init(id: documentID, name: "Remote name", initials: "LOCAL")],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: [],
+            logEntries: [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 2_000,
+                    sourceDevice: "android-atomic"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+        var checkpointCount = 0
+
+        XCTAssertThrowsError(
+            try RemoteSyncMyDocumentPatchApplyService().applyPatchArchives(
+                [stagedArchive],
+                modelContext: modelContext,
+                settingsStore: settingsStore,
+                publishCheckpoint: {
+                    checkpointCount += 1
+                    if checkpointCount == 2 {
+                        throw NSError(domain: "MyDocumentPatchAtomicity", code: 89)
+                    }
+                }
+            )
+        ) { error in
+            XCTAssertEqual((error as NSError).domain, "MyDocumentPatchAtomicity")
+            XCTAssertEqual((error as NSError).code, 89)
+        }
+        XCTAssertEqual(checkpointCount, 2)
+
+        let verificationContext = ModelContext(container)
+        XCTAssertEqual(
+            try verificationContext.fetch(FetchDescriptor<MyDocument>()).first(where: { $0.id == documentID })?.name,
+            "Local name"
+        )
+        let verificationSettings = SettingsStore(modelContext: verificationContext)
+        XCTAssertEqual(
+            RemoteSyncLogEntryStore(settingsStore: verificationSettings).entry(
+                for: .myDocuments,
+                tableName: "MyDocument",
+                entityID1: entityID,
+                entityID2: entityID2
+            )?.lastUpdated,
+            1_000
+        )
+        XCTAssertNil(
+            RemoteSyncPatchStatusStore(settingsStore: verificationSettings).status(
+                for: .myDocuments,
+                sourceDevice: "android-atomic",
+                patchNumber: 5
+            )
+        )
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: verificationSettings).fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocument",
+                entityID1: entityID,
+                entityID2: entityID2
+            ),
+            "old-fingerprint"
+        )
+    }
+
+    /**
+     Verifies a strict My Documents baseline projection failure rolls back patch publication.
+
+     Patch replay first projects the old graph successfully, then stages a remote document rename,
+     log watermark, patch status, and replacement fingerprint. The injected checkpoint fails on the
+     second strict projection, which is final baseline refresh. A fresh context must retain the old
+     document and all old metadata. A failure means a graph fetch error can publish content with an
+     empty or partial fingerprint baseline.
+     */
+    func testMyDocumentPatchBaselineSnapshotFailureRollsBackGraphAndMetadata() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "d1600000-0000-0000-0000-000000000001")!
+        modelContext.insert(MyDocument(id: documentID, name: "Local name", initials: "LOCAL"))
+        try modelContext.save()
+
+        let entityID = RemoteSyncSQLiteValue.blob(uuidBlob(documentID))
+        let entityID2 = RemoteSyncSQLiteValue.text("")
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
+            [myDocumentLogEntry(tableName: "MyDocument", rowID: documentID, type: .upsert, timestamp: 1_000)],
+            for: .myDocuments
+        )
+        RemoteSyncRowFingerprintStore(settingsStore: settingsStore).setFingerprint(
+            "old-fingerprint",
+            for: .myDocuments,
+            tableName: "MyDocument",
+            entityID1: entityID,
+            entityID2: entityID2
+        )
+
+        let stagedArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "android-strict",
+            patchNumber: 6,
+            timestamp: 7_000,
+            documents: [.init(id: documentID, name: "Remote name", initials: "LOCAL")],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: [],
+            logEntries: [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 2_000,
+                    sourceDevice: "android-strict"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        var strictProjectionCount = 0
+        let snapshotService = RemoteSyncMyDocumentSnapshotService(
+            strictSnapshotCheckpoint: {
+                strictProjectionCount += 1
+                if strictProjectionCount == 2 {
+                    throw NSError(domain: "MyDocumentBaselineSnapshot", code: 43)
+                }
+            }
+        )
+        let patchService = RemoteSyncMyDocumentPatchApplyService(snapshotService: snapshotService)
+
+        XCTAssertThrowsError(
+            try patchService.applyPatchArchives(
+                [stagedArchive],
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual((error as NSError).domain, "MyDocumentBaselineSnapshot")
+            XCTAssertEqual((error as NSError).code, 43)
+        }
+        XCTAssertEqual(strictProjectionCount, 2)
+
+        let verificationContext = ModelContext(container)
+        XCTAssertEqual(
+            try verificationContext.fetch(FetchDescriptor<MyDocument>()).first(where: { $0.id == documentID })?.name,
+            "Local name"
+        )
+        let verificationSettings = SettingsStore(modelContext: verificationContext)
+        XCTAssertEqual(
+            RemoteSyncLogEntryStore(settingsStore: verificationSettings).entry(
+                for: .myDocuments,
+                tableName: "MyDocument",
+                entityID1: entityID,
+                entityID2: entityID2
+            )?.lastUpdated,
+            1_000
+        )
+        XCTAssertNil(
+            RemoteSyncPatchStatusStore(settingsStore: verificationSettings).status(
+                for: .myDocuments,
+                sourceDevice: "android-strict",
+                patchNumber: 6
+            )
+        )
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: verificationSettings).fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocument",
+                entityID1: entityID,
+                entityID2: entityID2
+            ),
+            "old-fingerprint"
+        )
+    }
+
     func testRemoteSyncMyDocumentPatchReplaySkipsOlderRowsAndRecordsPatchStatus() throws {
         let container = try makeModelContainer()
         let modelContext = ModelContext(container)
@@ -1024,6 +1352,13 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         )
     }
 
+    /**
+     Verifies ordered patch replay applies later document content and records both accepted patches.
+
+     Android's `SELECT * FROM SyncStatus` does not define row order, so the bookkeeping assertion sorts
+     by patch number while the final content assertion proves archive application order. A failure means
+     replay lost an accepted patch or applied the archives in the wrong semantic sequence.
+     */
     func testRemoteSyncMyDocumentPatchReplayAppliesMultipleArchivesInOrder() throws {
         let container = try makeModelContainer()
         let modelContext = ModelContext(container)
@@ -1069,7 +1404,6 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             ],
             for: .myDocuments
         )
-
         let firstArchive = try makeStagedMyDocumentPatchArchive(
             sourceDevice: "pixel",
             patchNumber: 1,
@@ -1117,7 +1451,9 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             "After batch"
         )
         XCTAssertEqual(
-            RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .myDocuments),
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+                .statuses(for: .myDocuments)
+                .sorted { $0.patchNumber < $1.patchNumber },
             [
                 RemoteSyncPatchStatus(
                     sourceDevice: "pixel",
@@ -1415,6 +1751,10 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             ],
             for: .myDocuments
         )
+        RemoteSyncMyDocumentSnapshotService().refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
 
         let stagedArchive = try makeStagedMyDocumentPatchArchive(
             sourceDevice: "pixel",
@@ -1569,6 +1909,7 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             settingsStore: settingsStore
         )
 
+        settingsStore.setString("remote_sync_device_identifier", value: "ios-device")
         existingContent.content = "Edited content only"
         existingCacheEntry.contextHash = "updated-context"
         let newDocument = MyDocument(
@@ -1646,7 +1987,7 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         XCTAssertEqual(unwrappedReport.upsertedAiPageCacheEntryCount, 2)
         XCTAssertEqual(unwrappedReport.deletedRowCount, 0)
         XCTAssertEqual(unwrappedReport.logEntryCount, 6)
-        XCTAssertEqual(unwrappedReport.lastUpdated, 3_000)
+        XCTAssertGreaterThan(unwrappedReport.lastUpdated, 3_000)
 
         let uploadedFiles = await adapter.uploadedFilesSnapshot()
         let uploadedFile = try XCTUnwrap(uploadedFiles.first)
@@ -1694,7 +2035,10 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
                 )
             ]
         )
-        XCTAssertEqual(stateStore.progressState(for: .myDocuments).lastPatchWritten, 3_000)
+        XCTAssertEqual(
+            stateStore.progressState(for: .myDocuments).lastPatchWritten,
+            unwrappedReport.lastUpdated
+        )
         XCTAssertEqual(logEntryStore.entries(for: .myDocuments).count, 8)
 
         let currentSnapshot = snapshotService.snapshotCurrentState(
@@ -2027,7 +2371,7 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         XCTAssertNil(report.initialRestoreReport)
         XCTAssertNil(report.patchReplayReport)
         XCTAssertEqual(report.discoveredPatchCount, 0)
-        XCTAssertEqual(report.lastPatchWritten, 6_000)
+        XCTAssertGreaterThan(try XCTUnwrap(report.lastPatchWritten), 6_000)
         XCTAssertEqual(report.lastSynchronized, 6_000)
 
         guard case .myDocuments(let uploadReport)? = report.patchUploadReport else {
@@ -2040,7 +2384,7 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         XCTAssertEqual(uploadReport.upsertedAiPageCacheEntryCount, 0)
         XCTAssertEqual(uploadReport.deletedRowCount, 0)
         XCTAssertEqual(uploadReport.logEntryCount, 1)
-        XCTAssertEqual(uploadReport.lastUpdated, 6_000)
+        XCTAssertEqual(uploadReport.lastUpdated, report.lastPatchWritten)
         XCTAssertEqual(uploadReport.uploadedFile.name, "1.4.sqlite3.gz")
         XCTAssertEqual(uploadReport.uploadedFile.parentID, deviceFolderID)
         XCTAssertEqual(
@@ -2054,6 +2398,472 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
                 )
             ]
         )
+    }
+
+    /** Verifies strict My Documents projection failure cannot publish deletes or bookkeeping. */
+    func testMyDocumentUploadStrictPreflightFailureDoesNotPublishOrMutateBookkeeping() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let document = MyDocument(name: "Accepted", initials: "DOC")
+        modelContext.insert(document)
+        try modelContext.save()
+        let baselineService = RemoteSyncMyDocumentSnapshotService()
+        baselineService.refreshBaselineFingerprints(modelContext: modelContext, settingsStore: settingsStore)
+        let acceptedSnapshot = try baselineService.snapshotCurrentStateThrowing(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let documentKey = try XCTUnwrap(
+            acceptedSnapshot.documentRowsByKey.first { $0.value.id == document.id }?.key
+        )
+        let acceptedFingerprint = acceptedSnapshot.fingerprintsByKey[documentKey]
+        document.name = "Dirty"
+        try modelContext.save()
+
+        let adapter = MyDocumentOutboxTestAdapter(uploadTimestamps: [25_000])
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mydocuments-strict-preflight-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let snapshotService = RemoteSyncMyDocumentSnapshotService(
+            strictSnapshotCheckpoint: {
+                settingsStore.setString("test.mydocuments.upload.preflight", value: "rollback")
+                throw NSError(domain: "MyDocumentUploadPreflight", code: 81)
+            }
+        )
+        do {
+            _ = try await RemoteSyncMyDocumentPatchUploadService(
+                adapter: adapter,
+                snapshotService: snapshotService,
+                temporaryDirectory: directory,
+                outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true)
+            ).uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/mydocuments/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected strict My Documents preflight failure")
+        } catch {
+            XCTAssertEqual((error as NSError).domain, "MyDocumentUploadPreflight")
+        }
+
+        let uploads = await adapter.uploads()
+        XCTAssertTrue(uploads.isEmpty)
+        XCTAssertNil(settingsStore.getString("test.mydocuments.upload.preflight"))
+        XCTAssertNil(settingsStore.getString("remote_sync.pending_upload.mydocuments"))
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: settingsStore).fingerprint(
+                forLogKey: documentKey,
+                category: .myDocuments
+            ),
+            acceptedFingerprint
+        )
+    }
+
+    /** Verifies an in-flight My Documents edit remains dirty after exact-generation acceptance. */
+    func testMyDocumentUploadKeepsInFlightEditDirtyForNextPatch() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let document = MyDocument(name: "Initial", initials: "DOC")
+        modelContext.insert(document)
+        try modelContext.save()
+        let snapshotService = RemoteSyncMyDocumentSnapshotService()
+        snapshotService.refreshBaselineFingerprints(modelContext: modelContext, settingsStore: settingsStore)
+        document.name = "Uploaded generation"
+        try modelContext.save()
+        let uploadedSnapshot = try snapshotService.snapshotCurrentStateThrowing(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let documentKey = try XCTUnwrap(
+            uploadedSnapshot.documentRowsByKey.first { $0.value.id == document.id }?.key
+        )
+
+        let adapter = MyDocumentOutboxTestAdapter(uploadTimestamps: [27_000, 28_000])
+        await adapter.suspendNextUpload()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mydocuments-inflight-edit-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = RemoteSyncMyDocumentPatchUploadService(
+            adapter: adapter,
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true),
+            nowProvider: { 26_000 }
+        )
+        let uploadTask = Task {
+            try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/mydocuments/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
+        await adapter.waitUntilUploadStarts()
+        document.name = "Newer local generation"
+        try modelContext.save()
+        await adapter.resumeUpload()
+
+        let firstResult = try await uploadTask.value
+        XCTAssertEqual(try XCTUnwrap(firstResult).patchNumber, 1)
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: settingsStore).fingerprint(
+                forLogKey: documentKey,
+                category: .myDocuments
+            ),
+            uploadedSnapshot.fingerprintsByKey[documentKey]
+        )
+        let currentSnapshot = try snapshotService.snapshotCurrentStateThrowing(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertNotEqual(currentSnapshot.fingerprintsByKey[documentKey], uploadedSnapshot.fingerprintsByKey[documentKey])
+
+        let secondResult = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/mydocuments/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let secondReport = try XCTUnwrap(secondResult)
+        XCTAssertEqual(secondReport.patchNumber, 2)
+        let uploads = await adapter.uploads()
+        XCTAssertEqual(uploads.map(\.name), ["1.4.sqlite3.gz", "2.4.sqlite3.gz"])
+    }
+
+    /** Verifies local acceptance rollback retries the exact My Documents outbox bytes and number. */
+    func testMyDocumentUploadAcceptanceFailureRetriesExactOutboxGeneration() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let document = MyDocument(name: "Accepted", initials: "DOC")
+        modelContext.insert(document)
+        try modelContext.save()
+        let snapshotService = RemoteSyncMyDocumentSnapshotService()
+        snapshotService.refreshBaselineFingerprints(modelContext: modelContext, settingsStore: settingsStore)
+        let oldSnapshot = try snapshotService.snapshotCurrentStateThrowing(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let documentKey = try XCTUnwrap(oldSnapshot.documentRowsByKey.first?.key)
+        document.name = "Pending"
+        try modelContext.save()
+
+        let adapter = MyDocumentOutboxTestAdapter(uploadTimestamps: [30_000, 31_000])
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mydocuments-acceptance-retry-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let outboxDirectory = directory.appendingPathComponent("outbox", isDirectory: true)
+        let failingService = RemoteSyncMyDocumentPatchUploadService(
+            adapter: adapter,
+            temporaryDirectory: directory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: { 29_000 }
+        )
+        do {
+            _ = try await failingService.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/mydocuments/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore,
+                acceptanceCheckpoint: { throw NSError(domain: "MyDocumentUploadAcceptance", code: 91) }
+            )
+            XCTFail("Expected My Documents acceptance failure")
+        } catch {
+            XCTAssertEqual((error as NSError).domain, "MyDocumentUploadAcceptance")
+        }
+        XCTAssertNotNil(settingsStore.getString("remote_sync.pending_upload.mydocuments"))
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: settingsStore).fingerprint(
+                forLogKey: documentKey,
+                category: .myDocuments
+            ),
+            oldSnapshot.fingerprintsByKey[documentKey]
+        )
+        XCTAssertTrue(RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .myDocuments).isEmpty)
+
+        await adapter.removeRemoteFiles()
+        let retryService = RemoteSyncMyDocumentPatchUploadService(
+            adapter: adapter,
+            temporaryDirectory: directory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: { 99_000 }
+        )
+        let retryResult = try await retryService.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/mydocuments/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let report = try XCTUnwrap(retryResult)
+
+        let uploads = await adapter.uploads()
+        XCTAssertEqual(uploads.count, 2)
+        XCTAssertEqual(uploads[0].name, "1.4.sqlite3.gz")
+        XCTAssertEqual(uploads[1].name, "1.4.sqlite3.gz")
+        XCTAssertEqual(uploads[0].data, uploads[1].data)
+        XCTAssertEqual(report.patchNumber, 1)
+        XCTAssertEqual(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .myDocuments).first?.appliedDate,
+            31_000
+        )
+        XCTAssertGreaterThan(report.lastUpdated, 29_000)
+        XCTAssertEqual(
+            RemoteSyncStateStore(settingsStore: settingsStore).progressState(for: .myDocuments).lastPatchWritten,
+            report.lastUpdated
+        )
+    }
+
+    /** Verifies the accepted-key manifest emits a document delete without a current log row. */
+    func testMyDocumentUploadDetectsDeletionFromAcceptedKeyManifestWithoutLogEntry() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let document = MyDocument(name: "Delete after baseline", initials: "DOC")
+        modelContext.insert(document)
+        try modelContext.save()
+        RemoteSyncMyDocumentSnapshotService().refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertTrue(RemoteSyncLogEntryStore(settingsStore: settingsStore).entries(for: .myDocuments).isEmpty)
+        modelContext.delete(document)
+        try modelContext.save()
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mydocuments-manifest-delete-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let uploadResult = try await RemoteSyncMyDocumentPatchUploadService(
+            adapter: MyDocumentOutboxTestAdapter(uploadTimestamps: [33_000]),
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true),
+            nowProvider: { 32_000 }
+        ).uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/mydocuments/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let report = try XCTUnwrap(uploadResult)
+        XCTAssertEqual(report.deletedRowCount, 1)
+        XCTAssertEqual(RemoteSyncLogEntryStore(settingsStore: settingsStore).entries(for: .myDocuments).first?.type, .delete)
+    }
+
+    /** Verifies missing local status allocates after existing remote My Documents history. */
+    func testMyDocumentUploadAllocatesAfterRemoteHistoryWhenLocalStatusIsMissing() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let document = MyDocument(name: "Accepted", initials: "DOC")
+        modelContext.insert(document)
+        try modelContext.save()
+        RemoteSyncMyDocumentSnapshotService().refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        document.name = "Dirty"
+        try modelContext.save()
+
+        let deviceFolderID = "/mydocuments/ios-device"
+        let adapter = MyDocumentOutboxTestAdapter(uploadTimestamps: [35_000])
+        await adapter.seedRemoteFile(
+            name: "9.4.sqlite3.gz",
+            parentID: deviceFolderID,
+            data: Data("accepted remote patch".utf8),
+            timestamp: 34_000
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mydocuments-remote-numbering-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let uploadResult = try await RemoteSyncMyDocumentPatchUploadService(
+            adapter: adapter,
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true)
+        ).uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: deviceFolderID),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let report = try XCTUnwrap(uploadResult)
+        XCTAssertEqual(report.patchNumber, 10)
+        let uploads = await adapter.uploads()
+        XCTAssertEqual(uploads.map(\.name), ["10.4.sqlite3.gz"])
+    }
+
+    /** Verifies malformed My Documents patch status fails closed instead of resetting numbering. */
+    func testMyDocumentUploadRejectsMalformedAcceptedPatchStatus() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let document = MyDocument(name: "Accepted", initials: "DOC")
+        modelContext.insert(document)
+        try modelContext.save()
+        RemoteSyncMyDocumentSnapshotService().refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        document.name = "Dirty"
+        try modelContext.save()
+        let statusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let corruptKey = statusStore.key(for: .myDocuments, sourceDevice: "ios-device", patchNumber: 5)
+        settingsStore.setString(corruptKey, value: "{not-json")
+
+        let adapter = MyDocumentOutboxTestAdapter(uploadTimestamps: [37_000])
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mydocuments-corrupt-status-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            _ = try await RemoteSyncMyDocumentPatchUploadService(
+                adapter: adapter,
+                temporaryDirectory: directory,
+                outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true)
+            ).uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/mydocuments/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected malformed My Documents patch status to fail closed")
+        } catch let error as RemoteSyncPatchStatusStoreError {
+            XCTAssertEqual(error, .invalidStoredStatus(corruptKey))
+        }
+        let uploads = await adapter.uploads()
+        XCTAssertTrue(uploads.isEmpty)
+        XCTAssertNil(settingsStore.getString("remote_sync.pending_upload.mydocuments"))
+    }
+
+    /** Verifies My Documents destination replacement requires explicit pending cleanup. */
+    func testMyDocumentDestinationReplacementRequiresExplicitPendingCleanup() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let document = MyDocument(name: "Accepted", initials: "DOC")
+        modelContext.insert(document)
+        try modelContext.save()
+        RemoteSyncMyDocumentSnapshotService().refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        document.name = "Dirty"
+        try modelContext.save()
+
+        let adapter = MyDocumentOutboxTestAdapter(uploadTimestamps: [39_000, 40_000])
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mydocuments-destination-replacement-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = RemoteSyncMyDocumentPatchUploadService(
+            adapter: adapter,
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true),
+            nowProvider: { 38_000 }
+        )
+        do {
+            _ = try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/mydocuments/old-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore,
+                acceptanceCheckpoint: { throw NSError(domain: "MyDocumentDestination", code: 101) }
+            )
+            XCTFail("Expected local acceptance failure")
+        } catch {
+            XCTAssertEqual((error as NSError).domain, "MyDocumentDestination")
+        }
+        do {
+            _ = try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/mydocuments/new-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected mismatched My Documents outbox to fail closed")
+        } catch let error as RemoteSyncMyDocumentPatchUploadError {
+            XCTAssertEqual(error, .invalidPendingUpload)
+        }
+
+        try service.discardPendingUploadForDestinationReplacement(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let replacementResult = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/mydocuments/new-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let report = try XCTUnwrap(replacementResult)
+        XCTAssertEqual(report.patchNumber, 1)
+        let uploads = await adapter.uploads()
+        XCTAssertEqual(uploads.map(\.parentID), ["/mydocuments/old-device", "/mydocuments/new-device"])
+    }
+
+    /** Verifies My Documents acceptance rejects an exportable row without a computed fingerprint. */
+    func testMyDocumentAcceptedGenerationRejectsExportableRowWithoutFingerprint() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        modelContext.insert(MyDocument(name: "Fingerprint required", initials: "DOC"))
+        try modelContext.save()
+        let service = RemoteSyncMyDocumentSnapshotService()
+        let snapshot = try service.snapshotCurrentStateThrowing(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let key = try XCTUnwrap(snapshot.documentRowsByKey.first?.key)
+        let missingFingerprintSnapshot = RemoteSyncMyDocumentCurrentSnapshot(
+            documentRowsByKey: snapshot.documentRowsByKey,
+            pageRowsByKey: snapshot.pageRowsByKey,
+            pageContentRowsByKey: snapshot.pageContentRowsByKey,
+            aiPageCacheEntryRowsByKey: snapshot.aiPageCacheEntryRowsByKey,
+            fingerprintsByKey: [:]
+        )
+
+        XCTAssertThrowsError(try service.acceptedBaselineThrowing(from: missingFingerprintSnapshot)) { error in
+            XCTAssertEqual(
+                error as? RemoteSyncMyDocumentAcceptedBaselineError,
+                .missingProjectedFingerprint(key)
+            )
+        }
+    }
+
+    /** Verifies My Documents acceptance rejects an outbox projected from a superseded baseline. */
+    func testMyDocumentUploadRejectsStaleAcceptedBaselineAfterRemoteSuccess() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let document = MyDocument(name: "Accepted", initials: "DOC")
+        modelContext.insert(document)
+        try modelContext.save()
+        let snapshotService = RemoteSyncMyDocumentSnapshotService()
+        snapshotService.refreshBaselineFingerprints(modelContext: modelContext, settingsStore: settingsStore)
+        document.name = "Pending"
+        try modelContext.save()
+
+        let adapter = MyDocumentOutboxTestAdapter(uploadTimestamps: [42_000])
+        await adapter.suspendNextUpload()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mydocuments-baseline-cas-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = RemoteSyncMyDocumentPatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true),
+            nowProvider: { 41_000 }
+        )
+        let uploadTask = Task {
+            try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/mydocuments/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
+        await adapter.waitUntilUploadStarts()
+        try snapshotService.refreshBaselineFingerprintsThrowing(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        await adapter.resumeUpload()
+
+        do {
+            _ = try await uploadTask.value
+            XCTFail("Expected stale My Documents baseline acceptance to fail")
+        } catch let error as RemoteSyncMyDocumentAcceptedBaselineError {
+            XCTAssertEqual(error, .staleAcceptedBaseline)
+        }
+        XCTAssertNotNil(settingsStore.getString("remote_sync.pending_upload.mydocuments"))
+        XCTAssertTrue(RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .myDocuments).isEmpty)
     }
 
     private func makeModelContainer() throws -> ModelContainer {
@@ -2491,7 +3301,166 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
     }
 }
 
-private actor MyDocumentMockRemoteSyncAdapter: RemoteSyncAdapting {
+/** Deterministic create-only remote adapter for My Documents outbox behavior tests. */
+private actor MyDocumentOutboxTestAdapter: RemoteSyncAdapting, RemoteSyncConditionalFileUploading {
+    /// One completed conditional-create attempt.
+    struct Upload: Sendable, Equatable {
+        let name: String
+        let parentID: String
+        let data: Data
+        let timestamp: Int64
+    }
+
+    private var uploadTimestamps: [Int64]
+    private var uploadAttempts: [Upload] = []
+    private var remoteFilesByID: [String: (file: RemoteSyncFile, data: Data)] = [:]
+    private var shouldSuspendNextUpload = false
+    private var uploadDidStart = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    /** Creates an adapter that assigns supplied timestamps to successful creates in order. */
+    init(uploadTimestamps: [Int64]) {
+        self.uploadTimestamps = uploadTimestamps
+    }
+
+    /** Pauses the next conditional create after immutable bytes are received. */
+    func suspendNextUpload() {
+        shouldSuspendNextUpload = true
+        uploadDidStart = false
+    }
+
+    /** Waits until a suspended conditional create has begun. */
+    func waitUntilUploadStarts() async {
+        if uploadDidStart { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    /** Releases a suspended conditional create. */
+    func resumeUpload() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+
+    /** Removes remote objects while retaining create-attempt history. */
+    func removeRemoteFiles() {
+        remoteFilesByID.removeAll()
+    }
+
+    /** Seeds one accepted remote object. */
+    func seedRemoteFile(name: String, parentID: String, data: Data, timestamp: Int64) {
+        let id = "\(parentID)/\(name)"
+        remoteFilesByID[id] = (
+            RemoteSyncFile(
+                id: id,
+                name: name,
+                size: Int64(data.count),
+                timestamp: timestamp,
+                parentID: parentID,
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            ),
+            data
+        )
+    }
+
+    /** Returns completed create attempts in call order. */
+    func uploads() -> [Upload] {
+        uploadAttempts
+    }
+
+    func listFiles(
+        parentIDs: [String]?,
+        name: String?,
+        mimeType: String?,
+        modifiedAtLeast: Date?
+    ) async throws -> [RemoteSyncFile] {
+        remoteFilesByID.values.map(\.file).filter { file in
+            (parentIDs == nil || parentIDs!.contains(file.parentID))
+                && (name == nil || file.name == name)
+                && (mimeType == nil || file.mimeType == mimeType)
+                && (modifiedAtLeast == nil
+                    || Date(timeIntervalSince1970: TimeInterval(file.timestamp) / 1_000) >= modifiedAtLeast!)
+        }
+    }
+
+    func createNewFolder(name: String, parentID: String?) async throws -> RemoteSyncFile {
+        RemoteSyncFile(
+            id: "\(parentID ?? "/")/\(name)",
+            name: name,
+            size: 0,
+            timestamp: 0,
+            parentID: parentID ?? "/",
+            mimeType: NextCloudSyncAdapter.folderMimeType
+        )
+    }
+
+    func download(id: String) async throws -> Data {
+        remoteFilesByID[id]?.data ?? Data()
+    }
+
+    func upload(name: String, fileURL: URL, parentID: String, contentType: String) async throws -> RemoteSyncFile {
+        let result = try await uploadIfAbsent(
+            name: name,
+            fileURL: fileURL,
+            maximumByteCount: RemoteSyncArchiveStagingService.maximumCompressedInitialBackupByteCount,
+            parentID: parentID,
+            contentType: contentType
+        )
+        switch result {
+        case .created(let file): return file
+        case .alreadyExists:
+            return remoteFilesByID["\(parentID)/\(name)"]!.file
+        }
+    }
+
+    /** Atomically creates one object without replacing an occupied destination. */
+    func uploadIfAbsent(
+        name: String,
+        fileURL: URL,
+        maximumByteCount: Int,
+        parentID: String,
+        contentType: String
+    ) async throws -> RemoteSyncConditionalUploadResult {
+        let data = try RemoteSyncBoundedFileIO.readRegularFile(
+            at: fileURL,
+            maximumByteCount: maximumByteCount
+        )
+        let id = "\(parentID)/\(name)"
+        guard remoteFilesByID[id] == nil else { return .alreadyExists }
+        if shouldSuspendNextUpload {
+            shouldSuspendNextUpload = false
+            uploadDidStart = true
+            startWaiters.forEach { $0.resume() }
+            startWaiters.removeAll()
+            await withCheckedContinuation { releaseContinuation = $0 }
+            guard remoteFilesByID[id] == nil else { return .alreadyExists }
+        }
+        let timestamp = uploadTimestamps.isEmpty ? 0 : uploadTimestamps.removeFirst()
+        let file = RemoteSyncFile(
+            id: id,
+            name: name,
+            size: Int64(data.count),
+            timestamp: timestamp,
+            parentID: parentID,
+            mimeType: contentType
+        )
+        uploadAttempts.append(Upload(name: name, parentID: parentID, data: data, timestamp: timestamp))
+        remoteFilesByID[id] = (file, data)
+        return .created(file)
+    }
+
+    func delete(id: String) async throws {
+        remoteFilesByID.removeValue(forKey: id)
+    }
+
+    func isSyncFolderKnown(syncFolderID: String, secretFileName: String) async throws -> Bool { true }
+
+    func makeSyncFolderKnown(syncFolderID: String, deviceIdentifier: String) async throws -> String {
+        "device-known-\(deviceIdentifier)-secret"
+    }
+}
+
+private actor MyDocumentMockRemoteSyncAdapter: RemoteSyncAdapting, RemoteSyncConditionalFileUploading {
     private var uploadResults: [RemoteSyncFile] = []
     private var knownResponses: [String: Bool] = [:]
     private var listedFilesByParentID: [String: [RemoteSyncFile]] = [:]
@@ -2596,6 +3565,51 @@ private actor MyDocumentMockRemoteSyncAdapter: RemoteSyncAdapting {
             timestamp: 0,
             parentID: parentID,
             mimeType: contentType
+        )
+    }
+
+    /** Records one create-only upload through the mock's queued result contract. */
+    func uploadIfAbsent(
+        name: String,
+        fileURL: URL,
+        maximumByteCount: Int,
+        parentID: String,
+        contentType: String
+    ) async throws -> RemoteSyncConditionalUploadResult {
+        let data = try RemoteSyncBoundedFileIO.readRegularFile(
+            at: fileURL,
+            maximumByteCount: maximumByteCount
+        )
+        uploadedFiles.append(
+            MyDocumentMockUploadedFile(
+                name: name,
+                parentID: parentID,
+                contentType: contentType,
+                data: data
+            )
+        )
+        if !uploadResults.isEmpty {
+            let result = uploadResults.removeFirst()
+            return .created(
+                RemoteSyncFile(
+                    id: result.id,
+                    name: result.name,
+                    size: Int64(data.count),
+                    timestamp: result.timestamp,
+                    parentID: result.parentID,
+                    mimeType: result.mimeType
+                )
+            )
+        }
+        return .created(
+            RemoteSyncFile(
+                id: [parentID, name].joined(separator: "/"),
+                name: name,
+                size: Int64(data.count),
+                timestamp: 0,
+                parentID: parentID,
+                mimeType: contentType
+            )
         )
     }
 

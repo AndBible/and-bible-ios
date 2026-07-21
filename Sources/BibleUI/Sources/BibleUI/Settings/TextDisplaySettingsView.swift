@@ -200,9 +200,9 @@ struct TextDisplayPreferenceEditorDraft: Equatable, Sendable {
 
  Data dependencies:
  - `settings` is the persisted display-settings model owned by the parent screen
- - `workspaceColor`, when supplied by workspace-scoped callers, exposes Android's workspace accent
+ - `workspaceColor`, when supplied by global/workspace callers, exposes Android's workspace accent
    row from the nested color editor while keeping that metadata separate from inherited text-display
-   settings
+   settings; window callers omit it
  - `scope` determines which Android parent-scope links are visible
  - SwiftData labels back the Android `BOOKMARKS_HIDELABELS` picker
  - `onChange` lets the parent push updated settings into the reader after each mutation
@@ -274,8 +274,8 @@ public struct TextDisplaySettingsView: View {
      - Parameters:
        - settings: Shared display settings value to mutate from the form.
        - workspaceColor: Optional workspace accent color edited from Android's color settings
-         screen. Supplying this binding exposes the workspace color row for workspace-owned routes;
-         omitting it keeps true global/window routes from mutating workspace metadata.
+         screen. Global/workspace routes supply this binding; window routes omit it because Android
+         hides `workspace_color` only for window-specific color settings.
        - navigationTitle: Optional Android-scope title shown by the surrounding navigation stack.
          Passing `nil` uses the localized global text-options title.
        - scope: Android text-display scope currently being edited.

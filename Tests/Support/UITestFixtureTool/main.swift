@@ -361,6 +361,7 @@ private final class FixtureContext {
             AiPageCacheEntry.self,
             ReadingPlan.self,
             ReadingPlanDay.self,
+            ReadingPlanDefinitionPublicationState.self,
         ]
         let localModels: [any PersistentModel.Type] = [
             Repository.self,
@@ -629,6 +630,39 @@ private final class FixtureContext {
         )
     }
 
+    /** One canonical FTS row written by deterministic Search UI fixtures. */
+    private struct SeededSearchRow {
+        /// Source-style verse key retained for compatibility presentation.
+        let verseKey: String
+
+        /// Visible text analyzed through the production module-language pipeline.
+        let plainText: String
+
+        /// Exact installed source initials owning this row.
+        let moduleName: String
+
+        /// Locale-independent canonical book identity.
+        let osisBookId: String
+
+        /// Source-style SWORD display name retained for native module results.
+        let displayBook: String
+
+        /// One-based chapter coordinate.
+        let chapter: Int
+
+        /// One-based verse coordinate.
+        let verse: Int
+    }
+
+    /** Exact installed generation and analyzer language recorded by one seeded module. */
+    private struct SeededSearchModuleMetadata {
+        /// Production fingerprint/version identity derived from the installed SWORD module.
+        let identity: SearchIndexSourceIdentity
+
+        /// Module language selecting the production analyzer profile.
+        let languageCode: String
+    }
+
     /**
      Seeds a minimal KJV fixture FTS index so Search UI tests start from a ready state.
      *
@@ -641,6 +675,7 @@ private final class FixtureContext {
      */
     private func seedKJVFixtureSearchIndex() throws {
         let databaseURL = paths.documentsURL.appendingPathComponent("search_indexes.sqlite")
+        let sourceMetadata = try seededSearchSourceMetadata(for: "KJV")
         try fileManager.createDirectory(
             at: databaseURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -669,7 +704,7 @@ private final class FixtureContext {
             try insertSeededSearchRows(into: db)
             try insertSeededStrongRows(into: db)
             try recordSeededSearchModule(
-                "KJV",
+                sourceMetadata,
                 into: db,
                 verseCount: Int32(Self.seededSearchRows.count)
             )
@@ -710,6 +745,12 @@ private final class FixtureContext {
         defer { sqlite3_close(db) }
 
         try prepareSearchIndexSchema(in: db)
+        let sourceMetadataByModule = try Dictionary(
+            uniqueKeysWithValues: ["KJV", "AATESTWEB"].map {
+                let metadata = try seededSearchSourceMetadata(for: $0)
+                return ($0, metadata)
+            }
+        )
         for moduleName in ["KJV", "AATESTWEB", "UITESTWEB"] {
             try executeSearchSQL("DELETE FROM verse_fts WHERE module_name = '\(moduleName)'", db: db)
             try executeSearchSQL("DELETE FROM verse_strongs WHERE module_name = '\(moduleName)'", db: db)
@@ -723,7 +764,14 @@ private final class FixtureContext {
             try insertSeededStrongRows(into: db)
             for moduleName in Set(rows.map { $0.moduleName }).sorted() {
                 let verseCount = rows.filter { $0.moduleName == moduleName }.count
-                try recordSeededSearchModule(moduleName, into: db, verseCount: Int32(verseCount))
+                guard let sourceMetadata = sourceMetadataByModule[moduleName] else {
+                    throw FixtureToolError.missingSwordModule(moduleName)
+                }
+                try recordSeededSearchModule(
+                    sourceMetadata,
+                    into: db,
+                    verseCount: Int32(verseCount)
+                )
             }
             try executeSearchSQL("COMMIT", db: db)
         } catch {
@@ -751,12 +799,15 @@ private final class FixtureContext {
      * - Throws: `FixtureToolError.sqlite` when row insertion fails.
      */
     private func insertSeededSearchRows(
-        _ rows: [(verseKey: String, plainText: String, moduleName: String)],
+        _ rows: [SeededSearchRow],
         into db: OpaquePointer
     ) throws {
+        let analyzer = SearchTextAnalyzer.profile(for: "en")
         let sql = """
-            INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO verse_fts (
+                search_text, verse_key, plain_text, module_name, entry_order, osis_book,
+                display_book, display_book_mode, chapter, verse, book_order, canon_scope
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
@@ -771,10 +822,29 @@ private final class FixtureContext {
         for (entryOrder, row) in rows.enumerated() {
             sqlite3_reset(statement)
             sqlite3_clear_bindings(statement)
-            sqlite3_bind_text(statement, 1, row.verseKey, -1, sqliteTransient)
-            sqlite3_bind_text(statement, 2, row.plainText, -1, sqliteTransient)
-            sqlite3_bind_text(statement, 3, row.moduleName, -1, sqliteTransient)
-            sqlite3_bind_int(statement, 4, Int32(entryOrder))
+            let searchText = try SearchTextAnalyzer.analyzedText(row.plainText, profile: analyzer)
+            sqlite3_bind_text(statement, 1, searchText, -1, sqliteTransient)
+            sqlite3_bind_text(statement, 2, row.verseKey, -1, sqliteTransient)
+            sqlite3_bind_text(statement, 3, row.plainText, -1, sqliteTransient)
+            sqlite3_bind_text(statement, 4, row.moduleName, -1, sqliteTransient)
+            sqlite3_bind_int(statement, 5, Int32(entryOrder))
+            sqlite3_bind_text(statement, 6, row.osisBookId, -1, sqliteTransient)
+            sqlite3_bind_text(statement, 7, row.displayBook, -1, sqliteTransient)
+            sqlite3_bind_text(statement, 8, SearchBookNamePresentation.source.rawValue, -1, sqliteTransient)
+            sqlite3_bind_int(statement, 9, Int32(row.chapter))
+            sqlite3_bind_int(statement, 10, Int32(row.verse))
+            sqlite3_bind_int64(
+                statement,
+                11,
+                sqlite3_int64(SearchCanonicalBookCatalog.order(of: row.osisBookId))
+            )
+            sqlite3_bind_text(
+                statement,
+                12,
+                SearchCanonicalBookCatalog.section(of: row.osisBookId).rawValue,
+                -1,
+                sqliteTransient
+            )
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw sqliteError(
                     from: db,
@@ -833,15 +903,25 @@ private final class FixtureContext {
      databases remain valid when the app intentionally invalidates older index formats.
      *
      * - Parameters:
-     *   - moduleName: Module abbreviation to record as indexed.
+     *   - sourceMetadata: Exact installed module generation and analyzer language.
      *   - db: Open SQLite handle for `search_indexes.sqlite`.
      *   - verseCount: Number of seeded verse rows for the module.
      * - Throws: `FixtureToolError.sqlite` when the metadata row cannot be written.
      */
-    private func recordSeededSearchModule(_ moduleName: String, into db: OpaquePointer, verseCount: Int32) throws {
+    private func recordSeededSearchModule(
+        _ sourceMetadata: SeededSearchModuleMetadata,
+        into db: OpaquePointer,
+        verseCount: Int32
+    ) throws {
+        let identity = sourceMetadata.identity
+        let analyzerIdentifier = SearchTextAnalyzer.profile(
+            for: sourceMetadata.languageCode
+        ).identifier
         let sql = """
-            INSERT OR REPLACE INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
-            VALUES (?, ?, datetime('now'), ?)
+            INSERT OR REPLACE INTO indexed_modules (
+                module_name, verse_count, indexed_at, schema_version, language_code, analyzer_id,
+                strongs_complete, source_version, source_fingerprint, store_generation
+            ) VALUES (?, ?, datetime('now'), ?, ?, ?, 1, ?, ?, 0)
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
@@ -853,9 +933,13 @@ private final class FixtureContext {
         }
         defer { sqlite3_finalize(statement) }
 
-        sqlite3_bind_text(statement, 1, moduleName, -1, sqliteTransient)
+        sqlite3_bind_text(statement, 1, identity.moduleName, -1, sqliteTransient)
         sqlite3_bind_int(statement, 2, verseCount)
         sqlite3_bind_int(statement, 3, Int32(SearchIndexService.currentSchemaVersion))
+        sqlite3_bind_text(statement, 4, sourceMetadata.languageCode, -1, sqliteTransient)
+        sqlite3_bind_text(statement, 5, analyzerIdentifier, -1, sqliteTransient)
+        sqlite3_bind_text(statement, 6, identity.version, -1, sqliteTransient)
+        sqlite3_bind_text(statement, 7, identity.fingerprint, -1, sqliteTransient)
 
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw sqliteError(
@@ -875,11 +959,19 @@ private final class FixtureContext {
         try executeSearchSQL("PRAGMA journal_mode=WAL", db: db)
         try executeSearchSQL("""
             CREATE VIRTUAL TABLE IF NOT EXISTS verse_fts USING fts5(
-                verse_key,
-                plain_text,
+                search_text,
+                verse_key UNINDEXED,
+                plain_text UNINDEXED,
                 module_name UNINDEXED,
                 entry_order UNINDEXED,
-                tokenize='unicode61'
+                osis_book UNINDEXED,
+                display_book UNINDEXED,
+                display_book_mode UNINDEXED,
+                chapter UNINDEXED,
+                verse UNINDEXED,
+                book_order UNINDEXED,
+                canon_scope UNINDEXED,
+                tokenize='ascii'
             )
         """, db: db)
         try executeSearchSQL("""
@@ -896,13 +988,43 @@ private final class FixtureContext {
             ON verse_strongs (module_name, token, entry_order)
         """, db: db)
         try executeSearchSQL("""
-            CREATE TABLE IF NOT EXISTS indexed_modules (
-                module_name TEXT PRIMARY KEY,
-                verse_count INTEGER DEFAULT 0,
-                indexed_at TEXT,
-                schema_version INTEGER DEFAULT 1
+            CREATE TABLE IF NOT EXISTS search_index_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                store_generation INTEGER NOT NULL
             )
         """, db: db)
+        try executeSearchSQL("""
+            INSERT OR IGNORE INTO search_index_state (id, store_generation) VALUES (1, 0)
+        """, db: db)
+        try executeSearchSQL("""
+            CREATE TABLE IF NOT EXISTS indexed_modules (
+                module_name TEXT PRIMARY KEY,
+                verse_count INTEGER NOT NULL,
+                indexed_at TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                language_code TEXT NOT NULL,
+                analyzer_id TEXT NOT NULL,
+                strongs_complete INTEGER NOT NULL DEFAULT 0,
+                source_version TEXT NOT NULL,
+                source_fingerprint TEXT NOT NULL,
+                store_generation INTEGER NOT NULL
+            )
+        """, db: db)
+    }
+
+    /** Resolves exact production readiness metadata for one installed fixture module. */
+    private func seededSearchSourceMetadata(
+        for moduleName: String
+    ) throws -> SeededSearchModuleMetadata {
+        let swordURL = try ensureKJVSwordFixtureModuleAvailable()
+        guard let manager = SwordManager(modulePath: swordURL.path),
+              let module = manager.module(named: moduleName) else {
+            throw FixtureToolError.missingSwordModule(moduleName)
+        }
+        return SeededSearchModuleMetadata(
+            identity: module.searchIndexSourceIdentity,
+            languageCode: module.info.language
+        )
     }
 
     /**
@@ -935,21 +1057,33 @@ private final class FixtureContext {
     /**
      SQLite row set preseeded into the KJV fixture search index.
      */
-    private static let seededSearchRows: [(verseKey: String, plainText: String, moduleName: String)] = [
-        (
+    private static let seededSearchRows: [SeededSearchRow] = [
+        SeededSearchRow(
             verseKey: "Genesis 1:2",
             plainText: "And the earth was without form, and void; and darkness was upon the face of the deep.",
-            moduleName: "KJV"
+            moduleName: "KJV",
+            osisBookId: "Gen",
+            displayBook: "Genesis",
+            chapter: 1,
+            verse: 2
         ),
-        (
+        SeededSearchRow(
             verseKey: "Genesis 6:8",
             plainText: "But Noah found grace in the eyes of the LORD.",
-            moduleName: "KJV"
+            moduleName: "KJV",
+            osisBookId: "Gen",
+            displayBook: "Genesis",
+            chapter: 6,
+            verse: 8
         ),
-        (
+        SeededSearchRow(
             verseKey: "Matthew 1:1",
             plainText: "The book of the generation of Jesus Christ, the son of David, the son of Abraham.",
-            moduleName: "KJV"
+            moduleName: "KJV",
+            osisBookId: "Matt",
+            displayBook: "Matthew",
+            chapter: 1,
+            verse: 1
         ),
     ]
 
@@ -972,16 +1106,24 @@ private final class FixtureContext {
     /**
      Additional deterministic rows used only by the grouped multi-translation Search fixture.
      */
-    private static let seededMultiTranslationSearchRows: [(verseKey: String, plainText: String, moduleName: String)] = [
-        (
+    private static let seededMultiTranslationSearchRows: [SeededSearchRow] = [
+        SeededSearchRow(
             verseKey: "Genesis 1:2",
             plainText: "The earth had become formless and empty, and darkness was on the surface of the deep.",
-            moduleName: "AATESTWEB"
+            moduleName: "AATESTWEB",
+            osisBookId: "Gen",
+            displayBook: "Genesis",
+            chapter: 1,
+            verse: 2
         ),
-        (
+        SeededSearchRow(
             verseKey: "John 3:16",
             plainText: "For God so loved the earth that the deterministic fixture can prove grouped search totals.",
-            moduleName: "AATESTWEB"
+            moduleName: "AATESTWEB",
+            osisBookId: "John",
+            displayBook: "John",
+            chapter: 3,
+            verse: 16
         ),
     ]
 
@@ -1716,11 +1858,16 @@ private final class FixtureContext {
         createdAt: Date
     ) throws -> BibleBookmark {
         let ordinalStart = try resolveKJVOrdinal(bookName: bookName, chapter: chapter, verse: 1)
+        guard let ordinalRange = VerifiedKJVAOrdinalRange(
+            resolvingSourceBookInitials: "KJV",
+            sourceVersification: "KJV",
+            sourceOrdinalStart: ordinalStart,
+            sourceOrdinalEnd: ordinalStart
+        ) else {
+            throw FixtureToolError.unresolvedVerse("\(bookName).\(chapter).1")
+        }
         let bookmark = bookmarkService.addBibleBookmark(
-            bookInitials: "KJV",
-            startOrdinal: ordinalStart,
-            endOrdinal: ordinalStart,
-            v11n: "KJVA"
+            ordinalRange: ordinalRange
         )
         bookmark.book = bookName
         bookmark.createdAt = createdAt

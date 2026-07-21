@@ -62,7 +62,7 @@ sections or their front-matter equivalents:
 - [0004: Reader Pointer Affordances And Upstream Bug Handling](0004-reader-pointer-affordances-and-upstream-bug-handling.md)
 - [0005: Workspace Color Scope And Reader Chrome](0005-workspace-color-scope-and-reader-chrome.md)
 - [0006: Modal Presentation Ownership For Android Parity](0006-modal-presentation-ownership-for-android-parity.md)
-- [0007: iOS Discrete Mode App Name Boundary](0007-ios-discrete-mode-app-name-boundary.md)
+- [0007: iOS Discrete SKU and Runtime Icon Boundary](0007-ios-discrete-mode-app-name-boundary.md)
 - [0008: Parity Documentation Ownership](0008-parity-documentation-ownership.md)
 - [0009: Android Localization Source Of Truth](0009-android-localization-source-of-truth.md)
 - [0010: Unrecognized Module Versification Handling](0010-unrecognized-module-versification-handling.md)

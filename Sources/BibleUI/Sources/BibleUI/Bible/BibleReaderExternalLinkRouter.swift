@@ -1,4 +1,5 @@
 import Foundation
+import BibleCore
 
 /**
  Classifies Android-compatible reader links into typed native reader routes.
@@ -27,14 +28,19 @@ struct BibleReaderExternalLinkRouter {
         case epubReference(book: String, toKey: String, toId: String)
         /// Open Downloads, optionally filtered by module initials.
         case downloads(searchText: String?)
-        /// Open My Notes, optionally jumping to an OSIS reference and ordinal.
-        case myNotes(osisRef: String?, ordinal: Int?)
+        /// Open My Notes at an ordinal whose source domain is explicitly identified.
+        case myNotes(v11n: String, ordinal: Int)
         /// Open StudyPad for a label and optional bookmark entry.
         case studyPad(labelId: UUID, bookmarkId: UUID?)
-        /// Resolve one or more OSIS query values from an `osis://` link.
-        case osisReferences([String])
-        /// Resolve one or more OSIS query values from a `multi://` link.
-        case multiReferences([String])
+        /// Resolve one or more OSIS query values in their declared source domain.
+        case osisReferences(
+            values: [String],
+            v11n: String,
+            documentInitials: String?,
+            forceDocument: Bool
+        )
+        /// Resolve one or more multi-link OSIS values in their declared source domain.
+        case multiReferences(values: [String], v11n: String)
         /// Navigate a SWORD reference stripped from a `sword://` pseudo-link.
         case swordReference(String)
         /// Navigate an OSIS-style reference produced by MyBible/MySword links.
@@ -181,14 +187,17 @@ struct BibleReaderExternalLinkRouter {
     /**
      Parses My Notes links into optional jump metadata.
      */
-    private func myNotesRoute(from link: String) -> Route {
-        guard let components = URLComponents(string: link) else {
-            return .myNotes(osisRef: nil, ordinal: nil)
-        }
+    private func myNotesRoute(from link: String) -> Route? {
+        guard let components = URLComponents(string: link) else { return nil }
         let items = components.queryItems ?? []
-        let osisRef = items.first(where: { $0.name == "osis" })?.value
-        let ordinal = items.first(where: { $0.name == "ordinal" })?.value.flatMap(Int.init)
-        return .myNotes(osisRef: osisRef, ordinal: ordinal)
+        guard let v11n = items.first(where: { $0.name == "v11n" })?.value?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !v11n.isEmpty,
+              let ordinal = items.first(where: { $0.name == "ordinal" })?.value.flatMap(Int.init),
+              ordinal > 0 else {
+            return nil
+        }
+        return .myNotes(v11n: v11n, ordinal: ordinal)
     }
 
     /**
@@ -211,10 +220,51 @@ struct BibleReaderExternalLinkRouter {
      */
     private func osisRoute(from link: String) -> Route? {
         guard let components = URLComponents(string: link) else { return nil }
-        let values = (components.queryItems ?? [])
+        let items = components.queryItems ?? []
+        let values = items
             .filter { $0.name == "osis" }
             .compactMap(\.value)
-        return values.isEmpty ? nil : .osisReferences(values)
+        guard !values.isEmpty else { return nil }
+        let v11n = items.first(where: { $0.name == "v11n" })?.value
+            .flatMap { $0.isEmpty ? nil : $0 } ?? JSwordKJVAVersification.name
+        let documentInitials = items.first(where: { $0.name == "doc" })?.value
+            .flatMap { $0.isEmpty ? nil : $0 }
+        let forceDocument = androidBooleanQueryParameter(
+            named: "force-doc",
+            in: items,
+            defaultValue: false
+        )
+        return .osisReferences(
+            values: values,
+            v11n: v11n,
+            documentInitials: documentInitials,
+            forceDocument: forceDocument
+        )
+    }
+
+    /**
+     Parses one query item with Android `Uri.getBooleanQueryParameter` semantics.
+
+     Android treats an absent item as the caller's default, and treats only case-insensitive
+     `false` or `0` as false once the item is present. Bare parameters and every other value are
+     true.
+
+     - Parameters:
+       - name: Query parameter name.
+       - items: Decoded URL query items.
+       - defaultValue: Value returned when the parameter is absent.
+     - Returns: Android-compatible Boolean value.
+     - Side effects: None.
+     - Failure modes: None; malformed or bare present values intentionally evaluate to true.
+     */
+    private func androidBooleanQueryParameter(
+        named name: String,
+        in items: [URLQueryItem],
+        defaultValue: Bool
+    ) -> Bool {
+        guard let item = items.first(where: { $0.name == name }) else { return defaultValue }
+        guard let value = item.value?.lowercased() else { return true }
+        return value != "false" && value != "0"
     }
 
     /**
@@ -222,10 +272,14 @@ struct BibleReaderExternalLinkRouter {
      */
     private func multiRoute(from link: String) -> Route? {
         guard let components = URLComponents(string: link) else { return nil }
-        let values = (components.queryItems ?? [])
+        let items = components.queryItems ?? []
+        let values = items
             .filter { $0.name == "osis" }
             .compactMap(\.value)
-        return values.isEmpty ? nil : .multiReferences(values)
+        guard !values.isEmpty else { return nil }
+        let v11n = items.first(where: { $0.name == "v11n" })?.value
+            .flatMap { $0.isEmpty ? nil : $0 } ?? JSwordKJVAVersification.name
+        return .multiReferences(values: values, v11n: v11n)
     }
 
     /**

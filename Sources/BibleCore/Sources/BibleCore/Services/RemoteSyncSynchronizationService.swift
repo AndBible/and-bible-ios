@@ -166,9 +166,10 @@ public enum RemoteSyncSynchronizationOutcome: Sendable, Equatable {
  - surface adopt-versus-create decisions without mutating local data
  - after remote adoption, download and restore `initial.sqlite3.gz`
  - after remote creation, upload a local `initial.sqlite3.gz` baseline before continuing
- - for ready categories, discover, stage, download, and replay incremental remote patches
- - after remote replay, upload one outbound sparse patch when the category supports local export
- - persist Android-aligned `lastPatchWritten` and `lastSynchronized` bookkeeping
+ - for ready categories, upload local sparse changes before listing remote patches
+ - persist Android's current-time discovery cursor before SEARCH, then stage and replay remote patches
+ - resume interrupted initial restore/upload work from persisted bootstrap phases
+ - persist Android-aligned `lastPatchWritten` after publication and `lastSynchronized` before listing
 
  Data dependencies:
  - `RemoteSyncBootstrapCoordinator` validates or creates ready bootstrap state
@@ -198,7 +199,8 @@ public enum RemoteSyncSynchronizationOutcome: Sendable, Equatable {
  - throws `RemoteSyncSynchronizationError.missingInitialBackup` when a remotely adopted folder has no `initial.sqlite3.gz`
  - rethrows remote transport failures from the backend adapter
  - rethrows archive staging, initial-backup restore, discovery, and patch-apply failures from the lower layers
- - only reverts `lastSynchronized` automatically for Android's incompatible-patch-version branch
+ - ordinary errors and cancellation retain the pre-list current-time cursor, skipped discovery
+   retains zero for a full retry, and incompatible schema restores the prior cursor
 
  Concurrency:
  - this type is not `Sendable`; callers must respect the confinement requirements of the supplied
@@ -343,10 +345,56 @@ public final class RemoteSyncSynchronizationService {
         settingsStore: SettingsStore,
         currentSchemaVersion: Int
     ) async throws -> RemoteSyncSynchronizationOutcome {
+        try await RemoteSyncProcessSynchronizationGate.shared.withPermit {
+            let compatibilityPolicy = RemoteSyncSchemaCompatibilityPolicy(settingsStore: settingsStore)
+            try compatibilityPolicy.prepareForSynchronization(
+                category: category,
+                currentSchemaVersion: currentSchemaVersion
+            )
+            do {
+                return try await synchronizeWhileHoldingProcessPermit(
+                    category,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore,
+                    currentSchemaVersion: currentSchemaVersion
+                )
+            } catch {
+                try compatibilityPolicy.recordIfSchemaIncompatibility(
+                    error,
+                    category: category,
+                    currentSchemaVersion: currentSchemaVersion
+                )
+                throw error
+            }
+        }
+    }
+
+    /**
+     Executes top-level synchronization after the caller acquires the process-wide permit.
+
+     - Parameters:
+       - category: Category to inspect or synchronize.
+       - modelContext: Context owning synchronized graph state.
+       - settingsStore: Local settings store bound to `modelContext`.
+       - currentSchemaVersion: Exact Android Room schema supported locally.
+     - Returns: Bootstrap decision or completed synchronization outcome.
+     - Side Effects: Performs the documented bootstrap, restore, replay, and upload phases.
+     - Throws: Rethrows all phase failures; the public wrapper persists schema policy first.
+     */
+    private func synchronizeWhileHoldingProcessPermit(
+        _ category: RemoteSyncCategory,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        currentSchemaVersion: Int
+    ) async throws -> RemoteSyncSynchronizationOutcome {
         let bootstrapCoordinator = makeBootstrapCoordinator(settingsStore: settingsStore)
 
         switch try await bootstrapCoordinator.inspect(category) {
         case .ready(let bootstrapState):
+            try finishDestinationReplacementIfNeeded(
+                for: category,
+                settingsStore: settingsStore
+            )
             let report = try await synchronizeReadyCategory(
                 category,
                 bootstrapState: bootstrapState,
@@ -355,6 +403,33 @@ public final class RemoteSyncSynchronizationService {
                 currentSchemaVersion: currentSchemaVersion,
                 initialRestoreReport: nil,
                 suppressOutboundUpload: false
+            )
+            return .synchronized(report)
+        case .requiresInitialRestore(let bootstrapState):
+            try finishDestinationReplacementIfNeeded(
+                for: category,
+                settingsStore: settingsStore
+            )
+            let report = try await restorePendingRemoteInitialBackupAndSynchronize(
+                for: category,
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore,
+                currentSchemaVersion: currentSchemaVersion,
+                initialPublishCheckpoint: { try Task.checkCancellation() }
+            )
+            return .synchronized(report)
+        case .requiresInitialUpload(let bootstrapState):
+            try finishDestinationReplacementIfNeeded(
+                for: category,
+                settingsStore: settingsStore
+            )
+            let report = try await uploadPendingLocalInitialBackupAndSynchronize(
+                for: category,
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore,
+                currentSchemaVersion: currentSchemaVersion
             )
             return .synchronized(report)
         case .requiresRemoteAdoption(let candidate):
@@ -399,16 +474,105 @@ public final class RemoteSyncSynchronizationService {
         settingsStore: SettingsStore,
         currentSchemaVersion: Int
     ) async throws -> RemoteSyncCategorySynchronizationReport {
-        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
-        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        try await RemoteSyncProcessSynchronizationGate.shared.withPermit {
+            let compatibilityPolicy = RemoteSyncSchemaCompatibilityPolicy(settingsStore: settingsStore)
+            try compatibilityPolicy.prepareForExplicitBootstrap(category: category)
+            do {
+                return try await adoptRemoteFolderAndSynchronize(
+                    for: category,
+                    remoteFolderID: remoteFolderID,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore,
+                    currentSchemaVersion: currentSchemaVersion,
+                    initialPublishCheckpoint: { try Task.checkCancellation() }
+                )
+            } catch {
+                try compatibilityPolicy.recordIfSchemaIncompatibility(
+                    error,
+                    category: category,
+                    currentSchemaVersion: currentSchemaVersion
+                )
+                throw error
+            }
+        }
+    }
+
+    /**
+     Adopts a remote folder with a deterministic checkpoint at the initial publication boundary.
+
+     Tests use the checkpoint to prove that restored graph data, metadata/fingerprints, patch zero,
+     `lastPatchWritten`, and readiness roll back together. Production supplies cancellation checking.
+
+     - Parameters:
+       - category: Logical sync category being adopted.
+       - remoteFolderID: Existing remote category folder selected for adoption.
+       - modelContext: Clean SwiftData context shared by graph and settings stores.
+       - settingsStore: Settings store bound to `modelContext`.
+       - currentSchemaVersion: Highest Android database schema this build can restore.
+       - initialPublishCheckpoint: Throwing callback invoked after every initial publication mutation
+         has staged and before the outer transaction commits.
+     - Returns: Completed synchronization report after initial restore and incremental replay.
+     - Side Effects: Creates or reuses remote setup, downloads the initial backup, atomically publishes
+       local initial state, and may replay newer patches.
+     - Throws: Rethrows setup, download, restore, transaction, checkpoint, cancellation, and replay errors.
+     */
+    func adoptRemoteFolderAndSynchronize(
+        for category: RemoteSyncCategory,
+        remoteFolderID: String,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        currentSchemaVersion: Int,
+        initialPublishCheckpoint: () throws -> Void
+    ) async throws -> RemoteSyncCategorySynchronizationReport {
         let bootstrapCoordinator = makeBootstrapCoordinator(settingsStore: settingsStore)
-        let discoveryService = makePatchDiscoveryService(settingsStore: settingsStore)
-        let stagingService = makeArchiveStagingService()
 
         let bootstrapState = try await bootstrapCoordinator.adoptRemoteFolder(
             for: category,
             remoteFolderID: remoteFolderID
         )
+        try finishDestinationReplacementIfNeeded(
+            for: category,
+            settingsStore: settingsStore
+        )
+        return try await restorePendingRemoteInitialBackupAndSynchronize(
+            for: category,
+            bootstrapState: bootstrapState,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            currentSchemaVersion: currentSchemaVersion,
+            initialPublishCheckpoint: initialPublishCheckpoint
+        )
+    }
+
+    /**
+     Restores a previously prepared adopted folder and atomically publishes its initial local state.
+
+     - Parameters:
+       - category: Logical sync category awaiting remote initial restore.
+       - bootstrapState: Valid marker/device-folder state retained from adoption setup.
+       - modelContext: Clean SwiftData context shared by graph and settings stores.
+       - settingsStore: Settings store bound to `modelContext`.
+       - currentSchemaVersion: Highest Android database schema this build can restore.
+       - initialPublishCheckpoint: Throwing callback immediately before the outer commit.
+     - Returns: Completed synchronization report after initial publication and incremental replay.
+     - Side Effects: Downloads/stages the initial backup, atomically publishes category state and
+       lifecycle bookkeeping, removes staged files, and may replay newer patches.
+     - Throws: Throws `missingInitialBackup` when absent and rethrows staging, restore, transaction,
+       checkpoint, cancellation, discovery, and replay errors. Pending adoption survives every failure.
+     */
+    private func restorePendingRemoteInitialBackupAndSynchronize(
+        for category: RemoteSyncCategory,
+        bootstrapState: RemoteSyncBootstrapState,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        currentSchemaVersion: Int,
+        initialPublishCheckpoint: () throws -> Void
+    ) async throws -> RemoteSyncCategorySynchronizationReport {
+        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let discoveryService = makePatchDiscoveryService(settingsStore: settingsStore)
+        let stagingService = makeArchiveStagingService()
+
         guard let syncFolderID = bootstrapState.syncFolderID,
               let initialBackup = try await discoveryService.findInitialBackup(syncFolderID: syncFolderID) else {
             throw RemoteSyncSynchronizationError.missingInitialBackup(category)
@@ -416,34 +580,49 @@ public final class RemoteSyncSynchronizationService {
 
         let stagedBackup = try await stagingService.downloadInitialBackup(
             initialBackup,
+            category: category,
             currentSchemaVersion: currentSchemaVersion
         )
         defer { stagingService.cleanupInitialBackup(stagedBackup) }
 
-        let initialRestoreReport = try initialBackupRestoreService.restoreInitialBackup(
-            stagedBackup,
-            category: category,
-            modelContext: modelContext,
-            settingsStore: settingsStore
-        )
+        var readyBootstrapState = bootstrapState
+        let initialRestoreReport: RemoteSyncInitialBackupRestoreReport
+        do {
+            initialRestoreReport = try settingsStore.performAtomicBatch(in: modelContext) {
+                let report = try initialBackupRestoreService.restoreInitialBackup(
+                    stagedBackup,
+                    category: category,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore
+                )
 
-        patchStatusStore.addStatus(
-            RemoteSyncPatchStatus(
-                sourceDevice: deviceIdentifier,
-                patchNumber: 0,
-                sizeBytes: initialBackup.size,
-                appliedDate: initialBackup.timestamp
-            ),
-            for: category
-        )
+                patchStatusStore.addStatus(
+                    RemoteSyncPatchStatus(
+                        sourceDevice: deviceIdentifier,
+                        patchNumber: 0,
+                        sizeBytes: initialBackup.size,
+                        appliedDate: initialBackup.timestamp
+                    ),
+                    for: category
+                )
 
-        var progressState = stateStore.progressState(for: category)
-        progressState.lastPatchWritten = nowProvider()
-        stateStore.setProgressState(progressState, for: category)
+                var progressState = stateStore.progressState(for: category)
+                progressState.lastPatchWritten = nowProvider()
+                stateStore.setProgressState(progressState, for: category)
+
+                readyBootstrapState.phase = .ready
+                stateStore.setBootstrapState(readyBootstrapState, for: category)
+                try initialPublishCheckpoint()
+                return report
+            }
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
 
         return try await synchronizeReadyCategory(
             category,
-            bootstrapState: bootstrapState,
+            bootstrapState: readyBootstrapState,
             modelContext: modelContext,
             settingsStore: settingsStore,
             currentSchemaVersion: currentSchemaVersion,
@@ -487,24 +666,109 @@ public final class RemoteSyncSynchronizationService {
         settingsStore: SettingsStore,
         currentSchemaVersion: Int
     ) async throws -> RemoteSyncCategorySynchronizationReport {
+        try await RemoteSyncProcessSynchronizationGate.shared.withPermit {
+            let compatibilityPolicy = RemoteSyncSchemaCompatibilityPolicy(settingsStore: settingsStore)
+            try compatibilityPolicy.prepareForExplicitBootstrap(category: category)
+            do {
+                return try await createRemoteFolderWhileHoldingProcessPermit(
+                    for: category,
+                    replacingRemoteFolderID: replacingRemoteFolderID,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore,
+                    currentSchemaVersion: currentSchemaVersion
+                )
+            } catch {
+                try compatibilityPolicy.recordIfSchemaIncompatibility(
+                    error,
+                    category: category,
+                    currentSchemaVersion: currentSchemaVersion
+                )
+                throw error
+            }
+        }
+    }
+
+    /**
+     Creates and publishes a replacement destination after process-wide serialization is acquired.
+
+     - Parameters:
+       - category: Category whose destination should be created.
+       - replacingRemoteFolderID: Optional remote folder removed before creation.
+       - modelContext: Context owning the exported graph.
+       - settingsStore: Local settings store bound to `modelContext`.
+       - currentSchemaVersion: Exact Android Room schema to publish.
+     - Returns: Completed initial upload and ready-state synchronization report.
+     - Side Effects: Creates remote bootstrap resources and uploads the local initial generation.
+     - Throws: Rethrows bootstrap, upload, replay, cancellation, and policy-publication failures.
+     */
+    private func createRemoteFolderWhileHoldingProcessPermit(
+        for category: RemoteSyncCategory,
+        replacingRemoteFolderID: String?,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        currentSchemaVersion: Int
+    ) async throws -> RemoteSyncCategorySynchronizationReport {
         let bootstrapCoordinator = makeBootstrapCoordinator(settingsStore: settingsStore)
 
         let bootstrapState = try await bootstrapCoordinator.createRemoteFolder(
             for: category,
             replacingRemoteFolderID: replacingRemoteFolderID
         )
+        try finishDestinationReplacementIfNeeded(
+            for: category,
+            settingsStore: settingsStore
+        )
 
+        return try await uploadPendingLocalInitialBackupAndSynchronize(
+            for: category,
+            bootstrapState: bootstrapState,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            currentSchemaVersion: currentSchemaVersion
+        )
+    }
+
+    /**
+     Uploads a prepared local initial baseline and transitions the category to ready afterward.
+
+     - Parameters:
+       - category: Logical sync category awaiting initial upload.
+       - bootstrapState: Valid marker/device-folder state retained from remote setup.
+       - modelContext: SwiftData context whose current category graph becomes the remote baseline.
+       - settingsStore: Local settings store for baseline and lifecycle bookkeeping.
+       - currentSchemaVersion: Android database schema written into the initial backup.
+     - Returns: Completed synchronization report after upload acceptance and incremental discovery.
+     - Side Effects: Uploads the full baseline, records its accepted baseline, atomically clears the
+       pending phase, and performs a ready-state pass without echoing a sparse patch.
+     - Throws: Rethrows export, upload, settings transaction, cancellation, discovery, and replay errors;
+       upload failure leaves the persisted pending phase available for restart retry.
+     */
+    private func uploadPendingLocalInitialBackupAndSynchronize(
+        for category: RemoteSyncCategory,
+        bootstrapState: RemoteSyncBootstrapState,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        currentSchemaVersion: Int
+    ) async throws -> RemoteSyncCategorySynchronizationReport {
+        var readyBootstrapState = bootstrapState
+        readyBootstrapState.phase = .ready
         _ = try await initialBackupUploadService.uploadInitialBackup(
             for: category,
             bootstrapState: bootstrapState,
             modelContext: modelContext,
             settingsStore: settingsStore,
-            schemaVersion: currentSchemaVersion
+            schemaVersion: currentSchemaVersion,
+            acceptedBaselineMutations: {
+                RemoteSyncStateStore(settingsStore: settingsStore).setBootstrapState(
+                    readyBootstrapState,
+                    for: category
+                )
+            }
         )
 
         return try await synchronizeReadyCategory(
             category,
-            bootstrapState: bootstrapState,
+            bootstrapState: readyBootstrapState,
             modelContext: modelContext,
             settingsStore: settingsStore,
             currentSchemaVersion: currentSchemaVersion,
@@ -514,12 +778,39 @@ public final class RemoteSyncSynchronizationService {
     }
 
     /**
+     Completes a persisted explicit destination-replacement boundary before synchronization proceeds.
+
+     New or repaired remote setup records a durable cleanup marker with its bootstrap identifiers.
+     Cleanup removes only unaccepted sparse/initial publications for the former destination. The marker
+     is cleared afterward, so a crash retries cleanup while successful initial-upload retries retain
+     their exact durable archive.
+
+     - Parameters:
+       - category: Logical category whose destination setup may require cleanup.
+       - settingsStore: Local store containing lifecycle and outbox metadata.
+     - Side Effects: When required, abandons pending publication markers/files and clears the cleanup marker.
+     - Throws: Rethrows strict settings, cancellation, or filesystem cleanup failures; the marker remains
+       pending until every cleanup step succeeds.
+     */
+    private func finishDestinationReplacementIfNeeded(
+        for category: RemoteSyncCategory,
+        settingsStore: SettingsStore
+    ) throws {
+        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+        guard stateStore.requiresPendingPublicationReset(for: category) else { return }
+        try RemoteSyncResetService(settingsStore: settingsStore).abandonPendingPublications(
+            for: category
+        )
+        try stateStore.markPendingPublicationResetComplete(for: category)
+    }
+
+    /**
      Synchronizes a category that already has a ready bootstrap state.
 
-     The method persists Android-style `lastSynchronized` bookkeeping before discovery so a later
-     sync can still see patches that are uploaded while the current run is in flight. Android also
-     retries once from `lastSynchronized = 0` when incremental discovery proves patches were
-     skipped, and that behavior is preserved here.
+     Android uploads first, persists the current time before remote listing, and performs one
+     inbound-only retry after durably resetting the cursor to zero when discovery reports skipped
+     patches. Incompatible schema restores the exact prior cursor; other failures preserve the
+     already-published pre-list cursor.
 
      - Parameters:
        - category: Logical sync category that already has a valid bootstrap state.
@@ -531,13 +822,13 @@ public final class RemoteSyncSynchronizationService {
        - suppressOutboundUpload: Whether the pass should skip sparse local upload because the same run just adopted or created the remote baseline.
      - Returns: Completed synchronization report for the ready category.
      - Side effects:
-       - updates `lastSynchronized` bookkeeping in `RemoteSyncStateStore`
+       - uploads at most once and updates `lastSynchronized` before remote listing
        - may stage and replay remote patches
        - may suppress sparse local upload when the same pass already exchanged a full initial backup
      - Failure modes:
        - rethrows discovery, staging, and patch-apply failures from the lower layers
        - retries once after `RemoteSyncPatchDiscoveryError.patchFilesSkipped`
-       - restores the previous `lastSynchronized` value for `RemoteSyncPatchDiscoveryError.incompatiblePatchVersion`
+       - incompatible schema restores the prior cursor; other failures retain Android's pre-list cursor
      */
     private func synchronizeReadyCategory(
         _ category: RemoteSyncCategory,
@@ -550,38 +841,73 @@ public final class RemoteSyncSynchronizationService {
     ) async throws -> RemoteSyncCategorySynchronizationReport {
         let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
         let originalProgressState = stateStore.progressState(for: category)
+        try Task.checkCancellation()
+
+        let resumedPatchUploadReport: RemoteSyncCategoryPatchUploadReport?
+        let newPatchUploadReport: RemoteSyncCategoryPatchUploadReport?
+        if suppressOutboundUpload {
+            resumedPatchUploadReport = nil
+            newPatchUploadReport = nil
+        } else {
+            resumedPatchUploadReport = try await resumePendingPatchIfSupported(
+                for: category,
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            try Task.checkCancellation()
+            newPatchUploadReport = try await uploadPendingPatchIfSupported(
+                for: category,
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
+
+        let syncStartedAt = nowProvider()
+        try settingsStore.performAtomicBatch {
+            var preListProgressState = stateStore.progressState(for: category)
+            preListProgressState.lastSynchronized = syncStartedAt
+            stateStore.setProgressState(preListProgressState, for: category)
+        }
+        let patchUploadReport = newPatchUploadReport ?? resumedPatchUploadReport
 
         do {
-            return try await synchronizeReadyAttempt(
-                category,
-                bootstrapState: bootstrapState,
-                progressState: originalProgressState,
-                modelContext: modelContext,
-                settingsStore: settingsStore,
-                currentSchemaVersion: currentSchemaVersion,
-                initialRestoreReport: initialRestoreReport,
-                suppressOutboundUpload: suppressOutboundUpload
-            )
-        } catch RemoteSyncPatchDiscoveryError.patchFilesSkipped {
-            var resetProgressState = originalProgressState
-            resetProgressState.lastSynchronized = 0
-            stateStore.setProgressState(resetProgressState, for: category)
-
-            return try await synchronizeReadyAttempt(
-                category,
-                bootstrapState: bootstrapState,
-                progressState: resetProgressState,
-                modelContext: modelContext,
-                settingsStore: settingsStore,
-                currentSchemaVersion: currentSchemaVersion,
-                initialRestoreReport: initialRestoreReport,
-                suppressOutboundUpload: suppressOutboundUpload
-            )
+            do {
+                return try await synchronizeReadyAttempt(
+                    category,
+                    bootstrapState: bootstrapState,
+                    progressState: originalProgressState,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore,
+                    currentSchemaVersion: currentSchemaVersion,
+                    initialRestoreReport: initialRestoreReport,
+                    patchUploadReport: patchUploadReport
+                )
+            } catch RemoteSyncPatchDiscoveryError.patchFilesSkipped {
+                var resetProgressState = stateStore.progressState(for: category)
+                resetProgressState.lastSynchronized = 0
+                try settingsStore.performAtomicBatch {
+                    stateStore.setProgressState(resetProgressState, for: category)
+                }
+                return try await synchronizeReadyAttempt(
+                    category,
+                    bootstrapState: bootstrapState,
+                    progressState: resetProgressState,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore,
+                    currentSchemaVersion: currentSchemaVersion,
+                    initialRestoreReport: initialRestoreReport,
+                    patchUploadReport: patchUploadReport
+                )
+            }
         } catch RemoteSyncPatchDiscoveryError.incompatiblePatchVersion(let version) {
-            stateStore.setProgressState(originalProgressState, for: category)
+            try settingsStore.performAtomicBatch {
+                var restoredProgressState = stateStore.progressState(for: category)
+                restoredProgressState.lastSynchronized = originalProgressState.lastSynchronized
+                stateStore.setProgressState(restoredProgressState, for: category)
+            }
             throw RemoteSyncPatchDiscoveryError.incompatiblePatchVersion(version)
-        } catch {
-            throw error
         }
     }
 
@@ -596,13 +922,11 @@ public final class RemoteSyncSynchronizationService {
        - settingsStore: Local-only settings store backing bootstrap and sync metadata.
        - currentSchemaVersion: Highest schema version the caller can safely read from remote archives.
        - initialRestoreReport: Optional initial-backup restore summary that should be carried into the final report.
-       - suppressOutboundUpload: Whether the pass should skip sparse local upload because the same run already exchanged a full initial backup.
+       - patchUploadReport: Upload result produced once before Android's cursor/listing phase.
      - Returns: Completed synchronization report for one ready-state attempt.
      - Side effects:
-       - persists `lastSynchronized` before remote discovery
+       - uses the caller-provided pre-list cursor for Android-compatible discovery
        - stages, downloads, and replays remote patches when discovery finds any
-       - may upload one outbound sparse patch after replay when the category supports local export
-         and the pass is not explicitly suppressing outbound upload
        - removes staged patch archives after application or failure
      - Failure modes:
        - rethrows discovery, staging, patch-apply, and patch-upload failures from the lower layers
@@ -615,16 +939,13 @@ public final class RemoteSyncSynchronizationService {
         settingsStore: SettingsStore,
         currentSchemaVersion: Int,
         initialRestoreReport: RemoteSyncInitialBackupRestoreReport?,
-        suppressOutboundUpload: Bool
+        patchUploadReport: RemoteSyncCategoryPatchUploadReport?
     ) async throws -> RemoteSyncCategorySynchronizationReport {
         let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
         let discoveryService = makePatchDiscoveryService(settingsStore: settingsStore)
         let stagingService = makeArchiveStagingService()
 
-        let syncStartedAt = nowProvider()
-        var updatedProgressState = progressState
-        updatedProgressState.lastSynchronized = syncStartedAt
-        stateStore.setProgressState(updatedProgressState, for: category)
+        try Task.checkCancellation()
 
         let discoveryResult = try await discoveryService.discoverPendingPatches(
             for: category,
@@ -632,6 +953,7 @@ public final class RemoteSyncSynchronizationService {
             progressState: progressState,
             currentSchemaVersion: currentSchemaVersion
         )
+        try Task.checkCancellation()
 
         let patchReplayReport: RemoteSyncCategoryPatchReplayReport?
         if discoveryResult.pendingPatches.isEmpty {
@@ -646,18 +968,7 @@ public final class RemoteSyncSynchronizationService {
                 settingsStore: settingsStore
             )
         }
-
-        let patchUploadReport: RemoteSyncCategoryPatchUploadReport?
-        if suppressOutboundUpload {
-            patchUploadReport = nil
-        } else {
-            patchUploadReport = try await uploadPendingPatchIfSupported(
-                for: category,
-                bootstrapState: bootstrapState,
-                modelContext: modelContext,
-                settingsStore: settingsStore
-            )
-        }
+        try Task.checkCancellation()
 
         let finalProgressState = stateStore.progressState(for: category)
         return RemoteSyncCategorySynchronizationReport(
@@ -670,6 +981,62 @@ public final class RemoteSyncSynchronizationService {
             lastPatchWritten: finalProgressState.lastPatchWritten,
             lastSynchronized: finalProgressState.lastSynchronized
         )
+    }
+
+    /**
+     Resumes one already-durable outbound generation without projecting newer local state.
+
+     The coordinator invokes this before inbound replay. Category workers validate that any pending
+     generation belongs to the active device folder and fail closed on mismatches; an absent pending
+     generation returns `nil` without allocating a patch number or creating an archive.
+
+     - Parameters:
+       - category: Logical category whose durable outbox may need acceptance.
+       - bootstrapState: Ready destination identifiers for the category.
+       - modelContext: Clean context shared by graph-backed category workers and settings.
+       - settingsStore: Local store containing category outbox and accepted-generation metadata.
+     - Returns: Category-specific accepted report, or `nil` when no outbox exists.
+     - Side Effects: May reconcile exact remote bytes and atomically accept one existing generation.
+     - Throws: Rethrows malformed outbox, destination mismatch, byte conflict, transport, cancellation,
+       stale-baseline, and atomic local-acceptance failures from category workers.
+     */
+    private func resumePendingPatchIfSupported(
+        for category: RemoteSyncCategory,
+        bootstrapState: RemoteSyncBootstrapState,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) async throws -> RemoteSyncCategoryPatchUploadReport? {
+        switch category {
+        case .bookmarks:
+            return try await bookmarkPatchUploadService.resumePendingUploadIfPresent(
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            ).map(RemoteSyncCategoryPatchUploadReport.bookmarks)
+        case .readingPlans:
+            return try await readingPlanPatchUploadService.resumePendingUploadIfPresent(
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            ).map(RemoteSyncCategoryPatchUploadReport.readingPlans)
+        case .workspaces:
+            return try await workspacePatchUploadService.resumePendingUploadIfPresent(
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            ).map(RemoteSyncCategoryPatchUploadReport.workspaces)
+        case .myDocuments:
+            return try await myDocumentPatchUploadService.resumePendingUploadIfPresent(
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            ).map(RemoteSyncCategoryPatchUploadReport.myDocuments)
+        case .progress:
+            return try await progressPatchUploadService.resumePendingPatchIfPresent(
+                bootstrapState: bootstrapState,
+                settingsStore: settingsStore
+            ).map(RemoteSyncCategoryPatchUploadReport.progress)
+        }
     }
 
     /**

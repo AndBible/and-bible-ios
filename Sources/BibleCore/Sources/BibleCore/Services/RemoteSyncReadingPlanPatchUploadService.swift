@@ -15,6 +15,24 @@ public enum RemoteSyncReadingPlanPatchUploadError: Error, Equatable {
 
     /// The generated temporary SQLite patch database could not be opened for writing.
     case invalidSQLiteDatabase
+
+    /// Durable pending-upload metadata could not be encoded or decoded safely.
+    case invalidPendingUpload
+
+    /// A pending archive belongs to a different destination and requires deliberate reset handling.
+    case pendingUploadDestinationMismatch(stored: String, requested: String)
+
+    /// One preserved Android log row was malformed or stored under the wrong key.
+    case invalidStoredLogEntry(String)
+
+    /// The requested wire schema is not the exact Android Room contract supported by this build.
+    case unsupportedSchemaVersion(Int)
+
+    /// Local and remote patch history exhausted Android's signed 64-bit number range.
+    case patchNumberExhausted
+
+    /// Android database sync cannot reconstruct active device-local custom plan definitions.
+    case unsupportedCustomReadingPlans([String])
 }
 
 /**
@@ -85,9 +103,9 @@ public struct RemoteSyncReadingPlanPatchUploadReport: Sendable, Equatable {
  The service mirrors the outbound half of Android's reading-plan sync contract for the one category
  that currently has a full iOS fidelity bridge:
  - project current local SwiftData state into Android `ReadingPlan` and `ReadingPlanStatus` rows
- - compare those rows against the preserved Android `LogEntry` baseline and local row fingerprints
+ - compare native Android rows against the preserved `LogEntry` baseline and local fingerprints
  - emit sparse `UPSERT` and `DELETE` `LogEntry` rows for only the changed Android keys
- - write an Android-compatible SQLite patch database and gzip archive
+ - stream an Android-compatible SQLite patch database into the bounded gzip outbox contract
  - upload `<patchNumber>.<schemaVersion>.sqlite3.gz` into the device folder
  - advance local `LogEntry`, `SyncStatus`, `lastPatchWritten`, and fingerprint baselines only after upload succeeds
 
@@ -98,11 +116,11 @@ public struct RemoteSyncReadingPlanPatchUploadReport: Sendable, Equatable {
  - `RemoteSyncReadingPlanStatusStore` preserves the accepted Android status payloads for later local diffs
  - `RemoteSyncPatchStatusStore` tracks the highest uploaded patch number for the local device folder
  - `RemoteSyncStateStore` persists Android-aligned `lastPatchWritten` bookkeeping
- - `RemoteSyncArchiveStagingService` provides gzip compression for the generated SQLite patch file
+ - `RemoteSyncArchiveStagingService` streams the generated SQLite patch into the bounded gzip contract
 
  Side effects:
- - reads live `ReadingPlan` state from SwiftData and preserved status/log metadata from `SettingsStore`
- - creates and removes temporary SQLite and gzip files beneath the configured temporary directory
+ - reads live `ReadingPlan` state and preserved status/log metadata
+ - creates and removes temporary SQLite files and manages one durable Application Support gzip outbox
  - uploads a gzip patch archive into the ready device folder
  - rewrites preserved Android status payloads for uploaded or deleted reading-plan status rows
  - rewrites local Android `LogEntry` and fingerprint baselines for `.readingPlans` after successful upload
@@ -112,14 +130,86 @@ public struct RemoteSyncReadingPlanPatchUploadReport: Sendable, Equatable {
  - throws `RemoteSyncReadingPlanPatchUploadError.missingDeviceFolderID` when the category is not bootstrapped for outbound upload
  - throws `RemoteSyncReadingPlanPatchUploadError.invalidSQLiteDatabase` when the temporary SQLite patch file cannot be created
  - rethrows local filesystem write failures while building the temporary SQLite or gzip files
- - rethrows backend transport or local-file read failures from `RemoteSyncAdapting.upload`
- - rethrows gzip-compression failures from `RemoteSyncArchiveStagingService.gzip(_:)`
+ - rethrows backend transport and local-file validation failures
+ - rethrows cancellation and bounded gzip failures from `gzipPatchDatabase(at:to:)`
 
  Concurrency:
  - this type is not `Sendable`; callers must respect the confinement rules of the supplied
    `ModelContext` and `SettingsStore`
  */
 public final class RemoteSyncReadingPlanPatchUploadService {
+    /**
+     Records one generated Android status identifier that may be merged after upload acceptance.
+
+     Only statuses that already existed without a remote id enter this list. Acceptance therefore
+     cannot recreate a status deleted while transport was suspended, and it preserves any newer
+     payload stored under the same logical plan/day key.
+     */
+    private struct GeneratedStatusIdentity: Codable, Equatable {
+        let planCode: String
+        let dayNumber: Int
+        let remoteStatusID: UUID
+    }
+
+    /**
+     Durable metadata for one exact reading-plan patch archive awaiting local acceptance.
+
+     The archive itself is file-backed so retries after process termination publish byte-identical
+     content for the same patch number. This envelope carries all local acceptance inputs so retry
+     never reprojects the live graph.
+     */
+    private struct PendingUpload: Codable, Equatable {
+        let formatVersion: Int
+        let deviceFolderID: String
+        let sourceDevice: String
+        let patchNumber: Int64
+        let schemaVersion: Int
+        let timestamp: Int64
+        let archiveFileName: String
+        let archiveSHA256: String
+        let archiveSize: Int64
+        let expectedBaselineRevision: Int64
+        let acceptedGeneration: RemoteSyncReadingPlanAcceptedGeneration
+        let updatedLogEntries: [RemoteSyncLogEntry]
+        let uploadedLogEntries: [RemoteSyncLogEntry]?
+        let generatedStatusIdentities: [GeneratedStatusIdentity]
+        let upsertedPlanCount: Int
+        let upsertedStatusCount: Int
+        let deletedRowCount: Int
+        let logEntryCount: Int
+        var publicationIdentity: RemoteSyncPublicationIdentity? = nil
+
+        /// Android-compatible archive name derived from the durable patch identity.
+        var patchFileName: String {
+            "\(patchNumber).\(schemaVersion).sqlite3.gz"
+        }
+    }
+
+    /**
+     In-memory generation used only until its exact archive and acceptance envelope are durable.
+     */
+    private struct UploadGeneration {
+        let deviceFolderID: String
+        let sourceDevice: String
+        let patchNumber: Int64
+        let schemaVersion: Int
+        let timestamp: Int64
+        let expectedBaselineRevision: Int64
+        let acceptedGeneration: RemoteSyncReadingPlanAcceptedGeneration
+        let updatedLogEntries: [RemoteSyncLogEntry]
+        let generatedStatusIdentities: [GeneratedStatusIdentity]
+        let changeSet: ChangeSet
+    }
+
+    /**
+     Result of the single atomic preflight read boundary.
+     */
+    private enum PreflightResult {
+        case noChanges
+        case pending(PendingUpload)
+        case generation(UploadGeneration)
+    }
+
     private struct ChangeSet {
         let planRowsByKey: [String: RemoteSyncCurrentReadingPlanRow]
         let statusRowsByKey: [String: RemoteSyncCurrentReadingPlanStatusRow]
@@ -139,10 +229,18 @@ public final class RemoteSyncReadingPlanPatchUploadService {
     }
 
     private let adapter: any RemoteSyncAdapting
+    private let remotePatchReconciler: RemoteSyncRemotePatchReconciler
     private let snapshotService: RemoteSyncReadingPlanSnapshotService
     private let fileManager: FileManager
     private let temporaryDirectory: URL
+    private let outboxDirectory: URL
     private let nowProvider: () -> Int64
+    private let finalAcceptanceCheckpoint: () throws -> Void
+    /// Local-only settings key holding the pending reading-plan upload envelope.
+    static let pendingUploadKey = "remote_sync.readingplans.pending_upload"
+
+    /// Current durable envelope format.
+    private static let pendingUploadFormatVersion = 2
 
     /**
      Creates a reading-plan patch upload service for one remote backend.
@@ -150,26 +248,75 @@ public final class RemoteSyncReadingPlanPatchUploadService {
      - Parameters:
        - adapter: Remote backend adapter used for the final archive upload.
        - snapshotService: Snapshot service used to project current local reading-plan state into Android rows.
+       - userPlanDirectory: Local custom-definition directory used by snapshot recovery.
        - fileManager: File manager used for temporary-file cleanup.
        - temporaryDirectory: Scratch directory for temporary SQLite and gzip files. Defaults to the process temporary directory.
        - nowProvider: Millisecond clock used for Android `LogEntry.lastUpdated` and local `lastPatchWritten`.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
-    public init(
+    public convenience init(
         adapter: any RemoteSyncAdapting,
-        snapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService(),
+        snapshotService: RemoteSyncReadingPlanSnapshotService? = nil,
+        userPlanDirectory: URL = ReadingPlanService.defaultUserReadingPlanDirectory(),
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil,
+        outboxDirectory: URL? = nil,
         nowProvider: @escaping () -> Int64 = {
-            Int64(Date().timeIntervalSince1970 * 1000.0)
+            AndroidTimestamp.currentMilliseconds()
         }
     ) {
+        self.init(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            userPlanDirectory: userPlanDirectory,
+            fileManager: fileManager,
+            temporaryDirectory: temporaryDirectory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: nowProvider,
+            finalAcceptanceCheckpoint: {}
+        )
+    }
+
+    /**
+     Creates a reading-plan uploader with an internal final-acceptance checkpoint.
+
+     - Parameters:
+       - adapter: Remote backend adapter used for archive upload.
+       - snapshotService: Strict graph projector and accepted-baseline publisher.
+       - userPlanDirectory: Local custom-definition directory used by snapshot recovery.
+       - fileManager: File manager used for temporary and durable outbox files.
+       - temporaryDirectory: Scratch directory for SQLite construction.
+       - outboxDirectory: Durable directory that survives process termination.
+       - nowProvider: Millisecond clock used for patch metadata.
+       - finalAcceptanceCheckpoint: Synchronous checkpoint run after every local acceptance mutation
+         but before the atomic batch commits.
+     - Side effects: none until upload is requested.
+     - Failure modes: The initializer cannot fail; checkpoint failures are surfaced by upload.
+     */
+    init(
+        adapter: any RemoteSyncAdapting,
+        snapshotService: RemoteSyncReadingPlanSnapshotService? = nil,
+        userPlanDirectory: URL = ReadingPlanService.defaultUserReadingPlanDirectory(),
+        fileManager: FileManager = .default,
+        temporaryDirectory: URL? = nil,
+        outboxDirectory: URL? = nil,
+        nowProvider: @escaping () -> Int64 = {
+            AndroidTimestamp.currentMilliseconds()
+        },
+        finalAcceptanceCheckpoint: @escaping () throws -> Void
+    ) {
         self.adapter = adapter
-        self.snapshotService = snapshotService
+        self.remotePatchReconciler = RemoteSyncRemotePatchReconciler(adapter: adapter)
+        self.snapshotService = snapshotService ?? RemoteSyncReadingPlanSnapshotService(
+            userPlanDirectory: userPlanDirectory,
+            fileManager: fileManager
+        )
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
+        self.outboxDirectory = outboxDirectory ?? Self.defaultOutboxDirectory(fileManager: fileManager)
         self.nowProvider = nowProvider
+        self.finalAcceptanceCheckpoint = finalAcceptanceCheckpoint
     }
 
     /**
@@ -208,116 +355,333 @@ public final class RemoteSyncReadingPlanPatchUploadService {
             throw RemoteSyncReadingPlanPatchUploadError.missingDeviceFolderID
         }
 
-        let sourceDevice = Self.sourceDeviceName(from: deviceFolderID)
-        let timestamp = nowProvider()
-        let snapshot = snapshotService.snapshotCurrentState(
+        if let resumed = try await resumePendingUploadIfPresent(
+            bootstrapState: bootstrapState,
             modelContext: modelContext,
             settingsStore: settingsStore
-        )
-
-        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
-        let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
-        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
-        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
-
-        let existingEntriesByKey = Dictionary(
-            uniqueKeysWithValues: logEntryStore.entries(for: .readingPlans).map {
-                (logEntryStore.key(for: .readingPlans, entry: $0), $0)
-            }
-        )
-        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
-        let hadMissingFingerprintBaseline = existingEntriesByKey.keys.contains { key in
-            snapshot.planRowsByKey[key] != nil || snapshot.statusRowsByKey[key] != nil
-        } && existingEntriesByKey.contains { key, entry in
-            if entry.type == .delete {
-                return false
-            }
-            return (snapshot.planRowsByKey[key] != nil || snapshot.statusRowsByKey[key] != nil)
-                && fingerprintStore.fingerprint(
-                    for: .readingPlans,
-                    tableName: entry.tableName,
-                    entityID1: entry.entityID1,
-                    entityID2: entry.entityID2
-                ) == nil
+        ) {
+            return resumed
         }
 
-        let changeSet = buildChangeSet(
-            snapshot: snapshot,
-            existingEntriesByKey: existingEntriesByKey,
-            fingerprintStore: fingerprintStore,
-            timestamp: timestamp,
-            sourceDevice: sourceDevice
-        )
-
-        if changeSet.logEntries.isEmpty {
-            if hadMissingFingerprintBaseline {
-                snapshotService.refreshBaselineFingerprints(
-                    modelContext: modelContext,
-                    settingsStore: settingsStore
+        let hasPendingWork = try settingsStore.performAtomicBatch(in: modelContext) {
+            let snapshot = try snapshotService.snapshotCurrentStateStrict(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            let unsupportedPlanCodes = snapshotService
+                .unsupportedCustomPlanCodes(in: snapshot)
+            guard unsupportedPlanCodes.isEmpty else {
+                throw RemoteSyncReadingPlanPatchUploadError.unsupportedCustomReadingPlans(
+                    unsupportedPlanCodes
                 )
             }
+            let mutationJournal = RemoteSyncMutationJournalService(
+                nowProvider: nowProvider,
+                readingPlanSnapshotService: snapshotService
+            )
+            try mutationJournal.recordLocalChanges(
+                for: .readingPlans,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            return try !mutationJournal.pendingMutations(
+                for: .readingPlans,
+                settingsStore: settingsStore
+            ).isEmpty
+        }
+        guard hasPendingWork else {
             return nil
         }
 
-        let patchNumber = (patchStatusStore.lastPatchNumber(
-            for: .readingPlans,
-            sourceDevice: sourceDevice
-        ) ?? 0) + 1
-        let patchFileName = "\(patchNumber).\(schemaVersion).sqlite3.gz"
+        let sourceDevice = Self.sourceDeviceName(from: deviceFolderID)
+        let remotePatchNumber = try await maximumRemotePatchNumber(deviceFolderID: deviceFolderID)
+        let preflight = try settingsStore.performAtomicBatch(in: modelContext) {
+            try Task.checkCancellation()
+            if let pendingUpload = try loadPendingUpload(settingsStore: settingsStore) {
+                guard pendingUpload.deviceFolderID == deviceFolderID else {
+                    throw RemoteSyncReadingPlanPatchUploadError.pendingUploadDestinationMismatch(
+                        stored: pendingUpload.deviceFolderID,
+                        requested: deviceFolderID
+                    )
+                }
+                return PreflightResult.pending(pendingUpload)
+            }
 
-        let databaseURL = temporaryURL(prefix: "remote-sync-readingplans-upload-", suffix: ".sqlite3")
-        let archiveURL = temporaryURL(prefix: "remote-sync-readingplans-upload-", suffix: ".sqlite3.gz")
-        defer {
-            try? fileManager.removeItem(at: databaseURL)
-            try? fileManager.removeItem(at: archiveURL)
+            let wallClockTimestamp = nowProvider()
+            let snapshot = try snapshotService.snapshotCurrentStateStrict(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            let unsupportedPlanCodes = snapshotService
+                .unsupportedCustomPlanCodes(in: snapshot)
+            guard unsupportedPlanCodes.isEmpty else {
+                throw RemoteSyncReadingPlanPatchUploadError.unsupportedCustomReadingPlans(
+                    unsupportedPlanCodes
+                )
+            }
+            let mutationJournal = RemoteSyncMutationJournalService(
+                nowProvider: nowProvider,
+                readingPlanSnapshotService: snapshotService
+            )
+            try mutationJournal.recordLocalChanges(
+                for: .readingPlans,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            let pendingMutations = try mutationJournal.pendingMutations(
+                for: .readingPlans,
+                settingsStore: settingsStore
+            )
+            try snapshotService.validateExportableFingerprints(in: snapshot)
+            let acceptedBaseline = try snapshotService.storedAcceptedBaseline(
+                settingsStore: settingsStore
+            )
+            let acceptedGeneration = snapshotService.acceptedGeneration(
+                from: snapshot,
+                preserving: acceptedBaseline?.generation
+            )
+            let acceptedRows = acceptedBaseline?.generation.rowsByKey
+            let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+            let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
+            let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+            let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+            let patchStatuses = try patchStatusStore.statusesStrict(for: .readingPlans)
+
+            let existingEntriesByKey = Dictionary(
+                uniqueKeysWithValues: try strictLogEntries(
+                    settingsStore: settingsStore,
+                    logEntryStore: logEntryStore
+                ).map {
+                    (logEntryStore.key(for: .readingPlans, entry: $0), $0)
+                }
+            )
+            let progressState = RemoteSyncStateStore(settingsStore: settingsStore)
+                .progressState(for: .readingPlans)
+            let timestamp = try RemoteSyncLogicalSequence.nextTimestamp(
+                now: wallClockTimestamp,
+                highWatermarks: existingEntriesByKey.values.map(\.lastUpdated)
+                    + patchStatuses.map(\.appliedDate)
+                    + [progressState.lastPatchWritten, progressState.lastSynchronized].compactMap { $0 }
+            )
+            let changeSet = try buildChangeSet(
+                snapshot: snapshot,
+                acceptedRowsByKey: acceptedRows ?? [:],
+                existingEntriesByKey: existingEntriesByKey,
+                fingerprintStore: fingerprintStore,
+                pendingMutations: pendingMutations,
+                timestamp: timestamp,
+                sourceDevice: sourceDevice
+            )
+
+            if changeSet.logEntries.isEmpty {
+                if acceptedBaseline == nil {
+                    try snapshotService.acceptBaselineFingerprints(
+                        acceptedGeneration,
+                        settingsStore: settingsStore,
+                        expectedRevision: 0
+                    )
+                }
+                return PreflightResult.noChanges
+            }
+
+            let generatedStatusIdentities: [GeneratedStatusIdentity] = try changeSet.statusRowsByKey.values.compactMap {
+                row -> GeneratedStatusIdentity? in
+                guard let status = try statusStore.storedStatusStrict(
+                    planCode: row.planCode,
+                    dayNumber: row.planDay
+                ), status.remoteStatusID == nil else {
+                    return nil
+                }
+                return GeneratedStatusIdentity(
+                    planCode: row.planCode,
+                    dayNumber: row.planDay,
+                    remoteStatusID: row.id
+                )
+            }
+            let localPatchNumber = patchStatuses
+                .filter { $0.sourceDevice == sourceDevice }
+                .map(\.patchNumber)
+                .max() ?? 0
+            let patchNumber: Int64
+            do {
+                patchNumber = try RemoteSyncPublicationIdentity.nextPatchNumber(
+                    after: [localPatchNumber, remotePatchNumber]
+                )
+            } catch {
+                throw RemoteSyncReadingPlanPatchUploadError.patchNumberExhausted
+            }
+            return PreflightResult.generation(
+                UploadGeneration(
+                    deviceFolderID: deviceFolderID,
+                    sourceDevice: sourceDevice,
+                    patchNumber: patchNumber,
+                    schemaVersion: schemaVersion,
+                    timestamp: timestamp,
+                    expectedBaselineRevision: acceptedBaseline?.revision ?? 0,
+                    acceptedGeneration: acceptedGeneration,
+                    updatedLogEntries: changeSet.updatedEntriesByKey.values.sorted(by: Self.logEntrySort),
+                    generatedStatusIdentities: generatedStatusIdentities,
+                    changeSet: changeSet
+                )
+            )
         }
 
-        try writePatchDatabase(
-            at: databaseURL,
-            schemaVersion: schemaVersion,
-            changeSet: changeSet
-        )
-        let archiveData = try RemoteSyncArchiveStagingService.gzip(Data(contentsOf: databaseURL))
-        try archiveData.write(to: archiveURL, options: .atomic)
-
-        let uploadedFile = try await adapter.upload(
-            name: patchFileName,
-            fileURL: archiveURL,
-            parentID: deviceFolderID,
-            contentType: NextCloudSyncAdapter.gzipMimeType
-        )
-
-        persistAcceptedStatuses(changeSet.statusRowsByKey.values, to: statusStore)
-        removeDeletedStatuses(changeSet.logEntries, from: statusStore)
-        logEntryStore.replaceEntries(
-            changeSet.updatedEntriesByKey.values.sorted(by: Self.logEntrySort),
-            for: .readingPlans
-        )
-        patchStatusStore.addStatus(
-            RemoteSyncPatchStatus(
-                sourceDevice: sourceDevice,
-                patchNumber: patchNumber,
-                sizeBytes: uploadedFile.size,
-                appliedDate: timestamp
-            ),
-            for: .readingPlans
-        )
-        var progressState = stateStore.progressState(for: .readingPlans)
-        progressState.lastPatchWritten = timestamp
-        stateStore.setProgressState(progressState, for: .readingPlans)
-        snapshotService.refreshBaselineFingerprints(
+        let pendingUpload: PendingUpload
+        switch preflight {
+        case .noChanges:
+            return nil
+        case .pending(let existingUpload):
+            pendingUpload = existingUpload
+        case .generation(let generation):
+            pendingUpload = try persistPendingUpload(
+                generation,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
+        return try await finishPendingUpload(
+            pendingUpload,
             modelContext: modelContext,
             settingsStore: settingsStore
         )
+    }
 
+    /**
+     Resumes an already-durable reading-plan generation without projecting or creating new work.
+
+     Synchronization calls this before inbound replay so a remotely published generation is accepted
+     against the baseline revision it was built from. A destination mismatch remains fail-closed and
+     must be cleared only by the explicit category reset/replacement boundary.
+
+     - Parameters:
+       - bootstrapState: Ready bootstrap state naming the current device folder.
+       - modelContext: Clean context shared by the graph and settings store.
+       - settingsStore: Local store containing any durable pending envelope.
+     - Returns: Accepted upload report, or `nil` when no pending generation exists.
+     - Side effects: May reconcile exact remote bytes and atomically accept one durable generation.
+     - Throws: Rethrows destination, outbox, transport, cancellation, CAS, and acceptance failures.
+     */
+    public func resumePendingUploadIfPresent(
+        bootstrapState: RemoteSyncBootstrapState,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) async throws -> RemoteSyncReadingPlanPatchUploadReport? {
+        guard let deviceFolderID = bootstrapState.deviceFolderID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !deviceFolderID.isEmpty else {
+            throw RemoteSyncReadingPlanPatchUploadError.missingDeviceFolderID
+        }
+        let pendingUpload = try settingsStore.performAtomicBatch(in: modelContext) {
+            try Task.checkCancellation()
+            return try loadPendingUpload(settingsStore: settingsStore)
+        }
+        guard let pendingUpload else {
+            return nil
+        }
+        guard pendingUpload.deviceFolderID == deviceFolderID else {
+            throw RemoteSyncReadingPlanPatchUploadError.pendingUploadDestinationMismatch(
+                stored: pendingUpload.deviceFolderID,
+                requested: deviceFolderID
+            )
+        }
+        return try await finishPendingUpload(
+            pendingUpload,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+    }
+
+    /**
+     Reconciles one durable archive remotely and publishes its exact local acceptance generation.
+
+     - Parameters:
+       - pendingUpload: Persisted outbox envelope to finish.
+       - modelContext: Clean context shared by graph and settings.
+       - settingsStore: Local synchronization metadata store.
+     - Returns: Report reconstructed from the durable generation and accepted remote metadata.
+     - Side effects: Conditionally creates or verifies the remote patch, atomically publishes local
+       metadata, and removes the archive only after local commit.
+     - Throws: Rethrows durable-byte, remote conflict, cancellation, stale-baseline, and atomic failures.
+     */
+    private func finishPendingUpload(
+        _ pendingUpload: PendingUpload,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) async throws -> RemoteSyncReadingPlanPatchUploadReport {
+        let archiveURL = try pendingArchiveURL(for: pendingUpload)
+        let reconciliation = try await remotePatchReconciler.reconcile(
+            archive: RemoteSyncDurablePatchArchive(
+                fileName: pendingUpload.patchFileName,
+                fileURL: archiveURL,
+                sha256: pendingUpload.archiveSHA256,
+                size: pendingUpload.archiveSize,
+                parentID: pendingUpload.deviceFolderID,
+                contentType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
+        let uploadedFile: RemoteSyncFile
+        switch reconciliation {
+        case .created(let file), .matchedExisting(let file):
+            uploadedFile = file
+        }
+        try Task.checkCancellation()
+
+        try settingsStore.performAtomicBatch(in: modelContext) {
+            guard try loadPendingUpload(settingsStore: settingsStore) == pendingUpload else {
+                throw RemoteSyncReadingPlanPatchUploadError.invalidPendingUpload
+            }
+            try validateStoredStatuses(settingsStore: settingsStore)
+            let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
+            try mergeGeneratedStatusIdentities(
+                pendingUpload.generatedStatusIdentities,
+                into: statusStore
+            )
+            let currentSnapshot = try snapshotService.snapshotCurrentStateStrict(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            try snapshotService.validateExportableFingerprints(in: currentSnapshot)
+            try RemoteSyncMutationJournalService().mergeAcceptedLogEntries(
+                acceptedEntries: pendingUpload.updatedLogEntries,
+                uploadedEntries: pendingUpload.uploadedLogEntries ?? pendingUpload.updatedLogEntries.filter {
+                    $0.lastUpdated == pendingUpload.timestamp && $0.sourceDevice == pendingUpload.sourceDevice
+                },
+                acceptedFingerprints: pendingUpload.acceptedGeneration.fingerprintsByKey,
+                currentFingerprints: currentSnapshot.fingerprintsByKey,
+                category: .readingPlans,
+                settingsStore: settingsStore
+            )
+            try RemoteSyncPatchStatusStore(settingsStore: settingsStore).addStatusStrict(
+                RemoteSyncPatchStatus(
+                    sourceDevice: pendingUpload.sourceDevice,
+                    patchNumber: pendingUpload.patchNumber,
+                    sizeBytes: uploadedFile.size,
+                    appliedDate: uploadedFile.timestamp
+                ),
+                for: .readingPlans
+            )
+            let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+            settingsStore.setString(
+                stateStore.scopedKey("lastPatchWritten", category: .readingPlans),
+                value: String(pendingUpload.timestamp)
+            )
+            try snapshotService.acceptBaselineFingerprints(
+                pendingUpload.acceptedGeneration,
+                settingsStore: settingsStore,
+                expectedRevision: pendingUpload.expectedBaselineRevision
+            )
+            settingsStore.remove(Self.pendingUploadKey)
+            try finalAcceptanceCheckpoint()
+        }
+
+        try? fileManager.removeItem(at: archiveURL)
         return RemoteSyncReadingPlanPatchUploadReport(
             uploadedFile: uploadedFile,
-            patchNumber: patchNumber,
-            upsertedPlanCount: changeSet.planRowsByKey.count,
-            upsertedStatusCount: changeSet.statusRowsByKey.count,
-            deletedRowCount: changeSet.deletedRowCount,
-            logEntryCount: changeSet.logEntries.count,
-            lastUpdated: timestamp
+            patchNumber: pendingUpload.patchNumber,
+            upsertedPlanCount: pendingUpload.upsertedPlanCount,
+            upsertedStatusCount: pendingUpload.upsertedStatusCount,
+            deletedRowCount: pendingUpload.deletedRowCount,
+            logEntryCount: pendingUpload.logEntryCount,
+            lastUpdated: pendingUpload.timestamp
         )
     }
 
@@ -326,30 +690,40 @@ public final class RemoteSyncReadingPlanPatchUploadService {
 
      - Parameters:
        - snapshot: Current local reading-plan state projected into Android-shaped rows.
+       - acceptedRowsByKey: Durable accepted-row identities used to detect baseline rows deleted locally.
        - existingEntriesByKey: Existing Android `LogEntry` baseline keyed by Android composite key.
        - fingerprintStore: Local fingerprint store used to compare current rows against the last uploaded baseline.
        - timestamp: Millisecond timestamp to assign to any emitted outbound `LogEntry` rows.
        - sourceDevice: Local source-device folder name that should own the outbound patch rows.
      - Returns: Sparse change set containing upserted rows, delete entries, and the updated local metadata baseline.
      - Side effects: none.
-     - Failure modes: This helper cannot fail.
+     - Throws: `RemoteSyncReadingPlanSnapshotError.missingProjectedFingerprint` when an exportable
+       row has no hash; strict settings failures are surfaced by the enclosing preflight batch.
      */
     private func buildChangeSet(
         snapshot: RemoteSyncReadingPlanCurrentSnapshot,
+        acceptedRowsByKey: [String: RemoteSyncReadingPlanAcceptedRowIdentity],
         existingEntriesByKey: [String: RemoteSyncLogEntry],
         fingerprintStore: RemoteSyncRowFingerprintStore,
+        pendingMutations: [String: RemoteSyncPendingMutation],
         timestamp: Int64,
         sourceDevice: String
-    ) -> ChangeSet {
+    ) throws -> ChangeSet {
         var planRowsByKey: [String: RemoteSyncCurrentReadingPlanRow] = [:]
         var statusRowsByKey: [String: RemoteSyncCurrentReadingPlanStatusRow] = [:]
         var logEntries: [RemoteSyncLogEntry] = []
         var updatedEntriesByKey = existingEntriesByKey
 
         for (key, row) in snapshot.planRowsByKey.sorted(by: { $0.key < $1.key }) {
+            guard !snapshot.suppressedKeys.contains(key) else {
+                continue
+            }
+            guard let currentFingerprint = snapshot.fingerprintsByKey[key] else {
+                throw RemoteSyncReadingPlanSnapshotError.missingProjectedFingerprint(key)
+            }
             let shouldUpload = shouldUploadCurrentRow(
                 key: key,
-                currentFingerprint: snapshot.fingerprintsByKey[key],
+                currentFingerprint: currentFingerprint,
                 existingEntriesByKey: existingEntriesByKey,
                 fingerprintStore: fingerprintStore
             )
@@ -357,23 +731,35 @@ public final class RemoteSyncReadingPlanPatchUploadService {
                 continue
             }
 
-            let entry = RemoteSyncLogEntry(
-                tableName: "ReadingPlan",
-                entityID1: .blob(RemoteSyncReadingPlanSnapshotService.uuidBlob(row.id)),
-                entityID2: .text(""),
+            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: currentFingerprint,
                 type: .upsert,
-                lastUpdated: timestamp,
-                sourceDevice: sourceDevice
-            )
+                category: .readingPlans,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: "ReadingPlan",
+                    entityID1: .blob(RemoteSyncReadingPlanSnapshotService.uuidBlob(row.id)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             planRowsByKey[key] = row
             logEntries.append(entry)
             updatedEntriesByKey[key] = entry
         }
 
         for (key, row) in snapshot.statusRowsByKey.sorted(by: { $0.key < $1.key }) {
+            guard !snapshot.suppressedKeys.contains(key) else {
+                continue
+            }
+            guard let currentFingerprint = snapshot.fingerprintsByKey[key] else {
+                throw RemoteSyncReadingPlanSnapshotError.missingProjectedFingerprint(key)
+            }
             let shouldUpload = shouldUploadCurrentRow(
                 key: key,
-                currentFingerprint: snapshot.fingerprintsByKey[key],
+                currentFingerprint: currentFingerprint,
                 existingEntriesByKey: existingEntriesByKey,
                 fingerprintStore: fingerprintStore
             )
@@ -381,34 +767,61 @@ public final class RemoteSyncReadingPlanPatchUploadService {
                 continue
             }
 
-            let entry = RemoteSyncLogEntry(
-                tableName: "ReadingPlanStatus",
-                entityID1: .blob(RemoteSyncReadingPlanSnapshotService.uuidBlob(row.id)),
-                entityID2: .text(""),
+            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: currentFingerprint,
                 type: .upsert,
-                lastUpdated: timestamp,
-                sourceDevice: sourceDevice
-            )
+                category: .readingPlans,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: "ReadingPlanStatus",
+                    entityID1: .blob(RemoteSyncReadingPlanSnapshotService.uuidBlob(row.id)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             statusRowsByKey[key] = row
             logEntries.append(entry)
             updatedEntriesByKey[key] = entry
         }
 
-        for (key, entry) in existingEntriesByKey.sorted(by: { $0.key < $1.key }) {
-            guard entry.type != .delete else {
-                continue
-            }
-            guard snapshot.planRowsByKey[key] == nil, snapshot.statusRowsByKey[key] == nil else {
-                continue
-            }
-            let deleteEntry = RemoteSyncLogEntry(
-                tableName: entry.tableName,
-                entityID1: entry.entityID1,
-                entityID2: entry.entityID2,
-                type: .delete,
-                lastUpdated: timestamp,
+        let acceptedDeletionCandidates = acceptedRowsByKey.mapValues { identity in
+            RemoteSyncLogEntry(
+                tableName: identity.tableName,
+                entityID1: identity.entityID1,
+                entityID2: identity.entityID2,
+                type: .upsert,
+                lastUpdated: 0,
                 sourceDevice: sourceDevice
             )
+        }.merging(existingEntriesByKey) { _, logEntry in logEntry }
+
+        for (key, entry) in acceptedDeletionCandidates.sorted(by: { $0.key < $1.key }) {
+            guard !snapshot.suppressedKeys.contains(key) else {
+                continue
+            }
+            guard snapshot.planRowsByKey[key] == nil,
+                  snapshot.statusRowsByKey[key] == nil else {
+                continue
+            }
+            guard entry.type != .delete || acceptedRowsByKey[key] != nil || pendingMutations[key] != nil else {
+                continue
+            }
+            let deleteEntry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: nil,
+                type: .delete,
+                category: .readingPlans,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: entry.tableName,
+                    entityID1: entry.entityID1,
+                    entityID2: entry.entityID2,
+                    type: .delete,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             logEntries.append(deleteEntry)
             updatedEntriesByKey[key] = deleteEntry
         }
@@ -422,68 +835,366 @@ public final class RemoteSyncReadingPlanPatchUploadService {
     }
 
     /**
-     Persists the accepted Android status payloads emitted by a successful upload.
+     Reads all preserved reading-plan log rows without dropping malformed metadata.
 
      - Parameters:
-       - rows: Uploaded Android-shaped status rows.
-       - statusStore: Local-only reading-plan status store to update.
-     - Side effects:
-       - writes preserved Android status payloads for the uploaded rows
-     - Failure modes:
-       - underlying status-store persistence failures are swallowed by `SettingsStore`
+       - settingsStore: Store containing category-scoped log rows.
+       - logEntryStore: Canonical log-key encoder for key/payload validation.
+     - Returns: Complete decoded reading-plan log history.
+     - Side effects: Reads settings rows inside the caller's atomic preflight.
+     - Throws: `invalidStoredLogEntry` for malformed JSON or a key/payload mismatch.
      */
-    private func persistAcceptedStatuses(
-        _ rows: some Sequence<RemoteSyncCurrentReadingPlanStatusRow>,
-        to statusStore: RemoteSyncReadingPlanStatusStore
-    ) {
-        for row in rows {
-            statusStore.setStatus(
-                row.readingStatusJSON,
-                planCode: row.planCode,
-                dayNumber: row.planDay,
-                remoteStatusID: row.id
+    private func strictLogEntries(
+        settingsStore: SettingsStore,
+        logEntryStore: RemoteSyncLogEntryStore
+    ) throws -> [RemoteSyncLogEntry] {
+        try settingsStore.entries(withPrefix: logEntryStore.prefix(for: .readingPlans)).map { entry in
+            guard let data = entry.value.data(using: .utf8),
+                  let logEntry = try? JSONDecoder().decode(RemoteSyncLogEntry.self, from: data),
+                  entry.key == logEntryStore.key(for: .readingPlans, entry: logEntry) else {
+                throw RemoteSyncReadingPlanPatchUploadError.invalidStoredLogEntry(entry.key)
+            }
+            return logEntry
+        }
+    }
+
+    /**
+     Replaces reading-plan log metadata with one fully encoded accepted generation.
+
+     - Parameters:
+       - entries: Exact accepted log rows from the durable outbox.
+       - settingsStore: Store receiving the replacement.
+     - Side effects: Removes prior category log rows and stages encoded replacements.
+     - Throws: Rethrows JSON encoding failures; settings failures invalidate acceptance atomically.
+     */
+    private func replaceLogEntriesStrict(
+        _ entries: [RemoteSyncLogEntry],
+        settingsStore: SettingsStore
+    ) throws {
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        for entry in settingsStore.entries(withPrefix: logEntryStore.prefix(for: .readingPlans)) {
+            settingsStore.remove(entry.key)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        for entry in entries {
+            let data = try encoder.encode(entry)
+            settingsStore.setString(
+                logEntryStore.key(for: .readingPlans, entry: entry),
+                value: String(decoding: data, as: UTF8.self)
             )
         }
     }
 
     /**
-     Removes preserved Android status payloads for rows deleted by the current upload.
+     Validates that no preserved Android reading status disappeared through a soft decoder.
+
+     - Parameter settingsStore: Store containing preserved reading status metadata.
+     - Side effects: Reads status settings inside the atomic acceptance transaction.
+     - Throws: `invalidStoredStatusMetadata` when any stored row cannot be projected.
+     */
+    private func validateStoredStatuses(settingsStore: SettingsStore) throws {
+        let rawStatuses = settingsStore.entries(
+            withPrefix: "remote_sync.readingplans.android_status"
+        )
+        let decodedStatuses = try RemoteSyncReadingPlanStatusStore(
+            settingsStore: settingsStore
+        ).allStatusesStrict()
+        guard rawStatuses.count == decodedStatuses.count else {
+            throw RemoteSyncReadingPlanSnapshotError.invalidStoredStatusMetadata
+        }
+    }
+
+    /**
+     Returns the highest Android patch filename currently present in this device folder.
+
+     - Parameter deviceFolderID: Ready remote device-folder identifier.
+     - Returns: Highest valid Android patch number, or zero when none exists.
+     - Side effects: Performs one strict remote folder listing.
+     - Throws: Rethrows cancellation and backend listing failures.
+     */
+    private func maximumRemotePatchNumber(deviceFolderID: String) async throws -> Int64 {
+        try Task.checkCancellation()
+        let files = try await adapter.listFiles(
+            parentIDs: [deviceFolderID],
+            name: nil,
+            mimeType: nil,
+            modifiedAtLeast: nil
+        )
+        try Task.checkCancellation()
+        return files.compactMap {
+            RemoteSyncPatchDiscoveryService.parsePatchFileName($0.name)?.patchNumber
+        }.max() ?? 0
+    }
+
+    /**
+     Conditionally merges generated remote ids into statuses that still exist after transport.
 
      - Parameters:
-       - logEntries: Log entries emitted by the current upload.
-       - statusStore: Local-only reading-plan status store to update.
-     - Side effects:
-       - deletes preserved Android status payloads when the upload emitted matching `DELETE` rows
-     - Failure modes:
-       - malformed or non-UUID `entityId1` values are ignored
-       - underlying status-store persistence failures are swallowed by `SettingsStore`
+       - identities: Generated ids captured from the immutable upload generation.
+       - statusStore: Current local Android-status metadata store.
+     - Side effects: Adds an id only when the same logical status still exists without one; newer
+       status JSON is preserved verbatim and deleted statuses are not recreated.
+     - Throws: Rethrows status-envelope encoding failures; settings persistence failures invalidate
+       the enclosing atomic acceptance batch.
      */
-    private func removeDeletedStatuses(
-        _ logEntries: some Sequence<RemoteSyncLogEntry>,
-        from statusStore: RemoteSyncReadingPlanStatusStore
-    ) {
-        for entry in logEntries where entry.type == .delete && entry.tableName == "ReadingPlanStatus" {
-            guard let remoteStatusID = Self.uuid(from: entry.entityID1),
-                  let storedStatus = statusStore.status(remoteStatusID: remoteStatusID) else {
+    private func mergeGeneratedStatusIdentities(
+        _ identities: [GeneratedStatusIdentity],
+        into statusStore: RemoteSyncReadingPlanStatusStore
+    ) throws {
+        for identity in identities {
+            guard let current = try statusStore.storedStatusStrict(
+                planCode: identity.planCode,
+                dayNumber: identity.dayNumber
+            ), current.remoteStatusID == nil else {
                 continue
             }
-            statusStore.removeStatus(
-                planCode: storedStatus.planCode,
-                dayNumber: storedStatus.dayNumber
+            try statusStore.setStatusThrowing(
+                RemoteSyncReadingPlanStatusStore.Status(
+                    planCode: current.planCode,
+                    dayNumber: current.dayNumber,
+                    readingStatusJSON: current.readingStatusJSON,
+                    remoteStatusID: identity.remoteStatusID
+                )
             )
         }
+    }
+
+    /**
+     Builds and durably records one exact archive before any remote transport begins.
+
+     - Parameters:
+       - generation: Atomic preflight generation to serialize.
+       - modelContext: Clean context shared by the graph and settings store.
+       - settingsStore: Local-only store receiving the durable pending-upload envelope.
+     - Returns: Durable pending upload whose archive bytes and acceptance generation are fixed.
+     - Side effects: Writes a temporary SQLite database, streams and fsyncs a bounded durable gzip
+       archive, and commits one pending-upload setting before returning.
+     - Throws: Rethrows cancellation, bounded-file, SQLite, compression, filesystem, encoding, and
+       atomic settings failures. Partial or race-losing archives are removed.
+     */
+    private func persistPendingUpload(
+        _ generation: UploadGeneration,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> PendingUpload {
+        let databaseURL = temporaryURL(prefix: "remote-sync-readingplans-upload-", suffix: ".sqlite3")
+        defer { try? fileManager.removeItem(at: databaseURL) }
+
+        try writePatchDatabase(
+            at: databaseURL,
+            schemaVersion: generation.schemaVersion,
+            changeSet: generation.changeSet
+        )
+        try fileManager.createDirectory(
+            at: outboxDirectory,
+            withIntermediateDirectories: true
+        )
+        let archiveFileName = "reading-plans-\(UUID().uuidString.lowercased()).sqlite3.gz"
+        let archiveURL = outboxDirectory.appendingPathComponent(archiveFileName, isDirectory: false)
+        var preserveArchive = false
+        defer {
+            if !preserveArchive {
+                try? fileManager.removeItem(at: archiveURL)
+            }
+        }
+        let archiveFingerprint = try RemoteSyncArchiveStagingService.gzipPatchDatabase(
+            at: databaseURL,
+            to: archiveURL
+        )
+
+        var pendingUpload = PendingUpload(
+            formatVersion: Self.pendingUploadFormatVersion,
+            deviceFolderID: generation.deviceFolderID,
+            sourceDevice: generation.sourceDevice,
+            patchNumber: generation.patchNumber,
+            schemaVersion: generation.schemaVersion,
+            timestamp: generation.timestamp,
+            archiveFileName: archiveFileName,
+            archiveSHA256: archiveFingerprint.sha256,
+            archiveSize: archiveFingerprint.byteCount,
+            expectedBaselineRevision: generation.expectedBaselineRevision,
+            acceptedGeneration: generation.acceptedGeneration,
+            updatedLogEntries: generation.updatedLogEntries,
+            uploadedLogEntries: generation.changeSet.logEntries,
+            generatedStatusIdentities: generation.generatedStatusIdentities,
+            upsertedPlanCount: generation.changeSet.planRowsByKey.count,
+            upsertedStatusCount: generation.changeSet.statusRowsByKey.count,
+            deletedRowCount: generation.changeSet.deletedRowCount,
+            logEntryCount: generation.changeSet.logEntries.count
+        )
+        pendingUpload.publicationIdentity = try RemoteSyncPublicationIdentity.patch(
+            category: .readingPlans,
+            destinationID: pendingUpload.deviceFolderID,
+            sourceDevice: pendingUpload.sourceDevice,
+            patchNumber: pendingUpload.patchNumber,
+            schemaVersion: pendingUpload.schemaVersion,
+            remoteFileName: pendingUpload.patchFileName,
+            archiveFileName: pendingUpload.archiveFileName,
+            archiveSHA256: pendingUpload.archiveSHA256,
+            archiveSize: pendingUpload.archiveSize,
+            rowCounts: Self.publicationRowCounts(for: pendingUpload),
+            acceptancePayload: pendingUpload
+        )
+
+        var selectedUpload = pendingUpload
+        try settingsStore.performAtomicBatch(in: modelContext) {
+            if let existingUpload = try loadPendingUpload(settingsStore: settingsStore) {
+                guard existingUpload.deviceFolderID == generation.deviceFolderID else {
+                    throw RemoteSyncReadingPlanPatchUploadError.pendingUploadDestinationMismatch(
+                        stored: existingUpload.deviceFolderID,
+                        requested: generation.deviceFolderID
+                    )
+                }
+                selectedUpload = existingUpload
+            } else {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.sortedKeys]
+                let data = try encoder.encode(pendingUpload)
+                settingsStore.setString(
+                    Self.pendingUploadKey,
+                    value: String(decoding: data, as: UTF8.self)
+                )
+            }
+        }
+        preserveArchive = selectedUpload == pendingUpload
+        return selectedUpload
+    }
+
+    /**
+     Loads the durable pending-upload envelope when one exists.
+
+     - Parameter settingsStore: Local-only store containing the envelope.
+     - Returns: Decoded pending upload, or `nil` when no upload awaits acceptance.
+     - Side effects: Reads one local setting row.
+     - Throws: `RemoteSyncReadingPlanPatchUploadError.invalidPendingUpload` for malformed or future
+       envelope data.
+     */
+    private func loadPendingUpload(settingsStore: SettingsStore) throws -> PendingUpload? {
+        guard let rawValue = settingsStore.getString(Self.pendingUploadKey) else {
+            return nil
+        }
+        guard let data = rawValue.data(using: .utf8),
+              let pendingUpload = try? JSONDecoder().decode(PendingUpload.self, from: data),
+              pendingUpload.formatVersion == Self.pendingUploadFormatVersion else {
+            throw RemoteSyncReadingPlanPatchUploadError.invalidPendingUpload
+        }
+        guard let publicationIdentity = pendingUpload.publicationIdentity else {
+            throw RemoteSyncReadingPlanPatchUploadError.invalidPendingUpload
+        }
+        var acceptancePayload = pendingUpload
+        acceptancePayload.publicationIdentity = nil
+        do {
+            try publicationIdentity.validate(
+                kind: .patch,
+                category: .readingPlans,
+                destinationID: pendingUpload.deviceFolderID,
+                sourceDevice: pendingUpload.sourceDevice,
+                patchNumber: pendingUpload.patchNumber,
+                schemaVersion: pendingUpload.schemaVersion,
+                remoteFileName: pendingUpload.patchFileName,
+                archiveFileName: pendingUpload.archiveFileName,
+                archiveSHA256: pendingUpload.archiveSHA256,
+                archiveSize: pendingUpload.archiveSize,
+                rowCounts: Self.publicationRowCounts(for: pendingUpload),
+                acceptancePayload: acceptancePayload
+            )
+        } catch {
+            throw RemoteSyncReadingPlanPatchUploadError.invalidPendingUpload
+        }
+        return pendingUpload
+    }
+
+    /**
+     Returns every operation count bound to one reading-plan publication.
+
+     - Parameter pendingUpload: Identity-free or decoded reading-plan outbox envelope.
+     - Returns: Nonempty count dictionary for plan rows, status rows, deletions, and log entries.
+     - Side effects: none.
+     - Failure modes: This deterministic projection cannot fail.
+     */
+    private static func publicationRowCounts(for pendingUpload: PendingUpload) -> [String: Int] {
+        [
+            "readingPlans": pendingUpload.upsertedPlanCount,
+            "readingPlanStatuses": pendingUpload.upsertedStatusCount,
+            "deletions": pendingUpload.deletedRowCount,
+            "logEntries": pendingUpload.logEntryCount
+        ]
+    }
+
+    /**
+     Resolves the durable archive path for one pending retry.
+
+     - Parameter pendingUpload: Envelope naming and hashing the expected archive.
+     - Returns: Durable archive URL confined beneath the configured outbox directory.
+     - Side effects: none.
+     - Throws: `invalidPendingUpload` when the manifest contains a path rather than a basename.
+       Byte existence, size, and digest are validated by `RemoteSyncRemotePatchReconciler`.
+     */
+    private func pendingArchiveURL(for pendingUpload: PendingUpload) throws -> URL {
+        guard URL(fileURLWithPath: pendingUpload.archiveFileName).lastPathComponent
+                == pendingUpload.archiveFileName else {
+            throw RemoteSyncReadingPlanPatchUploadError.invalidPendingUpload
+        }
+        return outboxDirectory.appendingPathComponent(
+            pendingUpload.archiveFileName,
+            isDirectory: false
+        )
+    }
+
+    /**
+     Deliberately discards a pending archive at a category destination-replacement boundary.
+
+     Reset/re-adoption code must call this before changing the category folder. The accepted
+     fingerprint/log baseline remains untouched, so current local rows stay dirty and the next
+     upload builds a new patch for the replacement destination.
+
+     - Parameter settingsStore: Local-only store containing any pending upload envelope.
+     - Side effects: Atomically removes the pending envelope, then best-effort deletes its archive.
+     - Throws: Rethrows malformed-envelope and atomic settings failures.
+     */
+    func discardPendingUploadForDestinationReplacement(
+        settingsStore: SettingsStore
+    ) throws {
+        var archiveFileName: String?
+        try settingsStore.performAtomicBatch {
+            archiveFileName = try loadPendingUpload(settingsStore: settingsStore)?.archiveFileName
+            settingsStore.remove(Self.pendingUploadKey)
+        }
+        if let archiveFileName {
+            try? fileManager.removeItem(
+                at: outboxDirectory.appendingPathComponent(archiveFileName, isDirectory: false)
+            )
+        }
+    }
+
+    /**
+     Returns the production durable outbox directory for reading-plan patches.
+
+     - Parameter fileManager: File manager used to locate Application Support.
+     - Returns: Category-specific Application Support directory, falling back to a stable temporary
+       subdirectory only when the platform exposes no Application Support location.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    static func defaultOutboxDirectory(fileManager: FileManager) -> URL {
+        let root = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        return root
+            .appendingPathComponent("AndBible", isDirectory: true)
+            .appendingPathComponent("RemoteSyncOutbox", isDirectory: true)
+            .appendingPathComponent("ReadingPlans", isDirectory: true)
     }
 
     /**
      Returns whether one current snapshot row should be emitted as an outbound `UPSERT`.
 
-     Missing fingerprints are intentionally treated as unchanged when the row already has a
-     preserved non-delete Android `LogEntry` baseline. That conservative branch prevents a one-time
-     fingerprint migration from generating false-positive uploads for historical restores.
+     A missing fingerprint is treated as upload-needed. Silently accepting a current row without a
+     hash can suppress a real edit, while a redundant Android upsert is idempotent and recoverable.
 
      - Parameters:
        - key: Android composite key for the row.
-       - currentFingerprint: Current stable row fingerprint, if one was computed.
+       - currentFingerprint: Current stable row fingerprint validated during strict projection.
        - existingEntriesByKey: Existing Android `LogEntry` baseline keyed by Android composite key.
        - fingerprintStore: Local fingerprint store used to read the prior baseline for the row.
      - Returns: `true` when the row should be emitted as an outbound upsert.
@@ -492,14 +1203,10 @@ public final class RemoteSyncReadingPlanPatchUploadService {
      */
     private func shouldUploadCurrentRow(
         key: String,
-        currentFingerprint: String?,
+        currentFingerprint: String,
         existingEntriesByKey: [String: RemoteSyncLogEntry],
         fingerprintStore: RemoteSyncRowFingerprintStore
     ) -> Bool {
-        guard let currentFingerprint else {
-            return false
-        }
-
         guard let existingEntry = existingEntriesByKey[key] else {
             if let existingFingerprint = fingerprintStore.fingerprint(
                 forLogKey: key,
@@ -520,9 +1227,6 @@ public final class RemoteSyncReadingPlanPatchUploadService {
             entityID1: existingEntry.entityID1,
             entityID2: existingEntry.entityID2
         )
-        guard let existingFingerprint else {
-            return false
-        }
         return existingFingerprint != currentFingerprint
     }
 
@@ -544,6 +1248,13 @@ public final class RemoteSyncReadingPlanPatchUploadService {
         schemaVersion: Int,
         changeSet: ChangeSet
     ) throws {
+        guard schemaVersion == RemoteSyncAndroidDatabaseContract.schemaVersion(for: .readingPlans) else {
+            throw RemoteSyncReadingPlanPatchUploadError.unsupportedSchemaVersion(schemaVersion)
+        }
+        try fileManager.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         var database: OpaquePointer?
         guard sqlite3_open_v2(
             url.path,
@@ -556,29 +1267,7 @@ public final class RemoteSyncReadingPlanPatchUploadService {
         defer { sqlite3_close(database) }
 
         try execute(
-            """
-            PRAGMA user_version = \(schemaVersion);
-            CREATE TABLE ReadingPlan (
-                planCode TEXT NOT NULL,
-                planStartDate INTEGER NOT NULL,
-                planCurrentDay INTEGER NOT NULL DEFAULT 1,
-                id BLOB NOT NULL PRIMARY KEY
-            );
-            CREATE TABLE ReadingPlanStatus (
-                planCode TEXT NOT NULL,
-                planDay INTEGER NOT NULL,
-                readingStatus TEXT NOT NULL,
-                id BLOB NOT NULL PRIMARY KEY
-            );
-            CREATE TABLE LogEntry (
-                tableName TEXT NOT NULL,
-                entityId1 BLOB,
-                entityId2 BLOB,
-                type TEXT NOT NULL,
-                lastUpdated INTEGER NOT NULL,
-                sourceDevice TEXT NOT NULL
-            );
-            """,
+            RemoteSyncAndroidDatabaseContract.createSchemaSQL(for: .readingPlans),
             in: database
         )
 
@@ -631,10 +1320,27 @@ public final class RemoteSyncReadingPlanPatchUploadService {
 
         sqlite3_bind_text(statement, 1, row.planCode, -1, remoteSyncReadingPlanPatchUploadSQLiteTransient)
         sqlite3_bind_int64(statement, 2, row.planStartDateMillis)
-        sqlite3_bind_int(statement, 3, Int32(row.planCurrentDay))
+        sqlite3_bind_int(
+            statement,
+            3,
+            try RemoteSyncWireInteger.int32(
+                exactly: row.planCurrentDay,
+                field: "ReadingPlan.planCurrentDay"
+            )
+        )
         let blob = RemoteSyncReadingPlanSnapshotService.uuidBlob(row.id)
+        let blobByteCount = try RemoteSyncWireInteger.int32(
+            exactly: blob.count,
+            field: "ReadingPlan.id.byteCount"
+        )
         _ = blob.withUnsafeBytes { bytes in
-            sqlite3_bind_blob(statement, 4, bytes.baseAddress, Int32(blob.count), remoteSyncReadingPlanPatchUploadSQLiteTransient)
+            sqlite3_bind_blob(
+                statement,
+                4,
+                bytes.baseAddress,
+                blobByteCount,
+                remoteSyncReadingPlanPatchUploadSQLiteTransient
+            )
         }
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncReadingPlanPatchUploadError.invalidSQLiteDatabase
@@ -663,11 +1369,28 @@ public final class RemoteSyncReadingPlanPatchUploadService {
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_text(statement, 1, row.planCode, -1, remoteSyncReadingPlanPatchUploadSQLiteTransient)
-        sqlite3_bind_int(statement, 2, Int32(row.planDay))
+        sqlite3_bind_int(
+            statement,
+            2,
+            try RemoteSyncWireInteger.int32(
+                exactly: row.planDay,
+                field: "ReadingPlanStatus.planDay"
+            )
+        )
         sqlite3_bind_text(statement, 3, row.readingStatusJSON, -1, remoteSyncReadingPlanPatchUploadSQLiteTransient)
         let blob = RemoteSyncReadingPlanSnapshotService.uuidBlob(row.id)
+        let blobByteCount = try RemoteSyncWireInteger.int32(
+            exactly: blob.count,
+            field: "ReadingPlanStatus.id.byteCount"
+        )
         _ = blob.withUnsafeBytes { bytes in
-            sqlite3_bind_blob(statement, 4, bytes.baseAddress, Int32(blob.count), remoteSyncReadingPlanPatchUploadSQLiteTransient)
+            sqlite3_bind_blob(
+                statement,
+                4,
+                bytes.baseAddress,
+                blobByteCount,
+                remoteSyncReadingPlanPatchUploadSQLiteTransient
+            )
         }
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncReadingPlanPatchUploadError.invalidSQLiteDatabase
@@ -696,8 +1419,8 @@ public final class RemoteSyncReadingPlanPatchUploadService {
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_text(statement, 1, entry.tableName, -1, remoteSyncReadingPlanPatchUploadSQLiteTransient)
-        Self.bindSQLiteValue(entry.entityID1, to: statement, index: 2)
-        Self.bindSQLiteValue(entry.entityID2, to: statement, index: 3)
+        try Self.bindSQLiteValue(entry.entityID1, to: statement, index: 2)
+        try Self.bindSQLiteValue(entry.entityID2, to: statement, index: 3)
         sqlite3_bind_text(statement, 4, entry.type.rawValue, -1, remoteSyncReadingPlanPatchUploadSQLiteTransient)
         sqlite3_bind_int64(statement, 5, entry.lastUpdated)
         sqlite3_bind_text(statement, 6, entry.sourceDevice, -1, remoteSyncReadingPlanPatchUploadSQLiteTransient)
@@ -730,7 +1453,7 @@ public final class RemoteSyncReadingPlanPatchUploadService {
        - suffix: File-name suffix for the temporary file.
      - Returns: Temporary file URL that does not currently exist.
      - Side effects: none.
-     - Failure modes: This helper cannot fail.
+     - Failure modes: UUID path generation and URL composition are nonthrowing.
      */
     private func temporaryURL(prefix: String, suffix: String) -> URL {
         temporaryDirectory.appendingPathComponent("\(prefix)\(UUID().uuidString)\(suffix)")
@@ -757,13 +1480,14 @@ public final class RemoteSyncReadingPlanPatchUploadService {
        - statement: Prepared SQLite statement receiving the bound value.
        - index: One-based SQLite bind parameter index.
      - Side effects: mutates the prepared SQLite statement's bound-parameter state.
-     - Failure modes: This helper cannot fail.
+     - Throws: `RemoteSyncWireIntegerError.outOfRange` when a blob length cannot fit SQLite's
+       signed 32-bit byte-count argument; SQLite bind status is checked by the caller's step.
      */
     private static func bindSQLiteValue(
         _ value: RemoteSyncSQLiteValue,
         to statement: OpaquePointer?,
         index: Int32
-    ) {
+    ) throws {
         switch value.kind {
         case .null:
             sqlite3_bind_null(statement, index)
@@ -781,12 +1505,16 @@ public final class RemoteSyncReadingPlanPatchUploadService {
             )
         case .blob:
             let data = value.blobData ?? Data()
+            let byteCount = try RemoteSyncWireInteger.int32(
+                exactly: data.count,
+                field: "LogEntry.entityId.byteCount"
+            )
             _ = data.withUnsafeBytes { bytes in
                 sqlite3_bind_blob(
                     statement,
                     index,
                     bytes.baseAddress,
-                    Int32(data.count),
+                    byteCount,
                     remoteSyncReadingPlanPatchUploadSQLiteTransient
                 )
             }

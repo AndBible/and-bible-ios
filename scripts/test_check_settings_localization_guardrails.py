@@ -20,12 +20,18 @@ from check_settings_localization_guardrails import (
     LocalePrefOption,
     PARITY_KEYS,
     audit_android_shared_translations,
+    audit_discrete_app_name_localizations,
+    audit_discrete_security_localizations,
     audit_locale_pref_contract,
+    build_android_discrete_app_names,
     build_android_non_english_by_key,
     build_android_shared_localization,
+    load_android_discrete_app_names_from_snapshot,
     load_android_locale_pref_options_from_snapshot,
     load_android_non_english_snapshot,
     parse_ios_strings,
+    sync_discrete_app_name_localizations,
+    sync_discrete_security_localizations,
     sync_android_shared_translations,
     write_android_non_english_snapshot,
 )
@@ -216,6 +222,38 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
                 Path("/tmp/and-bible/app/src/main/res"),
             )
 
+    def test_default_android_root_finds_primary_checkout_sibling_from_worktree(self) -> None:
+        """Linked worktrees reuse the Android checkout adjacent to the primary iOS checkout.
+
+        The fixture models ``and-bible-ios/.worktrees/feature`` and a common Git directory at the
+        primary checkout. No environment override is present. A failure means local parity tests
+        require CI-only setup even though the normal Android sibling exists.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            primary_ios = root / "and-bible-ios"
+            worktree = primary_ios / ".worktrees" / "feature"
+            android_resources = root / "and-bible" / "app" / "src" / "main" / "res"
+            worktree.mkdir(parents=True)
+            android_resources.mkdir(parents=True)
+            git_result = mock.Mock(
+                returncode=0,
+                stdout=f"{primary_ios / '.git'}\n",
+            )
+
+            with mock.patch.dict("os.environ", {}, clear=True), mock.patch.object(
+                localization_guardrails,
+                "default_repo_root",
+                return_value=worktree,
+            ), mock.patch.object(
+                localization_guardrails.subprocess,
+                "run",
+                return_value=git_result,
+            ):
+                resolved = localization_guardrails.default_android_root()
+
+        self.assertEqual(resolved, android_resources.resolve())
+
     def test_android_snapshot_writer_uses_portable_source_identifier(self) -> None:
         """Prevents generated fixtures from committing local checkout paths.
 
@@ -233,12 +271,104 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
                 {key: [] for key in PARITY_KEYS},
                 [],
                 AndroidSharedLocalization([], [], {}, {}, {}, {}),
+                {
+                    locale: "Simple Calculator"
+                    for locale in localization_guardrails.LOCALE_TO_ANDROID_VALUES
+                },
             )
 
             payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
 
         self.assertEqual(payload["source_android_res"], "app/src/main/res")
         self.assertNotIn(str(root), payload["source_android_res"])
+
+    def test_discrete_app_names_use_android_translations_and_english_fallback(self) -> None:
+        """Derives the launcher identity from Android's flavor-backed string contract.
+
+        The French fixture translates `app_name_calculator` while the German fixture omits it.
+        A failure means iOS either ignores a real Android product name or loses Android's normal
+        English resource fallback for untranslated locales.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            android_root = Path(tmp)
+            self.write_android_strings(
+                android_root,
+                "values",
+                {"app_name_calculator": "Simple Calculator"},
+            )
+            self.write_android_strings(
+                android_root,
+                "values-fr",
+                {"app_name_calculator": "Calculatrice simple"},
+            )
+
+            names = build_android_discrete_app_names(android_root)
+
+        self.assertEqual(names["en"], "Simple Calculator")
+        self.assertEqual(names["fr"], "Calculatrice simple")
+        self.assertEqual(names["de"], "Simple Calculator")
+        self.assertEqual(set(names), set(localization_guardrails.LOCALE_TO_ANDROID_VALUES))
+
+    def test_discrete_app_name_snapshot_requires_complete_locale_inventory(self) -> None:
+        """Rejects incomplete launcher-name snapshots instead of weakening CI parity.
+
+        CI commonly uses the committed Android snapshot. A failure means removing one locale from
+        that fixture could silently make the discrete target fall back to an unverified identity.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            names = {
+                locale: "Simple Calculator"
+                for locale in localization_guardrails.LOCALE_TO_ANDROID_VALUES
+            }
+            names.pop("fr")
+            path = self.write_snapshot(Path(tmp), {"discrete_app_names": names})
+
+            with self.assertRaises(ValueError) as failure:
+                load_android_discrete_app_names_from_snapshot(path)
+
+        self.assertIn("missing=['fr']", str(failure.exception))
+
+    def test_discrete_app_name_sync_and_audit_are_target_scoped(self) -> None:
+        """Writes exact Info.plist names without modifying standard app localizations.
+
+        The test uses a two-locale contract to prove deterministic writes, Android-value auditing,
+        and isolation under the discrete-only resource directory. A failure can expose the normal
+        AndBible target to the disguised launcher name or let localized identity drift pass CI.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            names = {"en": "Simple Calculator", "fr": "Calculatrice simple"}
+
+            result = sync_discrete_app_name_localizations(root, names)
+            failures = audit_discrete_app_name_localizations(root, names)
+
+            self.assertEqual(result.files_changed, 2)
+            self.assertEqual(result.values_written, 2)
+            self.assertEqual(failures, [])
+            self.assertFalse((root / "AndBible" / "en.lproj" / "InfoPlist.strings").exists())
+            self.assertEqual(
+                parse_ios_strings(
+                    root
+                    / "AndBibleDiscreteLocalizations"
+                    / "fr.lproj"
+                    / "InfoPlist.strings"
+                )["CFBundleDisplayName"],
+                "Calculatrice simple",
+            )
+
+            resource = (
+                root
+                / "AndBibleDiscreteLocalizations"
+                / "fr.lproj"
+                / "InfoPlist.strings"
+            )
+            resource.write_text(
+                '"CFBundleDisplayName" = "Independent translation";\n',
+                encoding="utf-8",
+            )
+            failures = audit_discrete_app_name_localizations(root, names)
+
+        self.assertEqual(failures, ["discrete_app_name value drift: fr"])
 
     def test_locale_pref_snapshot_loader_preserves_default_empty_value(self) -> None:
         """Protects the Android default locale option while validating snapshot shape.
@@ -639,6 +769,148 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
         self.assertEqual(result.files_changed, 4)
         self.assertEqual(result.values_written, 10)
 
+    def test_passphrase_and_unlock_keys_follow_android_owned_semantics(self) -> None:
+        """Locks the two distribution-boundary keys to Android text and translations.
+
+        The fixture uses the exact production resource names so a future same-name exclusion,
+        format-token regression, or independently edited iOS translation cannot weaken this gate.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            android_root = root / "android"
+            self.make_shared_translation_repo(root, ["en", "fr"])
+            english = {
+                "give_passphrase_for_module": (
+                    "Document %@ is encrypted and needs passphrase to be unlocked"
+                ),
+                "show_unlock_info": "Module & unlock info",
+            }
+            for tree in ["AndBible", "Localizations"]:
+                self.write_ios_strings(root, tree, "en", english)
+                self.write_ios_strings(root, tree, "fr", english)
+            self.write_android_strings(
+                android_root,
+                "values",
+                {
+                    "give_passphrase_for_module": (
+                        "Document %s is encrypted and needs passphrase to be unlocked"
+                    ),
+                    "show_unlock_info": "Module &amp; unlock info",
+                },
+            )
+            self.write_android_strings(
+                android_root,
+                "values-fr",
+                {
+                    "give_passphrase_for_module": (
+                        "Le document %s est chiffre et necessite une phrase secrete"
+                    ),
+                    "show_unlock_info": "Module et informations de deverrouillage",
+                },
+            )
+
+            catalog = build_android_shared_localization(root, android_root)
+            sync_android_shared_translations(root, catalog)
+            audit = audit_android_shared_translations(root, catalog)
+
+            for tree in ["AndBible", "Localizations"]:
+                french = parse_ios_strings(
+                    root / tree / "fr.lproj" / "Localizable.strings"
+                )
+                self.assertEqual(
+                    french["give_passphrase_for_module"],
+                    "Le document %@ est chiffre et necessite une phrase secrete",
+                )
+                self.assertEqual(
+                    french["show_unlock_info"],
+                    "Module et informations de deverrouillage",
+                )
+
+        self.assertIn("give_passphrase_for_module", catalog.safe_keys)
+        self.assertIn("show_unlock_info", catalog.safe_keys)
+        self.assertEqual(audit.missing_key_by_key, {})
+        self.assertEqual(audit.value_mismatch_by_key, {})
+
+    def test_discrete_security_sync_enforces_product_copy_and_removes_obsolete_keys(self) -> None:
+        """Covers translated Android help, truthful fallback, and the obsolete-copy denylist."""
+        english_by_key = {
+            key: f"English {key}"
+            for key in localization_guardrails.DISCRETE_SECURITY_ANDROID_KEYS
+        }
+        catalog = AndroidSharedLocalization(
+            safe_keys=sorted(english_by_key),
+            english_mismatch_keys=[],
+            source_key_by_key={key: key for key in english_by_key},
+            english_by_key=english_by_key,
+            non_english_by_key={key: ["fr"] for key in english_by_key},
+            translations_by_locale={
+                "fr": {key: f"Francais {key}" for key in english_by_key},
+            },
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for tree in ["AndBible", "Localizations"]:
+                for locale in ["en", "fr"]:
+                    self.write_ios_strings(
+                        root,
+                        tree,
+                        locale,
+                        {
+                            "discrete_mode_description": (
+                                localization_guardrails.OBSOLETE_DISCRETE_MODE_SENTENCE
+                            ),
+                            "discrete_help_par1": "Obsolete shared help",
+                            "prefs_volume_keys_scroll_ios_note": "Dead note",
+                        },
+                    )
+
+            with mock.patch.object(
+                localization_guardrails,
+                "LOCALE_TO_ANDROID_VALUES",
+                {"en": "values", "fr": "values-fr"},
+            ):
+                sync_discrete_security_localizations(root, catalog)
+                failures = audit_discrete_security_localizations(root, catalog)
+
+            for tree in ["AndBible", "Localizations"]:
+                french = parse_ios_strings(
+                    root / tree / "fr.lproj" / "Localizable.strings"
+                )
+                self.assertEqual(french["calculator_par1"], "Francais calculator_par1")
+                self.assertEqual(
+                    french["discrete_help_calculator_enforced_ios"],
+                    localization_guardrails.DISCRETE_SECURITY_IOS_FALLBACKS[
+                        "discrete_help_calculator_enforced_ios"
+                    ],
+                )
+                self.assertNotIn("discrete_help_par1", french)
+                self.assertNotIn("prefs_volume_keys_scroll_ios_note", french)
+
+            drift_path = root / "AndBible" / "fr.lproj" / "Localizable.strings"
+            with drift_path.open("a", encoding="utf-8") as stream:
+                stream.write(
+                    '"prefs_volume_keys_scroll_ios_note" = "Dead note";\n'
+                    f'"obsolete_security_probe" = "'
+                    f'{localization_guardrails.OBSOLETE_DISCRETE_MODE_SENTENCE}";\n'
+                )
+            with mock.patch.object(
+                localization_guardrails,
+                "LOCALE_TO_ANDROID_VALUES",
+                {"en": "values", "fr": "values-fr"},
+            ):
+                drift_failures = audit_discrete_security_localizations(root, catalog)
+
+        self.assertEqual(failures, [])
+        self.assertIn(
+            "obsolete localization key remains: AndBible:fr:prefs_volume_keys_scroll_ios_note",
+            drift_failures,
+        )
+        self.assertIn(
+            "obsolete false security sentence remains: AndBible:fr",
+            drift_failures,
+        )
+
     def test_sync_shared_translations_normalizes_android_escape_sequences(self) -> None:
         """Converts Android XML escapes before writing iOS string resources.
 
@@ -671,6 +943,177 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
             values["escaped_key"].replace(r"\t", "\t").replace(r"\n", "\n"),
             "Ligne\tune\nLigne deux",
         )
+
+
+class AILocalizationSourceGuardrailTests(unittest.TestCase):
+    """Pins Android provenance and structured sync for AI localization keys."""
+
+    def write_ios_english(self, root: Path, values: dict[str, str]) -> None:
+        """Create both English iOS trees for one isolated localization fixture."""
+        for tree in ("AndBible", "Localizations"):
+            path = root / tree / "en.lproj" / "Localizable.strings"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                "".join(f'"{key}" = "{value}";\n' for key, value in sorted(values.items())),
+                encoding="utf-8",
+            )
+
+    def write_android_english(self, root: Path, values: dict[str, str]) -> Path:
+        """Create the Android English resource file and return its res directory."""
+        android_root = root / "android"
+        path = android_root / "values" / "strings.xml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "<resources>\n"
+            + "".join(
+                f'  <string name="{key}">{value}</string>\n'
+                for key, value in sorted(values.items())
+            )
+            + "</resources>\n",
+            encoding="utf-8",
+        )
+        return android_root
+
+    def write_ai_source(self, root: Path, source: str) -> None:
+        """Create one Swift AI source file used by the static-key inventory."""
+        path = root / "Sources" / "BibleUI" / "Sources" / "BibleUI" / "AI" / "Fixture.swift"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+
+    def test_source_inventory_covers_direct_indirect_dynamic_and_menu_keys(self) -> None:
+        """Every supported AI localization declaration form must enter the catalog contract."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_ai_source(
+                root,
+                '''
+                let direct = String(localized: "direct_key", defaultValue: "Direct")
+                let help = .localized("help_key")
+                let link = Link(labelKey: "label_key")
+                let dynamic = String.LocalizationValue("ai_disclaimer_point\\(index)")
+                ''',
+            )
+            keys = localization_guardrails.discover_ai_localization_keys(root)
+
+        self.assertEqual(
+            keys,
+            {
+                "direct_key",
+                "help_key",
+                "label_key",
+                "llm_actions",
+                *(f"ai_disclaimer_point{index}" for index in range(1, 10)),
+            },
+        )
+
+    def test_catalog_rejects_ai_key_without_android_provenance(self) -> None:
+        """An invented source label must fail before locale files can be synchronized."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_ios_english(root, {})
+            self.write_ai_source(
+                root,
+                'let title = String(localized: "ios_only_ai_label", defaultValue: "Label")\n',
+            )
+            android_root = self.write_android_english(root, {"llm_actions": "AI Actions"})
+
+            with self.assertRaisesRegex(ValueError, "ios_only_ai_label -> ios_only_ai_label"):
+                localization_guardrails.build_android_shared_localization(root, android_root)
+
+    def test_catalog_rejects_ai_default_that_differs_from_android_english(self) -> None:
+        """A valid Android key cannot retain independently invented fallback copy."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_ios_english(root, {})
+            self.write_ai_source(
+                root,
+                'let title = String(localized: "ai_provider_api_key", defaultValue: "Secret")\n',
+            )
+            android_root = self.write_android_english(
+                root,
+                {
+                    "ai_provider_api_key": "API key",
+                    "llm_actions": "AI Actions",
+                },
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "ai_provider_api_key -> ai_provider_api_key: 'Secret' != 'API key'",
+            ):
+                localization_guardrails.build_android_shared_localization(root, android_root)
+
+    def test_sync_bootstraps_missing_ai_key_and_rejects_stale_catalog(self) -> None:
+        """Structured sync adds Android-owned keys, while stale catalogs fail before writes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_ios_english(root, {})
+            android_root = self.write_android_english(
+                root,
+                {
+                    "ai_provider_api_key": "API key",
+                    "llm_actions": "AI Actions",
+                },
+            )
+            catalog_without_sources = localization_guardrails.build_android_shared_localization(
+                root,
+                android_root,
+            )
+            self.write_ai_source(
+                root,
+                'let title = String(localized: "ai_provider_api_key", defaultValue: "API key")\n',
+            )
+
+            with self.assertRaisesRegex(ValueError, "ai_provider_api_key, llm_actions"):
+                localization_guardrails.sync_android_shared_translations(
+                    root,
+                    catalog_without_sources,
+                )
+
+            catalog = localization_guardrails.build_android_shared_localization(root, android_root)
+            result = localization_guardrails.sync_android_shared_translations(root, catalog)
+
+            for tree in ("AndBible", "Localizations"):
+                values = localization_guardrails.parse_ios_strings(
+                    root / tree / "en.lproj" / "Localizable.strings"
+                )
+                self.assertEqual(values["ai_provider_api_key"], "API key")
+                self.assertEqual(values["llm_actions"], "AI Actions")
+
+        self.assertEqual(result.files_changed, 2)
+        self.assertEqual(result.values_written, 4)
+
+    def test_ai_sync_preserves_android_owned_keys_outside_ai_sources(self) -> None:
+        """The focused AI writer must not alter another shared localization domain."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_ios_english(root, {"unrelated_key": "Existing iOS value"})
+            self.write_ai_source(
+                root,
+                'let title = String(localized: "ai_provider_api_key", defaultValue: "API key")\n',
+            )
+            android_root = self.write_android_english(
+                root,
+                {
+                    "ai_provider_api_key": "API key",
+                    "llm_actions": "AI Actions",
+                    "unrelated_key": "Android-owned value",
+                },
+            )
+            catalog = localization_guardrails.build_android_shared_localization(root, android_root)
+
+            result = localization_guardrails.sync_android_ai_translations(root, catalog)
+
+            for tree in ("AndBible", "Localizations"):
+                values = localization_guardrails.parse_ios_strings(
+                    root / tree / "en.lproj" / "Localizable.strings"
+                )
+                self.assertEqual(values["ai_provider_api_key"], "API key")
+                self.assertEqual(values["llm_actions"], "AI Actions")
+                self.assertEqual(values["unrelated_key"], "Existing iOS value")
+
+        self.assertEqual(result.files_changed, 2)
+        self.assertEqual(result.values_written, 4)
 
 
 if __name__ == "__main__":

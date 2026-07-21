@@ -1,6 +1,5 @@
 // RemoteSyncReadingPlanPatchApplyService.swift — Incremental Android patch replay for reading plans
 
-import CLibSword
 import Foundation
 import SQLite3
 import SwiftData
@@ -20,6 +19,24 @@ public enum RemoteSyncReadingPlanPatchApplyError: Error, Equatable {
 
     /// One `UPSERT` log entry referenced a row that was not present in the staged patch database.
     case missingPatchRow(table: String, id: UUID)
+
+    /// One replay batch contains more patch archives than the bounded service contract permits.
+    case tooManyPatchArchives(Int)
+
+    /// A compressed patch exceeds the byte ceiling checked before reading it into memory.
+    case compressedArchiveTooLarge(Int64)
+
+    /// A gzip trailer declares an expanded patch larger than the bounded SQLite ceiling.
+    case expandedArchiveTooLarge(UInt64)
+
+    /// Aggregate expanded SQLite bytes exceed the bounded replay-request ceiling.
+    case cumulativeArchiveTooLarge(UInt64)
+
+    /// A staged patch is malformed, corrupt, or does not contain one strict gzip member.
+    case invalidPatchArchive
+
+    /// One patch table exceeds its row ceiling before any rows are materialized.
+    case tooManyRows(table: String, count: Int64)
 }
 
 /**
@@ -75,27 +92,28 @@ public struct RemoteSyncReadingPlanPatchApplyReport: Sendable, Equatable {
 /**
  Replays Android reading-plan patch archives into the local SwiftData reading-plan graph.
 
- Android patch files for the reading-plan category contain only sparse `ReadingPlan`,
- `ReadingPlanStatus`, and `LogEntry` rows. This service mirrors Android's conflict rule exactly:
+ Android patch files for the reading-plan category contain sparse `ReadingPlan`,
+ `ReadingPlanStatus`, and `LogEntry` rows. This service mirrors Android's conflict
+ rule for every row:
  a patch row is applied only when the incoming `LogEntry.lastUpdated` is newer than the locally
  preserved `LogEntry` for the same `(tableName, entityId1, entityId2)` key.
 
- The implementation stages every archive into an in-memory working set first:
- - current local plans and preserved Android status payloads are read into temporary value types
- - each staged patch archive is decompressed and its newer rows are replayed into that working set
- - only after every archive validates successfully does the service rewrite SwiftData and the
-   local-only fidelity stores
+ Before the first mutation, every archive is preflighted for compressed and cumulative expanded
+ bounds. The service then processes archives in caller order. For each archive it reads the current
+ strict graph and settings generation, inflates and validates one exact Room database, replays only
+ strictly newer rows, and commits graph, status, log, patch-status, and fingerprint state atomically.
 
- This preserves Android's precedence semantics while avoiding partially mutated local state when a
- later archive row is malformed.
+ This matches Android's independently committed archive loop: failure in one archive rolls back that
+ archive, while complete commits from earlier archives remain durable and later archives are not
+ attempted.
 
  Data dependencies:
  - `RemoteSyncInitialBackupMetadataRestoreService` reads Android `LogEntry` rows from patch files
  - `RemoteSyncLogEntryStore` provides the local Android conflict baseline for timestamp comparison
  - `RemoteSyncPatchStatusStore` records successfully applied patch archives per source device
  - `RemoteSyncReadingPlanStatusStore` preserves raw Android `ReadingPlanStatus` payloads locally
- - `ReadingPlanService.availablePlans` provides the supported plan templates needed to rebuild
-   `ReadingPlanDay` rows after replay
+ - `RemoteSyncReadingPlanDefinitionStore` recovers interrupted local definition publication
+ - `ReadingPlanService.catalog` provides bundled and installed templates needed to rebuild day rows
 
  Side effects:
  - creates and removes temporary decompressed SQLite files beneath the configured temporary directory
@@ -109,19 +127,39 @@ public struct RemoteSyncReadingPlanPatchApplyReport: Sendable, Equatable {
  - rethrows `RemoteSyncInitialBackupMetadataRestoreError` when staged `LogEntry` rows are malformed
  - throws `RemoteSyncReadingPlanPatchApplyError.invalidLogEntryIdentifier` when a patch log row does not use a UUID key
  - throws `RemoteSyncReadingPlanPatchApplyError.missingPatchRow` when an `UPSERT` log row has no matching row in the patch database
- - throws `RemoteSyncReadingPlanRestoreError.unsupportedPlanDefinitions` when replay would leave the local store with a plan code iOS cannot rebuild from bundled templates
+ - throws `RemoteSyncReadingPlanRestoreError.unsupportedPlanDefinitions` when replay would leave the local store with a plan code iOS cannot rebuild from the post-installation catalog
  - throws `RemoteSyncReadingPlanRestoreError.malformedReadingStatus` when one preserved Android status payload is not valid for completion reconstruction
- - rethrows `ModelContext.save()` failures after the final rewrite
+ - rethrows context-contract, cancellation, fetch, encoding, final-save, and durable-recovery failures
 
  Concurrency:
  - this type is not `Sendable`; callers must respect the confinement of the supplied `ModelContext`
    and `SettingsStore`
  */
 public final class RemoteSyncReadingPlanPatchApplyService {
+    /// Maximum archives replayed in one batch.
+    private static let maximumPatchArchiveCount = 1_000
+
+    /// Maximum compressed bytes read for one staged patch.
+    private static let maximumCompressedPatchByteCount = 16 * 1_024 * 1_024
+
+    /// Maximum expanded SQLite bytes written for one staged patch.
+    private static let maximumExpandedPatchByteCount = 64 * 1_024 * 1_024
+
+    /// Maximum aggregate expanded bytes admitted before the first archive publishes.
+    private static let maximumCumulativeExpandedPatchByteCount = 256 * 1_024 * 1_024
+
+    /// Maximum native plan, status, and log rows accepted per patch.
+    private static let maximumPlanRowCount: Int64 = 10_000
+    private static let maximumStatusRowCount: Int64 = 100_000
+    private static let maximumLogEntryRowCount: Int64 = 200_000
+
+    /// Maximum bytes accepted for one raw Android status JSON cell.
+    private static let maximumStatusByteCount = 1 * 1_024 * 1_024
+
     private struct WorkingPlan {
         let id: UUID
         var planCode: String
-        var startDate: Date
+        var startDateMilliseconds: Int64
         var currentDay: Int
     }
 
@@ -132,35 +170,14 @@ public final class RemoteSyncReadingPlanPatchApplyService {
         var readingStatusJSON: String
     }
 
-    private struct PreparedDay {
-        let dayNumber: Int
-        let readings: String
-        let isCompleted: Bool
-    }
-
-    private struct PreparedPlan {
-        let id: UUID
-        let planCode: String
-        let planName: String
-        let startDate: Date
-        let currentDay: Int
-        let totalDays: Int
-        let isActive: Bool
-        let days: [PreparedDay]
-    }
-
-    private struct AndroidReadingStatusPayload: Decodable {
-        let chapterReadArray: [AndroidChapterRead]
-    }
-
-    private struct AndroidChapterRead: Decodable {
-        let readingNumber: Int
-    }
-
     private let metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService
     private let snapshotService: RemoteSyncReadingPlanSnapshotService
     private let fileManager: FileManager
     private let temporaryDirectory: URL
+    private let planFetcher: (ModelContext) throws -> [ReadingPlan]
+    private let userPlanDirectory: URL
+    private let definitionStore: RemoteSyncReadingPlanDefinitionStore
+    private let restoreService: RemoteSyncReadingPlanRestoreService
 
     /**
      Creates a reading-plan patch replay service.
@@ -168,6 +185,7 @@ public final class RemoteSyncReadingPlanPatchApplyService {
      - Parameters:
        - metadataRestoreService: Reader used for staged Android `LogEntry` rows.
        - snapshotService: Snapshot service used to refresh outbound fingerprint baselines after replay.
+       - userPlanDirectory: Destination equivalent to Android's `jsword/readingplan` directory.
        - fileManager: File manager used for temporary-file cleanup.
        - temporaryDirectory: Scratch directory for temporary decompressed patch databases. Defaults
          to the process temporary directory.
@@ -176,14 +194,73 @@ public final class RemoteSyncReadingPlanPatchApplyService {
      */
     public init(
         metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService(),
-        snapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService(),
+        snapshotService: RemoteSyncReadingPlanSnapshotService? = nil,
+        userPlanDirectory: URL = ReadingPlanService.defaultUserReadingPlanDirectory(),
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil
     ) {
         self.metadataRestoreService = metadataRestoreService
-        self.snapshotService = snapshotService
+        self.snapshotService = snapshotService ?? RemoteSyncReadingPlanSnapshotService(
+            userPlanDirectory: userPlanDirectory,
+            fileManager: fileManager
+        )
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
+        self.userPlanDirectory = userPlanDirectory
+        definitionStore = RemoteSyncReadingPlanDefinitionStore(
+            userPlanDirectory: userPlanDirectory,
+            fileManager: fileManager
+        )
+        restoreService = RemoteSyncReadingPlanRestoreService(
+            userPlanDirectory: userPlanDirectory,
+            fileManager: fileManager
+        )
+        planFetcher = { modelContext in
+            try modelContext.fetch(FetchDescriptor<ReadingPlan>())
+        }
+    }
+
+    /**
+     Creates a patch replay service with explicit current-plan fetch behavior.
+
+     This initializer supports behavior-level failure tests without weakening production fetches or
+     coupling assertions to SwiftData implementation details.
+
+     - Parameters:
+       - metadataRestoreService: Reader used for staged Android `LogEntry` rows.
+       - snapshotService: Snapshot service used to refresh outbound fingerprint baselines after replay.
+       - userPlanDirectory: Destination equivalent to Android's `jsword/readingplan` directory.
+       - fileManager: File manager used for temporary-file cleanup.
+       - temporaryDirectory: Scratch directory for temporary decompressed patch databases.
+       - planFetcher: Throwing operation that returns the complete current local plan graph.
+     - Side effects: none until patch replay begins.
+     - Failure modes: The initializer cannot fail; `planFetcher` errors are rethrown by patch preflight.
+     */
+    init(
+        metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService(),
+        snapshotService: RemoteSyncReadingPlanSnapshotService? = nil,
+        userPlanDirectory: URL = ReadingPlanService.defaultUserReadingPlanDirectory(),
+        fileManager: FileManager = .default,
+        temporaryDirectory: URL? = nil,
+        planFetcher: @escaping (ModelContext) throws -> [ReadingPlan]
+    ) {
+        self.metadataRestoreService = metadataRestoreService
+        self.snapshotService = snapshotService ?? RemoteSyncReadingPlanSnapshotService(
+            userPlanDirectory: userPlanDirectory,
+            fileManager: fileManager
+        )
+        self.fileManager = fileManager
+        self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
+        self.userPlanDirectory = userPlanDirectory
+        definitionStore = RemoteSyncReadingPlanDefinitionStore(
+            userPlanDirectory: userPlanDirectory,
+            fileManager: fileManager
+        )
+        restoreService = RemoteSyncReadingPlanRestoreService(
+            userPlanDirectory: userPlanDirectory,
+            fileManager: fileManager
+        )
+        self.planFetcher = planFetcher
     }
 
     /**
@@ -198,42 +275,87 @@ public final class RemoteSyncReadingPlanPatchApplyService {
        - settingsStore: Local-only settings store backing preserved Android fidelity metadata.
      - Returns: Summary describing how many patch archives and `LogEntry` rows were replayed.
      - Side effects:
+       - preflights every archive's bounded gzip metadata before the first mutation
+       - recovers interrupted local definition publication before each archive projection
+       - reads the current plan, preserved-status, and conflict-log generation inside
+         that archive's settings-backed transaction
        - creates and removes temporary decompressed SQLite files
-       - rewrites local `ReadingPlan` and `ReadingPlanDay` rows after the full batch succeeds
-       - replaces local Android `LogEntry` metadata for `.readingPlans`
-       - appends applied-patch rows to `RemoteSyncPatchStatusStore`
-       - rewrites preserved Android status payloads in `RemoteSyncReadingPlanStatusStore`
-       - refreshes outbound reading-plan fingerprint baselines after successful replay
+       - rewrites local graph, Android metadata, patch status, preserved payloads, and
+         outbound fingerprints in one atomic publication per successful archive
      - Failure modes:
        - rethrows patch-archive decompression failures
        - rethrows malformed staged `LogEntry` metadata failures
        - rethrows malformed reading-status JSON failures
        - throws `RemoteSyncReadingPlanPatchApplyError` for invalid identifiers or missing patch rows
-       - rethrows `ModelContext.save()` failures after the final rewrite
+       - rethrows definition recovery, validation, installation, and rollback failures
+       - rethrows `SettingsStoreAtomicBatchError` when the supplied settings store does not own the
+         exact clean `modelContext`
+       - rethrows cancellation, strict preflight, strict fingerprint projection, replacement,
+         final-save, and durable-recovery failures; a later failure preserves earlier archive commits
+     - Note: Archives are committed independently and in caller order, matching Android replay.
      */
     public func applyPatchArchives(
         _ stagedArchives: [RemoteSyncStagedPatchArchive],
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> RemoteSyncReadingPlanPatchApplyReport {
+        guard stagedArchives.count <= Self.maximumPatchArchiveCount else {
+            throw RemoteSyncReadingPlanPatchApplyError.tooManyPatchArchives(
+                stagedArchives.count
+            )
+        }
+        try preflightArchiveBounds(stagedArchives)
+        if stagedArchives.count > 1 {
+            var appliedPatchCount = 0
+            var appliedLogEntryCount = 0
+            var skippedLogEntryCount = 0
+            var restoredPlanCodes: [String] = []
+            var preservedStatusCount = 0
+            for stagedArchive in stagedArchives {
+                let report = try applyPatchArchives(
+                    [stagedArchive],
+                    modelContext: modelContext,
+                    settingsStore: settingsStore
+                )
+                appliedPatchCount += report.appliedPatchCount
+                appliedLogEntryCount += report.appliedLogEntryCount
+                skippedLogEntryCount += report.skippedLogEntryCount
+                restoredPlanCodes = report.restoredPlanCodes
+                preservedStatusCount = report.preservedStatusCount
+            }
+            return RemoteSyncReadingPlanPatchApplyReport(
+                appliedPatchCount: appliedPatchCount,
+                appliedLogEntryCount: appliedLogEntryCount,
+                skippedLogEntryCount: skippedLogEntryCount,
+                restoredPlanCodes: restoredPlanCodes,
+                preservedStatusCount: preservedStatusCount
+            )
+        }
+        try definitionStore.prepareForSnapshot(settingsStore: settingsStore)
         let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
         let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
 
-        var workingPlans = try currentPlans(from: modelContext)
-        var workingStatuses = statusStore.allStatuses().map {
-            WorkingStatus(
-                remoteStatusID: $0.remoteStatusID,
-                planCode: $0.planCode,
-                dayNumber: $0.dayNumber,
-                readingStatusJSON: $0.readingStatusJSON
-            )
-        }
-        var logEntriesByKey = Dictionary(
-            uniqueKeysWithValues: logEntryStore.entries(for: .readingPlans).map {
-                (logEntryStore.key(for: .readingPlans, entry: $0), $0)
+        let initialState = try settingsStore.performAtomicBatch(in: modelContext) {
+            let plans = try currentPlans(from: modelContext, settingsStore: settingsStore)
+            let statuses = try statusStore.allStatusesStrict().map {
+                WorkingStatus(
+                    remoteStatusID: $0.remoteStatusID,
+                    planCode: $0.planCode,
+                    dayNumber: $0.dayNumber,
+                    readingStatusJSON: $0.readingStatusJSON
+                )
             }
-        )
+            let logEntriesByKey = Dictionary(
+                uniqueKeysWithValues: try logEntryStore.entriesStrict(for: .readingPlans).map {
+                    (logEntryStore.key(for: .readingPlans, entry: $0), $0)
+                }
+            )
+            return (plans, statuses, logEntriesByKey)
+        }
+        var workingPlans = initialState.0
+        var workingStatuses = initialState.1
+        var logEntriesByKey = initialState.2
 
         var appliedPatchStatuses: [RemoteSyncPatchStatus] = []
         var appliedLogEntryCount = 0
@@ -244,27 +366,32 @@ public final class RemoteSyncReadingPlanPatchApplyService {
                 let patchDatabaseURL = temporaryDatabaseURL(prefix: "remote-sync-readingplans-patch-", suffix: ".sqlite3")
                 defer { try? fileManager.removeItem(at: patchDatabaseURL) }
 
-                let archiveData = try Data(contentsOf: stagedArchive.archiveFileURL)
-                let databaseData = try Self.gunzip(archiveData)
-                try databaseData.write(to: patchDatabaseURL, options: .atomic)
+                try decompressPatchArchive(
+                    from: stagedArchive.archiveFileURL,
+                    to: patchDatabaseURL
+                )
+                try withSQLiteDatabase(at: patchDatabaseURL) { database in
+                    try RemoteSyncAndroidDatabaseContract.validateInboundDatabase(
+                        database,
+                        category: .readingPlans
+                    )
+                    try validatePatchDatabaseBounds(database)
+                }
 
                 let metadataSnapshot = try metadataRestoreService.readSnapshot(from: patchDatabaseURL)
                 let patchLogEntries = metadataSnapshot.logEntries.filter {
-                    $0.tableName == "ReadingPlan" || $0.tableName == "ReadingPlanStatus"
+                    $0.tableName == "ReadingPlan"
+                        || $0.tableName == "ReadingPlanStatus"
                 }
                 let filteredLogEntries = patchLogEntries.filter { entry in
                     let key = logEntryStore.key(for: .readingPlans, entry: entry)
                     guard let localEntry = logEntriesByKey[key] else {
                         return true
                     }
-                    return entry.lastUpdated > localEntry.lastUpdated
+                    return RemoteSyncLogEntryConflictOrder.isNewer(entry, than: localEntry)
                 }
 
                 skippedLogEntryCount += patchLogEntries.count - filteredLogEntries.count
-                if filteredLogEntries.isEmpty {
-                    return
-                }
-
                 try withSQLiteDatabase(at: patchDatabaseURL) { database in
                     try applyReadingPlanTableOperations(
                         logEntries: filteredLogEntries.filter { $0.tableName == "ReadingPlan" },
@@ -294,39 +421,58 @@ public final class RemoteSyncReadingPlanPatchApplyService {
             }()
         }
 
-        let supportedPlanCodes = Set(ReadingPlanService.availablePlans.map(\.code))
-        let unsupportedPlanCodes = Array(
-            Set(workingPlans.values.map(\.planCode).filter { !supportedPlanCodes.contains($0) })
-        ).sorted()
-        if !unsupportedPlanCodes.isEmpty {
-            throw RemoteSyncReadingPlanRestoreError.unsupportedPlanDefinitions(unsupportedPlanCodes)
+        return try settingsStore.performAtomicBatch(in: modelContext) {
+            let supportedPlanCodes = Set(
+                ReadingPlanService.catalog(userPlanDirectory: userPlanDirectory).templates.map(\.code)
+            )
+            let unsupportedPlanCodes = Array(
+                Set(workingPlans.values.map(\.planCode).filter { !supportedPlanCodes.contains($0) })
+            ).sorted()
+            if !unsupportedPlanCodes.isEmpty {
+                throw RemoteSyncReadingPlanRestoreError.unsupportedPlanDefinitions(unsupportedPlanCodes)
+            }
+
+            let preparedPlans = try preparePlans(
+                plans: Array(workingPlans.values),
+                statuses: workingStatuses
+            )
+            let replacement = RemoteSyncReadingPlanReplacement(
+                plans: preparedPlans,
+                statuses: workingStatuses.sorted(by: Self.statusSort).map { status in
+                    RemoteSyncReadingPlanStatusStore.Status(
+                        planCode: status.planCode,
+                        dayNumber: status.dayNumber,
+                        readingStatusJSON: status.readingStatusJSON,
+                        remoteStatusID: status.remoteStatusID
+                    )
+                }
+            )
+            let restoreReport = try settingsStore.performAtomicBatch(in: modelContext) {
+                let report = try restoreService.replaceLocalReadingPlans(
+                    with: replacement,
+                    modelContext: modelContext,
+                    statusStore: statusStore
+                )
+                logEntryStore.replaceEntries(
+                    logEntriesByKey.values.sorted(by: Self.logEntrySort),
+                    for: .readingPlans
+                )
+                patchStatusStore.addStatuses(appliedPatchStatuses, for: .readingPlans)
+                try snapshotService.refreshBaselineFingerprintsStrict(
+                    modelContext: modelContext,
+                    settingsStore: settingsStore
+                )
+                return report
+            }
+
+            return RemoteSyncReadingPlanPatchApplyReport(
+                appliedPatchCount: appliedPatchStatuses.count,
+                appliedLogEntryCount: appliedLogEntryCount,
+                skippedLogEntryCount: skippedLogEntryCount,
+                restoredPlanCodes: restoreReport.restoredPlanCodes,
+                preservedStatusCount: restoreReport.preservedStatusCount
+            )
         }
-
-        let preparedPlans = try preparePlans(plans: Array(workingPlans.values), statuses: workingStatuses)
-        try replaceLocalReadingPlans(
-            preparedPlans: preparedPlans,
-            preservedStatuses: workingStatuses,
-            modelContext: modelContext,
-            statusStore: statusStore
-        )
-
-        logEntryStore.replaceEntries(
-            logEntriesByKey.values.sorted(by: Self.logEntrySort),
-            for: .readingPlans
-        )
-        patchStatusStore.addStatuses(appliedPatchStatuses, for: .readingPlans)
-        snapshotService.refreshBaselineFingerprints(
-            modelContext: modelContext,
-            settingsStore: settingsStore
-        )
-
-        return RemoteSyncReadingPlanPatchApplyReport(
-            appliedPatchCount: appliedPatchStatuses.count,
-            appliedLogEntryCount: appliedLogEntryCount,
-            skippedLogEntryCount: skippedLogEntryCount,
-            restoredPlanCodes: preparedPlans.map(\.planCode).sorted(),
-            preservedStatusCount: workingStatuses.count
-        )
     }
 
     /**
@@ -337,19 +483,30 @@ public final class RemoteSyncReadingPlanPatchApplyService {
      - Side effects:
        - reads local `ReadingPlan` rows from SwiftData
      - Failure modes:
-       - fetch failures are swallowed and reported as an empty plan set to match the repo's existing
-         store behavior
+       - rethrows SwiftData fetch failures before patch staging or publication begins
      */
-    private func currentPlans(from modelContext: ModelContext) throws -> [UUID: WorkingPlan] {
-        let existingPlans = (try? modelContext.fetch(FetchDescriptor<ReadingPlan>())) ?? []
+    private func currentPlans(
+        from modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> [UUID: WorkingPlan] {
+        let existingPlans = try planFetcher(modelContext)
+        let exactTimestamps = try RemoteSyncReadingPlanTimestampStore(
+            settingsStore: settingsStore
+        ).allMilliseconds()
         return Dictionary(
-            uniqueKeysWithValues: existingPlans.map { plan in
-                (
+            uniqueKeysWithValues: try existingPlans.map { plan in
+                let startDateMilliseconds: Int64
+                if let preserved = exactTimestamps[plan.id] {
+                    startDateMilliseconds = preserved
+                } else {
+                    startDateMilliseconds = try AndroidTimestamp.milliseconds(from: plan.startDate)
+                }
+                return (
                     plan.id,
                     WorkingPlan(
                         id: plan.id,
                         planCode: plan.planCode,
-                        startDate: plan.startDate,
+                        startDateMilliseconds: startDateMilliseconds,
                         currentDay: plan.currentDay
                     )
                 )
@@ -493,8 +650,12 @@ public final class RemoteSyncReadingPlanPatchApplyService {
     private func preparePlans(
         plans: [WorkingPlan],
         statuses: [WorkingStatus]
-    ) throws -> [PreparedPlan] {
-        let templatesByCode = Dictionary(uniqueKeysWithValues: ReadingPlanService.availablePlans.map { ($0.code, $0) })
+    ) throws -> [RemoteSyncPreparedReadingPlan] {
+        let templatesByCode = Dictionary(
+            uniqueKeysWithValues: ReadingPlanService.catalog(
+                userPlanDirectory: userPlanDirectory
+            ).templates.map { ($0.code, $0) }
+        )
         let missingPlanCodes = Array(
             Set(plans.map(\.planCode).filter { templatesByCode[$0] == nil })
         ).sorted()
@@ -507,38 +668,37 @@ public final class RemoteSyncReadingPlanPatchApplyService {
         return try plans.sorted(by: Self.planSort).map { plan in
             let template = templatesByCode[plan.planCode]!
             let isDateBased = Self.isDateBasedPlan(template)
-            let normalizedCurrentDay = min(max(plan.currentDay, 1), max(template.totalDays, 1))
-            let statusesByDay = Dictionary(uniqueKeysWithValues: statusesByPlanCode[plan.planCode, default: []].map {
-                (
-                    $0.dayNumber,
-                    RemoteSyncAndroidReadingPlanStatus(
-                        id: $0.remoteStatusID ?? UUID(),
-                        planCode: $0.planCode,
-                        dayNumber: $0.dayNumber,
-                        readingStatusJSON: $0.readingStatusJSON
+            let effectiveCurrentDay = max(plan.currentDay, 1)
+            var statusesByDay: [Int: RemoteSyncAndroidReadingPlanStatus] = [:]
+            for status in statusesByPlanCode[plan.planCode, default: []] {
+                guard statusesByDay[status.dayNumber] == nil else {
+                    throw RemoteSyncReadingPlanRestoreError.duplicateReadingStatus(
+                        planCode: status.planCode,
+                        dayNumber: status.dayNumber
                     )
+                }
+                statusesByDay[status.dayNumber] = RemoteSyncAndroidReadingPlanStatus(
+                    id: status.remoteStatusID ?? UUID(),
+                    planCode: status.planCode,
+                    dayNumber: status.dayNumber,
+                    readingStatusJSON: status.readingStatusJSON
                 )
-            })
+            }
 
-            var preparedDays: [PreparedDay] = []
-            preparedDays.reserveCapacity(template.totalDays)
-            var allDaysCompleted = true
-
-            for dayNumber in 1...template.totalDays {
+            var preparedDays: [RemoteSyncPreparedReadingPlanDay] = []
+            preparedDays.reserveCapacity(template.dayNumbers.count)
+            for dayNumber in template.dayNumbers {
                 let readings = template.readingsForDay(dayNumber)
-                let expectedCount = Self.expectedReadingCount(for: readings, isDateBasedPlan: isDateBased)
+                let expectedCount = Self.expectedReadingCount(for: readings)
                 let completion = try Self.isDayComplete(
                     status: statusesByDay[dayNumber],
                     dayNumber: dayNumber,
-                    currentDay: normalizedCurrentDay,
+                    currentDay: effectiveCurrentDay,
                     expectedReadingCount: expectedCount,
                     isDateBasedPlan: isDateBased
                 )
-                if !completion {
-                    allDaysCompleted = false
-                }
                 preparedDays.append(
-                    PreparedDay(
+                    RemoteSyncPreparedReadingPlanDay(
                         dayNumber: dayNumber,
                         readings: readings,
                         isCompleted: completion
@@ -546,81 +706,17 @@ public final class RemoteSyncReadingPlanPatchApplyService {
                 )
             }
 
-            return PreparedPlan(
+            return RemoteSyncPreparedReadingPlan(
                 id: plan.id,
                 planCode: plan.planCode,
                 planName: template.name,
-                startDate: plan.startDate,
-                currentDay: normalizedCurrentDay,
+                startDateMilliseconds: plan.startDateMilliseconds,
+                currentDay: plan.currentDay,
                 totalDays: template.totalDays,
-                isActive: !allDaysCompleted,
+                isActive: false,
                 days: preparedDays
             )
         }
-    }
-
-    /**
-     Rewrites the local `ReadingPlan` graph and preserved Android status payloads.
-
-     - Parameters:
-       - preparedPlans: Supported plan rows prepared for SwiftData insertion.
-       - preservedStatuses: Raw Android status payloads to preserve locally after the rewrite.
-       - modelContext: SwiftData context whose reading-plan graph should be replaced.
-       - statusStore: Local-only store used to preserve Android `ReadingPlanStatus` payloads.
-     - Side effects:
-       - deletes the existing local `ReadingPlan` graph
-       - inserts the prepared plan and day rows
-       - clears and rewrites preserved Android status payloads
-       - saves the supplied `ModelContext`
-     - Failure modes:
-       - rethrows `ModelContext.save()` failures after mutating local SwiftData state
-     */
-    private func replaceLocalReadingPlans(
-        preparedPlans: [PreparedPlan],
-        preservedStatuses: [WorkingStatus],
-        modelContext: ModelContext,
-        statusStore: RemoteSyncReadingPlanStatusStore
-    ) throws {
-        let existingPlans = (try? modelContext.fetch(FetchDescriptor<ReadingPlan>())) ?? []
-        for plan in existingPlans {
-            modelContext.delete(plan)
-        }
-
-        statusStore.clearAll()
-
-        for plan in preparedPlans {
-            let restoredPlan = ReadingPlan(
-                id: plan.id,
-                planCode: plan.planCode,
-                planName: plan.planName,
-                startDate: plan.startDate,
-                currentDay: plan.currentDay,
-                totalDays: plan.totalDays,
-                isActive: plan.isActive
-            )
-            modelContext.insert(restoredPlan)
-
-            for day in plan.days {
-                let restoredDay = ReadingPlanDay(
-                    dayNumber: day.dayNumber,
-                    isCompleted: day.isCompleted,
-                    readings: day.readings
-                )
-                restoredDay.plan = restoredPlan
-                modelContext.insert(restoredDay)
-            }
-        }
-
-        for status in preservedStatuses.sorted(by: Self.statusSort) {
-            statusStore.setStatus(
-                status.readingStatusJSON,
-                planCode: status.planCode,
-                dayNumber: status.dayNumber,
-                remoteStatusID: status.remoteStatusID
-            )
-        }
-
-        try modelContext.save()
     }
 
     /**
@@ -649,15 +745,33 @@ public final class RemoteSyncReadingPlanPatchApplyService {
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncReadingPlanRestoreError.invalidSQLiteDatabase
         }
-        bindUUIDBlob(id, to: statement, index: 1)
+        try bindUUIDBlob(id, to: statement, index: 1)
         guard sqlite3_step(statement) == SQLITE_ROW else {
             return nil
         }
+        guard sqlite3_column_type(statement, 3) == SQLITE_INTEGER else {
+            throw RemoteSyncReadingPlanRestoreError.invalidDayNumber(
+                table: "ReadingPlan",
+                value: 0
+            )
+        }
+        let currentDayValue = sqlite3_column_int64(statement, 3)
+        guard currentDayValue >= Int64(Int32.min),
+              currentDayValue <= Int64(Int32.max) else {
+            throw RemoteSyncReadingPlanRestoreError.invalidDayNumber(
+                table: "ReadingPlan",
+                value: currentDayValue
+            )
+        }
         return WorkingPlan(
             id: try uuidFromBlob(statement: statement, column: 0, table: "ReadingPlan", name: "id"),
-            planCode: stringColumn(statement: statement, index: 1),
-            startDate: Date(timeIntervalSince1970: TimeInterval(sqlite3_column_int64(statement, 2)) / 1000.0),
-            currentDay: Int(sqlite3_column_int(statement, 3))
+            planCode: try planCodeColumn(
+                statement: statement,
+                index: 1,
+                table: "ReadingPlan"
+            ),
+            startDateMilliseconds: sqlite3_column_int64(statement, 2),
+            currentDay: Int(currentDayValue)
         )
     }
 
@@ -687,15 +801,30 @@ public final class RemoteSyncReadingPlanPatchApplyService {
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncReadingPlanRestoreError.invalidSQLiteDatabase
         }
-        bindUUIDBlob(id, to: statement, index: 1)
+        try bindUUIDBlob(id, to: statement, index: 1)
         guard sqlite3_step(statement) == SQLITE_ROW else {
             return nil
         }
         return RemoteSyncAndroidReadingPlanStatus(
             id: try uuidFromBlob(statement: statement, column: 0, table: "ReadingPlanStatus", name: "id"),
-            planCode: stringColumn(statement: statement, index: 1),
-            dayNumber: Int(sqlite3_column_int(statement, 2)),
-            readingStatusJSON: stringColumn(statement: statement, index: 3)
+            planCode: try planCodeColumn(
+                statement: statement,
+                index: 1,
+                table: "ReadingPlanStatus"
+            ),
+            dayNumber: try dayNumberColumn(
+                statement: statement,
+                index: 2,
+                table: "ReadingPlanStatus"
+            ),
+            readingStatusJSON: try textColumn(
+                statement: statement,
+                index: 3,
+                table: "ReadingPlanStatus",
+                column: "readingStatus",
+                maximumByteCount: Self.maximumStatusByteCount,
+                permitsEmpty: true
+            )
         )
     }
 
@@ -756,6 +885,54 @@ public final class RemoteSyncReadingPlanPatchApplyService {
         return try body(database)
     }
 
+    /** Rejects oversized native patch tables before metadata or row materialization. */
+    private func validatePatchDatabaseBounds(_ database: OpaquePointer) throws {
+        try requirePatchRowCount(
+            table: "ReadingPlan",
+            database: database,
+            maximum: Self.maximumPlanRowCount
+        )
+        try requirePatchRowCount(
+            table: "ReadingPlanStatus",
+            database: database,
+            maximum: Self.maximumStatusRowCount
+        )
+        try requirePatchRowCount(
+            table: "LogEntry",
+            database: database,
+            maximum: Self.maximumLogEntryRowCount
+        )
+    }
+
+    /** Reads one table count through SQLite's aggregate without allocating row payloads. */
+    private func requirePatchRowCount(
+        table: String,
+        database: OpaquePointer,
+        maximum: Int64
+    ) throws {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            database,
+            "SELECT COUNT(*) FROM \(table)",
+            -1,
+            &statement,
+            nil
+        ) == SQLITE_OK, let statement else {
+            throw RemoteSyncReadingPlanRestoreError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw RemoteSyncReadingPlanRestoreError.invalidSQLiteDatabase
+        }
+        let count = sqlite3_column_int64(statement, 0)
+        guard count >= 0, count <= maximum else {
+            throw RemoteSyncReadingPlanPatchApplyError.tooManyRows(
+                table: table,
+                count: count
+            )
+        }
+    }
+
     /**
      Creates a unique temporary database URL in the configured scratch directory.
 
@@ -764,38 +941,85 @@ public final class RemoteSyncReadingPlanPatchApplyService {
        - suffix: Trailing file-name suffix including the extension.
      - Returns: Unique temporary-file URL that does not yet exist.
      - Side effects: none.
-     - Failure modes: This helper cannot fail.
+     - Throws: `RemoteSyncWireIntegerError.outOfRange` when the BLOB byte count cannot fit SQLite's
+       signed 32-bit count argument.
      */
     private func temporaryDatabaseURL(prefix: String, suffix: String) -> URL {
         temporaryDirectory.appendingPathComponent("\(prefix)\(UUID().uuidString)\(suffix)")
     }
 
     /**
-     Compresses or decompresses staged patch payloads using the same C helpers as archive staging.
+     Inflates one strict gzip member into a bounded file and verifies its trailer integrity.
 
-     - Parameter data: Raw gzip-compressed patch bytes.
-     - Returns: Decompressed SQLite database bytes.
-     - Side effects: none.
-     - Failure modes:
-       - throws `RemoteSyncArchiveStagingError.decompressionFailed` when the payload is not valid gzip data
+     - Parameters:
+       - archiveURL: Readable staged gzip file.
+       - databaseURL: Unique output URL for the expanded SQLite database.
+     - Side effects: Reads a bounded compressed payload and writes at most 64 MiB to `databaseURL`.
+     - Throws: Typed compressed/expanded size errors or `invalidPatchArchive` for malformed data.
      */
-    private static func gunzip(_ data: Data) throws -> Data {
-        try data.withUnsafeBytes { (pointer: UnsafeRawBufferPointer) -> Data in
-            guard let baseAddress = pointer.baseAddress else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
+    private func decompressPatchArchive(from archiveURL: URL, to databaseURL: URL) throws {
+        try Task.checkCancellation()
+        do {
+            let member = try RemoteSyncBoundedFileIO.inspectGzip(
+                at: archiveURL,
+                maximumCompressedByteCount: Self.maximumCompressedPatchByteCount,
+                maximumExpandedByteCount: Self.maximumExpandedPatchByteCount
+            )
+            try RemoteSyncBoundedFileIO.inflateGzip(
+                member,
+                from: archiveURL,
+                to: databaseURL,
+                maximumExpandedByteCount: Self.maximumExpandedPatchByteCount
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch RemoteSyncBoundedFileError.compressedSizeExceeded(let size) {
+            throw RemoteSyncReadingPlanPatchApplyError.compressedArchiveTooLarge(size)
+        } catch RemoteSyncBoundedFileError.expandedSizeExceeded(let size) {
+            throw RemoteSyncReadingPlanPatchApplyError.expandedArchiveTooLarge(size)
+        } catch {
+            throw RemoteSyncReadingPlanPatchApplyError.invalidPatchArchive
+        }
+    }
 
-            var outputLength: UInt = 0
-            guard let output = gunzip_data(
-                baseAddress.assumingMemoryBound(to: UInt8.self),
-                UInt(data.count),
-                &outputLength
-            ) else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
+    /**
+     Verifies all archive headers and cumulative expanded bytes before any graph publication.
 
-            defer { gunzip_free(output) }
-            return Data(bytes: output, count: Int(outputLength))
+     - Parameter stagedArchives: Caller-ordered ReadingList patch files.
+     - Side effects: Opens each archive without following symlinks and reads bounded gzip metadata.
+     - Throws: Typed compressed, expanded, cumulative, or malformed-archive errors without inflating
+     a SQLite file or mutating graph rows or settings.
+     */
+    private func preflightArchiveBounds(
+        _ stagedArchives: [RemoteSyncStagedPatchArchive]
+    ) throws {
+        var cumulativeExpandedByteCount: UInt64 = 0
+        for stagedArchive in stagedArchives {
+            try Task.checkCancellation()
+            let member: RemoteSyncGzipMember
+            do {
+                member = try RemoteSyncBoundedFileIO.inspectGzip(
+                    at: stagedArchive.archiveFileURL,
+                    maximumCompressedByteCount: Self.maximumCompressedPatchByteCount,
+                    maximumExpandedByteCount: Self.maximumExpandedPatchByteCount
+                )
+            } catch RemoteSyncBoundedFileError.compressedSizeExceeded(let size) {
+                throw RemoteSyncReadingPlanPatchApplyError.compressedArchiveTooLarge(size)
+            } catch RemoteSyncBoundedFileError.expandedSizeExceeded(let size) {
+                throw RemoteSyncReadingPlanPatchApplyError.expandedArchiveTooLarge(size)
+            } catch {
+                throw RemoteSyncReadingPlanPatchApplyError.invalidPatchArchive
+            }
+            let (next, overflow) = cumulativeExpandedByteCount.addingReportingOverflow(
+                member.expandedByteCount
+            )
+            guard !overflow,
+                  next <= UInt64(Self.maximumCumulativeExpandedPatchByteCount) else {
+                throw RemoteSyncReadingPlanPatchApplyError.cumulativeArchiveTooLarge(
+                    overflow ? UInt64.max : next
+                )
+            }
+            cumulativeExpandedByteCount = next
         }
     }
 
@@ -864,25 +1088,23 @@ public final class RemoteSyncReadingPlanPatchApplyService {
        - mutates the bound SQLite statement parameter state
      - Failure modes: This helper cannot fail.
      */
-    private func bindUUIDBlob(_ uuid: UUID, to statement: OpaquePointer?, index: Int32) {
-        let hex = uuid.uuidString.replacingOccurrences(of: "-", with: "")
-        var bytes = Data()
-        bytes.reserveCapacity(16)
-
-        var cursor = hex.startIndex
-        while cursor < hex.endIndex {
-            let next = hex.index(cursor, offsetBy: 2)
-            let byteString = hex[cursor..<next]
-            bytes.append(UInt8(byteString, radix: 16)!)
-            cursor = next
-        }
+    private func bindUUIDBlob(
+        _ uuid: UUID,
+        to statement: OpaquePointer?,
+        index: Int32
+    ) throws {
+        let bytes = RemoteSyncReadingPlanSnapshotService.uuidBlob(uuid)
+        let byteCount = try RemoteSyncWireInteger.int32(
+            exactly: bytes.count,
+            field: "UUID.byteCount"
+        )
 
         _ = bytes.withUnsafeBytes { rawBuffer in
             sqlite3_bind_blob(
                 statement,
                 index,
                 rawBuffer.baseAddress,
-                Int32(bytes.count),
+                byteCount,
                 remoteSyncReadingPlanPatchSQLiteTransient
             )
         }
@@ -898,11 +1120,84 @@ public final class RemoteSyncReadingPlanPatchApplyService {
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    private func stringColumn(statement: OpaquePointer?, index: Int32) -> String {
-        guard let raw = sqlite3_column_text(statement, index) else {
-            return ""
+    /** Reads one exact bounded UTF-8 cell without C-string truncation. */
+    private func textColumn(
+        statement: OpaquePointer?,
+        index: Int32,
+        table: String,
+        column: String,
+        maximumByteCount: Int,
+        permitsEmpty: Bool
+    ) throws -> String {
+        guard sqlite3_column_type(statement, index) == SQLITE_TEXT else {
+            throw RemoteSyncReadingPlanRestoreError.invalidTextValue(
+                table: table,
+                column: column
+            )
         }
-        return String(cString: raw)
+        let byteCount = Int(sqlite3_column_bytes(statement, index))
+        guard byteCount <= maximumByteCount else {
+            throw RemoteSyncReadingPlanRestoreError.fieldTooLarge(
+                table: table,
+                column: column,
+                byteCount: byteCount
+            )
+        }
+        guard (permitsEmpty || byteCount > 0),
+              let bytes = sqlite3_column_text(statement, index),
+              let value = String(
+                  data: Data(bytes: bytes, count: byteCount),
+                  encoding: .utf8
+              ) else {
+            throw RemoteSyncReadingPlanRestoreError.invalidTextValue(
+                table: table,
+                column: column
+            )
+        }
+        return value
+    }
+
+    /** Reads one bounded non-traversing Android plan code. */
+    private func planCodeColumn(
+        statement: OpaquePointer?,
+        index: Int32,
+        table: String
+    ) throws -> String {
+        let value = try textColumn(
+            statement: statement,
+            index: index,
+            table: table,
+            column: "planCode",
+            maximumByteCount: RemoteSyncReadingPlanDefinitionStore.maximumPlanCodeByteCount,
+            permitsEmpty: false
+        )
+        guard value != ".",
+              value != "..",
+              !value.contains("/"),
+              !value.contains("\\"),
+              !value.contains("\0") else {
+            throw RemoteSyncReadingPlanRestoreError.invalidTextValue(
+                table: table,
+                column: "planCode"
+            )
+        }
+        return value
+    }
+
+    /** Reads one positive day value inside Android's and iOS's allocation-safe domains. */
+    private func dayNumberColumn(
+        statement: OpaquePointer?,
+        index: Int32,
+        table: String
+    ) throws -> Int {
+        guard sqlite3_column_type(statement, index) == SQLITE_INTEGER else {
+            throw RemoteSyncReadingPlanRestoreError.invalidDayNumber(table: table, value: 0)
+        }
+        let value = sqlite3_column_int64(statement, index)
+        guard value >= Int64(Int32.min), value <= Int64(Int32.max) else {
+            throw RemoteSyncReadingPlanRestoreError.invalidDayNumber(table: table, value: value)
+        }
+        return Int(value)
     }
 
     /**
@@ -941,8 +1236,8 @@ public final class RemoteSyncReadingPlanPatchApplyService {
         if lhs.planCode != rhs.planCode {
             return lhs.planCode < rhs.planCode
         }
-        if lhs.startDate != rhs.startDate {
-            return lhs.startDate < rhs.startDate
+        if lhs.startDateMilliseconds != rhs.startDateMilliseconds {
+            return lhs.startDateMilliseconds < rhs.startDateMilliseconds
         }
         return lhs.id.uuidString < rhs.id.uuidString
     }
@@ -982,26 +1277,13 @@ public final class RemoteSyncReadingPlanPatchApplyService {
     /**
      Counts the reading segments expected for one plan-day string.
 
-     - Parameters:
-       - readings: Raw reading-plan day payload from the bundled template.
-       - isDateBasedPlan: Whether the template uses Android's date-prefixed reading format.
+     - Parameter readings: Raw reading-plan day payload from the bundled template.
      - Returns: Number of reading segments Android expects for completion.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    private static func expectedReadingCount(for readings: String, isDateBasedPlan: Bool) -> Int {
-        let payload: String
-        if isDateBasedPlan, let separator = readings.firstIndex(of: ";") {
-            payload = String(readings[readings.index(after: separator)...])
-        } else {
-            payload = readings
-        }
-
-        let components = payload
-            .split(separator: ",", omittingEmptySubsequences: true)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return components.count
+    private static func expectedReadingCount(for readings: String) -> Int {
+        ReadingPlanDayAssignment(rawValue: readings).readings.count
     }
 
     /**
@@ -1032,10 +1314,9 @@ public final class RemoteSyncReadingPlanPatchApplyService {
             return expectedReadingCount == 0
         }
 
-        let decoder = JSONDecoder()
-        let payload: AndroidReadingStatusPayload
+        let payload: AndroidReadingPlanStatusPayload
         do {
-            payload = try decoder.decode(AndroidReadingStatusPayload.self, from: Data(status.readingStatusJSON.utf8))
+            payload = try AndroidReadingPlanStatusPayload(androidJSON: status.readingStatusJSON)
         } catch {
             throw RemoteSyncReadingPlanRestoreError.malformedReadingStatus(
                 planCode: status.planCode,
@@ -1043,7 +1324,6 @@ public final class RemoteSyncReadingPlanPatchApplyService {
             )
         }
 
-        let uniqueReadings = Set(payload.chapterReadArray.map(\.readingNumber))
-        return uniqueReadings.count >= expectedReadingCount
+        return payload.isAllRead(readingCount: expectedReadingCount)
     }
 }

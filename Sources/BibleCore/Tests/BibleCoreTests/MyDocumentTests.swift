@@ -242,6 +242,146 @@ final class MyDocumentStoreTests: XCTestCase {
         XCTAssertNotNil(page.pageContent)
     }
 
+    /**
+     Protects Android's transactional page-save contract when SwiftData persistence fails.
+
+     The fixture leaves an unrelated document update pending while attempting rejected edits against
+     both an existing content row and a page that would require a new row, then saves the context.
+     Reopening the on-disk store must reveal only the unrelated update; losing that update indicates
+     an over-broad rollback, while any edited title, timestamp, body, or inserted content row means a
+     failed editor response can leak into a later save.
+
+     The injected save closure fails synchronously and deterministically before the unrelated direct
+     context save. The temporary store directory is removed after the reopened-state assertions.
+     */
+    func testFailedPageContentSaveRestoresPageGraphBeforeUnrelatedSave() throws {
+        let storeDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MyDocumentSaveAtomicity-\(UUID().uuidString)", isDirectory: true)
+        let storeURL = storeDirectory.appendingPathComponent("MyDocuments.store")
+        try FileManager.default.createDirectory(
+            at: storeDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: storeDirectory) }
+
+        let originalDate = try XCTUnwrap(DateComponents(
+            calendar: Calendar(identifier: .gregorian),
+            timeZone: TimeZone(secondsFromGMT: 0),
+            year: 2026,
+            month: 7,
+            day: 20,
+            hour: 12
+        ).date)
+        let existingContentPageID = try XCTUnwrap(
+            UUID(uuidString: "12121212-1212-1212-1212-121212121212")
+        )
+        let missingContentPageID = try XCTUnwrap(
+            UUID(uuidString: "34343434-3434-3434-3434-343434343434")
+        )
+
+        do {
+            let container = try makePersistentMyDocumentModelContainer(at: storeURL)
+            let context = ModelContext(container)
+            let document = MyDocument(
+                name: "Target Document",
+                initials: "TARGET",
+                updatedAt: originalDate
+            )
+            let existingContentPage = MyDocumentPage(
+                id: existingContentPageID,
+                title: "Existing Title",
+                pageKey: "existing",
+                createdAt: originalDate,
+                updatedAt: originalDate
+            )
+            let existingContent = MyDocumentPageContent(
+                pageId: existingContentPageID,
+                content: "Original body"
+            )
+            let missingContentPage = MyDocumentPage(
+                id: missingContentPageID,
+                title: "Empty Title",
+                pageKey: "empty",
+                createdAt: originalDate,
+                updatedAt: originalDate
+            )
+            let unrelatedDocument = MyDocument(
+                name: "Unrelated Before",
+                initials: "OTHER",
+                updatedAt: originalDate
+            )
+
+            existingContentPage.document = document
+            existingContentPage.pageContent = existingContent
+            existingContent.page = existingContentPage
+            missingContentPage.document = document
+            document.pages = [existingContentPage, missingContentPage]
+            context.insert(document)
+            context.insert(existingContentPage)
+            context.insert(existingContent)
+            context.insert(missingContentPage)
+            context.insert(unrelatedDocument)
+            try context.save()
+            unrelatedDocument.name = "Unrelated Pending"
+
+            let store = MyDocumentStore(
+                modelContext: context,
+                savePageContentChanges: { throw ForcedMyDocumentSaveError() }
+            )
+
+            XCTAssertFalse(store.savePageContent(
+                bookInitials: "TARGET",
+                pageId: existingContentPageID,
+                content: "Rejected existing body",
+                title: "Rejected Existing Title"
+            ))
+            XCTAssertFalse(store.savePageContent(
+                bookInitials: "TARGET",
+                pageId: missingContentPageID,
+                content: "Rejected inserted body",
+                title: "Rejected Empty Title"
+            ))
+
+            XCTAssertEqual(existingContentPage.title, "Existing Title")
+            XCTAssertEqual(existingContentPage.updatedAt, originalDate)
+            XCTAssertEqual(existingContent.content, "Original body")
+            XCTAssertEqual(missingContentPage.title, "Empty Title")
+            XCTAssertEqual(missingContentPage.updatedAt, originalDate)
+            XCTAssertNil(missingContentPage.pageContent)
+            XCTAssertEqual(document.updatedAt, originalDate)
+            XCTAssertEqual(unrelatedDocument.name, "Unrelated Pending")
+
+            try context.save()
+        }
+
+        let reopenedContainer = try makePersistentMyDocumentModelContainer(at: storeURL)
+        let reopenedContext = ModelContext(reopenedContainer)
+        let reopenedStore = MyDocumentStore(modelContext: reopenedContext)
+        let reopenedDocument = try XCTUnwrap(reopenedStore.document(initials: "TARGET"))
+        let reopenedExistingPage = try XCTUnwrap(reopenedStore.page(
+            bookInitials: "TARGET",
+            pageId: existingContentPageID
+        ))
+        let reopenedMissingContentPage = try XCTUnwrap(reopenedStore.page(
+            bookInitials: "TARGET",
+            pageId: missingContentPageID
+        ))
+
+        XCTAssertEqual(reopenedDocument.updatedAt, originalDate)
+        XCTAssertEqual(reopenedExistingPage.title, "Existing Title")
+        XCTAssertEqual(reopenedExistingPage.updatedAt, originalDate)
+        XCTAssertEqual(reopenedExistingPage.pageContent?.content, "Original body")
+        XCTAssertEqual(reopenedMissingContentPage.title, "Empty Title")
+        XCTAssertEqual(reopenedMissingContentPage.updatedAt, originalDate)
+        XCTAssertNil(reopenedMissingContentPage.pageContent)
+        XCTAssertEqual(reopenedStore.document(initials: "OTHER")?.name, "Unrelated Pending")
+
+        let rejectedContentDescriptor = FetchDescriptor<MyDocumentPageContent>(
+            predicate: #Predicate { $0.pageId == missingContentPageID }
+        )
+        XCTAssertTrue(try reopenedContext.fetch(rejectedContentDescriptor).isEmpty)
+    }
+
     func testAIPageActionContextRequiresSourcePromptMetadata() throws {
         let container = try makeMyDocumentModelContainer()
         let context = ModelContext(container)
@@ -379,4 +519,32 @@ final class MyDocumentStoreTests: XCTestCase {
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])
     }
+
+    /**
+     Opens a disk-backed My Documents test store at a stable URL so tests can verify durable state
+     through a fresh `ModelContainer`.
+
+     - Parameter url: Store URL inside a caller-owned temporary directory.
+     - Returns: A local-only SwiftData container containing the complete My Documents schema.
+     - Side effects: Creates or opens the SQLite-backed SwiftData store at `url`.
+     - Failure modes: Rethrows schema or persistent-store initialization errors.
+     */
+    private func makePersistentMyDocumentModelContainer(at url: URL) throws -> ModelContainer {
+        let schema = Schema([
+            MyDocument.self,
+            MyDocumentPage.self,
+            MyDocumentPageContent.self,
+            AiPageCacheEntry.self,
+        ])
+        let configuration = ModelConfiguration(
+            "MyDocumentSaveAtomicity",
+            schema: schema,
+            url: url,
+            cloudKitDatabase: .none
+        )
+        return try ModelContainer(for: schema, configurations: [configuration])
+    }
 }
+
+/** Deterministic persistence failure injected into My Documents page-save tests. */
+private struct ForcedMyDocumentSaveError: Error {}

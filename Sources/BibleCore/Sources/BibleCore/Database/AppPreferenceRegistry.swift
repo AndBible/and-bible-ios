@@ -29,6 +29,12 @@ public enum AppPreferenceKey: String, CaseIterable, Sendable {
     case bookGridGroupByCategory = "book_grid_group_by_category"
     case bookGridShowLongName = "book_grid_show_long_name"
     case bookGridShowProgress = "book_grid_show_progress"
+    case searchSelectedTranslations = "search_selected_translations"
+    case searchResultsStrongsTranslations = "search_results_strongs_translations"
+    case epubSearchType = "epubSearch-SearchType"
+    case bookmarkSortOrder = "BookmarkSortOrder"
+    case bookmarkShowNotes = "bookmark_show_notes"
+    case bookmarkCSVUncheckedColumns = "csv_export_unchecked_columns"
 
     // Look & feel
     case nightModePref3 = "night_mode_pref3"
@@ -54,6 +60,10 @@ public enum AppPreferenceKey: String, CaseIterable, Sendable {
     // Advanced
     case experimentalFeatures = "experimental_features"
     case enableBluetoothPref = "enable_bluetooth_pref"
+    case speakAutoBookmark = "speak_autoBookmark"
+    case speakSynchronize = "speak_synchronize"
+    case speakReplaceDivineName = "speak_replaceDivineName"
+    case speakRestoreSettingsFromBookmarks = "speak_restoreSettingsFromBookmarks"
     case requestSdcardPermissionPref = "request_sdcard_permission_pref"
     case showErrorBox = "show_errorbox"
     case openLinks = "open_links"
@@ -330,6 +340,48 @@ public enum AppPreferenceRegistry {
             defaultValue: "true",
             androidReference: "GridChoosePassageBook.kt:95-100,171,224-230,352"
         ),
+        .searchSelectedTranslations: .init(
+            key: .searchSelectedTranslations,
+            storage: .swiftData,
+            valueType: .string,
+            defaultValue: nil,
+            androidReference: "Search.kt:232-261"
+        ),
+        .searchResultsStrongsTranslations: .init(
+            key: .searchResultsStrongsTranslations,
+            storage: .swiftData,
+            valueType: .string,
+            defaultValue: nil,
+            androidReference: "LinkControl.kt:358-366; SearchResults.kt:185-194"
+        ),
+        .epubSearchType: .init(
+            key: .epubSearchType,
+            storage: .swiftData,
+            valueType: .string,
+            defaultValue: nil,
+            androidReference: "EpubSearch.kt:60-80,113-124"
+        ),
+        .bookmarkSortOrder: .init(
+            key: .bookmarkSortOrder,
+            storage: .userDefaults,
+            valueType: .string,
+            defaultValue: BookmarkSortOrder.bibleOrder.rawValue,
+            androidReference: "Bookmarks.kt:331-350,460"
+        ),
+        .bookmarkShowNotes: .init(
+            key: .bookmarkShowNotes,
+            storage: .swiftData,
+            valueType: .bool,
+            defaultValue: "true",
+            androidReference: "Bookmarks.kt:352-354,461"
+        ),
+        .bookmarkCSVUncheckedColumns: .init(
+            key: .bookmarkCSVUncheckedColumns,
+            storage: .swiftData,
+            valueType: .csvStringSet,
+            defaultValue: nil,
+            androidReference: "BookmarkControl.kt:1062-1076"
+        ),
         .nightModePref3: .init(
             key: .nightModePref3,
             storage: .swiftData,
@@ -466,6 +518,34 @@ public enum AppPreferenceRegistry {
             defaultValue: "true",
             androidReference: "settings.xml:230"
         ),
+        .speakAutoBookmark: .init(
+            key: .speakAutoBookmark,
+            storage: .swiftData,
+            valueType: .bool,
+            defaultValue: "false",
+            androidReference: "CommonUtils.kt:281-286"
+        ),
+        .speakSynchronize: .init(
+            key: .speakSynchronize,
+            storage: .swiftData,
+            valueType: .bool,
+            defaultValue: "true",
+            androidReference: "CommonUtils.kt:288-293"
+        ),
+        .speakReplaceDivineName: .init(
+            key: .speakReplaceDivineName,
+            storage: .swiftData,
+            valueType: .bool,
+            defaultValue: "false",
+            androidReference: "CommonUtils.kt:295-300"
+        ),
+        .speakRestoreSettingsFromBookmarks: .init(
+            key: .speakRestoreSettingsFromBookmarks,
+            storage: .swiftData,
+            valueType: .bool,
+            defaultValue: "false",
+            androidReference: "CommonUtils.kt:302-307"
+        ),
         .requestSdcardPermissionPref: .init(
             key: .requestSdcardPermissionPref,
             storage: .swiftData,
@@ -507,19 +587,67 @@ public enum AppPreferenceRegistry {
     }
 
     /**
-     * Returns the durable application-preference keys cleared by Android's reset action.
+     * Returns the durable application-preference keys cleared by Android's Settings reset action.
      *
-     * The reset contract is derived from storage metadata rather than from the Settings UI so it
-     * stays stable when rows move between reader navigation, feature shortcuts, and platform-only
-     * presentation surfaces. Action rows are excluded because they do not represent persisted
-     * user choices.
+     * Android maintains this as an explicit allowlist in `SettingsActivity.reset()`. It is not the
+     * set of every persisted preference: volume-button scrolling, book-grid choices, and Bluetooth
+     * remain untouched, while bootstrap values stored outside Android's Settings Room database
+     * (`locale_pref`, `calculator_pin`, `show_calculator`, and `discrete_mode`) are also cleared.
+     * Keep this declaration ordered like the Android implementation so source reviews can compare
+     * the two contracts directly. Android's `google_drive_sync` key is omitted because it has no
+     * registered iOS equivalent.
+     *
+     * - Returns: Registered iOS keys corresponding exactly to Android's reset allowlist.
+     * - Side Effects: None.
+     * - Failure: This static contract cannot fail; the exact set is pinned by registry tests.
+     */
+    public static let applicationPreferencesResetKeys: [AppPreferenceKey] = [
+        .strongsGreekDictionary,
+        .strongsHebrewDictionary,
+        .robinsonGreekMorphology,
+        .disabledWordLookupDictionaries,
+        .navigateToVersePref,
+        .openLinksInSpecialWindowPref,
+        .screenKeepOnPref,
+        .autoFullscreenPref,
+        .fullScreenHideButtonsPref,
+        .hideWindowButtons,
+        .hideBibleReferenceOverlay,
+        .showActiveWindowIndicator,
+        .toolbarButtonActions,
+        .disableTwoStepBookmarking,
+        .doubleTapToFullscreen,
+        .nightModePref3,
+        .requestSdcardPermissionPref,
+        .showErrorBox,
+        .showCalculator,
+        .calculatorPin,
+        .disableBibleBookmarkModalButtons,
+        .disableGenBookmarkModalButtons,
+        .monochromeMode,
+        .disableAnimations,
+        .disableClickToEdit,
+        .fontSizeMultiplier,
+        .bibleViewSwipeMode,
+        .experimentalFeatures,
+        .notesContentType,
+        .localePref,
+        .discreteMode,
+    ]
+
+    /**
+     * Returns every registered preference that owns persisted state.
+     *
+     * This broader storage boundary is intentionally separate from Android's user-facing reset
+     * allowlist. Destructive database restore uses it to replace all registered local values before
+     * applying the incoming Android snapshot, including values Android's Settings reset preserves.
      *
      * - Returns: Registered non-action preference keys in `AppPreferenceKey.allCases` order.
      * - Side Effects: None.
      * - Failure: Missing registry entries are filtered by `definitions`; completeness remains
      *   enforced by `definition(for:)` and registry tests.
      */
-    public static var applicationPreferencesResetKeys: [AppPreferenceKey] {
+    public static var persistedPreferenceKeys: [AppPreferenceKey] {
         definitions
             .filter { $0.storage != .action }
             .map(\.key)

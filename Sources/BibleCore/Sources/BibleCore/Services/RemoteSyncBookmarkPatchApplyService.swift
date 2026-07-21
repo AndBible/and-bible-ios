@@ -1,6 +1,5 @@
 // RemoteSyncBookmarkPatchApplyService.swift — Incremental Android patch replay for bookmarks
 
-import CLibSword
 import Foundation
 import SQLite3
 import SwiftData
@@ -153,8 +152,11 @@ public final class RemoteSyncBookmarkPatchApplyService {
         var wholeVerse: Bool
         var type: String?
         var customIcon: String?
+        var sourcePromptId: UUID?
+        var notesSourcePromptId: UUID?
         var editAction: EditAction?
         var labelLinks: [RemoteSyncAndroidBookmarkLabelLink]
+        var ordinalTrustMetadata: PersistedOrdinalTrustMetadata?
     }
 
     private struct WorkingGenericBookmark {
@@ -162,8 +164,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
         var key: String
         var createdAt: Date
         var bookInitials: String
-        var ordinalStart: Int
-        var ordinalEnd: Int
+        var ordinalStart: Int?
+        var ordinalEnd: Int?
         var startOffset: Int?
         var endOffset: Int?
         var primaryLabelID: UUID?
@@ -173,6 +175,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
         var wholeVerse: Bool
         var playbackSettingsJSON: String?
         var customIcon: String?
+        var sourcePromptId: UUID?
+        var notesSourcePromptId: UUID?
         var editAction: EditAction?
         var labelLinks: [RemoteSyncAndroidBookmarkLabelLink]
     }
@@ -184,6 +188,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
         var indentLevel: Int
         var text: String?
         var contentType: String?
+        var sourcePromptId: UUID?
     }
 
     private struct WorkingSnapshot {
@@ -198,7 +203,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
          - Returns: Deterministically sorted bookmark snapshot ready for `replaceLocalBookmarks`.
          - Side effects: none.
          - Failure modes: This helper cannot fail.
-         - Note: StudyPad entries without a preserved text row normalize to an empty string here because the iOS restore path stores StudyPad content inline on the value type instead of as a separate optional child row.
+         - Note: StudyPad entries preserve an absent text child as `nil`, matching the independent
+           Android `StudyPadTextEntryText` relationship.
          */
         func materializedSnapshot() -> RemoteSyncAndroidBookmarkSnapshot {
             RemoteSyncAndroidBookmarkSnapshot(
@@ -241,8 +247,11 @@ public final class RemoteSyncBookmarkPatchApplyService {
                             wholeVerse: $0.wholeVerse,
                             type: $0.type,
                             customIcon: $0.customIcon,
+                            sourcePromptId: $0.sourcePromptId,
+                            notesSourcePromptId: $0.notesSourcePromptId,
                             editAction: $0.editAction,
-                            labelLinks: $0.labelLinks.sorted(by: Self.labelLinkSort)
+                            labelLinks: $0.labelLinks.sorted(by: Self.labelLinkSort),
+                            ordinalTrustMetadata: $0.ordinalTrustMetadata
                         )
                     }
                     .sorted { $0.id.uuidString < $1.id.uuidString },
@@ -264,6 +273,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
                             wholeVerse: $0.wholeVerse,
                             playbackSettingsJSON: $0.playbackSettingsJSON,
                             customIcon: $0.customIcon,
+                            sourcePromptId: $0.sourcePromptId,
+                            notesSourcePromptId: $0.notesSourcePromptId,
                             editAction: $0.editAction,
                             labelLinks: $0.labelLinks.sorted(by: Self.labelLinkSort)
                         )
@@ -277,7 +288,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
                             orderNumber: $0.orderNumber,
                             indentLevel: $0.indentLevel,
                             contentType: $0.contentType,
-                            text: $0.text ?? ""
+                            sourcePromptId: $0.sourcePromptId,
+                            text: $0.text
                         )
                     }
                     .sorted(by: Self.studyPadSort)
@@ -352,60 +364,120 @@ public final class RemoteSyncBookmarkPatchApplyService {
      - Side effects:
        - reads the current local bookmark graph and local-only fidelity stores
        - creates and removes temporary decompressed SQLite files
-       - rewrites local bookmark-category SwiftData rows after the full batch succeeds
-       - replaces local Android `LogEntry` metadata for `.bookmarks`
-       - refreshes outbound bookmark fingerprint baselines after the final replay state is accepted
-       - appends applied-patch rows to `RemoteSyncPatchStatusStore`
+       - atomically rewrites local bookmark-category SwiftData rows, Android fidelity settings,
+         `LogEntry` metadata, applied-patch rows, and outbound fingerprint baselines after replay
      - Failure modes:
        - rethrows patch-archive decompression failures
        - rethrows malformed staged `LogEntry` metadata failures
        - throws `RemoteSyncBookmarkPatchApplyError` for invalid identifiers or missing patch rows
        - rethrows bookmark-restore errors when the final working snapshot cannot be normalized back into iOS
-       - rethrows SwiftData fetch and save failures from the supplied `ModelContext`
+       - throws `SettingsStoreAtomicBatchError` when graph and settings do not share one clean context
+       - rethrows SwiftData fetch and transaction-commit failures after rolling the complete publish back
      */
     public func applyPatchArchives(
         _ stagedArchives: [RemoteSyncStagedPatchArchive],
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> RemoteSyncBookmarkPatchApplyReport {
+        try applyPatchArchives(
+            stagedArchives,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            publishCheckpoint: { try Task.checkCancellation() }
+        )
+    }
+
+    /**
+     Applies bookmark patches with a deterministic checkpoint inside the final atomic publish.
+
+     Archive parsing and replay remain staged in memory. The final bookmark graph, fidelity rows,
+     log entries, patch statuses, and outbound fingerprint baseline then join one settings-backed
+     SwiftData transaction. Tests can throw from `publishCheckpoint` after all durable categories
+     have been staged to prove the complete publish rolls back.
+
+     - Parameters:
+       - stagedArchives: Downloaded patch archives in Android replay order.
+       - modelContext: Exact clean context shared by graph and settings models.
+       - settingsStore: Settings store bound to `modelContext`.
+       - publishCheckpoint: Throwing callback invoked before archive processing and after the final
+         graph and metadata mutations have been staged.
+     - Returns: Patch replay report after the atomic publish commits.
+     - Side Effects: Reads patch files and replaces bookmark sync state in one final transaction.
+     - Throws: Rethrows archive, replay, context-contract, checkpoint, fetch, and commit errors; a
+       publish failure rolls graph, fidelity, bookkeeping, and fingerprints back together.
+     */
+    func applyPatchArchives(
+        _ stagedArchives: [RemoteSyncStagedPatchArchive],
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        publishCheckpoint: () throws -> Void
+    ) throws -> RemoteSyncBookmarkPatchApplyReport {
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
 
-        var snapshot = try currentSnapshot(from: modelContext, settingsStore: settingsStore)
-        var logEntriesByKey = Dictionary(
-            uniqueKeysWithValues: logEntryStore.entries(for: .bookmarks).map {
-                (logEntryStore.key(for: .bookmarks, entry: $0), $0)
+        let initialState = try settingsStore.performAtomicBatch(in: modelContext) {
+            try publishCheckpoint()
+            let snapshot = try currentSnapshot(from: modelContext, settingsStore: settingsStore)
+            var logEntriesByKey: [String: RemoteSyncLogEntry] = [:]
+            for rawEntry in try logEntryStore.entriesStrict(for: .bookmarks) {
+                let entry = AndroidBookmarkDatabaseContract.normalizedLogEntry(rawEntry)
+                let key = logEntryStore.key(for: .bookmarks, entry: entry)
+                if logEntriesByKey[key].map({
+                    RemoteSyncLogEntryConflictOrder.isNewer(entry, than: $0)
+                }) ?? true {
+                    logEntriesByKey[key] = entry
+                }
             }
-        )
+            return (snapshot, logEntriesByKey)
+        }
+        var snapshot = initialState.0
+        var logEntriesByKey = initialState.1
 
         var appliedPatchStatuses: [RemoteSyncPatchStatus] = []
         var appliedLogEntryCount = 0
         var skippedLogEntryCount = 0
+        var cumulativeExpandedByteCount = UInt64(0)
 
         for stagedArchive in stagedArchives {
             try {
+                try Task.checkCancellation()
                 let patchDatabaseURL = temporaryDatabaseURL(prefix: "remote-sync-bookmarks-patch-", suffix: ".sqlite3")
                 defer { try? fileManager.removeItem(at: patchDatabaseURL) }
 
-                let archiveData = try Data(contentsOf: stagedArchive.archiveFileURL)
-                let databaseData = try Self.gunzip(archiveData)
-                try databaseData.write(to: patchDatabaseURL, options: .atomic)
+                let expandedByteCount = try RemoteSyncBoundedFileIO.inflateGzip(
+                    at: stagedArchive.archiveFileURL,
+                    to: patchDatabaseURL,
+                    maximumCompressedByteCount:
+                        RemoteSyncArchiveStagingService.maximumCompressedPatchByteCount,
+                    maximumExpandedByteCount:
+                        RemoteSyncArchiveStagingService.maximumExpandedPatchByteCount
+                )
+                let (nextCumulativeByteCount, overflow) = cumulativeExpandedByteCount
+                    .addingReportingOverflow(expandedByteCount)
+                guard !overflow,
+                      nextCumulativeByteCount <= UInt64(
+                        RemoteSyncArchiveStagingService.maximumCumulativeExpandedPatchByteCount
+                      ) else {
+                    throw RemoteSyncBoundedFileError.expandedSizeExceeded(
+                        overflow ? UInt64.max : nextCumulativeByteCount
+                    )
+                }
+                cumulativeExpandedByteCount = nextCumulativeByteCount
+                try Task.checkCancellation()
 
                 let metadataSnapshot = try metadataRestoreService.readSnapshot(from: patchDatabaseURL)
-                let patchLogEntries = metadataSnapshot.logEntries.filter { Self.supportedTableNames.contains($0.tableName) }
+                let patchLogEntries = metadataSnapshot.logEntries
+                    .map(AndroidBookmarkDatabaseContract.normalizedLogEntry)
+                    .filter { Self.supportedTableNames.contains($0.tableName) }
                 let filteredLogEntries = patchLogEntries.filter { entry in
                     let key = logEntryStore.key(for: .bookmarks, entry: entry)
                     guard let localEntry = logEntriesByKey[key] else {
                         return true
                     }
-                    return entry.lastUpdated > localEntry.lastUpdated
+                    return RemoteSyncLogEntryConflictOrder.isNewer(entry, than: localEntry)
                 }
 
                 skippedLogEntryCount += patchLogEntries.count - filteredLogEntries.count
-                if filteredLogEntries.isEmpty {
-                    return
-                }
-
                 try withSQLiteDatabase(at: patchDatabaseURL) { database in
                     try applyLabelOperations(
                         logEntries: filteredLogEntries.filter { $0.tableName == "Label" },
@@ -471,6 +543,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
                         logEntryStore: logEntryStore
                     )
                 }
+                try Task.checkCancellation()
 
                 appliedLogEntryCount += filteredLogEntries.count
                 appliedPatchStatuses.append(
@@ -484,21 +557,27 @@ public final class RemoteSyncBookmarkPatchApplyService {
             }()
         }
 
-        let restoreReport = try restoreService.replaceLocalBookmarks(
-            from: snapshot.materializedSnapshot(),
-            modelContext: modelContext,
-            settingsStore: settingsStore
-        )
+        try Task.checkCancellation()
+        let restoreReport = try settingsStore.performAtomicBatch(in: modelContext) {
+            let report = try restoreService.replaceLocalBookmarks(
+                from: snapshot.materializedSnapshot(),
+                modelContext: modelContext,
+                settingsStore: settingsStore,
+                preserveUnverifiedLocalBookmarks: true
+            )
 
-        logEntryStore.replaceEntries(
-            logEntriesByKey.values.sorted(by: Self.logEntrySort),
-            for: .bookmarks
-        )
-        patchStatusStore.addStatuses(appliedPatchStatuses, for: .bookmarks)
-        snapshotService.refreshBaselineFingerprints(
-            modelContext: modelContext,
-            settingsStore: settingsStore
-        )
+            logEntryStore.replaceEntries(
+                logEntriesByKey.values.sorted(by: Self.logEntrySort),
+                for: .bookmarks
+            )
+            patchStatusStore.addStatuses(appliedPatchStatuses, for: .bookmarks)
+            try snapshotService.refreshBaselineFingerprintsThrowing(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            try publishCheckpoint()
+            return report
+        }
 
         return RemoteSyncBookmarkPatchApplyReport(
             appliedPatchCount: appliedPatchStatuses.count,
@@ -511,17 +590,18 @@ public final class RemoteSyncBookmarkPatchApplyService {
     /**
      Loads the current local bookmark graph into mutable remote-ID working rows.
 
-     The working snapshot must stay in Android's identifier space so patch `LogEntry` rows can be
-     matched without translating every incoming UUID. Reserved system labels therefore use the
-     reverse alias map when one has been preserved locally.
+ The working snapshot stays in Android's current identifier space so patch `LogEntry` rows can be
+ matched without translating every incoming UUID. Reserved system labels always use Android's
+ fixed v12 identifiers; historical aliases remain restore metadata and are never re-emitted as
+ current Room rows.
 
      - Parameters:
        - modelContext: SwiftData context that owns the local bookmark graph.
-       - settingsStore: Local-only settings store backing playback JSON and system-label aliases.
+       - settingsStore: Local-only settings store backing playback JSON and Android book fidelity.
      - Returns: Mutable remote-ID working snapshot representing the current local bookmark category.
      - Side effects:
        - reads bookmark-category SwiftData rows from `modelContext`
-       - reads preserved Android playback JSON and label-alias rows from local settings
+       - reads preserved Android playback JSON and Android book fidelity from local settings
      - Failure modes:
        - rethrows SwiftData fetch failures from `modelContext.fetch`
      */
@@ -529,12 +609,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
         from modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> WorkingSnapshot {
-        let labelAliasStore = RemoteSyncBookmarkLabelAliasStore(settingsStore: settingsStore)
         let playbackSettingsStore = RemoteSyncBookmarkPlaybackSettingsStore(settingsStore: settingsStore)
         let androidBookStore = RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore)
-        let reverseAliases = Dictionary(
-            uniqueKeysWithValues: labelAliasStore.allAliases().map { ($0.localLabelID, $0.remoteLabelID) }
-        )
 
         let labels = try modelContext.fetch(FetchDescriptor<Label>())
         let bibleBookmarks = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
@@ -545,6 +621,15 @@ public final class RemoteSyncBookmarkPatchApplyService {
         let genericLinks = try modelContext.fetch(FetchDescriptor<GenericBookmarkToLabel>())
         let studyPadEntries = try modelContext.fetch(FetchDescriptor<StudyPadTextEntry>())
         let studyPadTexts = try modelContext.fetch(FetchDescriptor<StudyPadTextEntryText>())
+        let remoteLabelIDsByLocalID = Dictionary(
+            uniqueKeysWithValues: labels.map { label in
+                (
+                    label.id,
+                    AndroidBookmarkDatabaseContract.fixedLabelID(forName: label.name)
+                        ?? label.id
+                )
+            }
+        )
 
         let bibleNotesByBookmarkID = Dictionary(uniqueKeysWithValues: bibleNotes.map { ($0.bookmarkId, $0) })
         let genericNotesByBookmarkID = Dictionary(uniqueKeysWithValues: genericNotes.map { ($0.bookmarkId, $0) })
@@ -555,7 +640,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
                   let localLabelID = link.label?.id else {
                 return nil
             }
-            let remoteLabelID = reverseAliases[localLabelID] ?? localLabelID
+            let remoteLabelID = remoteLabelIDsByLocalID[localLabelID] ?? localLabelID
             return (
                 bookmarkID,
                 RemoteSyncAndroidBookmarkLabelLink(
@@ -571,7 +656,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
                   let localLabelID = link.label?.id else {
                 return nil
             }
-            let remoteLabelID = reverseAliases[localLabelID] ?? localLabelID
+            let remoteLabelID = remoteLabelIDsByLocalID[localLabelID] ?? localLabelID
             return (
                 bookmarkID,
                 RemoteSyncAndroidBookmarkLabelLink(
@@ -584,7 +669,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
         }, by: { $0.0 })
 
         let labelsByID = Dictionary(uniqueKeysWithValues: labels.map { label in
-            let remoteID = reverseAliases[label.id] ?? label.id
+            let remoteID = remoteLabelIDsByLocalID[label.id] ?? label.id
             return (
                 remoteID,
                 WorkingLabel(
@@ -605,8 +690,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
         })
 
         let bibleBookmarksByID = Dictionary(uniqueKeysWithValues: bibleBookmarks.map { bookmark in
-            let playbackJSON = playbackSettingsStore.playbackSettingsJSON(for: bookmark.id, kind: .bible)
-                ?? synthesizedPlaybackSettingsJSON(from: bookmark.playbackSettings)
+            let playbackJSON = synthesizedPlaybackSettingsJSON(from: bookmark.playbackSettings)
+                ?? playbackSettingsStore.playbackSettingsJSON(for: bookmark.id, kind: .bible)
             let labelLinks = (bibleLinksByBookmarkID[bookmark.id] ?? [])
                 .map { $0.1 }
                 .sorted(by: sortLabelLinks)
@@ -627,22 +712,25 @@ public final class RemoteSyncBookmarkPatchApplyService {
                     ),
                     startOffset: bookmark.startOffset,
                     endOffset: bookmark.endOffset,
-                    primaryLabelID: bookmark.primaryLabelId.map { reverseAliases[$0] ?? $0 },
+                    primaryLabelID: bookmark.primaryLabelId.map { remoteLabelIDsByLocalID[$0] ?? $0 },
                     notes: bibleNotesByBookmarkID[bookmark.id]?.notes,
                     notesContentType: bibleNotesByBookmarkID[bookmark.id]?.contentType,
                     lastUpdatedOn: bookmark.lastUpdatedOn,
                     wholeVerse: bookmark.wholeVerse,
                     type: bookmark.type,
                     customIcon: bookmark.customIcon,
+                    sourcePromptId: bookmark.sourcePromptId,
+                    notesSourcePromptId: bibleNotesByBookmarkID[bookmark.id]?.sourcePromptId,
                     editAction: bookmark.editAction,
-                    labelLinks: labelLinks
+                    labelLinks: labelLinks,
+                    ordinalTrustMetadata: bookmark.ordinalTrustMetadata
                 )
             )
         })
 
         let genericBookmarksByID = Dictionary(uniqueKeysWithValues: genericBookmarks.map { bookmark in
-            let playbackJSON = playbackSettingsStore.playbackSettingsJSON(for: bookmark.id, kind: .generic)
-                ?? synthesizedPlaybackSettingsJSON(from: bookmark.playbackSettings)
+            let playbackJSON = synthesizedPlaybackSettingsJSON(from: bookmark.playbackSettings)
+                ?? playbackSettingsStore.playbackSettingsJSON(for: bookmark.id, kind: .generic)
             let labelLinks = (genericLinksByBookmarkID[bookmark.id] ?? [])
                 .map { $0.1 }
                 .sorted(by: sortLabelLinks)
@@ -657,13 +745,15 @@ public final class RemoteSyncBookmarkPatchApplyService {
                     ordinalEnd: bookmark.ordinalEnd,
                     startOffset: bookmark.startOffset,
                     endOffset: bookmark.endOffset,
-                    primaryLabelID: bookmark.primaryLabelId.map { reverseAliases[$0] ?? $0 },
+                    primaryLabelID: bookmark.primaryLabelId.map { remoteLabelIDsByLocalID[$0] ?? $0 },
                     notes: genericNotesByBookmarkID[bookmark.id]?.notes,
                     notesContentType: genericNotesByBookmarkID[bookmark.id]?.contentType,
                     lastUpdatedOn: bookmark.lastUpdatedOn,
                     wholeVerse: bookmark.wholeVerse,
                     playbackSettingsJSON: playbackJSON,
                     customIcon: bookmark.customIcon,
+                    sourcePromptId: bookmark.sourcePromptId,
+                    notesSourcePromptId: genericNotesByBookmarkID[bookmark.id]?.sourcePromptId,
                     editAction: bookmark.editAction,
                     labelLinks: labelLinks
                 )
@@ -674,7 +764,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
             guard let localLabelID = entry.label?.id else {
                 return nil
             }
-            let remoteLabelID = reverseAliases[localLabelID] ?? localLabelID
+            let remoteLabelID = remoteLabelIDsByLocalID[localLabelID] ?? localLabelID
             return (
                 entry.id,
                 WorkingStudyPadEntry(
@@ -683,7 +773,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
                     orderNumber: entry.orderNumber,
                     indentLevel: entry.indentLevel,
                     text: studyPadTextsByEntryID[entry.id],
-                    contentType: entry.contentType
+                    contentType: entry.contentType,
+                    sourcePromptId: entry.sourcePromptId
                 )
             )
         })
@@ -821,6 +912,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
             if var bookmark = snapshot.bibleBookmarksByID[bookmarkID] {
                 bookmark.notes = notes.notes
                 bookmark.notesContentType = notes.contentType
+                bookmark.notesSourcePromptId = notes.sourcePromptId
                 snapshot.bibleBookmarksByID[bookmarkID] = bookmark
             }
             logEntriesByKey[logEntryStore.key(for: .bookmarks, entry: entry)] = entry
@@ -831,6 +923,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
             if var bookmark = snapshot.bibleBookmarksByID[bookmarkID] {
                 bookmark.notes = nil
                 bookmark.notesContentType = nil
+                bookmark.notesSourcePromptId = nil
                 snapshot.bibleBookmarksByID[bookmarkID] = bookmark
             }
             logEntriesByKey[logEntryStore.key(for: .bookmarks, entry: entry)] = entry
@@ -971,6 +1064,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
             if var bookmark = snapshot.genericBookmarksByID[bookmarkID] {
                 bookmark.notes = notes.notes
                 bookmark.notesContentType = notes.contentType
+                bookmark.notesSourcePromptId = notes.sourcePromptId
                 snapshot.genericBookmarksByID[bookmarkID] = bookmark
             }
             logEntriesByKey[logEntryStore.key(for: .bookmarks, entry: entry)] = entry
@@ -981,6 +1075,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
             if var bookmark = snapshot.genericBookmarksByID[bookmarkID] {
                 bookmark.notes = nil
                 bookmark.notesContentType = nil
+                bookmark.notesSourcePromptId = nil
                 snapshot.genericBookmarksByID[bookmarkID] = bookmark
             }
             logEntriesByKey[logEntryStore.key(for: .bookmarks, entry: entry)] = entry
@@ -1071,10 +1166,12 @@ public final class RemoteSyncBookmarkPatchApplyService {
             let entryID = try uuid(from: entry.entityID1, tableName: entry.tableName, field: "entityId1")
             let existingText = snapshot.studyPadEntriesByID[entryID]?.text
             let existingContentType = snapshot.studyPadEntriesByID[entryID]?.contentType
+            let existingSourcePromptId = snapshot.studyPadEntriesByID[entryID]?.sourcePromptId
             guard let studyPadEntry = try fetchStudyPadEntry(
                 id: entryID,
                 preservingText: existingText,
                 preservingContentType: existingContentType,
+                preservingSourcePromptId: existingSourcePromptId,
                 from: database
             ) else {
                 throw RemoteSyncBookmarkPatchApplyError.missingPatchRow(table: entry.tableName, entityID1: entryID, entityID2: nil)
@@ -1108,7 +1205,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
        - throws `RemoteSyncBookmarkPatchApplyError.invalidLogEntryIdentifier` when a log row does not identify a UUID StudyPad row
        - throws `RemoteSyncBookmarkPatchApplyError.missingPatchRow` when an `UPSERT` row is absent from the patch database
        - rethrows SQLite read failures when one row cannot be read from the staged database
-       - Note: Deleting a StudyPad text row clears the working text payload instead of deleting the parent entry because iOS rebuilds StudyPad state from the parent row plus inline text value, not a separate optional child-row representation.
+       - Note: Deleting a StudyPad text row preserves the independent parent and records the child
+         as absent, matching Android's nullable one-way relationship.
      */
     private func applyStudyPadTextOperations(
         logEntries: [RemoteSyncLogEntry],
@@ -1356,10 +1454,13 @@ public final class RemoteSyncBookmarkPatchApplyService {
         preserving existing: WorkingBibleBookmark?,
         from database: OpaquePointer
     ) throws -> WorkingBibleBookmark? {
+        let sourcePromptExpression = try tableHasColumn("sourcePromptId", in: "BibleBookmark", database: database)
+            ? "sourcePromptId"
+            : "NULL AS sourcePromptId"
         let sql = """
         SELECT id, kjvOrdinalStart, kjvOrdinalEnd, ordinalStart, ordinalEnd, v11n, playbackSettings,
                createdAt, book, startOffset, endOffset, primaryLabelId, lastUpdatedOn, wholeVerse,
-               type, customIcon, editAction_mode, editAction_content
+               type, customIcon, \(sourcePromptExpression), editAction_mode, editAction_content
         FROM BibleBookmark
         WHERE id = ?
         LIMIT 1
@@ -1394,11 +1495,14 @@ public final class RemoteSyncBookmarkPatchApplyService {
             wholeVerse: boolColumn(statement: statement, index: 13),
             type: optionalStringColumn(statement: statement, index: 14),
             customIcon: optionalStringColumn(statement: statement, index: 15),
+            sourcePromptId: try optionalUUIDFromBlob(statement: statement, column: 16, table: "BibleBookmark", name: "sourcePromptId"),
+            notesSourcePromptId: existing?.notesSourcePromptId,
             editAction: editAction(
-                mode: optionalStringColumn(statement: statement, index: 16),
-                content: optionalStringColumn(statement: statement, index: 17)
+                mode: optionalStringColumn(statement: statement, index: 17),
+                content: optionalStringColumn(statement: statement, index: 18)
             ),
-            labelLinks: existing?.labelLinks ?? []
+            labelLinks: existing?.labelLinks ?? [],
+            ordinalTrustMetadata: nil
         )
     }
 
@@ -1421,9 +1525,10 @@ public final class RemoteSyncBookmarkPatchApplyService {
         from database: OpaquePointer
     ) throws -> RemoteSyncCurrentBookmarkNoteRow? {
         let hasContentType = try tableHasColumn("contentType", in: tableName, database: database)
-        let sql = hasContentType
-            ? "SELECT notes, contentType FROM \(tableName) WHERE bookmarkId = ? LIMIT 1"
-            : "SELECT notes FROM \(tableName) WHERE bookmarkId = ? LIMIT 1"
+        let hasSourcePromptId = try tableHasColumn("sourcePromptId", in: tableName, database: database)
+        let contentTypeExpression = hasContentType ? "contentType" : "NULL AS contentType"
+        let sourcePromptExpression = hasSourcePromptId ? "sourcePromptId" : "NULL AS sourcePromptId"
+        let sql = "SELECT notes, \(contentTypeExpression), \(sourcePromptExpression) FROM \(tableName) WHERE bookmarkId = ? LIMIT 1"
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
 
@@ -1439,7 +1544,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
             notes: stringColumn(statement: statement, index: 0),
             contentType: hasContentType
                 ? try optionalNotesContentTypeColumn(statement: statement, index: 1, table: tableName, name: "contentType")
-                : nil
+                : nil,
+            sourcePromptId: try optionalUUIDFromBlob(statement: statement, column: 2, table: tableName, name: "sourcePromptId")
         )
     }
 
@@ -1505,10 +1611,13 @@ public final class RemoteSyncBookmarkPatchApplyService {
         preserving existing: WorkingGenericBookmark?,
         from database: OpaquePointer
     ) throws -> WorkingGenericBookmark? {
+        let sourcePromptExpression = try tableHasColumn("sourcePromptId", in: "GenericBookmark", database: database)
+            ? "sourcePromptId"
+            : "NULL AS sourcePromptId"
         let sql = """
         SELECT id, `key`, createdAt, bookInitials, ordinalStart, ordinalEnd, startOffset, endOffset,
                primaryLabelId, lastUpdatedOn, wholeVerse, playbackSettings, customIcon,
-               editAction_mode, editAction_content
+               \(sourcePromptExpression), editAction_mode, editAction_content
         FROM GenericBookmark
         WHERE id = ?
         LIMIT 1
@@ -1529,8 +1638,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
             key: stringColumn(statement: statement, index: 1),
             createdAt: dateFromMillisecondsColumn(statement: statement, index: 2),
             bookInitials: stringColumn(statement: statement, index: 3),
-            ordinalStart: Int(sqlite3_column_int(statement, 4)),
-            ordinalEnd: Int(sqlite3_column_int(statement, 5)),
+            ordinalStart: optionalIntColumn(statement: statement, index: 4),
+            ordinalEnd: optionalIntColumn(statement: statement, index: 5),
             startOffset: optionalIntColumn(statement: statement, index: 6),
             endOffset: optionalIntColumn(statement: statement, index: 7),
             primaryLabelID: try optionalUUIDFromBlob(statement: statement, column: 8, table: "GenericBookmark", name: "primaryLabelId"),
@@ -1540,9 +1649,11 @@ public final class RemoteSyncBookmarkPatchApplyService {
             wholeVerse: boolColumn(statement: statement, index: 10),
             playbackSettingsJSON: optionalStringColumn(statement: statement, index: 11),
             customIcon: optionalStringColumn(statement: statement, index: 12),
+            sourcePromptId: try optionalUUIDFromBlob(statement: statement, column: 13, table: "GenericBookmark", name: "sourcePromptId"),
+            notesSourcePromptId: existing?.notesSourcePromptId,
             editAction: editAction(
-                mode: optionalStringColumn(statement: statement, index: 13),
-                content: optionalStringColumn(statement: statement, index: 14)
+                mode: optionalStringColumn(statement: statement, index: 14),
+                content: optionalStringColumn(statement: statement, index: 15)
             ),
             labelLinks: existing?.labelLinks ?? []
         )
@@ -1567,12 +1678,14 @@ public final class RemoteSyncBookmarkPatchApplyService {
         id: UUID,
         preservingText: String?,
         preservingContentType: String?,
+        preservingSourcePromptId: UUID?,
         from database: OpaquePointer
     ) throws -> WorkingStudyPadEntry? {
         let hasContentType = try tableHasColumn("contentType", in: "StudyPadTextEntry", database: database)
-        let sql = hasContentType
-            ? "SELECT id, labelId, orderNumber, indentLevel, contentType FROM StudyPadTextEntry WHERE id = ? LIMIT 1"
-            : "SELECT id, labelId, orderNumber, indentLevel FROM StudyPadTextEntry WHERE id = ? LIMIT 1"
+        let hasSourcePromptId = try tableHasColumn("sourcePromptId", in: "StudyPadTextEntry", database: database)
+        let contentTypeExpression = hasContentType ? "contentType" : "NULL AS contentType"
+        let sourcePromptExpression = hasSourcePromptId ? "sourcePromptId" : "NULL AS sourcePromptId"
+        let sql = "SELECT id, labelId, orderNumber, indentLevel, \(contentTypeExpression), \(sourcePromptExpression) FROM StudyPadTextEntry WHERE id = ? LIMIT 1"
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
 
@@ -1592,7 +1705,10 @@ public final class RemoteSyncBookmarkPatchApplyService {
             text: preservingText,
             contentType: hasContentType
                 ? try optionalNotesContentTypeColumn(statement: statement, index: 4, table: "StudyPadTextEntry", name: "contentType")
-                : preservingContentType
+                : preservingContentType,
+            sourcePromptId: hasSourcePromptId
+                ? try optionalUUIDFromBlob(statement: statement, column: 5, table: "StudyPadTextEntry", name: "sourcePromptId")
+                : preservingSourcePromptId
         )
     }
 
@@ -1696,28 +1812,16 @@ public final class RemoteSyncBookmarkPatchApplyService {
     }
 
     /**
-     Recreates a minimal Android playback-settings JSON payload from the subset currently modeled on iOS.
+     Encodes complete Android playback settings from the live native bookmark model.
 
      - Parameter playbackSettings: Current iOS bookmark playback settings.
-     - Returns: Raw JSON payload containing `bookId`, or `nil` when the current bookmark has no playback metadata.
+     - Returns: Complete Android JSON, or `nil` when the bookmark has no playback metadata.
      - Side effects: none.
      - Failure modes:
        - encoding failures return `nil`
      */
     private func synthesizedPlaybackSettingsJSON(from playbackSettings: PlaybackSettings?) -> String? {
-        guard let bookID = playbackSettings?.bookId, !bookID.isEmpty else {
-            return nil
-        }
-
-        struct PlaybackProjection: Encodable {
-            let bookId: String
-        }
-
-        guard let data = try? JSONEncoder().encode(PlaybackProjection(bookId: bookID)),
-              let json = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-        return json
+        try? playbackSettings?.androidJSON()
     }
 
     /**
@@ -1820,35 +1924,6 @@ public final class RemoteSyncBookmarkPatchApplyService {
             return "text:\(value.textValue ?? "")"
         case .blob:
             return "blob:\(value.blobBase64Value ?? "")"
-        }
-    }
-
-    /**
-     Decompresses staged patch payloads using the same C helpers as archive staging.
-
-     - Parameter data: Raw gzip-compressed patch bytes.
-     - Returns: Decompressed SQLite database bytes.
-     - Side effects: none.
-     - Failure modes:
-       - throws `RemoteSyncArchiveStagingError.decompressionFailed` when the payload is not valid gzip data
-     */
-    private static func gunzip(_ data: Data) throws -> Data {
-        try data.withUnsafeBytes { (pointer: UnsafeRawBufferPointer) -> Data in
-            guard let baseAddress = pointer.baseAddress else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
-
-            var outputLength: UInt = 0
-            guard let output = gunzip_data(
-                baseAddress.assumingMemoryBound(to: UInt8.self),
-                UInt(data.count),
-                &outputLength
-            ) else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
-
-            defer { gunzip_free(output) }
-            return Data(bytes: output, count: Int(outputLength))
         }
     }
 

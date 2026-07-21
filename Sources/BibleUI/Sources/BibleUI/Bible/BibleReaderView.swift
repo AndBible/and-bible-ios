@@ -168,6 +168,30 @@ public struct BibleReaderView: View {
         }
     }
 
+    /**
+     Retains a failed generic quick-selector request so the user can retry the exact pane action.
+
+     The selected module and captured pane identity stay together because the active pane may change
+     while the error alert is visible. The value produces a stable SwiftUI identity and carries the
+     actionable failure message; it has no side effects, and a missing captured pane safely resolves
+     through the reader's active-pane fallback during retry.
+     */
+    private struct GenericQuickModuleSwitchRetry: Identifiable {
+        /// Generic module selected from Android's commentary-adjacent quick menu.
+        let module: ModuleInfo
+
+        /// Pane captured when the quick selector was presented.
+        let targetWindowId: UUID?
+
+        /// Actionable SWORD validation failure shown in the retry alert.
+        let message: String
+
+        /// Stable identity for one pane-and-module retry request.
+        var id: String {
+            "genericQuickSwitch::\(targetWindowId?.uuidString ?? "active")::\(module.name)"
+        }
+    }
+
     /// Coordinator-owned modal flows that do not require payload-backed sheet state.
     private enum ReaderModal: String, Identifiable {
         case syncSettings
@@ -303,6 +327,9 @@ public struct BibleReaderView: View {
     /// Window that owns the active commentary quick selector, kept separate from modal routing state.
     @State private var commentaryQuickModuleSelectorTargetWindowId: UUID?
 
+    /// Failed generic quick-selector action retained for an explicit user retry.
+    @State private var pendingGenericQuickModuleSwitchRetry: GenericQuickModuleSwitchRetry?
+
     /// Presents the Android-style left navigation drawer from the reader header.
     @State private var showReaderNavigationDrawer = false
 
@@ -350,6 +377,9 @@ public struct BibleReaderView: View {
 
     /// Pending plain-text payload for the native share sheet.
     @State private var shareText: String?
+
+    /// Pending My Documents payload whose title and body must remain separate for native sharing.
+    @State private var myDocumentSharePayload: MyDocumentSharePayload?
 
     /// Pending cross-reference payload for modal presentation.
     @State private var crossReferences: [CrossReference]?
@@ -413,17 +443,20 @@ public struct BibleReaderView: View {
     /// Initial query forwarded into `SearchView`, usually from Strong's lookups.
     @State private var searchInitialQuery = ""
 
+    /// Whether the current Search destination was opened by Strong's Find All.
+    @State private var searchIsStrongsFindAll = false
+
     /// Window that owns the currently presented pane-scoped sheet or chooser flow.
     @State private var panePresentationTargetWindowId: UUID?
 
     /// Ensures the launch-seeded UI-test Search destination is only auto-presented once per app session.
     @State private var didPresentUITestLaunchSearch = false
 
-    /// Presents the reference chooser used by bridge-driven dialogs.
-    @State private var showRefChooser = false
+    /// One-shot completion state for the bridge-driven reference chooser flow.
+    @State private var refChooserRequest = BibleReaderReferenceChooserRequest()
 
-    /// Completion callback for the bridge-driven reference chooser flow.
-    @State private var refChooserCompletion: ((String?) -> Void)?
+    /// Generation whose bridge-driven chooser sheet is currently presented.
+    @State private var refChooserPresentation: BibleReaderReferenceChooserRequest.Generation?
     #if os(iOS)
     /// Motion-driven scroll helper used when tilt-to-scroll is enabled for the workspace.
     @State private var tiltScrollService = TiltScrollService()
@@ -505,7 +538,7 @@ public struct BibleReaderView: View {
     }
 
     /// Window captured for the currently presented pane-scoped destination, if it is still loaded.
-    private var panePresentationTargetWindow: Window? {
+    private var panePresentationTargetWindow: BibleCore.Window? {
         BibleReaderPanePresentationTarget.window(
             targetWindowId: panePresentationTargetWindowId,
             allWindows: windowManager.allWindows,
@@ -549,8 +582,8 @@ public struct BibleReaderView: View {
 
      - Returns: A binding that resolves nil stored colors to Android's `#ff444444` fallback and
        writes edits to the pane target workspace when available.
-     - Side effects: Setting the binding mutates `Workspace.workspaceColor`; the caller remains
-       responsible for saving the model context.
+     - Side effects: Setting the binding mutates `Workspace.workspaceColor`, refreshes reader chrome,
+       and saves the view's model context.
      - Failure modes: If the target workspace no longer exists, writes are ignored.
      */
     private var workspaceColorBinding: Binding<Int?> {
@@ -560,10 +593,12 @@ public struct BibleReaderView: View {
                 return workspace?.workspaceColor ?? Workspace.defaultWorkspaceColor
             },
             set: { newValue in
-                let workspace = panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace
+                let workspaceID = panePresentationTargetWindow?.workspace?.id ?? windowManager.activeWorkspace?.id
+                let workspace = workspaceID.flatMap { WorkspaceStore(modelContext: modelContext).workspace(id: $0) }
                 let resolvedColor = newValue ?? Workspace.defaultWorkspaceColor
                 workspace?.workspaceColor = resolvedColor
                 workspaceChromeColor = resolvedColor
+                try? modelContext.save()
             }
         )
     }
@@ -723,16 +758,17 @@ public struct BibleReaderView: View {
     /**
      Binding that presents the native share sheet while a share payload exists.
 
-     - Returns: A Boolean binding derived from `shareText`.
-     - Side effects: Setting the binding to `false` clears the pending share payload.
+     - Returns: A Boolean binding derived from either reader text or My Documents share state.
+     - Side effects: Setting the binding to `false` clears both pending share payload forms.
      - Failure modes: none.
      */
     private var shareSheetBinding: Binding<Bool> {
         Binding(
-            get: { shareText != nil },
+            get: { shareText != nil || myDocumentSharePayload != nil },
             set: { isPresented in
                 if !isPresented {
                     shareText = nil
+                    myDocumentSharePayload = nil
                 }
             }
         )
@@ -866,12 +902,21 @@ public struct BibleReaderView: View {
         .sheet(item: readerSheetModalBinding) { modal in
             readerModalContent(modal)
         }
+        #if os(iOS)
         .fullScreenCover(item: readerDocumentChooserModalBinding) { modal in
             readerModalContent(modal)
         }
         .fullScreenCover(item: $activeReaderLabelAssignmentRoute) { route in
             readerLabelAssignmentContent(route)
         }
+        #else
+        .sheet(item: readerDocumentChooserModalBinding) { modal in
+            readerModalContent(modal)
+        }
+        .sheet(item: $activeReaderLabelAssignmentRoute) { route in
+            readerLabelAssignmentContent(route)
+        }
+        #endif
         .confirmationDialog(
             localizedAndroidOverflowString(
                 androidKey: "strongs_mode_title",
@@ -882,6 +927,31 @@ public struct BibleReaderView: View {
             titleVisibility: .visible
         ) {
             strongsModeDialogActions
+        }
+        .alert(
+            String(localized: "error_occurred"),
+            isPresented: Binding(
+                get: { pendingGenericQuickModuleSwitchRetry != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingGenericQuickModuleSwitchRetry = nil
+                    }
+                }
+            ),
+            presenting: pendingGenericQuickModuleSwitchRetry
+        ) { retry in
+            Button(String(localized: "retry")) {
+                pendingGenericQuickModuleSwitchRetry = nil
+                selectCommentaryQuickModule(
+                    retry.module,
+                    targetWindowId: retry.targetWindowId
+                )
+            }
+            Button(String(localized: "cancel"), role: .cancel) {
+                pendingGenericQuickModuleSwitchRetry = nil
+            }
+        } message: { retry in
+            Text(retry.message)
         }
         .onChange(of: activeReaderSheet) { oldValue, newValue in
             handleActiveReaderSheetChange(from: oldValue, to: newValue)
@@ -922,8 +992,11 @@ public struct BibleReaderView: View {
         .sheet(isPresented: crossReferenceSheetBinding) {
             crossReferenceSheetContent
         }
-        .sheet(isPresented: $showRefChooser, onDismiss: resetPassageChooserProgressContext) {
-            refChooserSheetContent
+        .sheet(item: $refChooserPresentation) { generation in
+            refChooserSheetContent(for: generation)
+                .onDisappear {
+                    handleReferenceChooserDismissal(for: generation)
+                }
         }
         // MARK: - Keyboard Shortcuts (iPad/Mac)
         .background {
@@ -1118,14 +1191,21 @@ public struct BibleReaderView: View {
 
     /// Search destination seeded from toolbar, keyboard, or Android-compatible link routing.
     private var searchSheetContent: some View {
-        SearchView(
-            swordModule: panePresentationController?.activeModule,
-            swordManager: panePresentationController?.swordManager,
+        let controller = panePresentationController
+        return SearchView(
+            swordModule: controller?.activeModule,
+            swordManager: controller?.swordManager,
             searchIndexService: searchIndexService,
-            installedBibleModules: panePresentationController?.installedBibleModules ?? [],
-            currentBook: panePresentationController?.currentBook ?? "Genesis",
+            searchIndexSourceRegistry: controller?.makeSearchIndexSourceRegistry(),
+            installedBibleModules: controller?.installedBibleModules ?? [],
+            currentBook: controller?.currentBook ?? "Genesis",
             currentOsisBookId: searchSheetCurrentOsisBookId,
+            selectionPreferences: SearchSelectionPreferences(
+                settingsStore: SettingsStore(modelContext: modelContext)
+            ),
+            isStrongsFindAll: searchIsStrongsFindAll,
             initialQuery: searchInitialQuery,
+            onOpenReference: openReferenceFromSearch,
             onNavigate: navigateFromSearch
         )
         #if os(iOS)
@@ -1148,6 +1228,7 @@ public struct BibleReaderView: View {
         BibleReaderActiveSheetContent(
             sheet: presentedSheet,
             controller: panePresentationController,
+            speakService: speakService,
             readingProgressInitialTab: readingProgressInitialTab,
             chapterReadHistoryTarget: chapterReadHistoryTarget,
             onDismiss: dismissReaderSheet
@@ -1199,6 +1280,40 @@ public struct BibleReaderView: View {
         }
     }
 
+    /**
+     Rebuilds each pane's My Documents store after an isolated library transaction commits.
+
+     SwiftData contexts do not merge an isolated save into models already registered by another
+     context. Replacing the reader stores makes a page opened immediately after Save resolve from
+     persisted state without forcing the shared scene context to commit unrelated pending edits.
+
+     - Side effects: Replaces the My Documents persistence adapter on every open reader controller.
+     - Failure modes: None; controllers that are not Bible readers are ignored.
+     */
+    private func refreshMyDocumentStores() {
+        let container = modelContext.container
+        for registeredController in windowManager.controllers.values {
+            guard let controller = registeredController as? BibleReaderController else { continue }
+            controller.myDocumentStore = MyDocumentStore(modelContext: ModelContext(container))
+        }
+    }
+
+    /**
+     Reconciles a committed EPUB deletion across every reader pane that still holds its generation.
+
+     - Parameter identifier: Stable EPUB library identifier removed from local storage.
+     - Side effects: Releases matching reader leases and returns affected panes to their selected
+       Bible document. Unrelated panes remain unchanged.
+     - Failure modes: Closed panes and non-reader controllers are ignored.
+     */
+    @MainActor
+    private func reconcileDeletedEpubAcrossReaderPanes(_ identifier: String) {
+        for registeredController in windowManager.controllers.values {
+            guard let controller = registeredController as? BibleReaderController else { continue }
+            controller.reconcileDeletedEpub(identifier: identifier)
+        }
+    }
+
     /// Builds reader-stack destinations opened from the drawer, overflow, or keyboard shortcuts.
     @ViewBuilder
     private func readerDestinationContent(_ destination: ReaderDestination) -> some View {
@@ -1207,9 +1322,11 @@ public struct BibleReaderView: View {
             searchSheetContent
         case .bookmarks:
             BookmarkListView(
-                onNavigate: { book, chapter in
-                    panePresentationController?.navigateTo(book: book, chapter: chapter)
-                    activeReaderDestination = nil
+                onNavigateTarget: { target in
+                    guard let controller = panePresentationController else {
+                        throw BibleReaderBookmarkNavigationCommitFailure.readerUnavailable
+                    }
+                    try controller.navigate(toBookmarkTarget: target)
                 },
                 onOpenStudyPad: { labelId in
                     panePresentationController?.loadStudyPadDocument(labelId: labelId)
@@ -1251,23 +1368,50 @@ public struct BibleReaderView: View {
                 readerRenderedContentStateExport
             }
         case .myDocuments:
-            MyDocumentsListView { bookInitials, pageKey in
-                if panePresentationController?.loadMyDocumentPage(bookInitials: bookInitials, pageKey: pageKey) == true {
+            let reservedInitials = Set(
+                [
+                    DocumentCategory.bible,
+                    .commentary,
+                    .dictionary,
+                    .generalBook,
+                    .map,
+                ]
+                .flatMap { panePresentationController?.installedModules(for: $0) ?? [] }
+                .map(\.name)
+            )
+            MyDocumentsListView(
+                reservedInitials: reservedInitials,
+                onDismiss: { activeReaderDestination = nil },
+                onLibrarySaved: refreshMyDocumentStores
+            ) { bookInitials, pageKey in
+                if panePresentationController?.loadMyDocumentPage(
+                    bookInitials: bookInitials,
+                    pageKey: pageKey
+                ) == true {
                     activeReaderDestination = nil
                 }
             }
-            #if os(iOS)
-            .toolbar(.visible, for: .navigationBar)
-            .navigationBarBackButtonHidden(true)
-            .toolbar {
-                readerDestinationBackToolbarItem
-            }
-            #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
         case .readingPlans:
-            ReadingPlanListView()
+            ReadingPlanListView(
+                planVersificationResolver: { planCode in
+                    guard let controller = panePresentationController else {
+                        throw ReadingPlanDefinitionError.unavailable(planCode: planCode)
+                    }
+                    return try controller.readingPlanVersificationProperty(forPlanCode: planCode)
+                },
+                onPerformDailyReadingAction: { request in
+                    guard let controller = panePresentationController else {
+                        throw BibleReaderDailyReadingActionFailure.activeBibleUnavailable
+                    }
+                    try await controller.performDailyReadingAction(request)
+                },
+                onReadCompleted: {
+                    activeReaderDestination = nil
+                }
+            )
             #if os(iOS)
             .toolbar(.visible, for: .navigationBar)
             .navigationBarBackButtonHidden(true)
@@ -1329,7 +1473,10 @@ public struct BibleReaderView: View {
                 readerRenderedContentStateExport
             }
         case .importExport:
-            ImportExportView(startupRestoreImportTarget: startupRestoreImportTarget)
+            ImportExportView(
+                startupRestoreImportTarget: startupRestoreImportTarget,
+                speakService: speakService
+            )
                 #if os(iOS)
                 .toolbar(.visible, for: .navigationBar)
                 .navigationBarBackButtonHidden(true)
@@ -1343,6 +1490,7 @@ public struct BibleReaderView: View {
         case .globalTextOptions:
             TextDisplaySettingsView(
                 settings: $globalDisplaySettings,
+                workspaceColor: workspaceColorBinding,
                 navigationTitle: String(
                     localized: "global_text_display_settings_title",
                     defaultValue: "Global text options"
@@ -1422,7 +1570,7 @@ public struct BibleReaderView: View {
      */
     @ToolbarContentBuilder
     private var readerDestinationBackToolbarItem: some ToolbarContent {
-        ToolbarItem(placement: .navigationBarLeading) {
+        ToolbarItem(placement: .cancellationAction) {
             Button {
                 activeReaderDestination = nil
             } label: {
@@ -1453,7 +1601,13 @@ public struct BibleReaderView: View {
     /// System share sheet for selected or generated reader text.
     @ViewBuilder
     private var shareSheetContent: some View {
-        if let text = shareText {
+        if let payload = myDocumentSharePayload {
+            #if os(iOS)
+            ShareSheet(items: [MyDocumentActivityItemSource(payload: payload)])
+            #else
+            ShareSheet(items: [payload.body])
+            #endif
+        } else if let text = shareText {
             ShareSheet(items: [text])
         }
     }
@@ -1470,13 +1624,24 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Reference chooser sheet used by web-modal callbacks.
-    private var refChooserSheetContent: some View {
+    /**
+     Builds the reference chooser sheet for one bridge request generation.
+
+     - Parameter generation: Request identity captured by every selection and dismissal callback.
+     - Returns: Verse-level passage chooser seeded from the requesting pane.
+     - Side effects: User actions resolve only the matching bridge request generation.
+     - Failure modes: Missing/invalid KJVA selections complete the matching request as cancelled;
+       stale sheet callbacks are ignored by `BibleReaderReferenceChooserRequest`.
+     */
+    private func refChooserSheetContent(
+        for generation: BibleReaderReferenceChooserRequest.Generation
+    ) -> some View {
         let progressContext = passageChooserProgressContext
 
         return NavigationStack {
             BookChooserView(
                 books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
+                navigateToVerse: true,
                 currentBook: panePresentationController?.currentBook,
                 currentChapter: panePresentationController?.currentChapter,
                 currentVerse: panePresentationController?.currentVerse,
@@ -1498,15 +1663,96 @@ public struct BibleReaderView: View {
                 },
                 verseProgressProvider: { book, chapter, verse in
                     progressContext.verseProgress(for: book, chapter: chapter, verse: verse)
+                },
+                onCancel: {
+                    completeReferenceChooser(with: nil, for: generation)
                 }
-            ) { book, chapter, _ in
-                showRefChooser = false
+            ) { book, chapter, verse in
+                guard let verse else {
+                    completeReferenceChooser(with: nil, for: generation)
+                    return
+                }
                 let osisId = panePresentationController?.osisBookId(for: book) ?? BibleReaderController.osisBookId(for: book)
-                refChooserCompletion?("\(osisId).\(chapter)")
-                refChooserCompletion = nil
+                guard !osisId.isEmpty,
+                      let verseName = BibleReaderReferenceChooserResultFormatter.verseName(
+                          osisBookId: osisId,
+                          chapter: chapter,
+                          verse: verse
+                      ) else {
+                    completeReferenceChooser(with: nil, for: generation)
+                    return
+                }
+                completeReferenceChooser(with: verseName, for: generation)
             }
         }
         .presentationDetents([.large])
+    }
+
+    /**
+     Presents Android's verse-level bridge reference chooser for one reader pane.
+
+     - Parameters:
+       - windowId: Pane whose module canon and current passage seed the chooser.
+       - completion: Bridge callback receiving Android's JSword short `Verse.name` or cancellation.
+
+     Side effects:
+     - targets the requesting pane, captures progress, cancels any superseded bridge request, and
+       presents the chooser sheet
+
+     Failure modes:
+     - none; a superseded request is completed as cancelled instead of being orphaned
+     */
+    private func presentReferenceChooser(
+        from windowId: UUID,
+        completion: @escaping (String?) -> Void
+    ) {
+        setPanePresentationTarget(windowId)
+        passageChooserProgressContext = makePassageChooserProgressContext()
+        refChooserPresentation = refChooserRequest.replace(with: completion)
+    }
+
+    /**
+     Resolves the pending chooser and closes its sheet.
+
+     - Parameters:
+       - verseName: JSword short `Verse.name`, or `nil` for cancellation or invalid selection.
+       - generation: Sheet identity that owns the completion attempt.
+
+     Side effects:
+     - completes the matching bridge request at most once, dismisses only its sheet, and clears its
+       progress snapshot
+
+     Failure modes:
+     - stale generations and callbacks after interactive dismissal are no-ops
+     */
+    private func completeReferenceChooser(
+        with verseName: String?,
+        for generation: BibleReaderReferenceChooserRequest.Generation
+    ) {
+        guard refChooserRequest.resolve(for: generation, with: verseName) else { return }
+        if refChooserPresentation == generation {
+            refChooserPresentation = nil
+        }
+        resetPassageChooserProgressContext()
+    }
+
+    /**
+     Completes one interactively dismissed chooser generation as cancelled.
+
+     - Parameter generation: Identity captured by the disappearing sheet content.
+
+     Side effects:
+     - resolves only a matching pending bridge request with cancellation and clears its captured
+       progress
+
+     Failure modes:
+     - stale dismissal after request replacement is ignored and leaves the replacement presented
+     */
+    private func handleReferenceChooserDismissal(
+        for generation: BibleReaderReferenceChooserRequest.Generation
+    ) {
+        guard refChooserRequest.resolve(for: generation, with: nil) else { return }
+        resetPassageChooserProgressContext()
     }
 
     /// Invisible keyboard shortcut host for iPad and Mac command routing.
@@ -1556,7 +1802,7 @@ public struct BibleReaderView: View {
      Failure modes:
      - returns `false` when the controller is missing or cannot parse the reference
      */
-    private func navigateWindowTabReference(_ window: Window, _ text: String) -> Bool {
+    private func navigateWindowTabReference(_ window: BibleCore.Window, _ text: String) -> Bool {
         guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else {
             return false
         }
@@ -1566,20 +1812,42 @@ public struct BibleReaderView: View {
     /**
      Navigates from Search results into the active reader pane.
 
-     - Parameters:
-       - book: Book name selected by Search.
-       - chapter: Chapter selected by Search.
-       - verse: Verse selected by Search.
-     Side effects:
-     - dismisses the Search destination
-     - updates the active pane's reader location
-     Failure modes:
-     - does nothing when no pane presentation controller is available
+     - Parameter target: Exact module and canonical verse selected in grouped Search results.
+     - Returns: `true` only after the target module and canonical verse were opened.
+     - Side effects: Dismisses Search after success, may switch the pane's Bible module, and updates
+       the active reader location.
+     - Failure modes: Returns `false` without changing Search state when the controller or target
+       module is unavailable.
      */
-    private func navigateFromSearch(book: String, chapter: Int, verse: Int) {
-        panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
+    private func navigateFromSearch(_ target: SearchNavigationTarget) -> Bool {
+        guard let controller = panePresentationController,
+              controller.navigateToSearchResult(target) else {
+            return false
+        }
         activeReaderDestination = nil
         searchInitialQuery = ""
+        return true
+    }
+
+    /**
+     Attempts Android-compatible reference navigation before Search compiles a text query.
+
+     - Parameter query: Raw trimmed Search input such as `John 3:16`, a range, a localized book
+       name, or a comma-separated passage list.
+     - Returns: `true` only when the active reader's canonical reference parser recognized and
+       opened the complete input.
+     - Side effects: Successful navigation dismisses Search state and clears its seeded query.
+     - Failure modes: Missing reader state or unrecognized text returns `false`, allowing normal
+       Lucene-compatible text search to continue.
+     */
+    private func openReferenceFromSearch(_ query: String) -> Bool {
+        guard let controller = panePresentationController,
+              controller.navigateToRef(query) else {
+            return false
+        }
+        activeReaderDestination = nil
+        searchInitialQuery = ""
+        return true
     }
 
     // MARK: - Sheet and Destination Routing
@@ -1713,7 +1981,7 @@ public struct BibleReaderView: View {
         }
     }
 
-    private func windowCopySettingsTitle(_ window: Window) -> String {
+    private func windowCopySettingsTitle(_ window: BibleCore.Window) -> String {
         let visibleWindows = windowManager.visibleWindows
         let position = (visibleWindows.firstIndex(where: { $0.id == window.id }) ?? 0) + 1
         let controller = self.controller(for: window.id)
@@ -2263,9 +2531,11 @@ public struct BibleReaderView: View {
        - module: Installed module selected from the Android-parity quick selector.
        - targetWindowId: Captured window whose controller owns the popup selection.
      - Side effects: Dismisses the popup and switches the pane through the category-specific
-       current-document path.
+       current-document path. Generic exact keys render immediately, invalid/missing keys open their
+       browser, and validation/enumeration failures present a Retry/Cancel alert.
      - Failure modes: If the controller is no longer available, or the selected module category is
        not part of Android's commentary quick popup, the selection is ignored after dismissal.
+       SWORD key validation/enumeration failures leave pane state unchanged and remain retryable.
      */
     private func selectCommentaryQuickModule(_ module: ModuleInfo, targetWindowId: UUID?) {
         let controller = controller(for: targetWindowId)
@@ -2275,11 +2545,55 @@ public struct BibleReaderView: View {
         case .commentary:
             controller.switchCommentaryDocument(to: module.name)
         case .dictionary:
-            controller.switchDictionaryDocument(to: module.name)
+            handleGenericQuickModuleSwitch(
+                controller.switchDictionaryDocument(to: module.name),
+                module: module,
+                targetWindowId: targetWindowId,
+                browser: .dictionaryBrowser
+            )
         case .generalBook:
-            controller.switchGeneralBookDocument(to: module.name)
+            handleGenericQuickModuleSwitch(
+                controller.switchGeneralBookDocument(to: module.name),
+                module: module,
+                targetWindowId: targetWindowId,
+                browser: .generalBookBrowser
+            )
         default:
             return
+        }
+    }
+
+    /**
+     Routes one generic quick-selector switch through Android's retain-or-choose behavior.
+
+     - Parameters:
+       - outcome: Exact-key validation result returned by the reader controller.
+       - module: Selected module retained when validation needs an explicit retry.
+       - targetWindowId: Pane captured by the quick selector.
+       - browser: Category chooser shown only when the previous key is invalid or missing.
+     - Side effects: Presents the key browser for invalid keys or an actionable retry alert for
+       backend failures. A retained exact key requires no follow-up presentation.
+     - Failure modes: Repeated validation/enumeration failures replace the same retry request without
+       mutating the target pane's module, key, category, or persisted state. A later transient browser
+       failure remains retryable inside the browser.
+     */
+    private func handleGenericQuickModuleSwitch(
+        _ outcome: BibleReaderGenericModuleSwitchOutcome,
+        module: ModuleInfo,
+        targetWindowId: UUID?,
+        browser: ReaderModal
+    ) {
+        switch outcome {
+        case .switchedPreservingKey:
+            return
+        case .switchedRequiringKeySelection:
+            presentReaderModalPreservingPane(browser)
+        case .failed(let message):
+            pendingGenericQuickModuleSwitchRetry = GenericQuickModuleSwitchRetry(
+                module: module,
+                targetWindowId: targetWindowId,
+                message: message
+            )
         }
     }
 
@@ -2361,7 +2675,7 @@ public struct BibleReaderView: View {
             }
         case .importExport:
             NavigationStack {
-                ImportExportView()
+                ImportExportView(speakService: speakService)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button(String(localized: "done"), action: dismissReaderModal)
@@ -2388,8 +2702,8 @@ public struct BibleReaderView: View {
             }
         case .dictionaryBrowser:
             if let controller = panePresentationController,
-               let module = controller.activeDictionaryModule {
-                DictionaryBrowserView(module: module) { key in
+               let source = controller.activeDictionaryBrowserSource() {
+                DictionaryBrowserView(source: source) { key in
                     dismissReaderModal()
                     controller.loadDictionaryEntry(key: key)
                 }
@@ -2397,14 +2711,29 @@ public struct BibleReaderView: View {
                 readerPanePreparationContent
             }
         case .generalBookBrowser:
-            if let controller = panePresentationController,
-               let module = controller.activeGeneralBookModule {
-                GeneralBookBrowserView(
-                    module: module,
-                    title: controller.activeGeneralBookModuleName ?? String(localized: "general_book")
-                ) { key in
-                    dismissReaderModal()
-                    controller.loadGeneralBookEntry(key: key)
+            if let controller = panePresentationController {
+                if let reader = controller.activeEpubReader {
+                    EpubBrowserView(reader: reader) { key in
+                        dismissReaderModal()
+                        controller.loadEpubEntry(key: key)
+                    }
+                } else if let module = controller.activeGeneralBookModule {
+                    GeneralBookBrowserView(
+                        module: module,
+                        title: controller.activeGeneralBookModuleName ?? String(localized: "general_book"),
+                        onEmptyKeys: { firstGlobalKey in
+                            controller.handleEmptyGenericKeyChooser(
+                                module: module,
+                                category: .generalBook,
+                                firstGlobalKey: firstGlobalKey
+                            )
+                        }
+                    ) { key in
+                        dismissReaderModal()
+                        controller.loadGeneralBookEntry(key: key)
+                    }
+                } else {
+                    readerPanePreparationContent
                 }
             } else {
                 readerPanePreparationContent
@@ -2414,7 +2743,14 @@ public struct BibleReaderView: View {
                let module = controller.activeMapModule {
                 GeneralBookBrowserView(
                     module: module,
-                    title: controller.activeMapModuleName ?? String(localized: "map")
+                    title: controller.activeMapModuleName ?? String(localized: "map"),
+                    onEmptyKeys: { firstGlobalKey in
+                        controller.handleEmptyGenericKeyChooser(
+                            module: module,
+                            category: .map,
+                            firstGlobalKey: firstGlobalKey
+                        )
+                    }
                 ) { key in
                     dismissReaderModal()
                     controller.loadMapEntry(key: key)
@@ -2423,28 +2759,26 @@ public struct BibleReaderView: View {
                 readerPanePreparationContent
             }
         case .epubLibrary:
-            EpubLibraryView { identifier in
+            EpubLibraryView(onDeleteEpub: reconcileDeletedEpubAcrossReaderPanes) { identifier in
                 dismissReaderModal()
                 panePresentationController?.switchEpub(identifier: identifier)
-                panePresentationController?.switchCategory(to: .epub)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    presentReaderModalPreservingPane(.epubBrowser)
+                    presentReaderModalPreservingPane(.generalBookBrowser)
                 }
             }
         case .epubBrowser:
             if let controller = panePresentationController {
                 if let reader = controller.activeEpubReader {
-                    EpubBrowserView(reader: reader) { href in
+                    EpubBrowserView(reader: reader) { key in
                         dismissReaderModal()
-                        controller.loadEpubEntry(href: href)
+                        controller.loadEpubEntry(key: key)
                     }
                 } else {
-                    EpubLibraryView { identifier in
+                    EpubLibraryView(onDeleteEpub: reconcileDeletedEpubAcrossReaderPanes) { identifier in
                         dismissReaderModal()
                         controller.switchEpub(identifier: identifier)
-                        controller.switchCategory(to: .epub)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            presentReaderModalPreservingPane(.epubBrowser)
+                            presentReaderModalPreservingPane(.generalBookBrowser)
                         }
                     }
                 }
@@ -2453,9 +2787,17 @@ public struct BibleReaderView: View {
             }
         case .epubSearch:
             if let reader = panePresentationController?.activeEpubReader {
-                EpubSearchView(reader: reader) { href in
+                EpubSearchView(
+                    reader: reader,
+                    modePreferences: SearchModePreferences(
+                        settingsStore: SettingsStore(modelContext: modelContext)
+                    )
+                ) { result in
                     dismissReaderModal()
-                    panePresentationController?.loadEpubEntry(href: href)
+                    panePresentationController?.loadEpubEntry(
+                        key: result.key,
+                        jumpToOrdinal: result.ordinal
+                    )
                 }
             } else {
                 Text(String(localized: "reader_no_epub_loaded"))
@@ -2674,68 +3016,60 @@ public struct BibleReaderView: View {
         speakService.restoreSettings()
 
         let wm = windowManager
-        speakService.onRequestNext = {
-            if let activeId = wm.activeWindow?.id,
-               let ctrl = wm.controllers[activeId] as? BibleReaderController {
-                ctrl.navigateNext()
-                ctrl.speakCurrentChapter()
-            }
+        if let workspaceSettings = wm.activeWorkspace?.workspaceSettings {
+            speakService.applySettings(workspaceSettings.speakSettings, persist: false)
         }
-        speakService.onRequestPrevious = {
-            if let activeId = wm.activeWindow?.id,
-               let ctrl = wm.controllers[activeId] as? BibleReaderController {
-                ctrl.navigatePrevious()
-                ctrl.speakCurrentChapter()
-            }
+        if let activeId = wm.activeWindow?.id,
+           let controller = wm.controllers[activeId] as? BibleReaderController {
+            speakService.bookmarkManager = controller.bookmarkService
         }
-        speakService.onFinishedSpeaking = {
-            if let activeId = wm.activeWindow?.id,
-               let ctrl = wm.controllers[activeId] as? BibleReaderController {
-                guard ctrl.hasNext else { return }
-                ctrl.navigateNext()
-                ctrl.speakCurrentChapter()
-            }
+
+        speakService.onRequestNext = nil
+        speakService.onRequestPrevious = nil
+        speakService.onFinishedSpeaking = nil
+        speakService.onSettingsChanged = { settings in
+            guard let workspace = wm.activeWorkspace else { return }
+            var workspaceSettings = workspace.workspaceSettings ?? WorkspaceSettings()
+            workspaceSettings.speakSettings = settings.normalized
+            workspace.workspaceSettings = workspaceSettings
+            try? modelContext.save()
         }
+        BibleReaderSpeechSessionBinding.install(on: speakService) { [weak wm] in
+            guard let wm, let activeId = wm.activeWindow?.id else { return nil }
+            return wm.controllers[activeId] as? BibleReaderController
+        }
+        speakService.reloadResumeBookmarks()
     }
 
-    /// Registers synchronized scrolling behavior across windows in the active workspace.
+    /**
+     Registers target-versification-safe scrolling across synchronized reader windows.
+
+     The callback resolves the source module ordinal back to one authoritative verse identity, then
+     asks every target controller to resolve that verse in its own module. A source ordinal is never
+     reused directly in a target module because ordinal spaces differ across versifications.
+
+     - Side effects: Replaces `WindowManager.onSyncVerseChanged` and may navigate synchronized target
+       panes after a verified source and target conversion.
+     - Failure modes: Missing controllers or an unresolvable source verse stop the update; individual
+       targets that cannot represent the verse remain unchanged.
+     */
     private func installSynchronizedScrollingCallback() {
-        windowManager.onSyncVerseChanged = { [weak windowManager] sourceWindow, ordinal, key in
+        windowManager.onSyncVerseChanged = { [weak windowManager] sourceWindow, ordinal, _ in
             guard let wm = windowManager else { return }
             let syncTargets = wm.synchronizedVerseUpdateTargets(for: sourceWindow)
-            let sourceReference = (wm.controllers[sourceWindow.id] as? BibleReaderController)?
-                .synchronizedVerseReference(ordinal: ordinal)
+            guard let sourceReference = (wm.controllers[sourceWindow.id] as? BibleReaderController)?
+                .synchronizedVerseReference(ordinal: ordinal) else {
+                return
+            }
             for target in syncTargets {
                 guard let ctrl = wm.controllers[target.id] as? BibleReaderController else {
                     continue
                 }
-
-                if let sourceReference {
-                    ctrl.scrollToSynchronizedVerse(
-                        osisBookId: sourceReference.osisBookId,
-                        chapter: sourceReference.chapter,
-                        verse: sourceReference.verse
-                    )
-                    continue
-                }
-
-                let sourceBook = sourceWindow.pageManager?.bibleBibleBook
-                let sourceChapter = sourceWindow.pageManager?.bibleChapterNo
-                let targetBook = target.pageManager?.bibleBibleBook
-                let targetChapter = target.pageManager?.bibleChapterNo
-                if sourceBook == targetBook && sourceChapter == targetChapter {
-                    ctrl.scrollToOrdinal(ordinal)
-                    continue
-                }
-
-                let parts = key.split(separator: ".")
-                if parts.count >= 2,
-                   let chapter = Int(parts[1]) {
-                    let osisBook = String(parts[0])
-                    if let bookName = ctrl.bookName(forOsisId: osisBook) {
-                        ctrl.navigateToSynchronizedPosition(book: bookName, chapter: chapter, ordinal: ordinal)
-                    }
-                }
+                ctrl.scrollToSynchronizedVerse(
+                    osisBookId: sourceReference.osisBookId,
+                    chapter: sourceReference.chapter,
+                    verse: sourceReference.verse
+                )
             }
         }
     }
@@ -2867,7 +3201,7 @@ public struct BibleReaderView: View {
        layout state.
      - Returns: A fully configured pane view bound to coordinator-owned presentation state.
      */
-    private func paneView(for window: Window) -> some View {
+    private func paneView(for window: BibleCore.Window) -> some View {
         BibleWindowPane(
             window: window,
             displaySettings: resolvedDisplaySettings(for: window),
@@ -2920,7 +3254,14 @@ public struct BibleReaderView: View {
                 presentReaderSheet(.chapterReadHistory, from: window.id)
             },
             onShowSpeakControls: { presentReaderModal(.speakControls, from: window.id) },
-            onShareText: { text in shareText = text },
+            onShareText: { text in
+                myDocumentSharePayload = nil
+                shareText = text
+            },
+            onShareMyDocument: { payload in
+                shareText = nil
+                myDocumentSharePayload = payload
+            },
             onShowCrossReferences: { refs in
                 setPanePresentationTarget(window.id)
                 crossReferences = refs
@@ -2948,13 +3289,15 @@ public struct BibleReaderView: View {
                 }
                 resetAutoFullscreenTracking()
             },
-            onSearchForStrongs: { strongsNum in presentSearch(from: window.id, initialQuery: strongsNum) },
+            onSearchForStrongs: { strongsNum in
+                presentSearch(
+                    from: window.id,
+                    initialQuery: strongsNum,
+                    isStrongsFindAll: true
+                )
+            },
             onRefChooserDialog: { completion in
-                // Present book chooser and return OSIS ref
-                setPanePresentationTarget(window.id)
-                passageChooserProgressContext = makePassageChooserProgressContext()
-                refChooserCompletion = completion
-                showRefChooser = true
+                presentReferenceChooser(from: window.id, completion: completion)
             },
             onAssignLabels: { bookmarkId in
                 presentReaderLabelAssignment(bookmarkId: bookmarkId, from: window.id)
@@ -3048,8 +3391,11 @@ public struct BibleReaderView: View {
             controller?.currentCategory == .map ||
             controller?.currentCategory == .epub {
             let category = controller?.currentCategory ?? .dictionary
+            let title = controller?.activeEpubReader?.title
+                ?? controller?.activeModuleName(for: category)
+                ?? ""
             return .auxiliary(
-                title: controller?.activeModuleName(for: category) ?? "",
+                title: title,
                 subtitle: auxiliaryDocumentSubtitle(for: controller),
                 browseSystemImageName: browseIconName(for: category)
             )
@@ -3068,7 +3414,9 @@ public struct BibleReaderView: View {
         case .dictionary:
             return controller?.currentDictionaryKey
         case .generalBook:
-            return controller?.currentGeneralBookKey
+            return controller?.activeEpubReader == nil
+                ? controller?.currentGeneralBookKey
+                : controller?.currentEpubTitle
         case .map:
             return controller?.currentMapKey
         case .epub:
@@ -3099,6 +3447,7 @@ public struct BibleReaderView: View {
             showsReverseSplitModeToggle: windowManager.visibleWindows.count > 1,
             reverseSplitModeEnabled: windowManager.activeWorkspace?.workspaceSettings?.enableReverseSplitMode ?? false,
             windowPinningEnabled: windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false,
+            showsAIActions: isAIConfigured,
             showsBibleDisplayOptions: isBibleContentFocused,
             sectionTitlesEnabled: sectionTitlesEnabled,
             moduleHasStrongs: moduleHasStrongs,
@@ -3113,6 +3462,14 @@ public struct BibleReaderView: View {
         #else
         return false
         #endif
+    }
+
+    /** Whether Android's workspace-level AI action should appear in the reader overflow menu. */
+    private var isAIConfigured: Bool {
+        guard let providers = try? AISettingsStore(modelContext: modelContext).providers() else {
+            return false
+        }
+        return !providers.isEmpty
     }
 
     private func handleReaderOverflowMenuAction(_ action: BibleReaderOverflowMenuAction) {
@@ -3154,9 +3511,14 @@ public struct BibleReaderView: View {
             updateWorkspaceSettings { $0.enableReverseSplitMode = nextValue }
         case .toggleWindowPinning:
             let nextValue = !(windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false)
-            updateWorkspaceSettings { $0.autoPin = nextValue }
+            windowManager.setAutoPinEnabled(nextValue)
         case .openLabelSettings:
             dismissReaderOverflowMenuAndQueue(.labelManager)
+        case .openAIActions:
+            let controller = focusedController
+            dismissReaderOverflowMenuAndPerform {
+                controller?.onRequestWorkspaceAIAction?()
+            }
         case .toggleSectionTitles:
             toggleDisplaySetting(\.showSectionTitles, default: true)
         case .openStrongsMode:
@@ -3680,7 +4042,7 @@ public struct BibleReaderView: View {
        refreshes the affected pane.
      - Failure modes: Missing window or page manager falls back through the persistence helper.
      */
-    private func applyStrongsMode(_ mode: Int, for window: Window?) {
+    private func applyStrongsMode(_ mode: Int, for window: BibleCore.Window?) {
         let targetWindow = window
         let previousWindowSettings = resolvedDisplaySettings(for: targetWindow)
         var nextWindowSettings = previousWindowSettings
@@ -3723,7 +4085,7 @@ public struct BibleReaderView: View {
     private func toggleDisplaySetting(
         _ keyPath: WritableKeyPath<TextDisplaySettings, Bool?>,
         default defaultValue: Bool,
-        for window: Window?
+        for window: BibleCore.Window?
     ) {
         let targetWindow = window
         let previousWindowSettings = resolvedDisplaySettings(for: targetWindow)
@@ -3746,7 +4108,7 @@ public struct BibleReaderView: View {
      */
     private func presentWindowStrongsMode(from windowId: UUID) {
         if let targetWindow = windowManager.allWindows.first(where: { $0.id == windowId }) {
-            windowManager.activeWindow = targetWindow
+            windowManager.activateWindow(targetWindow)
             syncActiveDisplaySettings()
         }
         showReaderStrongsModeDialog = true
@@ -3797,7 +4159,7 @@ public struct BibleReaderView: View {
      */
     private func persistWindowDisplaySettings(
         _ windowSettings: TextDisplaySettings,
-        for window: Window?,
+        for window: BibleCore.Window?,
         previousResolvedSettings: TextDisplaySettings
     ) {
         guard let window else {
@@ -4017,7 +4379,7 @@ public struct BibleReaderView: View {
     }
 
     /// Resolves text-display settings for one specific window using the normal inheritance chain.
-    private func resolvedDisplaySettings(for window: Window?) -> TextDisplaySettings {
+    private func resolvedDisplaySettings(for window: BibleCore.Window?) -> TextDisplaySettings {
         TextDisplaySettings.fullyResolved(
             window: window?.pageManager?.textDisplaySettings,
             workspace: window?.workspace?.textDisplaySettings ?? windowManager.activeWorkspace?.textDisplaySettings,
@@ -4311,7 +4673,7 @@ public struct BibleReaderView: View {
        active window, auto-fullscreen is disabled, the delta is zero, or fullscreen is currently
        locked by a prior double-tap action.
      */
-    private func handleAutoFullscreenScroll(from window: Window, deltaY: Double) {
+    private func handleAutoFullscreenScroll(from window: BibleCore.Window, deltaY: Double) {
         guard windowManager.activeWindow?.id == window.id else { return }
         let action = ReaderAutoFullscreenPolicy.action(
             deltaY: deltaY,
@@ -4398,7 +4760,10 @@ public struct BibleReaderView: View {
        client reports an open modal, the rendered document blocks host page navigation, or the
        configured swipe mode is `.none`.
      */
-    private func handleHorizontalSwipe(from window: Window, direction: NativeHorizontalSwipeDirection) {
+    private func handleHorizontalSwipe(
+        from window: BibleCore.Window,
+        direction: NativeHorizontalSwipeDirection
+    ) {
         guard windowManager.activeWindow?.id == window.id else { return }
         guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else { return }
         switch ReaderHorizontalSwipePolicy.action(
@@ -4424,8 +4789,14 @@ public struct BibleReaderView: View {
     /**
      Presents Search after first staging the latest initial-query state.
 
+     - Parameters:
+       - windowId: Reader pane that should own Search navigation and module context.
+       - initialQuery: Optional text used to seed Search before presentation.
+       - isStrongsFindAll: Whether Search must use Android's Strong's-only persisted selection.
+
      Side effects:
      - mutates `searchInitialQuery` so the Search destination can seed its query field from the latest caller
+     - mutates `searchIsStrongsFindAll` so normal and Strong's searches cannot share selections
      - schedules the `.search` destination for the next main-actor turn so the staged query wins over
        the current render pass
 
@@ -4434,9 +4805,19 @@ public struct BibleReaderView: View {
        next render pass completes
      */
     @MainActor
-    private func presentSearch(from windowId: UUID? = nil, initialQuery: String? = nil) {
+    private func presentSearch(
+        from windowId: UUID? = nil,
+        initialQuery: String? = nil,
+        isStrongsFindAll: Bool = false
+    ) {
         setPanePresentationTarget(windowId)
         searchLastUsed = Date().timeIntervalSince1970
+        if panePresentationController?.currentCategory == .generalBook,
+           panePresentationController?.activeEpubReader != nil {
+            presentReaderModal(.epubSearch, from: windowId)
+            return
+        }
+        searchIsStrongsFindAll = isStrongsFindAll
         if let initialQuery {
             searchInitialQuery = initialQuery
         } else if let uiTestQuery = UITestSearchQuerySeed.consume() {

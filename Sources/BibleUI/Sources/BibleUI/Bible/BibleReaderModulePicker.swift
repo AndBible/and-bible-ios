@@ -1,6 +1,24 @@
 import BibleCore
 import SwiftUI
 import SwordKit
+import UniformTypeIdentifiers
+
+/**
+ Retains one local SWORD archive while the picker requests overwrite consent.
+
+ The repository repeats validation during install; this value exists only to preserve provider
+ metadata and show the exact preflight conflicts before authorizing replacement.
+ */
+private struct DocumentPickerLocalOverwriteConfirmation: Identifiable {
+    /// Selected external document request retained across alert presentation.
+    let request: ExternalDocumentImportRequest
+
+    /// Validated archive summary and conflicting destination paths.
+    let inspection: LocalSwordZipInspection
+
+    /// Stable alert identity derived from the selected file URL.
+    var id: String { request.url.standardizedFileURL.path }
+}
 
 /**
  Light document-selection palette matching Android's `ChooseDocument` activity surface.
@@ -80,6 +98,57 @@ struct BibleReaderModulePicker: View {
     /// Whether the Android-style app-bar overflow menu is visible.
     @State private var showOverflowMenu = false
 
+    /// Installed modules captured for Android's selected-by-default backup sheet.
+    @State private var moduleBackupCandidates: [ModuleInfo] = []
+
+    /// Whether Android's module-backup selection sheet is visible.
+    @State private var showModuleBackupSelection = false
+
+    /// Whether selected module files are currently being archived.
+    @State private var isExportingModuleBackup = false
+
+    /// Generated Android module backup passed to SwiftUI's document exporter.
+    @State private var moduleBackupDocument = BackupExportDocument()
+
+    /// Temporary file backing the current streamed Android module backup export.
+    @State private var moduleBackupTemporaryFileURL: URL?
+
+    /// Android-compatible default filename for the generated module backup.
+    @State private var moduleBackupFileName = AndroidModuleBackupService.moduleBackupFileName
+
+    /// Whether the destination picker for a generated module backup is visible.
+    @State private var showModuleBackupExporter = false
+
+    /// Whether Android's Load Documents From Files picker is visible.
+    @State private var showInstallZipImporter = false
+
+    /// Whether a selected ZIP, EPUB, font, or module backup is being installed.
+    @State private var isImportingExternalDocument = false
+
+    /// Durable phase snapshot for an ordinary local SWORD ZIP install.
+    @State private var externalDocumentImportProgress: ModuleInstallProgress?
+
+    /// Local SWORD archive waiting for explicit overwrite consent.
+    @State private var pendingLocalModuleOverwrite: DocumentPickerLocalOverwriteConfirmation?
+
+    /// User-visible completion or failure feedback for import/export routes.
+    @State private var externalDocumentImportMessage: String?
+
+    /// Locked module whose cipher-key prompt is visible.
+    @State private var pendingUnlockModule: ModuleInfo?
+
+    /// Cipher key entered for the pending locked module.
+    @State private var unlockCipherKey = ""
+
+    /// Failed unlock feedback shown when Android's passphrase prompt is retried.
+    @State private var unlockFailureMessage: String?
+
+    /// Generic module retained for retry after exact-key validation fails.
+    @State private var pendingGenericSwitchRetry: ModuleInfo?
+
+    /// SWORD key-validation failure shown without dismissing the document picker.
+    @State private var genericSwitchFailureMessage: String?
+
     /// Repository service used by Android's Delete document row action.
     private let repository = ModuleRepository()
 
@@ -146,13 +215,14 @@ struct BibleReaderModulePicker: View {
 
     /// Android chooser rows before filters are applied.
     private var allRows: [DocumentChooserRow] {
-        Self.allRows(from: allSelectableModules)
+        Self.allRows(from: allSelectableModules, epubs: EpubReader.installedEpubs())
     }
 
     /// Rows after applying Android-compatible type, language, and free-text filters.
     private var filteredDocumentRows: [DocumentChooserRow] {
         Self.filteredRows(
             allSelectableModules,
+            epubs: EpubReader.installedEpubs(),
             selectedFilter: selectedFilter,
             selectedLanguage: selectedLanguage,
             searchText: searchText
@@ -177,6 +247,133 @@ struct BibleReaderModulePicker: View {
         androidDocumentChooserScreen
         .moduleBrowserModuleDetailsDialog(details: selectedModuleDetails) {
             selectedModuleDetails = nil
+        }
+        .sheet(isPresented: $showModuleBackupSelection) {
+            AndroidModuleBackupExportSheet(
+                modules: moduleBackupCandidates,
+                isExporting: isExportingModuleBackup,
+                onCancel: dismissModuleBackupSelection,
+                onExport: exportModuleBackup(moduleNames:)
+            )
+        }
+        .fileExporter(
+            isPresented: $showModuleBackupExporter,
+            document: moduleBackupDocument,
+            contentType: .zip,
+            defaultFilename: moduleBackupFileName,
+            onCompletion: handleModuleBackupExport
+        )
+        .fileImporter(
+            isPresented: $showInstallZipImporter,
+            allowedContentTypes: ExternalDocumentImportService.supportedContentTypes,
+            allowsMultipleSelection: false,
+            onCompletion: handleInstallZipSelection
+        )
+        .alert(
+            String(
+                localized: "android_module_backup_overwrite_title",
+                defaultValue: "Overwrite existing module files?"
+            ),
+            isPresented: Binding(
+                get: { pendingLocalModuleOverwrite != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingLocalModuleOverwrite = nil
+                    }
+                }
+            ),
+            presenting: pendingLocalModuleOverwrite
+        ) { confirmation in
+            Button(String(localized: "cancel"), role: .cancel) {
+                pendingLocalModuleOverwrite = nil
+            }
+            Button(String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) {
+                pendingLocalModuleOverwrite = nil
+                importExternalDocument(
+                    confirmation.request,
+                    overwritePolicy: .replaceExisting(
+                        confirmation.inspection.overwriteAuthorization
+                    )
+                )
+            }
+        } message: { confirmation in
+            Text(Self.localModuleOverwriteMessage(confirmation.inspection))
+        }
+        .alert(
+            String(localized: "install_zip", defaultValue: "Load Documents From Files"),
+            isPresented: Binding(
+                get: { externalDocumentImportMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        externalDocumentImportMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {
+                externalDocumentImportMessage = nil
+            }
+        } message: {
+            Text(externalDocumentImportMessage ?? "")
+        }
+        .alert(
+            pendingUnlockModule.map(Self.unlockPromptTitle(for:)) ?? "",
+            isPresented: Binding(
+                get: { pendingUnlockModule != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        clearUnlockPrompt()
+                    }
+                }
+            ),
+            presenting: pendingUnlockModule
+        ) { module in
+            TextField(
+                String(localized: "passphrase", defaultValue: "Passphrase"),
+                text: $unlockCipherKey
+            )
+            Button(String(localized: "unlock", defaultValue: "Unlock")) {
+                attemptUnlock(module)
+            }
+            .disabled(unlockCipherKey.isEmpty)
+            if !module.aboutMetadata.unlockInfo.isEmpty {
+                Button(String(localized: "show_unlock_info", defaultValue: "Module & unlock info")) {
+                    showUnlockInformation(for: module)
+                }
+            }
+            Button(String(localized: "cancel"), role: .cancel) {
+                clearUnlockPrompt()
+            }
+        } message: { _ in
+            Text(
+                unlockFailureMessage
+                    ?? String(localized: "enter_module_passphrase", defaultValue: "Enter the module passphrase.")
+            )
+        }
+        .alert(
+            String(localized: "error_occurred"),
+            isPresented: Binding(
+                get: { pendingGenericSwitchRetry != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingGenericSwitchRetry = nil
+                        genericSwitchFailureMessage = nil
+                    }
+                }
+            ),
+            presenting: pendingGenericSwitchRetry
+        ) { module in
+            Button(String(localized: "retry")) {
+                pendingGenericSwitchRetry = nil
+                genericSwitchFailureMessage = nil
+                selectUnlockedModule(module)
+            }
+            Button(String(localized: "cancel"), role: .cancel) {
+                pendingGenericSwitchRetry = nil
+                genericSwitchFailureMessage = nil
+            }
+        } message: { _ in
+            Text(genericSwitchFailureMessage ?? String(localized: "error_occurred"))
         }
         .alert(
             pendingRowActionConfirmation?.title ?? "",
@@ -224,6 +421,28 @@ struct BibleReaderModulePicker: View {
             }
         } message: {
             Text(rowActionErrorMessage ?? "")
+        }
+        .overlay(alignment: .bottom) {
+            if isImportingExternalDocument {
+                HStack(spacing: 12) {
+                    if let fraction = externalDocumentImportProgress?.fraction {
+                        ProgressView(value: fraction)
+                            .frame(maxWidth: 140)
+                    } else {
+                        ProgressView()
+                    }
+                    Text(String(localized: "installing", defaultValue: "Installing"))
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(DocumentChooserPalette.primaryText)
+                }
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .background(DocumentChooserPalette.menuSurface)
+                .overlay(alignment: .top) {
+                    Divider().background(DocumentChooserPalette.divider)
+                }
+                .accessibilityIdentifier("modulePickerInstallProgress")
+            }
         }
     }
 
@@ -339,8 +558,8 @@ struct BibleReaderModulePicker: View {
     /**
      Builds Android's chooser overflow menu.
 
-     Android exposes document-management actions from this app bar. iOS currently has a real
-     Downloads handoff from the chooser, so it is surfaced here instead of as a native toolbar item.
+     Android exposes Downloads, module backup, and local-file installation from this app bar. Each
+     route remains inside the chooser except the explicit Downloads handoff.
      */
     private var androidChooserOverflowMenu: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -350,6 +569,24 @@ struct BibleReaderModulePicker: View {
             ) {
                 showOverflowMenu = false
                 openDownloadsAfterDismiss()
+            }
+
+            androidOverflowMenuButton(
+                title: String(localized: "backup_modules", defaultValue: "Backup Documents"),
+                accessibilityIdentifier: "modulePickerBackupDocumentsButton"
+            ) {
+                guard !isExportingModuleBackup else { return }
+                showOverflowMenu = false
+                presentModuleBackupSelection()
+            }
+
+            androidOverflowMenuButton(
+                title: String(localized: "install_zip", defaultValue: "Load Documents From Files"),
+                accessibilityIdentifier: "modulePickerInstallZipButton"
+            ) {
+                guard !isImportingExternalDocument else { return }
+                showOverflowMenu = false
+                showInstallZipImporter = true
             }
         }
         .frame(width: 260, alignment: .leading)
@@ -601,9 +838,56 @@ struct BibleReaderModulePicker: View {
         switch row {
         case .module(let module):
             moduleRow(module)
+        case .epub(let epub):
+            epubRow(epub)
         case .pseudoDocument(let document):
             pseudoDocumentRow(document)
         }
+    }
+
+    /**
+     Builds one imported EPUB row as an Android `GENERAL_BOOK` document.
+
+     - Parameter epub: Installed adapter metadata.
+     - Returns: Tappable chooser row using stable EPUB initials as document identity.
+     - Side effects: Selecting the row activates its general-book adapter and opens its TOC.
+     - Failure modes: An EPUB that disappears between list construction and selection leaves the
+       current document unchanged because `switchEpub(identifier:)` fails closed.
+     */
+    private func epubRow(_ epub: EpubInfo) -> some View {
+        androidRowContainer(
+            accessibilityIdentifier: "modulePickerRow::\(epub.initials)",
+            leading: {
+                VStack(spacing: 5) {
+                    categoryIcon(for: .generalBook)
+                    Text(Self.displayName(for: epub.language))
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(DocumentChooserPalette.secondaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                .frame(width: 70)
+            },
+            center: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(epub.initials)
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundStyle(DocumentChooserPalette.primaryText)
+                        .lineLimit(1)
+                    Text(epub.author.isEmpty ? epub.title : "\(epub.title) - \(epub.author)")
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(DocumentChooserPalette.secondaryText)
+                        .lineLimit(2)
+                }
+            },
+            trailing: {
+                Spacer().frame(width: 48)
+            },
+            selection: {
+                controller.switchEpub(identifier: epub.identifier)
+                dismissAndPresentAuxiliaryBrowser(onOpenGeneralBookBrowser)
+            }
+        )
     }
 
     /**
@@ -613,7 +897,7 @@ struct BibleReaderModulePicker: View {
      - Returns: Tappable row that switches or opens the selected document.
      */
     private func moduleRow(_ module: ModuleInfo) -> some View {
-        let actions = Self.rowActions(for: module)
+        let actions = Self.rowActions(for: module, installedModules: allSelectableModules)
         return androidRowContainer(
             accessibilityIdentifier: "modulePickerRow::\(module.name)",
             leading: {
@@ -688,6 +972,16 @@ struct BibleReaderModulePicker: View {
                     Label(
                         String(localized: "delete_module_index", defaultValue: "Delete Index"),
                         systemImage: "magnifyingglass"
+                    )
+                }
+            }
+            if actions.contains(.unlock) {
+                Button {
+                    beginUnlock(module)
+                } label: {
+                    Label(
+                        String(localized: "unlock", defaultValue: "Unlock"),
+                        systemImage: "lock.open"
                     )
                 }
             }
@@ -912,10 +1206,29 @@ struct BibleReaderModulePicker: View {
      - opens the auxiliary browser for dictionary, general book, or map selections
 
      Failure modes:
+     - locked encrypted modules open the cipher-key prompt without changing reader state
      - add-on rows are intentionally non-selecting, matching Android's AND_BIBLE guard in
-       `ChooseDocument.handleDocumentSelection`.
+       `ChooseDocument.handleDocumentSelection`
      */
     private func select(_ module: ModuleInfo) {
+        if Self.requiresUnlock(module) {
+            beginUnlock(module)
+            return
+        }
+        selectUnlockedModule(module)
+    }
+
+    /**
+     Applies a category-specific reader transition after lock validation succeeds.
+
+     - Parameter module: Installed module already known to be selectable and unlocked.
+     - Side effects: Switches the pane document; exact generic keys dismiss without another chooser,
+       invalid/missing keys replace the picker with the matching key browser, and key validation or
+       enumeration failures keep the picker visible with Retry/Cancel actions.
+     - Failure modes: Add-ons and unsupported categories are ignored. Repeated SWORD failures retain
+       the selected module for retry without mutating the pane.
+     */
+    private func selectUnlockedModule(_ module: ModuleInfo) {
         guard let selectedDocumentCategory = Self.documentCategory(for: module.category) else {
             return
         }
@@ -925,18 +1238,138 @@ struct BibleReaderModulePicker: View {
             controller.switchCommentaryDocument(to: module.name)
             onDismiss()
         case .dictionary:
-            controller.switchDictionaryDocument(to: module.name)
-            dismissAndPresentAuxiliaryBrowser(onOpenDictionaryBrowser)
+            handleGenericModuleSwitch(
+                controller.switchDictionaryDocument(to: module.name),
+                module: module,
+                onOpenBrowser: onOpenDictionaryBrowser
+            )
         case .generalBook:
-            controller.switchGeneralBookDocument(to: module.name)
-            dismissAndPresentAuxiliaryBrowser(onOpenGeneralBookBrowser)
+            handleGenericModuleSwitch(
+                controller.switchGeneralBookDocument(to: module.name),
+                module: module,
+                onOpenBrowser: onOpenGeneralBookBrowser
+            )
         case .map:
-            controller.switchMapDocument(to: module.name)
-            dismissAndPresentAuxiliaryBrowser(onOpenMapBrowser)
+            handleGenericModuleSwitch(
+                controller.switchMapDocument(to: module.name),
+                module: module,
+                onOpenBrowser: onOpenMapBrowser
+            )
         default:
             controller.switchBibleDocument(to: module.name)
             onDismiss()
         }
+    }
+
+    /**
+     Routes one generic document switch according to Android's retain-or-choose contract.
+
+     - Parameters:
+       - outcome: Controller result after exact-key validation.
+       - module: Selected module retained only when a failed lookup needs retry.
+       - onOpenBrowser: Category-specific key chooser presentation callback.
+     - Side effects: Dismisses the picker immediately when content can render, replaces it with the
+       key browser only for an invalid/missing key, or keeps it open with a retry alert on read failure.
+     - Failure modes: Repeated SWORD validation/enumeration failures keep the same retryable alert and
+       never mutate the pane. A later transient browser failure uses the browser's retry state.
+     */
+    private func handleGenericModuleSwitch(
+        _ outcome: BibleReaderGenericModuleSwitchOutcome,
+        module: ModuleInfo,
+        onOpenBrowser: @escaping () -> Void
+    ) {
+        switch outcome {
+        case .switchedPreservingKey:
+            onDismiss()
+        case .switchedRequiringKeySelection:
+            dismissAndPresentAuxiliaryBrowser(onOpenBrowser)
+        case .failed(let message):
+            genericSwitchFailureMessage = message
+            pendingGenericSwitchRetry = module
+        }
+    }
+
+    /**
+     Starts Android's passphrase prompt for an encrypted locked module.
+
+     - Parameter module: Locked chooser row selected directly or through its context action.
+     - Side Effects: Clears stale key/error state and presents the module-scoped unlock alert.
+     - Failure Modes: Already-unlocked and unencrypted modules bypass the prompt and select normally.
+     */
+    private func beginUnlock(_ module: ModuleInfo) {
+        guard Self.requiresUnlock(module) else {
+            selectUnlockedModule(module)
+            return
+        }
+        unlockCipherKey = ""
+        unlockFailureMessage = nil
+        pendingUnlockModule = module
+    }
+
+    /**
+     Applies the entered cipher key through `SwordManager` and verifies refreshed metadata.
+
+     - Parameter module: Locked module associated with the visible prompt.
+     - Side Effects: Updates SWORD cipher configuration, refreshes controller module caches, selects
+       the document on success, or reopens the passphrase prompt with retry feedback on failure.
+     - Failure Modes: Missing managers, empty/rejected keys, and modules that remain locked all use
+       the same retry path without dismissing the chooser.
+     */
+    private func attemptUnlock(_ module: ModuleInfo) {
+        let cipherKey = unlockCipherKey
+        if ModuleUnlockActionCoordinator.submit(
+            module: module,
+            cipherKey: cipherKey,
+            unlockModule: { moduleName, submittedKey in
+                controller.swordManager?.unlockModule(
+                    named: moduleName,
+                    withCipherKey: submittedKey
+                ) ?? false
+            },
+            onAccepted: {
+                clearUnlockPrompt()
+                controller.refreshInstalledModules()
+                selectUnlockedModule(module)
+            }
+        ) {
+            return
+        }
+
+        pendingUnlockModule = nil
+        unlockCipherKey = ""
+        let failureMessage = ModuleUnlockActionCoordinator.failureMessage
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + ModuleUnlockActionCoordinator.retryPresentationDelay
+        ) {
+            unlockFailureMessage = failureMessage
+            pendingUnlockModule = module
+        }
+    }
+
+    /**
+     Opens the existing module details dialog at Android's unlock-information action.
+
+     - Parameter module: Locked module whose provider instructions should be shown.
+     - Side Effects: Dismisses the passphrase prompt and presents module About metadata.
+     - Failure Modes: Modules without unlock information do not expose this action.
+     */
+    private func showUnlockInformation(for module: ModuleInfo) {
+        clearUnlockPrompt()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            selectedModuleDetails = moduleDetails(for: module)
+        }
+    }
+
+    /**
+     Clears all transient cipher-key prompt state.
+
+     - Side Effects: Dismisses the unlock alert and removes the entered key/failure message.
+     - Failure Modes: None.
+     */
+    private func clearUnlockPrompt() {
+        pendingUnlockModule = nil
+        unlockCipherKey = ""
+        unlockFailureMessage = nil
     }
 
     /**
@@ -1041,18 +1474,28 @@ struct BibleReaderModulePicker: View {
 
      - Parameter name: Module initials to remove from local storage.
      Side effects:
+     - deletes the module's generated Search index before repository file removal, matching Android
      - deletes module files off the main actor
      - `ModuleRepository` posts the module-store notification used by reader controllers to refresh
      - records failures for a user-visible alert
      */
     private func uninstallInstalledModule(_ name: String) {
         let repository = repository
+        let searchIndexService = searchIndexService
 
         Task {
             do {
-                try await Task.detached(priority: .userInitiated) {
-                    try repository.uninstallModule(named: name)
-                }.value
+                try await ModuleSearchIndexUninstaller.uninstall(
+                    moduleName: name,
+                    deleteSearchIndex: { moduleName in
+                        await searchIndexService.deleteIndex(for: moduleName)
+                    },
+                    removeModule: { moduleName in
+                        try await Task.detached(priority: .userInitiated) {
+                            try repository.uninstallModule(named: moduleName)
+                        }.value
+                    }
+                )
             } catch {
                 await MainActor.run {
                     rowActionErrorMessage = error.localizedDescription
@@ -1075,13 +1518,268 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
+     Presents Android's installed-document backup selection in language-first order.
+
+     - Side Effects: Reads current manager inventory, stores a stable candidate snapshot, and opens
+       the selected-by-default module sheet.
+     - Failure Modes: Missing or empty inventory surfaces a user-visible no-modules error.
+     */
+    private func presentModuleBackupSelection() {
+        guard let modules = controller.swordManager?.installedModules(), !modules.isEmpty else {
+            rowActionErrorMessage = String(
+                localized: "android_module_backup_no_modules",
+                defaultValue: "No installed documents can be backed up."
+            )
+            return
+        }
+        moduleBackupCandidates = Self.sortedBackupModules(modules)
+        showModuleBackupSelection = true
+    }
+
+    /**
+     Dismisses module-backup selection without writing an archive.
+
+     - Side Effects: Clears the candidate snapshot and active export state.
+     - Failure Modes: None.
+     */
+    private func dismissModuleBackupSelection() {
+        showModuleBackupSelection = false
+        moduleBackupCandidates = []
+        isExportingModuleBackup = false
+    }
+
+    /**
+     Generates Android's `.abmd.zip` archive for selected installed documents.
+
+     - Parameter moduleNames: Module initials selected in display order.
+     - Side Effects: Reads module files off the main actor, dismisses selection, and presents the
+       document exporter with Android's filename.
+     - Failure Modes: Empty selections and archive errors leave the chooser open and surface an
+       actionable error.
+     */
+    private func exportModuleBackup(moduleNames: [String]) {
+        guard !moduleNames.isEmpty else {
+            rowActionErrorMessage = String(
+                localized: "android_module_backup_no_modules",
+                defaultValue: "No installed documents can be backed up."
+            )
+            return
+        }
+        isExportingModuleBackup = true
+        let selectedModuleNames = Set(moduleNames)
+
+        Task { @MainActor in
+            await Task.yield()
+            do {
+                let export = try await Task.detached(priority: .userInitiated) {
+                    try AndroidModuleBackupService().exportArchiveFile(moduleNames: selectedModuleNames)
+                }.value
+                isExportingModuleBackup = false
+                showModuleBackupSelection = false
+                moduleBackupCandidates = []
+                if let moduleBackupTemporaryFileURL {
+                    try? FileManager.default.removeItem(at: moduleBackupTemporaryFileURL)
+                }
+                moduleBackupTemporaryFileURL = export.fileURL
+                moduleBackupDocument = BackupExportDocument(fileURL: export.fileURL)
+                moduleBackupFileName = export.fileName
+                await Task.yield()
+                showModuleBackupExporter = true
+            } catch {
+                isExportingModuleBackup = false
+                showModuleBackupSelection = false
+                moduleBackupCandidates = []
+                rowActionErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    /**
+     Handles completion of Android module-backup destination selection.
+
+     - Parameter result: Exported destination URL or exporter error.
+     - Side Effects: Surfaces success/failure feedback and resets the generated document payload.
+     - Failure Modes: User cancellation is treated as a no-op.
+     */
+    private func handleModuleBackupExport(_ result: Result<URL, Error>) {
+        defer {
+            if let moduleBackupTemporaryFileURL {
+                try? FileManager.default.removeItem(at: moduleBackupTemporaryFileURL)
+            }
+            moduleBackupTemporaryFileURL = nil
+            moduleBackupDocument = BackupExportDocument()
+            moduleBackupFileName = AndroidModuleBackupService.moduleBackupFileName
+        }
+        switch result {
+        case .success:
+            externalDocumentImportMessage = String(
+                localized: "android_module_backup_export_success",
+                defaultValue: "Module backup exported successfully."
+            )
+        case .failure(let error):
+            guard !Self.isFileImporterCancellation(error) else { return }
+            rowActionErrorMessage = error.localizedDescription
+        }
+    }
+
+    /**
+     Handles Android's Load Documents From Files picker result.
+
+     - Parameter result: File importer URLs or provider error.
+     - Side Effects: Builds a metadata-preserving request and starts read-only import preflight.
+     - Failure Modes: Cancellation is ignored; provider errors become chooser feedback.
+     */
+    private func handleInstallZipSelection(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            let request = ExternalDocumentImportRequest(
+                url: url,
+                contentTypeIdentifier: try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.identifier,
+                suggestedFileName: url.lastPathComponent
+            )
+            preflightExternalDocumentImport(request)
+        case .failure(let error):
+            guard !Self.isFileImporterCancellation(error) else { return }
+            externalDocumentImportMessage = error.localizedDescription
+        }
+    }
+
+    /**
+     Inspects a selected archive before any local SWORD destination is overwritten.
+
+     - Parameter request: Selected document URL and provider metadata.
+     - Side Effects: Runs inspection off the main actor, then starts import, presents exact overwrite
+       conflicts, or reports validation failure.
+     - Failure Modes: Failed preflight never runs installer writes.
+     */
+    private func preflightExternalDocumentImport(_ request: ExternalDocumentImportRequest) {
+        isImportingExternalDocument = true
+        externalDocumentImportProgress = ModuleInstallProgress(phase: .queued)
+        let service = ExternalDocumentImportService()
+        Task { @MainActor in
+            let preflight = await Task.detached(priority: .userInitiated) {
+                service.preflightDocument(request)
+            }.value
+            switch preflight {
+            case .ready:
+                importExternalDocument(request, overwritePolicy: .reject)
+            case .moduleOverwriteRequired(let inspection):
+                isImportingExternalDocument = false
+                externalDocumentImportProgress = nil
+                pendingLocalModuleOverwrite = DocumentPickerLocalOverwriteConfirmation(
+                    request: request,
+                    inspection: inspection
+                )
+            case .failed(let message):
+                isImportingExternalDocument = false
+                externalDocumentImportProgress = nil
+                externalDocumentImportMessage = ExternalDocumentImportResult.failed(
+                    message: message
+                ).feedbackMessage
+            }
+        }
+    }
+
+    /**
+     Installs one preflighted external document with explicit overwrite authorization.
+
+     - Parameters:
+       - request: Selected ZIP, EPUB, font, or Android module-backup request.
+       - overwritePolicy: Conflict policy, with replacement used only after explicit consent.
+     - Side Effects: Runs installer I/O off the main actor, publishes progress, refreshes controller
+       module inventory, and surfaces structured feedback without dismissing the chooser.
+     - Failure Modes: Installer failures are returned as user-visible feedback and preserve retry.
+     */
+    private func importExternalDocument(
+        _ request: ExternalDocumentImportRequest,
+        overwritePolicy: LocalSwordZipOverwritePolicy
+    ) {
+        isImportingExternalDocument = true
+        externalDocumentImportProgress = ModuleInstallProgress(phase: .queued)
+        let service = ExternalDocumentImportService()
+        Task { @MainActor in
+            await Task.yield()
+            let importResult = await Task.detached(priority: .userInitiated) {
+                service.importDocument(
+                    request,
+                    moduleOverwritePolicy: overwritePolicy,
+                    progressState: { progress in
+                        Task { @MainActor in
+                            externalDocumentImportProgress = progress
+                        }
+                    }
+                )
+            }.value
+            isImportingExternalDocument = false
+            externalDocumentImportProgress = nil
+            externalDocumentImportMessage = importResult.feedbackMessage
+            controller.refreshInstalledModules()
+        }
+    }
+
+    /**
+     Builds Android-style overwrite disclosure from exact conflicting local paths.
+
+     - Parameter inspection: Validated local SWORD ZIP inspection.
+     - Returns: Prompt text naming modules and every destination that replacement will modify.
+     - Side Effects: None.
+     - Failure Modes: Empty module names use a generic module label.
+     */
+    static func localModuleOverwriteMessage(_ inspection: LocalSwordZipInspection) -> String {
+        let modules = inspection.moduleNames.isEmpty
+            ? String(localized: "install_zip_module", defaultValue: "Bible module")
+            : inspection.moduleNames.joined(separator: ", ")
+        return "\(modules)\n\n" + inspection.conflictingPaths.joined(separator: "\n")
+    }
+
+    /**
+     Detects the Cocoa error emitted when the user cancels a file importer/exporter.
+
+     - Parameter error: SwiftUI document-picker error.
+     - Returns: `true` for the standard user-cancelled code.
+     - Side Effects: None.
+     - Failure Modes: None.
+     */
+    static func isFileImporterCancellation(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain
+            && nsError.code == CocoaError.userCancelled.rawValue
+    }
+
+    /**
+     Sorts backup candidates using Android's language, description, and initials order.
+
+     - Parameter modules: Installed non-pseudo module inventory.
+     - Returns: Stable module order used by the backup selection sheet.
+     - Side Effects: None.
+     - Failure Modes: None.
+     */
+    static func sortedBackupModules(_ modules: [ModuleInfo]) -> [ModuleInfo] {
+        modules.sorted { lhs, rhs in
+            let languageOrder = lhs.language.localizedCaseInsensitiveCompare(rhs.language)
+            if languageOrder != .orderedSame {
+                return languageOrder == .orderedAscending
+            }
+            let descriptionOrder = lhs.description.localizedCaseInsensitiveCompare(rhs.description)
+            if descriptionOrder != .orderedSame {
+                return descriptionOrder == .orderedAscending
+            }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    /**
      Builds all Android chooser rows from installed modules and visible pseudo-documents.
 
-     - Parameter modules: Installed module snapshots.
-     - Returns: Installed module rows plus My Notes, StudyPads, and Compare pseudo-document rows.
+     - Parameters:
+       - modules: Installed SWORD module snapshots.
+       - epubs: Installed EPUB general-book adapters.
+     - Returns: Installed module/EPUB rows plus My Notes, StudyPads, and Compare pseudo-document rows.
      */
-    static func allRows(from modules: [ModuleInfo]) -> [DocumentChooserRow] {
+    static func allRows(from modules: [ModuleInfo], epubs: [EpubInfo] = []) -> [DocumentChooserRow] {
         modules.map(DocumentChooserRow.module) +
+            epubs.map(DocumentChooserRow.epub) +
             visibleAndroidPseudoDocuments.map(DocumentChooserRow.pseudoDocument)
     }
 
@@ -1089,7 +1787,8 @@ struct BibleReaderModulePicker: View {
      Filters and sorts chooser rows using Android `DocumentSelectionBase` semantics.
 
      - Parameters:
-       - modules: Complete installed-module set.
+       - modules: Complete installed SWORD-module set.
+       - epubs: Installed EPUB general-book adapters.
        - selectedFilter: Android document-type filter.
        - selectedLanguage: ISO language filter, or empty for all languages.
        - searchText: Free-text search over initials, description, category, and language.
@@ -1097,12 +1796,13 @@ struct BibleReaderModulePicker: View {
      */
     static func filteredRows(
         _ modules: [ModuleInfo],
+        epubs: [EpubInfo] = [],
         selectedFilter: DocumentTypeFilter,
         selectedLanguage: String,
         searchText: String
     ) -> [DocumentChooserRow] {
         let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return allRows(from: modules).filter { row in
+        return allRows(from: modules, epubs: epubs).filter { row in
             rowMatchesFilter(row, selectedFilter: selectedFilter) &&
             rowMatchesLanguage(row, selectedLanguage: selectedLanguage) &&
             rowMatchesSearch(row, searchText: trimmedSearch)
@@ -1241,17 +1941,46 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Computes Android contextual document actions for an installed chooser row.
+     Determines whether selecting an installed module must first request a cipher key.
 
      - Parameter module: Installed module metadata.
-     - Returns: Ordered Android row actions. Unlock remains hidden until iOS has a real cipher-key
-       coordinator, matching the Downloads planner contract.
+     - Returns: `true` only for encrypted modules not currently reported as unlocked.
+     - Side Effects: None.
+     - Failure Modes: None.
      */
-    static func rowActions(for module: ModuleInfo) -> [ModuleDownloadRowAction] {
+    static func requiresUnlock(_ module: ModuleInfo) -> Bool {
+        module.isEncrypted && !module.isUnlocked
+    }
+
+    /**
+     Builds Android's module-scoped passphrase prompt title.
+
+     - Parameter module: Locked module being unlocked.
+     - Returns: Localized title containing the module initials.
+     - Side Effects: None.
+     - Failure Modes: Missing localization uses the supplied English format string.
+     */
+    static func unlockPromptTitle(for module: ModuleInfo) -> String {
+        ModuleUnlockActionCoordinator.promptTitle(for: module)
+    }
+
+    /**
+     Computes Android contextual document actions for an installed chooser row.
+
+     - Parameters:
+       - module: Installed module metadata.
+       - installedModules: Complete Android-compatible installed inventory used to protect the last
+         Bible from removal.
+     - Returns: Ordered Android row actions, including unlock for encrypted installed modules.
+     */
+    static func rowActions(
+        for module: ModuleInfo,
+        installedModules: [ModuleInfo]
+    ) -> [ModuleDownloadRowAction] {
         ModuleDownloadRowActionPlanner.availableActions(
             installedModule: module,
             isBeingInstalled: false,
-            supportsUnlock: false
+            installedModules: installedModules
         )
     }
 
@@ -1476,6 +2205,9 @@ struct BibleReaderModulePicker: View {
         /// Installed local module row.
         case module(ModuleInfo)
 
+        /// Imported EPUB exposed through Android's general-book contract.
+        case epub(EpubInfo)
+
         /// Android visible pseudo-document row.
         case pseudoDocument(AndroidPseudoDocument)
 
@@ -1484,6 +2216,8 @@ struct BibleReaderModulePicker: View {
             switch self {
             case .module(let module):
                 return "module:\(module.name)"
+            case .epub(let epub):
+                return "epub:\(epub.initials)"
             case .pseudoDocument(let document):
                 return "pseudo:\(document.rawValue)"
             }
@@ -1494,6 +2228,8 @@ struct BibleReaderModulePicker: View {
             switch self {
             case .module(let module):
                 return BibleReaderModulePicker.documentCategory(for: module.category)
+            case .epub:
+                return .generalBook
             case .pseudoDocument(let document):
                 return document.category
             }
@@ -1504,6 +2240,8 @@ struct BibleReaderModulePicker: View {
             switch self {
             case .module(let module):
                 return module.language
+            case .epub(let epub):
+                return epub.language
             case .pseudoDocument(let document):
                 return document.language
             }
@@ -1517,6 +2255,7 @@ struct BibleReaderModulePicker: View {
 
         /// Whether Android would rank the row as a real installed SWORD document before fake rows.
         var isRealInstalledDocument: Bool {
+            if case .epub = self { return true }
             guard case .module(let module) = self else { return false }
             return BibleReaderModulePicker.documentCategory(for: module.category) != nil || module.category == .addon
         }
@@ -1526,6 +2265,8 @@ struct BibleReaderModulePicker: View {
             switch self {
             case .module(let module):
                 return module.name
+            case .epub(let epub):
+                return epub.initials
             case .pseudoDocument(let document):
                 return document.title
             }
@@ -1541,6 +2282,15 @@ struct BibleReaderModulePicker: View {
                     module.language,
                     BibleReaderModulePicker.displayName(for: module.language),
                     BibleReaderModulePicker.moduleCategoryTitle(for: module.category)
+                ]
+            case .epub(let epub):
+                return [
+                    epub.initials,
+                    epub.title,
+                    epub.author,
+                    epub.language,
+                    BibleReaderModulePicker.displayName(for: epub.language),
+                    BibleReaderModulePicker.categoryFilterTitle(for: .generalBook)
                 ]
             case .pseudoDocument(let document):
                 return [

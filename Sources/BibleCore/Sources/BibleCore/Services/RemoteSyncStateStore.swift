@@ -38,14 +38,7 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
 
     /// Highest Android SQLite schema version iOS can currently read and write for this category.
     public var currentSchemaVersion: Int {
-        switch self {
-        case .myDocuments:
-            RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
-        case .progress:
-            9
-        case .bookmarks, .workspaces, .readingPlans:
-            1
-        }
+        RemoteSyncAndroidDatabaseContract.schemaVersion(for: self)
     }
 
     /**
@@ -64,7 +57,29 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
 }
 
 /**
- Persisted bootstrap identifiers for one remote sync category.
+ Persisted lifecycle phase for one remote sync category's initial baseline exchange.
+
+ A category is not ready for incremental patch synchronization until its initial remote backup has
+ either been restored locally or its local baseline has been uploaded. Unknown persisted values are
+ retained as unsupported so a newer lifecycle state can never be mistaken for `ready` by an older
+ build.
+ */
+public enum RemoteSyncBootstrapPhase: Sendable, Equatable {
+    /// Initial baseline exchange completed; incremental patch synchronization may proceed.
+    case ready
+
+    /// Remote folder setup completed, but its initial backup still needs to be restored locally.
+    case awaitingRemoteInitialRestore
+
+    /// Remote folder setup completed, but the current local baseline still needs to be uploaded.
+    case awaitingLocalInitialUpload
+
+    /// A newer build persisted a phase this build does not understand; synchronization must fail closed.
+    case unsupported(String)
+}
+
+/**
+ Persisted bootstrap identifiers and lifecycle phase for one remote sync category.
 
  These values correspond to Android's per-database `SyncConfiguration` entries that identify the
  chosen global sync folder, the device-specific patch folder, and the NextCloud secret marker file
@@ -80,6 +95,9 @@ public struct RemoteSyncBootstrapState: Sendable, Equatable {
     /// NextCloud secret marker filename used to prove sync-folder ownership.
     public var secretFileName: String?
 
+    /// Initial-baseline lifecycle phase that determines whether incremental sync may begin.
+    public var phase: RemoteSyncBootstrapPhase
+
     /**
      Creates one category bootstrap state payload.
 
@@ -87,17 +105,20 @@ public struct RemoteSyncBootstrapState: Sendable, Equatable {
        - syncFolderID: Remote identifier for the category's global sync folder.
        - deviceFolderID: Remote identifier for the current device's patch folder.
        - secretFileName: NextCloud secret marker filename used to prove sync-folder ownership.
+       - phase: Initial-baseline lifecycle phase; absent legacy state defaults to ready.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
     public init(
         syncFolderID: String? = nil,
         deviceFolderID: String? = nil,
-        secretFileName: String? = nil
+        secretFileName: String? = nil,
+        phase: RemoteSyncBootstrapPhase = .ready
     ) {
         self.syncFolderID = syncFolderID
         self.deviceFolderID = deviceFolderID
         self.secretFileName = secretFileName
+        self.phase = phase
     }
 }
 
@@ -156,8 +177,8 @@ public struct RemoteSyncProgressState: Sendable, Equatable {
  - clear operations remove only the scoped category keys they manage
 
  Failure modes:
- - underlying `SettingsStore` writes swallow save errors, so callers should treat this store as
-   best-effort persistence and surface user-visible sync errors elsewhere
+ - ordinary setters preserve the existing best-effort `SettingsStore` behavior
+ - `setBootstrapStateAtomically` surfaces strict fetch, cancellation, and commit failures after rollback
  */
 public final class RemoteSyncStateStore {
     private let settingsStore: SettingsStore
@@ -167,6 +188,8 @@ public final class RemoteSyncStateStore {
         static let syncFolderID = "syncId"
         static let deviceFolderID = "deviceFolderId"
         static let secretFileName = "nextCloudSecretFile"
+        static let bootstrapPhase = "bootstrapPhase"
+        static let pendingPublicationReset = "pendingPublicationReset"
         static let lastPatchWritten = "lastPatchWritten"
         static let lastSynchronized = "lastSynchronized"
         static let disabledForVersion = "disabledForVersion"
@@ -187,15 +210,16 @@ public final class RemoteSyncStateStore {
      Reads the persisted bootstrap identifiers for one category.
 
      - Parameter category: Logical sync category whose bootstrap state should be read.
-     - Returns: Persisted folder and marker identifiers, or `nil` values when a field has not been stored yet.
+     - Returns: Persisted identifiers and lifecycle phase. Missing legacy phase data maps to `.ready`.
      - Side effects: none.
-     - Failure modes: Missing or malformed values are returned as `nil` fields.
+     - Failure modes: Missing identifiers return as `nil`; unknown phase data is retained as `.unsupported`.
      */
     public func bootstrapState(for category: RemoteSyncCategory) -> RemoteSyncBootstrapState {
         RemoteSyncBootstrapState(
             syncFolderID: getNonEmptyString(Keys.syncFolderID, category: category),
             deviceFolderID: getNonEmptyString(Keys.deviceFolderID, category: category),
-            secretFileName: getNonEmptyString(Keys.secretFileName, category: category)
+            secretFileName: getNonEmptyString(Keys.secretFileName, category: category),
+            phase: bootstrapPhase(for: category)
         )
     }
 
@@ -214,6 +238,79 @@ public final class RemoteSyncStateStore {
         setOptionalString(state.syncFolderID, for: Keys.syncFolderID, category: category)
         setOptionalString(state.deviceFolderID, for: Keys.deviceFolderID, category: category)
         setOptionalString(state.secretFileName, for: Keys.secretFileName, category: category)
+        setOptionalString(serializedBootstrapPhase(state.phase), for: Keys.bootstrapPhase, category: category)
+    }
+
+    /**
+     Persists one bootstrap state as a single durable settings transaction.
+
+     - Parameters:
+       - state: Folder identifiers and initial-baseline phase to persist together.
+       - category: Logical sync category being updated.
+     - Side Effects: Defers the individual setting upserts and commits them through one atomic batch.
+     - Throws: Rethrows strict fetch, cancellation, mutation, or commit failures after rollback.
+     */
+    public func setBootstrapStateAtomically(
+        _ state: RemoteSyncBootstrapState,
+        for category: RemoteSyncCategory
+    ) throws {
+        try settingsStore.performAtomicBatch {
+            setBootstrapState(state, for: category)
+        }
+    }
+
+    /**
+     Persists bootstrap state for a newly selected destination and resets generation-scoped gates.
+
+     Remote setup has already succeeded when this method is called. The cleanup marker is committed
+     with the new identifiers so a restart cannot begin initial restore/upload while an outbox for the
+     former destination remains authoritative. Cursor and compatibility values belong to that same
+     former generation, so clearing them in this transaction forces an unfiltered first discovery
+     and permits the current local schema to re-evaluate remote compatibility.
+
+     - Parameters:
+       - state: New destination identifiers and lifecycle phase.
+       - category: Logical category whose destination changed.
+     - Side Effects: Atomically replaces bootstrap state, clears patch/cursor/version gates, and
+       records pending-publication cleanup.
+     - Throws: Rethrows strict fetch, cancellation, mutation, or commit failures after rollback.
+     */
+    func setBootstrapStateForNewDestinationAtomically(
+        _ state: RemoteSyncBootstrapState,
+        for category: RemoteSyncCategory
+    ) throws {
+        try settingsStore.performAtomicBatch {
+            setBootstrapState(state, for: category)
+            setOptionalInt64(nil, for: Keys.lastPatchWritten, category: category)
+            setOptionalInt64(nil, for: Keys.lastSynchronized, category: category)
+            setOptionalInt(nil, for: Keys.disabledForVersion, category: category)
+            setOptionalString("true", for: Keys.pendingPublicationReset, category: category)
+        }
+    }
+
+    /**
+     Reports whether stale publications must be abandoned before using the persisted destination.
+
+     - Parameter category: Logical category whose replacement boundary is being resumed.
+     - Returns: `true` for the persisted marker and for any unknown nonempty token; otherwise `false`.
+     - Side Effects: Reads one local setting.
+     - Failure modes: Settings fetch failures retain `SettingsStore` behavior; unknown values fail closed.
+     */
+    func requiresPendingPublicationReset(for category: RemoteSyncCategory) -> Bool {
+        getNonEmptyString(Keys.pendingPublicationReset, category: category) != nil
+    }
+
+    /**
+     Marks explicit destination-replacement cleanup complete after all outbox files are abandoned.
+
+     - Parameter category: Logical category whose cleanup completed.
+     - Side Effects: Atomically removes the durable cleanup marker.
+     - Throws: Rethrows strict fetch, cancellation, mutation, or commit failures after rollback.
+     */
+    func markPendingPublicationResetComplete(for category: RemoteSyncCategory) throws {
+        try settingsStore.performAtomicBatch {
+            setOptionalString(nil, for: Keys.pendingPublicationReset, category: category)
+        }
     }
 
     /**
@@ -263,6 +360,8 @@ public final class RemoteSyncStateStore {
             Keys.syncFolderID,
             Keys.deviceFolderID,
             Keys.secretFileName,
+            Keys.bootstrapPhase,
+            Keys.pendingPublicationReset,
             Keys.lastPatchWritten,
             Keys.lastSynchronized,
             Keys.disabledForVersion,
@@ -292,6 +391,52 @@ public final class RemoteSyncStateStore {
             return nil
         }
         return value
+    }
+
+    /**
+     Decodes the persisted initial-baseline phase without treating unknown future values as ready.
+
+     - Parameter category: Logical sync category whose phase should be decoded.
+     - Returns: Legacy absent values as `.ready`, known values as their phase, and unknown values as
+       `.unsupported` with the original payload retained.
+     - Side Effects: none.
+     - Failure modes: This helper does not throw; malformed values fail closed as unsupported.
+     */
+    private func bootstrapPhase(for category: RemoteSyncCategory) -> RemoteSyncBootstrapPhase {
+        guard let value = getNonEmptyString(Keys.bootstrapPhase, category: category) else {
+            return .ready
+        }
+        switch value {
+        case "ready":
+            return .ready
+        case "awaitingRemoteInitialRestore":
+            return .awaitingRemoteInitialRestore
+        case "awaitingLocalInitialUpload":
+            return .awaitingLocalInitialUpload
+        default:
+            return .unsupported(value)
+        }
+    }
+
+    /**
+     Encodes one initial-baseline phase for durable settings storage.
+
+     - Parameter phase: Lifecycle phase to encode.
+     - Returns: Stable persisted token, preserving unsupported payloads byte-for-byte.
+     - Side Effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func serializedBootstrapPhase(_ phase: RemoteSyncBootstrapPhase) -> String {
+        switch phase {
+        case .ready:
+            return "ready"
+        case .awaitingRemoteInitialRestore:
+            return "awaitingRemoteInitialRestore"
+        case .awaitingLocalInitialUpload:
+            return "awaitingLocalInitialUpload"
+        case .unsupported(let value):
+            return value
+        }
     }
 
     private func setOptionalString(_ value: String?, for key: String, category: RemoteSyncCategory) {

@@ -22,7 +22,7 @@ import BibleCore
  Determinism: pure value derivation with no persistence or asynchronous work.
  */
 enum ReaderWorkspaceChromeColor {
-    static func resolved(activeWindow: Window?, activeWorkspace: Workspace?) -> Int {
+    static func resolved(activeWindow: BibleCore.Window?, activeWorkspace: Workspace?) -> Int {
         activeWindow?.workspace?.workspaceColor
             ?? activeWorkspace?.workspaceColor
             ?? Workspace.defaultWorkspaceColor

@@ -2,6 +2,18 @@
 
 import Foundation
 
+/** Fail-visible decoding errors for persisted local Progress snapshots. */
+enum ProgressPersistenceSnapshotError: Error, Equatable {
+    /// Present reading-progress JSON is malformed or contains unsupported semantic values.
+    case invalidReadingProgress
+
+    /// Present memorization-progress JSON is malformed.
+    case invalidMemorizationProgress
+
+    /// A new Android reading cycle cannot be represented by Swift's integer domain.
+    case readingCycleExhausted
+}
+
 public enum ReadingProgressSource: String, Codable, Equatable, Hashable, Sendable {
     case manual = "MANUAL"
     case autoScroll = "AUTO_SCROLL"
@@ -12,9 +24,16 @@ public enum ReadingProgressSource: String, Codable, Equatable, Hashable, Sendabl
     }
 }
 
-public struct ReadingProgressHistoryRow: Codable, Equatable, Hashable {
+/** One Android-compatible `ChapterReadHistory` row. */
+public struct ReadingProgressHistoryRow: Codable, Equatable, Hashable, Sendable {
     public let id: UUID
     public let bookInitials: String
+    /**
+     Legacy source-domain field retained only for source compatibility.
+
+     Android does not persist this value. New and decoded rows always expose zero, and encoding
+     intentionally omits it so source ordinals cannot be mistaken for KJVA provenance.
+     */
     public let startOrdinal: Int
     public let kjvBookOrdinal: Int
     public let chapter: Int
@@ -22,6 +41,21 @@ public struct ReadingProgressHistoryRow: Codable, Equatable, Hashable {
     public let readAt: Int64
     public let source: ReadingProgressSource
 
+    /**
+     Creates a history row through the legacy source-compatible initializer.
+
+     - Parameters:
+       - id: Stable Android-compatible row identifier.
+       - bookInitials: Source module initials; Android permits an empty string.
+       - startOrdinal: Ignored legacy iOS source ordinal.
+       - kjvBookOrdinal: Android JSword KJV `BibleBook.ordinal`.
+       - chapter: One-based source chapter retained by Android.
+       - cycle: Positive reading cycle.
+       - readAt: Unix epoch milliseconds.
+       - source: Android reading source.
+     - Side effects: none.
+     - Failure modes: Validation occurs at `ReadingProgressStore` persistence boundaries.
+     */
     public init(
         id: UUID = UUID(),
         bookInitials: String,
@@ -34,12 +68,78 @@ public struct ReadingProgressHistoryRow: Codable, Equatable, Hashable {
     ) {
         self.id = id
         self.bookInitials = bookInitials
-        self.startOrdinal = startOrdinal
+        self.startOrdinal = 0
         self.kjvBookOrdinal = kjvBookOrdinal
         self.chapter = chapter
         self.cycle = cycle
         self.readAt = readAt
         self.source = source
+    }
+
+    /**
+     Creates a validated Android chapter-history row.
+
+     - Parameters:
+       - id: Stable Android-compatible row identifier.
+       - bookInitials: Source module initials; Android permits an empty string.
+       - identity: Validated KJVA book/chapter identity.
+       - cycle: Positive reading cycle.
+       - readAt: Unix epoch milliseconds.
+       - source: Android reading source.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail after identity validation.
+     */
+    public init(
+        id: UUID = UUID(),
+        bookInitials: String,
+        identity: ReadingProgressKJVAIdentity,
+        cycle: Int,
+        readAt: Int64,
+        source: ReadingProgressSource
+    ) {
+        self.id = id
+        self.bookInitials = bookInitials
+        startOrdinal = 0
+        kjvBookOrdinal = identity.kjvBookOrdinal
+        chapter = identity.chapter
+        self.cycle = cycle
+        self.readAt = readAt
+        self.source = source
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case bookInitials
+        case kjvBookOrdinal
+        case chapter
+        case cycle
+        case readAt
+        case source
+    }
+
+    /** Decodes Android fields while ignoring pre-parity iOS `startOrdinal` data. */
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        bookInitials = try container.decodeIfPresent(String.self, forKey: .bookInitials) ?? ""
+        startOrdinal = 0
+        kjvBookOrdinal = try container.decode(Int.self, forKey: .kjvBookOrdinal)
+        chapter = try container.decode(Int.self, forKey: .chapter)
+        cycle = try container.decodeIfPresent(Int.self, forKey: .cycle) ?? 1
+        readAt = try container.decode(Int64.self, forKey: .readAt)
+        source = try container.decodeIfPresent(ReadingProgressSource.self, forKey: .source) ?? .manual
+    }
+
+    /** Encodes only Android `ChapterReadHistory` fields. */
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(bookInitials, forKey: .bookInitials)
+        try container.encode(kjvBookOrdinal, forKey: .kjvBookOrdinal)
+        try container.encode(chapter, forKey: .chapter)
+        try container.encode(cycle, forKey: .cycle)
+        try container.encode(readAt, forKey: .readAt)
+        try container.encode(source, forKey: .source)
     }
 }
 
@@ -212,8 +312,71 @@ public final class ReadingProgressStore {
         return Self.normalized(snapshot)
     }
 
+    /**
+     Decodes local reading progress without converting corrupt persistence into an empty snapshot.
+
+     Missing persistence retains the normal default meaning. Present JSON must decode exactly, use a
+     supported Android visibility, and contain no negative cycle before any sync or restore mutation.
+
+     - Returns: The decoded local snapshot without lossy semantic normalization.
+     - Side effects: Reads one settings value.
+     - Throws: `ProgressPersistenceSnapshotError.invalidReadingProgress` for malformed JSON,
+       unsupported visibility, or negative history/settings cycles.
+     */
+    func strictSnapshot() throws -> ReadingProgressSnapshot {
+        guard let rawValue = settingsStore.getString(Self.settingsKey) else {
+            return ReadingProgressSnapshot()
+        }
+        guard let data = rawValue.data(using: .utf8),
+              let snapshot = try? decoder.decode(ReadingProgressSnapshot.self, from: data),
+              snapshot.settings.activeCycle >= 0,
+              ReadingProgressSettingsSnapshot.isValidWordVisibility(
+                  snapshot.settings.memorizeWordVisibility
+              ),
+              snapshot.history.allSatisfy(Self.isStoredRowValid) else {
+            throw ProgressPersistenceSnapshotError.invalidReadingProgress
+        }
+        return snapshot
+    }
+
     public func currentCycle() -> Int {
         Self.currentCycle(in: snapshot())
+    }
+
+    /** Returns Android's latest persisted cycle, defaulting to one for empty history. */
+    public func latestCycle() -> Int {
+        snapshot().history.map(\.cycle).max() ?? 1
+    }
+
+    /**
+     Selects one positive reading cycle.
+
+     - Parameter cycle: Positive Android cycle number.
+     - Returns: Effective selected cycle.
+     - Side effects: Persists `activeCycle` in the settings snapshot.
+     - Failure modes: Non-positive values select cycle one; corruption, journaling, and save errors
+       are thrown without replacing the persisted snapshot.
+     */
+    @discardableResult
+    public func setActiveCycle(_ cycle: Int) throws -> Int {
+        var current = try strictSnapshot()
+        current.settings.activeCycle = max(cycle, 1)
+        return try save(current).settings.activeCycle
+    }
+
+    /**
+     Starts Android's next cycle and selects it.
+
+     - Returns: Newly selected cycle number.
+     - Side effects: Persists `activeCycle`.
+     - Failure modes: Corrupt persistence, cycle overflow, journal failure, or save failure throws.
+     */
+    @discardableResult
+    public func startNewCycle() throws -> Int {
+        let latest = try strictSnapshot().history.map(\.cycle).max() ?? 1
+        let (next, overflow) = latest.addingReportingOverflow(1)
+        guard !overflow else { throw ProgressPersistenceSnapshotError.readingCycleExhausted }
+        return try setActiveCycle(next)
     }
 
     public func readingSummary(recentLimit: Int = 20) -> ReadingProgressSummary {
@@ -226,6 +389,7 @@ public final class ReadingProgressStore {
     }
 
     @discardableResult
+    @available(*, deprecated, message: "Use recordChapterRead(bookInitials:identity:source:readAt:) with a verified KJVA identity.")
     public func recordChapterRead(
         bookInitials: String,
         startOrdinal: Int,
@@ -234,44 +398,63 @@ public final class ReadingProgressStore {
         source: ReadingProgressSource,
         readAt: Int64? = nil
     ) -> Int {
-        guard Self.isValid(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            kjvBookOrdinal: kjvBookOrdinal,
-            chapter: chapter
-        ) else {
-            return chapterReadCount(kjvBookOrdinal: kjvBookOrdinal, chapter: chapter)
-        }
+        chapterReadCount(kjvBookOrdinal: kjvBookOrdinal, chapter: chapter)
+    }
 
-        var snapshot = snapshot()
+    /**
+     Records one chapter read at the validated Android-compatible persistence boundary.
+
+     - Parameters:
+       - bookInitials: Source module initials; an empty string is valid Android history.
+       - identity: Validated KJVA book ordinal and chapter.
+       - source: Android reading source.
+       - readAt: Optional Unix epoch milliseconds, defaulting to the current clock.
+     - Returns: Read count for the chapter in the active cycle after insertion.
+     - Side effects: Appends and persists one Android-shaped history row.
+     - Failure modes: Corrupt persistence, encoding, journal, and storage failures are thrown.
+     */
+    @discardableResult
+    public func recordChapterRead(
+        bookInitials: String,
+        identity: ReadingProgressKJVAIdentity,
+        source: ReadingProgressSource,
+        readAt: Int64? = nil
+    ) throws -> Int {
+
+        var snapshot = try strictSnapshot()
         let cycle = Self.currentCycle(in: snapshot)
         let recordedAt = readAt ?? Self.currentTimeMilliseconds()
         snapshot.history.append(
             ReadingProgressHistoryRow(
                 bookInitials: bookInitials,
-                startOrdinal: startOrdinal,
-                kjvBookOrdinal: kjvBookOrdinal,
-                chapter: chapter,
+                identity: identity,
                 cycle: cycle,
                 readAt: recordedAt,
                 source: source
             )
         )
-        let savedSnapshot = save(snapshot)
-        return Self.chapterReadCount(in: savedSnapshot, kjvBookOrdinal: kjvBookOrdinal, chapter: chapter)
+        let savedSnapshot = try save(snapshot)
+        return Self.chapterReadCount(
+            in: savedSnapshot,
+            kjvBookOrdinal: identity.kjvBookOrdinal,
+            chapter: identity.chapter
+        )
     }
 
     @discardableResult
-    public func clearChapterReadStatus(kjvBookOrdinal: Int, chapter: Int) -> Int {
-        guard kjvBookOrdinal > 0, chapter > 0 else { return 0 }
-        var snapshot = snapshot()
+    public func clearChapterReadStatus(kjvBookOrdinal: Int, chapter: Int) throws -> Int {
+        guard ReadingProgressKJVAIdentity(
+            androidKJVBookOrdinal: kjvBookOrdinal,
+            chapter: chapter
+        ) != nil else { return 0 }
+        var snapshot = try strictSnapshot()
         let cycle = Self.currentCycle(in: snapshot)
         snapshot.history.removeAll { row in
             row.kjvBookOrdinal == kjvBookOrdinal &&
                 row.chapter == chapter &&
                 row.cycle == cycle
         }
-        let savedSnapshot = save(snapshot)
+        let savedSnapshot = try save(snapshot)
         return Self.chapterReadCount(in: savedSnapshot, kjvBookOrdinal: kjvBookOrdinal, chapter: chapter)
     }
 
@@ -280,7 +463,10 @@ public final class ReadingProgressStore {
     }
 
     public func chapterReadHistory(kjvBookOrdinal: Int, chapter: Int) -> [ReadingProgressHistoryRow] {
-        guard kjvBookOrdinal > 0, chapter > 0 else { return [] }
+        guard ReadingProgressKJVAIdentity(
+            androidKJVBookOrdinal: kjvBookOrdinal,
+            chapter: chapter
+        ) != nil else { return [] }
         let snapshot = snapshot()
         let cycle = Self.currentCycle(in: snapshot)
         return snapshot.history
@@ -297,6 +483,88 @@ public final class ReadingProgressStore {
             }
     }
 
+    /**
+     Deletes one Android chapter-history row by identifier.
+
+     - Parameter id: Stable history-row UUID.
+     - Returns: `true` when a row was removed.
+     - Side effects: Persists the updated history snapshot.
+     - Failure modes: Missing identifiers return `false`; corruption, journal, and save failures throw.
+     */
+    @discardableResult
+    public func deleteHistoryEntry(id: UUID) throws -> Bool {
+        var current = try strictSnapshot()
+        let originalCount = current.history.count
+        current.history.removeAll { $0.id == id }
+        guard current.history.count != originalCount else { return false }
+        try save(current)
+        return true
+    }
+
+    /**
+     Builds Android's reading-progress analytics for the active cycle.
+
+     - Parameters:
+       - now: End of the 52-week calendar window.
+       - calendar: Local calendar used for DST-safe day buckets.
+       - recentLimit: Maximum recent rows returned.
+     - Returns: Cycle controls, statistics, 66-book heatmap data, calendar buckets, and history.
+     - Side effects: Reads the persisted snapshot.
+     - Failure modes: Invalid stored rows are removed by snapshot normalization.
+     */
+    public func presentation(
+        asOf now: Date = Date(),
+        calendar: Calendar = .current,
+        recentLimit: Int = 20
+    ) -> ReadingProgressPresentationSnapshot {
+        let current = snapshot()
+        let cycle = Self.currentCycle(in: current)
+        let rows = current.history.filter { $0.cycle == cycle }
+        var chapterKeys = Set<ChapterKey>()
+        var countsByBook: [Int: [Int: Int]] = [:]
+        var totalByBook: [Int: Int] = [:]
+        var dayCounts: [Int64: Int] = [:]
+        var activeDays = Set<Int64>()
+
+        let calendarEnd = now
+        let calendarStart = calendar.date(byAdding: .weekOfYear, value: -52, to: now) ?? now
+        for row in rows {
+            chapterKeys.insert(ChapterKey(kjvBookOrdinal: row.kjvBookOrdinal, chapter: row.chapter))
+            countsByBook[row.kjvBookOrdinal, default: [:]][row.chapter, default: 0] += 1
+            totalByBook[row.kjvBookOrdinal, default: 0] += 1
+
+            let date = AndroidTimestamp.date(from: row.readAt)
+            let day = calendar.startOfDay(for: date)
+            let dayMillis = (try? AndroidTimestamp.milliseconds(from: day)) ?? row.readAt
+            activeDays.insert(dayMillis)
+            if date >= calendarStart && date <= calendarEnd {
+                dayCounts[dayMillis, default: 0] += 1
+            }
+        }
+
+        let books = ReadingProgressKJVAIdentity.scriptureBooks.map { book in
+            ReadingProgressBookSummary(
+                book: book,
+                chapterReadCounts: countsByBook[book.bibleBookOrdinal, default: [:]],
+                totalReadCount: totalByBook[book.bibleBookOrdinal, default: 0]
+            )
+        }
+        let recentRows = rows.sorted(by: Self.isMoreRecent).prefix(max(recentLimit, 0))
+
+        return ReadingProgressPresentationSnapshot(
+            cycle: cycle,
+            latestCycle: current.history.map(\.cycle).max() ?? 1,
+            distinctChapterCount: chapterKeys.count,
+            activeDayCount: activeDays.count,
+            totalBibleChapterCount: books.reduce(0) { $0 + $1.book.chapterCount },
+            books: books,
+            calendar: dayCounts.keys.sorted().map {
+                ReadingProgressDayCount(dayStartMilliseconds: $0, count: dayCounts[$0, default: 0])
+            },
+            recentRows: Array(recentRows)
+        )
+    }
+
     public func settingsBundle() -> ReadingProgressSettingsBundle {
         ReadingProgressSettingsBundle(settings: snapshot().settings)
     }
@@ -306,14 +574,16 @@ public final class ReadingProgressStore {
     }
 
     @discardableResult
-    public func saveSettings(_ settings: ReadingProgressSettingsSnapshot) -> ReadingProgressSettingsSnapshot {
-        var snapshot = snapshot()
+    public func saveSettings(
+        _ settings: ReadingProgressSettingsSnapshot
+    ) throws -> ReadingProgressSettingsSnapshot {
+        var snapshot = try strictSnapshot()
         snapshot.settings = settings
-        return save(snapshot).settings
+        return try save(snapshot).settings
     }
 
     @discardableResult
-    public func applySettingsBundle(json: String) -> Bool {
+    public func applySettingsBundle(json: String) throws -> Bool {
         guard let data = json.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data),
               let dictionary = object as? [String: Any],
@@ -323,7 +593,7 @@ public final class ReadingProgressStore {
             return false
         }
 
-        var snapshot = snapshot()
+        var snapshot = try strictSnapshot()
         var settings = snapshot.settings
         if let autoMarkMemorized = patch.autoMarkMemorized {
             settings.autoMarkMemorized = autoMarkMemorized
@@ -348,18 +618,25 @@ public final class ReadingProgressStore {
         }
 
         snapshot.settings = settings
-        save(snapshot)
+        try save(snapshot)
         return true
     }
 
     @discardableResult
-    private func save(_ snapshot: ReadingProgressSnapshot) -> ReadingProgressSnapshot {
+    private func save(_ snapshot: ReadingProgressSnapshot) throws -> ReadingProgressSnapshot {
         let normalized = Self.normalized(snapshot)
-        guard let data = try? encoder.encode(normalized),
-              let rawValue = String(data: data, encoding: .utf8) else {
-            return normalized
+        let data = try encoder.encode(normalized)
+        guard let rawValue = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileWriteInapplicableStringEncoding)
         }
-        settingsStore.setString(Self.settingsKey, value: rawValue)
+        try settingsStore.performJournaledSave {
+            settingsStore.setString(Self.settingsKey, value: rawValue)
+            try RemoteSyncMutationJournalService().recordLocalChanges(
+                for: .progress,
+                modelContext: nil,
+                settingsStore: settingsStore
+            )
+        }
         return normalized
     }
 
@@ -452,25 +729,14 @@ public final class ReadingProgressStore {
         )
     }
 
-    private static func isValid(
-        bookInitials: String,
-        startOrdinal: Int,
-        kjvBookOrdinal: Int,
-        chapter: Int
-    ) -> Bool {
-        !bookInitials.isEmpty && startOrdinal > 0 && kjvBookOrdinal > 0 && chapter > 0
-    }
-
     private static func isStoredRowValid(_ row: ReadingProgressHistoryRow) -> Bool {
-        guard row.kjvBookOrdinal > 0,
-              row.chapter > 0,
-              row.cycle > 0 else {
-            return false
-        }
-        return row.startOrdinal >= 0
+        row.cycle > 0 && ReadingProgressKJVAIdentity(
+            androidKJVBookOrdinal: row.kjvBookOrdinal,
+            chapter: row.chapter
+        ) != nil
     }
 
     private static func currentTimeMilliseconds() -> Int64 {
-        Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
+        AndroidTimestamp.currentMilliseconds()
     }
 }

@@ -73,6 +73,16 @@
 </template>
 
 <script lang="ts" setup>
+/**
+ * Coordinates reader clicks that can resolve to multiple actions, bookmarks, or AI document markers.
+ *
+ * @param blocking Whether the modal prevents background interaction.
+ * @param doNotCloseModals Whether background clicks preserve other open modal state.
+ * @fires back-clicked When a plain reader click should dismiss the owning modal layer.
+ * @remarks AI marker choices sort before normal bookmarks, matching Android's navigation-first
+ * chooser. The component owns transient selection highlighting and resolves its internal deferred
+ * choice deterministically when a normal action is selected or cancelled.
+ */
 import ModalDialog from "@/components/modals/ModalDialog.vue";
 import {useCommon} from "@/composables";
 import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
@@ -165,7 +175,7 @@ const clickedBookmarks = computed<BaseBookmark[]>(() => {
         originalSelections.value
             .filter(v => v.options.bookmarkId && !v.options.hidden && bookmarkMap.has(v.options.bookmarkId))
             .map(v => bookmarkMap.get(v.options.bookmarkId)!),
-        v => v.text.length
+        [v => v.type === "ai-doc-marker" ? 0 : 1, v => v.text.length]
     );
 });
 
@@ -259,7 +269,10 @@ const selectedBookmarks = computed<BaseBookmark[]>(() => {
             ...Array.from(bookmarkIdsByOrdinal.get(`${keyBase}-${o}`) || [])
                 .filter(bId => !clickedIds.has(bId) && !result.includes(bId)))
     }
-    return result.map(bId => bookmarkMap.get(bId)).filter(b => b) as BaseBookmark[];
+    return sortBy(
+        result.map(bId => bookmarkMap.get(bId)).filter(b => b) as BaseBookmark[],
+        [v => v.type === "ai-doc-marker" ? 0 : 1]
+    );
 });
 
 function setInitialVerse(_verseInfo: EventVerseInfo) {

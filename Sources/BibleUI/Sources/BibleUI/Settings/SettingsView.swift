@@ -17,7 +17,9 @@ The view renders Android-parity application preferences backed by `SettingsStore
 
  Data dependencies:
  - `modelContext` is used to load and persist Android-parity settings through `SettingsStore`
-- `nightMode` and `nightModeMode` are shared global settings owned by the parent
+ - `windowManager` identifies the active workspace whose Android accent color is edited from global
+   Text Options
+ - `nightMode` and `nightModeMode` are shared global settings owned by the parent
  - `colorScheme` and `openURL` influence night-mode resolution and system-settings actions
 
  Side effects:
@@ -30,6 +32,9 @@ The view renders Android-parity application preferences backed by `SettingsStore
 public struct SettingsView: View {
     /// SwiftData context used to read and persist settings through `SettingsStore`.
     @Environment(\.modelContext) private var modelContext
+
+    /// Window manager used to resolve the active workspace for Android's global color route.
+    @Environment(WindowManager.self) private var windowManager
 
     /// Current system color scheme used to resolve night-mode behavior.
     @Environment(\.colorScheme) private var colorScheme
@@ -167,10 +172,6 @@ public struct SettingsView: View {
     /// Android-parity mode controlling horizontal swipe actions in the reader.
     @State private var bibleViewSwipeMode =
         AppPreferenceRegistry.stringDefault(for: .bibleViewSwipeMode) ?? "CHAPTER"
-
-    /// Persisted cross-platform preference for volume-key scrolling.
-    @State private var volumeKeysScroll =
-        AppPreferenceRegistry.boolDefault(for: .volumeKeysScroll) ?? true
 
     /// Enabled experimental feature identifiers.
     @State private var enabledExperimentalFeatures: Set<String> = []
@@ -943,28 +944,6 @@ public struct SettingsView: View {
                     store.setString(.bibleViewSwipeMode, value: bibleViewSwipeMode)
                 }
             }
-            if settingsSearchMatchesPreference(.volumeKeysScroll, in: behaviorSettingsSearchEntries) {
-                Toggle(isOn: Binding(
-                    get: { volumeKeysScroll },
-                    set: { newValue in
-                        volumeKeysScroll = newValue
-                        let store = SettingsStore(modelContext: modelContext)
-                        store.setBool(.volumeKeysScroll, value: newValue)
-                    }
-                )) {
-                    settingsRowLabel(
-                        preferenceKey: .volumeKeysScroll,
-                        title: String(
-                            localized: "prefs_volume_keys_scroll_title",
-                            defaultValue: "Volume buttons scroll"
-                        ),
-                        summary: String(
-                            localized: "prefs_volume_keys_scroll_summary",
-                            defaultValue: "Use volume up/down to scroll Bible text"
-                        )
-                    )
-                }
-            }
             if settingsSearchMatchesPreference(.nightModePref3, in: behaviorSettingsSearchEntries) {
                 settingsMenuRow(
                     preference: .nightModePref3,
@@ -1005,9 +984,13 @@ public struct SettingsView: View {
                         summary: String(localized: "discrete_help_summary")
                     )
                 }
+                .accessibilityIdentifier("discreteHelpButton")
             }
 
-            if settingsSearchMatchesPreference(.discreteMode, in: securitySettingsSearchEntries) {
+            if ApplicationSettingsPresentation.isPreferenceVisible(
+                .discreteMode,
+                buildIdentity: ApplicationSettingsPresentation.currentBuildIdentity
+            ), settingsSearchMatchesPreference(.discreteMode, in: securitySettingsSearchEntries) {
                 Toggle(isOn: $discreteMode) {
                     settingsRowLabel(
                         preferenceKey: .discreteMode,
@@ -1015,9 +998,13 @@ public struct SettingsView: View {
                         summary: String(localized: "discrete_mode_description")
                     )
                 }
+                .accessibilityIdentifier("discreteModeToggle")
             }
 
-            if settingsSearchMatchesPreference(.showCalculator, in: securitySettingsSearchEntries) {
+            if ApplicationSettingsPresentation.isPreferenceVisible(
+                .showCalculator,
+                buildIdentity: ApplicationSettingsPresentation.currentBuildIdentity
+            ), settingsSearchMatchesPreference(.showCalculator, in: securitySettingsSearchEntries) {
                 Toggle(isOn: $showCalculator) {
                     settingsRowLabel(
                         preferenceKey: .showCalculator,
@@ -1025,6 +1012,7 @@ public struct SettingsView: View {
                         summary: String(localized: "show_calculator_description")
                     )
                 }
+                .accessibilityIdentifier("showCalculatorToggle")
             }
 
             if settingsSearchMatchesPreference(.calculatorPin, in: securitySettingsSearchEntries) {
@@ -1046,6 +1034,7 @@ public struct SettingsView: View {
                             if filtered != newValue { calculatorPin = filtered }
                         }
                 }
+                .accessibilityIdentifier("calculatorPinRow")
             }
         }
     }
@@ -1241,6 +1230,8 @@ public struct SettingsView: View {
                 ) {
                     TextDisplaySettingsView(
                         settings: $globalTextDisplaySettings,
+                        workspaceColor: activeWorkspaceColorBinding,
+                        scope: .global,
                         onChange: applyGlobalTextDisplaySettingsChange
                     )
                 }
@@ -1519,6 +1510,40 @@ public struct SettingsView: View {
         }
     }
 
+    /**
+     Workspace accent-color binding for Android's global Text Options color route.
+
+     Android displays `workspace_color` for every non-window color editor. The global iOS route
+     therefore edits the active workspace's metadata instead of incorrectly placing the color in
+     inheritable global text settings. Fetching by identifier keeps the mutation in this view's
+     `ModelContext`, even when `WindowManager` was created with a different context.
+
+     - Returns: Binding that resolves missing values to Android's `#ff444444` default.
+     - Side Effects: Setting the binding mutates and saves the active workspace row.
+     - Failure Modes: A missing/deleted active workspace renders the default and ignores writes;
+       fetch and save failures use the repository's established soft-failure behavior.
+     */
+    private var activeWorkspaceColorBinding: Binding<Int?> {
+        Binding(
+            get: {
+                guard let workspaceID = windowManager.activeWorkspace?.id else {
+                    return Workspace.defaultWorkspaceColor
+                }
+                return WorkspaceStore(modelContext: modelContext)
+                    .workspace(id: workspaceID)?
+                    .workspaceColor ?? Workspace.defaultWorkspaceColor
+            },
+            set: { newValue in
+                guard let workspaceID = windowManager.activeWorkspace?.id,
+                      let workspace = WorkspaceStore(modelContext: modelContext).workspace(id: workspaceID) else {
+                    return
+                }
+                workspace.workspaceColor = newValue ?? Workspace.defaultWorkspaceColor
+                try? modelContext.save()
+            }
+        )
+    }
+
     /// Whether any module-backed dictionary preference sections should be shown.
     private var hasDictionaryPreferences: Bool {
         !strongsGreekDictionaries.isEmpty ||
@@ -1618,12 +1643,37 @@ public struct SettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text(String(localized: "discrete_help_par1"))
-                    Text(String(localized: "discrete_help_par2"))
-                    Text(String(localized: "discrete_help_par3"))
-                    Text(String(localized: "discrete_help_ios_note"))
-                        .foregroundStyle(.secondary)
+                    if ApplicationSettingsPresentation.currentBuildIdentity == .discrete {
+                        Text(String(localized: "calculator_par1"))
+                        Text(String(localized: "calculator_par2"))
+                        Text(String(localized: "calculator_par3"))
+                        Text(String(localized: "discrete_help_calculator_enforced_ios"))
+                            .foregroundStyle(.secondary)
+                        Text(String(localized: "discrete_help_calculator_fallback_ios"))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(String(localized: "discrete_help_standard_icon_only_ios"))
+                            .foregroundStyle(.secondary)
+                        Text(String(localized: "discrete_mode_info_par1"))
+                        Text(String(localized: "discrete_mode_info_par2"))
+                        if let documentationURL = URL(
+                            string: "https://github.com/AndBible/and-bible/wiki/Discrete-build"
+                        ) {
+                            Link(
+                                String(
+                                    format: String(localized: "discrete_mode_link"),
+                                    documentationURL.absoluteString
+                                ),
+                                destination: documentationURL
+                            )
+                        }
+                    }
                 }
+                .accessibilityIdentifier(
+                    ApplicationSettingsPresentation.currentBuildIdentity == .discrete
+                        ? "calculatorProductSecurityHelp"
+                        : "standardProductSecurityHelp"
+                )
                 .padding()
             }
             .navigationTitle(String(localized: "settings_security"))
@@ -1640,9 +1690,6 @@ public struct SettingsView: View {
 
     /**
      Builds Android's feature-shortcut section using native SwiftUI navigation.
-
-     iOS implements the feature shortcuts that have real local destinations. The Android AI row is
-     intentionally absent because this app has no AI settings contract to open.
      */
     @ViewBuilder
     private var featuresSettingsSection: some View {
@@ -1657,6 +1704,19 @@ public struct SettingsView: View {
                     accessibilityIdentifier: syncEntry.identifier
                 ) {
                     SyncSettingsView()
+                }
+            }
+
+            let aiEntry = aiSettingsSearchEntry
+            if settingsSearchMatchesEntry(aiEntry) {
+                settingsNavigationLink(
+                    title: aiEntry.title,
+                    androidKey: "ai_settings_shortcut",
+                    summary: aiEntry.summary,
+                    accessibilityIdentifier: aiEntry.identifier
+                ) {
+                    AISettingsView(swordManager: readingProgressController?.swordManager)
+                        .accessibilityIdentifier("aiSettingsScreen")
                 }
             }
 
@@ -1687,9 +1747,22 @@ public struct SettingsView: View {
         readingProgressController != nil
     }
 
+    /** Search metadata for Android's production AI settings shortcut. */
+    private var aiSettingsSearchEntry: AndBibleSettingsSearchEntry {
+        AndBibleSettingsSearchEntry(
+            identifier: "settingsAISettingsLink",
+            title: String(localized: "ai_settings", defaultValue: "AI Settings"),
+            summary: String(
+                localized: "ai_settings_shortcut_summary",
+                defaultValue: "AI connection and prompt settings"
+            ),
+            keywords: ["AI", "LLM", "providers", "models", "prompts"]
+        )
+    }
+
     /// Search entries for feature shortcuts that can be opened from Application preferences.
     private var featuresSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
-        ApplicationSettingsPresentation
+        [aiSettingsSearchEntry] + ApplicationSettingsPresentation
             .featureShortcuts(canOpenReadingProgressSettings: canOpenReadingProgressSettings)
             .map(\.searchEntry)
     }
@@ -1820,14 +1893,6 @@ public struct SettingsView: View {
                 )
             ),
             ApplicationSettingsPresentation.ListPreference.bibleViewSwipeMode.searchEntry,
-            preferenceSearchEntry(
-                .volumeKeysScroll,
-                title: String(localized: "prefs_volume_keys_scroll_title", defaultValue: "Volume buttons scroll"),
-                summary: String(
-                    localized: "prefs_volume_keys_scroll_summary",
-                    defaultValue: "Use volume up/down to scroll Bible text"
-                )
-            ),
             ApplicationSettingsPresentation.ListPreference.nightModePref3.searchEntry,
         ]
     }
@@ -1913,28 +1978,36 @@ public struct SettingsView: View {
 
     /// Search entries for security preferences.
     private var securitySettingsSearchEntries: [AndBibleSettingsSearchEntry] {
-        [
+        let buildIdentity = ApplicationSettingsPresentation.currentBuildIdentity
+        var entries = [
             preferenceSearchEntry(
                 .discreteHelp,
                 title: String(localized: "discrete_help_title"),
                 summary: String(localized: "discrete_help_summary")
             ),
-            preferenceSearchEntry(
+        ]
+        if ApplicationSettingsPresentation.isPreferenceVisible(.discreteMode, buildIdentity: buildIdentity) {
+            entries.append(preferenceSearchEntry(
                 .discreteMode,
                 title: String(localized: "discrete_mode"),
                 summary: String(localized: "discrete_mode_description")
-            ),
-            preferenceSearchEntry(
+            ))
+        }
+        if ApplicationSettingsPresentation.isPreferenceVisible(.showCalculator, buildIdentity: buildIdentity) {
+            entries.append(preferenceSearchEntry(
                 .showCalculator,
                 title: String(localized: "show_calculator"),
                 summary: String(localized: "show_calculator_description")
-            ),
+            ))
+        }
+        entries.append(
             preferenceSearchEntry(
                 .calculatorPin,
                 title: String(localized: "calculator_pin"),
                 summary: String(localized: "calculator_pin_description")
-            ),
-        ]
+            )
+        )
+        return entries
     }
 
     /// Search entries for advanced preferences and developer/debug action rows.
@@ -2426,7 +2499,6 @@ public struct SettingsView: View {
             store.getString(.toolbarButtonActions)
         )
         bibleViewSwipeMode = Self.normalizedBibleViewSwipeMode(store.getString(.bibleViewSwipeMode))
-        volumeKeysScroll = store.getBool(.volumeKeysScroll)
         enabledExperimentalFeatures = Set(store.getStringSet(.experimentalFeatures))
         sanitizeExperimentalFeatures(store: store)
         nightModeMode = store.getString(.nightModePref3)

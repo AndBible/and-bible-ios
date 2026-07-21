@@ -14,6 +14,12 @@ public enum RemoteSyncPatchDiscoveryError: Error, Equatable {
 
     /// One or more earlier patches are missing, so incremental application would be unsafe.
     case patchFilesSkipped
+
+    /// Two remote objects claim the same source-device patch identity.
+    case duplicatePatch(sourceDevice: String, patchNumber: Int64)
+
+    /// A source stream reached the end of Android's signed 64-bit patch-number domain.
+    case patchNumberExhausted(sourceDevice: String)
 }
 
 /**
@@ -85,7 +91,7 @@ public struct RemoteSyncPatchDiscoveryResult: Sendable, Equatable {
  - use `lastSynchronized` as the incremental lower bound when available
  - parse patch filenames as `<patchNumber>.<schemaVersion>.sqlite3.gz`
  - skip already applied patches recorded in `RemoteSyncPatchStatusStore`
- - fail fast when earlier patches are missing or when a newer schema version is encountered
+ - fail fast when any per-device patch number is missing or when a newer schema is encountered
 
  Data dependencies:
  - `RemoteSyncAdapting` performs remote folder and file listings
@@ -100,6 +106,7 @@ public struct RemoteSyncPatchDiscoveryResult: Sendable, Equatable {
    newer local schema version
  - throws `RemoteSyncPatchDiscoveryError.patchFilesSkipped` when incremental discovery proves a
    gap in the patch sequence for a device folder
+ - rethrows strict patch-status failures before classifying remote files
  - rethrows backend transport errors from the adapter
  */
 public final class RemoteSyncPatchDiscoveryService {
@@ -110,7 +117,7 @@ public final class RemoteSyncPatchDiscoveryService {
     private let statusStore: RemoteSyncPatchStatusStore
 
     private static let patchFilePattern = try! NSRegularExpression(
-        pattern: #"^(\d+)\.((\d+)\.)?sqlite3\.gz$"#,
+        pattern: #"(\d+)\.((\d+)\.)?sqlite3\.gz"#,
         options: []
     )
 
@@ -160,7 +167,7 @@ public final class RemoteSyncPatchDiscoveryService {
        - throws `RemoteSyncPatchDiscoveryError.missingSyncFolderID` when bootstrap state is incomplete
        - throws `RemoteSyncPatchDiscoveryError.incompatiblePatchVersion` when a remote patch targets
          a newer schema version than `currentSchemaVersion`
-       - throws `RemoteSyncPatchDiscoveryError.patchFilesSkipped` when an earlier patch is missing
+       - throws `RemoteSyncPatchDiscoveryError.patchFilesSkipped` when any required patch is missing
        - rethrows backend transport errors from the adapter
      */
     public func discoverPendingPatches(
@@ -173,19 +180,24 @@ public final class RemoteSyncPatchDiscoveryService {
             throw RemoteSyncPatchDiscoveryError.missingSyncFolderID
         }
 
+        let appliedStatuses = try statusStore.statusesStrict(for: category)
+        let statusesBySourceDevice = Dictionary(grouping: appliedStatuses, by: \.sourceDevice)
+
         let deviceFolders = try await adapter.listFiles(
             parentIDs: [syncFolderID],
             name: nil,
             mimeType: NextCloudSyncAdapter.folderMimeType,
             modifiedAtLeast: nil
-        )
+        ).sorted(by: Self.remoteFileSort)
         guard !deviceFolders.isEmpty else {
             return RemoteSyncPatchDiscoveryResult(deviceFolders: [], pendingPatches: [])
         }
 
         let modifiedAtLeast: Date?
         if let lastSynchronized = progressState.lastSynchronized, lastSynchronized > 0 {
-            modifiedAtLeast = Date(timeIntervalSince1970: TimeInterval(lastSynchronized) / 1000.0)
+            modifiedAtLeast = Date(
+                timeIntervalSince1970: TimeInterval(lastSynchronized) / 1000.0
+            )
         } else {
             modifiedAtLeast = nil
         }
@@ -195,16 +207,12 @@ public final class RemoteSyncPatchDiscoveryService {
             name: nil,
             mimeType: nil,
             modifiedAtLeast: modifiedAtLeast
-        ).sorted { lhs, rhs in
-            if lhs.timestamp == rhs.timestamp {
-                return lhs.name < rhs.name
-            }
-            return lhs.timestamp < rhs.timestamp
-        }
+        ).sorted(by: Self.remoteFileSort)
 
         struct FolderState {
             let folder: RemoteSyncFile
             let lastAppliedPatchNumber: Int64
+            let appliedPatchNumbers: Set<Int64>
         }
 
         let folderStates = Dictionary(
@@ -213,49 +221,93 @@ public final class RemoteSyncPatchDiscoveryService {
                     folder.id,
                     FolderState(
                         folder: folder,
-                        lastAppliedPatchNumber: statusStore.lastPatchNumber(
-                            for: category,
-                            sourceDevice: folder.name
-                        ) ?? 0
+                        lastAppliedPatchNumber: statusesBySourceDevice[folder.name]?
+                            .map(\.patchNumber)
+                            .max() ?? 0,
+                        appliedPatchNumbers: Set(
+                            statusesBySourceDevice[folder.name]?.map(\.patchNumber) ?? []
+                        )
                     )
                 )
             }
         )
 
-        let pendingPatches = try rawPatchFiles.compactMap { file -> RemoteSyncDiscoveredPatch? in
+        struct PatchIdentity: Hashable {
+            let sourceDevice: String
+            let patchNumber: Int64
+        }
+
+        var pendingByIdentity: [PatchIdentity: RemoteSyncDiscoveredPatch] = [:]
+        for file in rawPatchFiles {
             guard let folderState = folderStates[file.parentID],
                   let parsedPatch = Self.parsePatchFileName(file.name) else {
-                return nil
+                continue
             }
-            if parsedPatch.schemaVersion > currentSchemaVersion {
+            let isUnsupportedWorkspaceGeneration = category == .workspaces
+                && !RemoteSyncWorkspaceDatabaseMigrator.supportsSourceVersion(
+                    parsedPatch.schemaVersion
+                )
+            if parsedPatch.schemaVersion > currentSchemaVersion
+                || isUnsupportedWorkspaceGeneration {
                 throw RemoteSyncPatchDiscoveryError.incompatiblePatchVersion(parsedPatch.schemaVersion)
             }
-            if statusStore.status(
-                for: category,
-                sourceDevice: folderState.folder.name,
-                patchNumber: parsedPatch.patchNumber
-            ) != nil {
-                return nil
+            if folderState.appliedPatchNumbers.contains(parsedPatch.patchNumber) {
+                continue
             }
             guard parsedPatch.patchNumber > folderState.lastAppliedPatchNumber else {
-                return nil
+                continue
             }
-            return RemoteSyncDiscoveredPatch(
+            let discovered = RemoteSyncDiscoveredPatch(
                 sourceDevice: folderState.folder.name,
                 patchNumber: parsedPatch.patchNumber,
                 schemaVersion: parsedPatch.schemaVersion,
                 file: file
             )
+            let identity = PatchIdentity(
+                sourceDevice: discovered.sourceDevice,
+                patchNumber: discovered.patchNumber
+            )
+            guard pendingByIdentity[identity] == nil else {
+                throw RemoteSyncPatchDiscoveryError.duplicatePatch(
+                    sourceDevice: identity.sourceDevice,
+                    patchNumber: identity.patchNumber
+                )
+            }
+            pendingByIdentity[identity] = discovered
         }
 
-        for folderState in folderStates.values {
-            guard let firstPendingPatch = pendingPatches.first(where: { $0.sourceDevice == folderState.folder.name }) else {
+        let pendingBySource = Dictionary(grouping: pendingByIdentity.values, by: \.sourceDevice)
+        for folderState in folderStates.values.sorted(by: { $0.folder.name < $1.folder.name }) {
+            guard let sourcePatches = pendingBySource[folderState.folder.name]?.sorted(by: {
+                if $0.patchNumber != $1.patchNumber {
+                    return $0.patchNumber < $1.patchNumber
+                }
+                return Self.patchSort($0, $1)
+            }),
+                  !sourcePatches.isEmpty else {
                 continue
             }
-            if firstPendingPatch.patchNumber > folderState.lastAppliedPatchNumber + 1 {
-                throw RemoteSyncPatchDiscoveryError.patchFilesSkipped
+
+            var previousPatchNumber = folderState.lastAppliedPatchNumber
+            for patch in sourcePatches {
+                let expected: Int64
+                do {
+                    expected = try RemoteSyncLogicalSequence.nextPatchNumber(
+                        after: [previousPatchNumber]
+                    )
+                } catch {
+                    throw RemoteSyncPatchDiscoveryError.patchNumberExhausted(
+                        sourceDevice: folderState.folder.name
+                    )
+                }
+                guard patch.patchNumber == expected else {
+                    throw RemoteSyncPatchDiscoveryError.patchFilesSkipped
+                }
+                previousPatchNumber = patch.patchNumber
             }
         }
+
+        let pendingPatches = pendingByIdentity.values.sorted(by: Self.patchSort)
 
         return RemoteSyncPatchDiscoveryResult(
             deviceFolders: deviceFolders,
@@ -270,7 +322,10 @@ public final class RemoteSyncPatchDiscoveryService {
      optional and defaults to `1` for legacy patch archives.
 
      - Parameter name: Remote filename to parse.
-     - Returns: Patch number and schema version when the filename matches the Android convention.
+     Android calls Kotlin `Regex.find`, so a valid patch identity may occur inside a longer remote
+     object name; matching is deliberately not anchored to the basename boundaries.
+
+     - Returns: Patch number and schema version when the filename contains the Android convention.
      - Side effects: none.
      - Failure modes: Invalid filenames return `nil`.
      */
@@ -284,11 +339,34 @@ public final class RemoteSyncPatchDiscoveryService {
 
         let schemaVersion: Int
         if let versionRange = Range(match.range(at: 3), in: name) {
-            schemaVersion = Int(name[versionRange]) ?? 1
+            guard let parsedVersion = Int(name[versionRange]) else { return nil }
+            schemaVersion = parsedVersion
         } else {
             schemaVersion = 1
         }
 
         return (patchNumber, schemaVersion)
+    }
+
+    /** Sorts remote objects by every stable field used by discovery. */
+    private static func remoteFileSort(_ lhs: RemoteSyncFile, _ rhs: RemoteSyncFile) -> Bool {
+        if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+        if lhs.name != rhs.name { return lhs.name < rhs.name }
+        if lhs.parentID != rhs.parentID { return lhs.parentID < rhs.parentID }
+        if lhs.id != rhs.id { return lhs.id < rhs.id }
+        if lhs.size != rhs.size { return lhs.size < rhs.size }
+        return lhs.mimeType < rhs.mimeType
+    }
+
+    /** Sorts parsed patches into one deterministic process-independent replay order. */
+    private static func patchSort(
+        _ lhs: RemoteSyncDiscoveredPatch,
+        _ rhs: RemoteSyncDiscoveredPatch
+    ) -> Bool {
+        if lhs.file.timestamp != rhs.file.timestamp { return lhs.file.timestamp < rhs.file.timestamp }
+        if lhs.sourceDevice != rhs.sourceDevice { return lhs.sourceDevice < rhs.sourceDevice }
+        if lhs.patchNumber != rhs.patchNumber { return lhs.patchNumber < rhs.patchNumber }
+        if lhs.schemaVersion != rhs.schemaVersion { return lhs.schemaVersion < rhs.schemaVersion }
+        return remoteFileSort(lhs.file, rhs.file)
     }
 }

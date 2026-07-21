@@ -76,6 +76,127 @@ final class RepositorySourceManagerTests: XCTestCase {
     }
 
     /**
+     Verifies Android's editable SWORD package directory overrides manifest metadata and round-trips.
+
+     Setup:
+     - serves a manifest whose package path differs from the editor value
+     - adds and then replaces the same custom source with two explicit package paths
+
+     Expected result:
+     - normalized editor values win over manifest/default/heuristic paths
+     - reload after each write returns the explicit value from persisted sidecar metadata
+
+     Failure meaning:
+     - repositories that Android can install through a custom package directory remain impossible to
+       configure on iOS, or edits appear to save but package downloads still use stale paths.
+     */
+    func testRepositorySourceManagerPersistsEditablePackageDirectoryOverride() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = Data(
+            """
+            {
+              "name": "Editable Repo",
+              "description": "Editable package path",
+              "type": "sword-https",
+              "host": "example.org",
+              "catalogDirectory": "/catalog",
+              "packageDirectory": "/manifest/packages",
+              "manifestUrl": "https://example.org/manifest.json"
+            }
+            """.utf8
+        )
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: Self.makeMockedURLSession()
+        )
+
+        let added = try await manager.addCustomSource(
+            from: "https://example.org/manifest.json",
+            packageDirectory: " custom/packages/ "
+        )
+        XCTAssertEqual(added.packageDirectory, "/custom/packages")
+        XCTAssertEqual(
+            manager.loadSources().first { $0.name == "Editable Repo" }?.packageDirectory,
+            "/custom/packages"
+        )
+
+        let replaced = try await manager.replaceCustomSource(
+            named: "Editable Repo",
+            with: "https://example.org/manifest.json",
+            packageDirectory: "/second/packages"
+        )
+        XCTAssertEqual(replaced.packageDirectory, "/second/packages")
+        XCTAssertEqual(
+            manager.loadSources().first { $0.name == "Editable Repo" }?.packageDirectory,
+            "/second/packages"
+        )
+    }
+
+    /**
+     Verifies unsafe package-directory editor input is rejected before source persistence.
+
+     Failure means a custom repository can escape its host path, inject configuration syntax, or
+     save a value that cannot produce Android-compatible package URLs.
+     */
+    func testRepositorySourceManagerRejectsUnsafeEditablePackageDirectory() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = Data(
+            """
+            {
+              "name": "Unsafe Repo",
+              "description": "Unsafe package path",
+              "type": "sword-https",
+              "host": "example.org",
+              "catalogDirectory": "/catalog",
+              "packageDirectory": "/manifest/packages",
+              "manifestUrl": "https://example.org/manifest.json"
+            }
+            """.utf8
+        )
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: Self.makeMockedURLSession()
+        )
+
+        do {
+            _ = try await manager.addCustomSource(
+                from: "https://example.org/manifest.json",
+                packageDirectory: "../outside"
+            )
+            XCTFail("Expected traversal package directory to be rejected.")
+        } catch RepositorySourceManagementError.invalidPackageDirectory(let value) {
+            XCTAssertEqual(value, "../outside")
+        }
+        XCTAssertFalse(manager.loadSources().contains { $0.name == "Unsafe Repo" })
+    }
+
+    /**
      Verifies SWORD package directories are normalized before persistence and reload.
 
      Android package directories are repository paths. iOS accepts Android-style manifests and direct
@@ -1351,13 +1472,17 @@ final class RepositorySourceManagerTests: XCTestCase {
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        let missingBasePath = tempDir.appendingPathComponent("missing", isDirectory: true)
-        let manager = RepositorySourceManager(basePath: missingBasePath.path)
+        let invalidBasePath = tempDir.appendingPathComponent("not-a-directory", isDirectory: false)
+        try Data("blocking file".utf8).write(to: invalidBasePath)
+        let manager = RepositorySourceManager(basePath: invalidBasePath.path)
 
         XCTAssertThrowsError(try manager.resetToDefaults()) { error in
-            XCTAssertEqual(
-                error as? RepositorySourceManagementError,
-                .configWriteFailed("default configuration was not recreated")
+            guard case .configWriteFailed(let message) = error as? RepositorySourceManagementError else {
+                return XCTFail("Expected configWriteFailed, got \(error)")
+            }
+            XCTAssertFalse(
+                message.isEmpty,
+                "Persistence failures must retain an actionable file-system explanation."
             )
         }
     }
@@ -1467,6 +1592,222 @@ final class RepositorySourceManagerTests: XCTestCase {
     }
 
     /**
+     Verifies every two-store repository mutation rolls back byte-for-byte when its second write fails.
+
+     Each case starts from the same visible custom SWORD source and injects one failure specifically
+     for `CustomRepositories.json`, after `InstallMgr.conf` has already changed. Add, edit, delete,
+     Android-backup replacement, and reset must all throw, restore both original files, remove the
+     journal, and expose only the original source after constructing a fresh manager. A failure means
+     the two persistent stores can diverge under disk-full, permission, or interruption conditions.
+     */
+    func testRepositorySourceManagerRollsBackEveryTwoStoreMutationAfterSecondWriteFailure() async throws {
+        enum Mutation: CaseIterable {
+            case add
+            case edit
+            case delete
+            case replaceAll
+            case reset
+        }
+
+        let replacementManifest = Data(
+            """
+            {
+              "name": "Replacement Repo",
+              "description": "Replacement catalog",
+              "type": "sword-https",
+              "host": "replacement.example",
+              "catalogDirectory": "/catalog",
+              "packageDirectory": "/packages",
+              "manifestUrl": "https://replacement.example/manifest.json"
+            }
+            """.utf8
+        )
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, replacementManifest)
+        }
+
+        for mutation in Mutation.allCases {
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: tempDir) }
+            try Self.seedRepositoryPersistence(at: tempDir)
+
+            let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+            let sidecarURL = tempDir.appendingPathComponent("CustomRepositories.json")
+            let journalURL = tempDir.appendingPathComponent("RepositorySources.transaction.json")
+            let originalConfig = try Data(contentsOf: configURL)
+            let originalSidecar = try Data(contentsOf: sidecarURL)
+            let failure = RepositorySourceSecondStoreFailure()
+            let manager = RepositorySourceManager(
+                basePath: tempDir.path,
+                session: Self.makeMockedURLSession(),
+                persistence: failure.persistence
+            )
+
+            do {
+                switch mutation {
+                case .add:
+                    _ = try await manager.addCustomSource(
+                        from: "https://replacement.example/manifest.json"
+                    )
+                case .edit:
+                    _ = try await manager.replaceCustomSource(
+                        named: "Existing Repo",
+                        with: "https://replacement.example/manifest.json"
+                    )
+                case .delete:
+                    try manager.deleteCustomSource(named: "Existing Repo")
+                case .replaceAll:
+                    try manager.replaceCustomSources(with: [Self.replacementRegistration])
+                case .reset:
+                    try manager.resetToDefaults()
+                }
+                XCTFail("Expected injected second-store failure for \(mutation)")
+            } catch RepositorySourceManagementError.configWriteFailed {
+                // Expected: rollback must complete through the same persistence dependency.
+            }
+
+            XCTAssertEqual(try Data(contentsOf: configURL), originalConfig, "mutation=\(mutation)")
+            XCTAssertEqual(try Data(contentsOf: sidecarURL), originalSidecar, "mutation=\(mutation)")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path), "mutation=\(mutation)")
+
+            let reloaded = RepositorySourceManager(basePath: tempDir.path).loadSources().map(\.name)
+            XCTAssertTrue(reloaded.contains("Existing Repo"), "mutation=\(mutation)")
+            XCTAssertFalse(reloaded.contains("Replacement Repo"), "mutation=\(mutation)")
+        }
+    }
+
+    /**
+     Verifies a retained transaction journal repairs both repository stores before the next load.
+
+     The fixture fails the sidecar commit and then the immediate config rollback, which simulates a
+     process ending with a changed config, an old sidecar, and a durable journal. A fresh manager must
+     restore both original byte sequences and remove the journal before returning visible sources.
+     A failure means interrupted repository writes can remain split across launches.
+     */
+    func testRepositorySourceManagerRecoversRetainedJournalBeforeNextLoad() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        try Self.seedRepositoryPersistence(at: tempDir)
+
+        let manifest = Data(
+            """
+            {
+              "name": "Replacement Repo",
+              "description": "Replacement catalog",
+              "type": "sword-https",
+              "host": "replacement.example",
+              "catalogDirectory": "/catalog",
+              "packageDirectory": "/packages",
+              "manifestUrl": "https://replacement.example/manifest.json"
+            }
+            """.utf8
+        )
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifest)
+        }
+
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        let sidecarURL = tempDir.appendingPathComponent("CustomRepositories.json")
+        let journalURL = tempDir.appendingPathComponent("RepositorySources.transaction.json")
+        let originalConfig = try Data(contentsOf: configURL)
+        let originalSidecar = try Data(contentsOf: sidecarURL)
+        let failure = RepositorySourceInterruptedTransactionFailure()
+        let interruptedManager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: Self.makeMockedURLSession(),
+            persistence: failure.persistence
+        )
+
+        do {
+            _ = try await interruptedManager.addCustomSource(
+                from: "https://replacement.example/manifest.json"
+            )
+            XCTFail("Expected the injected commit and rollback failures.")
+        } catch RepositorySourceManagementError.configWriteFailed(let message) {
+            XCTAssertTrue(message.contains("rollback failed"))
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertNotEqual(try Data(contentsOf: configURL), originalConfig)
+        XCTAssertEqual(try Data(contentsOf: sidecarURL), originalSidecar)
+
+        let recoveredNames = RepositorySourceManager(basePath: tempDir.path).loadSources().map(\.name)
+
+        XCTAssertEqual(try Data(contentsOf: configURL), originalConfig)
+        XCTAssertEqual(try Data(contentsOf: sidecarURL), originalSidecar)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertTrue(recoveredNames.contains("Existing Repo"))
+        XCTAssertFalse(recoveredNames.contains("Replacement Repo"))
+    }
+
+    /** Seeds matching SWORD config and sidecar bytes for repository transaction tests. */
+    private static func seedRepositoryPersistence(at directory: URL) throws {
+        InstallManager.ensureDefaultConfigPublic(at: directory.path)
+        let configURL = directory.appendingPathComponent("InstallMgr.conf")
+        var config = try String(contentsOf: configURL, encoding: .utf8)
+        config += "\nHTTPSource=Existing Repo|existing.example|/catalog\n"
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+        let sidecar = Data(
+            """
+            {
+              "version": 1,
+              "repositories": [
+                {
+                  "name": "Existing Repo",
+                  "description": "Existing catalog",
+                  "type": "sword-https",
+                  "host": "existing.example",
+                  "catalogDirectory": "/catalog",
+                  "packageDirectory": "/packages",
+                  "manifestURL": "https://existing.example/manifest.json",
+                  "sourceURL": "https://existing.example/catalog"
+                }
+              ]
+            }
+            """.utf8
+        )
+        try sidecar.write(to: directory.appendingPathComponent("CustomRepositories.json"))
+    }
+
+    /** Replacement registration used by the restore-style transaction case. */
+    private static var replacementRegistration: RepositorySourceRegistration {
+        RepositorySourceRegistration(
+            source: SourceConfig(
+                name: "Replacement Repo",
+                type: "HTTP",
+                host: "replacement.example",
+                catalogPath: "/catalog",
+                repositoryType: SourceConfig.swordHTTPSRepositoryType,
+                description: "Replacement catalog",
+                packageDirectory: "/packages",
+                manifestURL: URL(string: "https://replacement.example/manifest.json"),
+                sourceURL: URL(string: "https://replacement.example/catalog")
+            ),
+            description: "Replacement catalog",
+            packageDirectory: "/packages",
+            manifestURL: URL(string: "https://replacement.example/manifest.json")!,
+            sourceURL: URL(string: "https://replacement.example/catalog")!,
+            type: SourceConfig.swordHTTPSRepositoryType
+        )
+    }
+
+    /**
      Creates an ephemeral URL session that routes repository manifest validation through the local
      URLProtocol fixture.
 
@@ -1479,6 +1820,63 @@ final class RepositorySourceManagerTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RepositorySourceManagerMockURLProtocol.self]
         return URLSession(configuration: configuration)
+    }
+}
+
+/** Injects exactly one failure when a transaction first mutates its sidecar store. */
+private final class RepositorySourceSecondStoreFailure {
+    private var didFail = false
+
+    var persistence: RepositorySourcePersistence {
+        RepositorySourcePersistence(
+            write: { [weak self] data, destination in
+                if destination.lastPathComponent == "CustomRepositories.json",
+                   self?.consumeFailure() == true {
+                    throw CocoaError(.fileWriteOutOfSpace)
+                }
+                try data.write(to: destination, options: .atomic)
+            },
+            remove: { [weak self] destination in
+                if destination.lastPathComponent == "CustomRepositories.json",
+                   self?.consumeFailure() == true {
+                    throw CocoaError(.fileWriteNoPermission)
+                }
+                try FileManager.default.removeItem(at: destination)
+            }
+        )
+    }
+
+    /** Returns true once so rollback writes use the normal atomic path. */
+    private func consumeFailure() -> Bool {
+        guard !didFail else { return false }
+        didFail = true
+        return true
+    }
+}
+
+/** Leaves a durable journal by failing both the sidecar commit and first rollback write. */
+private final class RepositorySourceInterruptedTransactionFailure {
+    private var didFailSidecarCommit = false
+    private var didFailConfigRollback = false
+
+    var persistence: RepositorySourcePersistence {
+        RepositorySourcePersistence { [weak self] data, destination in
+            guard let self else {
+                return try data.write(to: destination, options: .atomic)
+            }
+            if destination.lastPathComponent == "CustomRepositories.json",
+               !didFailSidecarCommit {
+                didFailSidecarCommit = true
+                throw CocoaError(.fileWriteOutOfSpace)
+            }
+            if destination.lastPathComponent == "InstallMgr.conf",
+               didFailSidecarCommit,
+               !didFailConfigRollback {
+                didFailConfigRollback = true
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            try data.write(to: destination, options: .atomic)
+        }
     }
 }
 

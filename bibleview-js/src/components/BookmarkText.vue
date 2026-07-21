@@ -26,6 +26,11 @@
           :fragment="bookmark.osisFragment"
           hide-titles
       />
+      <OsisFragment
+          v-else-if="isGenericBookmark(bookmark) && bookmark.osisFragment"
+          :fragment="bookmark.osisFragment"
+          hide-titles
+      />
       <div
           v-else-if="isGenericBookmark(bookmark)"
           @click.stop="$emit('change-expanded', false)"
@@ -39,6 +44,16 @@
 </template>
 
 <script lang="ts" setup>
+/**
+ * Renders collapsed bookmark text or expanded structured source context.
+ *
+ * @param bookmark Bible or generic bookmark payload supplied by the native bridge.
+ * @param expanded Whether to render the bookmark's source fragment instead of its one-line quote.
+ * @fires change-expanded With `false` when the expanded raw fallback is dismissed and `true` when
+ * the collapsed quote is opened.
+ * @remarks Structured Bible and generic fragments share `OsisFragment`, preserving Android's
+ * `OsisSegment` parsing path. Legacy generic payloads without a fragment retain the HTML fallback.
+ */
 import {useCommon} from "@/composables";
 import OsisFragment from "@/components/documents/OsisFragment.vue";
 import {computed, ref} from "vue";

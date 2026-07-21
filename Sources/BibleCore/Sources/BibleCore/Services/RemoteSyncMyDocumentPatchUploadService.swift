@@ -15,6 +15,15 @@ public enum RemoteSyncMyDocumentPatchUploadError: Error, Equatable {
 
     /// The generated temporary SQLite patch database could not be opened for writing.
     case invalidSQLiteDatabase
+
+    /// Persisted outbox metadata is malformed or incompatible with the active destination.
+    case invalidPendingUpload
+
+    /// The highest accepted local or remote patch number cannot be incremented safely.
+    case patchNumberOverflow
+
+    /// The requested wire schema is not the exact Android Room contract supported by this build.
+    case unsupportedSchemaVersion(Int)
 }
 
 /**
@@ -78,6 +87,48 @@ public struct RemoteSyncMyDocumentPatchUploadReport: Sendable, Equatable {
  Creates Android-shaped sparse My Documents patch databases and uploads them to the active backend.
  */
 public final class RemoteSyncMyDocumentPatchUploadService {
+    /** Immutable strict projection and metadata used to build one My Documents archive. */
+    private struct UploadGeneration {
+        let acceptedBaseline: RemoteSyncMyDocumentAcceptedBaseline
+        let expectedAcceptedBaselineRevision: UUID?
+        let expectedAcceptedBaselineExists: Bool
+        let changeSet: ChangeSet
+        let patchNumber: Int64
+        let sourceDevice: String
+        let timestamp: Int64
+    }
+
+    /**
+     Durable My Documents upload generation retained until remote and local acceptance both succeed.
+
+     Persisting archive identity and exact accepted bookkeeping makes retries restart-safe even when
+     the live document graph changes after upload begins.
+     */
+    private struct PendingUpload: Codable, Equatable {
+        let generationID: UUID
+        let deviceFolderID: String
+        let sourceDevice: String
+        let patchNumber: Int64
+        let schemaVersion: Int
+        let patchFileName: String
+        let archiveFileName: String
+        let archiveSHA256: String
+        let archiveSize: Int64
+        let timestamp: Int64
+        let updatedEntries: [RemoteSyncLogEntry]
+        let uploadedEntries: [RemoteSyncLogEntry]?
+        let acceptedBaseline: RemoteSyncMyDocumentAcceptedBaseline
+        let expectedAcceptedBaselineRevision: UUID?
+        let expectedAcceptedBaselineExists: Bool
+        let upsertedDocumentCount: Int
+        let upsertedPageCount: Int
+        let upsertedPageContentCount: Int
+        let upsertedAiPageCacheEntryCount: Int
+        let deletedRowCount: Int
+        let logEntryCount: Int
+        var publicationIdentity: RemoteSyncPublicationIdentity? = nil
+    }
+
     private struct ChangeSet {
         let documentRowsByKey: [String: RemoteSyncAndroidMyDocument]
         let pageRowsByKey: [String: RemoteSyncAndroidMyDocumentPage]
@@ -99,10 +150,15 @@ public final class RemoteSyncMyDocumentPatchUploadService {
     ]
 
     private let adapter: any RemoteSyncAdapting
+    private let remotePatchReconciler: RemoteSyncRemotePatchReconciler
     private let snapshotService: RemoteSyncMyDocumentSnapshotService
     private let fileManager: FileManager
     private let temporaryDirectory: URL
+    private let outboxDirectory: URL
     private let nowProvider: () -> Int64
+
+    /// Settings row containing the current My Documents outbox generation.
+    static let pendingUploadKey = "remote_sync.pending_upload.mydocuments"
 
     /**
      Creates a My Documents patch upload service for one remote backend.
@@ -112,14 +168,19 @@ public final class RemoteSyncMyDocumentPatchUploadService {
         snapshotService: RemoteSyncMyDocumentSnapshotService = RemoteSyncMyDocumentSnapshotService(),
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil,
+        outboxDirectory: URL? = nil,
         nowProvider: @escaping () -> Int64 = {
             Int64(Date().timeIntervalSince1970 * 1000.0)
         }
     ) {
         self.adapter = adapter
+        self.remotePatchReconciler = RemoteSyncRemotePatchReconciler(adapter: adapter)
         self.snapshotService = snapshotService
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
+        self.outboxDirectory = outboxDirectory
+            ?? temporaryDirectory?.appendingPathComponent("remote-sync-mydocuments-outbox", isDirectory: true)
+            ?? Self.defaultOutboxDirectory(fileManager: fileManager)
         self.nowProvider = nowProvider
     }
 
@@ -132,129 +193,610 @@ public final class RemoteSyncMyDocumentPatchUploadService {
         settingsStore: SettingsStore,
         schemaVersion: Int = RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
     ) async throws -> RemoteSyncMyDocumentPatchUploadReport? {
+        try await uploadPendingPatch(
+            bootstrapState: bootstrapState,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            schemaVersion: schemaVersion,
+            acceptanceCheckpoint: {}
+        )
+    }
+
+    /**
+     Resumes an existing My Documents outbox without projecting or creating a new generation.
+
+     - Parameters:
+       - bootstrapState: Ready category state identifying the pending destination.
+       - modelContext: Clean context containing My Documents and settings rows.
+       - settingsStore: Settings store constructed from `modelContext`.
+       - schemaVersion: Android My Documents schema version.
+     - Returns: Accepted pending-generation report, or `nil` when no outbox exists.
+     - Side effects: May reconcile/upload the persisted archive and atomically publish accepted state.
+     - Failure modes: Throws for malformed state, destination/schema mismatch, stale baseline revision,
+       missing/conflicting bytes, transport failure, or local acceptance failure.
+     - Important: This method never projects the live graph and never allocates a patch number.
+     */
+    public func resumePendingUploadIfPresent(
+        bootstrapState: RemoteSyncBootstrapState,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        schemaVersion: Int = RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
+    ) async throws -> RemoteSyncMyDocumentPatchUploadReport? {
+        try await resumePendingUploadIfPresent(
+            bootstrapState: bootstrapState,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            schemaVersion: schemaVersion,
+            acceptanceCheckpoint: {}
+        )
+    }
+
+    /**
+     Explicitly discards an unaccepted My Documents outbox at a destination-replacement boundary.
+
+     - Parameters:
+       - modelContext: Clean context containing local sync settings.
+       - settingsStore: Store containing the pending manifest.
+     - Side effects: Atomically removes the pending marker, then best-effort removes its archive;
+       accepted metadata and live rows remain unchanged and therefore dirty.
+     - Failure modes: Rethrows malformed-manifest or settings transaction failures without removing
+       the archive.
+     */
+    public func discardPendingUploadForDestinationReplacement(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws {
+        guard let pendingUpload = try settingsStore.performAtomicBatch(in: modelContext, {
+            try loadPendingUpload(settingsStore: settingsStore)
+        }) else {
+            return
+        }
+        try invalidatePendingUpload(
+            pendingUpload,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+    }
+
+    /**
+     Resumes a My Documents outbox with a deterministic local-acceptance checkpoint for tests.
+
+     - Parameters:
+       - bootstrapState: Ready category state identifying the pending destination.
+       - modelContext: Clean context containing My Documents and settings rows.
+       - settingsStore: Settings store constructed from `modelContext`.
+       - schemaVersion: Android My Documents schema version.
+       - acceptanceCheckpoint: Callback invoked after all acceptance mutations and before commit.
+     - Returns: Pending-generation report, or `nil` when no outbox exists.
+     - Side effects: Reconciles/uploads and accepts only an already-persisted generation.
+     - Failure modes: Rethrows destination, manifest, transport, baseline-CAS, transaction, and
+       checkpoint failures.
+     */
+    func resumePendingUploadIfPresent(
+        bootstrapState: RemoteSyncBootstrapState,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        schemaVersion: Int = RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion,
+        acceptanceCheckpoint: @escaping () throws -> Void
+    ) async throws -> RemoteSyncMyDocumentPatchUploadReport? {
+        guard let deviceFolderID = bootstrapState.deviceFolderID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !deviceFolderID.isEmpty else {
+            throw RemoteSyncMyDocumentPatchUploadError.missingDeviceFolderID
+        }
+        guard let pendingUpload = try settingsStore.performAtomicBatch(in: modelContext, {
+            try loadPendingUpload(settingsStore: settingsStore)
+        }) else {
+            return nil
+        }
+        guard pendingUpload.schemaVersion == schemaVersion,
+              pendingUpload.deviceFolderID == deviceFolderID else {
+            throw RemoteSyncMyDocumentPatchUploadError.invalidPendingUpload
+        }
+        return try await finishPendingUpload(
+            pendingUpload,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            acceptanceCheckpoint: acceptanceCheckpoint
+        )
+    }
+
+    /**
+     Executes My Documents upload with a deterministic final local-acceptance checkpoint.
+
+     - Parameters:
+       - bootstrapState: Ready category bootstrap state.
+       - modelContext: Clean context containing My Documents and settings rows.
+       - settingsStore: Settings store constructed from `modelContext`.
+       - schemaVersion: Android My Documents schema version.
+       - acceptanceCheckpoint: Callback invoked after all acceptance mutations and before commit.
+     - Returns: Upload report, or `nil` for a fully baselined unchanged projection.
+     - Side effects: Persists/resumes a durable outbox, reconciles or uploads one remote archive, and
+       atomically publishes accepted log, status, progress, fingerprints, and row identities.
+     - Failure modes: Rethrows strict reads, settings transactions, filesystem, transport,
+       reconciliation, and checkpoint failures without advancing accepted state.
+     */
+    func uploadPendingPatch(
+        bootstrapState: RemoteSyncBootstrapState,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        schemaVersion: Int = RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion,
+        acceptanceCheckpoint: @escaping () throws -> Void
+    ) async throws -> RemoteSyncMyDocumentPatchUploadReport? {
         guard let deviceFolderID = bootstrapState.deviceFolderID?.trimmingCharacters(in: .whitespacesAndNewlines),
               !deviceFolderID.isEmpty else {
             throw RemoteSyncMyDocumentPatchUploadError.missingDeviceFolderID
         }
 
-        let sourceDevice = Self.sourceDeviceName(from: deviceFolderID)
-        let timestamp = nowProvider()
-        let snapshot = snapshotService.snapshotCurrentState(
+        if let resumed = try await resumePendingUploadIfPresent(
+            bootstrapState: bootstrapState,
             modelContext: modelContext,
-            settingsStore: settingsStore
-        )
-
-        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
-        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
-        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
-        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
-        let existingEntriesByKey = Dictionary(
-            uniqueKeysWithValues: logEntryStore.entries(for: .myDocuments).map {
-                (logEntryStore.key(for: .myDocuments, entry: $0), $0)
-            }
-        )
-
-        let hadMissingFingerprintBaseline = existingEntriesByKey.contains { key, entry in
-            guard Self.supportedTableNames.contains(entry.tableName),
-                  entry.type != .delete,
-                  currentRowExists(forKey: key, in: snapshot) else {
-                return false
-            }
-            return fingerprintStore.fingerprint(
-                for: .myDocuments,
-                tableName: entry.tableName,
-                entityID1: entry.entityID1,
-                entityID2: entry.entityID2
-            ) == nil
+            settingsStore: settingsStore,
+            schemaVersion: schemaVersion,
+            acceptanceCheckpoint: acceptanceCheckpoint
+        ) {
+            return resumed
         }
 
-        let changeSet = buildChangeSet(
-            snapshot: snapshot,
-            existingEntriesByKey: existingEntriesByKey,
-            fingerprintStore: fingerprintStore,
-            timestamp: timestamp,
-            sourceDevice: sourceDevice
-        )
-
-        if changeSet.logEntries.isEmpty {
-            if hadMissingFingerprintBaseline {
-                snapshotService.refreshBaselineFingerprints(
-                    modelContext: modelContext,
-                    settingsStore: settingsStore
-                )
-            }
+        let hasPendingMutations = try settingsStore.performAtomicBatch(in: modelContext) {
+            let mutationJournal = RemoteSyncMutationJournalService(nowProvider: nowProvider)
+            try mutationJournal.recordLocalChanges(
+                for: .myDocuments,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            return try !mutationJournal.pendingMutations(
+                for: .myDocuments,
+                settingsStore: settingsStore
+            ).isEmpty
+        }
+        guard hasPendingMutations else {
             return nil
         }
 
-        let patchNumber = (patchStatusStore.lastPatchNumber(
-            for: .myDocuments,
-            sourceDevice: sourceDevice
-        ) ?? 0) + 1
-        let patchFileName = "\(patchNumber).\(schemaVersion).sqlite3.gz"
+        let highestRemotePatchNumber = try await highestRemotePatchNumber(in: deviceFolderID)
+        let generation: UploadGeneration? = try settingsStore.performAtomicBatch(in: modelContext) {
+            let sourceDevice = Self.sourceDeviceName(from: deviceFolderID)
+            let wallClockTimestamp = nowProvider()
+            let mutationJournal = RemoteSyncMutationJournalService(nowProvider: nowProvider)
+            try mutationJournal.recordLocalChanges(
+                for: .myDocuments,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            let pendingMutations = try mutationJournal.pendingMutations(
+                for: .myDocuments,
+                settingsStore: settingsStore
+            )
+            let snapshot = try snapshotService.snapshotCurrentStateThrowing(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            let previousBaseline = try snapshotService.storedAcceptedBaseline(settingsStore: settingsStore)
+            let acceptedBaseline = try snapshotService.acceptedBaselineThrowing(from: snapshot)
+            let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+            let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+            let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+            let existingEntriesByKey = Dictionary(
+                uniqueKeysWithValues: try logEntryStore.entriesStrict(for: .myDocuments).map {
+                    (logEntryStore.key(for: .myDocuments, entry: $0), $0)
+                }
+            )
+            let patchStatuses = try patchStatusStore.statusesStrict(for: .myDocuments)
+            let progressState = RemoteSyncStateStore(settingsStore: settingsStore)
+                .progressState(for: .myDocuments)
+            let timestamp = try RemoteSyncLogicalSequence.nextTimestamp(
+                now: wallClockTimestamp,
+                highWatermarks: existingEntriesByKey.values.map(\.lastUpdated)
+                    + patchStatuses.map(\.appliedDate)
+                    + [progressState.lastPatchWritten, progressState.lastSynchronized].compactMap { $0 }
+            )
+            var acceptedRowsByKey = Dictionary(
+                uniqueKeysWithValues: (previousBaseline?.rowIdentities ?? []).map { ($0.key, $0) }
+            )
+            for (key, entry) in existingEntriesByKey
+            where entry.type != .delete && Self.supportedTableNames.contains(entry.tableName) {
+                acceptedRowsByKey[key] = RemoteSyncMyDocumentAcceptedRowIdentity(
+                    key: key,
+                    tableName: entry.tableName,
+                    entityID1: entry.entityID1,
+                    entityID2: entry.entityID2
+                )
+            }
+
+            let changeSet = try buildChangeSet(
+                snapshot: snapshot,
+                existingEntriesByKey: existingEntriesByKey,
+                acceptedRowsByKey: acceptedRowsByKey,
+                fingerprintStore: fingerprintStore,
+                pendingMutations: pendingMutations,
+                timestamp: timestamp,
+                sourceDevice: sourceDevice
+            )
+            if changeSet.logEntries.isEmpty {
+                if previousBaseline == nil {
+                    try snapshotService.acceptBaseline(acceptedBaseline, settingsStore: settingsStore)
+                }
+                return nil
+            }
+            let highestAcceptedPatchNumber = patchStatuses
+                .filter { $0.sourceDevice == sourceDevice }
+                .map(\.patchNumber)
+                .max() ?? 0
+            let patchNumber: Int64
+            do {
+                patchNumber = try RemoteSyncPublicationIdentity.nextPatchNumber(
+                    after: [highestAcceptedPatchNumber, highestRemotePatchNumber]
+                )
+            } catch {
+                throw RemoteSyncMyDocumentPatchUploadError.patchNumberOverflow
+            }
+            return UploadGeneration(
+                acceptedBaseline: acceptedBaseline,
+                expectedAcceptedBaselineRevision: previousBaseline?.revision,
+                expectedAcceptedBaselineExists: previousBaseline != nil,
+                changeSet: changeSet,
+                patchNumber: patchNumber,
+                sourceDevice: sourceDevice,
+                timestamp: timestamp
+            )
+        }
+
+        guard let generation else { return nil }
+        let patchFileName = "\(generation.patchNumber).\(schemaVersion).sqlite3.gz"
 
         let databaseURL = temporaryURL(prefix: "remote-sync-mydocuments-upload-", suffix: ".sqlite3")
-        let archiveURL = temporaryURL(prefix: "remote-sync-mydocuments-upload-", suffix: ".sqlite3.gz")
         defer {
             try? fileManager.removeItem(at: databaseURL)
-            try? fileManager.removeItem(at: archiveURL)
         }
 
         try writePatchDatabase(
             at: databaseURL,
             schemaVersion: schemaVersion,
-            changeSet: changeSet
+            changeSet: generation.changeSet
         )
-        let archiveData = try RemoteSyncArchiveStagingService.gzip(Data(contentsOf: databaseURL))
-        try archiveData.write(to: archiveURL, options: .atomic)
-
-        let uploadedFile = try await adapter.upload(
-            name: patchFileName,
-            fileURL: archiveURL,
-            parentID: deviceFolderID,
-            contentType: NextCloudSyncAdapter.gzipMimeType
-        )
-
-        logEntryStore.replaceEntries(
-            changeSet.updatedEntriesByKey.values.sorted(by: Self.logEntrySort),
-            for: .myDocuments
-        )
-        patchStatusStore.addStatus(
-            RemoteSyncPatchStatus(
-                sourceDevice: sourceDevice,
-                patchNumber: patchNumber,
-                sizeBytes: uploadedFile.size,
-                appliedDate: timestamp
-            ),
-            for: .myDocuments
-        )
-        var progressState = stateStore.progressState(for: .myDocuments)
-        progressState.lastPatchWritten = timestamp
-        stateStore.setProgressState(progressState, for: .myDocuments)
-        snapshotService.refreshBaselineFingerprints(
+        let pendingUpload = try persistPendingUpload(
+            generation: generation,
+            databaseURL: databaseURL,
+            patchFileName: patchFileName,
+            deviceFolderID: deviceFolderID,
+            schemaVersion: schemaVersion,
             modelContext: modelContext,
             settingsStore: settingsStore
         )
-
-        return RemoteSyncMyDocumentPatchUploadReport(
-            uploadedFile: uploadedFile,
-            patchNumber: patchNumber,
-            upsertedDocumentCount: changeSet.documentRowsByKey.count,
-            upsertedPageCount: changeSet.pageRowsByKey.count,
-            upsertedPageContentCount: changeSet.pageContentRowsByKey.count,
-            upsertedAiPageCacheEntryCount: changeSet.aiPageCacheEntryRowsByKey.count,
-            deletedRowCount: changeSet.deletedRowCount,
-            logEntryCount: changeSet.logEntries.count,
-            lastUpdated: timestamp
+        return try await finishPendingUpload(
+            pendingUpload,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            acceptanceCheckpoint: acceptanceCheckpoint
         )
+    }
+
+    /**
+     Persists one exact My Documents archive and its acceptance metadata before network upload.
+
+     - Parameters:
+       - generation: Strict preflight generation.
+       - databaseURL: Complete SQLite patch database to compress into the durable outbox.
+       - patchFileName: Android patch filename.
+       - deviceFolderID: Destination device folder.
+       - schemaVersion: Android My Documents schema version.
+       - modelContext: Clean context shared by graph and settings.
+       - settingsStore: Store receiving the pending manifest.
+     - Returns: Durable pending generation.
+     - Side effects: Writes one outbox archive and atomically stores its manifest.
+     - Failure modes: Rethrows filesystem, encoding, or settings transaction errors and removes the
+       archive when manifest publication fails.
+     */
+    private func persistPendingUpload(
+        generation: UploadGeneration,
+        databaseURL: URL,
+        patchFileName: String,
+        deviceFolderID: String,
+        schemaVersion: Int,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> PendingUpload {
+        try fileManager.createDirectory(at: outboxDirectory, withIntermediateDirectories: true)
+        let generationID = UUID()
+        let archiveFileName = "mydocuments-\(generationID.uuidString.lowercased()).sqlite3.gz"
+        let archiveURL = outboxDirectory.appendingPathComponent(archiveFileName, isDirectory: false)
+        var keepsArchive = false
+        defer {
+            if !keepsArchive {
+                try? fileManager.removeItem(at: archiveURL)
+            }
+        }
+        let archiveFingerprint = try RemoteSyncArchiveStagingService.gzipPatchDatabase(
+            at: databaseURL,
+            to: archiveURL
+        )
+
+        var pendingUpload = PendingUpload(
+            generationID: generationID,
+            deviceFolderID: deviceFolderID,
+            sourceDevice: generation.sourceDevice,
+            patchNumber: generation.patchNumber,
+            schemaVersion: schemaVersion,
+            patchFileName: patchFileName,
+            archiveFileName: archiveFileName,
+            archiveSHA256: archiveFingerprint.sha256,
+            archiveSize: archiveFingerprint.byteCount,
+            timestamp: generation.timestamp,
+            updatedEntries: generation.changeSet.updatedEntriesByKey.values.sorted(by: Self.logEntrySort),
+            uploadedEntries: generation.changeSet.logEntries,
+            acceptedBaseline: generation.acceptedBaseline,
+            expectedAcceptedBaselineRevision: generation.expectedAcceptedBaselineRevision,
+            expectedAcceptedBaselineExists: generation.expectedAcceptedBaselineExists,
+            upsertedDocumentCount: generation.changeSet.documentRowsByKey.count,
+            upsertedPageCount: generation.changeSet.pageRowsByKey.count,
+            upsertedPageContentCount: generation.changeSet.pageContentRowsByKey.count,
+            upsertedAiPageCacheEntryCount: generation.changeSet.aiPageCacheEntryRowsByKey.count,
+            deletedRowCount: generation.changeSet.deletedRowCount,
+            logEntryCount: generation.changeSet.logEntries.count
+        )
+        pendingUpload.publicationIdentity = try RemoteSyncPublicationIdentity.patch(
+            category: .myDocuments,
+            destinationID: pendingUpload.deviceFolderID,
+            sourceDevice: pendingUpload.sourceDevice,
+            patchNumber: pendingUpload.patchNumber,
+            schemaVersion: pendingUpload.schemaVersion,
+            remoteFileName: pendingUpload.patchFileName,
+            archiveFileName: pendingUpload.archiveFileName,
+            archiveSHA256: pendingUpload.archiveSHA256,
+            archiveSize: pendingUpload.archiveSize,
+            rowCounts: Self.publicationRowCounts(for: pendingUpload),
+            acceptancePayload: pendingUpload
+        )
+        do {
+            try settingsStore.performAtomicBatch(in: modelContext) {
+                guard try loadPendingUpload(settingsStore: settingsStore) == nil else {
+                    throw RemoteSyncMyDocumentPatchUploadError.invalidPendingUpload
+                }
+                try storePendingUpload(pendingUpload, settingsStore: settingsStore)
+            }
+        } catch {
+            throw error
+        }
+        keepsArchive = true
+        return pendingUpload
+    }
+
+    /**
+     Reconciles or uploads one pending My Documents generation and accepts it atomically.
+
+     Existing same-name remote files are downloaded and compared against the persisted archive digest.
+     This closes the process-death window after remote commit without regenerating bytes from live data.
+
+     - Parameters:
+       - pendingUpload: Durable generation to finish.
+       - modelContext: Clean shared context.
+       - settingsStore: Store containing pending and accepted metadata.
+       - acceptanceCheckpoint: Deterministic final in-transaction test checkpoint.
+     - Returns: Upload report for the persisted generation.
+     - Side effects: Lists/downloads/uploads remote data, atomically publishes local accepted state,
+       and removes the outbox archive after commit.
+     - Failure modes: Throws for missing/conflicting bytes, transport, settings, or checkpoint errors;
+       the complete old bookkeeping and pending generation remain on local acceptance failure.
+     */
+    private func finishPendingUpload(
+        _ pendingUpload: PendingUpload,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        acceptanceCheckpoint: @escaping () throws -> Void
+    ) async throws -> RemoteSyncMyDocumentPatchUploadReport {
+        let archiveURL = try pendingArchiveURL(for: pendingUpload)
+        let reconciliation = try await remotePatchReconciler.reconcile(
+            archive: RemoteSyncDurablePatchArchive(
+                fileName: pendingUpload.patchFileName,
+                fileURL: archiveURL,
+                sha256: pendingUpload.archiveSHA256,
+                size: pendingUpload.archiveSize,
+                parentID: pendingUpload.deviceFolderID,
+                contentType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
+        let acceptedRemoteFile: RemoteSyncFile
+        switch reconciliation {
+        case .created(let file), .matchedExisting(let file):
+            acceptedRemoteFile = file
+        }
+
+        try settingsStore.performAtomicBatch(in: modelContext) {
+            guard try loadPendingUpload(settingsStore: settingsStore) == pendingUpload else {
+                throw RemoteSyncMyDocumentPatchUploadError.invalidPendingUpload
+            }
+            try snapshotService.validateAcceptedBaselineRevision(
+                expectedRevision: pendingUpload.expectedAcceptedBaselineRevision,
+                expectedBaselineExists: pendingUpload.expectedAcceptedBaselineExists,
+                settingsStore: settingsStore
+            )
+            let currentSnapshot = try snapshotService.snapshotCurrentStateThrowing(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            try RemoteSyncMutationJournalService().mergeAcceptedLogEntries(
+                acceptedEntries: pendingUpload.updatedEntries,
+                uploadedEntries: pendingUpload.uploadedEntries ?? pendingUpload.updatedEntries.filter {
+                    $0.lastUpdated == pendingUpload.timestamp && $0.sourceDevice == pendingUpload.sourceDevice
+                },
+                acceptedFingerprints: pendingUpload.acceptedBaseline.fingerprintsByKey,
+                currentFingerprints: currentSnapshot.fingerprintsByKey,
+                category: .myDocuments,
+                settingsStore: settingsStore
+            )
+            let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+            _ = try patchStatusStore.statusesStrict(for: .myDocuments)
+            patchStatusStore.addStatus(
+                RemoteSyncPatchStatus(
+                    sourceDevice: pendingUpload.sourceDevice,
+                    patchNumber: pendingUpload.patchNumber,
+                    sizeBytes: acceptedRemoteFile.size,
+                    appliedDate: acceptedRemoteFile.timestamp
+                ),
+                for: .myDocuments
+            )
+            let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+            var progressState = stateStore.progressState(for: .myDocuments)
+            progressState.lastPatchWritten = pendingUpload.timestamp
+            stateStore.setProgressState(progressState, for: .myDocuments)
+            try snapshotService.acceptBaseline(
+                pendingUpload.acceptedBaseline,
+                settingsStore: settingsStore
+            )
+            try acceptanceCheckpoint()
+            settingsStore.remove(Self.pendingUploadKey)
+        }
+
+        try? fileManager.removeItem(at: archiveURL)
+        return RemoteSyncMyDocumentPatchUploadReport(
+            uploadedFile: acceptedRemoteFile,
+            patchNumber: pendingUpload.patchNumber,
+            upsertedDocumentCount: pendingUpload.upsertedDocumentCount,
+            upsertedPageCount: pendingUpload.upsertedPageCount,
+            upsertedPageContentCount: pendingUpload.upsertedPageContentCount,
+            upsertedAiPageCacheEntryCount: pendingUpload.upsertedAiPageCacheEntryCount,
+            deletedRowCount: pendingUpload.deletedRowCount,
+            logEntryCount: pendingUpload.logEntryCount,
+            lastUpdated: pendingUpload.timestamp
+        )
+    }
+
+    /**
+     Invalidates a My Documents outbox only after explicit lifecycle destination replacement.
+
+     - Parameters:
+       - pendingUpload: Old destination-bound generation.
+       - modelContext: Clean shared context.
+       - settingsStore: Store containing its manifest.
+     - Side effects: Atomically removes only the pending marker and then removes its archive best effort.
+     - Failure modes: Rethrows manifest validation or settings transaction errors.
+     */
+    private func invalidatePendingUpload(
+        _ pendingUpload: PendingUpload,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws {
+        try settingsStore.performAtomicBatch(in: modelContext) {
+            guard try loadPendingUpload(settingsStore: settingsStore) == pendingUpload else {
+                throw RemoteSyncMyDocumentPatchUploadError.invalidPendingUpload
+            }
+            settingsStore.remove(Self.pendingUploadKey)
+        }
+        if let archiveURL = try? pendingArchiveURL(for: pendingUpload) {
+            try? fileManager.removeItem(at: archiveURL)
+        }
+    }
+
+    /** Reads and decodes the pending My Documents upload manifest. */
+    private func loadPendingUpload(settingsStore: SettingsStore) throws -> PendingUpload? {
+        guard let payload = settingsStore.getString(Self.pendingUploadKey) else { return nil }
+        guard let data = payload.data(using: .utf8),
+              let pendingUpload = try? JSONDecoder().decode(PendingUpload.self, from: data) else {
+            throw RemoteSyncMyDocumentPatchUploadError.invalidPendingUpload
+        }
+        guard let publicationIdentity = pendingUpload.publicationIdentity else {
+            throw RemoteSyncMyDocumentPatchUploadError.invalidPendingUpload
+        }
+        var acceptancePayload = pendingUpload
+        acceptancePayload.publicationIdentity = nil
+        do {
+            try publicationIdentity.validate(
+                kind: .patch,
+                category: .myDocuments,
+                destinationID: pendingUpload.deviceFolderID,
+                sourceDevice: pendingUpload.sourceDevice,
+                patchNumber: pendingUpload.patchNumber,
+                schemaVersion: pendingUpload.schemaVersion,
+                remoteFileName: pendingUpload.patchFileName,
+                archiveFileName: pendingUpload.archiveFileName,
+                archiveSHA256: pendingUpload.archiveSHA256,
+                archiveSize: pendingUpload.archiveSize,
+                rowCounts: Self.publicationRowCounts(for: pendingUpload),
+                acceptancePayload: acceptancePayload
+            )
+        } catch {
+            throw RemoteSyncMyDocumentPatchUploadError.invalidPendingUpload
+        }
+        return pendingUpload
+    }
+
+    /**
+     Returns every operation count bound to one My Documents publication.
+
+     - Parameter pendingUpload: Identity-free or decoded My Documents outbox envelope.
+     - Returns: Nonempty count dictionary covering all Android My Documents row families.
+     - Side effects: none.
+     - Failure modes: This deterministic projection cannot fail.
+     */
+    private static func publicationRowCounts(for pendingUpload: PendingUpload) -> [String: Int] {
+        [
+            "documents": pendingUpload.upsertedDocumentCount,
+            "pages": pendingUpload.upsertedPageCount,
+            "pageContents": pendingUpload.upsertedPageContentCount,
+            "aiPageCacheEntries": pendingUpload.upsertedAiPageCacheEntryCount,
+            "deletions": pendingUpload.deletedRowCount,
+            "logEntries": pendingUpload.logEntryCount
+        ]
+    }
+
+    /** Encodes and stores one complete pending My Documents upload manifest. */
+    private func storePendingUpload(_ pendingUpload: PendingUpload, settingsStore: SettingsStore) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(pendingUpload)
+        guard let payload = String(data: data, encoding: .utf8) else {
+            throw RemoteSyncMyDocumentPatchUploadError.invalidPendingUpload
+        }
+        settingsStore.setString(Self.pendingUploadKey, value: payload)
+    }
+
+    /** Resolves a safe pending archive basename beneath the configured outbox. */
+    private func pendingArchiveURL(for pendingUpload: PendingUpload) throws -> URL {
+        guard pendingUpload.archiveFileName == URL(fileURLWithPath: pendingUpload.archiveFileName).lastPathComponent,
+              !pendingUpload.archiveFileName.isEmpty else {
+            throw RemoteSyncMyDocumentPatchUploadError.invalidPendingUpload
+        }
+        return outboxDirectory.appendingPathComponent(pendingUpload.archiveFileName, isDirectory: false)
+    }
+
+    /**
+     Reads the highest Android patch number already present in one My Documents device folder.
+
+     - Parameter deviceFolderID: Active remote device-folder identifier.
+     - Returns: Highest valid Android patch number, or zero when no patch archive exists.
+     - Side effects: Performs one unfiltered remote folder listing.
+     - Failure modes: Rethrows backend listing failures so generation creation fails closed.
+     */
+    private func highestRemotePatchNumber(in deviceFolderID: String) async throws -> Int64 {
+        try await adapter.listFiles(
+            parentIDs: [deviceFolderID],
+            name: nil,
+            mimeType: nil,
+            modifiedAtLeast: nil
+        )
+        .compactMap { RemoteSyncPatchDiscoveryService.parsePatchFileName($0.name)?.patchNumber }
+        .max() ?? 0
+    }
+
+    /** Resolves the production My Documents outbox beneath Application Support. */
+    static func defaultOutboxDirectory(fileManager: FileManager) -> URL {
+        let root = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        return root
+            .appendingPathComponent("AndBible", isDirectory: true)
+            .appendingPathComponent("RemoteSyncOutbox", isDirectory: true)
+            .appendingPathComponent("mydocuments", isDirectory: true)
     }
 
     private func buildChangeSet(
         snapshot: RemoteSyncMyDocumentCurrentSnapshot,
         existingEntriesByKey: [String: RemoteSyncLogEntry],
+        acceptedRowsByKey: [String: RemoteSyncMyDocumentAcceptedRowIdentity],
         fingerprintStore: RemoteSyncRowFingerprintStore,
+        pendingMutations: [String: RemoteSyncPendingMutation],
         timestamp: Int64,
         sourceDevice: String
-    ) -> ChangeSet {
+    ) throws -> ChangeSet {
         var documentRowsByKey: [String: RemoteSyncAndroidMyDocument] = [:]
         var pageRowsByKey: [String: RemoteSyncAndroidMyDocumentPage] = [:]
         var pageContentRowsByKey: [String: RemoteSyncAndroidMyDocumentPageContent] = [:]
@@ -271,14 +813,20 @@ public final class RemoteSyncMyDocumentPatchUploadService {
             ) else {
                 continue
             }
-            let entry = RemoteSyncLogEntry(
-                tableName: "MyDocument",
-                entityID1: .blob(RemoteSyncMyDocumentSnapshotService.uuidBlob(row.id)),
-                entityID2: RemoteSyncMyDocumentSnapshotService.emptySecondaryEntityID,
+            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: snapshot.fingerprintsByKey[key],
                 type: .upsert,
-                lastUpdated: timestamp,
-                sourceDevice: sourceDevice
-            )
+                category: .myDocuments,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: "MyDocument",
+                    entityID1: .blob(RemoteSyncMyDocumentSnapshotService.uuidBlob(row.id)),
+                    entityID2: RemoteSyncMyDocumentSnapshotService.emptySecondaryEntityID,
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             documentRowsByKey[key] = row
             logEntries.append(entry)
             updatedEntriesByKey[key] = entry
@@ -293,14 +841,20 @@ public final class RemoteSyncMyDocumentPatchUploadService {
             ) else {
                 continue
             }
-            let entry = RemoteSyncLogEntry(
-                tableName: "MyDocumentPage",
-                entityID1: .blob(RemoteSyncMyDocumentSnapshotService.uuidBlob(row.id)),
-                entityID2: RemoteSyncMyDocumentSnapshotService.emptySecondaryEntityID,
+            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: snapshot.fingerprintsByKey[key],
                 type: .upsert,
-                lastUpdated: timestamp,
-                sourceDevice: sourceDevice
-            )
+                category: .myDocuments,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: "MyDocumentPage",
+                    entityID1: .blob(RemoteSyncMyDocumentSnapshotService.uuidBlob(row.id)),
+                    entityID2: RemoteSyncMyDocumentSnapshotService.emptySecondaryEntityID,
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             pageRowsByKey[key] = row
             logEntries.append(entry)
             updatedEntriesByKey[key] = entry
@@ -315,14 +869,20 @@ public final class RemoteSyncMyDocumentPatchUploadService {
             ) else {
                 continue
             }
-            let entry = RemoteSyncLogEntry(
-                tableName: "MyDocumentPageContent",
-                entityID1: .blob(RemoteSyncMyDocumentSnapshotService.uuidBlob(row.pageId)),
-                entityID2: RemoteSyncMyDocumentSnapshotService.emptySecondaryEntityID,
+            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: snapshot.fingerprintsByKey[key],
                 type: .upsert,
-                lastUpdated: timestamp,
-                sourceDevice: sourceDevice
-            )
+                category: .myDocuments,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: "MyDocumentPageContent",
+                    entityID1: .blob(RemoteSyncMyDocumentSnapshotService.uuidBlob(row.pageId)),
+                    entityID2: RemoteSyncMyDocumentSnapshotService.emptySecondaryEntityID,
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             pageContentRowsByKey[key] = row
             logEntries.append(entry)
             updatedEntriesByKey[key] = entry
@@ -337,34 +897,58 @@ public final class RemoteSyncMyDocumentPatchUploadService {
             ) else {
                 continue
             }
-            let entry = RemoteSyncLogEntry(
-                tableName: "AiPageCacheEntry",
-                entityID1: .blob(RemoteSyncMyDocumentSnapshotService.uuidBlob(row.pageId)),
-                entityID2: RemoteSyncMyDocumentSnapshotService.emptySecondaryEntityID,
+            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: snapshot.fingerprintsByKey[key],
                 type: .upsert,
-                lastUpdated: timestamp,
-                sourceDevice: sourceDevice
-            )
+                category: .myDocuments,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: "AiPageCacheEntry",
+                    entityID1: .blob(RemoteSyncMyDocumentSnapshotService.uuidBlob(row.pageId)),
+                    entityID2: RemoteSyncMyDocumentSnapshotService.emptySecondaryEntityID,
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             aiPageCacheEntryRowsByKey[key] = row
             logEntries.append(entry)
             updatedEntriesByKey[key] = entry
         }
 
-        for (key, entry) in existingEntriesByKey.sorted(by: { $0.key < $1.key }) {
-            guard Self.supportedTableNames.contains(entry.tableName), entry.type != .delete else {
+        var deletionRowsByKey = acceptedRowsByKey
+        for (key, mutation) in pendingMutations where mutation.entry.type == .delete {
+            deletionRowsByKey[key] = RemoteSyncMyDocumentAcceptedRowIdentity(
+                key: key,
+                tableName: mutation.entry.tableName,
+                entityID1: mutation.entry.entityID1,
+                entityID2: mutation.entry.entityID2
+            )
+        }
+        for (key, identity) in deletionRowsByKey.sorted(by: { $0.key < $1.key }) {
+            guard Self.supportedTableNames.contains(identity.tableName) else {
                 continue
             }
             guard !currentRowExists(forKey: key, in: snapshot) else {
                 continue
             }
-            let deleteEntry = RemoteSyncLogEntry(
-                tableName: entry.tableName,
-                entityID1: entry.entityID1,
-                entityID2: entry.entityID2,
+            guard existingEntriesByKey[key]?.type != .delete || pendingMutations[key] != nil else {
+                continue
+            }
+            let deleteEntry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: nil,
                 type: .delete,
-                lastUpdated: timestamp,
-                sourceDevice: sourceDevice
-            )
+                category: .myDocuments,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: identity.tableName,
+                    entityID1: identity.entityID1,
+                    entityID2: identity.entityID2,
+                    type: .delete,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             logEntries.append(deleteEntry)
             updatedEntriesByKey[key] = deleteEntry
         }
@@ -431,6 +1015,13 @@ public final class RemoteSyncMyDocumentPatchUploadService {
         schemaVersion: Int,
         changeSet: ChangeSet
     ) throws {
+        guard schemaVersion == RemoteSyncAndroidDatabaseContract.schemaVersion(for: .myDocuments) else {
+            throw RemoteSyncMyDocumentPatchUploadError.unsupportedSchemaVersion(schemaVersion)
+        }
+        try fileManager.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         var database: OpaquePointer?
         guard sqlite3_open_v2(
             url.path,
@@ -446,101 +1037,7 @@ public final class RemoteSyncMyDocumentPatchUploadService {
         defer { sqlite3_close(database) }
 
         try execute(
-            """
-            PRAGMA user_version = \(schemaVersion);
-            CREATE TABLE MyDocument (
-                id BLOB NOT NULL PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT DEFAULT NULL,
-                initials TEXT NOT NULL,
-                orderNumber INTEGER NOT NULL,
-                createdAt INTEGER NOT NULL,
-                updatedAt INTEGER NOT NULL,
-                sourcePromptId BLOB DEFAULT NULL
-            );
-            CREATE TABLE MyDocumentPage (
-                id BLOB NOT NULL PRIMARY KEY,
-                documentId BLOB NOT NULL,
-                title TEXT NOT NULL,
-                pageKey TEXT NOT NULL,
-                contentType TEXT NOT NULL,
-                orderNumber INTEGER NOT NULL,
-                createdAt INTEGER NOT NULL,
-                updatedAt INTEGER NOT NULL,
-                sourcePromptId BLOB DEFAULT NULL,
-                languageCode TEXT DEFAULT NULL,
-                FOREIGN KEY(documentId) REFERENCES MyDocument(id) ON DELETE CASCADE
-            );
-            CREATE TABLE MyDocumentPageContent (
-                pageId BLOB NOT NULL PRIMARY KEY,
-                content TEXT NOT NULL,
-                FOREIGN KEY(pageId) REFERENCES MyDocumentPage(id) ON DELETE CASCADE
-            );
-            CREATE TABLE AiPageCacheEntry (
-                pageId BLOB NOT NULL PRIMARY KEY,
-                sourcePromptId BLOB NOT NULL,
-                sourceContext TEXT DEFAULT NULL,
-                kjvOrdinalStart INTEGER DEFAULT NULL,
-                kjvOrdinalEnd INTEGER DEFAULT NULL,
-                contextHash TEXT DEFAULT NULL,
-                usedWriteTools INTEGER NOT NULL,
-                sourceModelName TEXT DEFAULT NULL,
-                sourceBookInitials TEXT DEFAULT NULL,
-                sourceBookKey TEXT DEFAULT NULL,
-                FOREIGN KEY(pageId) REFERENCES MyDocumentPage(id) ON DELETE CASCADE
-            );
-            CREATE TABLE LogEntry (
-                tableName TEXT NOT NULL,
-                entityId1 BLOB NOT NULL,
-                entityId2 BLOB NOT NULL,
-                type TEXT NOT NULL,
-                lastUpdated INTEGER NOT NULL,
-                sourceDevice TEXT NOT NULL,
-                PRIMARY KEY(tableName, entityId1, entityId2)
-            );
-            CREATE TABLE SyncConfiguration (
-                keyName TEXT NOT NULL,
-                stringValue TEXT,
-                longValue INTEGER,
-                booleanValue INTEGER,
-                PRIMARY KEY(keyName)
-            );
-            CREATE TABLE SyncStatus (
-                sourceDevice TEXT NOT NULL,
-                patchNumber INTEGER NOT NULL,
-                sizeBytes INTEGER NOT NULL,
-                appliedDate INTEGER NOT NULL,
-                PRIMARY KEY(sourceDevice, patchNumber)
-            );
-            CREATE TABLE room_master_table (
-                id INTEGER PRIMARY KEY,
-                identity_hash TEXT
-            );
-            INSERT OR REPLACE INTO room_master_table (id, identity_hash)
-                VALUES(42, '3f0946602099d896c8d47129233c1794');
-            CREATE UNIQUE INDEX index_MyDocument_initials ON MyDocument (initials);
-            CREATE INDEX index_MyDocumentPage_documentId ON MyDocumentPage (documentId);
-            CREATE UNIQUE INDEX index_MyDocumentPage_documentId_pageKey ON MyDocumentPage (documentId, pageKey);
-            CREATE INDEX index_AiPageCacheEntry_sourcePromptId_contextHash ON AiPageCacheEntry (sourcePromptId, contextHash);
-            CREATE INDEX index_AiPageCacheEntry_sourcePromptId_kjvOrdinalStart_kjvOrdinalEnd ON AiPageCacheEntry (sourcePromptId, kjvOrdinalStart, kjvOrdinalEnd);
-            CREATE INDEX index_AiPageCacheEntry_kjvOrdinalStart_kjvOrdinalEnd ON AiPageCacheEntry (kjvOrdinalStart, kjvOrdinalEnd);
-            CREATE INDEX index_AiPageCacheEntry_sourceBookInitials_sourceBookKey ON AiPageCacheEntry (sourceBookInitials, sourceBookKey);
-            CREATE INDEX index_LogEntry_lastUpdated ON LogEntry (lastUpdated);
-            CREATE INDEX index_LogEntry_sourceDevice ON LogEntry (sourceDevice);
-            CREATE VIEW MyDocumentPageWithContent AS
-                SELECT p.*, c.content
-                FROM MyDocumentPage p
-                LEFT OUTER JOIN MyDocumentPageContent c ON p.id = c.pageId;
-            CREATE VIEW AiCachedPageWithContent AS
-                SELECT c.pageId, c.sourcePromptId, c.sourceContext, c.kjvOrdinalStart,
-                       c.kjvOrdinalEnd, c.contextHash, c.usedWriteTools, c.sourceModelName,
-                       c.sourceBookInitials, c.sourceBookKey,
-                       p.title, p.pageKey, p.contentType, p.documentId,
-                       p.orderNumber, p.createdAt, p.updatedAt, p.languageCode, cnt.content
-                FROM AiPageCacheEntry c
-                INNER JOIN MyDocumentPage p ON c.pageId = p.id
-                LEFT OUTER JOIN MyDocumentPageContent cnt ON p.id = cnt.pageId;
-            """,
+            RemoteSyncAndroidDatabaseContract.createSchemaSQL(for: .myDocuments),
             in: database
         )
 

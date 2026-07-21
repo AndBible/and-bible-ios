@@ -1,0 +1,865 @@
+{
+  "default": {
+    "original": [
+      "Lord",
+      "God",
+      "",
+      "",
+      ""
+    ],
+    "replacement": [
+      "Yahweh",
+      "Yahweh",
+      "",
+      "",
+      ""
+    ],
+    "resourceQualifier": "values"
+  },
+  "languages": {
+    "af": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-af"
+    },
+    "ar": {
+      "original": [
+        "السيد",
+        "الرب",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "يهوه",
+        "يهوه",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-ar"
+    },
+    "az": {
+      "original": [],
+      "replacement": [],
+      "resourceQualifier": "values-az"
+    },
+    "bg": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-bg"
+    },
+    "bn": {
+      "original": [
+        "প্রভু",
+        "ঈশ্বর",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "ইহোবা",
+        "ইহোবা",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-bn"
+    },
+    "ca": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-ca"
+    },
+    "cs": {
+      "original": [
+        "Pán",
+        "Bůh",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Jahve",
+        "Jahve",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-cs"
+    },
+    "da": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-da"
+    },
+    "de": {
+      "original": [
+        "Herr",
+        "Gott",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Jahwe",
+        "Jahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-de"
+    },
+    "el": {
+      "original": [
+        "Κύριος",
+        "Θεός"
+      ],
+      "replacement": [
+        "Γιαχβέ",
+        "Γιαχβέ"
+      ],
+      "resourceQualifier": "values-el"
+    },
+    "en": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values"
+    },
+    "eo": {
+      "original": [
+        "Dio",
+        "Eternulo",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Javeo",
+        "Javeo",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-eo"
+    },
+    "es": {
+      "original": [
+        "Señor",
+        "Dios",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahvé",
+        "Yahvé",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-es"
+    },
+    "et": {
+      "original": [
+        "Issand",
+        "Jumal",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Jehoova",
+        "Jehoova",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-et"
+    },
+    "fi": {
+      "original": [
+        "Herra",
+        "Jumala",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Jahve",
+        "Jahve",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-fi"
+    },
+    "fil": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-fil"
+    },
+    "fr": {
+      "original": [
+        "Seigneur",
+        "Dieu",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahvé",
+        "Yahvé",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-fr"
+    },
+    "he": {
+      "original": [
+        "אדון",
+        "אלוהים",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "יהוה",
+        "יהוה",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-iw"
+    },
+    "hi": {
+      "original": [
+        "भगवान",
+        "परमेश्वर",
+        "ईश्वर",
+        "ख़ुदा",
+        ""
+      ],
+      "replacement": [
+        "यहोवा",
+        "यहोवा",
+        "यहोवा",
+        "यहोवा",
+        ""
+      ],
+      "resourceQualifier": "values-hi"
+    },
+    "hr": {
+      "original": [
+        "Gospodin",
+        "Bog",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Jahve",
+        "Jahve",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-hr"
+    },
+    "hu": {
+      "original": [
+        "Úr",
+        "Isten",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Jahve",
+        "Jahve",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-hu"
+    },
+    "id": {
+      "original": [
+        "Tuhan",
+        "Allah",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-id"
+    },
+    "it": {
+      "original": [
+        "Signore",
+        "Dio",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-it"
+    },
+    "ja": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-ja"
+    },
+    "kk": {
+      "original": [],
+      "replacement": [
+        "Яхве",
+        "Яхве",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-kk"
+    },
+    "ko": {
+      "original": [
+        "주",
+        "하나님",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "야훼",
+        "야훼",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-ko"
+    },
+    "lt": {
+      "original": [
+        "Viešpats",
+        "Dievas",
+        "Karalius",
+        "Visagalis",
+        ""
+      ],
+      "replacement": [
+        "Jahvė",
+        "Jahvė",
+        "Jahvė",
+        "Jahvė",
+        ""
+      ],
+      "resourceQualifier": "values-lt"
+    },
+    "ml": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-ml"
+    },
+    "ms": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-ms"
+    },
+    "my": {
+      "original": [
+        "သခင်",
+        "ဘုရားသခင်",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-my"
+    },
+    "nb": {
+      "original": [
+        "Herre",
+        "Gud",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Jahve",
+        "Jahve",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-nb"
+    },
+    "ne": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-ne"
+    },
+    "nl": {
+      "original": [
+        "Heer",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-nl"
+    },
+    "pl": {
+      "original": [
+        "Bóg",
+        "PAN",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Jahwe",
+        "Jahwe",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-pl"
+    },
+    "pt": {
+      "original": [],
+      "replacement": [],
+      "resourceQualifier": "values-pt"
+    },
+    "ro": {
+      "original": [
+        "Domnul",
+        "Dumnezeu",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-ro"
+    },
+    "ru": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-ru"
+    },
+    "sk": {
+      "original": [
+        "Pán",
+        "Boh",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Jahve",
+        "Jahve",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-sk"
+    },
+    "sl": {
+      "original": [
+        "Gospod",
+        "Bog",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Jehova",
+        "Jehova",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-sl"
+    },
+    "sr": {
+      "original": [
+        "Господ",
+        "Бог",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Јахве",
+        "Јахве",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-b+sr"
+    },
+    "sv": {
+      "original": [
+        "HERREN",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Jahve",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-sv"
+    },
+    "sw": {
+      "original": [
+        "BWANA",
+        "Mungu",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-sw"
+    },
+    "ta": {
+      "original": [
+        "ஆண்டவர்",
+        "கடவுள்",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "யாவே",
+        "யாவே",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-ta"
+    },
+    "te": {
+      "original": [
+        "ప్రభువు",
+        "దేవుడు",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "యెహోవా",
+        "యెహోవా",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-te"
+    },
+    "th": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-th"
+    },
+    "tr": {
+      "original": [
+        "Rab",
+        "Tanrı",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahve",
+        "Yahve",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-tr"
+    },
+    "uk": {
+      "original": [
+        "Господь",
+        "Бог",
+        "Господнє",
+        "Боже",
+        "Господа"
+      ],
+      "replacement": [
+        "Ягве",
+        "Яхве",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-uk"
+    },
+    "ur": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-ur"
+    },
+    "uz": {
+      "original": [
+        "Egamiz",
+        "Xudo",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [],
+      "resourceQualifier": "values-uz"
+    },
+    "vi": {
+      "original": [
+        "Lord",
+        "God",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "Yahweh",
+        "Yahweh",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-vi"
+    },
+    "yue": {
+      "original": [
+        "上帝",
+        "神",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "耶和華",
+        "耶和華",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-yue"
+    },
+    "zh": {
+      "original": [
+        "上帝",
+        "神",
+        "",
+        "",
+        ""
+      ],
+      "replacement": [
+        "耶和華",
+        "耶和華",
+        "",
+        "",
+        ""
+      ],
+      "resourceQualifier": "values-zh"
+    }
+  },
+  "schemaVersion": 1,
+  "sourceAndroidRes": "app/src/main/res"
+}

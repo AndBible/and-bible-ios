@@ -48,7 +48,7 @@ enum AndroidDatabaseBackupSettingsMapper {
         let fileName = databaseURL.lastPathComponent
         let snapshot = try readSnapshot(from: databaseURL)
         try validate(snapshot, fileName: fileName)
-        settingsStore.resetApplicationPreferences()
+        settingsStore.clearRegisteredApplicationPreferences()
 
         var appliedCount = 0
         for definition in AppPreferenceRegistry.definitions where definition.storage != .action {

@@ -20,11 +20,41 @@ extension Color {
 }
 
 /**
+ Stateless authorization rule for leaving the Calculator product's launch gate.
+
+ Android authorizes only a direct PIN entry, not an arithmetic result or an attempt counter. The
+ configured value must be nonempty and match the entered digits exactly. This value type owns no
+ lifecycle state, so backgrounding, relaunching, and repeated wrong attempts cannot accumulate an
+ alternate unlock condition.
+ */
+struct CalculatorUnlockPolicy {
+    /**
+     Tests one direct calculator entry against the configured security PIN.
+
+     - Parameters:
+       - enteredPIN: Exact digits present before the user taps equals.
+       - configuredPIN: Persisted Calculator PIN; an empty value disables unlocking.
+       - isDirectEntry: `true` only when the value was entered without arithmetic transformation.
+     - Returns: `true` only for an exact, nonempty, direct PIN match.
+     - Side effects: none.
+     - Failure modes: Empty values, whitespace differences, arithmetic results, and wrong values
+       all return `false`; there is no retry counter or fallback gesture.
+     */
+    static func allowsUnlock(
+        enteredPIN: String,
+        configuredPIN: String,
+        isDirectEntry: Bool
+    ) -> Bool {
+        isDirectEntry && !configuredPIN.isEmpty && enteredPIN == configuredPIN
+    }
+}
+
+/**
  Renders the discrete-mode calculator disguise used to protect access to the main app.
 
- The calculator behaves like a lightweight four-function calculator while also exposing two unlock
- paths: entering the configured calculator PIN and pressing `=` repeatedly to trigger the fallback
- secret gesture.
+ The calculator behaves like a lightweight four-function calculator while exposing one unlock path:
+ entering the exact configured nonempty PIN directly and pressing `=`. Arithmetic results and
+ repeated incorrect attempts never authorize access.
 
  Data dependencies:
  - `calculatorPin` is loaded from the shared application-preference store
@@ -32,7 +62,7 @@ extension Color {
 
  Side effects:
  - button taps mutate calculator state, including current input, pending operation, and display
- - successful PIN entry or secret-gesture completion invokes `onUnlock`
+ - successful direct PIN entry invokes `onUnlock`
  */
 public struct CalculatorView: View {
     /// Current calculator display text.
@@ -47,8 +77,11 @@ public struct CalculatorView: View {
     /// Active arithmetic operation awaiting completion with the next operand.
     @State private var currentOperation: Operation?
 
-    /// Number of consecutive `=` taps used for the fallback secret unlock gesture.
-    @State private var secretTapCount = 0
+    /// Whether the current value consists only of direct keypad entry rather than calculation.
+    @State private var isDirectPINEntry = true
+
+    /// Whether the next digit should begin a fresh expression after equals was pressed.
+    @State private var beginsNewInputAfterEquals = false
 
     /// Legacy state slot for conditional Bible presentation.
     @State private var shouldShowBible = false
@@ -56,9 +89,6 @@ public struct CalculatorView: View {
     /// Configured discrete-mode PIN that can unlock the main app from calculator mode.
     @AppStorage(AppPreferenceKey.calculatorPin.rawValue)
     private var calculatorPin = AppPreferenceRegistry.stringDefault(for: .calculatorPin) ?? "1234"
-
-    /// Number of `=` taps required to trigger the fallback unlock gesture.
-    private let secretTapThreshold = 7
 
     /**
      Supported binary operations for the calculator keypad.
@@ -80,8 +110,8 @@ public struct CalculatorView: View {
     /**
      Creates the calculator disguise with an unlock callback supplied by the parent flow.
 
-     - Parameter onUnlock: Callback invoked when the calculator PIN or fallback gesture unlocks the
-       main application content.
+     - Parameter onUnlock: Callback invoked when the exact configured nonempty PIN unlocks the main
+       application content.
      */
     public init(onUnlock: @escaping () -> Void) {
         self.onUnlock = onUnlock
@@ -123,30 +153,41 @@ public struct CalculatorView: View {
         .padding()
         .background(Color.black)
         .preferredColorScheme(.dark)
+        .accessibilityIdentifier("calculatorGateRoot")
     }
 
     /**
-     Handles one keypad tap, including arithmetic state, PIN matching, and secret unlock counting.
+     Handles one keypad tap, including arithmetic state and exact direct-PIN matching.
 
      - Parameter button: Key label that was tapped.
 
      Side effects:
-     - mutates display, input, arithmetic state, and secret-tap tracking
-     - invokes `onUnlock` when the configured PIN matches the display or the fallback tap threshold
-       is reached
+     - mutates display, input, and arithmetic state
+     - invokes `onUnlock` only when the configured nonempty PIN matches direct input exactly
      */
     private func handleButton(_ button: String) {
         switch button {
         case "0"..."9":
-            if currentInput == "0" {
-                currentInput = button
-            } else {
-                currentInput += button
+            if beginsNewInputAfterEquals {
+                display = "0"
+                currentInput = ""
+                previousValue = 0
+                currentOperation = nil
+                isDirectPINEntry = true
+                beginsNewInputAfterEquals = false
             }
+            currentInput += button
             display = currentInput
-            secretTapCount = 0
 
         case ".":
+            if beginsNewInputAfterEquals {
+                display = "0"
+                currentInput = ""
+                previousValue = 0
+                currentOperation = nil
+                isDirectPINEntry = true
+                beginsNewInputAfterEquals = false
+            }
             if !currentInput.contains(".") {
                 currentInput += currentInput.isEmpty ? "0." : "."
                 display = currentInput
@@ -157,18 +198,23 @@ public struct CalculatorView: View {
             currentInput = ""
             previousValue = 0
             currentOperation = nil
-            secretTapCount = 0
+            isDirectPINEntry = true
+            beginsNewInputAfterEquals = false
 
         case "±":
             if let value = Double(currentInput) {
                 currentInput = String(-value)
                 display = currentInput
+                isDirectPINEntry = false
+                beginsNewInputAfterEquals = false
             }
 
         case "%":
             if let value = Double(currentInput) {
                 currentInput = String(value / 100)
                 display = currentInput
+                isDirectPINEntry = false
+                beginsNewInputAfterEquals = false
             }
 
         case "+", "-", "×", "÷":
@@ -178,21 +224,19 @@ public struct CalculatorView: View {
             }
             currentOperation = Operation(rawValue: button)
             currentInput = ""
+            isDirectPINEntry = false
+            beginsNewInputAfterEquals = false
 
         case "=":
+            let shouldUnlock = CalculatorUnlockPolicy.allowsUnlock(
+                enteredPIN: currentInput,
+                configuredPIN: calculatorPin,
+                isDirectEntry: isDirectPINEntry && currentOperation == nil
+            )
             calculateResult()
             currentOperation = nil
-
-            let pin = calculatorPin.trimmingCharacters(in: .whitespaces)
-            let displayValue = display.trimmingCharacters(in: .whitespaces)
-            if !pin.isEmpty && displayValue == pin {
-                onUnlock()
-                return
-            }
-
-            secretTapCount += 1
-            if secretTapCount >= secretTapThreshold {
-                secretTapCount = 0
+            beginsNewInputAfterEquals = true
+            if shouldUnlock {
                 onUnlock()
             }
 

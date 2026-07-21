@@ -11,6 +11,30 @@ import UIKit
 
 private let memorizeParitySQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
+/**
+ Creates a deterministic KJVA-identity mapping contract for app-host progress fixtures.
+
+ - Parameters:
+   - start: Inclusive source and persisted KJVA start ordinal.
+   - end: Inclusive source and persisted KJVA end ordinal.
+ - Returns: Verified range accepted by native memorization write APIs.
+ - Side effects: Reads bundled canon and mapping fixtures only.
+ - Failure modes: Throws an XCTest unwrap failure when fixture ordinals are invalid.
+ */
+private func memorizeParityVerifiedKJVARange(
+    start: Int,
+    end: Int
+) throws -> VerifiedKJVAOrdinalRange {
+    try XCTUnwrap(
+        VerifiedKJVAOrdinalRange(
+            resolvingSourceBookInitials: "KJVA",
+            sourceVersification: "KJVA",
+            sourceOrdinalStart: start,
+            sourceOrdinalEnd: end
+        )
+    )
+}
+
 extension AndBibleTests {
     #if os(iOS)
     /**
@@ -49,24 +73,27 @@ extension AndBibleTests {
         let settingsStore = try makeMemorizeParitySettingsStore()
         let store = MemorizationProgressStore(settingsStore: settingsStore)
 
-        let addDelta = store.addMemorizationTarget(bookInitials: "", startOrdinal: 4, endOrdinal: 5)
+        let targetRange = try memorizeParityVerifiedKJVARange(start: 4, end: 5)
+        let addDelta = try store.addMemorizationTarget(targetRange)
         XCTAssertEqual(addDelta.addedTargets, [4, 5])
         XCTAssertEqual(addDelta.removedTargets, [])
         XCTAssertEqual(store.targetOrdinals(bookInitials: "KJV", startOrdinal: 4, endOrdinal: 5), [4, 5])
         XCTAssertEqual(store.targetOrdinals(bookInitials: "FinRK", startOrdinal: 4, endOrdinal: 5), [4, 5])
 
-        let noOpDelta = store.addMemorizationTargetIfNeeded(bookInitials: "", startOrdinal: 4, endOrdinal: 5)
+        let noOpDelta = try store.addMemorizationTargetIfNeeded(targetRange)
         XCTAssertTrue(noOpDelta.isEmpty)
 
-        let markDelta = store.markAsMemorized(bookInitials: "", startOrdinal: 4, endOrdinal: 4)
+        let markDelta = try store.markAsMemorized(
+            memorizeParityVerifiedKJVARange(start: 4, end: 4)
+        )
         XCTAssertEqual(markDelta.addedMemorized, [4])
         XCTAssertEqual(store.memorizedOrdinals(bookInitials: "ESV", startOrdinal: 4, endOrdinal: 4), [4])
 
-        let removeDelta = store.removeMemorizationTarget(bookInitials: "", startOrdinal: 5, endOrdinal: 5)
+        let removeDelta = try store.removeMemorizationTarget(bookInitials: "", startOrdinal: 5, endOrdinal: 5)
         XCTAssertEqual(removeDelta.removedTargets, [5])
         XCTAssertEqual(store.targetOrdinals(bookInitials: "KJV", startOrdinal: 4, endOrdinal: 5), [4])
 
-        let unmarkDelta = store.unmarkMemorized(bookInitials: "", startOrdinal: 4, endOrdinal: 4)
+        let unmarkDelta = try store.unmarkMemorized(bookInitials: "", startOrdinal: 4, endOrdinal: 4)
         XCTAssertEqual(unmarkDelta.removedMemorized, [4])
         XCTAssertEqual(store.memorizedOrdinals(bookInitials: "KJV", startOrdinal: 4, endOrdinal: 4), [])
     }
@@ -90,16 +117,20 @@ extension AndBibleTests {
         )
 
         XCTAssertEqual(
-            store.markAsMemorized(bookInitials: "", startOrdinal: 4, endOrdinal: 6).addedMemorized,
+            try store.markAsMemorized(
+                memorizeParityVerifiedKJVARange(start: 4, end: 6)
+            ).addedMemorized,
             [4, 5, 6]
         )
         now = 1_700_000_200_000
         XCTAssertEqual(
-            store.unmarkMemorized(bookInitials: "", startOrdinal: 5, endOrdinal: 5).removedMemorized,
+            try store.unmarkMemorized(bookInitials: "", startOrdinal: 5, endOrdinal: 5).removedMemorized,
             [5]
         )
         XCTAssertEqual(
-            store.markAsMemorized(bookInitials: "", startOrdinal: 5, endOrdinal: 5).addedMemorized,
+            try store.markAsMemorized(
+                memorizeParityVerifiedKJVARange(start: 5, end: 5)
+            ).addedMemorized,
             [5]
         )
 
@@ -115,12 +146,16 @@ extension AndBibleTests {
 
         now = 1_700_000_300_000
         XCTAssertEqual(
-            store.addMemorizationTarget(bookInitials: "", startOrdinal: 10, endOrdinal: 11).addedTargets,
+            try store.addMemorizationTarget(
+                memorizeParityVerifiedKJVARange(start: 10, end: 11)
+            ).addedTargets,
             [10, 11]
         )
         now = 1_700_000_400_000
         XCTAssertEqual(
-            store.addMemorizationTarget(bookInitials: "", startOrdinal: 10, endOrdinal: 11).addedTargets,
+            try store.addMemorizationTarget(
+                memorizeParityVerifiedKJVARange(start: 10, end: 11)
+            ).addedTargets,
             [10, 11]
         )
 
@@ -134,14 +169,13 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies pre-row memorization JSON is migrated into Android-compatible rows.
+     Verifies pre-row global-KJVA memorization JSON migrates into trusted Android-compatible rows.
 
-     Earlier iOS slices persisted memorized progress as normalized ranges. The Android parity model
-     now needs per-verse memorized rows and per-target range rows, but users with existing local
-     state must keep their progress when the app decodes the old JSON shape.
+     Earlier iOS slices persisted normalized global KJVA ranges with an empty compatibility module
+     field. Decoding must preserve and trust that documented schema while continuing to quarantine
+     nonempty module-scoped legacy rows whose source versification remains unresolved.
 
-     Failure means the parity migration would either drop existing local memorization progress or
-     leave it in a shape the native Android-style progress tab cannot display.
+     Failure means valid existing progress is hidden or discarded during the trust-metadata upgrade.
      */
     func testMemorizationProgressStoreMigratesLegacyRangeSnapshotToAndroidRows() throws {
         let settingsStore = try makeMemorizeParitySettingsStore()
@@ -161,17 +195,36 @@ extension AndBibleTests {
 
         let store = MemorizationProgressStore(settingsStore: settingsStore)
 
+        let persisted = store.persistenceSnapshot()
+        XCTAssertEqual(persisted.memorizedVerses.count, 2)
+        XCTAssertEqual(persisted.targetRows.count, 1)
+        XCTAssertEqual(persisted.memorizedVerses.map(\.ordinalTrust.state), [
+            .verifiedMappingV1,
+            .verifiedMappingV1,
+        ])
+        XCTAssertEqual(persisted.targetRows.map(\.ordinalTrust.state), [.verifiedMappingV1])
+        XCTAssertEqual(persisted.memorizedVerses.map(\.ordinalTrust.provenance), [
+            .legacyMigration,
+            .legacyMigration,
+        ])
         XCTAssertEqual(
             store.memorizedVerseRangesWithTimestamps(),
             [
                 MemorizedVerseRangeWithTimestamp(
-                    range: MemorizationProgressRange(bookInitials: "", startOrdinal: 4, endOrdinal: 5),
+                    range: MemorizationProgressRange(
+                        bookInitials: "",
+                        startOrdinal: 4,
+                        endOrdinal: 5
+                    ),
                     latestMemorizedAt: 0
                 ),
             ]
         )
         XCTAssertEqual(store.memorizationTargets().map(\.createdAt), [0])
-        XCTAssertEqual(store.targetOrdinals(bookInitials: "KJV", startOrdinal: 8, endOrdinal: 9), [8, 9])
+        XCTAssertEqual(
+            store.targetOrdinals(bookInitials: "KJV", startOrdinal: 8, endOrdinal: 9),
+            [8, 9]
+        )
     }
 
     /**
@@ -235,32 +288,44 @@ extension AndBibleTests {
      */
     func testAndroidProgressMapperExportsMemorizationTimestampsAndTargetRows() throws {
         let settingsStore = try makeMemorizeParitySettingsStore()
-        settingsStore.setString(
-            MemorizationProgressStore.settingsKey,
-            value: """
-            {
-              "memorizedVerses": [
-                {"bookInitials":"","kjvOrdinal":4,"memorizedAt":1700000100000},
-                {"bookInitials":"","kjvOrdinal":5,"memorizedAt":1700000200000}
-              ],
-              "targetRows": [
-                {
-                  "id":"16000000-0000-0000-0000-000000000101",
-                  "bookInitials":"",
-                  "startOrdinal":10,
-                  "endOrdinal":11,
-                  "createdAt":1700000300000
-                },
-                {
-                  "id":"16000000-0000-0000-0000-000000000102",
-                  "bookInitials":"",
-                  "startOrdinal":10,
-                  "endOrdinal":11,
-                  "createdAt":1700000400000
-                }
-              ]
-            }
-            """
+        let verse4 = try memorizeParityVerifiedKJVARange(start: 4, end: 4)
+        let verse5 = try memorizeParityVerifiedKJVARange(start: 5, end: 5)
+        let target = try memorizeParityVerifiedKJVARange(start: 10, end: 11)
+        try MemorizationProgressStore(settingsStore: settingsStore).replacePersistenceSnapshot(
+            MemorizationProgressSnapshot(
+                memorizedVerses: [
+                    MemorizedVerseProgress(
+                        bookInitials: "",
+                        kjvOrdinal: 4,
+                        memorizedAt: 1_700_000_100_000,
+                        ordinalTrust: verse4.ordinalTrust
+                    ),
+                    MemorizedVerseProgress(
+                        bookInitials: "",
+                        kjvOrdinal: 5,
+                        memorizedAt: 1_700_000_200_000,
+                        ordinalTrust: verse5.ordinalTrust
+                    ),
+                ],
+                targetRows: [
+                    MemorizationTargetRow(
+                        id: UUID(uuidString: "16000000-0000-0000-0000-000000000101")!,
+                        bookInitials: "",
+                        startOrdinal: 10,
+                        endOrdinal: 11,
+                        createdAt: 1_700_000_300_000,
+                        ordinalTrust: target.ordinalTrust
+                    ),
+                    MemorizationTargetRow(
+                        id: UUID(uuidString: "16000000-0000-0000-0000-000000000102")!,
+                        bookInitials: "",
+                        startOrdinal: 10,
+                        endOrdinal: 11,
+                        createdAt: 1_700_000_400_000,
+                        ordinalTrust: target.ordinalTrust
+                    ),
+                ]
+            )
         )
         let databaseURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("memorize-parity-export-\(UUID().uuidString).sqlite3")
@@ -329,26 +394,32 @@ extension AndBibleTests {
         calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
         let genDay: Int64 = 1_700_000_100_000
         let exodDay: Int64 = 1_700_100_100_000
+        let gen1Trust = try memorizeParityVerifiedKJVARange(start: gen1, end: gen1).ordinalTrust
+        let gen2Trust = try memorizeParityVerifiedKJVARange(start: gen2, end: gen2).ordinalTrust
+        let exod1Trust = try memorizeParityVerifiedKJVARange(start: exod1, end: exod1).ordinalTrust
+        let genesisTargetTrust = try memorizeParityVerifiedKJVARange(start: gen1, end: gen3).ordinalTrust
 
         let presentation = MemorizationProgressPresentation(
             snapshot: MemorizationProgressSnapshot(
                 memorizedVerses: [
-                    .init(kjvOrdinal: gen1, memorizedAt: genDay),
-                    .init(kjvOrdinal: gen2, memorizedAt: genDay + 1_000),
-                    .init(kjvOrdinal: exod1, memorizedAt: exodDay),
+                    .init(kjvOrdinal: gen1, memorizedAt: genDay, ordinalTrust: gen1Trust),
+                    .init(kjvOrdinal: gen2, memorizedAt: genDay + 1_000, ordinalTrust: gen2Trust),
+                    .init(kjvOrdinal: exod1, memorizedAt: exodDay, ordinalTrust: exod1Trust),
                 ],
                 targetRows: [
                     MemorizationTargetRow(
                         id: UUID(uuidString: "16000000-0000-0000-0000-000000000201")!,
                         startOrdinal: gen1,
                         endOrdinal: gen3,
-                        createdAt: genDay + 2_000
+                        createdAt: genDay + 2_000,
+                        ordinalTrust: genesisTargetTrust
                     ),
                     MemorizationTargetRow(
                         id: UUID(uuidString: "16000000-0000-0000-0000-000000000202")!,
                         startOrdinal: exod1,
                         endOrdinal: exod1,
-                        createdAt: exodDay + 2_000
+                        createdAt: exodDay + 2_000,
+                        ordinalTrust: exod1Trust
                     ),
                 ]
             ),
@@ -409,7 +480,8 @@ extension AndBibleTests {
      Android's `ReadingProgressActivity` displays counted pagination labels, target progress as a
      percentage plus ratio, destructive confirmations with the affected passage/goal name, and
      tappable chapter detail cells that return to the selected Bible chapter. The SwiftUI callbacks
-     are private view composition, so this app-host guard reads the source boundary directly.
+     are private view composition, so this app-host guard reads the source boundary directly. The
+     separate reading-cycle reset keeps its own Android-parity confirmation dialog.
 
      Failure means the data model may still be Android-shaped while the user-visible progress UI
      has drifted away from Android behavior.
@@ -434,7 +506,7 @@ extension AndBibleTests {
         XCTAssertTrue(progressSource.contains(".alert(item: $memorizationDeletionRequest)"))
         XCTAssertTrue(progressSource.contains(".default(Text(String(localized: \"ok\", defaultValue: \"OK\")))"))
         XCTAssertTrue(progressSource.contains(".cancel(Text(String(localized: \"cancel\", defaultValue: \"Cancel\")))"))
-        XCTAssertFalse(progressSource.contains(".confirmationDialog("))
+        XCTAssertTrue(progressSource.contains("isPresented: $showNewReadingCycleConfirmation"))
         XCTAssertTrue(progressSource.contains("onOpenChapter(detail.osisId, chapter.chapter)"))
         XCTAssertTrue(progressSource.contains("MemorizationSummaryView(summary: presentation.summary)"))
         XCTAssertTrue(progressSource.contains("MemorizationViewToggle(overviewActive: $memorizationOverviewActive)"))
@@ -473,65 +545,89 @@ extension AndBibleTests {
      The shared Vue client expects native `markAsMemorized`, `addMemorizationTarget`,
      `removeMemorizationTarget`, and `unmarkMemorized` calls to emit
      `update_memorization_data` deltas in the current rendered ordinal domain while persistence is
-     normalized to Android KJVA ordinals. This test uses the no-module reader fallback so it runs in
-     the app-host scheme without a SWORD fixture: rendered ordinals 1 and 2 are Genesis 1:1-2, while
-     KJVA storage ordinals are 4 and 5.
+     normalized to Android KJVA ordinals. The real KJV fixture gives the bridge an authoritative
+     source module; a no-module placeholder must not reinterpret arbitrary rendered ordinals as
+     KJVA merely to make a test mutation succeed.
 
      Failure means the bridge can persist native state without updating the open Vue document, or
      can continue writing iOS-only module-specific memorization rows.
      */
     func testMemorizationBridgePersistsKJVAGlobalRowsAndEmitsRenderedDeltas() throws {
         let (bridge, recordedScripts) = makeMemorizeParityRecordingBridge()
-        let controller = BibleReaderController(bridge: bridge)
+        let modulePath = try makeMemorizeParityTemporarySwordPath()
+        defer { try? FileManager.default.removeItem(atPath: modulePath) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.settingsStore = try makeMemorizeParitySettingsStore()
         let store = try XCTUnwrap(controller.memorizationProgressStore)
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let renderedStart = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+        let renderedEnd = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2))
+        let kjvaStart = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1)
+        )
+        let kjvaEnd = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 2)
+        )
 
         XCTAssertEqual(
-            bridge.dispatchMessage(method: "addMemorizationTarget", args: ["KJV", 1, 2]),
+            bridge.dispatchMessage(
+                method: "addMemorizationTarget",
+                args: ["KJV", renderedStart, renderedEnd]
+            ),
             .handled
         )
         XCTAssertEqual(
             store.snapshot().targetRanges,
-            [MemorizationProgressRange(bookInitials: "", startOrdinal: 4, endOrdinal: 5)]
+            [MemorizationProgressRange(bookInitials: "", startOrdinal: kjvaStart, endOrdinal: kjvaEnd)]
         )
         XCTAssertEqual(
             try memorizationParityPayloads(from: recordedScripts()).last?["addedTargets"] as? [Int],
-            [1, 2]
+            [renderedStart, renderedEnd]
         )
 
         XCTAssertEqual(
-            bridge.dispatchMessage(method: "markAsMemorized", args: ["KJV", 1, 1]),
+            bridge.dispatchMessage(
+                method: "markAsMemorized",
+                args: ["KJV", renderedStart, renderedStart]
+            ),
             .handled
         )
         XCTAssertEqual(
             store.snapshot().memorizedRanges,
-            [MemorizationProgressRange(bookInitials: "", startOrdinal: 4, endOrdinal: 4)]
+            [MemorizationProgressRange(bookInitials: "", startOrdinal: kjvaStart, endOrdinal: kjvaStart)]
         )
         XCTAssertEqual(
             try memorizationParityPayloads(from: recordedScripts()).last?["addedMemorized"] as? [Int],
-            [1]
+            [renderedStart]
         )
 
         XCTAssertEqual(
-            bridge.dispatchMessage(method: "removeMemorizationTarget", args: ["KJV", 2, 2]),
+            bridge.dispatchMessage(
+                method: "removeMemorizationTarget",
+                args: ["KJV", renderedEnd, renderedEnd]
+            ),
             .handled
         )
         XCTAssertEqual(store.snapshot().targetRanges, [
-            MemorizationProgressRange(bookInitials: "", startOrdinal: 4, endOrdinal: 4),
+            MemorizationProgressRange(bookInitials: "", startOrdinal: kjvaStart, endOrdinal: kjvaStart),
         ])
         XCTAssertEqual(
             try memorizationParityPayloads(from: recordedScripts()).last?["removedTargets"] as? [Int],
-            [2]
+            [renderedEnd]
         )
 
         XCTAssertEqual(
-            bridge.dispatchMessage(method: "unmarkMemorized", args: ["KJV", 1, 1]),
+            bridge.dispatchMessage(
+                method: "unmarkMemorized",
+                args: ["KJV", renderedStart, renderedStart]
+            ),
             .handled
         )
         XCTAssertTrue(store.snapshot().memorizedRanges.isEmpty)
         XCTAssertEqual(
             try memorizationParityPayloads(from: recordedScripts()).last?["removedMemorized"] as? [Int],
-            [1]
+            [renderedStart]
         )
     }
 
@@ -541,8 +637,8 @@ extension AndBibleTests {
      Android's `ProgressControl.addMemorizationTarget` converts the selected `VerseRange` to KJVA,
      stores one inclusive `kjvOrdinalStart...kjvOrdinalEnd` row, and posts UI updates from that
      same range. The KJVA span between Genesis 1:31 and Genesis 2:2 includes a chapter-intro
-     ordinal that is not a rendered verse; iOS must keep that storage ordinal while emitting only
-     visible rendered ordinals back to Vue.
+     ordinal that is not a concrete verse; Android includes that ordinal in `addedTargets`, so iOS
+     must preserve it in both storage and the projected bridge event.
 
      Failure means iOS is preserving a visible-verse-only storage shape, which changes Android
      target totals, backup rows, duplicate-target detection, and removal behavior.
@@ -557,7 +653,6 @@ extension AndBibleTests {
         let store = try XCTUnwrap(controller.memorizationProgressStore)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
         let renderedStart = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31))
-        let renderedMiddle = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 1))
         let renderedEnd = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2))
         let kjvaStart = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 31))
         let kjvaEnd = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 2, verse: 2))
@@ -574,7 +669,7 @@ extension AndBibleTests {
         )
         XCTAssertEqual(
             try memorizationParityPayloads(from: recordedScripts()).last?["addedTargets"] as? [Int],
-            [renderedStart, renderedMiddle, renderedEnd]
+            Array(kjvaStart...kjvaEnd)
         )
     }
 
@@ -582,23 +677,33 @@ extension AndBibleTests {
      Verifies normal Bible documents project global KJVA progress back to rendered ordinals.
 
      The bridge stores Android-compatible global KJVA rows, but Vue's Bible document payload still
-     consumes ordinals in the currently rendered document domain. The no-module fallback makes the
-     two domains intentionally different: rendered Genesis 1:1-2 are stored as KJVA ordinals 4-5.
+     consumes ordinals in the currently rendered document domain. A real KJV fixture keeps the
+     integration on Android's module-backed path instead of asking the fail-closed no-module
+     placeholder to reinterpret synthetic ordinals as KJVA.
 
      Failure means a reload can highlight the wrong visible verses even though the bridge mutation
      itself wrote Android-parity persistence rows.
      */
     func testBibleDocumentPayloadProjectsKJVAGlobalProgressToRenderedOrdinals() throws {
         let (bridge, recordedScripts) = makeMemorizeParityRecordingBridge()
-        let controller = BibleReaderController(bridge: bridge)
+        let modulePath = try makeMemorizeParityTemporarySwordPath()
+        defer { try? FileManager.default.removeItem(atPath: modulePath) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.settingsStore = try makeMemorizeParitySettingsStore()
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let renderedStart = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+        let renderedEnd = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2))
 
         XCTAssertEqual(
-            bridge.dispatchMessage(method: "addMemorizationTarget", args: ["KJV", 1, 2]),
+            bridge.dispatchMessage(
+                method: "addMemorizationTarget",
+                args: ["KJV", renderedStart, renderedEnd]
+            ),
             .handled
         )
         XCTAssertEqual(
-            bridge.dispatchMessage(method: "markAsMemorized", args: ["KJV", 1, 1]),
+            bridge.dispatchMessage(method: "markAsMemorized", args: ["KJV", renderedStart, renderedStart]),
             .handled
         )
 
@@ -608,8 +713,8 @@ extension AndBibleTests {
             memorizeParityBridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
         )
         XCTAssertEqual(document["type"] as? String, "bible")
-        XCTAssertEqual(document["targetOrdinals"] as? [Int], [1, 2])
-        XCTAssertEqual(document["memorizedOrdinals"] as? [Int], [1])
+        XCTAssertEqual(document["targetOrdinals"] as? [Int], [renderedStart, renderedEnd])
+        XCTAssertEqual(document["memorizedOrdinals"] as? [Int], [renderedStart])
     }
 
     /**
@@ -625,8 +730,15 @@ extension AndBibleTests {
      */
     func testMemorizeDocumentUsesSavedPageManagerState() throws {
         let (bridge, recordedScripts) = makeMemorizeParityRecordingBridge()
-        let controller = BibleReaderController(bridge: bridge)
+        let modulePath = try makeMemorizeParityTemporarySwordPath()
+        defer { try? FileManager.default.removeItem(atPath: modulePath) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.settingsStore = try makeMemorizeParitySettingsStore()
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let renderedOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1)
+        )
 
         let window = Window()
         let pageManager = PageManager(id: window.id)
@@ -636,7 +748,10 @@ extension AndBibleTests {
         controller.bridgeDidSetClientReady(bridge)
 
         let baselineScriptCount = recordedScripts().count
-        XCTAssertEqual(bridge.dispatchMessage(method: "memorize", args: ["KJV", 1, 1]), .handled)
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "memorize", args: ["KJV", renderedOrdinal, renderedOrdinal]),
+            .handled
+        )
 
         let memorizeScripts = Array(recordedScripts().dropFirst(baselineScriptCount))
         let document = try XCTUnwrap(
@@ -660,8 +775,9 @@ extension AndBibleTests {
 
      Android creates the fake Memorize document from the selected JSword `VerseRange`, so a
      selection spanning Genesis 1:31 through Genesis 2:2 yields all three concrete verses, a
-     cross-chapter title, and a cross-chapter OSIS range. This app-host test keeps that parity
-     executable in the iOS simulator because package tests cannot currently compile on macOS.
+     cross-chapter title, and a cross-chapter OSIS range. The target-ordinal list separately keeps
+     Android's complete inclusive range, including the chapter-introduction ordinal between the
+     concrete verses. This app-host test exercises the same contract through the iOS simulator.
 
      Failure means iOS is still using a same-chapter Memorize loader shape instead of the selected
      Android range contract.
@@ -675,7 +791,6 @@ extension AndBibleTests {
         controller.settingsStore = try makeMemorizeParitySettingsStore()
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
         let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31))
-        let middleOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 1))
         let endOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2))
 
         controller.bridgeDidSetClientReady(bridge)
@@ -694,22 +809,23 @@ extension AndBibleTests {
         XCTAssertEqual(document["osisRef"] as? String, "Gen.1.31-Gen.2.2")
         XCTAssertEqual(document["startOrdinal"] as? Int, startOrdinal)
         XCTAssertEqual(document["endOrdinal"] as? Int, endOrdinal)
-        XCTAssertEqual(document["targetOrdinals"] as? [Int], [startOrdinal, middleOrdinal, endOrdinal])
+        XCTAssertEqual(document["targetOrdinals"] as? [Int], Array(startOrdinal...endOrdinal))
 
         let texts = try XCTUnwrap(document["texts"] as? [[String: String]])
         XCTAssertEqual(texts.map { $0["key"] }, ["Gen.1.31", "Gen.2.1", "Gen.2.2"])
         XCTAssertTrue(
-            texts[0]["text"]?.contains("saw <H07200> every thing") == true,
+            texts[0]["text"]?.contains("saw every thing") == true,
             "Unexpected Gen.1.31 text: \(texts[0]["text"] ?? "<nil>")"
         )
         XCTAssertTrue(
-            texts[1]["text"]?.contains("heavens <H08064> and the earth") == true,
+            texts[1]["text"]?.contains("heavens and the earth") == true,
             "Unexpected Gen.2.1 text: \(texts[1]["text"] ?? "<nil>")"
         )
         XCTAssertTrue(
-            texts[2]["text"]?.contains("seventh <H07637> day") == true,
+            texts[2]["text"]?.contains("seventh day") == true,
             "Unexpected Gen.2.2 text: \(texts[2]["text"] ?? "<nil>")"
         )
+        XCTAssertFalse(texts.compactMap { $0["text"] }.contains { $0.contains("<H") })
     }
 
     /**
@@ -717,8 +833,9 @@ extension AndBibleTests {
 
      Android's Reading Progress list is not scoped to the currently visible book. A memorized
      passage or target row may point to any KJVA verse range, and tapping it opens Memorize for that
-     exact range. The native iOS sheet therefore must not route row taps through the current
-     reader book/chapter ordinal resolver.
+     exact range after converting it to the default Bible module's versification. The native iOS
+     sheet therefore must not route row taps through the current reader book/chapter ordinal
+     resolver or relabel the rendered module range as KJVA.
 
      Failure means the Reading Progress memorization list is preserving an iOS-only current-book
      structure instead of using Android's global KJVA progress domain.
@@ -738,7 +855,9 @@ extension AndBibleTests {
             JSwordKJVAVersification.verseOrdinal(osisId: "Exod", chapter: 2, verse: 1)
         )
         try XCTUnwrap(controller.memorizationProgressStore)
-            .addMemorizationTarget(bookInitials: "", startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+            .addMemorizationTarget(
+                try memorizeParityVerifiedKJVARange(start: startOrdinal, end: endOrdinal)
+            )
 
         controller.bridgeDidSetClientReady(bridge)
         let baselineScriptCount = recordedScripts().count
@@ -754,7 +873,7 @@ extension AndBibleTests {
         XCTAssertEqual(document["type"] as? String, "memorize")
         XCTAssertEqual(document["title"] as? String, "Exodus 1:22-2:1")
         XCTAssertEqual(document["osisRef"] as? String, "Exod.1.22-Exod.2.1")
-        XCTAssertEqual(document["v11n"] as? String, "KJVA")
+        XCTAssertEqual(document["v11n"] as? String, "KJV")
         XCTAssertEqual(document["startOrdinal"] as? Int, startOrdinal)
         XCTAssertEqual(document["endOrdinal"] as? Int, endOrdinal)
         XCTAssertEqual(document["targetOrdinals"] as? [Int], [startOrdinal, endOrdinal])
@@ -802,41 +921,7 @@ private func makeMemorizeParityAndroidProgressDatabase(
     defer { sqlite3_close(database) }
 
     try executeMemorizeParitySQLite(
-        """
-        CREATE TABLE MemorizedVerse (
-            id BLOB NOT NULL PRIMARY KEY,
-            kjvOrdinal INTEGER NOT NULL,
-            memorizedAt INTEGER NOT NULL
-        );
-        CREATE UNIQUE INDEX index_MemorizedVerse_kjvOrdinal ON MemorizedVerse (kjvOrdinal);
-        CREATE TABLE MemorizationTarget (
-            id BLOB NOT NULL PRIMARY KEY,
-            kjvOrdinalStart INTEGER NOT NULL,
-            kjvOrdinalEnd INTEGER NOT NULL,
-            createdAt INTEGER NOT NULL
-        );
-        CREATE TABLE ChapterReadHistory (
-            id BLOB NOT NULL PRIMARY KEY,
-            kjvBookOrdinal INTEGER NOT NULL,
-            chapter INTEGER NOT NULL,
-            cycle INTEGER NOT NULL DEFAULT 1,
-            readAt INTEGER NOT NULL,
-            bookInitials TEXT NOT NULL DEFAULT '',
-            source TEXT NOT NULL DEFAULT 'MANUAL'
-        );
-        CREATE TABLE GlobalReadingProgressSettings (
-            id BLOB NOT NULL PRIMARY KEY,
-            autoTrackReading INTEGER NOT NULL DEFAULT 0,
-            autoMarkMemorized INTEGER NOT NULL DEFAULT 1,
-            memorizeTypeFullWords INTEGER NOT NULL DEFAULT 0,
-            memorizeWordVisibility TEXT NOT NULL DEFAULT 'light',
-            memorizeErrorHeatmap INTEGER NOT NULL DEFAULT 1,
-            memorizeScrambleHideUsed INTEGER NOT NULL DEFAULT 0,
-            memorizeIncludeReference INTEGER NOT NULL DEFAULT 1,
-            activeCycle INTEGER NOT NULL DEFAULT 0
-        );
-        PRAGMA user_version = 9;
-        """,
+        RemoteSyncAndroidDatabaseContract.createSchemaSQL(for: .progress),
         on: database,
         fileName: url.lastPathComponent
     )
@@ -1011,7 +1096,7 @@ private func makeMemorizeParityRecordingBridge() -> (BibleBridge, () -> [String]
 }
 
 /**
- Copies bundled KJV SWORD resources into an isolated app-host test directory.
+ Copies the package KJV SWORD fixture into an isolated app-host test directory.
 
  - Returns: Path to a temporary `sword` module root containing `mods.d` and module data.
  - Side effects: Creates a temporary directory and recursively copies repository fixture files.
@@ -1021,8 +1106,11 @@ private func makeMemorizeParityTemporarySwordPath(file: StaticString = #filePath
     let fileManager = FileManager.default
     let sourceFile = URL(fileURLWithPath: String(describing: file), isDirectory: false)
     let bundledSwordURL = try memorizeParityRepositoryRoot(from: sourceFile)
-        .appendingPathComponent("AndBible", isDirectory: true)
-        .appendingPathComponent("Resources", isDirectory: true)
+        .appendingPathComponent("Sources", isDirectory: true)
+        .appendingPathComponent("BibleUI", isDirectory: true)
+        .appendingPathComponent("Tests", isDirectory: true)
+        .appendingPathComponent("BibleUITests", isDirectory: true)
+        .appendingPathComponent("Fixtures", isDirectory: true)
         .appendingPathComponent("sword", isDirectory: true)
 
     let tempRoot = fileManager.temporaryDirectory
@@ -1030,23 +1118,31 @@ private func makeMemorizeParityTemporarySwordPath(file: StaticString = #filePath
         .appendingPathComponent("sword", isDirectory: true)
     try fileManager.createDirectory(at: tempRoot, withIntermediateDirectories: true)
     try copyMemorizeParityDirectoryContents(from: bundledSwordURL, to: tempRoot)
+    try? fileManager.removeItem(
+        at: tempRoot
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("modules-conf.cache", isDirectory: false)
+    )
     return tempRoot.path
 }
 
 /**
- Finds the repository root that contains the bundled SWORD fixture.
+ Finds the repository root that contains the package SWORD fixture.
 
  - Parameter sourceFile: Source file URL used as the upward-search anchor.
  - Returns: Repository root URL.
  - Side effects: None.
- - Failure modes: Throws when `AndBible/Resources/sword` cannot be found from the source path.
+ - Failure modes: Throws when the BibleUI package fixture cannot be found from the source path.
  */
 private func memorizeParityRepositoryRoot(from sourceFile: URL) throws -> URL {
     var candidate = sourceFile.deletingLastPathComponent()
     while candidate.path != candidate.deletingLastPathComponent().path {
         let swordPath = candidate
-            .appendingPathComponent("AndBible", isDirectory: true)
-            .appendingPathComponent("Resources", isDirectory: true)
+            .appendingPathComponent("Sources", isDirectory: true)
+            .appendingPathComponent("BibleUI", isDirectory: true)
+            .appendingPathComponent("Tests", isDirectory: true)
+            .appendingPathComponent("BibleUITests", isDirectory: true)
+            .appendingPathComponent("Fixtures", isDirectory: true)
             .appendingPathComponent("sword", isDirectory: true)
         if FileManager.default.fileExists(atPath: swordPath.path) {
             return candidate
@@ -1056,7 +1152,10 @@ private func memorizeParityRepositoryRoot(from sourceFile: URL) throws -> URL {
     throw NSError(
         domain: "AndBibleTests",
         code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Could not locate AndBible/Resources/sword from \(sourceFile.path)"]
+        userInfo: [
+            NSLocalizedDescriptionKey:
+                "Could not locate Sources/BibleUI/Tests/BibleUITests/Fixtures/sword from \(sourceFile.path)",
+        ]
     )
 }
 

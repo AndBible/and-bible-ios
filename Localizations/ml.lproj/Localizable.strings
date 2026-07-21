@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Security";
 "discrete_mode" = "Discrete Mode";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "സംബന്ധിച്ച്";
 "version" = "Version";
 "export" = "Export";
@@ -405,10 +405,6 @@
 "calculator_pin_description" = "PIN code to enter the app when the calculator is shown.";
 "discrete_help_title" = "Read this first!";
 "discrete_help_summary" = "Instructions for the settings and information about specific discrete build.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Application behavior";
 "prefs_display_customization_cat" = "Look & feel";
@@ -479,7 +475,6 @@
 
 "prefs_volume_keys_scroll_title" = "Volume buttons scroll";
 "prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Experimental features";
 "prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
@@ -552,3 +547,78 @@
 "windowMinimise" = "ചെറുതാക്കുക";
 "windowSynchronise" = "ഒരുപോലെയാക്കുക";
 "error_no_content" = "തിരഞ്ഞ ഈ വാക്യം ശുന്യമാണു";
+
+/* Android shared translations */
+"calculator_par1" = "Before entering the app, calculator screen is displayed.";
+"calculator_par2" = "In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press \"=\" button.";
+"calculator_par3" = "You can set up a custom PIN code by \"Calculator PIN\" setting.";
+"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
+"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
+"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
+"discrete_mode_info_par1" = "You are using standard application version, which means that it is still possible to see the real name and icon of the application in app info.";
+"discrete_mode_info_par2" = "For improved security in persecuted environment, we highly recommend using discrete version of the app, which always displays calculator, even if the app data is deleted.";
+"discrete_mode_link" = "You can download the latest version of discrete version from %@.";
+
+/* Android shared translations */
+"extracting_zip_file" = "Extracting Zip file now…";
+"install_failed_reason" = "Installing module failed for the following reason: %@.";
+"install_zip_successfull" = "മൊഡ്യൂള്‍ ഇന്‍സ്റ്റാള്‍ ചെയ്തു";
+"module_install_phase_committing" = "Please wait. Loading modules from a file.";
+"module_install_phase_downloading" = "ഡൌൺലോഡ്";
+"module_install_phase_queued" = "Please wait…";
+"storage_space_warning" = "കംപ്യൂട്ടറിൽ സ്ഥലം അപര്യാപ്തം";
+
+/* Android shared translations */
+"error_occurred" = "ഒരു തെറ്റ് പറ്റിയിരിക്കുന്നു";
+
+/* Android shared translations */
+"conf_change_chapter" = "Chapter changes";
+"conf_change_title" = "തലക്കെട്ടുകൾ";
+"conf_replace_divinename" = "Replace divine name with Yahweh";
+"conf_save_playback_settings_to_bookmarks" = "Save playback settings to bookmarks";
+"conf_speak_auto_bookmark" = "Automatic bookmarking";
+"conf_speak_footnotes" = "അടിക്കുറിപ്പുകൾ";
+"conf_speak_sleep_timer" = "മയക്ക സമയം നിശ്ചയിക്കുക";
+"conf_speak_synchronize" = "Text follows speech";
+"forward" = "മുമ്പിലേക്കു പോകൂ";
+"playback_settings_title" = "Playback Settings";
+"rewind" = "പുറകിലേക്കുപോകൂ";
+"speak_bookmarks_menu_title" = "Speak from bookmark";
+"speak_next" = "അടുത്തത്";
+"speak_previous" = "പുറകോട്ട്";
+"speak_settings_title" = "General Speak Settings";
+
+/* Android shared translations */
+"sleep_timer_title" = "മയക്കത്തിന്റെ സമയം";
+"speak_beginning_of_passage" = "ഖണ്ഡികയുടെ തുടക്കം തിരഞ്ഞെടുക്കുക";
+"speak_ending_of_passage" = "ഖണ്ഡികയുടെ അവസാനം തിരഞ്ഞെടുക്കുക";
+"speak_ending_verse_must_be_later" = "അവസാന വാക്യം ആദ്യ വാക്യത്തിന് ശേഷമായിരിക്കണം";
+"speak_verse_range_to_repeat" = "ആവർത്തിക്കേണ്ട വാക്യ പരിധി തിരഞ്ഞെടുക്കുക";
+
+/* Android shared translations */
+"tts_lang_not_available" = "ഈ ഭാഷ ലഭ്യമല്ല";
+
+/* Android shared translations */
+"errorTitle" = "ഒരു തെറ്റ് പറ്റിയിരിക്കുന്നു";
+"error_executing_search" = "അസാധുവായ അന്വേഷണം";
+"okay" = "കൊള്ളാം";
+"overwrite" = "അതെ";
+"search_all_words" = "എല്ലാ പദങ്ങളും";
+"search_any_word" = "ഏതെങ്കിലും പദം";
+"search_phrase" = "ഉപവാക്യം";
+"search_words_group_prompt" = "വാക്യങ്ങൾ കണ്ടുപിടിക്കുക";
+"speak_book_changed" = "പുസ്തകം മാറി";
+"speak_chapter_changed" = "അദ്ധ്യായം";
+"success" = "കഴിഞ്ഞു";
+"undo" = "മാറ്റിക്കളയുക";
+
+/* Android shared translations */
+"error_key_not_in_document" = "ഡോക്കുമെന്റിൽ കാണുന്നില്ല";
+"system_items1" = "കൂടുതൽ";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "സ്ടോങ്ങ്സ് നംബറുള്ള വേദപുസ്തകം ഡൌൺലോഡ് ചെയ്ത ശേഷം, ഇതിന്റെ പട്ടിക, \"സേർച്ച്\" വഴി ഡൌൺലോഡ് ചെയ്യുക";
+
+/* Android shared translations */
+"save_and_exit" = "സൂക്ഷിക്കു";
+"watch_tutorial_video" = "ടൂട്ടോറിയൽ വീഡിയോ കാണുക (ഇംഗ്ലീഷ്)";

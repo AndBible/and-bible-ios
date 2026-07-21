@@ -1,0 +1,158 @@
+// AndroidModuleBackupArchiveExporter.swift — Manifest-first Android module backup ZIP creation
+
+import Foundation
+
+/**
+ Creates Android-compatible module backup archives from a validated file-backed inventory.
+
+ The exporter is the sole owner of ZIP ordering and temporary archive lifecycle. It writes the
+ Android manifest as the literal first member, streams every payload from disk, and retains native
+ EPUB generations through the complete write. Discovery and ownership rules remain isolated in
+ `AndroidModuleBackupExportInventoryBuilder`.
+ */
+internal final class AndroidModuleBackupArchiveExporter {
+    /// Android's required literal first ZIP member for module backups.
+    private static let manifestFileName = "AndBibleBackupManifest.json"
+
+    /// Producer build number emitted in Android's complete four-field manifest contract.
+    private let producerVersion: Int
+
+    /// File manager used for archive writes, compatibility reads, and cleanup.
+    private let fileManager: FileManager
+
+    /// Directory that owns temporary completed and partial archive files.
+    private let temporaryDirectory: URL
+
+    /// Cross-family inventory builder used before the ZIP destination is opened.
+    private let inventoryBuilder: AndroidModuleBackupExportInventoryBuilder
+
+    /**
+     Creates an archive exporter bound to one installed-module layout.
+
+     - Parameters:
+       - fileManager: File manager used for discovery, ZIP output, and cleanup.
+       - moduleDirectory: Canonical local module root mirrored by Android backup paths.
+       - temporaryDirectory: Scratch directory that owns generated archives.
+       - epubLibraryRootURL: Optional native EPUB library override for isolated hosts and tests.
+       - producerVersion: Integer app build written as Android's `andBibleVersion` field.
+     - Side effects: none; directories and archives are created only during export.
+     - Failure modes: This initializer cannot fail.
+     */
+    internal init(
+        fileManager: FileManager,
+        moduleDirectory: URL,
+        temporaryDirectory: URL,
+        epubLibraryRootURL: URL?,
+        producerVersion: Int
+    ) {
+        self.fileManager = fileManager
+        self.temporaryDirectory = temporaryDirectory
+        self.producerVersion = producerVersion
+        self.inventoryBuilder = AndroidModuleBackupExportInventoryBuilder(
+            fileManager: fileManager,
+            moduleDirectory: moduleDirectory,
+            epubLibraryRootURL: epubLibraryRootURL,
+            reservedArchivePath: Self.manifestFileName
+        )
+    }
+
+    /**
+     Exports selected installed modules as in-memory archive bytes for compatibility callers.
+
+     - Parameter moduleNames: Optional case/Unicode-insensitive Android initials selection; `nil`
+       exports every discovered module family.
+     - Returns: Complete Android backup bytes and the same summary as the file-backed export.
+     - Side effects: Creates a temporary archive, reads it into memory, and removes it before return.
+     - Throws: Discovery, path-validation, file-read, ZIP-writing, or cleanup-independent read errors.
+       The temporary archive is removed best-effort even when the compatibility read fails.
+     */
+    internal func exportArchive(moduleNames: Set<String>?) throws -> AndroidModuleBackupExport {
+        let fileExport = try exportArchiveFile(
+            orderedModuleNames: moduleNames?.sorted()
+        )
+        defer { try? fileManager.removeItem(at: fileExport.fileURL) }
+        return AndroidModuleBackupExport(
+            fileName: fileExport.fileName,
+            data: try Data(contentsOf: fileExport.fileURL),
+            moduleNames: fileExport.moduleNames,
+            entryCount: fileExport.entryCount
+        )
+    }
+
+    /**
+     Streams selected installed modules into one Android-compatible `.abmd.zip` archive.
+
+     - Parameter moduleNames: Optional case/Unicode-insensitive Android initials selection; `nil`
+       exports every discovered module family.
+     - Returns: A completed temporary archive owned by the caller, sorted module initials, and the
+       number of ZIP members including the manifest.
+     - Side effects: Enumerates installed content, leases immutable EPUB generations, creates one
+       temporary archive, and streams payload files into it. Leases are released after writing.
+     - Throws: `AndroidModuleBackupError` for empty, missing, unsafe, or colliding inventory;
+       filesystem errors; or `ZipArchiveWriterError` for unsupported ZIP limits. Partial output is
+       removed before an error escapes.
+     - Note: The manifest is always the literal first ZIP member and payload ordering comes directly
+       from the validated inventory.
+     */
+    internal func exportArchiveFile(moduleNames: Set<String>?) throws -> AndroidModuleBackupFileExport {
+        try exportArchiveFile(orderedModuleNames: moduleNames?.sorted())
+    }
+
+    /**
+     Streams picker-selected content in exact display/selection order.
+
+     - Parameter orderedModuleNames: Android runtime initials in picker order, or nil for all.
+     - Returns: Completed file-backed Android module backup.
+     - Side effects: Performs the same inventory, lease, and temporary-file work as the unordered
+       compatibility overload.
+     - Throws: The same discovery, source-integrity, cancellation, ZIP, and filesystem errors.
+     */
+    internal func exportArchiveFile(
+        orderedModuleNames: [String]?
+    ) throws -> AndroidModuleBackupFileExport {
+        let inventory = try inventoryBuilder.prepare(moduleNames: orderedModuleNames)
+        defer { inventory.releaseEpubGenerations() }
+        guard !inventory.entries.isEmpty else {
+            throw AndroidModuleBackupError.noExportableModules
+        }
+
+        let entries = [
+            ZipArchiveWriterFileEntry(name: Self.manifestFileName, data: manifestData),
+        ] + inventory.entries.map {
+            ZipArchiveWriterFileEntry(name: $0.archivePath, pinnedFile: $0.source)
+        }
+        let archiveURL = temporaryDirectory.appendingPathComponent(
+            "android-module-backup-export-\(UUID().uuidString).abmd.zip"
+        )
+        do {
+            try ZipArchiveWriter.writeAndroidCompatibleDeflatedArchive(
+                entries: entries,
+                to: archiveURL,
+                fileManager: fileManager
+            )
+        } catch {
+            try? fileManager.removeItem(at: archiveURL)
+            throw error
+        }
+        return AndroidModuleBackupFileExport(
+            fileName: AndroidModuleBackupService.moduleBackupFileName,
+            fileURL: archiveURL,
+            moduleNames: inventory.moduleNames,
+            entryCount: entries.count
+        )
+    }
+
+    /** Returns the same canonical all-family rows accepted by export inventory preparation. */
+    internal func installedContentCatalog() throws -> [AndroidModuleBackupInstalledContent] {
+        try inventoryBuilder.installedContentCatalog()
+    }
+
+    /// Full Android kotlinx-serialization field set in declaration order, including nullable data.
+    private var manifestData: Data {
+        Data(
+            "{\"backupType\":\"MODULE_BACKUP\",\"contains\":null,\"manifestVersion\":1,"
+                .appending("\"andBibleVersion\":\(producerVersion)}")
+                .utf8
+        )
+    }
+}

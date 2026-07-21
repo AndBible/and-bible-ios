@@ -14,6 +14,8 @@ public struct ReadingPlanTemplate: Identifiable, Sendable {
     public let description: String
     /// Total number of days in the plan.
     public let totalDays: Int
+    /// Explicit signed-Int32 property keys retained in ascending order.
+    public let dayNumbers: [Int]
     /// Whether this template uses Android's date-prefixed reading-plan format.
     public let isDateBased: Bool
     /// Generates the readings string for a given 1-based day number.
@@ -29,7 +31,7 @@ public struct ReadingPlanTemplate: Identifiable, Sendable {
        - code: Stable plan code used for persistence and lookup.
        - name: User-visible plan name.
        - description: User-visible plan description.
-       - totalDays: Total number of days encoded by the plan.
+       - dayNumbers: Explicit Android integer property keys encoded by the plan.
        - isDateBased: Whether readings use Android's date-prefixed syntax.
        - readingsForDay: Closure returning the readings string for a 1-based day number.
      */
@@ -37,14 +39,15 @@ public struct ReadingPlanTemplate: Identifiable, Sendable {
         code: String,
         name: String,
         description: String,
-        totalDays: Int,
+        dayNumbers: [Int],
         isDateBased: Bool = false,
         readingsForDay: @escaping @Sendable (Int) -> String
     ) {
         self.code = code
         self.name = name
         self.description = description
-        self.totalDays = totalDays
+        self.dayNumbers = Array(Set(dayNumbers)).sorted()
+        self.totalDays = max(self.dayNumbers.max() ?? 0, 0)
         self.isDateBased = isDateBased
         self.readingsForDay = readingsForDay
     }
@@ -81,6 +84,41 @@ public struct ReadingPlanCatalog: Sendable {
     }
 }
 
+/** Errors raised while importing an Android-compatible custom reading-plan definition. */
+public enum ReadingPlanImportError: Error, Equatable {
+    /// The selected filename cannot become Android's stable plan code.
+    case invalidFileName
+
+    /// The selected properties text contains no numeric day assignments.
+    case invalidProperties
+
+    /// A custom filename would override one of Android's bundled reading-plan identities.
+    case bundledPlanCodeCollision
+
+    /// Existing definition bytes can only be changed together with their persisted plan graph.
+    case coordinatedMutationRequired
+
+    /// The destination definition could not be persisted.
+    case writeFailed
+}
+
+/** Fail-visible local reading-plan mutation errors. */
+public enum ReadingPlanMutationError: Error, Equatable {
+    /// A requested Android current-day offset cannot be represented by the supplied calendar.
+    case unrepresentableStartDate
+}
+
+/** Fail-visible errors raised while loading reading-plan definition metadata. */
+public enum ReadingPlanDefinitionError: Error, Equatable, LocalizedError, Sendable {
+    /// No valid definition can be loaded for the requested stable plan code.
+    case unavailable(planCode: String)
+
+    /// Android-shared generic description suitable for the daily-reading failure alert.
+    public var errorDescription: String? {
+        String(localized: "error_occurred", defaultValue: "An error has occurred")
+    }
+}
+
 /**
  Provides Android-compatible reading plan templates and plan lifecycle helpers.
 
@@ -88,9 +126,8 @@ public struct ReadingPlanCatalog: Sendable {
  first, followed by unique user files from `jsword/readingplan`, followed by unique add-on-provided
  plans declared through `AndBibleProvidesReadingPlan`.
 
- Day numbering is intentionally 1-based for plan templates and day rows. The persisted
- `ReadingPlan.currentDay` field is still stored separately and currently starts at `0` when a
- plan is created.
+ Day numbering is intentionally 1-based for plan templates, day rows, and the persisted
+ `ReadingPlan.currentDay` field, matching Android's Room schema default.
  */
 public final class ReadingPlanService {
     private struct BundledPlanDefinition: Sendable {
@@ -108,6 +145,30 @@ public final class ReadingPlanService {
         case bundled
         case userFile(URL)
         case addon(SwordReadingPlanProvider)
+    }
+
+    /** Selected readable definition and the parsed day content that establishes its validity. */
+    private struct LoadedPlanDefinition {
+        /// Source whose metadata and content won Android's priority order.
+        let source: PlanSource
+
+        /// Decoded source text retained for structural metadata parsing.
+        let propertiesText: String
+
+        /// UTF-8 reader view used only for Android's leading-comment display metadata.
+        let metadataText: String
+
+        /// Numeric day assignments parsed from the selected source.
+        let readings: [Int: String]
+    }
+
+    /** Two Android decoding views over one exact bounded properties payload. */
+    private struct PropertiesPayload {
+        /// `Properties.load(InputStream)` byte-to-character interpretation.
+        let valuesText: String
+
+        /// Kotlin `bufferedReader()` interpretation used for leading comments.
+        let metadataText: String
     }
 
     private static let bundledPlanDefinitions: [BundledPlanDefinition] = [
@@ -156,6 +217,40 @@ public final class ReadingPlanService {
      */
     public static var availablePlans: [ReadingPlanTemplate] {
         catalog().templates
+    }
+
+    /**
+     Returns whether a code belongs to Android's bundled reading-plan catalog.
+
+     - Parameter code: Exact filename-style reading-plan identity.
+     - Returns: `true` only for definitions shipped in the application bundle.
+     - Side effects: none.
+     - Failure modes: This lookup cannot fail.
+     */
+    static func isBundledPlanCode(_ code: String) -> Bool {
+        bundledPlanDefinitions.contains { $0.code == code }
+    }
+
+    /**
+     Builds only templates backed by definitions bundled on both supported platforms.
+
+     Manifestless Android sync archives carry no content identity for custom or add-on plans. Their
+     rows must therefore resolve against this catalog rather than files already present on the iOS
+     recipient, which could share a code while describing a different schedule.
+
+     - Returns: Valid bundled templates in Android's catalog order.
+     - Side effects: Reads bundled `.properties` resources.
+     - Failure modes: Missing or malformed bundled resources are omitted consistently with `catalog`.
+     */
+    static func bundledTemplates() -> [ReadingPlanTemplate] {
+        bundledPlanDefinitions.compactMap { definition in
+            template(
+                code: definition.code,
+                bundledDefinition: definition,
+                userPlanFile: nil,
+                addonProvider: nil
+            )
+        }
     }
 
     /**
@@ -241,7 +336,103 @@ public final class ReadingPlanService {
         )
     }
 
+    /**
+     Loads the optional raw `Versification` value used by Android for one reading plan.
+
+     Definition content uses the same source and validity rules as catalog templates: a readable
+     add-on file wins over a user file, which wins over the bundled definition. A readable selected
+     source with no numeric day assignments is invalid and does not fall through; an unreadable
+     candidate does fall through to the next source. For add-ons, module `Versification` metadata
+     overrides the selected file property, matching Android's `ReadingPlanTextFileDao`.
+
+     - Parameters:
+       - code: Stable plan code whose definition metadata should be loaded.
+       - userPlanDirectory: Directory containing Android-compatible user `.properties` plans.
+       - modulePath: SWORD module root containing add-on module configs and provider files.
+     - Returns: The decoded Java-properties value, or `nil` when the selected valid definition does
+       not declare `Versification`.
+     - Side effects: Reads user-plan directory metadata, SWORD configs, and local definition files.
+     - Throws: `ReadingPlanDefinitionError.unavailable(planCode:)` when no valid definition can be
+       loaded for `code`.
+     - Note: The returned value is not trimmed, defaulted, or mapped to a supported canon.
+     */
+    public static func versificationProperty(
+        forPlanCode code: String,
+        userPlanDirectory: URL? = ReadingPlanService.defaultUserReadingPlanDirectory(),
+        modulePath: String = SwordManager.defaultModulePath()
+    ) throws -> String? {
+        let userPlansByCode = Dictionary(
+            userPlanFiles(in: userPlanDirectory).map { ($0.code, $0.url) }
+        ) { first, _ in first }
+        let providersByCode = Dictionary(
+            SwordManager.readingPlanProviders(modulePath: modulePath).map { ($0.planCode, $0) }
+        ) { _, last in last }
+
+        guard let definition = loadedPlanDefinition(
+            code: code,
+            userPlanFile: userPlansByCode[code],
+            addonProvider: providersByCode[code]
+        ) else {
+            throw ReadingPlanDefinitionError.unavailable(planCode: code)
+        }
+
+        if case .addon(let provider) = definition.source,
+           let providerVersification = provider.versification {
+            return providerVersification
+        }
+        return propertyValue(named: "Versification", in: definition.propertiesText)
+    }
+
     // MARK: - .properties File Parser
+
+    /**
+     Loads one valid definition using Android's content-source priority.
+
+     Source readability is evaluated before falling through from add-on to user to bundle. Once a
+     source decodes, its parsed day assignments determine validity; malformed readable content does
+     not fall through because catalog template loading observes that same selected source.
+
+     - Parameters:
+       - code: Stable plan code used for bundled-resource lookup.
+       - userPlanFile: Matching user file, when discovered.
+       - addonProvider: Matching add-on provider, when discovered.
+     - Returns: Selected source, decoded text, and numeric day assignments, or `nil` when the
+       selected source is missing or invalid.
+     - Side effects: Reads candidate definition files in priority order until one decodes.
+     - Failure modes: Missing, undecodable, or dayless selected definitions return `nil`.
+     */
+    private static func loadedPlanDefinition(
+        code: String,
+        userPlanFile: URL?,
+        addonProvider: SwordReadingPlanProvider?
+    ) -> LoadedPlanDefinition? {
+        let source: PlanSource
+        let selectedPayload: PropertiesPayload
+
+        if let addonProvider,
+           let payload = propertiesPayload(from: addonProvider.fileURL) {
+            source = .addon(addonProvider)
+            selectedPayload = payload
+        } else if let userPlanFile,
+                  let payload = propertiesPayload(from: userPlanFile) {
+            source = .userFile(userPlanFile)
+            selectedPayload = payload
+        } else if let payload = bundledPropertiesPayload(code: code) {
+            source = .bundled
+            selectedPayload = payload
+        } else {
+            return nil
+        }
+
+        let readings = parseProperties(selectedPayload.valuesText)
+        guard !readings.isEmpty else { return nil }
+        return LoadedPlanDefinition(
+            source: source,
+            propertiesText: selectedPayload.valuesText,
+            metadataText: selectedPayload.metadataText,
+            readings: readings
+        )
+    }
 
     /**
      Creates one template by selecting the Android-equivalent source for a plan code.
@@ -256,7 +447,7 @@ public final class ReadingPlanService {
        - userPlanFile: Matching user `.properties` file, when present.
        - addonProvider: Matching add-on provider, when present.
      - Returns: Template when a selected source can be parsed.
-     - Side effects: Reads at most one plan file.
+     - Side effects: Reads candidate definition files in priority order until one decodes.
      - Failure modes: Missing or malformed selected sources return `nil`.
      */
     private static func template(
@@ -265,41 +456,29 @@ public final class ReadingPlanService {
         userPlanFile: URL?,
         addonProvider: SwordReadingPlanProvider?
     ) -> ReadingPlanTemplate? {
-        let source: PlanSource
-        let selectedPropertiesText: String
+        guard let definition = loadedPlanDefinition(
+            code: code,
+            userPlanFile: userPlanFile,
+            addonProvider: addonProvider
+        ) else { return nil }
 
-        if let addonProvider,
-           let text = propertiesText(from: addonProvider.fileURL) {
-            source = .addon(addonProvider)
-            selectedPropertiesText = text
-        } else if let userPlanFile,
-                  let text = propertiesText(from: userPlanFile) {
-            source = .userFile(userPlanFile)
-            selectedPropertiesText = text
-        } else if let text = bundledPropertiesText(code: code) {
-            source = .bundled
-            selectedPropertiesText = text
-        } else {
-            return nil
-        }
-
-        let readings = parseProperties(selectedPropertiesText)
-        guard !readings.isEmpty else { return nil }
-
-        let totalDays = readings.keys.max() ?? 0
         let display = displayMetadata(
             code: code,
             bundledDefinition: bundledDefinition,
-            source: source,
-            propertiesText: selectedPropertiesText
+            source: definition.source,
+            propertiesText: definition.metadataText
         )
-        let isDateBased = isDateBased(source: source, firstDayReadings: readings[1] ?? "")
+        let isDateBased = isDateBased(
+            source: definition.source,
+            firstDayReadings: definition.readings[1] ?? ""
+        )
+        let readings = definition.readings
 
         return ReadingPlanTemplate(
             code: code,
             name: display.name,
             description: display.description,
-            totalDays: totalDays,
+            dayNumbers: readings.keys.sorted(),
             isDateBased: isDateBased,
             readingsForDay: { day in
                 readings[day] ?? ""
@@ -320,19 +499,33 @@ public final class ReadingPlanService {
               let urls = try? FileManager.default.contentsOfDirectory(
                 at: directory,
                 includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
+                options: []
               ) else {
             return []
         }
 
-        return urls
-            .filter { $0.pathExtension.caseInsensitiveCompare("properties") == .orderedSame }
+        let candidates = urls
+            .filter { $0.lastPathComponent.hasSuffix(".properties") }
             .compactMap { url -> UserPlanFile? in
-                let code = url.deletingPathExtension().lastPathComponent
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let code = url.lastPathComponent.replacingOccurrences(
+                    of: ".properties",
+                    with: ""
+                )
                 guard !code.isEmpty else { return nil }
                 return UserPlanFile(code: code, url: url)
             }
+        let collisionKeys = Dictionary(grouping: candidates) {
+            $0.code.precomposedStringWithCanonicalMapping.lowercased(
+                with: Locale(identifier: "en_US_POSIX")
+            )
+        }.filter { $0.value.count > 1 }.keys
+        return candidates.filter { candidate in
+            !collisionKeys.contains(
+                candidate.code.precomposedStringWithCanonicalMapping.lowercased(
+                    with: Locale(identifier: "en_US_POSIX")
+                )
+            )
+        }
     }
 
     /**
@@ -343,14 +536,14 @@ public final class ReadingPlanService {
      - Side effects: Reads one bundled resource.
      - Failure modes: Missing or undecodable resources return `nil`.
      */
-    private static func bundledPropertiesText(code: String) -> String? {
+    private static func bundledPropertiesPayload(code: String) -> PropertiesPayload? {
         guard let url = moduleResourceURL(
             forResource: code,
             withExtension: "properties",
             subdirectories: ["readingplan", "Resources/readingplan"]
         ) else { return nil }
 
-        return propertiesText(from: url)
+        return propertiesPayload(from: url)
     }
 
     /**
@@ -362,9 +555,27 @@ public final class ReadingPlanService {
      - Failure modes: Missing or undecodable files return `nil`.
      */
     private static func propertiesText(from url: URL) -> String? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return String(data: data, encoding: .utf8) ??
-            String(data: data, encoding: .isoLatin1)
+        propertiesPayload(from: url)?.valuesText
+    }
+
+    /**
+     Reads one definition once and exposes Android's distinct values and comment decodings.
+
+     - Parameter url: Local plan definition URL.
+     - Returns: Latin-1 property text plus UTF-8 comment text, or nil for unsafe/unreadable files.
+     - Side effects: Opens one no-follow descriptor and reads at most the shared definition limit.
+     - Failure modes: Symlinks, nonregular files, growth, and oversized files return nil.
+     */
+    private static func propertiesPayload(from url: URL) -> PropertiesPayload? {
+        guard let data = try? RemoteSyncReadingPlanDefinitionStore
+            .readBoundedDefinitionData(from: url),
+              let valuesText = String(data: data, encoding: .isoLatin1) else {
+            return nil
+        }
+        return PropertiesPayload(
+            valuesText: valuesText,
+            metadataText: String(decoding: data, as: UTF8.self)
+        )
     }
 
     /**
@@ -418,7 +629,7 @@ public final class ReadingPlanService {
         fallbackName: String
     ) -> (name: String, description: String) {
         var comments: [String] = []
-        for line in text.components(separatedBy: .newlines).prefix(5) {
+        for line in physicalPropertiesLines(from: text).prefix(5) {
             guard line.hasPrefix("#") else { continue }
             let comment = line
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -467,9 +678,10 @@ public final class ReadingPlanService {
      - Failure modes: none.
      */
     static func hasDateBasedPrefix(_ readings: String) -> Bool {
-        let regex = try! NSRegularExpression(pattern: #"^[A-Za-z]{3}-\d{1,2};"#)
-        let range = NSRange(readings.startIndex..<readings.endIndex, in: readings)
-        return regex.firstMatch(in: readings, options: [], range: range) != nil
+        readings.range(
+            of: #"^[A-Za-z]{3}-[0-9]{1,2};"#,
+            options: .regularExpression
+        ) != nil
     }
 
     private static func moduleResourceURL(
@@ -490,22 +702,85 @@ public final class ReadingPlanService {
     }
 
     /**
-     Parse .properties file content into a day→readings dictionary.
-     Format: `dayNumber=OsisRef1,OsisRef2,...`
-     Lines starting with # are comments. Blank lines are ignored.
+     Parses Java-properties content into Android's day-to-readings dictionary.
+
+     Numeric keys use Java's decoded key exactly: escaped leading whitespace is significant, while
+     unescaped separators and continuation whitespace are handled by `Properties.load` rules.
+
+     - Parameter text: ISO-8859-1-decoded `.properties` content.
+     - Returns: Keys accepted by Kotlin's signed 32-bit `String.toIntOrNull()` conversion.
+     - Side Effects: none.
+     - Failure modes: Nonnumeric or out-of-range keys are ignored, matching Android's `toIntOrNull`.
      */
     public static func parseProperties(_ text: String) -> [Int: String] {
         var readings: [Int: String] = [:]
-        for line in logicalPropertiesLines(from: text) {
-            guard let entry = propertiesEntry(from: line) else { continue }
-            let key = unescapePropertyText(entry.key).trimmingCharacters(in: .whitespaces)
-            let value = unescapePropertyText(entry.value)
-
+        for entry in parsedProperties(text) {
             // Skip non-numeric keys (e.g. "Versification=KJV")
-            guard let dayNumber = Int(key) else { continue }
-            readings[dayNumber] = value
+            guard let dayNumber = Int32(entry.key).map(Int.init) else { continue }
+            readings[dayNumber] = entry.value
         }
         return readings
+    }
+
+    /**
+     Returns every decoded property key whose complete text has signed ASCII-integer syntax.
+
+     Validation uses this stream before integer conversion so arbitrarily large numeric keys cannot
+     disappear through integer overflow before validation.
+
+     - Parameter text: ISO-8859-1-decoded Java-properties content.
+     - Returns: Numeric-looking decoded keys in source order, including duplicates.
+     - Side Effects: none.
+     - Failure modes: Malformed nonnumeric keys are omitted.
+     */
+    static func numericPropertyKeys(in text: String) -> [String] {
+        parsedProperties(text).compactMap { entry in
+            let digits: Substring
+            if entry.key.first == "+" || entry.key.first == "-" {
+                digits = entry.key.dropFirst()
+            } else {
+                digits = entry.key[...]
+            }
+            guard !digits.isEmpty,
+                  digits.utf8.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }) else {
+                return nil
+            }
+            return entry.key
+        }
+    }
+
+    /**
+     Parses Java-properties entries using the same structural rules as reading assignments.
+
+     - Parameter text: Raw `.properties` content.
+     - Returns: Ordered decoded key/value entries; duplicate keys remain ordered for callers to
+       apply Java's last-value-wins behavior.
+     - Side effects: none.
+     - Failure modes: Ignored lines are omitted and malformed escapes follow
+       `unescapePropertyText(_:)` recovery behavior.
+     */
+    private static func parsedProperties(_ text: String) -> [(key: String, value: String)] {
+        logicalPropertiesLines(from: text).compactMap { line in
+            guard let entry = propertiesEntry(from: line) else { return nil }
+            return (
+                key: unescapePropertyText(entry.key),
+                value: unescapePropertyText(entry.value)
+            )
+        }
+    }
+
+    /**
+     Returns the last decoded value for one exact Java-properties key.
+
+     - Parameters:
+       - name: Case-sensitive decoded property key.
+       - text: Raw `.properties` content.
+     - Returns: The final matching value, including significant trailing whitespace, or `nil`.
+     - Side effects: none.
+     - Failure modes: Malformed escapes use the parser's documented literal recovery behavior.
+     */
+    private static func propertyValue(named name: String, in text: String) -> String? {
+        parsedProperties(text).last { $0.key == name }?.value
     }
 
     /**
@@ -523,21 +798,24 @@ public final class ReadingPlanService {
     private static func logicalPropertiesLines(from text: String) -> [String] {
         var logicalLines: [String] = []
         var current = ""
+        var isContinuation = false
 
-        for physicalLine in text.components(separatedBy: .newlines) {
-            if current.isEmpty {
-                current = physicalLine
+        for physicalLine in physicalPropertiesLines(from: text) {
+            if isContinuation {
+                current += physicalLine.drop(while: isPropertyWhitespace)
             } else {
-                current += physicalLine.trimmingCharacters(in: .whitespaces)
+                current = physicalLine
             }
 
             if hasOddTrailingBackslashes(current) {
                 current.removeLast()
+                isContinuation = true
                 continue
             }
 
             logicalLines.append(current)
             current = ""
+            isContinuation = false
         }
 
         if !current.isEmpty {
@@ -545,6 +823,43 @@ public final class ReadingPlanService {
         }
 
         return logicalLines
+    }
+
+    /**
+     Splits Java-properties text only at CR, LF, or CRLF physical line boundaries.
+
+     Foundation's broad newline character set also treats Latin-1 NEL as a separator, while
+     `Properties.load(InputStream)` treats byte `0x85` as ordinary value data.
+
+     - Parameter text: ISO-8859-1-decoded properties content.
+     - Returns: Physical lines, retaining a final empty line after a terminal line separator.
+     - Side Effects: none.
+     - Failure modes: none.
+     */
+    private static func physicalPropertiesLines(from text: String) -> [String] {
+        let scalars = text.unicodeScalars
+        var lines: [String] = []
+        var lineStart = scalars.startIndex
+        var index = scalars.startIndex
+        while index < scalars.endIndex {
+            let scalar = scalars[index]
+            guard scalar.value == 0x0d || scalar.value == 0x0a else {
+                index = scalars.index(after: index)
+                continue
+            }
+            lines.append(String(scalars[lineStart..<index]))
+            let next = scalars.index(after: index)
+            if scalar.value == 0x0d,
+               next < scalars.endIndex,
+               scalars[next].value == 0x0a {
+                index = scalars.index(after: next)
+            } else {
+                index = next
+            }
+            lineStart = index
+        }
+        lines.append(String(scalars[lineStart...]))
+        return lines
     }
 
     /**
@@ -641,23 +956,42 @@ public final class ReadingPlanService {
                 result.append("\u{000C}")
                 index = text.index(after: escapedIndex)
             case "u":
-                var unicodeIndex = text.index(after: escapedIndex)
-                var scalarValue = 0
-                var digitCount = 0
-                while digitCount < 4,
-                      unicodeIndex < text.endIndex,
-                      let digitValue = hexValue(of: text[unicodeIndex]) {
-                    scalarValue = scalarValue * 16 + digitValue
-                    digitCount += 1
-                    unicodeIndex = text.index(after: unicodeIndex)
-                }
-                if digitCount == 4, let scalar = UnicodeScalar(scalarValue) {
-                    result.unicodeScalars.append(scalar)
-                    index = unicodeIndex
-                } else {
+                guard let decoded = decodedUnicodeEscape(
+                    in: text,
+                    digitsStart: text.index(after: escapedIndex)
+                ) else {
                     result.append(escaped)
                     index = text.index(after: escapedIndex)
+                    continue
                 }
+                let firstUnit = decoded.unit
+                if (0xD800...0xDBFF).contains(firstUnit),
+                   decoded.endIndex < text.endIndex,
+                   text[decoded.endIndex] == "\\" {
+                    let nextU = text.index(after: decoded.endIndex)
+                    if nextU < text.endIndex,
+                       text[nextU] == "u",
+                       let low = decodedUnicodeEscape(
+                           in: text,
+                           digitsStart: text.index(after: nextU)
+                       ),
+                       (0xDC00...0xDFFF).contains(low.unit) {
+                        let value = 0x10000
+                            + ((firstUnit - 0xD800) << 10)
+                            + (low.unit - 0xDC00)
+                        if let scalar = UnicodeScalar(value) {
+                            result.unicodeScalars.append(scalar)
+                            index = low.endIndex
+                            continue
+                        }
+                    }
+                }
+                if let scalar = UnicodeScalar(firstUnit) {
+                    result.unicodeScalars.append(scalar)
+                } else {
+                    result.unicodeScalars.append("\u{FFFD}")
+                }
+                index = decoded.endIndex
             default:
                 result.append(escaped)
                 index = text.index(after: escapedIndex)
@@ -665,6 +999,21 @@ public final class ReadingPlanService {
         }
 
         return result
+    }
+
+    /** Decodes exactly four hexadecimal UTF-16 code-unit digits after one Java `\u` marker. */
+    private static func decodedUnicodeEscape(
+        in text: String,
+        digitsStart: String.Index
+    ) -> (unit: Int, endIndex: String.Index)? {
+        var index = digitsStart
+        var value = 0
+        for _ in 0..<4 {
+            guard index < text.endIndex, let digit = hexValue(of: text[index]) else { return nil }
+            value = value * 16 + digit
+            index = text.index(after: index)
+        }
+        return (value, index)
     }
 
     /**
@@ -728,24 +1077,32 @@ public final class ReadingPlanService {
     // MARK: - Custom Plan Import
 
     /**
-     Imports a custom reading plan from `.properties` file content.
+     Parses a custom reading plan without persisting a definition file.
+
+     This compatibility overload now derives a deterministic Android-compatible code from `name`;
+     UI imports use the filename-aware overload below so restart and restore can rediscover the
+     exact definition.
+
      - Parameters:
-       - name: User-visible plan name.
+       - name: User-visible plan name and stable-code source for compatibility callers.
        - propertiesText: Raw `.properties` file content using Android plan syntax.
-     - Returns: A transient template when parsing succeeds, otherwise `nil`.
+     - Returns: Parsed template when at least one numeric day exists, otherwise `nil`.
+     - Side effects: none.
+     - Failure modes: Invalid names or properties return `nil`.
      */
     public static func importCustomPlan(name: String, propertiesText: String) -> ReadingPlanTemplate? {
         let readings = parseProperties(propertiesText)
         guard !readings.isEmpty else { return nil }
 
         let totalDays = readings.keys.max() ?? 0
-        let code = "custom_\(UUID().uuidString.prefix(8))"
+        let code = stableCustomPlanCode(from: name)
+        guard !code.isEmpty else { return nil }
 
         return ReadingPlanTemplate(
             code: code,
             name: name,
             description: "Custom imported reading plan (\(totalDays) days).",
-            totalDays: totalDays,
+            dayNumbers: readings.keys.sorted(),
             isDateBased: hasDateBasedPrefix(readings[1] ?? ""),
             readingsForDay: { day in
                 readings[day] ?? ""
@@ -753,35 +1110,320 @@ public final class ReadingPlanService {
         )
     }
 
+    /**
+     Persists and imports one custom Android `.properties` reading plan.
+
+     Android defines custom identity as the exact filename without `.properties`. iOS writes the
+     original text to the equivalent `jsword/readingplan` folder before rebuilding the catalog, so
+     the same stable code survives restart, backup restore, and sync replay whenever the Android
+     definition file is present.
+
+     - Parameters:
+       - fileName: Source filename including Android's exact lowercase `.properties` extension.
+       - propertiesText: Raw Java-properties content.
+       - userPlanDirectory: Android-equivalent user definition directory.
+     - Returns: Rediscovered persisted template.
+     - Side effects: Creates the destination directory and atomically writes one `.properties` file.
+     - Failure modes:
+       - throws `ReadingPlanImportError.invalidFileName` for empty/path-like codes
+       - throws `ReadingPlanImportError.invalidProperties` when no numeric day is present
+       - throws `ReadingPlanImportError.writeFailed` when persistence or rediscovery fails
+     */
+    public static func importCustomPlan(
+        fileName: String,
+        propertiesText: String,
+        userPlanDirectory: URL = ReadingPlanService.defaultUserReadingPlanDirectory()
+    ) throws -> ReadingPlanTemplate {
+        try importCustomPlan(
+            fileName: fileName,
+            propertiesData: Data(propertiesText.utf8),
+            userPlanDirectory: userPlanDirectory
+        )
+    }
+
+    /**
+     Persists an unreferenced custom definition without transcoding its Java-properties bytes.
+
+     This compatibility entry point permits a new file or an idempotent write of identical bytes.
+     Replacing different bytes requires `importAndStartCustomPlan`, which updates any existing plan
+     graph and progress in the same durable publication.
+
+     - Parameters:
+       - fileName: Exact source filename ending in lowercase `.properties`.
+       - propertiesData: Original bytes interpreted by Android as ISO-8859-1.
+       - userPlanDirectory: Android-equivalent user definition directory.
+     - Returns: Template parsed from the exact persisted bytes.
+     - Side effects: May atomically create one unreferenced definition file.
+     - Throws: Validation, collision, coordinated-mutation, or filesystem errors.
+     */
+    public static func importCustomPlan(
+        fileName: String,
+        propertiesData: Data,
+        userPlanDirectory: URL = ReadingPlanService.defaultUserReadingPlanDirectory()
+    ) throws -> ReadingPlanTemplate {
+        let store = RemoteSyncReadingPlanDefinitionStore(userPlanDirectory: userPlanDirectory)
+        let definition = try store.validatedDefinition(
+            fileName: fileName,
+            propertiesData: propertiesData
+        )
+        try store.installUnreferencedDefinition(definition)
+        return try customTemplate(for: definition)
+    }
+
+    /**
+     Reads one selected custom definition without allocating beyond the accepted payload bound.
+
+     The security-scoped access lifetime remains owned by the UI caller. This helper verifies the
+     selected item is a regular nonsymlink file, rejects an oversized metadata length before reading,
+     then caps the actual read at one byte beyond the shared definition limit to catch file growth.
+
+     - Parameter url: Security-accessible local file selected for import.
+     - Returns: Exact source bytes without text decoding or newline normalization.
+     - Side effects: Opens and reads the selected file, then closes its handle.
+     - Throws: Filename, filesystem, or `definitionTooLarge` errors before import publication.
+     */
+    public static func readCustomPlanDefinitionData(from url: URL) throws -> Data {
+        do {
+            return try RemoteSyncReadingPlanDefinitionStore.readBoundedDefinitionData(from: url)
+        } catch RemoteSyncReadingPlanDefinitionError.unreadableLocalDefinition(_) {
+            throw ReadingPlanImportError.invalidFileName
+        }
+    }
+
+    /**
+     Imports or edits a custom plan and selects it through one crash-recoverable transaction.
+
+     Exact source bytes are published as one filesystem generation. A changed definition rebuilds
+     every persisted day for that code and removes per-reading statuses that no longer describe the
+     schedule. The graph, selected-plan preference, sync mutation journal, and definition generation
+     commit marker then save together through `SettingsStore.performAtomicBatch`.
+
+     - Parameters:
+       - fileName: Exact source filename ending in lowercase `.properties`.
+       - propertiesData: Original Java-properties bytes without transcoding.
+       - modelContext: Clean SwiftData context containing plans and settings.
+       - settingsStore: Settings store bound to `modelContext`.
+       - userPlanDirectory: Android-equivalent user definition directory.
+     - Returns: Newly created or rebuilt persisted plan selected by its stable code.
+     - Side effects: Publishes definition bytes, mutates plan/day/status rows, writes selection and
+       mutation-journal settings, and commits once.
+     - Throws: Validation, collision, context, journal, filesystem, or persistence failures. A failed
+       operation restores the prior definition generation and graph/settings transaction.
+     - Important: Callers must not pass a context with unrelated pending changes.
+     */
+    public static func importAndStartCustomPlan(
+        fileName: String,
+        propertiesData: Data,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        userPlanDirectory: URL = ReadingPlanService.defaultUserReadingPlanDirectory()
+    ) throws -> ReadingPlan {
+        let store = RemoteSyncReadingPlanDefinitionStore(userPlanDirectory: userPlanDirectory)
+        let definition = try store.validatedDefinition(
+            fileName: fileName,
+            propertiesData: propertiesData
+        )
+        let importedTemplate = try customTemplate(for: definition)
+
+        return try store.withPublishingLocalDefinition(
+            definition,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        ) { definitionChanged in
+            let existingPlans = try modelContext.fetch(FetchDescriptor<ReadingPlan>())
+            let selectedPlan: ReadingPlan
+            if let existingPlan = existingPlans.first(where: { $0.planCode == definition.planCode }) {
+                selectedPlan = existingPlan
+                if definitionChanged {
+                    for day in existingPlan.days ?? [] {
+                        modelContext.delete(day)
+                    }
+                    let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
+                    for status in try statusStore.allStatusesStrict()
+                    where status.planCode == definition.planCode {
+                        statusStore.removeStatus(
+                            planCode: status.planCode,
+                            dayNumber: status.dayNumber
+                        )
+                    }
+                    existingPlan.planName = importedTemplate.name
+                    existingPlan.totalDays = importedTemplate.totalDays
+                    for dayNumber in importedTemplate.dayNumbers {
+                        let day = ReadingPlanDay(
+                            dayNumber: dayNumber,
+                            readings: importedTemplate.readingsForDay(dayNumber)
+                        )
+                        day.plan = existingPlan
+                        modelContext.insert(day)
+                    }
+                }
+            } else {
+                let plan = ReadingPlan(
+                    planCode: importedTemplate.code,
+                    planName: importedTemplate.name,
+                    startDate: Calendar.current.startOfDay(for: Date()),
+                    currentDay: 1,
+                    totalDays: importedTemplate.totalDays,
+                    isActive: true
+                )
+                modelContext.insert(plan)
+                for dayNumber in importedTemplate.dayNumbers {
+                    let day = ReadingPlanDay(
+                        dayNumber: dayNumber,
+                        readings: importedTemplate.readingsForDay(dayNumber)
+                    )
+                    day.plan = plan
+                    modelContext.insert(day)
+                }
+                selectedPlan = plan
+            }
+
+            settingsStore.setString(
+                ReadingPlanSelectionStore.settingsKey,
+                value: selectedPlan.planCode
+            )
+            let timestampStore = RemoteSyncReadingPlanTimestampStore(settingsStore: settingsStore)
+            if try timestampStore.allMilliseconds()[selectedPlan.id] == nil {
+                timestampStore.setMilliseconds(
+                    try AndroidTimestamp.milliseconds(from: selectedPlan.startDate),
+                    for: selectedPlan.id
+                )
+            }
+            for plan in existingPlans where plan.id != selectedPlan.id {
+                plan.isActive = false
+            }
+            selectedPlan.isActive = true
+            modelContext.processPendingChanges()
+            try RemoteSyncMutationJournalService(
+                readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService(
+                    userPlanDirectory: userPlanDirectory
+                )
+            ).recordLocalChanges(
+                for: .readingPlans,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            return selectedPlan
+        }
+    }
+
+    /**
+     Recovers a definition-directory publication interrupted around its graph/settings commit.
+
+     - Parameters:
+       - settingsStore: Settings source containing the committed definition-generation marker.
+       - userPlanDirectory: Android-equivalent custom definition directory.
+     - Side effects: Finalizes a committed generation or restores the prior directory before catalog use.
+     - Throws: Durable journal decoding or contradictory filesystem recovery failures.
+     */
+    public static func recoverCustomPlanDefinitionPublication(
+        settingsStore: SettingsStore,
+        userPlanDirectory: URL = ReadingPlanService.defaultUserReadingPlanDirectory()
+    ) throws {
+        try RemoteSyncReadingPlanDefinitionStore(userPlanDirectory: userPlanDirectory)
+            .recoverPendingPublication(settingsStore: settingsStore)
+    }
+
+    /**
+     Builds a template from one already validated exact-byte custom definition.
+
+     - Parameter definition: Safe filename identity and Java-properties byte payload.
+     - Returns: Parsed custom template.
+     - Side effects: none.
+     - Throws: `ReadingPlanImportError.invalidProperties` when decoding or parsing unexpectedly fails.
+     */
+    private static func customTemplate(
+        for definition: RemoteSyncReadingPlanDefinition
+    ) throws -> ReadingPlanTemplate {
+        guard let propertiesText = String(data: definition.propertiesData, encoding: .isoLatin1) else {
+            throw ReadingPlanImportError.invalidProperties
+        }
+        let readings = parseProperties(propertiesText)
+        guard let totalDays = readings.keys.max(), totalDays > 0 else {
+            throw ReadingPlanImportError.invalidProperties
+        }
+        let metadata = userPlanMetadata(
+            from: String(decoding: definition.propertiesData, as: UTF8.self),
+            fallbackName: definition.planCode
+        )
+        return ReadingPlanTemplate(
+            code: definition.planCode,
+            name: metadata.name,
+            description: metadata.description,
+            dayNumbers: readings.keys.sorted(),
+            isDateBased: hasDateBasedPrefix(readings[1] ?? ""),
+            readingsForDay: { day in readings[day] ?? "" }
+        )
+    }
+
+    /**
+     Produces a deterministic compatibility code for callers without a source filename.
+
+     - Parameter name: User-visible imported-plan name.
+     - Returns: Trimmed code with path separators and whitespace replaced by underscores.
+     - Side effects: none.
+     - Failure modes: Empty input returns an empty string.
+     */
+    private static func stableCustomPlanCode(from name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"[\\/\s]+"#, with: "_", options: .regularExpression)
+    }
+
     // MARK: - Plan Management
 
     /**
      Starts a new persisted reading plan from a template.
      - Parameters:
-       - template: Template defining day count and daily readings.
+       - template: Template defining sparse Android day keys and daily readings.
        - modelContext: Context used to insert the plan and all child day rows.
-     - Returns: The newly created persisted plan.
-     - Note: This pre-generates all `ReadingPlanDay` rows up front with 1-based day numbers and
-       stores the start date at the local day boundary to mirror Android's truncated plan date.
+       - selectionStore: Android `reading_plan` preference store, when available.
+     - Returns: Existing started plan with the same code, or a newly created persisted plan.
+     - Side effects: Selects exactly one plan, creating its day graph only on first start.
+     - Throws: Plan fetch, timestamp conversion, mutation-journal, settings, or model-save failure.
+     - Note: This materializes only explicit signed-Int32 property keys and stores the start date at
+       the local day boundary to mirror Android's truncated plan date.
      */
     public static func startPlan(
         template: ReadingPlanTemplate,
-        modelContext: ModelContext
-    ) -> ReadingPlan {
+        modelContext: ModelContext,
+        selectionStore: ReadingPlanSelectionStore? = nil
+    ) throws -> ReadingPlan {
         let calendar = Calendar.current
         let startDate = calendar.startOfDay(for: Date())
+        let startDateMilliseconds = try AndroidTimestamp.milliseconds(from: startDate)
+        let existingPlans = try modelContext.fetch(FetchDescriptor<ReadingPlan>())
+        if let existingPlan = existingPlans.first(where: { $0.planCode == template.code }) {
+            if let selectionStore {
+                try selectionStore.select(
+                    existingPlan,
+                    among: existingPlans,
+                    modelContext: modelContext
+                )
+            } else {
+                for plan in existingPlans {
+                    plan.isActive = plan.id == existingPlan.id
+                }
+                try RemoteSyncMutationJournalService.savePendingGraphChanges(
+                    for: .readingPlans,
+                    modelContext: modelContext
+                )
+            }
+            return existingPlan
+        }
+        for existingPlan in existingPlans {
+            existingPlan.isActive = false
+        }
         let plan = ReadingPlan(
             planCode: template.code,
             planName: template.name,
             startDate: startDate,
-            currentDay: 0,
+            currentDay: 1,
             totalDays: template.totalDays,
             isActive: true
         )
         modelContext.insert(plan)
 
-        // Pre-generate all day entries
-        for day in 1...template.totalDays {
+        for day in template.dayNumbers {
             let planDay = ReadingPlanDay(
                 dayNumber: day,
                 readings: template.readingsForDay(day)
@@ -790,20 +1432,36 @@ public final class ReadingPlanService {
             modelContext.insert(planDay)
         }
 
-        try? modelContext.save()
+        if let selectionStore {
+            try selectionStore.select(
+                plan,
+                among: existingPlans + [plan],
+                modelContext: modelContext,
+                startDateMilliseconds: startDateMilliseconds
+            )
+        } else {
+            try RemoteSyncMutationJournalService.savePendingGraphChanges(
+                for: .readingPlans,
+                modelContext: modelContext
+            )
+        }
         return plan
     }
 
     /**
-     Rebases a plan so the supplied 1-based day number is treated as today's current day.
+     Rebases a non-date plan so the supplied 1-based day number is treated as today's current day.
 
      - Parameters:
-       - dayNumber: Desired plan day. Values outside the plan range are clamped to `1...totalDays`.
+       - dayNumber: Desired Android signed-Int32 plan day. Values below one read back as day one.
        - plan: Persisted plan to mutate.
        - modelContext: SwiftData context used to save the plan and day-row mutations.
+       - progressStore: Android status store used to discard rows that become implicit history.
        - now: Clock value used to derive today's date and completion timestamps.
+       - calendar: Calendar used to normalize the local start date.
      - Side effects: Updates `plan.startDate`, `plan.currentDay`, marks all earlier day rows
-       completed, refreshes the active flag, and saves the context on a best-effort basis.
+       completed, refreshes the active flag, and journals the mutation atomically.
+     - Throws: Status corruption, an unrepresentable calendar offset, timestamp conversion,
+       mutation-journal, settings, or model-save failure.
      - Note: The selected day and later days are not rewritten, matching Android's current-day
        action which preserves existing status rows outside the prior-day catch-up range.
      */
@@ -811,41 +1469,68 @@ public final class ReadingPlanService {
         _ dayNumber: Int,
         for plan: ReadingPlan,
         modelContext: ModelContext,
-        now: Date = Date()
-    ) {
-        let upperBound = max(plan.totalDays, 1)
-        let clampedDay = min(max(dayNumber, 1), upperBound)
-        let calendar = Calendar.current
+        progressStore: ReadingPlanProgressStore? = nil,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) throws {
+        guard !isDateBased(plan) else { return }
+        guard Int32(exactly: dayNumber) != nil else { return }
+        let effectiveDay = max(dayNumber, 1)
         let today = calendar.startOfDay(for: now)
-        plan.startDate = calendar.date(byAdding: .day, value: -(clampedDay - 1), to: today) ?? today
-        plan.currentDay = clampedDay
-
-        for day in plan.days ?? [] where day.dayNumber < clampedDay {
-            day.isCompleted = true
-            if day.completedDate == nil {
-                day.completedDate = now
+        guard let rebasedStartDate = calendar.date(
+            byAdding: .day,
+            value: -(effectiveDay - 1),
+            to: today
+        ) else {
+            throw ReadingPlanMutationError.unrepresentableStartDate
+        }
+        let mutateGraph = {
+            plan.startDate = rebasedStartDate
+            plan.currentDay = dayNumber
+            for day in plan.days ?? [] where day.dayNumber < effectiveDay {
+                day.isCompleted = true
+                if day.completedDate == nil {
+                    day.completedDate = now
+                }
             }
+            plan.isActive = plan.days?.allSatisfy(\.isCompleted) != true
         }
 
-        if plan.days?.allSatisfy(\.isCompleted) == true {
-            plan.isActive = false
+        if let progressStore {
+            try progressStore.performMutation { settingsStore in
+                mutateGraph()
+                try progressStore.removeStatusesStaged(
+                    planCode: plan.planCode,
+                    before: effectiveDay
+                )
+                RemoteSyncReadingPlanTimestampStore(settingsStore: settingsStore)
+                    .setMilliseconds(
+                        try AndroidTimestamp.milliseconds(from: rebasedStartDate),
+                        for: plan.id
+                    )
+            }
         } else {
-            plan.isActive = true
+            mutateGraph()
+            try RemoteSyncMutationJournalService.savePendingGraphChanges(
+                for: .readingPlans,
+                modelContext: modelContext
+            )
         }
-        try? modelContext.save()
     }
 
     /**
-     Sets a plan's start date and refreshes the persisted current-day pointer.
+     Sets a non-date plan's start date without changing Android's persisted current-day pointer.
 
      - Parameters:
        - startDate: New date anchor. The date is normalized to the current calendar's start of day
          and capped at today to match Android's start-date picker.
        - plan: Persisted plan to mutate.
        - modelContext: SwiftData context used to save the plan mutation.
-       - now: Clock value used to cap future dates and calculate the resulting current day.
-     - Side effects: Updates `plan.startDate`, recalculates `plan.currentDay`, and saves the
-       context on a best-effort basis.
+       - now: Clock value used to cap future dates.
+       - calendar: Calendar used to normalize local days.
+     - Side effects: Updates `plan.startDate`, preserves exact milliseconds when a settings store is
+       supplied, and journals the mutation.
+     - Throws: Timestamp conversion, mutation-journal, settings, or model-save failure.
      - Note: Day completion statuses are intentionally left untouched so changing the date does not
        rewrite user-authored reading progress.
      */
@@ -853,14 +1538,36 @@ public final class ReadingPlanService {
         _ startDate: Date,
         for plan: ReadingPlan,
         modelContext: ModelContext,
-        now: Date = Date()
-    ) {
-        let calendar = Calendar.current
+        settingsStore: SettingsStore? = nil,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) throws {
+        guard !isDateBased(plan) else { return }
         let today = calendar.startOfDay(for: now)
         let requestedStart = calendar.startOfDay(for: startDate)
-        plan.startDate = min(requestedStart, today)
-        plan.currentDay = expectedDay(for: plan, asOf: now)
-        try? modelContext.save()
+        let normalizedStart = min(requestedStart, today)
+        if let settingsStore {
+            try settingsStore.performJournaledSave(in: modelContext) {
+                plan.startDate = normalizedStart
+                RemoteSyncReadingPlanTimestampStore(settingsStore: settingsStore)
+                    .setMilliseconds(
+                        try AndroidTimestamp.milliseconds(from: normalizedStart),
+                        for: plan.id
+                    )
+                modelContext.processPendingChanges()
+                try RemoteSyncMutationJournalService().recordLocalChanges(
+                    for: .readingPlans,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore
+                )
+            }
+        } else {
+            plan.startDate = normalizedStart
+            try RemoteSyncMutationJournalService.savePendingGraphChanges(
+                for: .readingPlans,
+                modelContext: modelContext
+            )
+        }
     }
 
     /**
@@ -869,29 +1576,246 @@ public final class ReadingPlanService {
      - Parameters:
        - plan: Persisted plan graph to remove.
        - modelContext: SwiftData context used to delete and save the graph.
-     - Side effects: Deletes the plan from SwiftData, relies on the model relationship cascade to
-       delete `ReadingPlanDay` rows, and saves the context on a best-effort basis.
+       - progressStore: Typed Android status store used to remove status rows.
+       - selectionStore: Android selected-plan preference store.
+     - Side effects: Deletes the plan graph, statuses, selection, timestamp sidecar, and records the
+       local mutation journal through one available settings transaction.
+     - Throws: Fetch, status corruption, mutation-journal, settings, or model-save failure.
      */
     public static func resetPlan(
         _ plan: ReadingPlan,
+        modelContext: ModelContext,
+        progressStore: ReadingPlanProgressStore? = nil,
+        selectionStore: ReadingPlanSelectionStore? = nil
+    ) throws {
+        let remainingPlans = try modelContext.fetch(FetchDescriptor<ReadingPlan>())
+            .filter { $0.id != plan.id }
+        if let progressStore {
+            try progressStore.performMutation { settingsStore in
+                try resetPlanStaged(
+                    plan,
+                    remainingPlans: remainingPlans,
+                    progressStore: progressStore,
+                    settingsStore: settingsStore,
+                    modelContext: modelContext
+                )
+            }
+        } else if let selectionStore {
+            modelContext.delete(plan)
+            try selectionStore.clearIfSelected(
+                planCode: plan.planCode,
+                among: remainingPlans,
+                modelContext: modelContext,
+                planID: plan.id
+            )
+        } else {
+            modelContext.delete(plan)
+            try RemoteSyncMutationJournalService.savePendingGraphChanges(
+                for: .readingPlans,
+                modelContext: modelContext
+            )
+        }
+    }
+
+    /** Stages one complete plan reset inside an existing progress/settings transaction. */
+    private static func resetPlanStaged(
+        _ plan: ReadingPlan,
+        remainingPlans: [ReadingPlan],
+        progressStore: ReadingPlanProgressStore,
+        settingsStore: SettingsStore,
         modelContext: ModelContext
-    ) {
+    ) throws {
+        try progressStore.removeStatusesStaged(planCode: plan.planCode)
+        if settingsStore.getString(ReadingPlanSelectionStore.settingsKey) == plan.planCode {
+            settingsStore.remove(ReadingPlanSelectionStore.settingsKey)
+        }
+        RemoteSyncReadingPlanTimestampStore(settingsStore: settingsStore)
+            .removeMilliseconds(for: plan.id)
+        for remainingPlan in remainingPlans where remainingPlan.planCode == plan.planCode {
+            remainingPlan.isActive = false
+        }
         modelContext.delete(plan)
-        try? modelContext.save()
+    }
+
+    /**
+     Applies Android's enabled `Done` transition to one all-read plan day.
+
+     Current non-date days become implicit history by advancing `currentDay`; date-plan `Done`
+     retains the explicit status while the date-derived pointer remains unchanged because Android
+     deliberately skips historic-status deletion for date plans.
+     Finishing the final current day resets the plan graph and selected preference, exactly as
+     Android does. Viewing another completed day advances only the displayed day and does not
+     rewrite the plan pointer.
+
+     - Parameters:
+       - day: Displayed day whose readings must all be marked read.
+       - plan: Parent persisted plan.
+       - modelContext: Context owning the plan graph.
+       - progressStore: Android per-reading status store.
+       - selectionStore: Android selected-plan preference store.
+       - now: Clock used for due-day decisions.
+       - calendar: Calendar used for local date comparisons.
+     - Returns: Next due day number, or `nil` when Android would dismiss the daily-reading screen.
+     - Side effects: May delete historic status rows, advance `currentDay`, or reset the plan.
+     - Throws: Status corruption, fetch, mutation-journal, settings, or model-save failure. An
+       incomplete day performs no mutation and returns its own day number.
+     */
+    public static func finishDay(
+        _ day: ReadingPlanDay,
+        in plan: ReadingPlan,
+        modelContext: ModelContext,
+        progressStore: ReadingPlanProgressStore,
+        selectionStore: ReadingPlanSelectionStore,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) throws -> Int? {
+        _ = selectionStore
+        return try progressStore.performMutation { settingsStore in
+            func stageReset() throws {
+                let remainingPlans = try modelContext.fetch(FetchDescriptor<ReadingPlan>())
+                    .filter { $0.id != plan.id }
+                try resetPlanStaged(
+                    plan,
+                    remainingPlans: remainingPlans,
+                    progressStore: progressStore,
+                    settingsStore: settingsStore,
+                    modelContext: modelContext
+                )
+            }
+
+            let assignment = ReadingPlanDayAssignment(rawValue: day.readings)
+            guard try progressStore.status(for: day, in: plan).isAllRead(
+                readingCount: assignment.readings.count
+            ) else {
+                return day.dayNumber
+            }
+
+            let currentDay = expectedDay(for: plan, asOf: now, calendar: calendar)
+            guard day.dayNumber == currentDay else {
+                guard let nextDay = (plan.days ?? [])
+                    .map(\.dayNumber)
+                    .filter({ $0 > day.dayNumber })
+                    .min() else {
+                    return nil
+                }
+                return isDayDue(
+                    nextDay,
+                    in: plan,
+                    asOf: now,
+                    calendar: calendar
+                ) ? nextDay : nil
+            }
+
+            if day.dayNumber >= plan.totalDays {
+                try stageReset()
+                return nil
+            }
+
+            if !isDateBased(plan) {
+                let nextStoredDay = (plan.days ?? [])
+                    .map(\.dayNumber)
+                    .filter { $0 > day.dayNumber }
+                    .min() ?? day.dayNumber + 1
+                try progressStore.removeStatusesStaged(
+                    planCode: plan.planCode,
+                    before: nextStoredDay
+                )
+                plan.currentDay = nextStoredDay
+                for candidate in plan.days ?? [] where candidate.dayNumber < plan.currentDay {
+                    candidate.isCompleted = true
+                    candidate.completedDate = candidate.completedDate ?? now
+                }
+            }
+
+            let laterDays = (plan.days ?? [])
+                .filter { $0.dayNumber > day.dayNumber }
+                .sorted { $0.dayNumber < $1.dayNumber }
+            for candidate in laterDays {
+                let nextDay = candidate.dayNumber
+                guard isDayDue(nextDay, in: plan, asOf: now, calendar: calendar) else {
+                    return nil
+                }
+                let candidateAssignment = ReadingPlanDayAssignment(rawValue: candidate.readings)
+                if !candidateAssignment.readings.isEmpty {
+                    return nextDay
+                }
+                if nextDay >= plan.totalDays {
+                    try stageReset()
+                    return nil
+                }
+                if !isDateBased(plan) {
+                    plan.currentDay = laterDays.first { $0.dayNumber > nextDay }?.dayNumber
+                        ?? nextDay + 1
+                }
+            }
+            return nil
+        }
     }
 
     /**
      Calculates which 1-based day the user should be on based on normalized calendar dates.
      - Parameter plan: Persisted reading plan.
      - Parameter now: Clock value used when comparing the plan start date to today.
-     - Returns: Clamped expected day number in the range `1...plan.totalDays`.
+     - Returns: Date-selected day or Android's floor-only current-day value.
      */
-    public static func expectedDay(for plan: ReadingPlan, asOf now: Date = Date()) -> Int {
-        let calendar = Calendar.current
-        let startDate = calendar.startOfDay(for: plan.startDate)
+    public static func expectedDay(
+        for plan: ReadingPlan,
+        asOf now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Int {
+        let orderedDays = (plan.days ?? []).sorted { $0.dayNumber < $1.dayNumber }
+        if isDateBased(plan) {
+            let today = calendar.startOfDay(for: now)
+            return orderedDays.first { day in
+                ReadingPlanDayAssignment(rawValue: day.readings)
+                    .scheduledDate(inYearContaining: now, calendar: calendar)
+                    .map { calendar.isDate($0, inSameDayAs: today) } == true
+            }?.dayNumber ?? 1
+        }
+        return max(plan.currentDay, 1)
+    }
+
+    /**
+     Detects whether a persisted plan uses Android's calendar-date semantics.
+
+     - Parameter plan: Persisted plan whose first day carries the definition syntax.
+     - Returns: `true` when the first day starts with Android's `MMM-d;` date prefix.
+     - Side effects: none.
+     - Failure modes: Missing day rows return `false`.
+     */
+    public static func isDateBased(_ plan: ReadingPlan) -> Bool {
+        guard let firstDay = plan.days?.first(where: { $0.dayNumber == 1 }) else {
+            return false
+        }
+        return hasDateBasedPrefix(firstDay.readings)
+    }
+
+    /**
+     Determines whether Android would continue to one plan day as already due.
+
+     Android derives this gate from elapsed local days since the plan's stored start date for both
+     ordinal and date-based plans. Date tokens choose the initially displayed day; they do not make
+     every earlier calendar token part of a catch-up queue for a plan started midyear.
+
+     - Parameters:
+       - dayNumber: Candidate one-based day.
+       - plan: Parent plan.
+       - now: Current clock value.
+       - calendar: Local calendar used for date boundaries.
+     - Returns: `true` when the candidate is not in the future.
+     - Side effects: none.
+     - Failure modes: Calendar arithmetic failures treat the start day as day one.
+     */
+    private static func isDayDue(
+        _ dayNumber: Int,
+        in plan: ReadingPlan,
+        asOf now: Date,
+        calendar: Calendar
+    ) -> Bool {
+        let start = calendar.startOfDay(for: plan.startDate)
         let today = calendar.startOfDay(for: now)
-        let days = calendar.dateComponents([.day], from: startDate, to: today).day ?? 0
-        return min(max(days + 1, 1), plan.totalDays)
+        let dueDay = (calendar.dateComponents([.day], from: start, to: today).day ?? 0) + 1
+        return dueDay >= dayNumber
     }
 
     /**

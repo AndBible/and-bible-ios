@@ -1,18 +1,19 @@
 // AndroidModuleBackupExportSheet.swift -- Android module backup export selection UI
 
 import SwiftUI
+import BibleCore
 import SwordKit
 
 /**
- Presents installed SWORD modules for Android-compatible module backup export.
+ Presents every Android-registerable installed family for module backup export.
 
  Android asks the user which installed documents to include before creating
- `AndBibleModulesBackup.abmd.zip`. This sheet mirrors that behavior for the SWORD-backed module
- types iOS can export, defaulting to every listed module selected and allowing the user to switch
+ `AndBibleModulesBackup.abmd.zip`. This sheet consumes the exporter's canonical all-family catalog,
+ defaulting to every listed module selected and allowing the user to switch
  between all and none before exporting.
 
  Data dependencies:
- - `modules` is the installed SWORD module list gathered by the parent from `SwordManager`
+ - `modules` is the canonical installed-content catalog gathered from `AndroidModuleBackupService`
  - `onExport` receives selected module initials in display order
 
  Side effects:
@@ -21,12 +22,11 @@ import SwordKit
 
  Failure modes:
  - empty selections disable the Export command so the parent never receives an invalid request
- - unsupported Android-only module formats are not listed because they are not represented by
-   SWORD `ModuleInfo` entries on iOS
+ - catalog discovery failures are handled by the parent before this sheet is presented
  */
 struct AndroidModuleBackupExportSheet: View {
-    /// Installed SWORD modules eligible for Android-compatible export.
-    let modules: [ModuleInfo]
+    /// Installed all-family content eligible for Android-compatible export.
+    let modules: [AndroidModuleBackupInstalledContent]
 
     /// Whether the parent is currently writing the backup archive.
     let isExporting: Bool
@@ -37,8 +37,8 @@ struct AndroidModuleBackupExportSheet: View {
     /// Callback receiving selected module initials in display order.
     let onExport: ([String]) -> Void
 
-    /// Current selected module initials.
-    @State private var selectedModuleNames: Set<String>
+    /// Current selected Android identities without Swift's canonical Unicode normalization.
+    @State private var selectedModuleIdentities: Set<SQLiteDocumentIdentity>
 
     /**
      Creates one export-selection sheet.
@@ -53,7 +53,7 @@ struct AndroidModuleBackupExportSheet: View {
      - Failure modes: This initializer cannot fail.
      */
     init(
-        modules: [ModuleInfo],
+        modules: [AndroidModuleBackupInstalledContent],
         isExporting: Bool,
         onCancel: @escaping () -> Void,
         onExport: @escaping ([String]) -> Void
@@ -62,7 +62,40 @@ struct AndroidModuleBackupExportSheet: View {
         self.isExporting = isExporting
         self.onCancel = onCancel
         self.onExport = onExport
-        _selectedModuleNames = State(initialValue: Set(modules.map(\.name)))
+        _selectedModuleIdentities = State(initialValue: Set(modules.map(\.id)))
+    }
+
+    /**
+     Preserves the reader picker's SWORD-only backup entry point while the Settings picker uses the
+     canonical all-family catalog.
+
+     - Parameters:
+       - modules: Installed SWORD rows already selected by the reader picker.
+       - isExporting: Parent-owned progress state that disables controls while archive writing runs.
+       - onCancel: Dismiss callback.
+       - onExport: Export callback receiving selected initials.
+     - Side effects: Converts immutable presentation metadata into canonical SWORD-family rows.
+     - Failure modes: This initializer cannot fail.
+     */
+    init(
+        modules: [ModuleInfo],
+        isExporting: Bool,
+        onCancel: @escaping () -> Void,
+        onExport: @escaping ([String]) -> Void
+    ) {
+        self.init(
+            modules: modules.map {
+                AndroidModuleBackupInstalledContent(
+                    initials: $0.name,
+                    displayName: $0.description,
+                    language: $0.language,
+                    family: .swordConfiguration
+                )
+            },
+            isExporting: isExporting,
+            onCancel: onCancel,
+            onExport: onExport
+        )
     }
 
     /**
@@ -80,10 +113,10 @@ struct AndroidModuleBackupExportSheet: View {
                 }
 
                 Section {
-                    ForEach(modules, id: \.name) { module in
-                        Toggle(isOn: binding(for: module.name)) {
+                    ForEach(modules) { module in
+                        Toggle(isOn: binding(for: module.initials)) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(module.description.isEmpty ? module.name : module.description)
+                                Text(module.displayName.isEmpty ? module.initials : module.displayName)
                                     .font(.body)
                                 Text(moduleDetail(for: module))
                                     .font(.caption)
@@ -91,17 +124,10 @@ struct AndroidModuleBackupExportSheet: View {
                             }
                         }
                         .disabled(isExporting)
-                        .accessibilityIdentifier("androidModuleBackupExportRow::\(module.name)")
+                        .accessibilityIdentifier("androidModuleBackupExportRow::\(module.initials)")
                     }
                 } header: {
                     Text(String(localized: "android_module_backup_export_modules", defaultValue: "Select modules"))
-                } footer: {
-                    Text(
-                        String(
-                            localized: "android_module_backup_export_footer",
-                            defaultValue: "Only SWORD-backed modules can be exported in an Android-compatible module backup on iOS."
-                        )
-                    )
                 }
             }
             .accessibilityIdentifier("androidModuleBackupExportSheet")
@@ -114,7 +140,6 @@ struct AndroidModuleBackupExportSheet: View {
                     Button(String(localized: "cancel")) {
                         onCancel()
                     }
-                    .disabled(isExporting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -142,7 +167,27 @@ struct AndroidModuleBackupExportSheet: View {
      - Failure modes: none.
      */
     private var selectedModuleNamesInDisplayOrder: [String] {
-        modules.map(\.name).filter(selectedModuleNames.contains)
+        Self.selectedModuleNames(
+            inDisplayOrder: modules,
+            selectedIdentities: selectedModuleIdentities
+        )
+    }
+
+    /**
+     Resolves exact Android identities through the canonical picker order.
+
+     - Parameters:
+       - modules: Canonical all-family rows in their visible order.
+       - selectedIdentities: Android-compatible identities currently selected by the user.
+     - Returns: Selected archive identities in visible order, without Unicode normalization.
+     - Side effects: none.
+     - Failure modes: none; identities absent from the catalog are ignored.
+     */
+    static func selectedModuleNames(
+        inDisplayOrder modules: [AndroidModuleBackupInstalledContent],
+        selectedIdentities: Set<SQLiteDocumentIdentity>
+    ) -> [String] {
+        modules.filter { selectedIdentities.contains($0.id) }.map(\.initials)
     }
 
     /**
@@ -153,7 +198,7 @@ struct AndroidModuleBackupExportSheet: View {
      - Failure modes: none.
      */
     private var selectionToggleTitle: String {
-        if selectedModuleNames.count == modules.count {
+        if selectedModuleIdentities.count == modules.count {
             return String(localized: "select_none", defaultValue: "Select none")
         }
         return String(localized: "select_all", defaultValue: "Select all")
@@ -163,18 +208,19 @@ struct AndroidModuleBackupExportSheet: View {
      Produces a mutable selection binding for one module row.
 
      - Parameter moduleName: Module initials whose selected state should be exposed.
-     - Returns: Binding that adds or removes the module from `selectedModuleNames`.
+     - Returns: Binding that adds or removes the module from `selectedModuleIdentities`.
      - Side effects: Writes local sheet selection state when the user toggles a row.
      - Failure modes: none.
      */
     private func binding(for moduleName: String) -> Binding<Bool> {
-        Binding(
-            get: { selectedModuleNames.contains(moduleName) },
+        let identity = SQLiteDocumentIdentity(moduleName)
+        return Binding(
+            get: { selectedModuleIdentities.contains(identity) },
             set: { isSelected in
                 if isSelected {
-                    selectedModuleNames.insert(moduleName)
+                    selectedModuleIdentities.insert(identity)
                 } else {
-                    selectedModuleNames.remove(moduleName)
+                    selectedModuleIdentities.remove(identity)
                 }
             }
         )
@@ -184,16 +230,16 @@ struct AndroidModuleBackupExportSheet: View {
      Toggles between all modules selected and no modules selected.
 
      Side effects:
-     - mutates `selectedModuleNames`
+     - mutates `selectedModuleIdentities`
 
      Failure modes:
      - empty module lists remain empty; the toolbar button is disabled for that state.
      */
     private func toggleAllSelections() {
-        if selectedModuleNames.count == modules.count {
-            selectedModuleNames.removeAll()
+        if selectedModuleIdentities.count == modules.count {
+            selectedModuleIdentities.removeAll()
         } else {
-            selectedModuleNames = Set(modules.map(\.name))
+            selectedModuleIdentities = Set(modules.map(\.id))
         }
     }
 
@@ -205,8 +251,30 @@ struct AndroidModuleBackupExportSheet: View {
      - Side effects: none.
      - Failure modes: none.
      */
-    private func moduleDetail(for module: ModuleInfo) -> String {
+    private func moduleDetail(for module: AndroidModuleBackupInstalledContent) -> String {
         let language = module.language.isEmpty ? "?" : module.language
-        return "\(module.name), \(language), \(module.category.rawValue)"
+        return "\(module.initials), \(language), \(familyName(module.family))"
+    }
+
+    /** Returns a compact user-visible family label for one canonical catalog row. */
+    private func familyName(_ family: AndroidModuleBackupContentFamily) -> String {
+        switch family {
+        case .swordConfiguration, .swordPayload:
+            return "SWORD"
+        case .myBible:
+            return "MyBible"
+        case .mySword:
+            return "MySword"
+        case .eSword:
+            return "e-Sword"
+        case .epub:
+            return "EPUB"
+        case .ttf:
+            return "Font"
+        case .background:
+            return "Background"
+        case .prompts:
+            return "Prompt pack"
+        }
     }
 }

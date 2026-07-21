@@ -2,6 +2,7 @@
 
 import Foundation
 import Observation
+import SwordKit
 
 /**
  Result of applying Android-style initial labels to a bookmark.
@@ -36,6 +37,361 @@ public struct BookmarkInitialLabelAssignmentResult {
     }
 }
 
+// MARK: - Speak Bookmark Lifecycle
+
+extension BookmarkService: SpeakBookmarkManaging {
+    /**
+     Activates Android's Speak bookmark at a provider's start position.
+
+     Android retains the matched bookmark even when restore-from-bookmark is disabled because pause,
+     stop, and settings updates still relocate or update that exact row. Bible matching uses the
+     verified KJVA start ordinal; generic matching uses module, key, and source start ordinal.
+
+     - Parameter position: Exact provider position at which playback will start.
+     - Returns: Persisted playback settings, or `nil` when no Speak-labeled bookmark starts there.
+     - Side effects: Replaces the in-memory active Speak-bookmark identity for this service.
+     - Failure modes: Unverified Bible positions and incomplete generic identities fail closed.
+     */
+    public func playbackSettingsForSpeakBookmark(at position: SpeakStreamPosition) -> PlaybackSettings? {
+        activeSpeakBibleBookmarkID = nil
+        activeSpeakGenericBookmarkID = nil
+
+        switch position.category {
+        case .bible:
+            guard let range = position.verifiedBibleRange else { return nil }
+            let bookmark = store.bibleBookmarks(withLabel: Label.speakLabelId).first {
+                $0.kjvOrdinalStart == range.kjvaOrdinalStart
+            }
+            activeSpeakBibleBookmarkID = bookmark?.id
+            return bookmark?.playbackSettings
+
+        case .commentary, .dictionary, .generalBook, .myDocument:
+            guard let ordinalStart = position.ordinalStart else { return nil }
+            let bookmark = store.genericBookmarks(withLabel: Label.speakLabelId).first {
+                $0.bookInitials == position.bookInitials &&
+                    $0.key == position.key &&
+                    $0.ordinalStart == ordinalStart
+            }
+            activeSpeakGenericBookmarkID = bookmark?.id
+            return bookmark?.playbackSettings
+
+        case .memorization, .selection:
+            return nil
+        }
+    }
+
+    /**
+     Updates the active Speak bookmark with changed structured playback settings.
+
+     Android preserves `bookId` and `bookmarkWasCreated` from the owning bookmark while applying
+     all user-editable settings. That prevents a settings panel from corrupting resume identity or
+     changing whether the row may be deleted as an auto-created bookmark.
+
+     When speech is stopped, Android targets only the Speak bookmark at the visible Bible verse.
+     The supplied position therefore also acts as an exact lookup when no Bible session bookmark is
+     active; stale generic-session identity is never reused for that branch.
+
+     - Parameters:
+       - position: Active provider position, or the visible Bible position while stopped.
+       - settings: Complete replacement playback settings from the active Speak session.
+     - Side effects: Mutates and saves the category-matching Bible or generic bookmark when one
+       exists.
+     - Failure modes: Stale identifiers, missing Speak labels, and positions without verified Bible
+       coordinates are ignored.
+     */
+    public func updateSpeakBookmarkPlaybackSettings(
+        at position: SpeakStreamPosition,
+        settings: PlaybackSettings
+    ) {
+        switch position.category {
+        case .bible:
+            if activeSpeakBibleBookmarkID == nil,
+               let range = position.verifiedBibleRange {
+                let candidateOrdinal: Int
+                if let reference = JSwordKJVAVersification.referenceIncludingIntroductions(
+                    ordinal: range.kjvaOrdinalStart
+                ), reference.chapter > 0, reference.verse == 0,
+                   let firstVerseOrdinal = JSwordKJVAVersification.verseOrdinal(
+                       osisId: reference.osisId,
+                       chapter: reference.chapter,
+                       verse: 1
+                   ) {
+                    candidateOrdinal = firstVerseOrdinal
+                } else {
+                    candidateOrdinal = range.kjvaOrdinalStart
+                }
+                activeSpeakBibleBookmarkID = store
+                    .bibleBookmarks(withLabel: Label.speakLabelId)
+                    .first {
+                        $0.kjvOrdinalStart == candidateOrdinal && $0.playbackSettings != nil
+                    }?
+                    .id
+            }
+            guard let id = activeSpeakBibleBookmarkID else { return }
+            guard let bookmark = store.bibleBookmark(id: id) else {
+                activeSpeakBibleBookmarkID = nil
+                return
+            }
+            bookmark.playbackSettings = mergedSpeakPlaybackSettings(
+                settings,
+                preservingIdentityFrom: bookmark.playbackSettings
+            )
+            bookmark.lastUpdatedOn = Date()
+            store.saveChanges()
+        case .commentary, .dictionary, .generalBook, .myDocument:
+            guard let id = activeSpeakGenericBookmarkID else { return }
+            guard let bookmark = store.genericBookmark(id: id) else {
+                activeSpeakGenericBookmarkID = nil
+                return
+            }
+            bookmark.playbackSettings = mergedSpeakPlaybackSettings(
+                settings,
+                preservingIdentityFrom: bookmark.playbackSettings
+            )
+            bookmark.lastUpdatedOn = Date()
+            store.saveChanges()
+        case .memorization, .selection:
+            return
+        }
+    }
+
+    /**
+     Relocates Android's Speak bookmark to the provider's current stream unit.
+
+     A user bookmark carrying other labels, or explicitly marked as user-created, loses only its
+     Speak label and playback metadata. A Speak-only auto-created row is deleted. A new row is then
+     written when auto-bookmarking is enabled or an existing Speak bookmark was removed, preserving
+     Android's quit-and-resume behavior even when auto-bookmarking is subsequently disabled.
+
+     - Parameters:
+       - position: Current provider position at pause or stop.
+       - settings: Complete playback settings to persist with the relocated bookmark.
+       - autoBookmark: Android's global `speak_autoBookmark` setting.
+     - Side effects: May remove a Speak label, delete an old bookmark, insert a new bookmark, attach
+       the canonical Speak label, and save SwiftData.
+     - Failure modes: Memorization, selections, unverified Bible positions, and generic positions
+       without an ordinal are intentionally not persisted.
+     */
+    public func persistSpeakBookmark(
+        at position: SpeakStreamPosition,
+        settings: PlaybackSettings,
+        autoBookmark: Bool
+    ) {
+        guard position.category != .memorization, position.category != .selection else { return }
+        let wasRemoved = removeActiveSpeakBookmark()
+        guard autoBookmark || wasRemoved else { return }
+
+        var playback = settings.normalized
+        playback.bookId = position.bookInitials
+        playback.bookmarkWasCreated = true
+        playback.isMemorizationLoop = false
+
+        switch position.category {
+        case .bible:
+            guard let range = position.verifiedBibleRange else { return }
+            let bookmark = addBibleBookmark(ordinalRange: range)
+            bookmark.book = position.bookName
+            bookmark.playbackSettings = playback
+            bookmark.lastUpdatedOn = Date()
+            attachSpeakLabel(to: bookmark)
+            activeSpeakBibleBookmarkID = bookmark.id
+
+        case .commentary, .dictionary, .generalBook, .myDocument:
+            guard let ordinalStart = position.ordinalStart else { return }
+            let bookmark = addGenericBookmark(
+                bookInitials: position.bookInitials,
+                key: position.key,
+                startOrdinal: ordinalStart,
+                endOrdinal: position.ordinalEnd ?? ordinalStart
+            )
+            bookmark.playbackSettings = playback
+            bookmark.lastUpdatedOn = Date()
+            attachSpeakLabel(to: bookmark)
+            activeSpeakGenericBookmarkID = bookmark.id
+
+        case .memorization, .selection:
+            return
+        }
+        store.saveChanges()
+    }
+
+    /**
+     Returns all Android Speak-label bookmarks for the resume picker.
+
+     Bible rows are ordered by KJVA verse position before generic rows, matching Android's widget.
+     Generic rows retain exact module/key/ordinal identity and are reclassified by the reader when
+     the provider is reconstructed.
+
+     - Returns: Verified Bible rows followed by generic rows, each carrying structured settings.
+     - Side effects: Ensures canonical system-label identities before querying.
+     - Failure modes: Bible rows whose persisted ordinal provenance cannot be revalidated are
+       omitted; generic rows without a source ordinal are not resumable and are omitted.
+     */
+    public func speakResumeBookmarks() -> [SpeakResumeBookmark] {
+        ensureSystemLabels()
+
+        let bible = store.bibleBookmarks(withLabel: Label.speakLabelId)
+            .sorted { $0.kjvOrdinalStart < $1.kjvOrdinalStart }
+            .compactMap(makeBibleSpeakResumeBookmark)
+        let generic = store.genericBookmarks(withLabel: Label.speakLabelId)
+            .compactMap(makeGenericSpeakResumeBookmark)
+        return bible + generic
+    }
+
+    /** Combines editable settings with identity fields owned by the persisted bookmark. */
+    private func mergedSpeakPlaybackSettings(
+        _ settings: PlaybackSettings,
+        preservingIdentityFrom existing: PlaybackSettings?
+    ) -> PlaybackSettings {
+        var merged = settings.normalized
+        if let existing {
+            merged.bookId = existing.bookId
+            merged.bookmarkWasCreated = existing.bookmarkWasCreated
+        }
+        merged.isMemorizationLoop = false
+        return merged
+    }
+
+    /** Removes the active Speak bookmark using Android's auto-created ownership rules. */
+    private func removeActiveSpeakBookmark() -> Bool {
+        defer {
+            activeSpeakBibleBookmarkID = nil
+            activeSpeakGenericBookmarkID = nil
+        }
+
+        if let id = activeSpeakBibleBookmarkID,
+           let bookmark = store.bibleBookmark(id: id) {
+            let speakLinks = (bookmark.bookmarkToLabels ?? []).filter {
+                $0.label?.id == Label.speakLabelId
+            }
+            guard !speakLinks.isEmpty else { return false }
+            let hasOtherLabel = (bookmark.bookmarkToLabels ?? []).contains {
+                guard let labelID = $0.label?.id else { return false }
+                return labelID != Label.speakLabelId
+            }
+            if hasOtherLabel || bookmark.playbackSettings?.bookmarkWasCreated == false {
+                speakLinks.forEach(store.delete)
+                bookmark.playbackSettings = nil
+                if bookmark.primaryLabelId == Label.speakLabelId {
+                    bookmark.primaryLabelId = bookmark.bookmarkToLabels?.first {
+                        $0.label?.id != Label.speakLabelId
+                    }?.label?.id
+                }
+                bookmark.lastUpdatedOn = Date()
+                store.saveChanges()
+            } else {
+                store.delete(bookmark)
+            }
+            return true
+        }
+
+        if let id = activeSpeakGenericBookmarkID,
+           let bookmark = store.genericBookmark(id: id) {
+            let speakLinks = (bookmark.bookmarkToLabels ?? []).filter {
+                $0.label?.id == Label.speakLabelId
+            }
+            guard !speakLinks.isEmpty else { return false }
+            let hasOtherLabel = (bookmark.bookmarkToLabels ?? []).contains {
+                guard let labelID = $0.label?.id else { return false }
+                return labelID != Label.speakLabelId
+            }
+            if hasOtherLabel || bookmark.playbackSettings?.bookmarkWasCreated == false {
+                speakLinks.forEach(store.delete)
+                bookmark.playbackSettings = nil
+                if bookmark.primaryLabelId == Label.speakLabelId {
+                    bookmark.primaryLabelId = bookmark.bookmarkToLabels?.first {
+                        $0.label?.id != Label.speakLabelId
+                    }?.label?.id
+                }
+                bookmark.lastUpdatedOn = Date()
+                store.saveChanges()
+            } else {
+                store.delete(bookmark)
+            }
+            return true
+        }
+
+        return false
+    }
+
+    /** Attaches only Android's canonical Speak label to a Bible bookmark. */
+    private func attachSpeakLabel(to bookmark: BibleBookmark) {
+        ensureSystemLabels()
+        guard let label = store.label(id: Label.speakLabelId) else { return }
+        bookmark.primaryLabelId = label.id
+        let link = BibleBookmarkToLabel()
+        link.bookmark = bookmark
+        link.label = label
+        store.insert(link)
+    }
+
+    /** Attaches only Android's canonical Speak label to a generic bookmark. */
+    private func attachSpeakLabel(to bookmark: GenericBookmark) {
+        ensureSystemLabels()
+        guard let label = store.label(id: Label.speakLabelId) else { return }
+        bookmark.primaryLabelId = label.id
+        let link = GenericBookmarkToLabel()
+        link.bookmark = bookmark
+        link.label = label
+        store.insert(link)
+    }
+
+    /** Projects one trusted Bible bookmark into provider-neutral resume metadata. */
+    private func makeBibleSpeakResumeBookmark(_ bookmark: BibleBookmark) -> SpeakResumeBookmark? {
+        guard let range = VerifiedKJVAOrdinalRange(
+            revalidatingKJVAOrdinalStart: bookmark.kjvOrdinalStart,
+            kjvaOrdinalEnd: bookmark.kjvOrdinalEnd,
+            ordinalTrust: bookmark.ordinalTrustMetadata
+        ),
+        let reference = JSwordKJVAVersification.verseReference(ordinal: bookmark.kjvOrdinalStart) else {
+            return nil
+        }
+        let playback = bookmark.playbackSettings ?? PlaybackSettings()
+        let bookName = JSwordKJVAVersification.longBookName(osisId: reference.osisId) ?? reference.osisId
+        let sourceVersification = bookmark.ordinalSourceVersification?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let position = SpeakStreamPosition(
+            id: "speak-bible-\(bookmark.id.uuidString)",
+            category: .bible,
+            bookInitials: playback.bookId ?? bookmark.bookInitials,
+            key: reference.osisRef,
+            keyName: reference.osisRef,
+            bookName: bookName,
+            ordinalStart: bookmark.ordinalStart,
+            ordinalEnd: bookmark.ordinalEnd,
+            chapter: reference.chapter,
+            verse: reference.verse,
+            groupIdentifier: "\(reference.osisId).\(reference.chapter)",
+            language: "en",
+            versification: sourceVersification?.isEmpty == false
+                ? sourceVersification
+                : bookmark.v11n,
+            verifiedBibleRange: range
+        )
+        return SpeakResumeBookmark(id: bookmark.id, position: position, playbackSettings: playback)
+    }
+
+    /** Projects one generic bookmark into exact module/key/ordinal resume metadata. */
+    private func makeGenericSpeakResumeBookmark(_ bookmark: GenericBookmark) -> SpeakResumeBookmark? {
+        guard let ordinalStart = bookmark.ordinalStart else { return nil }
+        let playback = bookmark.playbackSettings ?? PlaybackSettings()
+        let position = SpeakStreamPosition(
+            id: "speak-generic-\(bookmark.id.uuidString)",
+            category: .generalBook,
+            bookInitials: playback.bookId ?? bookmark.bookInitials,
+            key: bookmark.key,
+            keyName: bookmark.key,
+            bookName: bookmark.bookInitials,
+            ordinalStart: ordinalStart,
+            ordinalEnd: bookmark.ordinalEnd ?? ordinalStart,
+            groupIdentifier: bookmark.key,
+            language: "en"
+        )
+        return SpeakResumeBookmark(id: bookmark.id, position: position, playbackSettings: playback)
+    }
+}
+
 /**
  Business logic for bookmark operations, coordinating between
  BookmarkStore and the bridge layer.
@@ -43,6 +399,12 @@ public struct BookmarkInitialLabelAssignmentResult {
 @Observable
 public final class BookmarkService {
     private let store: BookmarkStore
+
+    /// Speak bookmark activated when a Bible provider starts, retained until pause/stop relocation.
+    private var activeSpeakBibleBookmarkID: UUID?
+
+    /// Speak bookmark activated when a generic provider starts, retained until pause/stop relocation.
+    private var activeSpeakGenericBookmarkID: UUID?
 
     /**
      Normalizes nullable note content-type inputs to Android's accepted `TextContentType` values.
@@ -87,17 +449,11 @@ public final class BookmarkService {
     // MARK: - Bible Bookmarks
 
     /**
-     Creates a new Bible bookmark for a verse range.
+     Creates a new Bible bookmark from an explicitly verified source-to-KJVA mapping.
 
      - Parameters:
-       - bookInitials: Module initials associated with the selected verse range.
-       - startOrdinal: Source-versification start ordinal reported by the reader.
-       - endOrdinal: Source-versification end ordinal reported by the reader.
-       - kjvOrdinalStart: Optional Android-compatible KJVA start ordinal used for restore-safe
-         membership queries.
-       - kjvOrdinalEnd: Optional Android-compatible KJVA end ordinal used for restore-safe
-         membership queries.
-       - v11n: Source versification for `startOrdinal`/`endOrdinal`.
+       - ordinalRange: Typed boundary containing exact source coordinates and their validated KJVA
+         projection.
        - wholeVerse: Whether the bookmark covers whole verses instead of a text range.
        - startOffset: Optional text-range start offset.
        - endOffset: Optional text-range end offset.
@@ -105,31 +461,26 @@ public final class BookmarkService {
          by the caller when note text is saved.
      - Returns: Inserted Bible bookmark.
      - Side effects: Inserts the bookmark.
-     - Failure modes: SwiftData save failures are handled by `BookmarkStore` and do not throw.
+     - Failure modes: An unverified range cannot be passed to this API; SwiftData save failures are
+       handled by `BookmarkStore` and do not throw.
      */
     @discardableResult
     public func addBibleBookmark(
-        bookInitials: String,
-        startOrdinal: Int,
-        endOrdinal: Int,
-        kjvOrdinalStart: Int? = nil,
-        kjvOrdinalEnd: Int? = nil,
-        v11n: String = "KJVA",
+        ordinalRange: VerifiedKJVAOrdinalRange,
         wholeVerse: Bool = true,
         startOffset: Int? = nil,
         endOffset: Int? = nil,
         addNote: Bool = false
     ) -> BibleBookmark {
-        let storedKJVAStart = kjvOrdinalStart ?? startOrdinal
-        let storedKJVAEnd = kjvOrdinalEnd ?? endOrdinal
         let bookmark = BibleBookmark(
-            kjvOrdinalStart: storedKJVAStart,
-            kjvOrdinalEnd: storedKJVAEnd,
-            ordinalStart: startOrdinal,
-            ordinalEnd: endOrdinal,
-            v11n: v11n,
-            bookInitials: bookInitials,
-            wholeVerse: wholeVerse
+            kjvOrdinalStart: ordinalRange.kjvaOrdinalStart,
+            kjvOrdinalEnd: ordinalRange.kjvaOrdinalEnd,
+            ordinalStart: ordinalRange.sourceOrdinalStart,
+            ordinalEnd: ordinalRange.sourceOrdinalEnd,
+            v11n: ordinalRange.sourceVersification,
+            bookInitials: ordinalRange.sourceBookInitials,
+            wholeVerse: wholeVerse,
+            ordinalTrustMetadata: ordinalRange.ordinalTrust
         )
         bookmark.startOffset = startOffset
         bookmark.endOffset = endOffset
@@ -138,15 +489,87 @@ public final class BookmarkService {
     }
 
     /**
-     Creates a Bible bookmark that renders as a paragraph break in the web reader.
+     Updates one explicitly identified Bible bookmark from a verified source-to-KJVA mapping.
 
      - Parameters:
-       - bookInitials: Module initials associated with the selected verse.
-       - startOrdinal: Source-versification start ordinal reported by the reader.
-       - endOrdinal: Source-versification end ordinal reported by the reader.
-       - kjvOrdinalStart: Optional Android-compatible KJVA start ordinal.
-       - kjvOrdinalEnd: Optional Android-compatible KJVA end ordinal.
-       - v11n: Source versification for `startOrdinal`/`endOrdinal`.
+       - id: Stable bookmark identity selected by an edit workflow.
+       - ordinalRange: Exact source coordinates and validated KJVA projection.
+       - wholeVerse: Whether the bookmark covers whole verses.
+       - startOffset: Optional UTF-16 selection start offset.
+       - endOffset: Optional UTF-16 selection end offset.
+     - Returns: The updated bookmark, or `nil` when `id` is stale or quarantined.
+     - Side effects: Mutates only the identified bookmark and saves the context.
+     - Failure modes: Unverified ranges cannot reach this API; save failures are handled by
+       `BookmarkStore` and do not throw.
+     */
+    @discardableResult
+    public func updateBibleBookmark(
+        id: UUID,
+        ordinalRange: VerifiedKJVAOrdinalRange,
+        wholeVerse: Bool,
+        startOffset: Int?,
+        endOffset: Int?
+    ) -> BibleBookmark? {
+        guard let bookmark = store.bibleBookmark(id: id) else { return nil }
+        bookmark.kjvOrdinalStart = ordinalRange.kjvaOrdinalStart
+        bookmark.kjvOrdinalEnd = ordinalRange.kjvaOrdinalEnd
+        bookmark.ordinalStart = ordinalRange.sourceOrdinalStart
+        bookmark.ordinalEnd = ordinalRange.sourceOrdinalEnd
+        bookmark.v11n = ordinalRange.sourceVersification
+        bookmark.bookInitials = ordinalRange.sourceBookInitials
+        bookmark.ordinalTrustMetadata = ordinalRange.ordinalTrust
+        bookmark.wholeVerse = wholeVerse
+        bookmark.startOffset = startOffset
+        bookmark.endOffset = endOffset
+        bookmark.lastUpdatedOn = Date()
+        store.saveChanges()
+        return bookmark
+    }
+
+    /**
+     Rejects the legacy raw-number native bookmark write boundary at compile time.
+
+     The declaration remains solely to provide a migration diagnostic to callers. Numeric source
+     and KJVA values cannot prove that both domains refer to the same verses.
+
+     - Parameters:
+       - bookInitials: Unverified source module initials.
+       - startOrdinal: Unverified source start ordinal.
+       - endOrdinal: Unverified source end ordinal.
+       - kjvOrdinalStart: Unverified candidate KJVA start ordinal.
+       - kjvOrdinalEnd: Unverified candidate KJVA end ordinal.
+       - v11n: Unverified source versification.
+       - wholeVerse: Requested whole-verse flag.
+       - startOffset: Requested text-range start offset.
+       - endOffset: Requested text-range end offset.
+       - addNote: Legacy note-editor flag.
+     - Returns: No value; the overload is unavailable.
+     - Side effects: none.
+     - Failure modes: Compilation fails and directs callers to the typed overload.
+     */
+    @available(*, unavailable, message: "Use addBibleBookmark(ordinalRange:) with VerifiedKJVAOrdinalRange.")
+    @discardableResult
+    public func addBibleBookmark(
+        bookInitials: String,
+        startOrdinal: Int,
+        endOrdinal: Int,
+        kjvOrdinalStart: Int,
+        kjvOrdinalEnd: Int,
+        v11n: String = "KJVA",
+        wholeVerse: Bool = true,
+        startOffset: Int? = nil,
+        endOffset: Int? = nil,
+        addNote: Bool = false
+    ) -> BibleBookmark {
+        fatalError("Unavailable raw-number bookmark write boundary")
+    }
+
+    /**
+     Creates a paragraph-break bookmark from an explicitly verified source-to-KJVA mapping.
+
+     - Parameters:
+       - ordinalRange: Typed boundary containing exact source coordinates and their validated KJVA
+         projection.
        - book: Optional display book fallback for legacy list paths.
      - Returns: Inserted paragraph-break bookmark.
      - Side effects: Ensures the paragraph-break system label exists, inserts the bookmark, and
@@ -155,30 +578,53 @@ public final class BookmarkService {
      */
     @discardableResult
     public func addParagraphBreakBibleBookmark(
-        bookInitials: String,
-        startOrdinal: Int,
-        endOrdinal: Int,
-        kjvOrdinalStart: Int? = nil,
-        kjvOrdinalEnd: Int? = nil,
-        v11n: String = "KJVA",
+        ordinalRange: VerifiedKJVAOrdinalRange,
         book: String? = nil
     ) -> BibleBookmark {
         ensureSystemLabels()
-        let storedKJVAStart = kjvOrdinalStart ?? startOrdinal
-        let storedKJVAEnd = kjvOrdinalEnd ?? endOrdinal
         let bookmark = BibleBookmark(
-            kjvOrdinalStart: storedKJVAStart,
-            kjvOrdinalEnd: storedKJVAEnd,
-            ordinalStart: startOrdinal,
-            ordinalEnd: endOrdinal,
-            v11n: v11n,
-            bookInitials: bookInitials,
-            wholeVerse: false
+            kjvOrdinalStart: ordinalRange.kjvaOrdinalStart,
+            kjvOrdinalEnd: ordinalRange.kjvaOrdinalEnd,
+            ordinalStart: ordinalRange.sourceOrdinalStart,
+            ordinalEnd: ordinalRange.sourceOrdinalEnd,
+            v11n: ordinalRange.sourceVersification,
+            bookInitials: ordinalRange.sourceBookInitials,
+            wholeVerse: false,
+            ordinalTrustMetadata: ordinalRange.ordinalTrust
         )
         bookmark.book = book
         store.insert(bookmark)
         attachParagraphBreakLabel(to: bookmark)
         return bookmark
+    }
+
+    /**
+     Rejects the legacy raw-number paragraph-break write boundary at compile time.
+
+     - Parameters:
+       - bookInitials: Unverified source module initials.
+       - startOrdinal: Unverified source start ordinal.
+       - endOrdinal: Unverified source end ordinal.
+       - kjvOrdinalStart: Unverified candidate KJVA start ordinal.
+       - kjvOrdinalEnd: Unverified candidate KJVA end ordinal.
+       - v11n: Unverified source versification.
+       - book: Optional display book value.
+     - Returns: No value; the overload is unavailable.
+     - Side effects: none.
+     - Failure modes: Compilation fails and directs callers to the typed overload.
+     */
+    @available(*, unavailable, message: "Use addParagraphBreakBibleBookmark(ordinalRange:) with VerifiedKJVAOrdinalRange.")
+    @discardableResult
+    public func addParagraphBreakBibleBookmark(
+        bookInitials: String,
+        startOrdinal: Int,
+        endOrdinal: Int,
+        kjvOrdinalStart: Int,
+        kjvOrdinalEnd: Int,
+        v11n: String = "KJVA",
+        book: String? = nil
+    ) -> BibleBookmark {
+        fatalError("Unavailable raw-number paragraph-break bookmark write boundary")
     }
 
     /**
@@ -281,16 +727,53 @@ public final class BookmarkService {
         store.genericBookmark(id: id)
     }
 
+    /**
+     Returns generic bookmarks for one exact Android document identity.
+
+     - Parameters:
+       - bookInitials: Source document or generated-book initials.
+       - key: Exact source key within `bookInitials`.
+     - Returns: Matching rows ordered by creation time and UUID for deterministic bridge payloads.
+     - Side effects: Reads bookmark persistence only.
+     - Failure modes: Store fetch failures return an empty array; no module-only or nearest-key
+       fallback is attempted.
+     */
+    public func genericBookmarks(bookInitials: String, key: String) -> [GenericBookmark] {
+        store.genericBookmarks()
+            .filter { $0.bookInitials == bookInitials && $0.key == key }
+            .sorted {
+                if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+    }
+
     // MARK: - Generic Bookmarks
 
-    /// Create a generic bookmark for non-Bible documents.
+    /**
+     Creates a generic bookmark while preserving Android's nullable ordinal and UTF-16 selection
+     contract.
+
+     - Parameters:
+       - bookInitials: Stored source document initials.
+       - key: Stored source document key.
+       - startOrdinal: Optional first document ordinal; `nil` denotes a whole-page bookmark.
+       - endOrdinal: Optional last document ordinal; `nil` denotes a whole-page bookmark.
+       - wholeVerse: Whether the bookmark covers the full keyed range rather than text offsets.
+       - startOffset: Optional UTF-16 start offset for a partial selection.
+       - endOffset: Optional UTF-16 end offset for a partial selection.
+     - Returns: Inserted generic bookmark.
+     - Side effects: Inserts and saves the bookmark.
+     - Failure modes: Save failures are handled by `BookmarkStore` and do not throw.
+     */
     @discardableResult
     public func addGenericBookmark(
         bookInitials: String,
         key: String,
-        startOrdinal: Int,
-        endOrdinal: Int,
-        wholeVerse: Bool = true
+        startOrdinal: Int?,
+        endOrdinal: Int?,
+        wholeVerse: Bool = true,
+        startOffset: Int? = nil,
+        endOffset: Int? = nil
     ) -> GenericBookmark {
         let bookmark = GenericBookmark(
             key: key,
@@ -299,8 +782,37 @@ public final class BookmarkService {
             ordinalEnd: endOrdinal,
             wholeVerse: wholeVerse
         )
+        bookmark.startOffset = startOffset
+        bookmark.endOffset = endOffset
         store.insert(bookmark)
         return bookmark
+    }
+
+    /**
+     Persists one validated generic SWORD bookmark seed in Android's Room-v12 shape.
+
+     Android stores source identity as `bookInitials` plus `key`; category and raw OSIS remain
+     properties of the installed source resolved by that identity rather than extra bookmark
+     columns. Keeping this adapter on the existing service prevents seed consumers from
+     reassembling nullable ordinals, paired UTF-16 offsets, or whole-entry flags independently.
+
+     - Parameter seed: Exact source and selection contract produced by `SwordRawOSISFragment`.
+     - Returns: Inserted generic bookmark containing every Android-persisted seed field.
+     - Side effects: Inserts and saves one generic bookmark through `BookmarkStore`.
+     - Failure modes: Save failures are handled by `BookmarkStore` and do not throw. The adapter
+       assumes the seed passed generic SWORD source validation and performs no nearest-source fallback.
+     */
+    @discardableResult
+    public func addGenericBookmark(seed: SwordGenericBookmarkSeed) -> GenericBookmark {
+        addGenericBookmark(
+            bookInitials: seed.source.bookInitials,
+            key: seed.source.key,
+            startOrdinal: seed.ordinalStart,
+            endOrdinal: seed.ordinalEnd,
+            wholeVerse: seed.wholeVerse,
+            startOffset: seed.startOffset,
+            endOffset: seed.endOffset
+        )
     }
 
     /// Create a generic bookmark that renders as a paragraph break in the web reader.
@@ -334,40 +846,89 @@ public final class BookmarkService {
     // MARK: - Labels
 
     /**
+     Ensures one label is attached to a Bible or generic bookmark and repairs its primary label.
+
+     Existing relationships are retained. Repair uses Android StudyPad order, followed by UUID for
+     deterministic ties, so an invalid or absent primary label resolves to a live assignment.
+
+     - Parameters:
+       - bookmarkId: Exact Bible or generic bookmark identifier.
+       - labelId: Existing label identifier to attach.
+     - Returns: `"bible"` or `"generic"` for the matched bookmark table, or `nil` when the label or
+       bookmark does not exist.
+     - Side effects: May insert one relationship row, updates the bookmark timestamp and primary
+       label, and saves the bookmark graph.
+     - Failure modes: Missing labels or bookmarks return `nil`; persistence failures retain
+       `BookmarkStore`'s logged, non-throwing behavior.
+     */
+    @discardableResult
+    public func assignLabel(bookmarkId: UUID, labelId: UUID) -> String? {
+        guard let label = store.label(id: labelId) else { return nil }
+
+        if let bookmark = store.bibleBookmark(id: bookmarkId) {
+            if bookmark.bookmarkToLabels?.contains(where: { $0.label?.id == labelId }) != true {
+                let link = BibleBookmarkToLabel()
+                link.bookmark = bookmark
+                link.label = label
+                store.insert(link)
+            }
+            let validLabelIds = orderedLabelIDs(bookmark.bookmarkToLabels)
+            repairPrimaryLabel(validLabelIds: validLabelIds, primaryLabelId: &bookmark.primaryLabelId)
+            bookmark.lastUpdatedOn = Date()
+            store.saveChanges()
+            return "bible"
+        }
+
+        if let bookmark = store.genericBookmark(id: bookmarkId) {
+            if bookmark.bookmarkToLabels?.contains(where: { $0.label?.id == labelId }) != true {
+                let link = GenericBookmarkToLabel()
+                link.bookmark = bookmark
+                link.label = label
+                store.insert(link)
+            }
+            let validLabelIds = orderedLabelIDs(bookmark.bookmarkToLabels)
+            repairPrimaryLabel(validLabelIds: validLabelIds, primaryLabelId: &bookmark.primaryLabelId)
+            bookmark.lastUpdatedOn = Date()
+            store.saveChanges()
+            return "generic"
+        }
+
+        return nil
+    }
+
+    /**
      Toggle a label on a bookmark (Bible or generic).
      Returns "bible" or "generic" to indicate which type was toggled, or nil on failure.
      */
     @discardableResult
     public func toggleLabel(bookmarkId: UUID, labelId: UUID) -> String? {
-        guard let label = store.label(id: labelId) else { return nil }
+        guard store.label(id: labelId) != nil else { return nil }
 
         // Try Bible bookmark first
         if let bookmark = store.bibleBookmark(id: bookmarkId) {
-            let hasLabel = bookmark.bookmarkToLabels?.contains { $0.label?.id == labelId } ?? false
-            if hasLabel {
-                bookmark.bookmarkToLabels?.removeAll { $0.label?.id == labelId }
-            } else {
-                let btl = BibleBookmarkToLabel()
-                btl.bookmark = bookmark
-                btl.label = label
-                store.insert(btl)
+            let matchingLinks = bookmark.bookmarkToLabels?.filter { $0.label?.id == labelId } ?? []
+            if matchingLinks.isEmpty {
+                return assignLabel(bookmarkId: bookmarkId, labelId: labelId)
             }
+            matchingLinks.forEach(store.delete)
+            let validLabelIds = orderedLabelIDs(bookmark.bookmarkToLabels)
+            repairPrimaryLabel(validLabelIds: validLabelIds, primaryLabelId: &bookmark.primaryLabelId)
             bookmark.lastUpdatedOn = Date()
+            store.saveChanges()
             return "bible"
         }
 
         // Try generic bookmark
         if let bookmark = store.genericBookmark(id: bookmarkId) {
-            let hasLabel = bookmark.bookmarkToLabels?.contains { $0.label?.id == labelId } ?? false
-            if hasLabel {
-                bookmark.bookmarkToLabels?.removeAll { $0.label?.id == labelId }
-            } else {
-                let gbtl = GenericBookmarkToLabel()
-                gbtl.bookmark = bookmark
-                gbtl.label = label
-                store.insert(gbtl)
+            let matchingLinks = bookmark.bookmarkToLabels?.filter { $0.label?.id == labelId } ?? []
+            if matchingLinks.isEmpty {
+                return assignLabel(bookmarkId: bookmarkId, labelId: labelId)
             }
+            matchingLinks.forEach(store.delete)
+            let validLabelIds = orderedLabelIDs(bookmark.bookmarkToLabels)
+            repairPrimaryLabel(validLabelIds: validLabelIds, primaryLabelId: &bookmark.primaryLabelId)
             bookmark.lastUpdatedOn = Date()
+            store.saveChanges()
             return "generic"
         }
 
@@ -379,20 +940,30 @@ public final class BookmarkService {
         if let bookmark = store.bibleBookmark(id: bookmarkId) {
             bookmark.primaryLabelId = labelId
             bookmark.lastUpdatedOn = Date()
+            store.saveChanges()
         } else if let bookmark = store.genericBookmark(id: bookmarkId) {
             bookmark.primaryLabelId = labelId
             bookmark.lastUpdatedOn = Date()
+            store.saveChanges()
         }
     }
 
     /// Remove a label from a bookmark (Bible or generic).
     public func removeLabel(bookmarkId: UUID, labelId: UUID) {
         if let bookmark = store.bibleBookmark(id: bookmarkId) {
-            bookmark.bookmarkToLabels?.removeAll { $0.label?.id == labelId }
+            let matchingLinks = bookmark.bookmarkToLabels?.filter { $0.label?.id == labelId } ?? []
+            matchingLinks.forEach(store.delete)
+            let validLabelIds = orderedLabelIDs(bookmark.bookmarkToLabels)
+            repairPrimaryLabel(validLabelIds: validLabelIds, primaryLabelId: &bookmark.primaryLabelId)
             bookmark.lastUpdatedOn = Date()
+            store.saveChanges()
         } else if let bookmark = store.genericBookmark(id: bookmarkId) {
-            bookmark.bookmarkToLabels?.removeAll { $0.label?.id == labelId }
+            let matchingLinks = bookmark.bookmarkToLabels?.filter { $0.label?.id == labelId } ?? []
+            matchingLinks.forEach(store.delete)
+            let validLabelIds = orderedLabelIDs(bookmark.bookmarkToLabels)
+            repairPrimaryLabel(validLabelIds: validLabelIds, primaryLabelId: &bookmark.primaryLabelId)
             bookmark.lastUpdatedOn = Date()
+            store.saveChanges()
         }
     }
 
@@ -458,56 +1029,82 @@ public final class BookmarkService {
         return nil
     }
 
-    /// Set whole verse mode for a bookmark (Bible or generic).
+    /**
+     Persists whole-range mode for one Bible or generic bookmark before returning.
+
+     - Parameters:
+       - bookmarkId: Exact bookmark identifier to update.
+       - value: Whether the bookmark covers the complete verse or keyed entry.
+     - Side effects: Delegates one timestamped, journaled database mutation to `BookmarkStore`.
+     - Failure modes: Missing bookmarks and store save failures retain the store's non-throwing
+       behavior and produce no service-level error.
+     */
     public func setWholeVerse(bookmarkId: UUID, value: Bool) {
-        if let bookmark = store.bibleBookmark(id: bookmarkId) {
-            bookmark.wholeVerse = value
-            bookmark.lastUpdatedOn = Date()
-        } else if let bookmark = store.genericBookmark(id: bookmarkId) {
-            bookmark.wholeVerse = value
-            bookmark.lastUpdatedOn = Date()
-        }
+        store.setWholeVerse(bookmarkId: bookmarkId, value: value)
     }
 
-    /// Set custom icon for a bookmark (Bible or generic).
+    /**
+     Persists a custom icon for one Bible or generic bookmark before returning.
+
+     - Parameters:
+       - bookmarkId: Exact bookmark identifier to update.
+       - value: Android icon name to store, or `nil` to clear the icon.
+     - Side effects: Delegates one timestamped, journaled database mutation to `BookmarkStore`.
+     - Failure modes: Missing bookmarks and store save failures retain the store's non-throwing
+       behavior and produce no service-level error.
+     */
     public func setCustomIcon(bookmarkId: UUID, value: String?) {
-        if let bookmark = store.bibleBookmark(id: bookmarkId) {
-            bookmark.customIcon = value
-            bookmark.lastUpdatedOn = Date()
-        } else if let bookmark = store.genericBookmark(id: bookmarkId) {
-            bookmark.customIcon = value
-            bookmark.lastUpdatedOn = Date()
-        }
+        store.setCustomIcon(bookmarkId: bookmarkId, value: value)
     }
 
     // MARK: - Labels CRUD
 
     /**
-     Ensure system labels exist with deterministic UUIDs for CloudKit cross-device dedup.
-     If a system label already exists with a different UUID, update it to the canonical UUID.
-     If it doesn't exist, create it. System labels are invisible to users.
+     Ensures reserved labels use Android's fixed identities and repairs pre-parity iOS rows.
+
+     Speak, Unlabeled, and Paragraph Break are runtime-required and are created when missing.
+     Android creates the AI label lazily, so iOS only canonicalizes it when an AI row already
+     exists. Duplicate legacy rows are merged without dropping bookmark or StudyPad relationships.
+
+     - Side effects: May create, rename, re-identify, merge, or delete reserved label rows and
+       remap scalar primary-label references.
+     - Failure modes: Store fetch/save failures are handled by `BookmarkStore` and do not throw.
      */
     public func ensureSystemLabels() {
-        let systemLabels: [(name: String, id: UUID)] = [
-            (Label.speakLabelName, Label.speakLabelId),
-            (Label.unlabeledName, Label.unlabeledId),
-            (Label.paragraphBreakLabelName, Label.paragraphBreakLabelId),
+        let systemLabels: [(name: String, id: UUID, legacyID: UUID?, createIfMissing: Bool)] = [
+            (Label.speakLabelName, Label.speakLabelId, Label.legacySpeakLabelId, true),
+            (Label.unlabeledName, Label.unlabeledId, Label.legacyUnlabeledId, true),
+            (Label.paragraphBreakLabelName, Label.paragraphBreakLabelId, Label.legacyParagraphBreakLabelId, true),
+            (Label.aiLabelName, Label.aiLabelId, nil, false),
         ]
 
         let allLabels = store.labels(includeSystem: true)
 
-        for (name, canonicalId) in systemLabels {
-            if let existing = allLabels.first(where: { $0.name == name }) {
-                // Already exists — fix UUID if needed
-                if existing.id != canonicalId {
-                    existing.id = canonicalId
-                }
-            } else if store.label(id: canonicalId) == nil {
-                // Create with deterministic UUID
-                let label = Label(id: canonicalId, name: name)
+        for definition in systemLabels {
+            let candidates = allLabels.filter {
+                $0.name == definition.name ||
+                    $0.id == definition.id ||
+                    $0.id == definition.legacyID
+            }
+            var canonical = candidates.first(where: { $0.id == definition.id })
+            if canonical == nil, let existing = candidates.first {
+                let oldID = existing.id
+                existing.id = definition.id
+                existing.name = definition.name
+                store.remapPrimaryLabelIdentifier(from: oldID, to: definition.id)
+                canonical = existing
+            } else if canonical == nil, definition.createIfMissing {
+                let label = Label(id: definition.id, name: definition.name)
                 store.insert(label)
+                canonical = label
+            }
+            guard let canonical else { continue }
+            canonical.name = definition.name
+            for duplicate in candidates where duplicate !== canonical {
+                store.mergeLabel(duplicate, into: canonical)
             }
         }
+        store.saveChanges()
     }
 
     private func attachParagraphBreakLabel(to bookmark: BibleBookmark) {
@@ -603,6 +1200,48 @@ public final class BookmarkService {
         store.bibleBookmarkToLabels(labelId: labelId).count
             + store.genericBookmarkToLabels(labelId: labelId).count
             + store.studyPadEntries(labelId: labelId).count
+    }
+
+    /**
+     Returns attached Bible label IDs in Android StudyPad order for primary-label repair.
+
+     - Parameter links: Current Bible bookmark junction rows after a label mutation.
+     - Returns: Live label IDs sorted by `orderNumber`, then UUID for deterministic ties.
+     - Side effects: none.
+     - Failure modes: Missing labels and deleted relationship rows are omitted.
+     */
+    private func orderedLabelIDs(_ links: [BibleBookmarkToLabel]?) -> [UUID] {
+        (links ?? [])
+            .compactMap { link -> (id: UUID, orderNumber: Int)? in
+                guard let label = link.label, !label.isDeleted else { return nil }
+                return (label.id, link.orderNumber)
+            }
+            .sorted {
+                if $0.orderNumber != $1.orderNumber { return $0.orderNumber < $1.orderNumber }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+            .map(\.id)
+    }
+
+    /**
+     Returns attached generic label IDs in Android StudyPad order for primary-label repair.
+
+     - Parameter links: Current generic bookmark junction rows after a label mutation.
+     - Returns: Live label IDs sorted by `orderNumber`, then UUID for deterministic ties.
+     - Side effects: none.
+     - Failure modes: Missing labels and deleted relationship rows are omitted.
+     */
+    private func orderedLabelIDs(_ links: [GenericBookmarkToLabel]?) -> [UUID] {
+        (links ?? [])
+            .compactMap { link -> (id: UUID, orderNumber: Int)? in
+                guard let label = link.label, !label.isDeleted else { return nil }
+                return (label.id, link.orderNumber)
+            }
+            .sorted {
+                if $0.orderNumber != $1.orderNumber { return $0.orderNumber < $1.orderNumber }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+            .map(\.id)
     }
 
     private func repairPrimaryLabel(validLabelIds: [UUID], primaryLabelId: inout UUID?) {
@@ -771,27 +1410,38 @@ public final class BookmarkService {
     }
 
     /**
-     Delete a StudyPad text entry. Re-sanitizes order numbers.
-     Returns (deletedId, labelId, changedBibleBtls, changedGenericBtls, changedEntries).
+     Deletes one StudyPad text entry and durably normalizes the remaining mixed item order.
+
+     - Parameter id: Exact StudyPad entry identifier to delete.
+     - Returns: Deleted identifiers plus every Bible junction, generic junction, and text entry whose
+       order changed, or `nil` when the entry or label is missing.
+     - Side effects: Delegates deletion and contiguous renumbering to one atomic store save.
+     - Failure modes: Missing entries or labels return `nil`; store persistence failures retain the
+       store's non-throwing behavior.
      */
     public func deleteStudyPadEntry(
         id: UUID
     ) -> (UUID, UUID, [BibleBookmarkToLabel], [GenericBookmarkToLabel], [StudyPadTextEntry])? {
-        guard let entry = store.studyPadEntry(id: id),
-              let labelId = entry.label?.id else { return nil }
-
-        store.delete(entry)
-
-        // Re-sanitize order numbers
-        let changed = sanitizeStudyPadOrder(labelId: labelId)
-        return (id, labelId, changed.bibleBtls, changed.genericBtls, changed.entries)
+        store.deleteStudyPadEntryAndNormalizeOrder(id: id)
     }
 
-    /// Update a StudyPad text entry's metadata (orderNumber, indentLevel).
+    /**
+     Persists ordering metadata for one StudyPad text entry before returning.
+
+     - Parameters:
+       - id: Exact StudyPad entry identifier.
+       - orderNumber: Replacement display order, or `nil` to retain the current value.
+       - indentLevel: Replacement nesting depth, or `nil` to retain the current value.
+     - Side effects: Delegates one journaled database mutation to `BookmarkStore`.
+     - Failure modes: Missing entries and store save failures retain the store's non-throwing
+       behavior.
+     */
     public func updateStudyPadTextEntry(id: UUID, orderNumber: Int?, indentLevel: Int?) {
-        guard let entry = store.studyPadEntry(id: id) else { return }
-        if let orderNumber { entry.orderNumber = orderNumber }
-        if let indentLevel { entry.indentLevel = indentLevel }
+        store.updateStudyPadEntryMetadata(
+            id: id,
+            orderNumber: orderNumber,
+            indentLevel: indentLevel
+        )
     }
 
     /// Update the text content of a StudyPad text entry.
@@ -799,7 +1449,19 @@ public final class BookmarkService {
         store.upsertStudyPadEntryText(entryId: id, text: text)
     }
 
-    /// Update a BibleBookmarkToLabel junction's StudyPad properties.
+    /**
+     Persists StudyPad metadata for one Bible-bookmark-to-label relationship before returning.
+
+     - Parameters:
+       - bookmarkId: Exact Bible bookmark identifier.
+       - labelId: Exact label identifier for the junction row.
+       - orderNumber: Replacement display order, or `nil` to retain the current value.
+       - indentLevel: Replacement nesting depth, or `nil` to retain the current value.
+       - expandContent: Replacement expanded state, or `nil` to retain the current value.
+     - Side effects: Delegates one timestamped, journaled relationship mutation to `BookmarkStore`.
+     - Failure modes: Missing relationships and store save failures retain the store's non-throwing
+       behavior.
+     */
     public func updateBibleBookmarkToLabel(
         bookmarkId: UUID,
         labelId: UUID,
@@ -807,15 +1469,28 @@ public final class BookmarkService {
         indentLevel: Int?,
         expandContent: Bool?
     ) {
-        guard let btl = store.bibleBookmarkToLabel(bookmarkId: bookmarkId, labelId: labelId) else { return }
-        if let orderNumber { btl.orderNumber = orderNumber }
-        if let indentLevel { btl.indentLevel = indentLevel }
-        if let expandContent { btl.expandContent = expandContent }
-        // Bump bookmark timestamp
-        btl.bookmark?.lastUpdatedOn = Date()
+        store.updateBibleBookmarkToLabelMetadata(
+            bookmarkId: bookmarkId,
+            labelId: labelId,
+            orderNumber: orderNumber,
+            indentLevel: indentLevel,
+            expandContent: expandContent
+        )
     }
 
-    /// Update a GenericBookmarkToLabel junction's StudyPad properties.
+    /**
+     Persists StudyPad metadata for one generic-bookmark-to-label relationship before returning.
+
+     - Parameters:
+       - bookmarkId: Exact generic bookmark identifier.
+       - labelId: Exact label identifier for the junction row.
+       - orderNumber: Replacement display order, or `nil` to retain the current value.
+       - indentLevel: Replacement nesting depth, or `nil` to retain the current value.
+       - expandContent: Replacement expanded state, or `nil` to retain the current value.
+     - Side effects: Delegates one timestamped, journaled relationship mutation to `BookmarkStore`.
+     - Failure modes: Missing relationships and store save failures retain the store's non-throwing
+       behavior.
+     */
     public func updateGenericBookmarkToLabel(
         bookmarkId: UUID,
         labelId: UUID,
@@ -823,46 +1498,53 @@ public final class BookmarkService {
         indentLevel: Int?,
         expandContent: Bool?
     ) {
-        guard let gbtl = store.genericBookmarkToLabel(bookmarkId: bookmarkId, labelId: labelId) else { return }
-        if let orderNumber { gbtl.orderNumber = orderNumber }
-        if let indentLevel { gbtl.indentLevel = indentLevel }
-        if let expandContent { gbtl.expandContent = expandContent }
-        gbtl.bookmark?.lastUpdatedOn = Date()
+        store.updateGenericBookmarkToLabelMetadata(
+            bookmarkId: bookmarkId,
+            labelId: labelId,
+            orderNumber: orderNumber,
+            indentLevel: indentLevel,
+            expandContent: expandContent
+        )
     }
 
-    /// Batch update order numbers from a drag-drop reorder.
+    /**
+     Persists one mixed StudyPad drag-and-drop reorder as a single database batch.
+
+     - Parameters:
+       - labelId: Label whose bookmark junctions are addressed by the payload.
+       - bibleBookmarkOrders: Bible bookmark identifiers and replacement order numbers.
+       - genericBookmarkOrders: Generic bookmark identifiers and replacement order numbers.
+       - studyPadEntryOrders: StudyPad entry identifiers and replacement order numbers.
+     - Side effects: Delegates the complete payload to one journaled `BookmarkStore` save.
+     - Failure modes: Missing rows are ignored and store save failures retain the store's
+       non-throwing behavior.
+     */
     public func updateOrderNumbers(
         labelId: UUID,
         bibleBookmarkOrders: [(bookmarkId: UUID, orderNumber: Int)],
         genericBookmarkOrders: [(bookmarkId: UUID, orderNumber: Int)],
         studyPadEntryOrders: [(entryId: UUID, orderNumber: Int)]
     ) {
-        for (bmId, order) in bibleBookmarkOrders {
-            if let btl = store.bibleBookmarkToLabel(bookmarkId: bmId, labelId: labelId) {
-                btl.orderNumber = order
-            }
-        }
-        for (bmId, order) in genericBookmarkOrders {
-            if let gbtl = store.genericBookmarkToLabel(bookmarkId: bmId, labelId: labelId) {
-                gbtl.orderNumber = order
-            }
-        }
-        for (entryId, order) in studyPadEntryOrders {
-            if let entry = store.studyPadEntry(id: entryId) {
-                entry.orderNumber = order
-            }
-        }
+        store.updateStudyPadOrderNumbers(
+            labelId: labelId,
+            bibleBookmarkOrders: bibleBookmarkOrders,
+            genericBookmarkOrders: genericBookmarkOrders,
+            studyPadEntryOrders: studyPadEntryOrders
+        )
     }
 
-    /// Set edit action on a Bible or generic bookmark.
+    /**
+     Persists one note-edit action for a Bible or generic bookmark before returning.
+
+     - Parameters:
+       - bookmarkId: Exact bookmark identifier to update.
+       - editAction: Append/prepend action to store, or `nil` to clear the action.
+     - Side effects: Delegates one timestamped, journaled database mutation to `BookmarkStore`.
+     - Failure modes: Missing bookmarks and store save failures retain the store's non-throwing
+       behavior.
+     */
     public func setBookmarkEditAction(bookmarkId: UUID, editAction: EditAction?) {
-        if let bookmark = store.bibleBookmark(id: bookmarkId) {
-            bookmark.editAction = editAction
-            bookmark.lastUpdatedOn = Date()
-        } else if let bookmark = store.genericBookmark(id: bookmarkId) {
-            bookmark.editAction = editAction
-            bookmark.lastUpdatedOn = Date()
-        }
+        store.setBookmarkEditAction(bookmarkId: bookmarkId, editAction: editAction)
     }
 
     // MARK: - StudyPad Private Helpers
@@ -900,67 +1582,4 @@ public final class BookmarkService {
         return (changedBtls, changedGbtls, changedEntries)
     }
 
-    /// Re-number all StudyPad items contiguously (0, 1, 2, ...).
-    @discardableResult
-    private func sanitizeStudyPadOrder(
-        labelId: UUID
-    ) -> (bibleBtls: [BibleBookmarkToLabel], genericBtls: [GenericBookmarkToLabel], entries: [StudyPadTextEntry]) {
-        // Collect all items with their current order
-        struct OrderedItem: Comparable {
-            let orderNumber: Int
-            let kind: Int // 0=btl, 1=gbtl, 2=entry
-            let index: Int
-            static func < (lhs: OrderedItem, rhs: OrderedItem) -> Bool {
-                lhs.orderNumber < rhs.orderNumber
-            }
-        }
-
-        let btls = store.bibleBookmarkToLabels(labelId: labelId)
-        let gbtls = store.genericBookmarkToLabels(labelId: labelId)
-        let entries = store.studyPadEntries(labelId: labelId)
-
-        var items: [OrderedItem] = []
-        for (i, btl) in btls.enumerated() {
-            items.append(OrderedItem(orderNumber: btl.orderNumber, kind: 0, index: i))
-        }
-        for (i, gbtl) in gbtls.enumerated() {
-            items.append(OrderedItem(orderNumber: gbtl.orderNumber, kind: 1, index: i))
-        }
-        for (i, entry) in entries.enumerated() {
-            items.append(OrderedItem(orderNumber: entry.orderNumber, kind: 2, index: i))
-        }
-
-        items.sort()
-
-        var changedBtls: [BibleBookmarkToLabel] = []
-        var changedGbtls: [GenericBookmarkToLabel] = []
-        var changedEntries: [StudyPadTextEntry] = []
-
-        for (newOrder, item) in items.enumerated() {
-            switch item.kind {
-            case 0:
-                let btl = btls[item.index]
-                if btl.orderNumber != newOrder {
-                    btl.orderNumber = newOrder
-                    changedBtls.append(btl)
-                }
-            case 1:
-                let gbtl = gbtls[item.index]
-                if gbtl.orderNumber != newOrder {
-                    gbtl.orderNumber = newOrder
-                    changedGbtls.append(gbtl)
-                }
-            case 2:
-                let entry = entries[item.index]
-                if entry.orderNumber != newOrder {
-                    entry.orderNumber = newOrder
-                    changedEntries.append(entry)
-                }
-            default:
-                break
-            }
-        }
-
-        return (changedBtls, changedGbtls, changedEntries)
-    }
 }
