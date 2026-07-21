@@ -61,6 +61,33 @@ public final class AISettingsStore {
         try modelContext.save()
     }
 
+    /**
+     Persists whether the user explicitly accepted Android's AI responsibility notice.
+
+     The mutation runs in one SwiftData transaction. Any fetch or commit failure rolls the supplied
+     context back before the error escapes, so a failed save cannot leave an in-memory `true` value
+     that bypasses the disclaimer or becomes durable during a later unrelated save.
+
+     - Parameter isAccepted: Whether protected AI configuration actions may proceed.
+     - Side effects: Updates and saves the singleton `GlobalAISettings` row.
+     - Throws: SwiftData fetch, transaction, or save errors after rolling back pending changes.
+     - Important: As with every mutating store operation, callers must not concurrently mutate the
+       bound `ModelContext` while this method runs.
+    */
+    public func setDisclaimerAccepted(_ isAccepted: Bool) throws {
+        let settings = try globalSettings()
+        let previousValue = settings.aiDisclaimerAccepted
+        do {
+            try modelContext.transaction {
+                settings.aiDisclaimerAccepted = isAccepted
+            }
+        } catch {
+            modelContext.rollback()
+            settings.aiDisclaimerAccepted = previousValue
+            throw error
+        }
+    }
+
     /** Returns provider configurations in Android display order. */
     public func providers() throws -> [LLMProviderConfig] {
         var descriptor = FetchDescriptor<LLMProviderConfig>(

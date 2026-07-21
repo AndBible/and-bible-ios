@@ -996,3 +996,11 @@
 
 /* Android shared translations */
 "discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Accetto e mi assumo la piena responsabilità";
+"ai_disclaimer_accept_title" = "Accetta l'avviso sull'IA";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Impostazioni di connessione e prompt IA";
+"prefs_features_cat" = "Funzionalità";

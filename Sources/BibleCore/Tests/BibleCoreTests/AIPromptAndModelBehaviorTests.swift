@@ -209,6 +209,75 @@ final class AIPromptAndModelBehaviorTests: XCTestCase {
     }
 
     /**
+     Verifies explicit AI disclaimer acceptance is durably visible from a fresh SwiftData context.
+
+     The writer and reader share only the container, not managed objects. Failure means the UI could
+     advance in memory while a later configuration request or app session still sees the gate.
+     */
+    func testDisclaimerAcceptancePersistsAcrossModelContexts() throws {
+        let container = try makeAIContainer()
+        let writerContext = ModelContext(container)
+        writerContext.autosaveEnabled = false
+        let writer = AISettingsStore(modelContext: writerContext)
+
+        XCTAssertFalse(try writer.globalSettings().aiDisclaimerAccepted)
+        try writer.setDisclaimerAccepted(true)
+
+        let readerContext = ModelContext(container)
+        readerContext.autosaveEnabled = false
+        let reader = AISettingsStore(modelContext: readerContext)
+        XCTAssertTrue(try reader.globalSettings().aiDisclaimerAccepted)
+    }
+
+    /**
+     Verifies a rejected disclaimer save cannot grant transient or later durable acceptance.
+
+     Setup seeds a writable file-backed store, reopens it with `allowsSave: false`, and then reopens
+     it writable after the expected permission failure. The test touches only a temporary directory,
+     which is removed on exit. Failure means a save error could bypass Android's explicit gate in the
+     current context or during a subsequent unrelated save.
+     */
+    func testDisclaimerAcceptanceRollsBackWhenStoreRejectsSave() throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ai-disclaimer-rollback-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let storeURL = directoryURL.appendingPathComponent("AISettings.store")
+
+        try autoreleasepool {
+            let container = try makePersistentAIContainer(at: storeURL, allowsSave: true)
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            XCTAssertFalse(
+                try AISettingsStore(modelContext: context).globalSettings().aiDisclaimerAccepted
+            )
+        }
+
+        try autoreleasepool {
+            let container = try makePersistentAIContainer(at: storeURL, allowsSave: false)
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            let store = AISettingsStore(modelContext: context)
+
+            XCTAssertThrowsError(try store.setDisclaimerAccepted(true)) { error in
+                let cocoaError = error as NSError
+                XCTAssertEqual(cocoaError.domain, NSCocoaErrorDomain)
+                XCTAssertEqual(cocoaError.code, NSFileWriteNoPermissionError)
+            }
+            XCTAssertFalse(try store.globalSettings().aiDisclaimerAccepted)
+        }
+
+        try autoreleasepool {
+            let container = try makePersistentAIContainer(at: storeURL, allowsSave: true)
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            XCTAssertFalse(
+                try AISettingsStore(modelContext: context).globalSettings().aiDisclaimerAccepted
+            )
+        }
+    }
+
+    /**
      Verifies a deleted prompt-specific model falls back to the global model and resolves its provider
      and device-only credential.
 
@@ -342,6 +411,33 @@ private func makeAIContainer() throws -> ModelContainer {
     let models = AIModelRegistration.cloudSyncableModels + AIModelRegistration.localOnlyModels
     let schema = Schema(models)
     let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+    return try ModelContainer(for: schema, configurations: [configuration])
+}
+
+/**
+ Opens one file-backed AI store with configurable write permission for transaction tests.
+
+ - Parameters:
+   - storeURL: Stable SQLite store URL reused across seed, rejection, and verification phases.
+   - allowsSave: Whether SwiftData accepts writes through this configuration.
+ - Returns: A container containing every production AI model registration.
+ - Side effects: Creates or opens the store and its SQLite sidecar files.
+ - Throws: Schema, configuration, migration, or persistent-store loading errors.
+ */
+@MainActor
+private func makePersistentAIContainer(
+    at storeURL: URL,
+    allowsSave: Bool
+) throws -> ModelContainer {
+    let models = AIModelRegistration.cloudSyncableModels + AIModelRegistration.localOnlyModels
+    let schema = Schema(models)
+    let configuration = ModelConfiguration(
+        "AISettingsBehaviorTests",
+        schema: schema,
+        url: storeURL,
+        allowsSave: allowsSave,
+        cloudKitDatabase: .none
+    )
     return try ModelContainer(for: schema, configurations: [configuration])
 }
 

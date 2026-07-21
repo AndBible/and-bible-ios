@@ -1003,3 +1003,11 @@ Google డ్రైవ్ ని ఉపయోగిస్తున్నప�
 
 /* Android shared translations */
 "discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "నేను అంగీకరిస్తాను మరియు పూర్తి బాధ్యత వహిస్తాను";
+"ai_disclaimer_accept_title" = "AI నిరాకరణను అంగీకరించండి";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "AI కనెక్షన్ మరియు ప్రాంప్ట్ సెట్టింగులు";
+"prefs_features_cat" = "సౌలభ్యాలు";

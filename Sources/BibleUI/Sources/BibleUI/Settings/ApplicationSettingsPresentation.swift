@@ -272,6 +272,9 @@ enum ApplicationSettingsPresentation {
         /// Device synchronization shortcut backed by Android's sync settings preference row.
         case syncSettings
 
+        /// AI Settings shortcut backed by Android's AI settings preference row.
+        case aiSettings
+
         /// Reading Progress shortcut backed by Android's progress settings preference row.
         case readingProgressSettings
 
@@ -280,6 +283,8 @@ enum ApplicationSettingsPresentation {
             switch self {
             case .syncSettings:
                 return "settingsSyncLink"
+            case .aiSettings:
+                return "settingsAISettingsLink"
             case .readingProgressSettings:
                 return "settingsReadingProgressLink"
             }
@@ -290,6 +295,8 @@ enum ApplicationSettingsPresentation {
             switch self {
             case .syncSettings:
                 return "sync_settings_shortcut"
+            case .aiSettings:
+                return "ai_settings_shortcut"
             case .readingProgressSettings:
                 return "reading_progress_settings_shortcut"
             }
@@ -305,6 +312,8 @@ enum ApplicationSettingsPresentation {
             switch self {
             case .syncSettings:
                 return "cloud_sync_title"
+            case .aiSettings:
+                return "ai_settings"
             case .readingProgressSettings:
                 return "reading_progress_settings"
             }
@@ -315,6 +324,8 @@ enum ApplicationSettingsPresentation {
             switch self {
             case .syncSettings:
                 return "Device synchronization"
+            case .aiSettings:
+                return "AI Settings"
             case .readingProgressSettings:
                 return "Reading Progress Settings"
             }
@@ -325,6 +336,8 @@ enum ApplicationSettingsPresentation {
             switch self {
             case .syncSettings:
                 return "icloud_sync_description"
+            case .aiSettings:
+                return "ai_settings_shortcut_summary"
             case .readingProgressSettings:
                 return "reading_progress_settings_summary"
             }
@@ -335,6 +348,8 @@ enum ApplicationSettingsPresentation {
             switch self {
             case .syncSettings:
                 return "Sync bookmarks, labels, workspaces, reading plans, and notes across your devices via iCloud. Requires an iCloud account."
+            case .aiSettings:
+                return "AI connection and prompt settings"
             case .readingProgressSettings:
                 return "Configure automatic reading and memorization progress tracking."
             }
@@ -345,6 +360,8 @@ enum ApplicationSettingsPresentation {
             switch self {
             case .syncSettings:
                 return ["features", "sync", "icloud", "cloud", androidKey]
+            case .aiSettings:
+                return ["features", "AI", "LLM", "providers", "models", "prompts", androidKey]
             case .readingProgressSettings:
                 return ["features", "reading", "progress", "memorization", androidKey]
             }
@@ -355,6 +372,8 @@ enum ApplicationSettingsPresentation {
             switch self {
             case .syncSettings:
                 return String(localized: "cloud_sync_title", defaultValue: "Device synchronization")
+            case .aiSettings:
+                return String(localized: "ai_settings", defaultValue: "AI Settings")
             case .readingProgressSettings:
                 return String(localized: "reading_progress_settings", defaultValue: "Reading Progress Settings")
             }
@@ -367,6 +386,11 @@ enum ApplicationSettingsPresentation {
                 return String(
                     localized: "icloud_sync_description",
                     defaultValue: "Sync bookmarks, labels, workspaces, reading plans, and notes across your devices via iCloud. Requires an iCloud account."
+                )
+            case .aiSettings:
+                return String(
+                    localized: "ai_settings_shortcut_summary",
+                    defaultValue: "AI connection and prompt settings"
                 )
             case .readingProgressSettings:
                 return String(
@@ -390,6 +414,9 @@ enum ApplicationSettingsPresentation {
     /// Sync feature shortcut sourced from Android's settings XML.
     static let syncSettingsShortcut = FeatureShortcut.syncSettings
 
+    /// AI Settings feature shortcut sourced from Android's settings XML.
+    static let aiSettingsShortcut = FeatureShortcut.aiSettings
+
     /// Reading Progress feature shortcut sourced from Android's settings XML.
     static let readingProgressSettingsShortcut = FeatureShortcut.readingProgressSettings
 
@@ -406,7 +433,7 @@ enum ApplicationSettingsPresentation {
      - Failure modes: none.
      */
     static func featureShortcuts(canOpenReadingProgressSettings: Bool) -> [FeatureShortcut] {
-        var shortcuts: [FeatureShortcut] = [syncSettingsShortcut]
+        var shortcuts: [FeatureShortcut] = [syncSettingsShortcut, aiSettingsShortcut]
         if canOpenReadingProgressSettings {
             shortcuts.append(readingProgressSettingsShortcut)
         }

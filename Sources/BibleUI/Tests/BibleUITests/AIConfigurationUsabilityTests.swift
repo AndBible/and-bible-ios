@@ -67,6 +67,63 @@ final class AIConfigurationUsabilityTests: XCTestCase {
     }
 
     /**
+     Verifies Quick Setup and Add Provider share Android's persisted acceptance gate.
+
+     Each unaccepted request must retain its exact destination through the acceptance dialog, while
+     accepted requests proceed immediately. The pure test performs no SwiftData or UI work.
+     */
+    func testConfigurationActionsRequireExplicitDisclaimerAcceptance() {
+        for request in [AIConfigurationEntryRequest.quickSetup, .addProvider] {
+            XCTAssertEqual(
+                AIDisclaimerGate.decision(for: request, isAccepted: false),
+                .requireAcceptance(request)
+            )
+            XCTAssertEqual(
+                AIDisclaimerGate.decision(for: request, isAccepted: true),
+                .proceed(request)
+            )
+        }
+    }
+
+    /**
+     Verifies the disclaimer follows Android's prose, bullet, privacy, cost, and Scripture order.
+
+     Sentinel copy isolates composition from localization. The assertion catches reintroducing nine
+     uniform bullets or moving the Scripture reminder ahead of Android's explanatory paragraphs.
+     */
+    func testDisclaimerCompositionMatchesAndroidOrderAndStyles() {
+        let copy = AIDisclaimerCopy(
+            intro: "intro",
+            approach: "approach",
+            responsibility: "responsibility",
+            point1: "p1",
+            point2: "p2",
+            point3: "p3",
+            point4: "p4",
+            point5: "p5",
+            point6: "p6",
+            point7: "p7",
+            point8: "p8",
+            point9: "p9"
+        )
+
+        XCTAssertEqual(
+            copy.segments,
+            [
+                AIDisclaimerSegment(style: .body, text: "intro approach responsibility"),
+                AIDisclaimerSegment(style: .bullet, text: "p1"),
+                AIDisclaimerSegment(style: .bullet, text: "p2"),
+                AIDisclaimerSegment(style: .bullet, text: "p3"),
+                AIDisclaimerSegment(style: .bullet, text: "p4"),
+                AIDisclaimerSegment(style: .body, text: "p6"),
+                AIDisclaimerSegment(style: .body, text: "p7 p8"),
+                AIDisclaimerSegment(style: .body, text: "p9"),
+                AIDisclaimerSegment(style: .italic, text: "p5"),
+            ]
+        )
+    }
+
+    /**
      Locks current-stable quick setup model IDs and verifies all four token classes affect cost.
 
      The expected catalog order matches Android's chooser. The cost fixture uses one million tokens

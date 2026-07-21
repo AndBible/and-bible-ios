@@ -1670,7 +1670,7 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var featuresSettingsSection: some View {
-        settingsPreferenceSection(String(localized: "features", defaultValue: "Features")) {
+        settingsPreferenceSection(String(localized: "prefs_features_cat", defaultValue: "Features")) {
             let syncShortcut = ApplicationSettingsPresentation.syncSettingsShortcut
             let syncEntry = syncShortcut.searchEntry
             if settingsSearchMatchesEntry(syncEntry) {
@@ -1684,11 +1684,12 @@ public struct SettingsView: View {
                 }
             }
 
-            let aiEntry = aiSettingsSearchEntry
+            let aiShortcut = ApplicationSettingsPresentation.aiSettingsShortcut
+            let aiEntry = aiShortcut.searchEntry
             if settingsSearchMatchesEntry(aiEntry) {
                 settingsNavigationLink(
                     title: aiEntry.title,
-                    androidKey: "ai_settings_shortcut",
+                    androidKey: aiShortcut.androidKey,
                     summary: aiEntry.summary,
                     accessibilityIdentifier: aiEntry.identifier
                 ) {
@@ -1724,22 +1725,9 @@ public struct SettingsView: View {
         readingProgressController != nil
     }
 
-    /** Search metadata for Android's production AI settings shortcut. */
-    private var aiSettingsSearchEntry: AndBibleSettingsSearchEntry {
-        AndBibleSettingsSearchEntry(
-            identifier: "settingsAISettingsLink",
-            title: String(localized: "ai_settings", defaultValue: "AI Settings"),
-            summary: String(
-                localized: "ai_settings_shortcut_summary",
-                defaultValue: "AI connection and prompt settings"
-            ),
-            keywords: ["AI", "LLM", "providers", "models", "prompts"]
-        )
-    }
-
     /// Search entries for feature shortcuts that can be opened from Application preferences.
     private var featuresSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
-        [aiSettingsSearchEntry] + ApplicationSettingsPresentation
+        ApplicationSettingsPresentation
             .featureShortcuts(canOpenReadingProgressSettings: canOpenReadingProgressSettings)
             .map(\.searchEntry)
     }

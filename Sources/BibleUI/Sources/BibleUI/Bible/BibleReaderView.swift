@@ -116,6 +116,8 @@ public struct BibleReaderView: View {
         /// Drawer-owned reading-plan list destination that avoids legacy sheet chrome.
         case readingPlans
         case settings
+        /// Drawer-owned AI Settings destination matching Android's Administration shortcut.
+        case aiSettings
         /// Android-style startup setup route used instead of transient iOS dialog chrome.
         case startupDocumentSetup
         case downloads
@@ -1442,6 +1444,15 @@ public struct BibleReaderView: View {
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
+        case .aiSettings:
+            AISettingsView(swordManager: panePresentationController?.swordManager)
+                .accessibilityIdentifier("aiSettingsScreen")
+                #if os(iOS)
+                .toolbar(.visible, for: .navigationBar)
+                #endif
+                .overlay(alignment: .topLeading) {
+                    readerRenderedContentStateExport
+                }
         case .startupDocumentSetup:
             if let startupDownloadPromptReason {
                 StartupDocumentSetupView(
@@ -2159,7 +2170,7 @@ public struct BibleReaderView: View {
         switch previousDestination {
         case .search:
             searchInitialQuery = ""
-        case .bookmarks, .studyPads, .myDocuments, .readingPlans:
+        case .bookmarks, .studyPads, .myDocuments, .readingPlans, .aiSettings:
             break
         case .settings:
             reloadBehaviorPreferences()
@@ -3802,6 +3813,10 @@ public struct BibleReaderView: View {
                 if !presentSyncSettings() {
                     presentReaderModal(.syncSettings)
                 }
+            }
+        case .aiSettings:
+            dismissReaderNavigationDrawerAndPerform {
+                presentReaderDestination(.aiSettings, from: windowManager.activeWindow?.id)
             }
         case .settings:
             dismissReaderNavigationDrawerAndPerform {

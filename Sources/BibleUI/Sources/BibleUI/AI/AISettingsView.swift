@@ -55,6 +55,24 @@ private struct AIProviderRowState: Identifiable {
     let isUsable: Bool
 }
 
+/** Stable sheet host for disclaimer information and protected AI configuration flows. */
+private enum AISettingsSheet: Identifiable {
+    /// Dismissible information opened from the Behavior section.
+    case information
+    /// Configuration flow that may begin at Android's explicit acceptance gate.
+    case configuration(request: AIConfigurationEntryRequest, requiresAcceptance: Bool)
+
+    /// Stable identity for SwiftUI sheet presentation.
+    var id: String {
+        switch self {
+        case .information:
+            return "information"
+        case .configuration(let request, _):
+            return "configuration-\(request.id)"
+        }
+    }
+}
+
 /** Operational AI settings content bound to one model context. */
 private struct AISettingsContentView: View {
     @Environment(\.dismiss) private var dismiss
@@ -64,9 +82,8 @@ private struct AISettingsContentView: View {
     let credentialStore: AICredentialStore
 
     @State private var revision = 0
-    @State private var showingQuickSetup = false
     @State private var showingResetConfirmation = false
-    @State private var showingDisclaimer = false
+    @State private var activeSheet: AISettingsSheet?
     @State private var failureMessage: String?
 
     private var settingsStore: AISettingsStore { AISettingsStore(modelContext: modelContext) }
@@ -125,7 +142,7 @@ private struct AISettingsContentView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         Button {
-                            showingQuickSetup = true
+                            requestConfiguration(.quickSetup)
                         } label: {
                             Label(
                                 String(localized: "easy_setup_title", defaultValue: "Quick Setup"),
@@ -174,12 +191,8 @@ private struct AISettingsContentView: View {
                         }
                     }
                 }
-                NavigationLink {
-                    AIProviderSettingsView(
-                        providerID: nil,
-                        credentialStore: credentialStore,
-                        onChanged: refresh
-                    )
+                Button {
+                    requestConfiguration(.addProvider)
                 } label: {
                     Label(
                         String(localized: "ai_add_provider", defaultValue: "Add provider"),
@@ -226,7 +239,7 @@ private struct AISettingsContentView: View {
                     )
                 }
                 Button {
-                    showingDisclaimer = true
+                    activeSheet = .information
                 } label: {
                     Label(
                         String(
@@ -255,16 +268,14 @@ private struct AISettingsContentView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .sheet(isPresented: $showingQuickSetup, onDismiss: refresh) {
-            NavigationStack {
-                AIQuickSetupView(credentialStore: credentialStore, onSaved: {
-                    showingQuickSetup = false
-                    refresh()
-                })
-            }
-        }
-        .sheet(isPresented: $showingDisclaimer) {
-            NavigationStack { AIDisclaimerView() }
+        .sheet(isPresented: activeSheetPresentation, onDismiss: refresh) {
+            AISettingsSheetContent(
+                activeSheet: $activeSheet,
+                modelContext: modelContext,
+                swordManager: swordManager,
+                credentialStore: credentialStore,
+                onChanged: refresh
+            )
         }
         .alert(
             String(localized: "reset_all_ai_settings_confirm_title", defaultValue: "Reset all AI settings?"),
@@ -303,6 +314,42 @@ private struct AISettingsContentView: View {
         revision &+= 1
     }
 
+    /** Boolean sheet binding backed by the complete parent-owned flow state. */
+    private var activeSheetPresentation: Binding<Bool> {
+        Binding(
+            get: { activeSheet != nil },
+            set: { isPresented in
+                if !isPresented {
+                    activeSheet = nil
+                }
+            }
+        )
+    }
+
+    /** Opens one protected configuration action or presents Android's acceptance gate. */
+    private func requestConfiguration(_ request: AIConfigurationEntryRequest) {
+        do {
+            let settings = try settingsStore.globalSettings()
+            switch AIDisclaimerGate.decision(
+                for: request,
+                isAccepted: settings.aiDisclaimerAccepted
+            ) {
+            case .proceed(let acceptedRequest):
+                activeSheet = .configuration(
+                    request: acceptedRequest,
+                    requiresAcceptance: false
+                )
+            case .requireAcceptance(let pendingRequest):
+                activeSheet = .configuration(
+                    request: pendingRequest,
+                    requiresAcceptance: true
+                )
+            }
+        } catch {
+            failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
+        }
+    }
+
     /** Applies Android reset semantics while preserving local raw-log history. */
     private func resetAISettings() {
         do {
@@ -313,6 +360,91 @@ private struct AISettingsContentView: View {
             refresh()
         } catch {
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
+        }
+    }
+}
+
+/** Sheet content that observes parent-owned AI flow state throughout one presentation. */
+private struct AISettingsSheetContent: View {
+    /// Current information or protected configuration phase.
+    @Binding var activeSheet: AISettingsSheet?
+
+    /// Persistence context used to commit explicit disclaimer acceptance.
+    let modelContext: ModelContext
+    /// Optional installed-module manager used by prompt configuration.
+    let swordManager: SwordManager?
+    /// Device-only credential boundary shared by configuration destinations.
+    let credentialStore: AICredentialStore
+    /// Refresh callback for provider mutations.
+    let onChanged: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            activeSheetContent
+        }
+    }
+
+    /** Renders the current information, acceptance, or configuration phase from the live binding. */
+    @ViewBuilder
+    private var activeSheetContent: some View {
+        switch activeSheet {
+        case .information:
+            AIDisclaimerView(mode: .information)
+        case .configuration(let request, true):
+            AIDisclaimerView(mode: .acceptance) {
+                acceptDisclaimer(for: request)
+            }
+        case .configuration(let request, false):
+            configurationDestination(for: request)
+        case nil:
+            EmptyView()
+        }
+    }
+
+    /** Destination corresponding to the action captured before disclaimer acceptance. */
+    @ViewBuilder
+    private func configurationDestination(for request: AIConfigurationEntryRequest) -> some View {
+        switch request {
+        case .quickSetup:
+            AIQuickSetupView(credentialStore: credentialStore) {
+                activeSheet = nil
+            }
+        case .addProvider:
+            AIProviderSettingsView(
+                providerID: nil,
+                credentialStore: credentialStore,
+                onChanged: onChanged
+            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        activeSheet = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel(String(localized: "cancel", defaultValue: "Cancel"))
+                    .accessibilityIdentifier("aiProviderCloseButton")
+                }
+            }
+        }
+    }
+
+    /**
+     Commits explicit acceptance before advancing the existing sheet to the requested destination.
+
+     - Parameter request: Protected action captured before the notice was shown.
+     - Returns: Localized failure copy when persistence fails, otherwise `nil`.
+     - Side effects: Saves `GlobalAISettings.aiDisclaimerAccepted` in one rollback-protected
+       SwiftData transaction and updates the live sheet state only after commit.
+     - Failure modes: Store errors leave the acceptance phase active and are returned to its alert.
+     */
+    private func acceptDisclaimer(for request: AIConfigurationEntryRequest) -> String? {
+        do {
+            try AISettingsStore(modelContext: modelContext).setDisclaimerAccepted(true)
+            activeSheet = .configuration(request: request, requiresAcceptance: false)
+            return nil
+        } catch {
+            return String(localized: "error_occurred", defaultValue: "An error has occurred")
         }
     }
 }
@@ -395,6 +527,7 @@ private struct AIQuickSetupView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(String(localized: "cancel", defaultValue: "Cancel")) { dismiss() }
+                    .accessibilityIdentifier("aiQuickSetupCancelButton")
             }
         }
         .onChange(of: selectedProvider) {
@@ -460,7 +593,6 @@ private struct AIQuickSetupView: View {
                 try store.insertModel(model)
                 let settings = try store.globalSettings()
                 settings.defaultModelId = model.id
-                settings.aiDisclaimerAccepted = true
                 try store.save()
                 apiKey = ""
                 onSaved()
@@ -476,48 +608,117 @@ private struct AIQuickSetupView: View {
     }
 }
 
-/** Native presentation of Android's AI responsibility notice. */
+/** Native presentation of Android's AI responsibility notice and acceptance gate. */
 private struct AIDisclaimerView: View {
+    /// Whether the disclaimer is informational or requires explicit acceptance.
+    enum Mode {
+        case information
+        case acceptance
+    }
+
     @Environment(\.dismiss) private var dismiss
 
+    let mode: Mode
+    let onAccept: (() -> String?)?
+
+    @State private var acceptanceFailureMessage: String?
+
+    /**
+     Creates an information or acceptance presentation over Android's shared disclaimer copy.
+
+     Acceptance success is owned by the flow callback and does not dismiss this view itself; the
+     stable sheet host replaces it with the protected destination. Information and cancellation
+     actions dismiss the current presentation through SwiftUI's environment.
+     */
+    init(mode: Mode, onAccept: (() -> String?)? = nil) {
+        self.mode = mode
+        self.onAccept = onAccept
+    }
+
     var body: some View {
+        let copy = AIDisclaimerCopy.localized()
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text(
-                    String(
-                        localized: "ai_disclaimer_intro",
-                        defaultValue: "AI tools can greatly enrich your Bible study experience and open new ways to engage with Scripture."
-                    )
-                )
-                Text(
-                    String(
-                        localized: "ai_disclaimer_approach",
-                        defaultValue: "AndBible primarily uses AI to process text from the documents you have installed — commentaries, dictionaries, and other modules — rather than relying on the model's own training data."
-                    )
-                )
-                Text(
-                    String(
-                        localized: "ai_disclaimer_responsibility",
-                        defaultValue: "However, they are still powerful tools — and with great power comes great responsibility. Please bear the following in mind."
-                    )
-                )
-                    .font(.headline)
-                ForEach(1...9, id: \.self) { index in
-                    let key = String.LocalizationValue("ai_disclaimer_point\(index)")
-                    Text(verbatim: "• " + String(localized: key))
+                ForEach(Array(copy.segments.enumerated()), id: \.offset) { _, segment in
+                    switch segment.style {
+                    case .body:
+                        Text(segment.text)
+                    case .bullet:
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(verbatim: "•")
+                            Text(segment.text)
+                        }
+                    case .italic:
+                        Text(segment.text).italic()
+                    }
+                }
+
+                if mode == .acceptance {
+                    Button {
+                        if let message = onAccept?() {
+                            acceptanceFailureMessage = message
+                        }
+                    } label: {
+                        Text(
+                            String(
+                                localized: "ai_disclaimer_accept_button",
+                                defaultValue: "I accept and take full responsibility"
+                            )
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("aiDisclaimerAcceptButton")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
         }
-        .navigationTitle(String(localized: "ai_disclaimer_dialog_title", defaultValue: "AI Tools — Important Information"))
+        .accessibilityIdentifier("aiDisclaimerScreen")
+        .navigationTitle(disclaimerTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button(String(localized: "done", defaultValue: "Done")) { dismiss() }
+            if mode == .information {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(String(localized: "okay", defaultValue: "OK")) { dismiss() }
+                }
+            } else {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "cancel", defaultValue: "Cancel")) { dismiss() }
+                        .accessibilityIdentifier("aiDisclaimerCancelButton")
+                }
             }
+        }
+        .alert(
+            String(localized: "error", defaultValue: "Error"),
+            isPresented: Binding(
+                get: { acceptanceFailureMessage != nil },
+                set: { if !$0 { acceptanceFailureMessage = nil } }
+            )
+        ) {
+            Button(String(localized: "okay", defaultValue: "OK")) {
+                acceptanceFailureMessage = nil
+            }
+        } message: {
+            Text(acceptanceFailureMessage ?? "")
+        }
+    }
+
+    /// Android's distinct title for informational and explicit-acceptance presentations.
+    private var disclaimerTitle: String {
+        switch mode {
+        case .information:
+            return String(
+                localized: "ai_disclaimer_dialog_title",
+                defaultValue: "AI Tools — Important Information"
+            )
+        case .acceptance:
+            return String(
+                localized: "ai_disclaimer_accept_title",
+                defaultValue: "Accept AI Disclaimer"
+            )
         }
     }
 }

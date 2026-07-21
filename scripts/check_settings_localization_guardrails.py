@@ -343,7 +343,13 @@ AI_LOCALIZATION_SOURCE_DIRECTORIES = (
     "Sources/BibleCore/Sources/BibleCore/AI",
     "Sources/BibleUI/Sources/BibleUI/AI",
 )
-AI_ADDITIONAL_LOCALIZATION_KEYS = frozenset({"llm_actions"})
+AI_ADDITIONAL_LOCALIZATION_KEYS = frozenset(
+    {
+        "ai_settings_shortcut_summary",
+        "llm_actions",
+        "prefs_features_cat",
+    }
+)
 AI_LOCALIZATION_LITERAL_PATTERNS = (
     re.compile(r'String\s*\(\s*localized:\s*"([^"]+)"', re.DOTALL),
     re.compile(r'\.localized\(\s*"([^"]+)"', re.DOTALL),
@@ -361,21 +367,15 @@ AI_LOCALIZATION_DEFAULT_RE = re.compile(
     r'defaultValue:\s*"((?:[^"\\]|\\.)*)"',
     re.DOTALL,
 )
-AI_DYNAMIC_LOCALIZATION_KEY_EXPANSIONS = {
-    r"ai_disclaimer_point\(index)": tuple(f"ai_disclaimer_point{index}" for index in range(1, 10)),
-}
-
-
 def discover_ai_localization_keys(repo_root: Path) -> set[str]:
     """Return every statically declared localization key in the AI feature.
 
     The inventory scans both AI source directories for direct localization
-    calls, localized help contracts, and indirect key fields. The disclaimer's
-    bounded indexed keys are expanded explicitly, and the Android-owned
-    ``llm_actions`` menu label is included whenever the AI feature sources are
-    present. The function performs read-only source-file I/O and raises
-    ``ValueError`` for an unrecognized interpolated localization literal so new
-    dynamic key families cannot silently escape the Android parity contract.
+    calls, localized help contracts, and indirect key fields. The Android-owned
+    entry-point strings declared outside those directories are included whenever the AI feature
+    sources are present. The function performs read-only source-file I/O and raises
+    ``ValueError`` for any interpolated localization literal because Swift treats
+    it as a format-pattern key rather than resolving the runtime interpolation.
     """
     source_paths = sorted(
         path
@@ -391,12 +391,9 @@ def discover_ai_localization_keys(repo_root: Path) -> set[str]:
         for pattern in AI_LOCALIZATION_LITERAL_PATTERNS:
             keys.update(pattern.findall(source))
         for raw_key in AI_LOCALIZATION_VALUE_LITERAL_RE.findall(source):
-            expansion = AI_DYNAMIC_LOCALIZATION_KEY_EXPANSIONS.get(raw_key)
-            if expansion is not None:
-                keys.update(expansion)
-            elif r"\(" in raw_key:
+            if r"\(" in raw_key:
                 raise ValueError(
-                    "Unrecognized dynamic AI localization key in "
+                    "Interpolated AI localization key in "
                     f"{path.relative_to(repo_root)}: {raw_key}"
                 )
             else:

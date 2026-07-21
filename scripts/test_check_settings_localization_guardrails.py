@@ -867,7 +867,13 @@ class AILocalizationSourceGuardrailTests(unittest.TestCase):
             )
 
     def write_android_english(self, root: Path, values: dict[str, str]) -> Path:
-        """Create the Android English resource file and return its res directory."""
+        """Create Android English resources including AI entry-point keys outside AI sources."""
+        fixture_values = {
+            "ai_settings_shortcut_summary": "AI connection and prompt settings",
+            "llm_actions": "AI Actions",
+            "prefs_features_cat": "Features",
+        }
+        fixture_values.update(values)
         android_root = root / "android"
         path = android_root / "values" / "strings.xml"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -875,7 +881,7 @@ class AILocalizationSourceGuardrailTests(unittest.TestCase):
             "<resources>\n"
             + "".join(
                 f'  <string name="{key}">{value}</string>\n'
-                for key, value in sorted(values.items())
+                for key, value in sorted(fixture_values.items())
             )
             + "</resources>\n",
             encoding="utf-8",
@@ -888,7 +894,7 @@ class AILocalizationSourceGuardrailTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
 
-    def test_source_inventory_covers_direct_indirect_dynamic_and_menu_keys(self) -> None:
+    def test_source_inventory_covers_direct_indirect_literal_and_menu_keys(self) -> None:
         """Every supported AI localization declaration form must enter the catalog contract."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -898,7 +904,7 @@ class AILocalizationSourceGuardrailTests(unittest.TestCase):
                 let direct = String(localized: "direct_key", defaultValue: "Direct")
                 let help = .localized("help_key")
                 let link = Link(labelKey: "label_key")
-                let dynamic = String.LocalizationValue("ai_disclaimer_point\\(index)")
+                let literal = String.LocalizationValue("literal_value_key")
                 ''',
             )
             keys = localization_guardrails.discover_ai_localization_keys(root)
@@ -909,10 +915,24 @@ class AILocalizationSourceGuardrailTests(unittest.TestCase):
                 "direct_key",
                 "help_key",
                 "label_key",
+                "literal_value_key",
+                "ai_settings_shortcut_summary",
                 "llm_actions",
-                *(f"ai_disclaimer_point{index}" for index in range(1, 10)),
+                "prefs_features_cat",
             },
         )
+
+    def test_source_inventory_rejects_interpolated_localization_value(self) -> None:
+        """Swift interpolation must not masquerade as a family of runtime localization keys."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_ai_source(
+                root,
+                'let broken = String.LocalizationValue("ai_disclaimer_point\\(index)")\n',
+            )
+
+            with self.assertRaisesRegex(ValueError, "Interpolated AI localization key"):
+                localization_guardrails.discover_ai_localization_keys(root)
 
     def test_catalog_rejects_ai_key_without_android_provenance(self) -> None:
         """An invented source label must fail before locale files can be synchronized."""
@@ -972,7 +992,10 @@ class AILocalizationSourceGuardrailTests(unittest.TestCase):
                 'let title = String(localized: "ai_provider_api_key", defaultValue: "API key")\n',
             )
 
-            with self.assertRaisesRegex(ValueError, "ai_provider_api_key, llm_actions"):
+            with self.assertRaisesRegex(
+                ValueError,
+                "ai_provider_api_key, ai_settings_shortcut_summary, llm_actions, prefs_features_cat",
+            ):
                 localization_guardrails.sync_android_shared_translations(
                     root,
                     catalog_without_sources,
@@ -986,10 +1009,15 @@ class AILocalizationSourceGuardrailTests(unittest.TestCase):
                     root / tree / "en.lproj" / "Localizable.strings"
                 )
                 self.assertEqual(values["ai_provider_api_key"], "API key")
+                self.assertEqual(
+                    values["ai_settings_shortcut_summary"],
+                    "AI connection and prompt settings",
+                )
                 self.assertEqual(values["llm_actions"], "AI Actions")
+                self.assertEqual(values["prefs_features_cat"], "Features")
 
         self.assertEqual(result.files_changed, 2)
-        self.assertEqual(result.values_written, 4)
+        self.assertEqual(result.values_written, 8)
 
     def test_ai_sync_preserves_android_owned_keys_outside_ai_sources(self) -> None:
         """The focused AI writer must not alter another shared localization domain."""
@@ -1017,11 +1045,16 @@ class AILocalizationSourceGuardrailTests(unittest.TestCase):
                     root / tree / "en.lproj" / "Localizable.strings"
                 )
                 self.assertEqual(values["ai_provider_api_key"], "API key")
+                self.assertEqual(
+                    values["ai_settings_shortcut_summary"],
+                    "AI connection and prompt settings",
+                )
                 self.assertEqual(values["llm_actions"], "AI Actions")
+                self.assertEqual(values["prefs_features_cat"], "Features")
                 self.assertEqual(values["unrelated_key"], "Existing iOS value")
 
         self.assertEqual(result.files_changed, 2)
-        self.assertEqual(result.values_written, 4)
+        self.assertEqual(result.values_written, 8)
 
 
 if __name__ == "__main__":

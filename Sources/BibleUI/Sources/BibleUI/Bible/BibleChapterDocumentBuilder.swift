@@ -197,8 +197,10 @@ struct BibleChapterDocumentBuilder {
         var xml = "<div>"
         for verse in verses {
             let cleanText = verse.xml.trimmingCharacters(in: .whitespacesAndNewlines)
+            let projection = SwordVerseOSISProjection.project(cleanText)
+            xml += projection.preVerseXML
             xml += "<verse osisID=\"\(osisBookId).\(chapter).\(verse.verse)\" verseOrdinal=\"\(verse.ordinal)\">"
-            xml += "\(cleanText) "
+            xml += "\(projection.verseBodyXML) "
             xml += "</verse>"
         }
         xml += "</div>"

@@ -997,6 +997,8 @@ extension AndBibleUITests {
             return "Backup & Restore"
         case "readerOpenSyncSettingsAction":
             return "Device synchronization"
+        case "readerOpenAISettingsAction":
+            return "AI Settings"
         case "readerOpenLabelSettingsAction":
             return "Label Settings…"
         case "readerOpenHelpAction":
@@ -1059,6 +1061,7 @@ extension AndBibleUITests {
              "readerOpenMyNotesAction",
              "readerOpenImportExportAction",
              "readerOpenSyncSettingsAction",
+             "readerOpenAISettingsAction",
              "readerOpenHelpAction",
              "readerNeedHelpAction",
              "readerContributeAction",

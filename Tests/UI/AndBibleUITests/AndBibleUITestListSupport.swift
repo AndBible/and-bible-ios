@@ -1552,6 +1552,8 @@ extension AndBibleUITests {
             "Global text options"
         case "settingsSyncLink":
             "Device synchronization"
+        case "settingsAISettingsLink":
+            "AI Settings"
         case "settingsReadingProgressLink":
             "Reading Progress Settings"
         case "settingsLabelsLink":

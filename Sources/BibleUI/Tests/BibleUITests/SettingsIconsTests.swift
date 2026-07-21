@@ -189,6 +189,16 @@ final class SettingsIconsTests: XCTestCase {
         XCTAssertEqual(sync.icon?.androidDrawableName, "ic_syncdb_24dp")
         XCTAssertEqual(sync.searchEntry.identifier, sync.identifier)
 
+        let aiSettings = ApplicationSettingsPresentation.aiSettingsShortcut
+        XCTAssertEqual(aiSettings.identifier, "settingsAISettingsLink")
+        XCTAssertEqual(aiSettings.androidKey, "ai_settings_shortcut")
+        XCTAssertEqual(aiSettings.titleLocalizationKey, "ai_settings")
+        XCTAssertEqual(aiSettings.titleDefault, "AI Settings")
+        XCTAssertEqual(aiSettings.summaryLocalizationKey, "ai_settings_shortcut_summary")
+        XCTAssertTrue(aiSettings.keywords.contains("ai_settings_shortcut"))
+        XCTAssertEqual(aiSettings.icon?.androidDrawableName, "icon_robot")
+        XCTAssertEqual(aiSettings.searchEntry.identifier, aiSettings.identifier)
+
         let readingProgress = ApplicationSettingsPresentation.readingProgressSettingsShortcut
         XCTAssertEqual(readingProgress.identifier, "settingsReadingProgressLink")
         XCTAssertEqual(readingProgress.androidKey, "reading_progress_settings_shortcut")
@@ -203,19 +213,19 @@ final class SettingsIconsTests: XCTestCase {
     func testApplicationPreferenceFeatureShortcutsFollowRuntimeAvailability() {
         XCTAssertEqual(
             ApplicationSettingsPresentation.featureShortcuts(canOpenReadingProgressSettings: false),
-            [.syncSettings]
+            [.syncSettings, .aiSettings]
         )
         XCTAssertEqual(
             ApplicationSettingsPresentation.featureShortcuts(canOpenReadingProgressSettings: true),
-            [.syncSettings, .readingProgressSettings]
+            [.syncSettings, .aiSettings, .readingProgressSettings]
         )
         XCTAssertEqual(
             ApplicationSettingsPresentation.primaryLinkIdentifiers(canOpenReadingProgressSettings: false),
-            ["settingsGlobalTextOptionsLink", "settingsSyncLink"]
+            ["settingsGlobalTextOptionsLink", "settingsSyncLink", "settingsAISettingsLink"]
         )
         XCTAssertEqual(
             ApplicationSettingsPresentation.primaryLinkIdentifiers(canOpenReadingProgressSettings: true),
-            ["settingsGlobalTextOptionsLink", "settingsSyncLink", "settingsReadingProgressLink"]
+            ["settingsGlobalTextOptionsLink", "settingsSyncLink", "settingsAISettingsLink", "settingsReadingProgressLink"]
         )
     }
 
