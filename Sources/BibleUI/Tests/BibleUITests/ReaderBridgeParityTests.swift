@@ -135,9 +135,11 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
      Verifies Compare resolves the selected fragment rather than the active KJV pane.
 
      - Side effects: Builds temporary KJV/Vulgate SWORD modules and waits for the controller's
-       background Compare payload emission.
+       real background Compare builder before observing its main-queue payload emission.
      - Failure modes: Fails if the selected Vulgate ordinals are read as KJV, if target conversion
        is skipped, or if either fragment advertises the wrong source versification.
+     - Determinism: An injected wrapper fulfills only after the production Compare builder returns,
+       so simulator load cannot turn the assertion into a two-second scheduling race.
      */
     @MainActor
     func testCompareEventUsesSelectedVulgateFragmentWhileActivePaneIsKJV() throws {
@@ -157,15 +159,36 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let start = try XCTUnwrap(source.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
         let end = try XCTUnwrap(source.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2))
         let (bridge, scripts) = makeRecordingBridge()
-        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let compareBuildFinished = expectation(description: "Production Compare builder finished")
+        let resultLock = NSLock()
+        var builtDocumentJSON: String?
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            compareDocumentBuildOperation: { request in
+                let documentJSON = BibleReaderCompareDocumentBuilder.buildDocumentJSON(request)
+                resultLock.lock()
+                builtDocumentJSON = documentJSON
+                resultLock.unlock()
+                compareBuildFinished.fulfill()
+                return documentJSON
+            }
+        )
         XCTAssertEqual(controller.activeModuleName, "KJV")
 
         controller.bridge(bridge, compareVerses: "VulgTest", startOrdinal: start, endOrdinal: end)
 
-        let deadline = Date(timeIntervalSinceNow: 2)
-        while !scripts().contains(where: { $0.contains("emit('add_documents'") }) && Date() < deadline {
-            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
-        }
+        wait(for: [compareBuildFinished], timeout: 10)
+        resultLock.lock()
+        let didBuildDocument = builtDocumentJSON != nil
+        resultLock.unlock()
+        XCTAssertTrue(didBuildDocument, "Expected the production Compare builder to return a document")
+        XCTAssertTrue(
+            waitUntil(timeout: 5) {
+                scripts().contains(where: { $0.contains("emit('add_documents'") })
+            },
+            "Expected the completed Compare document to reach the bridge"
+        )
         let document = try XCTUnwrap(
             bridgeEmissionPayload(from: scripts(), event: "add_documents") as? [String: Any]
         )
