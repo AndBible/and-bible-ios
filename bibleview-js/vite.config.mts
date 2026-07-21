@@ -67,6 +67,9 @@ export function bibleViewConfig(mode: string): UserConfig {
             emptyOutDir: true,
             sourcemap,
             rollupOptions: {
+                // Rollup can collapse identical inline source maps in completion order on Linux.
+                // Serial file operations keep debug mappings reproducible without slowing releases.
+                ...(sourcemap ? {maxParallelFileOps: 1} : {}),
                 input: {
                     main: resolve(__dirname, "index.html")
                 }
