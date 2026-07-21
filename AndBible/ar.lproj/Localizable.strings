@@ -643,16 +643,10 @@
 "calculator_par1" = "قبل الدخول إلى التطبيق، تُعرض شاشة الآلة الحاسبة.";
 "calculator_par2" = "يمكنك إجراء العمليات الحسابية العادية، وعندما تريد الدخول إلى التطبيق فقط اكتب رمز PIN الخاص بك (الافتراضي هو 1234) ثم اضغط على زر \"=\".";
 "calculator_par3" = "يمكنك تعيين رمز PIN مخصص من خلال إعداد \"رمز PIN للآلة الحاسبة\".";
-"discrete_mode_info_par1" = "أنت تستخدم إصدار التطبيق القياسي، مما يعني أنه لا يزال بالإمكان رؤية الاسم الحقيقي وأيقونة التطبيق في معلومات التطبيق.";
-"discrete_mode_info_par2" = "لتعزيز الأمان في البيئات التي تعاني من الاضطهاد، نوصي بشدة باستخدام الإصدار المنفصل من التطبيق الذي يعرض الآلة الحاسبة دائماً، حتى لو تم حذف بيانات التطبيق.";
-"discrete_mode_link" = "يمكنك تنزيل أحدث إصدار من الإصدار المنفصل من %@.";
 "give_passphrase_for_module" = "المستند %@ مشفر و يحتاج لكلمة مرور ليتم فتحه";
 "show_unlock_info" = "الوحدة و معلومات الفتح";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "جارٍ فك الضغط الآن...";
@@ -1021,3 +1015,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "إعادة إنشاء مستند الذكاء الاصطناعي…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

@@ -630,16 +630,10 @@ Google డ్రైవ్ ని ఉపయోగిస్తున్నప�
 "calculator_par1" = "యాప్‌లోకి ప్రవేశించే ముందు, కాలిక్యులేటర్ స్క్రీన్ ప్రదర్శించబడుతుంది. .";
 "calculator_par2" = "అందులో, మీరు ప్రామాణిక కాలిక్యులస్ చేయవచ్చు మరియు మీరు యాప్‌లోకి ప్రవేశించాలనుకున్నప్పుడు, మీరు మీ PIN కోడ్‌ని టైప్ చేయండి (డిఫాల్ట్ 1234) ఆపై \"=\" బటన్‌ను నొక్కండి. .";
 "calculator_par3" = "మీరు \"కాలిక్యులేటర్ పిన్\" సెట్టింగ్ ద్వారా అనుకూల పిన్ కోడ్‌ని సెటప్ చేయవచ్చు. .";
-"discrete_mode_info_par1" = "మీరు స్టాండర్డ్ అప్లికేషన్ వెర్షన్‌ని ఉపయోగిస్తున్నారు, అంటే ఇప్పటికీ చూడటం సాధ్యమే యాప్ సమాచారంలో అప్లికేషన్ యొక్క అసలు పేరు మరియు చిహ్నం. .";
-"discrete_mode_info_par2" = "హింసించబడిన వాతావరణంలో మెరుగైన భద్రత కోసం, మేము వివిక్తంగా ఉపయోగించమని సిఫార్సు చేస్తున్నాము యాప్ డేటా తొలగించబడినప్పటికీ, ఎల్లప్పుడూ కాలిక్యులేటర్‌ని ప్రదర్శించే యాప్ వెర్షన్. .";
-"discrete_mode_link" = "మీరు %@ నుండి వివిక్త సంస్కరణ యొక్క తాజా వర్షన్ డౌన్‌లోడ్ చేసుకోవచ్చు. .";
 "give_passphrase_for_module" = "పత్రం %@ ఎన్‌క్రిప్ట్ చేయబడింది మరియు అన్‌లాక్ చేయడానికి పాస్‌ఫ్రేజ్ అవసరం";
 "show_unlock_info" = "మాడ్యూల్ & సమాచారాన్ని అన్‌లాక్ చేయండి";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "ఇప్పుడు జిప్ ఫైల్‌ని సంగ్రహిస్తోంది...";
@@ -1006,3 +1000,6 @@ Google డ్రైవ్ ని ఉపయోగిస్తున్నప�
 
 /* Android shared translations */
 "ai_document_regenerating" = "AI పత్రం పునర్జనరేట్ చేస్తోంది…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

@@ -987,10 +987,8 @@ public struct SettingsView: View {
                 .accessibilityIdentifier("discreteHelpButton")
             }
 
-            if ApplicationSettingsPresentation.isPreferenceVisible(
-                .discreteMode,
-                buildIdentity: ApplicationSettingsPresentation.currentBuildIdentity
-            ), settingsSearchMatchesPreference(.discreteMode, in: securitySettingsSearchEntries) {
+            if ApplicationSettingsPresentation.isPreferenceVisible(.discreteMode),
+               settingsSearchMatchesPreference(.discreteMode, in: securitySettingsSearchEntries) {
                 Toggle(isOn: $discreteMode) {
                     settingsRowLabel(
                         preferenceKey: .discreteMode,
@@ -1001,10 +999,8 @@ public struct SettingsView: View {
                 .accessibilityIdentifier("discreteModeToggle")
             }
 
-            if ApplicationSettingsPresentation.isPreferenceVisible(
-                .showCalculator,
-                buildIdentity: ApplicationSettingsPresentation.currentBuildIdentity
-            ), settingsSearchMatchesPreference(.showCalculator, in: securitySettingsSearchEntries) {
+            if ApplicationSettingsPresentation.isPreferenceVisible(.showCalculator),
+               settingsSearchMatchesPreference(.showCalculator, in: securitySettingsSearchEntries) {
                 Toggle(isOn: $showCalculator) {
                     settingsRowLabel(
                         preferenceKey: .showCalculator,
@@ -1643,37 +1639,13 @@ public struct SettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    if ApplicationSettingsPresentation.currentBuildIdentity == .discrete {
-                        Text(String(localized: "calculator_par1"))
-                        Text(String(localized: "calculator_par2"))
-                        Text(String(localized: "calculator_par3"))
-                        Text(String(localized: "discrete_help_calculator_enforced_ios"))
-                            .foregroundStyle(.secondary)
-                        Text(String(localized: "discrete_help_calculator_fallback_ios"))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(String(localized: "discrete_help_standard_icon_only_ios"))
-                            .foregroundStyle(.secondary)
-                        Text(String(localized: "discrete_mode_info_par1"))
-                        Text(String(localized: "discrete_mode_info_par2"))
-                        if let documentationURL = URL(
-                            string: "https://github.com/AndBible/and-bible/wiki/Discrete-build"
-                        ) {
-                            Link(
-                                String(
-                                    format: String(localized: "discrete_mode_link"),
-                                    documentationURL.absoluteString
-                                ),
-                                destination: documentationURL
-                            )
-                        }
-                    }
+                    Text(String(localized: "calculator_par1"))
+                    Text(String(localized: "calculator_par2"))
+                    Text(String(localized: "calculator_par3"))
+                    Text(String(localized: "discrete_help_ios_note"))
+                        .foregroundStyle(.secondary)
                 }
-                .accessibilityIdentifier(
-                    ApplicationSettingsPresentation.currentBuildIdentity == .discrete
-                        ? "calculatorProductSecurityHelp"
-                        : "standardProductSecurityHelp"
-                )
+                .accessibilityIdentifier("discreteModeSecurityHelp")
                 .padding()
             }
             .navigationTitle(String(localized: "settings_security"))
@@ -1978,7 +1950,6 @@ public struct SettingsView: View {
 
     /// Search entries for security preferences.
     private var securitySettingsSearchEntries: [AndBibleSettingsSearchEntry] {
-        let buildIdentity = ApplicationSettingsPresentation.currentBuildIdentity
         var entries = [
             preferenceSearchEntry(
                 .discreteHelp,
@@ -1986,14 +1957,14 @@ public struct SettingsView: View {
                 summary: String(localized: "discrete_help_summary")
             ),
         ]
-        if ApplicationSettingsPresentation.isPreferenceVisible(.discreteMode, buildIdentity: buildIdentity) {
+        if ApplicationSettingsPresentation.isPreferenceVisible(.discreteMode) {
             entries.append(preferenceSearchEntry(
                 .discreteMode,
                 title: String(localized: "discrete_mode"),
                 summary: String(localized: "discrete_mode_description")
             ))
         }
-        if ApplicationSettingsPresentation.isPreferenceVisible(.showCalculator, buildIdentity: buildIdentity) {
+        if ApplicationSettingsPresentation.isPreferenceVisible(.showCalculator) {
             entries.append(preferenceSearchEntry(
                 .showCalculator,
                 title: String(localized: "show_calculator"),

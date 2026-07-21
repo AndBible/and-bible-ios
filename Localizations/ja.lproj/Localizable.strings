@@ -761,16 +761,10 @@
 "calculator_par1" = "アプリに入る前に電卓画面が表示されます。";
 "calculator_par2" = "電卓で通常の計算ができます。アプリに入る際は、 PINコード（デフォルトは1234）を入力して「＝」ボタンを押してください。";
 "calculator_par3" = "「電卓のPINコード」設定でカスタムPINコードを設定できます。";
-"discrete_mode_info_par1" = "標準アプリバージョンを使用しているため、アプリ情報でアプリの本当の名前とアイコンが引き続き確認できる場合があります。";
-"discrete_mode_info_par2" = "迫害下にある環境でのセキュリティ向上のため、アプリデータが削除されても常に電卓を表示する隠蔽バージョンの使用を強くお勧めします。";
-"discrete_mode_link" = "隠蔽バージョンの最新版は %@ からダウンロードできます。";
 "give_passphrase_for_module" = "文書 %@ は暗号化されています。解除するにはパスフレーズが必要です";
 "show_unlock_info" = "モジュールと解除情報";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "ZIPファイルを展開しています…";
@@ -1136,3 +1130,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "AIドキュメントを再生成中…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

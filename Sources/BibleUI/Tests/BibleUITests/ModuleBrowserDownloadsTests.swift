@@ -1451,6 +1451,31 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
         )
     }
 
+    /** Partial repository failures stay in Download Errors instead of impersonating install failures. */
+    func testCatalogRefreshInlineErrorRequiresACompletelyEmptyCatalog() {
+        let errors = ["eBible: timed out", "AndBible Extra: cancelled"]
+
+        XCTAssertNil(
+            ModuleBrowserView.catalogRefreshInlineError(
+                availableModuleCount: 6,
+                errors: errors
+            )
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.catalogRefreshInlineError(
+                availableModuleCount: 0,
+                errors: errors
+            ),
+            "Failed to load catalogs:\neBible: timed out\nAndBible Extra: cancelled"
+        )
+        XCTAssertNil(
+            ModuleBrowserView.catalogRefreshInlineError(
+                availableModuleCount: 0,
+                errors: []
+            )
+        )
+    }
+
     /**
      Verifies install failures reuse Android's localized install-failure sentence.
 

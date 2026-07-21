@@ -91,9 +91,6 @@ jobs:
       - name: Check bridge parity inventory
         run: python3 scripts/check_bridge_parity_inventory.py
 
-      - name: Check source product boundaries
-        run: python3 scripts/check_product_boundaries.py
-
       - name: Check static source guardrails
         run: python3 scripts/check_repo_standards.py source-guards
 
@@ -1286,41 +1283,6 @@ jobs:
             --result-bundle-path "${BUILD_XCRESULT_BUNDLE_PATH}" \
             --code-signing-allowed NO \
             --action build-for-testing
-
-      - name: Build Calculator discrete target
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        run: >-
-          xcodebuild
-          -project AndBible.xcodeproj
-          -scheme AndBibleDiscrete
-          -configuration Debug
-          -destination "${{ steps.simulator.outputs.destination }}"
-          -derivedDataPath "${DERIVED_DATA_PATH}"
-          CODE_SIGNING_ALLOWED=NO
-          build
-
-      - name: Validate processed product boundaries
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        shell: bash
-        run: |
-          standard_app="${DERIVED_DATA_PATH}/Build/Products/Debug-iphonesimulator/AndBible.app"
-          calculator_app="${DERIVED_DATA_PATH}/Build/Products/Debug-iphonesimulator/Calculator.app"
-          codesign --force --sign - --entitlements AndBible/AndBible.entitlements "$standard_app"
-          codesign --force --sign - --entitlements AndBible/AndBibleDiscrete.entitlements "$calculator_app"
-          codesign --display --entitlements :- "$standard_app" > "$RUNNER_TEMP/AndBible-simulator.xcent"
-          codesign --display --entitlements :- "$calculator_app" > "$RUNNER_TEMP/Calculator-simulator.xcent"
-          python3 scripts/check_product_boundaries.py \
-            --standard-app "$standard_app" \
-            --calculator-app "$calculator_app" \
-            --standard-entitlements "$RUNNER_TEMP/AndBible-simulator.xcent" \
-            --calculator-entitlements "$RUNNER_TEMP/Calculator-simulator.xcent"
-
-      - name: Install Calculator product for cross-bundle launch smoke
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        run: >-
-          xcrun simctl install
-          "${{ steps.simulator.outputs.simulator_id }}"
-          "${DERIVED_DATA_PATH}/Build/Products/Debug-iphonesimulator/Calculator.app"
 
       - name: Build host-side UI fixture tool
         if: needs.repo-standards.outputs.required_checks_only != 'true'

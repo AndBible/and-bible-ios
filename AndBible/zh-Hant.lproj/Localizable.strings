@@ -643,16 +643,10 @@
 "calculator_par1" = "在進入主程式前，會顯示計算機界面。";
 "calculator_par2" = "在這個界面，你可以進行一般運算。如果你想進入主程式，只需輸入你的PIN碼 (預設是1234) 後按 \"=\" 鈕";
 "calculator_par3" = "你可以在「計算機PIN」更改自訂的PIN碼。";
-"discrete_mode_info_par1" = "你正在使用標準版本的程式，因此在程式的詳細資料中，仍可能顯示程式的真正名稱及圖示。";
-"discrete_mode_info_par2" = "在嚴重逼迫的地區，為提高安全性，我們建議你使用特殊的隱藏版本。它會由始至終都顯示計算機程式。";
-"discrete_mode_link" = "你可以在%@下載最新的特殊版本程式。";
 "give_passphrase_for_module" = "%@ 文件已加密，需要密碼解鎖。";
 "show_unlock_info" = "模組及解鎖資訊";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "正在解壓縮Zip檔案...";
@@ -1020,3 +1014,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "正在重新產生AI文件…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

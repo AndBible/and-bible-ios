@@ -20,17 +20,13 @@ from check_settings_localization_guardrails import (
     LocalePrefOption,
     PARITY_KEYS,
     audit_android_shared_translations,
-    audit_discrete_app_name_localizations,
     audit_discrete_security_localizations,
     audit_locale_pref_contract,
-    build_android_discrete_app_names,
     build_android_non_english_by_key,
     build_android_shared_localization,
-    load_android_discrete_app_names_from_snapshot,
     load_android_locale_pref_options_from_snapshot,
     load_android_non_english_snapshot,
     parse_ios_strings,
-    sync_discrete_app_name_localizations,
     sync_discrete_security_localizations,
     sync_android_shared_translations,
     write_android_non_english_snapshot,
@@ -271,104 +267,12 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
                 {key: [] for key in PARITY_KEYS},
                 [],
                 AndroidSharedLocalization([], [], {}, {}, {}, {}),
-                {
-                    locale: "Simple Calculator"
-                    for locale in localization_guardrails.LOCALE_TO_ANDROID_VALUES
-                },
             )
 
             payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
 
         self.assertEqual(payload["source_android_res"], "app/src/main/res")
         self.assertNotIn(str(root), payload["source_android_res"])
-
-    def test_discrete_app_names_use_android_translations_and_english_fallback(self) -> None:
-        """Derives the launcher identity from Android's flavor-backed string contract.
-
-        The French fixture translates `app_name_calculator` while the German fixture omits it.
-        A failure means iOS either ignores a real Android product name or loses Android's normal
-        English resource fallback for untranslated locales.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            android_root = Path(tmp)
-            self.write_android_strings(
-                android_root,
-                "values",
-                {"app_name_calculator": "Simple Calculator"},
-            )
-            self.write_android_strings(
-                android_root,
-                "values-fr",
-                {"app_name_calculator": "Calculatrice simple"},
-            )
-
-            names = build_android_discrete_app_names(android_root)
-
-        self.assertEqual(names["en"], "Simple Calculator")
-        self.assertEqual(names["fr"], "Calculatrice simple")
-        self.assertEqual(names["de"], "Simple Calculator")
-        self.assertEqual(set(names), set(localization_guardrails.LOCALE_TO_ANDROID_VALUES))
-
-    def test_discrete_app_name_snapshot_requires_complete_locale_inventory(self) -> None:
-        """Rejects incomplete launcher-name snapshots instead of weakening CI parity.
-
-        CI commonly uses the committed Android snapshot. A failure means removing one locale from
-        that fixture could silently make the discrete target fall back to an unverified identity.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            names = {
-                locale: "Simple Calculator"
-                for locale in localization_guardrails.LOCALE_TO_ANDROID_VALUES
-            }
-            names.pop("fr")
-            path = self.write_snapshot(Path(tmp), {"discrete_app_names": names})
-
-            with self.assertRaises(ValueError) as failure:
-                load_android_discrete_app_names_from_snapshot(path)
-
-        self.assertIn("missing=['fr']", str(failure.exception))
-
-    def test_discrete_app_name_sync_and_audit_are_target_scoped(self) -> None:
-        """Writes exact Info.plist names without modifying standard app localizations.
-
-        The test uses a two-locale contract to prove deterministic writes, Android-value auditing,
-        and isolation under the discrete-only resource directory. A failure can expose the normal
-        AndBible target to the disguised launcher name or let localized identity drift pass CI.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            names = {"en": "Simple Calculator", "fr": "Calculatrice simple"}
-
-            result = sync_discrete_app_name_localizations(root, names)
-            failures = audit_discrete_app_name_localizations(root, names)
-
-            self.assertEqual(result.files_changed, 2)
-            self.assertEqual(result.values_written, 2)
-            self.assertEqual(failures, [])
-            self.assertFalse((root / "AndBible" / "en.lproj" / "InfoPlist.strings").exists())
-            self.assertEqual(
-                parse_ios_strings(
-                    root
-                    / "AndBibleDiscreteLocalizations"
-                    / "fr.lproj"
-                    / "InfoPlist.strings"
-                )["CFBundleDisplayName"],
-                "Calculatrice simple",
-            )
-
-            resource = (
-                root
-                / "AndBibleDiscreteLocalizations"
-                / "fr.lproj"
-                / "InfoPlist.strings"
-            )
-            resource.write_text(
-                '"CFBundleDisplayName" = "Independent translation";\n',
-                encoding="utf-8",
-            )
-            failures = audit_discrete_app_name_localizations(root, names)
-
-        self.assertEqual(failures, ["discrete_app_name value drift: fr"])
 
     def test_locale_pref_snapshot_loader_preserves_default_empty_value(self) -> None:
         """Protects the Android default locale option while validating snapshot shape.
@@ -831,8 +735,8 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
         self.assertEqual(audit.missing_key_by_key, {})
         self.assertEqual(audit.value_mismatch_by_key, {})
 
-    def test_discrete_security_sync_enforces_product_copy_and_removes_obsolete_keys(self) -> None:
-        """Covers translated Android help, truthful fallback, and the obsolete-copy denylist."""
+    def test_discrete_security_sync_enforces_runtime_copy_and_removes_obsolete_keys(self) -> None:
+        """Covers Android help, the iOS name limitation, and obsolete product-copy removal."""
         english_by_key = {
             key: f"English {key}"
             for key in localization_guardrails.DISCRETE_SECURITY_ANDROID_KEYS
@@ -861,6 +765,8 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
                                 localization_guardrails.OBSOLETE_DISCRETE_MODE_SENTENCE
                             ),
                             "discrete_help_par1": "Obsolete shared help",
+                            "discrete_mode_info_par1": "Obsolete Android launcher copy",
+                            "discrete_help_calculator_enforced_ios": "Obsolete second-app copy",
                             "prefs_volume_keys_scroll_ios_note": "Dead note",
                         },
                     )
@@ -879,12 +785,14 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
                 )
                 self.assertEqual(french["calculator_par1"], "Francais calculator_par1")
                 self.assertEqual(
-                    french["discrete_help_calculator_enforced_ios"],
+                    french["discrete_help_ios_note"],
                     localization_guardrails.DISCRETE_SECURITY_IOS_FALLBACKS[
-                        "discrete_help_calculator_enforced_ios"
+                        "discrete_help_ios_note"
                     ],
                 )
                 self.assertNotIn("discrete_help_par1", french)
+                self.assertNotIn("discrete_mode_info_par1", french)
+                self.assertNotIn("discrete_help_calculator_enforced_ios", french)
                 self.assertNotIn("prefs_volume_keys_scroll_ios_note", french)
 
             drift_path = root / "AndBible" / "fr.lproj" / "Localizable.strings"

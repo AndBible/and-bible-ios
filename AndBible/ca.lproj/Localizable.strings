@@ -798,16 +798,10 @@
 "calculator_par1" = "Abans d'entrar a l'aplicació, es mostra la pantalla de la calculadora.";
 "calculator_par2" = "En ella, pots fer càlculs estàndard, i quan vulguis entrar a l'aplicació, simplement escriu el teu codi PIN (el valor predeterminat és 1234) i prem el botó «=».";
 "calculator_par3" = "Pots establir un codi PIN personalitzat a la configuració «PIN de la calculadora».";
-"discrete_mode_info_par1" = "Estàs usant la versió estàndard de l'aplicació, la qual cosa significa que encara és possible veure el nom i la icona real de l'aplicació a la informació de l'aplicació.";
-"discrete_mode_info_par2" = "Per a una seguretat millorada en entorns de persecució, recomanem usar la versió discreta de l'aplicació, que sempre mostra la calculadora, fins i tot si s'eliminen les dades de l'aplicació.";
-"discrete_mode_link" = "Pots baixar la darrera versió de la versió discreta des de %@.";
 "give_passphrase_for_module" = "El document %@ està xifrat i necessita una contrasenya per desbloquejar-lo";
 "show_unlock_info" = "Mòdul i informació de desbloqueig";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "S'està extraient el fitxer zip…";
@@ -1169,3 +1163,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Regenerant el document d'IA…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

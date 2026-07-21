@@ -1,6 +1,5 @@
 // ApplicationSettingsPresentation.swift - Android-backed application settings row metadata
 
-import Foundation
 import BibleCore
 
 /**
@@ -16,71 +15,19 @@ import BibleCore
  */
 enum ApplicationSettingsPresentation {
     /**
-     Static application identity selected by the Xcode build configuration.
-
-     Android ships a dedicated `discrete` product flavor whose package identity and launcher name
-     are always calculator-themed. iOS mirrors that contract with a separate build configuration
-     and scheme rather than treating the runtime alternate-icon toggle as a full identity change.
-     */
-    enum BuildIdentity: String, Equatable, Sendable {
-        /// Normal AndBible product identity.
-        case standard
-
-        /// Calculator-disguised product identity.
-        case discrete
-    }
-
-    /// Info.plist key populated by each app build configuration.
-    static let buildIdentityInfoKey = "AndBibleBuildIdentity"
-
-    /**
-     Resolves the static product identity from an Info.plist dictionary.
-
-     - Parameter infoDictionary: Bundle metadata containing `AndBibleBuildIdentity` when built by
-       the app target.
-     - Returns: `.discrete` only for the exact discrete marker; missing or unknown values safely
-       resolve to `.standard` for package tests and legacy builds.
-     - Side effects: none.
-     - Failure modes: Malformed or non-string values use the standard identity.
-     */
-    static func buildIdentity(from infoDictionary: [String: Any]?) -> BuildIdentity {
-        guard let rawValue = infoDictionary?[buildIdentityInfoKey] as? String else {
-            return .standard
-        }
-        return BuildIdentity(rawValue: rawValue) ?? .standard
-    }
-
-    /// Static identity of the currently running app bundle.
-    static var currentBuildIdentity: BuildIdentity {
-        buildIdentity(from: Bundle.main.infoDictionary)
-    }
-
-    /**
      Decides whether a registered Android preference has an honest iOS settings surface.
 
      Hardware volume-button events are not available through a supported public iOS API, so the
-     Android volume-scroll preference remains syncable but is not presented as functional. In the
-     discrete SKU, identity and calculator routing are fixed by the product configuration; exposing
-     runtime identity toggles there would let the disguised build drift into an invalid state.
+     Android volume-scroll preference remains syncable but is not presented as functional. Runtime
+     discrete-mode and calculator-gate preferences remain visible because iOS ships one app bundle.
 
-     - Parameters:
-       - key: Registered Android preference being considered for presentation.
-       - buildIdentity: Static app product identity selected by the build configuration.
-     - Returns: `true` when the preference has a functional user-facing surface in that product.
+     - Parameter key: Registered Android preference being considered for presentation.
+     - Returns: `true` when the preference has a functional user-facing surface on iOS.
      - Side effects: none.
      - Failure modes: none; unknown future keys remain visible until explicitly classified.
      */
-    static func isPreferenceVisible(
-        _ key: AppPreferenceKey,
-        buildIdentity: BuildIdentity
-    ) -> Bool {
-        if key == .volumeKeysScroll {
-            return false
-        }
-        if buildIdentity == .discrete && (key == .discreteMode || key == .showCalculator) {
-            return false
-        }
-        return true
+    static func isPreferenceVisible(_ key: AppPreferenceKey) -> Bool {
+        key != .volumeKeysScroll
     }
 
     /**

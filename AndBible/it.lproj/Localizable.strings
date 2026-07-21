@@ -642,16 +642,10 @@
 "calculator_par1" = "Prima di accedere all'app, viene mostrata la schermata della calcolatrice.";
 "calculator_par2" = "In questa puoi eseguire normali calcoli, e quando vuoi accedere all'app, ti basta inserire il tuo codice PIN (predefinito è 1234) e poi premere il pulsante \"=\".";
 "calculator_par3" = "Puoi impostare un tuo PIN personale dall'impostazione \"PIN calcolatrice\".";
-"discrete_mode_info_par1" = "Stai usando la versione standard dell'app, il che significa che è ancora possibile vedere il vero nome e la vera icona dell'app nelle informazioni app.";
-"discrete_mode_info_par2" = "Per una maggiore sicurezza nelle zone di persecuzione, consigliamo vivamente l'uso della versione discreta dell'app, che mostra sempre la calcolatrice, anche quando i dati dell'app vengono cancellati.";
-"discrete_mode_link" = "Puoi scaricare l'ultima versione discreta da %@.";
 "give_passphrase_for_module" = "Il documento %@ è cifrato e necessita di una password per essere sbloccato";
 "show_unlock_info" = "Info su modulo e sblocco";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Estrazione del file Zip in corso...";
@@ -1016,3 +1010,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Rigenerazione documento IA in corso…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

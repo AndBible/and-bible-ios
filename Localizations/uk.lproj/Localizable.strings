@@ -625,16 +625,10 @@
 "calculator_par1" = "Перед входом у програму відображається екран калькулятора.";
 "calculator_par2" = "У ньому ви можете виконувати стандартні обчислення, а коли захочете увійти в додаток, ви просто введіть свій PIN-код (за замовчуванням 1234), а потім натисніть кнопку \"=\".";
 "calculator_par3" = "Ви можете встановити спеціальний PIN-код за допомогою параметра «PIN-код калькулятора».";
-"discrete_mode_info_par1" = "Ви використовуєте стандартну версію програми, а це означає, що в інформації про програму все ще можна бачити справжню назву та піктограму програми.";
-"discrete_mode_info_par2" = "Для покращення безпеки в середовищі де переслідування за віру, ми настійно рекомендуємо використовувати дискретну, непомітну версію програми, яка завжди відображає калькулятор, навіть якщо дані програми видалено.";
-"discrete_mode_link" = "Ви можете завантажити останню версію дискретної, непомітної версії з %@.";
 "give_passphrase_for_module" = "Ресурс %@ зашифрований, потрібно парольну фразу для розблокування";
 "show_unlock_info" = "Модуль і інформацію про розблокування";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Витягування Zip-файлу…";
@@ -1003,3 +997,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Повторне створення ресурсу ШІ…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

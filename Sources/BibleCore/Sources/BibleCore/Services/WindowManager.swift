@@ -73,12 +73,12 @@ public final class WindowManager {
      - Returns: Effective pin mode used by visibility, ordering, and layout-weight behavior.
      - Side Effects: None.
      - Failure Modes: Detached windows fall back to their own workspace relationship and then to
-       auto-pin disabled.
+       Android's enabled auto-pin default.
      */
     public func isEffectivelyPinned(_ window: Window) -> Bool {
         let autoPin = window.workspace?.workspaceSettings?.autoPin
             ?? activeWorkspace?.workspaceSettings?.autoPin
-            ?? false
+            ?? WorkspaceSettings.defaultAutoPin
         return window.effectivePinMode(autoPin: autoPin)
     }
 

@@ -1,8 +1,8 @@
-// SpeakSystemPresentationPolicy.swift -- Product-boundary rules for system speech surfaces
+// SpeakSystemPresentationPolicy.swift -- Discrete-mode rules for system speech surfaces
 
 import Foundation
 
-/** Immutable Now Playing values that standard-product speech may expose to the operating system. */
+/** Immutable Now Playing values that non-discrete speech may expose to the operating system. */
 struct SpeakNowPlayingPresentation: Equatable, Sendable {
     /// Reader title, normally the current key or passage.
     let title: String
@@ -22,62 +22,58 @@ struct SpeakNowPlayingPresentation: Equatable, Sendable {
 }
 
 /**
- Enforces the Calculator product boundary for operating-system speech presentation.
+ Enforces Android's runtime discrete-mode boundary for operating-system speech presentation.
 
- Android's discrete flavor keeps speech audio functional but does not attach a media session and
- replaces notification content with calculator-safe presentation. iOS has no Speak notification;
- its equivalent external surfaces are Now Playing metadata and remote-command registration. The
- policy is resolved once from the signed app bundle and then injected immutably into `SpeakService`.
+ Android checks `CommonUtils.isDiscrete` whenever it builds speech notification state: audio remains
+ functional, but the media session and passage identity are suppressed. iOS has no equivalent Speak
+ notification, so this policy applies the same runtime preference to Now Playing metadata and remote
+ command registration inside the single installed AndBible app.
  */
 struct SpeakSystemPresentationPolicy: Equatable, Sendable {
-    /// Existing app Info.plist contract populated by each Xcode product configuration.
-    static let buildIdentityInfoKey = "AndBibleBuildIdentity"
-
-    /// Whether this product may expose Now Playing metadata and remote media commands.
+    /// Whether the current runtime mode may expose Now Playing metadata and remote media commands.
     let exposesMediaSession: Bool
 
-    /// Standard AndBible behavior with full system media integration.
+    /// Normal AndBible behavior with full system media integration.
     static let standard = SpeakSystemPresentationPolicy(exposesMediaSession: true)
 
-    /// Calculator behavior with no system media session or content metadata.
-    static let calculator = SpeakSystemPresentationPolicy(exposesMediaSession: false)
+    /// Runtime discrete behavior with no system media session or content metadata.
+    static let discrete = SpeakSystemPresentationPolicy(exposesMediaSession: false)
 
     /**
-     Resolves a product policy from immutable bundle metadata.
+     Resolves a policy from Android's runtime `discrete_mode` preference.
 
-     - Parameter infoDictionary: App bundle metadata containing `AndBibleBuildIdentity`.
-     - Returns: Standard policy only for the exact `standard` marker; every other value suppresses
-       system media exposure.
+     - Parameter discreteModeEnabled: Whether runtime discrete mode is enabled.
+     - Returns: Discrete policy when enabled, otherwise normal AndBible media behavior.
      - Side effects: none.
-     - Failure modes: Missing, unresolved, or malformed values fail closed to Calculator policy.
+     - Failure modes: none.
      */
-    static func resolve(from infoDictionary: [String: Any]?) -> SpeakSystemPresentationPolicy {
-        guard let identity = infoDictionary?[buildIdentityInfoKey] as? String,
-              identity == "standard" else {
-            return .calculator
-        }
-        return .standard
+    static func resolve(discreteModeEnabled: Bool) -> SpeakSystemPresentationPolicy {
+        discreteModeEnabled ? .discrete : .standard
     }
 
-    /// Policy for the currently executing app bundle, evaluated when a service is constructed.
+    /// Policy for the current persisted runtime mode.
     static var current: SpeakSystemPresentationPolicy {
-        resolve(from: Bundle.main.infoDictionary)
+        resolve(
+            discreteModeEnabled: UserDefaults.standard.bool(
+                forKey: AppPreferenceKey.discreteMode.rawValue
+            )
+        )
     }
 
     /**
-     Builds metadata only when the active product is allowed to expose a media session.
+     Builds metadata only when the active runtime mode is allowed to expose a media session.
 
-     Spoken command text is deliberately not an input, so neither product can accidentally publish
-     the current utterance through this boundary. Calculator builds always return `nil` even when
-     reader titles contain Bible identity.
+     Spoken command text is deliberately not an input, so neither runtime mode can accidentally
+     publish the current utterance through this boundary. Discrete mode always returns `nil` even when reader
+     titles contain Bible identity.
 
      - Parameters:
        - title: Current reader title, or `nil` when unavailable.
        - subtitle: Current reader subtitle, or `nil` when unavailable.
-       - playbackRate: Current standard-product playback rate.
-     - Returns: Standard-product metadata with legacy fallbacks, or `nil` for Calculator.
+       - playbackRate: Current playback rate.
+     - Returns: Metadata with legacy fallbacks, or `nil` in discrete mode.
      - Side effects: none.
-     - Failure modes: Missing standard-product metadata uses the existing Bible/AndBible fallback.
+     - Failure modes: Missing metadata uses the existing Bible/AndBible fallback.
      */
     func nowPlayingPresentation(
         title: String?,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source contracts for the build-owned BibleView and two-stage release workflows."""
+"""Source contracts for build-owned BibleView artifacts."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def workflow_job(source: str, job_name: str, next_job_name: str | None = None) -
 
 
 class ReleasePipelineContractTests(unittest.TestCase):
-    """Prevents release orchestration from bypassing generated-asset and evidence bindings."""
+    """Prevents Xcode jobs from bypassing verified BibleView assets."""
 
     def test_frontend_ci_rebuilds_deterministically_and_detects_committed_drift(self) -> None:
         """The frontend job must prove Debug determinism and exact Production source alignment."""
@@ -63,28 +63,6 @@ class ReleasePipelineContractTests(unittest.TestCase):
                 self.assertIn("name: bibleview-debug-bundle", job)
                 self.assertIn("manage_bibleview_bundle.py sync", job)
                 self.assertLess(job.index("manage_bibleview_bundle.py sync"), job.index("xcodebuild"))
-
-    def test_release_validation_downloads_exact_tarred_candidates_without_rebuilding(self) -> None:
-        """Prepare owns archives; validation must only restore and attest those exact candidates."""
-        source = (
-            REPO_ROOT / ".github" / "workflows" / "distribution-release-readiness.yml"
-        ).read_text(encoding="utf-8")
-        prepare = workflow_job(source, "prepare-release-archives", "validate-release-evidence")
-        validate = workflow_job(source, "validate-release-evidence")
-
-        self.assertEqual(prepare.count("xcodebuild archive"), 2)
-        self.assertIn("npm run build-production", prepare)
-        self.assertEqual(prepare.count("manage_bibleview_bundle.py verify-archive"), 2)
-        self.assertEqual(prepare.count("tar -C \"$RUNNER_TEMP\" -cpf"), 2)
-        self.assertIn("--write-binding", prepare)
-        self.assertNotIn("xcodebuild archive", validate)
-        self.assertNotIn("npm run build-production", validate)
-        self.assertIn("gh run download \"$ARCHIVE_RUN_ID\"", validate)
-        self.assertEqual(validate.count("tar -C \"$RUNNER_TEMP/restored-archives\" -xpf"), 2)
-        self.assertEqual(validate.count("manage_bibleview_bundle.py verify-archive"), 2)
-        self.assertIn("--expected-commit-sha \"$GITHUB_SHA\"", validate)
-        self.assertIn("validate_distribution_release_readiness.py", validate)
-
 
 if __name__ == "__main__":
     unittest.main()

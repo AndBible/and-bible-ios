@@ -627,16 +627,10 @@ Wanneer Google Drive gebruik word, kry %@ slegs toegang tot toepassinglêers, ni
 "calculator_par1" = "Voordat u die toep binnegaan, word die sakrekenaarskerm vertoon.";
 "calculator_par2" = "Daarin kan jy standaard rekene doen, en wanneer jy die toepassing wil betree, moet jy tik net jou PIN-kode (verstek is 1234) en druk dan '=' knoppie";
 "calculator_par3" = "Jy kan 'n pasgemaakte PIN-kode opstel deur 'Sakrekenaar-PIN'-instelling.";
-"discrete_mode_info_par1" = "Jy gebruik standaard toepassing weergawe, wat beteken dat dit steeds moontlik is om te sien die regte naam en ikoon van die toepassing in toep inligting.";
-"discrete_mode_info_par2" = "Vir verbeterde sekuriteit in 'n vervolgde omgewing, beveel ons sterk aan om diskrete weergawek van die toep, wat altyd 'n sakrekenaar sal vertoon, selfs al is die toep data uitgevee.";
-"discrete_mode_link" = "Jy kan die nuutste weergawe van diskrete weergawe aflaai vanaf %@.";
 "give_passphrase_for_module" = "Dokument %@ is geïnkripteer en moet met wagfrase ontsluit wor";
 "show_unlock_info" = "Module & ontsluit inligting";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Haal uit inligting van zip lêer nou...";
@@ -1003,3 +997,6 @@ Wanneer Google Drive gebruik word, kry %@ slegs toegang tot toepassinglêers, ni
 
 /* Android shared translations */
 "ai_document_regenerating" = "KI-dokument word hergenereer…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

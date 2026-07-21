@@ -624,16 +624,10 @@
 "calculator_par1" = "Avant d’entrer dans l’application, l’écran de la calculatrice s’affiche.";
 "calculator_par2" = "Vous pouvez y faire du calcul standard, et lorsque vous voulez entrer dans l’application, il vous suffit de taper votre code PIN (par défaut 1234) et d’appuyer sur le bouton \"=\".";
 "calculator_par3" = "Vous pouvez définir un code PIN personnalisé par le biais du paramètre « PIN de la Calculatrice ».";
-"discrete_mode_info_par1" = "Vous utilisez une version standard de l’application, ce qui signifie qu’il est encore possible de voir le vrai nom et l’icône de l’application dans les infos de l’application.";
-"discrete_mode_info_par2" = "Pour une meilleure sécurité dans un environnement de persécution, nous recommandons vivement d’utiliser la version discrète de l’app, qui affiche toujours la calculatrice, même si les données de l’application sont supprimées.";
-"discrete_mode_link" = "Vous pouvez télécharger la dernière version de la version discrète à l’adresse suivante%@";
 "give_passphrase_for_module" = "Le document %@ est crypté et nécessite une phrase de passe pour être déverrouillé.";
 "show_unlock_info" = "Module et info de déverrouillage";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Extraire le fichier Zip maintenant…";
@@ -992,3 +986,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Régénération du document IA…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

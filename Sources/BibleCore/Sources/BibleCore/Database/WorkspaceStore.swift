@@ -75,10 +75,9 @@ public final class WorkspaceStore {
         let maxOrder = workspaces().map(\.orderNumber).max() ?? -1
         let workspace = Workspace(name: name, orderNumber: maxOrder + 1)
         workspace.textDisplaySettings = source?.textDisplaySettings?.clearingThemeColors()
-        if var workspaceSettings = source?.workspaceSettings {
-            workspaceSettings.normalizeAutoAssignPrimaryLabel()
-            workspace.workspaceSettings = workspaceSettings
-        }
+        var workspaceSettings = source?.workspaceSettings ?? WorkspaceSettings()
+        workspaceSettings.normalizeAutoAssignPrimaryLabel()
+        workspace.workspaceSettings = workspaceSettings
         workspace.workspaceColor = source?.workspaceColor ?? Workspace.defaultWorkspaceColor
         modelContext.insert(workspace)
 

@@ -1,7 +1,7 @@
 {
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": 155.0,
   "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": 105.0,
-  "AndBibleUITests/AndBibleUITests/testDiscreteProductEnforcesCalculatorLaunchGateAndSettingsBoundary": 150.0,
+  "AndBibleUITests/AndBibleUITests/testSingleAppCalculatorGateAndSecuritySettings": 150.0,
   "AndBibleUITests/AndBibleUITests/testDownloadsInstallKeepsRowOrderVisibleDuringActivity": 95.0,
   "AndBibleUITests/AndBibleUITests/testDownloadsRepositoryManagerOpensFromOverflow": 165.0,
   "AndBibleUITests/AndBibleUITests/testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen": 6.194,

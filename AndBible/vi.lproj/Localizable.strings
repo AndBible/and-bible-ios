@@ -798,16 +798,10 @@
 "calculator_par1" = "Trước khi vào ứng dụng, màn hình máy tính được hiển thị.";
 "calculator_par2" = "Trong đó, bạn có thể thực hiện tính toán thông thường, và khi muốn vào ứng dụng, bạn chỉ cần nhập mã PIN (mặc định là 1234) rồi nhấn nút \"=\".";
 "calculator_par3" = "Bạn có thể đặt mã PIN tùy chỉnh trong cài đặt \"Mã PIN máy tính\".";
-"discrete_mode_info_par1" = "Bạn đang sử dụng phiên bản ứng dụng tiêu chuẩn, nghĩa là vẫn có thể thấy tên thật và biểu tượng của ứng dụng trong thông tin ứng dụng.";
-"discrete_mode_info_par2" = "Để tăng cường bảo mật trong môi trường bị bức hại, chúng tôi khuyến nghị sử dụng phiên bản ẩn danh của ứng dụng, luôn hiển thị máy tính, ngay cả khi dữ liệu ứng dụng bị xóa.";
-"discrete_mode_link" = "Bạn có thể tải xuống phiên bản ẩn danh mới nhất từ %@.";
 "give_passphrase_for_module" = "Tài liệu %@ được mã hóa và cần mật khẩu để mở khóa";
 "show_unlock_info" = "Mô-đun & thông tin mở khóa";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Đang giải nén tệp Zip…";
@@ -1174,3 +1168,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Đang tạo lại tài liệu AI…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

@@ -641,16 +641,10 @@
 "calculator_par1" = "Bevor die Anwenung startet, wird der Taschenrechner angezeigt";
 "calculator_par2" = "Damit kannst du einfache Rechnungen durchführen; wenn du die Bibelanwendung starten willst, gib einfach deinen PIN-Code ein (Standard ist 1234) und drücke danach den \"=\" Knopf.";
 "calculator_par3" = "Du kannst einen eigenen PIN-Code in den Einstellungen unter \"Taschenrechner PIN\" setzen.";
-"discrete_mode_info_par1" = "Du verwendest immer noch die normale Anwendungsversion. Das bedeutet, es ist immer noch mögllich, den echten Namen und das Anwendungssymbol in der Anwendungsinfo zu sehen.";
-"discrete_mode_info_par2" = "Für größere Sicherheit in einem Land mit Verfolgung empfehlen wir sehr, die versteckte Version der Anwendung zu verwenden. Diese wird immer als Taschenrechner angezeigt, sogar wenn Anwendungsdaten gelöscht werden.";
-"discrete_mode_link" = "Du kannst die neueste Version der verstecken Version von %@ herunterladen.";
 "give_passphrase_for_module" = "Dokument %@ ist verschlüsselt und benötigt eine Passphrase zum Entschlüsseln";
 "show_unlock_info" = "Informationen zum Modul & zum Entschlüsseln";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Das Zip-Archiv wird entpackt...";
@@ -1013,3 +1007,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "KI-Dokument wird neu generiert…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

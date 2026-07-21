@@ -5,11 +5,9 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>$(APP_DISPLAY_NAME)</string>
-	<key>AndBibleBuildIdentity</key>
-	<string>$(ANDBIBLE_BUILD_IDENTITY)</string>
+	<string>AndBible</string>
 	<key>AndBibleCloudKitContainerIdentifier</key>
-	<string>$(ANDBIBLE_CLOUDKIT_CONTAINER_IDENTIFIER)</string>
+	<string>iCloud.org.andbible.ios</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -56,10 +54,10 @@
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>$(PRODUCT_BUNDLE_IDENTIFIER).remote-sync-refresh</string>
+		<string>org.andbible.ios.remote-sync-refresh</string>
 	</array>
 	<key>NSMotionUsageDescription</key>
-	<string>$(MOTION_USAGE_DESCRIPTION)</string>
+	<string>AndBible uses motion sensors for tilt-to-scroll functionality.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>

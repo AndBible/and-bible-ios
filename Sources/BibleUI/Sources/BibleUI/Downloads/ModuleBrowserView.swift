@@ -1791,6 +1791,28 @@ public struct ModuleBrowserView: View {
     }
 
     /**
+     Resolves the inline failure shown after a repository refresh.
+
+     Android keeps partial repository failures behind the Download Errors menu while continuing to
+     show the usable catalog. Inline failure copy is reserved for a refresh that produced no module
+     rows at all, which prevents successful Easy Install packages from appearing to have failed.
+
+     - Parameters:
+       - availableModuleCount: Number of usable catalog rows after refreshed and cached rows merge.
+       - errors: Repository and metadata failures collected during the refresh.
+     - Returns: Aggregate failure copy only when no usable module row exists; otherwise `nil`.
+     - Side effects: none.
+     - Failure modes: Empty errors return `nil` even when the catalog is empty.
+     */
+    static func catalogRefreshInlineError(
+        availableModuleCount: Int,
+        errors: [String]
+    ) -> String? {
+        guard availableModuleCount == 0, !errors.isEmpty else { return nil }
+        return "Failed to load catalogs:\n" + errors.joined(separator: "\n")
+    }
+
+    /**
      Formats a localized module download failure for Android's Download errors surface.
 
      - Parameters:
@@ -3555,12 +3577,11 @@ public struct ModuleBrowserView: View {
      - merges and de-duplicates the refreshed module set before storing it in `availableModules`
      - in startup default mode, requests selected Android default modules from the full catalog so
        source-scoped tokens can resolve alternate repository rows hidden by visible-row de-duplication
-     - records aggregate or partial-source failures in `errorMessage`
+     - records every refresh failure in Download Errors and reserves `errorMessage` for an empty catalog
 
      Failure modes:
      - if no sources are configured, sets a user-visible error and exits without attempting a fetch
-     - per-source refresh failures are accumulated and surfaced after the refresh completes rather
-       than aborting the entire operation
+     - per-source refresh failures are accumulated without aborting usable catalog results
      */
     private func refreshCatalog() {
         isRefreshing = true
@@ -3690,12 +3711,11 @@ public struct ModuleBrowserView: View {
                     defaultDocuments: resolvedDefaultDocuments
                 )
 
-                if uniqueModules.isEmpty && !errors.isEmpty {
-                    errorMessage = "Failed to load catalogs:\n" + errors.joined(separator: "\n")
-                } else if !errors.isEmpty {
-                    errorMessage = "Some sources failed: " +
-                        errors.map { $0.components(separatedBy: ":").first ?? "" }
-                              .joined(separator: ", ")
+                if let inlineError = Self.catalogRefreshInlineError(
+                    availableModuleCount: uniqueModules.count,
+                    errors: errors
+                ) {
+                    errorMessage = inlineError
                 }
             }
         }

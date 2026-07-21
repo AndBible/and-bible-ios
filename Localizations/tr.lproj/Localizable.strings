@@ -625,16 +625,10 @@
 "calculator_par1" = "Uygulamaya girmeden önce hesap makinesi ekranı görüntülenir.";
 "calculator_par2" = "İçinde standart hesaplama yapabilirsiniz ve uygulamaya girmek istediğinizde PIN kodunuzu (varsayılan 1234’tür) yazmanız ve ardından \"=\" düğmesine basmanız yeterlidir.";
 "calculator_par3" = "\"Hesap Makinesi PIN\" ayarı ile özel bir PIN kodu oluşturabilirsiniz.";
-"discrete_mode_info_par1" = "Standart uygulama sürümünü kullanıyorsunuz, bu da uygulamanın gerçek adını ve simgesini uygulama bilgilerinde görmenin hala mümkün olduğu anlamına geliyor.";
-"discrete_mode_info_par2" = "Baskı altındaki ortamlarda daha iyi güvenlik için, uygulama verileri silinse bile her zaman hesap makinesi görüntüleyen uygulamanın ayrı sürümünü kullanmanızı şiddetle tavsiye ederiz.";
-"discrete_mode_link" = "Ayrık sürümün en son sürümünü %@ adresinden indirebilirsiniz.";
 "give_passphrase_for_module" = "%@ belgesi şifreli ve kilidinin açılması için parola gerekiyor";
 "show_unlock_info" = "Modül & kilit açma bilgisi";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Zip dosyası ayıklanıyor…";
@@ -1001,3 +995,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Yapay zeka belgesi yeniden oluşturuluyor…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

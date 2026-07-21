@@ -294,7 +294,8 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
     private let timerScheduler: SpeakTimerScheduling
     private let voiceResolver: SpeechVoiceResolving
     private let deviceLocale: Locale
-    private let systemPresentationPolicy: SpeakSystemPresentationPolicy
+    private var systemPresentationPolicy: SpeakSystemPresentationPolicy
+    private let observesRuntimeDiscreteMode: Bool
 
     /// Whether a provider session is active, including paused playback.
     @Published public private(set) var isSpeaking = false
@@ -458,7 +459,8 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
             timerScheduler: FoundationSpeakTimerScheduler(),
             voiceResolver: SystemSpeechVoiceResolver(),
             deviceLocale: .current,
-            systemPresentationPolicy: .current
+            systemPresentationPolicy: .current,
+            observesRuntimeDiscreteMode: true
         )
     }
 
@@ -470,8 +472,9 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
        - timerScheduler: Repeating timer scheduler or controllable test clock.
        - voiceResolver: Installed-voice resolver that rejects unrelated language fallbacks.
        - deviceLocale: Immutable locale used for Android's regional voice preference.
-       - systemPresentationPolicy: Immutable product boundary for Now Playing and media commands.
-     - Side effects: Assigns the speech delegate and registers iOS audio notifications.
+       - systemPresentationPolicy: Initial runtime boundary for Now Playing and media commands.
+       - observesRuntimeDiscreteMode: Whether UserDefaults changes should re-resolve that boundary.
+     - Side effects: Assigns the speech delegate and registers iOS audio and preference notifications.
      - Failure modes: Construction cannot fail; unavailable voices are handled when synthesis starts.
      */
     init(
@@ -479,18 +482,28 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         timerScheduler: SpeakTimerScheduling = FoundationSpeakTimerScheduler(),
         voiceResolver: SpeechVoiceResolving = SystemSpeechVoiceResolver(),
         deviceLocale: Locale = .current,
-        systemPresentationPolicy: SpeakSystemPresentationPolicy = .current
+        systemPresentationPolicy: SpeakSystemPresentationPolicy = .current,
+        observesRuntimeDiscreteMode: Bool = false
     ) {
         self.synthesizer = synthesizer
         self.timerScheduler = timerScheduler
         self.voiceResolver = voiceResolver
         self.deviceLocale = deviceLocale
         self.systemPresentationPolicy = systemPresentationPolicy
+        self.observesRuntimeDiscreteMode = observesRuntimeDiscreteMode
         super.init()
         self.synthesizer.delegate = self
         #if os(iOS)
         setRemoteCommandHandlingEnabled(AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref) ?? true)
         setupAudioNotifications()
+        if observesRuntimeDiscreteMode {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleRuntimePreferencesChanged(_:)),
+                name: UserDefaults.didChangeNotification,
+                object: UserDefaults.standard
+            )
+        }
         #endif
     }
 
@@ -617,6 +630,29 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         let enabled = settingsStore?.getBool(.enableBluetoothPref)
             ?? (AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref) ?? true)
         setRemoteCommandHandlingEnabled(enabled)
+        #endif
+    }
+
+    /**
+     Applies a runtime speech-presentation boundary after discrete mode changes.
+
+     - Parameter policy: Newly resolved normal or discrete-mode policy.
+     - Side effects: Tears down or restores remote commands and clears or republishes Now Playing
+       metadata for the active speech session.
+     - Failure modes: Missing Bluetooth preference state falls back to Android's enabled default.
+     */
+    func applySystemPresentationPolicy(_ policy: SpeakSystemPresentationPolicy) {
+        guard systemPresentationPolicy != policy else { return }
+        systemPresentationPolicy = policy
+        #if os(iOS)
+        let bluetoothEnabled = settingsStore?.getBool(.enableBluetoothPref)
+            ?? (AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref) ?? true)
+        setRemoteCommandHandlingEnabled(bluetoothEnabled)
+        if policy.exposesMediaSession, isSpeaking || isPaused {
+            updateNowPlayingInfo()
+        } else if !policy.exposesMediaSession {
+            clearNowPlayingInfo()
+        }
         #endif
     }
 
@@ -1855,6 +1891,19 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
             name: AVAudioSession.routeChangeNotification,
             object: AVAudioSession.sharedInstance()
         )
+    }
+
+    /** Re-resolves system speech exposure after an AppStorage-backed preference changes. */
+    @objc private func handleRuntimePreferencesChanged(_ notification: Notification) {
+        guard observesRuntimeDiscreteMode else { return }
+        let applyPolicy: () -> Void = { [weak self] in
+            self?.applySystemPresentationPolicy(.current)
+        }
+        if Thread.isMainThread {
+            applyPolicy()
+        } else {
+            DispatchQueue.main.async(execute: applyPolicy)
+        }
     }
 
     @objc private func handleInterruption(_ notification: Notification) {

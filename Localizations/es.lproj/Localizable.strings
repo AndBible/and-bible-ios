@@ -626,16 +626,10 @@
 "calculator_par1" = "Antes de entrar a la aplicación, se muestra la pantalla de calculadora.";
 "calculator_par2" = "En ella, puede realizar cálculos estándar, y cuando desee entrar a la aplicación simplemente escriba su código PIN (el predeterminado es 1234) y pulse el botón \"=\".";
 "calculator_par3" = "Puede establecer un código PIN personalizado mediante el ajuste \"PIN de calculadora\".";
-"discrete_mode_info_par1" = "Está usando la versión estándar de la aplicación, lo que significa que aún es posible ver el nombre real y el icono en la información de la aplicación.";
-"discrete_mode_info_par2" = "Para una seguridad mejorada en un entorno de persecución, recomendamos encarecidamente usar la versión discreta de la aplicación, que siempre muestra una calculadora, incluso si se borran los datos de la aplicación.";
-"discrete_mode_link" = "Puede descargar la última versión de la versión discreta desde %@.";
 "give_passphrase_for_module" = "El documento %@ está cifrado y se necesita una contraseña para desbloquearlo";
 "show_unlock_info" = "Módulo e información de desbloqueo";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Extrayendo Zip...";
@@ -1001,3 +995,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Regenerando documento de IA…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

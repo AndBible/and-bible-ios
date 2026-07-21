@@ -7,9 +7,8 @@ Checks:
 2. No iOS locale can remain English for a key when Android has a non-English translation.
 3. Per-key English-placeholder count may not exceed committed baseline (plus optional allowance).
 4. The iOS locale_pref picker must match Android arrays.xml values that have iOS resources.
-5. The discrete Calculator target must use Android's localized launcher names.
-6. Standard and Calculator security help must use truthful, product-specific copy in every locale.
-7. Every AI source key and literal fallback must have exact Android provenance.
+5. Runtime Calculator security help must use Android copy plus the truthful iOS name limitation.
+6. Every AI source key and literal fallback must have exact Android provenance.
 
 Usage:
   python3 scripts/check_settings_localization_guardrails.py
@@ -17,7 +16,6 @@ Usage:
   python3 scripts/check_settings_localization_guardrails.py --write-android-snapshot
   python3 scripts/check_settings_localization_guardrails.py --sync-android-shared-translations
   python3 scripts/check_settings_localization_guardrails.py --sync-android-ai-translations
-  python3 scripts/check_settings_localization_guardrails.py --sync-discrete-app-name
   python3 scripts/check_settings_localization_guardrails.py --sync-discrete-security-copy
 """
 
@@ -158,40 +156,32 @@ LOCALE_TO_ANDROID_VALUES = {
 ANDROID_ROOT_ENV = "ANDBIBLE_ANDROID_ROOT"
 # Stable provenance label for generated snapshots; never serialize a local checkout path.
 ANDROID_SNAPSHOT_SOURCE_RES = "app/src/main/res"
-DISCRETE_ANDROID_APP_NAME_KEY = "app_name_calculator"
-DISCRETE_INFO_PLIST_KEY = "CFBundleDisplayName"
-DISCRETE_LOCALIZATION_DIRECTORY = "AndBibleDiscreteLocalizations"
 DISCRETE_SECURITY_ANDROID_KEYS = (
     "calculator_par1",
     "calculator_par2",
     "calculator_par3",
-    "discrete_mode_info_par1",
-    "discrete_mode_info_par2",
-    "discrete_mode_link",
 )
 DISCRETE_SECURITY_IOS_FALLBACKS = {
     "discrete_mode_description": (
         "Changes only the launcher icon. AndBible remains visible as the app name in system app "
         "information."
     ),
-    "discrete_help_standard_icon_only_ios": (
-        "The standard product changes only its launcher icon. Its signed AndBible identity "
-        "remains discoverable in system app information."
-    ),
-    "discrete_help_calculator_enforced_ios": (
-        "This Calculator product always opens at the calculator gate, including after its app "
-        "data is deleted. The launch gate cannot be turned off in Settings."
-    ),
-    "discrete_help_calculator_fallback_ios": (
-        "You can also press the = button seven times as a fallback."
+    "discrete_help_ios_note": (
+        "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, "
+        "but the app display name cannot be changed at runtime due to platform limitations."
     ),
 }
 REMOVED_DISCRETE_SECURITY_KEYS = {
     "discrete_help_par1",
     "discrete_help_par2",
     "discrete_help_par3",
-    "discrete_help_ios_note",
     "prefs_volume_keys_scroll_ios_note",
+    "discrete_mode_info_par1",
+    "discrete_mode_info_par2",
+    "discrete_mode_link",
+    "discrete_help_standard_icon_only_ios",
+    "discrete_help_calculator_enforced_ios",
+    "discrete_help_calculator_fallback_ios",
 }
 OBSOLETE_DISCRETE_MODE_SENTENCE = (
     "When enabled, the app always launches as a calculator. Tap = seven times to temporarily "
@@ -717,150 +707,6 @@ def build_android_locale_pref_options(android_root: Path) -> list[LocalePrefOpti
     return options
 
 
-def build_android_discrete_app_names(android_root: Path) -> dict[str, str]:
-    """Build Calculator launcher names for every iOS locale from Android resources.
-
-    Android's discrete flavor aliases its launcher label to `app_name_calculator` in the shared
-    resource tree. Locale files that do not translate that key use Android's English fallback;
-    iOS must do the same rather than inventing independent product names.
-
-    - Parameter android_root: Android `app/src/main/res` directory.
-    - Returns: Exact runtime launcher name keyed by iOS locale identifier.
-    - Side effects: Reads Android XML resources without modifying them.
-    - Failure modes: Raises `ValueError` when Android's required English source key is missing.
-    """
-    base_strings = parse_android_strings(android_root / "values" / "strings.xml")
-    base_value = base_strings.get(DISCRETE_ANDROID_APP_NAME_KEY)
-    if base_value is None:
-        raise ValueError(f"Android string not found: {DISCRETE_ANDROID_APP_NAME_KEY}")
-
-    names: dict[str, str] = {}
-    for locale, qualifier in LOCALE_TO_ANDROID_VALUES.items():
-        locale_strings = parse_android_strings(android_root / qualifier / "strings.xml")
-        names[locale] = android_string_for_ios(
-            locale_strings.get(DISCRETE_ANDROID_APP_NAME_KEY, base_value)
-        )
-    return dict(sorted(names.items()))
-
-
-def load_android_discrete_app_names_from_snapshot(path: Path) -> dict[str, str]:
-    """Load and validate discrete Calculator launcher names from the Android snapshot.
-
-    CI can run without a sibling Android checkout, so the committed snapshot is a strict
-    contract. Every supported iOS locale must be represented by a string value; missing or
-    malformed entries fail instead of silently falling back to an unverified identity.
-
-    - Parameter path: Generated Android localization snapshot.
-    - Returns: Validated launcher names keyed by iOS locale identifier.
-    - Side effects: Reads the snapshot file without modifying it.
-    - Failure modes: Raises `ValueError` for missing, extra, or non-string locale entries.
-    """
-    payload = load_snapshot_payload(path)
-    raw_names = payload.get("discrete_app_names")
-    if not isinstance(raw_names, dict):
-        raise ValueError(f"Snapshot missing discrete_app_names: {path}")
-
-    expected_locales = set(LOCALE_TO_ANDROID_VALUES)
-    actual_locales = set(raw_names)
-    if actual_locales != expected_locales:
-        missing = sorted(expected_locales - actual_locales)
-        extra = sorted(actual_locales - expected_locales)
-        raise ValueError(
-            "Invalid discrete_app_names locale inventory in "
-            f"{path}: missing={missing}, extra={extra}"
-        )
-
-    names: dict[str, str] = {}
-    for locale in sorted(expected_locales):
-        value = raw_names.get(locale)
-        if not isinstance(value, str):
-            raise ValueError(
-                f"Invalid discrete_app_names.{locale} in {path}: expected string"
-            )
-        names[locale] = value
-    return names
-
-
-def sync_discrete_app_name_localizations(
-    repo_root: Path,
-    names_by_locale: dict[str, str],
-) -> SharedLocalizationSyncResult:
-    """Write target-only `InfoPlist.strings` files for the Calculator launcher name.
-
-    The resources live outside the standard AndBible localization tree so only the discrete
-    target receives the disguised identity. Each file contains one system-owned Info.plist key
-    sourced from Android and is rewritten deterministically when the Android contract changes.
-
-    - Parameters:
-      - repo_root: Root of the iOS checkout.
-      - names_by_locale: Android-derived launcher name for every supported iOS locale.
-    - Returns: Deterministic counts of files and values changed.
-    - Side effects: Creates or rewrites discrete target localization resources.
-    - Failure modes: Propagates filesystem errors to the caller.
-    """
-    files_changed = 0
-    values_written = 0
-    root = repo_root / DISCRETE_LOCALIZATION_DIRECTORY
-
-    for locale, value in sorted(names_by_locale.items()):
-        path = root / f"{locale}.lproj" / "InfoPlist.strings"
-        expected = f'"{DISCRETE_INFO_PLIST_KEY}" = "{escape_ios(value)}";\n'
-        current = path.read_text(encoding="utf-8") if path.exists() else None
-        if current == expected:
-            continue
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(expected, encoding="utf-8")
-        files_changed += 1
-        values_written += 1
-
-    return SharedLocalizationSyncResult(
-        files_changed=files_changed,
-        values_written=values_written,
-    )
-
-
-def audit_discrete_app_name_localizations(
-    repo_root: Path,
-    names_by_locale: dict[str, str],
-) -> list[str]:
-    """Compare the discrete target's launcher names with Android's product identity.
-
-    - Parameters:
-      - repo_root: Root of the iOS checkout.
-      - names_by_locale: Live or snapshotted Android launcher-name contract.
-    - Returns: Deterministically ordered mismatch descriptions; empty means parity.
-    - Side effects: Reads target-only `InfoPlist.strings` resources.
-    - Failure modes: Missing or malformed resources are reported as failures.
-    """
-    failures: list[str] = []
-    root = repo_root / DISCRETE_LOCALIZATION_DIRECTORY
-    actual_locales = {
-        path.name.removesuffix(".lproj")
-        for path in root.glob("*.lproj")
-        if path.is_dir()
-    }
-    expected_locales = set(names_by_locale)
-
-    for locale in sorted(expected_locales - actual_locales):
-        failures.append(f"discrete_app_name missing locale: {locale}")
-    for locale in sorted(actual_locales - expected_locales):
-        failures.append(f"discrete_app_name unexpected locale: {locale}")
-
-    for locale in sorted(expected_locales & actual_locales):
-        path = root / f"{locale}.lproj" / "InfoPlist.strings"
-        if not path.exists():
-            failures.append(f"discrete_app_name missing resource: {locale}")
-            continue
-        values = parse_ios_strings(path)
-        actual = values.get(DISCRETE_INFO_PLIST_KEY)
-        if actual is None:
-            failures.append(f"discrete_app_name missing key: {locale}")
-        elif unescape_ios(actual) != names_by_locale[locale]:
-            failures.append(f"discrete_app_name value drift: {locale}")
-
-    return failures
-
-
 def discrete_security_values_for_locale(
     catalog: AndroidSharedLocalization,
     locale: str,
@@ -908,11 +754,10 @@ def sync_discrete_security_localizations(
     repo_root: Path,
     catalog: AndroidSharedLocalization,
 ) -> SharedLocalizationSyncResult:
-    """Write complete product-specific security copy to both iOS localization trees.
+    """Write runtime Calculator security copy to both iOS localization trees.
 
     The sync covers every supported iOS locale, imports Android translations where available,
-    applies explicit truthful fallback otherwise, and removes keys whose old shared semantics made
-    the standard and Calculator products contradict each other.
+    applies the truthful iOS runtime-name limitation, and removes obsolete product-specific keys.
     """
     changed_paths: set[Path] = set()
     values_written = 0
@@ -942,7 +787,7 @@ def audit_discrete_security_localizations(
     repo_root: Path,
     catalog: AndroidSharedLocalization,
 ) -> list[str]:
-    """Enforce complete, truthful security copy across all locales and both resource trees."""
+    """Enforce complete runtime Calculator copy across all locales and resource trees."""
     failures: list[str] = []
     expected_locales = set(LOCALE_TO_ANDROID_VALUES)
 
@@ -1654,7 +1499,6 @@ def write_android_non_english_snapshot(
     non_english_by_key: dict[str, list[str]],
     locale_pref_options: list[LocalePrefOption],
     shared_localization: AndroidSharedLocalization,
-    discrete_app_names: dict[str, str],
 ) -> None:
     """Write a deterministic Android localization snapshot for iOS parity checks.
 
@@ -1672,7 +1516,6 @@ def write_android_non_english_snapshot(
             for option in locale_pref_options
         ],
         "android_non_english_by_key": non_english_by_key,
-        "discrete_app_names": discrete_app_names,
         "android_shared_localization": {
             "safe_keys": shared_localization.safe_keys,
             "english_mismatch_keys": shared_localization.english_mismatch_keys,
@@ -1842,14 +1685,9 @@ def main() -> int:
         help="Update only source-referenced AI localization keys from Android",
     )
     parser.add_argument(
-        "--sync-discrete-app-name",
-        action="store_true",
-        help="Update target-only Calculator launcher names from Android",
-    )
-    parser.add_argument(
         "--sync-discrete-security-copy",
         action="store_true",
-        help="Update product-specific security help in all iOS locales from Android plus fallback",
+        help="Update runtime Calculator security help from Android plus the iOS limitation",
     )
     args = parser.parse_args()
 
@@ -1860,13 +1698,11 @@ def main() -> int:
         non_english_by_key = build_android_non_english_by_key(args.android_root)
         locale_pref_options = build_android_locale_pref_options(args.android_root)
         shared_localization = build_android_shared_localization(args.repo_root, args.android_root)
-        discrete_app_names = build_android_discrete_app_names(args.android_root)
         write_android_non_english_snapshot(
             args.android_snapshot,
             non_english_by_key,
             locale_pref_options,
             shared_localization,
-            discrete_app_names,
         )
         print(f"Wrote Android snapshot: {args.android_snapshot}")
         return 0
@@ -1875,16 +1711,12 @@ def main() -> int:
         non_english_by_key = build_android_non_english_by_key(args.android_root)
         locale_pref_options = build_android_locale_pref_options(args.android_root)
         shared_localization = build_android_shared_localization(args.repo_root, args.android_root)
-        discrete_app_names = build_android_discrete_app_names(args.android_root)
         android_source = f"live:{args.android_root}"
     elif args.android_snapshot.exists():
         try:
             non_english_by_key = load_android_non_english_snapshot(args.android_snapshot)
             locale_pref_options = load_android_locale_pref_options_from_snapshot(args.android_snapshot)
             shared_localization = load_android_shared_localization_from_snapshot(args.android_snapshot)
-            discrete_app_names = load_android_discrete_app_names_from_snapshot(
-                args.android_snapshot
-            )
         except ValueError as exc:
             print(str(exc), file=sys.stderr)
             return 2
@@ -1918,22 +1750,13 @@ def main() -> int:
         print(f"- android source: {android_source}")
         return 0
 
-    if args.sync_discrete_app_name:
-        result = sync_discrete_app_name_localizations(args.repo_root, discrete_app_names)
-        print("Discrete Calculator launcher-name sync summary")
-        print(f"- files changed: {result.files_changed}")
-        print(f"- values written: {result.values_written}")
-        print(f"- locales sourced from Android: {len(discrete_app_names)}")
-        print(f"- android source: {android_source}")
-        return 0
-
     if args.sync_discrete_security_copy:
         try:
             result = sync_discrete_security_localizations(args.repo_root, shared_localization)
         except ValueError as exc:
             print(str(exc), file=sys.stderr)
             return 2
-        print("Discrete product security-copy sync summary")
+        print("Runtime Calculator security-copy sync summary")
         print(f"- files changed: {result.files_changed}")
         print(f"- values written or removed: {result.values_written}")
         print(f"- locales checked: {len(LOCALE_TO_ANDROID_VALUES)}")
@@ -1961,14 +1784,6 @@ def main() -> int:
 
     failures: list[str] = []
 
-    discrete_app_name_failures = audit_discrete_app_name_localizations(
-        args.repo_root,
-        discrete_app_names,
-    )
-    if discrete_app_name_failures:
-        failures.append("Discrete Calculator launcher-name failures:")
-        failures.extend(f"  - {item}" for item in discrete_app_name_failures)
-
     try:
         discrete_security_failures = audit_discrete_security_localizations(
             args.repo_root,
@@ -1977,7 +1792,7 @@ def main() -> int:
     except ValueError as exc:
         discrete_security_failures = [str(exc)]
     if discrete_security_failures:
-        failures.append("Discrete product security-copy failures:")
+        failures.append("Runtime Calculator security-copy failures:")
         failures.extend(f"  - {item}" for item in discrete_security_failures)
 
     if audit.tree_mismatches:
@@ -2055,7 +1870,6 @@ def main() -> int:
     print(f"- locale_pref supported values: {len(locale_pref_audit.supported_values)}")
     print(f"- locale_pref unavailable Android values: {len(locale_pref_audit.unsupported_values)}")
     print(f"- locale_pref extra iOS-only resource locales: {len(locale_pref_audit.extra_ios_locales)}")
-    print(f"- discrete app-name locales: {len(discrete_app_names)}")
     print(f"- discrete security-copy locales: {len(LOCALE_TO_ANDROID_VALUES)}")
     if audit.shared_localization is not None:
         print(f"- android shared source keys: {len(audit.shared_localization.safe_keys)}")

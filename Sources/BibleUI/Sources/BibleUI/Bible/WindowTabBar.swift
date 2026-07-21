@@ -356,7 +356,8 @@ struct WindowTabBar: View {
             && !windowManager.isMaximized
             && moveCandidates.count > 1
         let canSyncWindow = isWindowSyncable(window)
-        let autoPinEnabled = windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false
+        let autoPinEnabled = windowManager.activeWorkspace?.workspaceSettings?.autoPin
+            ?? WorkspaceSettings.defaultAutoPin
         let canPinWindow = !window.isLinksWindow && !windowManager.isMaximized && !autoPinEnabled
         let topCornerRadius: CGFloat = (windowManager.isEffectivelyPinned(window) || window.isLinksWindow) ? 6 : 1
         let tabShape = UnevenRoundedRectangle(

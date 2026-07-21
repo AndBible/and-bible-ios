@@ -8,11 +8,11 @@ import MediaPlayer
 #endif
 
 /**
- Protects Android-equivalent installed-voice selection and speech product boundaries.
+ Protects Android-equivalent installed-voice selection and runtime discrete-mode boundaries.
 
  Pure catalog tests pin locale precedence without relying on simulator voices. Service tests prove
- unsupported languages never reach synthesis and Calculator builds never expose Bible identity or
- spoken content through iOS media surfaces while the standard product retains those integrations.
+ unsupported languages never reach synthesis and runtime discrete mode never exposes Bible identity
+ or spoken content through iOS media surfaces while normal mode retains those integrations.
  */
 final class SpeechVoiceAndProductBoundaryTests: XCTestCase {
     /**
@@ -142,25 +142,21 @@ final class SpeechVoiceAndProductBoundaryTests: XCTestCase {
     }
 
     /**
-     Calculator identity suppresses every system media metadata field while standard identity keeps
-     the existing title, module, and playback-rate presentation.
+     Runtime discrete mode suppresses every system media metadata field while normal mode keeps the
+     existing title, module, and playback-rate presentation.
      */
-    func testCalculatorProductPolicySuppressesNowPlayingContent() {
-        let calculator = SpeakSystemPresentationPolicy.resolve(
-            from: [SpeakSystemPresentationPolicy.buildIdentityInfoKey: "discrete"]
-        )
-        XCTAssertFalse(calculator.exposesMediaSession)
+    func testDiscreteModePolicySuppressesNowPlayingContent() {
+        let discrete = SpeakSystemPresentationPolicy.resolve(discreteModeEnabled: true)
+        XCTAssertFalse(discrete.exposesMediaSession)
         XCTAssertNil(
-            calculator.nowPlayingPresentation(
+            discrete.nowPlayingPresentation(
                 title: "Genesis 1:1",
                 subtitle: "King James Version",
                 playbackRate: 1.25
             )
         )
 
-        let standard = SpeakSystemPresentationPolicy.resolve(
-            from: [SpeakSystemPresentationPolicy.buildIdentityInfoKey: "standard"]
-        )
+        let standard = SpeakSystemPresentationPolicy.resolve(discreteModeEnabled: false)
         XCTAssertEqual(
             standard.nowPlayingPresentation(
                 title: "Genesis 1:1",
@@ -173,23 +169,16 @@ final class SpeechVoiceAndProductBoundaryTests: XCTestCase {
                 playbackRate: 1.25
             )
         )
-        XCTAssertEqual(SpeakSystemPresentationPolicy.resolve(from: nil), .calculator)
-        XCTAssertEqual(
-            SpeakSystemPresentationPolicy.resolve(
-                from: [SpeakSystemPresentationPolicy.buildIdentityInfoKey: "unexpected"]
-            ),
-            .calculator
-        )
     }
 
     #if os(iOS)
     /**
-     The Calculator service clears stale Now Playing data and never installs media command handlers.
+     A discrete-mode service clears stale Now Playing data and never installs media command handlers.
 
      A real installed English voice drives the normal synthesis path; the assertion concerns only
      external system presentation and restores the global Now Playing center during cleanup.
      */
-    func testCalculatorSpeechDoesNotCreateSystemMediaSession() throws {
+    func testDiscreteModeSpeechDoesNotCreateSystemMediaSession() throws {
         let voice = try XCTUnwrap(AVSpeechSynthesisVoice(language: "en-US"))
         let center = MPNowPlayingInfoCenter.default()
         let previousInfo = center.nowPlayingInfo
@@ -200,7 +189,7 @@ final class SpeechVoiceAndProductBoundaryTests: XCTestCase {
             synthesizer: FakeSpeechSynthesizer(),
             voiceResolver: FixedSpeechVoiceResolver(voice: voice),
             deviceLocale: Locale(identifier: "en_US"),
-            systemPresentationPolicy: .calculator
+            systemPresentationPolicy: .discrete
         )
         service.currentTitle = "Genesis 1:1"
         service.currentSubtitle = "King James Version"
@@ -211,8 +200,34 @@ final class SpeechVoiceAndProductBoundaryTests: XCTestCase {
         XCTAssertNil(service.lastFailure)
     }
 
-    /** Standard-product speech keeps its reader identity and system media controls. */
-    func testStandardSpeechRetainsNowPlayingIdentityAndRemoteCommands() throws {
+    /** A live discrete-mode change removes media identity from the same running speech service. */
+    func testRuntimeDiscreteModeChangeClearsSystemMediaSession() throws {
+        let voice = try XCTUnwrap(AVSpeechSynthesisVoice(language: "en-US"))
+        let center = MPNowPlayingInfoCenter.default()
+        let previousInfo = center.nowPlayingInfo
+        defer { center.nowPlayingInfo = previousInfo }
+
+        let service = SpeakService(
+            synthesizer: FakeSpeechSynthesizer(),
+            voiceResolver: FixedSpeechVoiceResolver(voice: voice),
+            deviceLocale: Locale(identifier: "en_US"),
+            systemPresentationPolicy: .standard
+        )
+        service.currentTitle = "Genesis 1:1"
+        service.currentSubtitle = "King James Version"
+        service.speak(text: "In the beginning", language: "en")
+        XCTAssertNotNil(center.nowPlayingInfo)
+        XCTAssertTrue(service.hasRegisteredRemoteCommands)
+
+        service.applySystemPresentationPolicy(.discrete)
+
+        XCTAssertNil(center.nowPlayingInfo)
+        XCTAssertFalse(service.hasRegisteredRemoteCommands)
+        XCTAssertTrue(service.isSpeaking)
+    }
+
+    /** Normal speech keeps its reader identity and system media controls. */
+    func testNormalSpeechRetainsNowPlayingIdentityAndRemoteCommands() throws {
         let voice = try XCTUnwrap(AVSpeechSynthesisVoice(language: "en-US"))
         let center = MPNowPlayingInfoCenter.default()
         let previousInfo = center.nowPlayingInfo

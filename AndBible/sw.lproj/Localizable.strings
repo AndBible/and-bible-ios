@@ -798,16 +798,10 @@
 "calculator_par1" = "Kabla ya kuingia programu, skrini ya kikokotoo inaonyeshwa.";
 "calculator_par2" = "Ndani yake, unaweza kufanya hesabu za kawaida, na unapotaka kuingia programu, tu andika msimbo wako wa PIN (chaguo-msingi ni 1234) kisha bonyeza kitufe cha \"=\".";
 "calculator_par3" = "Unaweza kuweka msimbo maalum wa PIN kwa mipangilio ya \"PIN ya Kikokotoo\".";
-"discrete_mode_info_par1" = "Unatumia toleo la kawaida la programu, ambalo linamaanisha bado inawezekana kuona jina la kweli na ikoni ya programu katika taarifa ya programu.";
-"discrete_mode_info_par2" = "Kwa usalama wa hali ya juu zaidi katika mazingira yanayodhulumiwa, tunapendekeza sana kutumia toleo la siri la programu, ambalo huonyesha kikokotoo daima, hata data ya programu ikifutwa.";
-"discrete_mode_link" = "Unaweza kupakua toleo jipya zaidi la toleo la siri kutoka %@.";
 "give_passphrase_for_module" = "Hati %@ imesimbwa na inahitaji neno la siri ili ifunguliwe";
 "show_unlock_info" = "Moduli na taarifa za ufunguzi";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Inafungua faili ya Zip sasa…";
@@ -1175,3 +1169,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Inazalisha upya hati ya AI…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

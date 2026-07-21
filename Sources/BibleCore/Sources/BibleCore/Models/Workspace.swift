@@ -84,6 +84,9 @@ public final class Workspace {
  owning `Workspace` is saved.
  */
 public struct WorkspaceSettings: Codable, Sendable {
+    /// Android's persisted `WorkspaceSettings.autoPin` default for new and historical workspaces.
+    public static let defaultAutoPin = true
+
     private enum CodingKeys: String, CodingKey {
         case enableTiltToScroll
         case enableReverseSplitMode
@@ -150,7 +153,7 @@ public struct WorkspaceSettings: Codable, Sendable {
     public init(
         enableTiltToScroll: Bool = false,
         enableReverseSplitMode: Bool = false,
-        autoPin: Bool = false,
+        autoPin: Bool = Self.defaultAutoPin,
         restoreButtonsVisible: Bool = true,
         speakSettings: SpeakSettings = SpeakSettings(),
         recentLabels: [RecentLabel] = [],
@@ -185,7 +188,7 @@ public struct WorkspaceSettings: Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         enableTiltToScroll = try container.decodeIfPresent(Bool.self, forKey: .enableTiltToScroll) ?? false
         enableReverseSplitMode = try container.decodeIfPresent(Bool.self, forKey: .enableReverseSplitMode) ?? false
-        autoPin = try container.decodeIfPresent(Bool.self, forKey: .autoPin) ?? false
+        autoPin = try container.decodeIfPresent(Bool.self, forKey: .autoPin) ?? Self.defaultAutoPin
         restoreButtonsVisible = try container.decodeIfPresent(Bool.self, forKey: .restoreButtonsVisible) ?? true
         speakSettings = try container.decodeIfPresent(SpeakSettings.self, forKey: .speakSettings)?.normalized
             ?? SpeakSettings()

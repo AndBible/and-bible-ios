@@ -625,16 +625,10 @@
 "calculator_par1" = "Prieš atveriant programėlę, yra rodomas skaičiuotuvas.";
 "calculator_par2" = "Jame galite atlikti standartinius skaičiavimus, o norėdami atverti programėlę, tiesiog, įrašote PIN kodą (numatytasis yra 1234) ir paspaudžiate „=“ mygtuką.";
 "calculator_par3" = "Galite nusistatyti tinkintą PIN kodą, naudodami nustatymą „Skaičiuotuvo PIN kodas“.";
-"discrete_mode_info_par1" = "Jūs naudojate standartinę programėlės versiją, o tai reiškia, jog informacijoje apie programėlę yra įmanoma pamatyti tikrąjį programėlės pavadinimą ir piktogramą.";
-"discrete_mode_info_par2" = "Siekiant užtikrinti didesnį saugumą persekiojimo aplinkoje, primygtinai rekomenduojame naudoti uždarą programėlės versiją, kuri pastoviai rodo skaičiuotuvą netgi tuo atveju, jei programėlės duomenys bus ištrinti.";
-"discrete_mode_link" = "Galite atsisiųsti naujausią uždarą programėlės versiją iš %@.";
 "give_passphrase_for_module" = "Dokumentas %@ yra šifruotas ir tam, kad būtų atrakintas, reikalauja slaptafrazės";
 "show_unlock_info" = "Modulis ir informacija apie atrakinimą";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Išpakuojamas Zip failas...";
@@ -1003,3 +997,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Regeneruojamas DI dokumentas…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

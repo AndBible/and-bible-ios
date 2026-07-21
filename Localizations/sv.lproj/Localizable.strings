@@ -625,16 +625,10 @@
 "calculator_par1" = "Innan du kommer in i appen visas skärmen med kalkylatorn.";
 "calculator_par2" = "Du kan göra normala beräkningar i den, och när du vill komma in i appen behöver du bara ange din PIN-kod (standard är 1234) och sedan trycka på \"=\"-knappen.";
 "calculator_par3" = "Du kan ange en anpassad PIN-kod i inställningen \"Kalkylator-PIN\".";
-"discrete_mode_info_par1" = "Du använder standardversionen av appen, vilket betyder att det fortfarande är möjligt att se det riktiga namnet och den riktiga ikonen i appinformationen.";
-"discrete_mode_info_par2" = "För förbättrad säkerhet i en förföljd miljö rekommenderar vi starkt användning av appens diskreta version som alltid visar en kalkylator, även om appens data raderas.";
-"discrete_mode_link" = "Du kan ladda ned den senaste diskreta versionen från %@.";
 "give_passphrase_for_module" = "Dokumentet %@ är krypterat och behöver en lösenordsfras för att låsas upp";
 "show_unlock_info" = "Modul & upplåsningsinfo";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Packar upp Zip filen...";
@@ -998,3 +992,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Genererar om AI-dokument…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

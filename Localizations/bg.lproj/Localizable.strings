@@ -625,16 +625,10 @@
 "calculator_par1" = "Преди влизане в приложението се показва екранът на калкулатора.";
 "calculator_par2" = "В него можете да извършвате стандартни изчисления, а когато искате да влезете в приложението, просто въведете своя PIN код (по подразбиране е 1234) и след това натиснете бутона „=\".";
 "calculator_par3" = "Можете да зададете персонализиран PIN код чрез настройката „PIN код на калкулатора\".";
-"discrete_mode_info_par1" = "Използвате стандартната версия на приложението, което означава, че все още е възможно да се види истинското му название и икона в информацията за приложението.";
-"discrete_mode_info_par2" = "За подобрена сигурност в среда на преследване силно препоръчваме използването на дискретната версия на приложението, която винаги показва калкулатор, дори ако данните на приложението бъдат изтрити.";
-"discrete_mode_link" = "Можете да изтеглите най-новата версия на дискретната версия от %@.";
 "give_passphrase_for_module" = "Ресурсът %@ е шифрован и изисква парола за отключване";
 "show_unlock_info" = "Модул и информация за отключване";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Разархивиране на Zip файла…";
@@ -1002,3 +996,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Повторно генериране на AI ресурс…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

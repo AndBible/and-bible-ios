@@ -626,16 +626,10 @@
 "calculator_par1" = "ऐप में प्रवेश करने से पहले, कैलकुलेटर स्क्रीन दिखाई देती है।";
 "calculator_par2" = "इसमें, आप सामान्य गणना कर सकते हैं, और जब आप ऐप में प्रवेश करना चाहते हैं, तो बस अपना PIN कोड (डिफ़ॉल्ट 1234 है) टाइप करें और फिर \"=\" बटन दबाएं।";
 "calculator_par3" = "आप \"Calculator PIN\" सेटिंग द्वारा एक कस्टम PIN कोड सेट कर सकते हैं।";
-"discrete_mode_info_par1" = "आप मानक एप्लिकेशन संस्करण का उपयोग कर रहे हैं, जिसका अर्थ है कि ऐप इन्फो में एप्लिकेशन का असली नाम और आइकन अभी भी दिखाई दे सकता है।";
-"discrete_mode_info_par2" = "उत्पीड़न वाले वातावरण में बेहतर सुरक्षा के लिए, हम दृढ़ता से ऐप के discrete संस्करण का उपयोग करने की सलाह देते हैं, जो हमेशा कैलकुलेटर दिखाता है, चाहे ऐप डेटा हटा दिया जाए।";
-"discrete_mode_link" = "आप %@ से discrete संस्करण का नवीनतम संस्करण डाउनलोड कर सकते हैं।";
 "give_passphrase_for_module" = "%@ दस्तावेज़ एन्क्रिप्ट किया गया है और अनलॉक करने के लिए पासफ़्रेज़ की आवश्यकता है";
 "show_unlock_info" = "मॉड्यूल & अनलॉक जानकारी";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "अब ज़िप फ़ाइल एक् एक्स्ट्रैक्ट हो रहा है ...";
@@ -999,3 +993,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "AI दस्तावेज़ पुनर्जनन हो रहा है…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

@@ -38,22 +38,6 @@
 		D0771529B952829C77DBE023 /* AndBibleUITestReaderSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319E22F2B51D98677DD41DA6 /* AndBibleUITestReaderSupport.swift */; };
 		D53BEDB9C39D5C410E0643B4 /* AndBibleUITestInteractionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A04A880CDBD0810AACD52F /* AndBibleUITestInteractionSupport.swift */; };
 		CA70F982E1D8C8A49D27292A /* AndBibleUITestStateSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C892FA089280ABEE52D95C2F /* AndBibleUITestStateSupport.swift */; };
-		D15C09000000000000000101 /* DiscreteBuildBootstrap.m in Sources */ = {isa = PBXBuildFile; fileRef = D15C09000000000000000201 /* DiscreteBuildBootstrap.m */; };
-		D15C09000000000000000102 /* AndBibleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1FB2406B7E9DD316E296F7 /* AndBibleApp.swift */; };
-		D15C09000000000000000103 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ABFA8AEBF4A6CA89CDD4AF5 /* ContentView.swift */; };
-		D15C09000000000000000104 /* SwordSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CA144AB77AEE518F1465DCC /* SwordSetup.swift */; };
-		D15C09000000000000000105 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6AC3AEB9ADE0BA981610EA58 /* Assets.xcassets */; };
-		D15C09000000000000000106 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 451FFBBE453EACF1547FF4B6 /* Localizable.strings */; };
-		D15C09000000000000000107 /* CalculatorIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C001 /* CalculatorIcon.png */; };
-		D15C09000000000000000108 /* CalculatorIcon@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C002 /* CalculatorIcon@2x.png */; };
-		D15C09000000000000000109 /* CalculatorIcon@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C003 /* CalculatorIcon@3x.png */; };
-		D15C0900000000000000010A /* CalculatorIcon-76.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C004 /* CalculatorIcon-76.png */; };
-		D15C0900000000000000010B /* CalculatorIcon-76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C005 /* CalculatorIcon-76@2x.png */; };
-		D15C09000000000000000112 /* BibleUI in Frameworks */ = {isa = PBXBuildFile; productRef = 28DDAC55D2C87E9CB1F31A12 /* BibleUI */; };
-		D15C09000000000000000113 /* BibleView in Frameworks */ = {isa = PBXBuildFile; productRef = 13AB356C315B63B952461B92 /* BibleView */; };
-		D15C09000000000000000114 /* BibleCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3C9AB5341FEDFFF29A3ADAD5 /* BibleCore */; };
-		D15C09000000000000000115 /* SwordKit in Frameworks */ = {isa = PBXBuildFile; productRef = 020BEFE49A96B4F15548630F /* SwordKit */; };
-		D15C09000000000000000116 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = D15C09000000000000000501 /* InfoPlist.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -154,64 +138,6 @@
 		319E22F2B51D98677DD41DA6 /* AndBibleUITestReaderSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITestReaderSupport.swift; sourceTree = "<group>"; };
 		A4A04A880CDBD0810AACD52F /* AndBibleUITestInteractionSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITestInteractionSupport.swift; sourceTree = "<group>"; };
 		C892FA089280ABEE52D95C2F /* AndBibleUITestStateSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITestStateSupport.swift; sourceTree = "<group>"; };
-		D15C09000000000000000201 /* DiscreteBuildBootstrap.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = DiscreteBuildBootstrap.m; sourceTree = "<group>"; };
-		D15C09000000000000000202 /* AndBibleDiscrete.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AndBibleDiscrete.entitlements; sourceTree = "<group>"; };
-		D15C09000000000000000203 /* Calculator.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Calculator.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		D15C09000000000000000601 /* af */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = af; path = af.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000602 /* ar */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ar; path = ar.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000603 /* az */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = az; path = az.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000604 /* bg */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = bg; path = bg.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000605 /* bn */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = bn; path = bn.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000606 /* ca */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ca; path = ca.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000607 /* cs */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = cs; path = cs.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000608 /* da */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = da; path = da.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000609 /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000060A /* el */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = el; path = el.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000060B /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000060C /* eo */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = eo; path = eo.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000060D /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = es; path = es.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000060E /* et */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = et; path = et.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000060F /* fil */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = fil; path = fil.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000610 /* fi */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = fi; path = fi.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000611 /* fr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = fr; path = fr.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000612 /* he */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = he; path = he.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000613 /* hi */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = hi; path = hi.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000614 /* hr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = hr; path = hr.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000615 /* hu */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = hu; path = hu.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000616 /* id */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = id; path = id.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000617 /* it */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = it; path = it.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000618 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000619 /* kk */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = kk; path = kk.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000061A /* ko */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ko; path = ko.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000061B /* lt */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = lt; path = lt.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000061C /* ml */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ml; path = ml.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000061D /* ms */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ms; path = ms.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000061E /* my */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = my; path = my.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000061F /* nb */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = nb; path = nb.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000620 /* ne */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ne; path = ne.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000621 /* nl */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = nl; path = nl.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000622 /* pl */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = pl; path = pl.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000623 /* pt-BR */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = pt-BR; path = pt-BR.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000624 /* pt */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = pt; path = pt.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000625 /* ro */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ro; path = ro.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000626 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000627 /* sk */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = sk; path = sk.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000628 /* sl */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = sl; path = sl.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000629 /* sr-Latn */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = sr-Latn; path = sr-Latn.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000062A /* sr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = sr; path = sr.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000062B /* sv */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = sv; path = sv.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000062C /* sw */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = sw; path = sw.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000062D /* ta */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ta; path = ta.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000062E /* te */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = te; path = te.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C0900000000000000062F /* th */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = th; path = th.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000630 /* tr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = tr; path = tr.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000631 /* uk */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = uk; path = uk.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000632 /* ur */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ur; path = ur.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000633 /* uz */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = uz; path = uz.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000634 /* vi */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = vi; path = vi.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000635 /* yue */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = yue; path = yue.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000636 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh-Hans; path = zh-Hans.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D15C09000000000000000637 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh-Hant; path = zh-Hant.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -243,17 +169,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		D15C09000000000000000304 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				D15C09000000000000000112 /* BibleUI in Frameworks */,
-				D15C09000000000000000113 /* BibleView in Frameworks */,
-				D15C09000000000000000114 /* BibleCore in Frameworks */,
-				D15C09000000000000000115 /* SwordKit in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -272,8 +187,6 @@
 			children = (
 				AB1FB2406B7E9DD316E296F7 /* AndBibleApp.swift */,
 				CA1C01A1D3E74B1F00A1C010 /* AndBible.entitlements */,
-				D15C09000000000000000202 /* AndBibleDiscrete.entitlements */,
-				D15C09000000000000000201 /* DiscreteBuildBootstrap.m */,
 				6AC3AEB9ADE0BA981610EA58 /* Assets.xcassets */,
 				CA1C01A1D3E74B1F00A1C001 /* CalculatorIcon.png */,
 				CA1C01A1D3E74B1F00A1C002 /* CalculatorIcon@2x.png */,
@@ -288,19 +201,10 @@
 			path = AndBible;
 			sourceTree = "<group>";
 		};
-		D15C09000000000000000502 /* AndBibleDiscreteLocalizations */ = {
-			isa = PBXGroup;
-			children = (
-				D15C09000000000000000501 /* InfoPlist.strings */,
-			);
-			path = AndBibleDiscreteLocalizations;
-			sourceTree = "<group>";
-		};
 		8302045BDC9ADBE777B65BF3 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				8174AF1F3D15BAFB4EB66A1E /* AndBible.app */,
-				D15C09000000000000000203 /* Calculator.app */,
 				6F16572A9AD36BA967BA4C23 /* AndBibleTests.xctest */,
 				A1B2C3D4E5F60718293A4B5D /* AndBibleUITests.xctest */,
 			);
@@ -348,7 +252,6 @@
 			children = (
 				AA0B1C2D3E4F506172839405 /* Config */,
 				7DFD5395D5CEF669AB7C5B80 /* AndBible */,
-				D15C09000000000000000502 /* AndBibleDiscreteLocalizations */,
 				B5A39C18FE90DC3846D8F361 /* AndBibleTests */,
 				A1B2C3D4E5F60718293A4B5F /* AndBibleUITests */,
 				B9FA767A0E84719CAFF44F06 /* Packages */,
@@ -380,29 +283,6 @@
 			);
 			productName = AndBible;
 			productReference = 8174AF1F3D15BAFB4EB66A1E /* AndBible.app */;
-			productType = "com.apple.product-type.application";
-		};
-		D15C09000000000000000301 /* AndBibleDiscrete */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = D15C09000000000000000305 /* Build configuration list for PBXNativeTarget "AndBibleDiscrete" */;
-			buildPhases = (
-				D15C09000000000000000302 /* Sources */,
-				D15C09000000000000000303 /* Resources */,
-				D15C09000000000000000304 /* Frameworks */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = AndBibleDiscrete;
-			packageProductDependencies = (
-				28DDAC55D2C87E9CB1F31A12 /* BibleUI */,
-				13AB356C315B63B952461B92 /* BibleView */,
-				3C9AB5341FEDFFF29A3ADAD5 /* BibleCore */,
-				020BEFE49A96B4F15548630F /* SwordKit */,
-			);
-			productName = Calculator;
-			productReference = D15C09000000000000000203 /* Calculator.app */;
 			productType = "com.apple.product-type.application";
 		};
 		BFE035C24CF3C68C3D31B342 /* AndBibleTests */ = {
@@ -456,10 +336,6 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					105CB795998FF5CDD04BF6FF = {
-						DevelopmentTeam = "";
-						ProvisioningStyle = Automatic;
-					};
-					D15C09000000000000000301 = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
@@ -537,7 +413,6 @@
 			projectRoot = "";
 			targets = (
 				105CB795998FF5CDD04BF6FF /* AndBible */,
-				D15C09000000000000000301 /* AndBibleDiscrete */,
 				BFE035C24CF3C68C3D31B342 /* AndBibleTests */,
 				A1B2C3D4E5F60718293A4B63 /* AndBibleUITests */,
 			);
@@ -563,21 +438,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		D15C09000000000000000303 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				D15C09000000000000000105 /* Assets.xcassets in Resources */,
-				D15C09000000000000000107 /* CalculatorIcon.png in Resources */,
-				D15C09000000000000000108 /* CalculatorIcon@2x.png in Resources */,
-				D15C09000000000000000109 /* CalculatorIcon@3x.png in Resources */,
-				D15C0900000000000000010A /* CalculatorIcon-76.png in Resources */,
-				D15C0900000000000000010B /* CalculatorIcon-76@2x.png in Resources */,
-				D15C09000000000000000106 /* Localizable.strings in Resources */,
-				D15C09000000000000000116 /* InfoPlist.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -622,17 +482,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		D15C09000000000000000302 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				D15C09000000000000000101 /* DiscreteBuildBootstrap.m in Sources */,
-				D15C09000000000000000102 /* AndBibleApp.swift in Sources */,
-				D15C09000000000000000103 /* ContentView.swift in Sources */,
-				D15C09000000000000000104 /* SwordSetup.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -644,68 +493,6 @@
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
-		D15C09000000000000000501 /* InfoPlist.strings */ = {
-			isa = PBXVariantGroup;
-			children = (
-				D15C09000000000000000601 /* af */,
-				D15C09000000000000000602 /* ar */,
-				D15C09000000000000000603 /* az */,
-				D15C09000000000000000604 /* bg */,
-				D15C09000000000000000605 /* bn */,
-				D15C09000000000000000606 /* ca */,
-				D15C09000000000000000607 /* cs */,
-				D15C09000000000000000608 /* da */,
-				D15C09000000000000000609 /* de */,
-				D15C0900000000000000060A /* el */,
-				D15C0900000000000000060B /* en */,
-				D15C0900000000000000060C /* eo */,
-				D15C0900000000000000060D /* es */,
-				D15C0900000000000000060E /* et */,
-				D15C0900000000000000060F /* fil */,
-				D15C09000000000000000610 /* fi */,
-				D15C09000000000000000611 /* fr */,
-				D15C09000000000000000612 /* he */,
-				D15C09000000000000000613 /* hi */,
-				D15C09000000000000000614 /* hr */,
-				D15C09000000000000000615 /* hu */,
-				D15C09000000000000000616 /* id */,
-				D15C09000000000000000617 /* it */,
-				D15C09000000000000000618 /* ja */,
-				D15C09000000000000000619 /* kk */,
-				D15C0900000000000000061A /* ko */,
-				D15C0900000000000000061B /* lt */,
-				D15C0900000000000000061C /* ml */,
-				D15C0900000000000000061D /* ms */,
-				D15C0900000000000000061E /* my */,
-				D15C0900000000000000061F /* nb */,
-				D15C09000000000000000620 /* ne */,
-				D15C09000000000000000621 /* nl */,
-				D15C09000000000000000622 /* pl */,
-				D15C09000000000000000623 /* pt-BR */,
-				D15C09000000000000000624 /* pt */,
-				D15C09000000000000000625 /* ro */,
-				D15C09000000000000000626 /* ru */,
-				D15C09000000000000000627 /* sk */,
-				D15C09000000000000000628 /* sl */,
-				D15C09000000000000000629 /* sr-Latn */,
-				D15C0900000000000000062A /* sr */,
-				D15C0900000000000000062B /* sv */,
-				D15C0900000000000000062C /* sw */,
-				D15C0900000000000000062D /* ta */,
-				D15C0900000000000000062E /* te */,
-				D15C0900000000000000062F /* th */,
-				D15C09000000000000000630 /* tr */,
-				D15C09000000000000000631 /* uk */,
-				D15C09000000000000000632 /* ur */,
-				D15C09000000000000000633 /* uz */,
-				D15C09000000000000000634 /* vi */,
-				D15C09000000000000000635 /* yue */,
-				D15C09000000000000000636 /* zh-Hans */,
-				D15C09000000000000000637 /* zh-Hant */,
-			);
-			name = InfoPlist.strings;
-			sourceTree = "<group>";
-		};
 		451FFBBE453EACF1547FF4B6 /* Localizable.strings */ = {
 			isa = PBXVariantGroup;
 			children = (
@@ -847,9 +634,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = AA0B1C2D3E4F506172839407 /* AndBible-Release.xcconfig */;
 			buildSettings = {
-				ANDBIBLE_BUILD_IDENTITY = standard;
-				ANDBIBLE_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.org.andbible.ios;
-				APP_DISPLAY_NAME = AndBible;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = AndBible/AndBible.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -867,7 +651,6 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = org.andbible.ios;
-				MOTION_USAGE_DESCRIPTION = "AndBible uses motion sensors for tilt-to-scroll functionality.";
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = YES;
 				SWIFT_VERSION = 5.9;
@@ -943,9 +726,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = AA0B1C2D3E4F506172839406 /* AndBible-Debug.xcconfig */;
 			buildSettings = {
-				ANDBIBLE_BUILD_IDENTITY = standard;
-				ANDBIBLE_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.org.andbible.ios;
-				APP_DISPLAY_NAME = AndBible;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = AndBible/AndBible.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -963,79 +743,12 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = org.andbible.ios;
-				MOTION_USAGE_DESCRIPTION = "AndBible uses motion sensors for tilt-to-scroll functionality.";
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = YES;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
-		};
-		D15C09000000000000000306 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = AA0B1C2D3E4F506172839406 /* AndBible-Debug.xcconfig */;
-			buildSettings = {
-				ANDBIBLE_BUILD_IDENTITY = discrete;
-				ANDBIBLE_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.com.app.calculator.ios;
-				APP_DISPLAY_NAME = Calculator;
-				ASSETCATALOG_COMPILER_APPICON_NAME = CalculatorAppIcon;
-				CODE_SIGN_ENTITLEMENTS = AndBible/AndBibleDiscrete.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_ASSET_PATHS = "\"AndBible/Preview Content\"";
-				DEVELOPMENT_TEAM = "$(inherited)";
-				ENABLE_PREVIEWS = YES;
-				GOOGLE_DRIVE_CLIENT_ID = "";
-				GOOGLE_DRIVE_REVERSED_CLIENT_ID = "";
-				GOOGLE_DRIVE_SERVER_CLIENT_ID = "";
-				INFOPLIST_FILE = "AndBible/Info-Discrete.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MOTION_USAGE_DESCRIPTION = "Calculator uses motion sensors to support scrolling.";
-				PRODUCT_BUNDLE_IDENTIFIER = com.app.calculator.ios;
-				PRODUCT_NAME = Calculator;
-				SDKROOT = iphoneos;
-				SUPPORTS_MACCATALYST = YES;
-				SWIFT_VERSION = 5.9;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		D15C09000000000000000307 /* Release */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = AA0B1C2D3E4F506172839407 /* AndBible-Release.xcconfig */;
-			buildSettings = {
-				ANDBIBLE_BUILD_IDENTITY = discrete;
-				ANDBIBLE_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.com.app.calculator.ios;
-				APP_DISPLAY_NAME = Calculator;
-				ASSETCATALOG_COMPILER_APPICON_NAME = CalculatorAppIcon;
-				CODE_SIGN_ENTITLEMENTS = AndBible/AndBibleDiscrete.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_ASSET_PATHS = "\"AndBible/Preview Content\"";
-				DEVELOPMENT_TEAM = "$(inherited)";
-				ENABLE_PREVIEWS = YES;
-				GOOGLE_DRIVE_CLIENT_ID = "";
-				GOOGLE_DRIVE_REVERSED_CLIENT_ID = "";
-				GOOGLE_DRIVE_SERVER_CLIENT_ID = "";
-				INFOPLIST_FILE = "AndBible/Info-Discrete.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MOTION_USAGE_DESCRIPTION = "Calculator uses motion sensors to support scrolling.";
-				PRODUCT_BUNDLE_IDENTIFIER = com.app.calculator.ios;
-				PRODUCT_NAME = Calculator;
-				SDKROOT = iphoneos;
-				SUPPORTS_MACCATALYST = YES;
-				SWIFT_VERSION = 5.9;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
 		};
 		D5F40546F1ED81133FFD89C6 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -1105,15 +818,6 @@
 			buildConfigurations = (
 				C0FC6CE8DC358588C7159752 /* Debug */,
 				7A3C776F749E6C0CCEFD145F /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
-		};
-		D15C09000000000000000305 /* Build configuration list for PBXNativeTarget "AndBibleDiscrete" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				D15C09000000000000000306 /* Debug */,
-				D15C09000000000000000307 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

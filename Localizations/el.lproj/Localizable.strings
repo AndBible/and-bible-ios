@@ -625,16 +625,10 @@
 "calculator_par1" = "Πριν την είσοδο στην εφαρμογή, προβάλλεται η Αριθμομηχανή.";
 "calculator_par2" = "Σ' αυτή, μπορείτε να κάνετε απλούς υπολογισμούς, και αν θέλετε να μπείτε στην εφαρμογή, απλά πατήστε τον κωδικό σας PIN (προκαθορισμένος είναι το 1234) και στη συνέχεια πατήστε το πλήκτρο \"=\".";
 "calculator_par3" = "Μπορείτε να ορίσετε ένα δικό σας κωδικό PIN μέσω της ρύθμισης \"PIN Αριθμομηχανής\".";
-"discrete_mode_info_par1" = "Χρησιμοποιείτε την κανονική έκδοση της εφαρμογής, που σημαίνει ότι είναι ακόμα δυνατόν να δείτε το πραγματικό όνομα και εικονίδιο της εφαρμογής στις πληροφορίες της.";
-"discrete_mode_info_par2" = "Για βέλτιστη ασφάλεια σε διωκόμενο περιβάλλον, συστήνουμε ισχυρά την χρήση της ξεχωριστής έκδοσης της εφαρμογής, που εμφανίζει πάντα την Αριθμομηχανή, ακόμα κι αν σβηστούν τα δεδομένα της εφαρμογής.";
-"discrete_mode_link" = "Μπορείτε να κατεβάσετε την τελευταία έκδοση της ξεχωριστής έκδοσης από %@.";
 "give_passphrase_for_module" = "Το έγγραφο %@ είναι κρυπτογραφημένο και χρειάζεται φραση πρόσβασης για να ξεκλειδωθεί";
 "show_unlock_info" = "Πληροφορίες ξεκλειδώματος προσθέτου &";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Αποσυμπίεση αρχείου zip τώρα...";
@@ -1001,3 +995,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Αναδημιουργία εγγράφου AI…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

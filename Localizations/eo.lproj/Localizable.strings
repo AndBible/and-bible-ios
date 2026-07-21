@@ -626,16 +626,10 @@ Dum uzi Google Drive, %@ akiros aliron nur al aplikaĵaj datumoj, al neniu priva
 "calculator_par1" = "Antaŭ ol starto de la aplikaĵo, malfermiĝas ekrano de kalkulilo.";
 "calculator_par2" = "Tie vi povas fari kutimajn kalkulojn kaj kiam vi volas malfermi la aplikaĵon, enigu la PIN-kodon (implicite 1234) kaj sekve la butonon “=”.";
 "calculator_par3" = "Vi povas agordi alian kodon per la agordo “PIN-kodo por kalkulilo”.";
-"discrete_mode_info_par1" = "Vi nun uzas norman version de la aplikaĵo, do plue eblas rigardi la veran nomon kaj bildsimbolon de ĝi en “Informoj pri aplikaĵo” de Android.";
-"discrete_mode_info_par2" = "Por pliigi sekurecon en persekutanta ĉirkaŭaĵo, estas konsilinde uzi la diskretan version de la aplikaĵo, kiu ĉiam vidiĝas kiel kalkulilo, eĉ kiam ĝiaj datumoj estos forigitaj.";
-"discrete_mode_link" = "Vi povas elŝuti la plej aktualan diskretan version el %@.";
 "give_passphrase_for_module" = "La dokumento %@ estas ĉifrita kaj pasvorto estas necesa por malfermi ĝin";
 "show_unlock_info" = "Pri ĉifrita modulo";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Eltirado de zip-dosiero…";
@@ -1003,3 +997,6 @@ Dum uzi Google Drive, %@ akiros aliron nur al aplikaĵaj datumoj, al neniu priva
 
 /* Android shared translations */
 "ai_document_regenerating" = "Rekreado de AI-dokumento…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

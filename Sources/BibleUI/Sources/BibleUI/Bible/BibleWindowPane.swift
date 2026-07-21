@@ -468,7 +468,8 @@ struct BibleWindowPane: View {
             canClose: windowManager.allWindows.count > 1,
             canSync: capabilities.canSyncWindow,
             canCopyLink: currentCopyLinkURL != nil,
-            autoPinEnabled: windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false,
+            autoPinEnabled: windowManager.activeWorkspace?.workspaceSettings?.autoPin
+                ?? WorkspaceSettings.defaultAutoPin,
             moduleHasStrongs: controller?.hasStrongs ?? false,
             sectionTitlesEnabled: resolvedSettings.showSectionTitles ?? true,
             verseNumbersEnabled: resolvedSettings.showVerseNumbers ?? true,

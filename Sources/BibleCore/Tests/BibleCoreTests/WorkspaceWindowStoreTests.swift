@@ -13,6 +13,21 @@ import XCTest
  */
 final class WorkspaceWindowStoreTests: XCTestCase {
     /**
+     Verifies new and historical workspace settings use Android's enabled auto-pin default.
+
+     The empty JSON payload models an iOS workspace written before `autoPin` was serialized. Both
+     construction paths must resolve to Android's Room default without changing an explicit false.
+     */
+    func testWorkspaceSettingsUseAndroidAutoPinDefault() throws {
+        XCTAssertTrue(WorkspaceSettings().autoPin)
+
+        let decoded = try JSONDecoder().decode(WorkspaceSettings.self, from: Data("{}".utf8))
+
+        XCTAssertTrue(decoded.autoPin)
+        XCTAssertFalse(WorkspaceSettings(autoPin: false).autoPin)
+    }
+
+    /**
      Verifies workspace settings clear an auto-assign primary label when no auto-assigned labels remain.
      */
     func testWorkspaceSettingsClearsAutoAssignPrimaryLabelWhenAutoAssignLabelsAreEmpty() {
@@ -287,6 +302,35 @@ final class WorkspaceWindowStoreTests: XCTestCase {
 
         XCTAssertEqual(Workspace.defaultWorkspaceColor, Int(Int32(bitPattern: 0xFF444444)))
         XCTAssertEqual(workspace.workspaceColor, Workspace.defaultWorkspaceColor)
+        XCTAssertEqual(workspace.workspaceSettings?.autoPin, true)
+    }
+
+    /**
+     Verifies a legacy workspace with no settings opens a second Bible as another split pane.
+
+     The first pane is deliberately raw-unpinned to reproduce the simulator regression. Android's
+     missing/default `autoPin=true` value makes both panes effectively pinned, so creating the clone
+     must not minimize the original Bible.
+     */
+    func testLegacyWorkspaceWithoutSettingsKeepsTwoBiblePanesVisible() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Legacy")
+        let first = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        workspace.workspaceSettings = nil
+        first.isPinMode = false
+        first.pageManager?.bibleDocument = "KJV"
+        store.persistChanges()
+        manager.setActiveWorkspace(workspace)
+
+        let second = try XCTUnwrap(manager.addWindow(document: "ESV2011", from: first))
+
+        XCTAssertTrue(manager.isEffectivelyPinned(first))
+        XCTAssertTrue(manager.isEffectivelyPinned(second))
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [first.id, second.id])
+        XCTAssertEqual(first.layoutState, "split")
+        XCTAssertEqual(second.layoutState, "split")
     }
 
     /**
@@ -621,6 +665,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let workspaceStore = WorkspaceStore(modelContext: context)
         let windowManager = WindowManager(workspaceStore: workspaceStore)
         let workspace = workspaceStore.createWorkspace(name: "Pinned Order")
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: false)
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
@@ -807,6 +852,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let store = WorkspaceStore(modelContext: ModelContext(container))
         let manager = WindowManager(workspaceStore: store)
         let workspace = store.createWorkspace(name: "Unpinned Clone")
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: false)
         let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
         manager.setActiveWorkspace(workspace)
         manager.setPinMode(firstWindow, value: false)
@@ -840,6 +886,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let store = WorkspaceStore(modelContext: ModelContext(container))
         let manager = WindowManager(workspaceStore: store)
         let workspace = store.createWorkspace(name: "Unpin")
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: false)
         let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
         manager.setActiveWorkspace(workspace)
         let secondWindow = try XCTUnwrap(manager.addWindow(from: firstWindow))
@@ -894,6 +941,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let container = try makeWorkspaceModelContainer()
         let store = WorkspaceStore(modelContext: ModelContext(container))
         let workspace = store.createWorkspace(name: "Legacy Visibility")
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: false)
         let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
         let secondWindow = store.addWindow(to: workspace)
         firstWindow.isPinMode = false
@@ -1018,6 +1066,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let store = WorkspaceStore(modelContext: ModelContext(container))
         let manager = WindowManager(workspaceStore: store)
         let workspace = store.createWorkspace(name: "Persisted Actions")
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: false)
         let workspaceID = workspace.id
         let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
         manager.setActiveWorkspace(workspace)

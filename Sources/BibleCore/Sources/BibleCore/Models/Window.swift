@@ -105,11 +105,12 @@ public final class Window {
 
      - Returns: Effective pin mode derived from the owning workspace's auto-pin setting.
      - Side Effects: None.
-     - Failure Modes: A detached window falls back to auto-pin disabled and therefore uses its raw
-       pin value unless it is a links window.
+     - Failure Modes: A detached window uses Android's default auto-pin value.
      */
     public var isEffectivelyPinned: Bool {
-        effectivePinMode(autoPin: workspace?.workspaceSettings?.autoPin ?? false)
+        effectivePinMode(
+            autoPin: workspace?.workspaceSettings?.autoPin ?? WorkspaceSettings.defaultAutoPin
+        )
     }
 }
 

@@ -625,16 +625,10 @@
 "calculator_par1" = "Enne rakendusse sisenemist näidatakse kalkulaatori ekraani.";
 "calculator_par2" = "Selles saad teha standardseid arvutusi ja kui soovid rakendusse siseneda, sisesta lihtsalt oma PIN-kood (vaikimisi on 1234) ja vajuta seejärel nuppu \"=\".";
 "calculator_par3" = "Kohandatud PIN-koodi saad seada \"Kalkulaatori PIN\" seade kaudu.";
-"discrete_mode_info_par1" = "Kasutad standardset rakenduse versiooni, mis tähendab, et rakenduse tegeliku nime ja ikooni on endiselt näha rakenduse teabes.";
-"discrete_mode_info_par2" = "Parema turvalisuse tagamiseks tagakiusamise keskkonnas soovitame tungivalt kasutada rakenduse diskreetset versiooni, mis kuvab alati kalkulaatorit, isegi kui rakenduse andmed on kustutatud.";
-"discrete_mode_link" = "Saad alla laadida diskreetse versiooni uusima versiooni aadressilt %@.";
 "give_passphrase_for_module" = "Dokument %@ on krüpteeritud ja selle avamiseks on vaja parooli";
 "show_unlock_info" = "Moodul ja avamise info";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "ZIP-fail lahtipakkimine...";
@@ -1001,3 +995,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Taastatakse AI dokumenti…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

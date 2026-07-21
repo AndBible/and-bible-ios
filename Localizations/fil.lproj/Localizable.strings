@@ -761,16 +761,10 @@
 "calculator_par1" = "Bago pumasok sa app, ipinapakita ang screen ng calculator.";
 "calculator_par2" = "Dito, maaari kang gumawa ng karaniwang kalkulasyon, at kapag nais mong pumasok sa app, i-type lamang ang iyong PIN code (default ay 1234) at pagkatapos pindutin ang \"=\" na button.";
 "calculator_par3" = "Maaari kang magtakda ng custom na PIN code sa pamamagitan ng setting na \"Calculator PIN\".";
-"discrete_mode_info_par1" = "Gumagamit ka ng karaniwang bersyon ng aplikasyon, na nangangahulugang posible pa ring makita ang tunay na pangalan at icon ng aplikasyon sa impormasyon ng app.";
-"discrete_mode_info_par2" = "Para sa pinahusay na seguridad sa persekutadong kapaligiran, lubos naming inirerekomenda ang paggamit ng discrete na bersyon ng app, na palaging nagpapakita ng calculator, kahit na nabura ang data ng app.";
-"discrete_mode_link" = "Maaari kang mag-download ng pinakabagong bersyon ng discrete na bersyon mula sa %@.";
 "give_passphrase_for_module" = "Ang dokumento %@ ay naka-encrypt at nangangailangan ng passphrase para ma-unlock";
 "show_unlock_info" = "Module at impormasyon sa pag-unlock";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Ine-extract ang Zip file ngayon…";
@@ -1121,3 +1115,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Binubuo muli ang AI document…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

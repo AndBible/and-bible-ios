@@ -625,16 +625,10 @@
 "calculator_par1" = "앱에 진입하기 전에 계산기 화면이 표시됩니다.";
 "calculator_par2" = "거기서 일반 계산을 할 수 있으며, 앱에 진입하려면 PIN 코드(기본값은 1234)를 입력한 후 \"=\" 버튼을 누르면 됩니다.";
 "calculator_par3" = "\"계산기 PIN\" 설정에서 사용자 지정 PIN 코드를 설정할 수 있습니다.";
-"discrete_mode_info_par1" = "현재 표준 앱 버전을 사용 중이므로, 앱 정보에서 앱의 실제 이름과 아이콘을 여전히 볼 수 있습니다.";
-"discrete_mode_info_par2" = "박해받는 환경에서 보안을 강화하려면, 앱 데이터가 삭제되더라도 항상 계산기를 표시하는 비공개 버전의 앱을 사용하시기 바랍니다.";
-"discrete_mode_link" = "비공개 버전의 최신 버전을 %@에서 다운로드할 수 있습니다.";
 "give_passphrase_for_module" = "%@ 문서는 암호화되었으며 해제하기 위해서는 비밀번호가 필요합니다";
 "show_unlock_info" = "모듈 및 잠금 해제 정보";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "zip 파일을 푸는 중…";
@@ -1002,3 +996,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "AI 문서를 재생성하는 중…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

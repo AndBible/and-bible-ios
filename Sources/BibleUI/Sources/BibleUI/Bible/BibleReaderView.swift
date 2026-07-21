@@ -3446,7 +3446,8 @@ public struct BibleReaderView: View {
             tiltToScrollEnabled: windowManager.activeWorkspace?.workspaceSettings?.enableTiltToScroll ?? false,
             showsReverseSplitModeToggle: windowManager.visibleWindows.count > 1,
             reverseSplitModeEnabled: windowManager.activeWorkspace?.workspaceSettings?.enableReverseSplitMode ?? false,
-            windowPinningEnabled: windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false,
+            windowPinningEnabled: windowManager.activeWorkspace?.workspaceSettings?.autoPin
+                ?? WorkspaceSettings.defaultAutoPin,
             showsAIActions: isAIConfigured,
             showsBibleDisplayOptions: isBibleContentFocused,
             sectionTitlesEnabled: sectionTitlesEnabled,
@@ -3510,7 +3511,10 @@ public struct BibleReaderView: View {
             let nextValue = !(windowManager.activeWorkspace?.workspaceSettings?.enableReverseSplitMode ?? false)
             updateWorkspaceSettings { $0.enableReverseSplitMode = nextValue }
         case .toggleWindowPinning:
-            let nextValue = !(windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false)
+            let nextValue = !(
+                windowManager.activeWorkspace?.workspaceSettings?.autoPin
+                    ?? WorkspaceSettings.defaultAutoPin
+            )
             windowManager.setAutoPinEnabled(nextValue)
         case .openLabelSettings:
             dismissReaderOverflowMenuAndQueue(.labelManager)

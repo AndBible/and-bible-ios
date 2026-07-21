@@ -13,66 +13,22 @@ import SwiftUI
  */
 final class SettingsIconsTests: XCTestCase {
     /**
-     Verifies platform capability and static-product identity remove settings that would be inert.
+     Verifies platform capability hides only settings that would be inert.
 
      Android can intercept physical volume keys, but iOS has no supported equivalent event API, so
-     the persisted preference must not be advertised as functional. The discrete Calculator SKU
-     fixes identity at build time and therefore hides runtime identity/calculator switches while
-     retaining help and PIN controls.
+     the persisted preference must not be advertised as functional. The single AndBible app keeps
+     runtime discrete-mode, calculator-gate, help, and PIN controls visible.
 
      Failure meaning:
      - iOS can expose a setting with no behavior consumer
-     - the Calculator SKU can reveal or escape its fixed identity from Settings
-     - a malformed bundle marker can accidentally select the privacy-sensitive identity
+     - one-app runtime security controls can disappear behind a removed build identity
      */
-    func testApplicationPreferenceVisibilityMatchesPlatformAndBuildIdentity() {
-        XCTAssertEqual(
-            ApplicationSettingsPresentation.buildIdentity(from: nil),
-            .standard
-        )
-        XCTAssertEqual(
-            ApplicationSettingsPresentation.buildIdentity(
-                from: [ApplicationSettingsPresentation.buildIdentityInfoKey: "discrete"]
-            ),
-            .discrete
-        )
-        XCTAssertEqual(
-            ApplicationSettingsPresentation.buildIdentity(
-                from: [ApplicationSettingsPresentation.buildIdentityInfoKey: "unexpected"]
-            ),
-            .standard
-        )
-
-        for identity in [
-            ApplicationSettingsPresentation.BuildIdentity.standard,
-            .discrete,
-        ] {
-            XCTAssertFalse(
-                ApplicationSettingsPresentation.isPreferenceVisible(
-                    .volumeKeysScroll,
-                    buildIdentity: identity
-                )
-            )
-            XCTAssertTrue(
-                ApplicationSettingsPresentation.isPreferenceVisible(.discreteHelp, buildIdentity: identity)
-            )
-            XCTAssertTrue(
-                ApplicationSettingsPresentation.isPreferenceVisible(.calculatorPin, buildIdentity: identity)
-            )
-        }
-
-        XCTAssertTrue(
-            ApplicationSettingsPresentation.isPreferenceVisible(.discreteMode, buildIdentity: .standard)
-        )
-        XCTAssertTrue(
-            ApplicationSettingsPresentation.isPreferenceVisible(.showCalculator, buildIdentity: .standard)
-        )
-        XCTAssertFalse(
-            ApplicationSettingsPresentation.isPreferenceVisible(.discreteMode, buildIdentity: .discrete)
-        )
-        XCTAssertFalse(
-            ApplicationSettingsPresentation.isPreferenceVisible(.showCalculator, buildIdentity: .discrete)
-        )
+    func testApplicationPreferenceVisibilityMatchesPlatformCapabilities() {
+        XCTAssertFalse(ApplicationSettingsPresentation.isPreferenceVisible(.volumeKeysScroll))
+        XCTAssertTrue(ApplicationSettingsPresentation.isPreferenceVisible(.discreteHelp))
+        XCTAssertTrue(ApplicationSettingsPresentation.isPreferenceVisible(.calculatorPin))
+        XCTAssertTrue(ApplicationSettingsPresentation.isPreferenceVisible(.discreteMode))
+        XCTAssertTrue(ApplicationSettingsPresentation.isPreferenceVisible(.showCalculator))
     }
 
     /**

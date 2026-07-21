@@ -642,16 +642,10 @@
 "calculator_par1" = "Przed otwarciem aplikacji wyświetlany jest kalkulator.";
 "calculator_par2" = "Za jego pomocą możesz wykonywać zwykłe rachunki, a kiedy chcesz otworzyć aplikację, wpisujesz kod PIN (domyślnie 1234) i przycisk „=”.";
 "calculator_par3" = "Możesz zmienić domyślny kod PIN ustawieniem „Kod PIN kalkulatora”.";
-"discrete_mode_info_par1" = "Korzystasz teraz ze standardowej wersji aplikacji, więc wciąż jest możliwe zobaczenie prawdziwej nazwy i ikony aplikacji w menu Androida „Informacje o aplikacji”.";
-"discrete_mode_info_par2" = "Dla zwiększenia bezpieczeństwa w prześladującym otoczeniu, rekomendujemy korzystanie z dyskretnej wersji aplikacji, która zawsze wyświetla się jako kalkulator, nawet po usunięciu jej danych.";
-"discrete_mode_link" = "Najnowszą dyskretną wersję aplikacji możesz pobrać ze strony %@.";
 "give_passphrase_for_module" = "Dokument %@ jest zaszyfrowany i wymaga hasła do otwarcia";
 "show_unlock_info" = "O szyfrowanym module";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Rozpakowywanie pliku zip…";
@@ -1016,3 +1010,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Ponowne generowanie dokumentu AI…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

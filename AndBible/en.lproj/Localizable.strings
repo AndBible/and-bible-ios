@@ -317,12 +317,6 @@
 "calculator_par1" = "Before entering the app, calculator screen is displayed.";
 "calculator_par2" = "In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press \"=\" button.";
 "calculator_par3" = "You can set up a custom PIN code by \"Calculator PIN\" setting.";
-"discrete_mode_info_par1" = "You are using standard application version, which means that it is still possible to see the real name and icon of the application in app info.";
-"discrete_mode_info_par2" = "For improved security in persecuted environment, we highly recommend using discrete version of the app, which always displays calculator, even if the app data is deleted.";
-"discrete_mode_link" = "You can download the latest version of discrete version from %@.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
 
 /* About */
 "settings_language" = "Language";
@@ -1169,3 +1163,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Regenerating AI document…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

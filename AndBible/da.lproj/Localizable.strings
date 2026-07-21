@@ -798,16 +798,10 @@
 "calculator_par1" = "Inden du åbner appen, vises lommeregnerskærmen.";
 "calculator_par2" = "I den kan du udføre normale beregninger, og når du vil åbne appen, skal du blot indtaste din PIN-kode (standard er 1234) og derefter trykke på knappen \"=\".";
 "calculator_par3" = "Du kan angive en brugerdefineret PIN-kode under indstillingen \"Lommeregner-PIN\".";
-"discrete_mode_info_par1" = "Du bruger standardversionen af applikationen, hvilket betyder, at det stadig er muligt at se det rigtige navn og ikon for applikationen i appinfo.";
-"discrete_mode_info_par2" = "For forbedret sikkerhed i et forfølgelsesmiljø anbefaler vi kraftigt at bruge den diskrete version af appen, som altid viser lommeregneren, selv hvis appens data slettes.";
-"discrete_mode_link" = "Du kan hente den seneste version af den diskrete version fra %@.";
 "give_passphrase_for_module" = "Dokumentet %@ er krypteret og kræver adgangskode for at blive låst op";
 "show_unlock_info" = "Modul og oplåsningsinfo";
 
 /* Android shared translations */
-"discrete_help_calculator_enforced_ios" = "This Calculator product always opens at the calculator gate, including after its app data is deleted. The launch gate cannot be turned off in Settings.";
-"discrete_help_calculator_fallback_ios" = "You can also press the = button seven times as a fallback.";
-"discrete_help_standard_icon_only_ios" = "The standard product changes only its launcher icon. Its signed AndBible identity remains discoverable in system app information.";
 
 /* Android shared translations */
 "extracting_zip_file" = "Udpakker zip-fil…";
@@ -1170,3 +1164,6 @@
 
 /* Android shared translations */
 "ai_document_regenerating" = "Regenererer AI-dokument…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

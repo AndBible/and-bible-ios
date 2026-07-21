@@ -102,7 +102,7 @@ public final class SyncService {
     private var accountObserver: NSObjectProtocol?
     private let defaults: UserDefaults
     private let syncEnabledKey: String
-    /// Build-owned CloudKit container shared with the host's SwiftData configuration.
+    /// App-owned CloudKit container shared with the host's SwiftData configuration.
     let cloudKitContainerIdentifier: ProductCloudKitContainerIdentifier
     private var modeChangeHandler: ModeChangeHandler?
 
@@ -111,7 +111,7 @@ public final class SyncService {
      `startMonitoring(container:)`.
 
      - Parameters:
-       - cloudKitContainerIdentifier: Validated product-specific container also supplied to SwiftData.
+       - cloudKitContainerIdentifier: Validated app container also supplied to SwiftData.
        - defaults: Preference store that owns the iCloud sync toggle.
        - syncEnabledKey: Preference key for the iCloud sync toggle.
      - Side effects: none.
