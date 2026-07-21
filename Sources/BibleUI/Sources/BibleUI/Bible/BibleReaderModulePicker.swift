@@ -244,6 +244,20 @@ struct BibleReaderModulePicker: View {
      row actions, and a persistent Downloads handoff.
      */
     var body: some View {
+        rowActionPresentedScreen
+            .overlay(alignment: .bottom) {
+                installProgressOverlay
+            }
+    }
+
+    /**
+     Attaches document details, backup export, and local import presentation to the chooser.
+
+     - Returns: Chooser content with non-alert document-management presenters.
+     - Side effects: Presented controls can export backups or start an external document import.
+     - Failure modes: Export and import failures are retained for the later feedback-alert stage.
+     */
+    private var documentManagementPresentedScreen: some View {
         androidDocumentChooserScreen
         .moduleBrowserModuleDetailsDialog(details: selectedModuleDetails) {
             selectedModuleDetails = nil
@@ -269,6 +283,17 @@ struct BibleReaderModulePicker: View {
             allowsMultipleSelection: false,
             onCompletion: handleInstallZipSelection
         )
+    }
+
+    /**
+     Attaches local-module overwrite consent and import/export completion feedback.
+
+     - Returns: Document-management content with external-file alerts.
+     - Side effects: Consent can start a replacement install; dismissals clear retained feedback.
+     - Failure modes: Import failures remain visible until the user dismisses the feedback alert.
+     */
+    private var importFeedbackPresentedScreen: some View {
+        documentManagementPresentedScreen
         .alert(
             String(
                 localized: "android_module_backup_overwrite_title",
@@ -316,6 +341,17 @@ struct BibleReaderModulePicker: View {
         } message: {
             Text(externalDocumentImportMessage ?? "")
         }
+    }
+
+    /**
+     Attaches encrypted-module unlock and generic-key retry presentation.
+
+     - Returns: Import-feedback content with module-access alerts.
+     - Side effects: Actions can update a cipher key, retry a switch, or clear retained module state.
+     - Failure modes: Rejected keys and read failures keep retryable state in the chooser.
+     */
+    private var moduleAccessPresentedScreen: some View {
+        importFeedbackPresentedScreen
         .alert(
             pendingUnlockModule.map(Self.unlockPromptTitle(for:)) ?? "",
             isPresented: Binding(
@@ -375,6 +411,17 @@ struct BibleReaderModulePicker: View {
         } message: { _ in
             Text(genericSwitchFailureMessage ?? String(localized: "error_occurred"))
         }
+    }
+
+    /**
+     Attaches destructive row confirmation and row-action failure feedback last.
+
+     - Returns: Fully presented chooser content before the transient install-progress overlay.
+     - Side effects: Confirmed actions can uninstall modules or delete search indexes.
+     - Failure modes: Action failures remain visible until the user dismisses the error alert.
+     */
+    private var rowActionPresentedScreen: some View {
+        moduleAccessPresentedScreen
         .alert(
             pendingRowActionConfirmation?.title ?? "",
             isPresented: Binding(
@@ -422,27 +469,36 @@ struct BibleReaderModulePicker: View {
         } message: {
             Text(rowActionErrorMessage ?? "")
         }
-        .overlay(alignment: .bottom) {
-            if isImportingExternalDocument {
-                HStack(spacing: 12) {
-                    if let fraction = externalDocumentImportProgress?.fraction {
-                        ProgressView(value: fraction)
-                            .frame(maxWidth: 140)
-                    } else {
-                        ProgressView()
-                    }
-                    Text(String(localized: "installing", defaultValue: "Installing"))
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(DocumentChooserPalette.primaryText)
+    }
+
+    /**
+     Builds the transient progress bar shown while an external document is installed.
+
+     - Returns: Determinate or indeterminate progress content, or no content when no import is active.
+     - Side effects: none.
+     - Failure modes: Missing byte progress uses an indeterminate indicator.
+     */
+    @ViewBuilder
+    private var installProgressOverlay: some View {
+        if isImportingExternalDocument {
+            HStack(spacing: 12) {
+                if let fraction = externalDocumentImportProgress?.fraction {
+                    ProgressView(value: fraction)
+                        .frame(maxWidth: 140)
+                } else {
+                    ProgressView()
                 }
-                .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(DocumentChooserPalette.menuSurface)
-                .overlay(alignment: .top) {
-                    Divider().background(DocumentChooserPalette.divider)
-                }
-                .accessibilityIdentifier("modulePickerInstallProgress")
+                Text(String(localized: "installing", defaultValue: "Installing"))
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(DocumentChooserPalette.primaryText)
             }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(DocumentChooserPalette.menuSurface)
+            .overlay(alignment: .top) {
+                Divider().background(DocumentChooserPalette.divider)
+            }
+            .accessibilityIdentifier("modulePickerInstallProgress")
         }
     }
 
