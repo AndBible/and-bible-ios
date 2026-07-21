@@ -453,7 +453,9 @@ extension AndBibleUITests {
      * rerender the seeded result list after each option change. The same live Search route then
      * enters a deterministic fixture query, verifies the live translation picker Cancel,
      * outside-dismiss, and empty-OK paths, commits a second translation through the live picker,
-     * verifies grouped totals, and selects a result so reader-navigation handoff remains covered
+     * verifies grouped unique-verse and translation-hit totals plus both visible module rows, and
+     * selects the secondary translation result so the
+     * reader-navigation handoff remains covered
      * without a second cold app launch.
      *
      * - Side effects:
@@ -462,8 +464,8 @@ extension AndBibleUITests {
      *   - switches Search scope between NT and OT
      *   - switches Search word mode from all words to phrase and then to any word
      *   - enters a deterministic fixture query, exercises negative Search translation-picker
-     *     dialog paths, commits the seeded two-module translation selection, and taps a grouped
-     *     result row
+     *     dialog paths, commits the seeded two-module translation selection, and taps its visible
+     *     AATESTWEB result row
      * - Failure modes:
      *   - fails if Search regresses to sheet/modal presentation or drops the launch-seeded query
      *   - fails if visible Search option controls are not accessible
@@ -472,7 +474,8 @@ extension AndBibleUITests {
      *   - fails if live translation-picker Cancel, outside-dismiss, or empty OK commits draft
      *     changes instead of preserving the previous selection
      *   - fails if the translation picker cannot commit a second module with KJV first
-     *   - fails if grouped totals collapse to single-translation results
+     *   - fails if matching translations are not grouped into one Android-compatible unique verse
+     *     while retaining accessible result rows for both translation hits
      *   - fails if selecting the final result row does not navigate the reader to the selected
      *     passage
      */
@@ -579,15 +582,18 @@ extension AndBibleUITests {
             app.staticTexts["KJV, AATESTWEB"].waitForExistence(timeout: 5),
             "Expected the Search translation button to show Android's selected abbreviation list."
         )
-        waitForSearchState(containing: "groupedTotal=2", in: app, timeout: 20)
+        waitForSearchState(containing: "groupedTotal=1", in: app, timeout: 20)
+        waitForSearchState(containing: "groupedHitTotal=2", in: app, timeout: 20)
         waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
         waitForSearchState(containing: "AATESTWEB:1", in: app, timeout: 20)
-        waitForSearchResultCount(atLeast: 2, in: app, timeout: 20)
+        waitForSearchResultCount(atLeast: 1, in: app, timeout: 20)
 
         let groupedResultIdentifier = "searchResultRow::Genesis_1_2"
+        let secondaryModuleResultIdentifier = "searchResultModuleRow::Genesis_1_2::AATESTWEB"
         waitForSearchResultRow(groupedResultIdentifier, in: app, shouldExist: true, timeout: 20)
+        waitForSearchResultRow(secondaryModuleResultIdentifier, in: app, shouldExist: true, timeout: 20)
         let updatedReference = tapSearchResultRowAndWaitForReaderReferenceChange(
-            groupedResultIdentifier,
+            secondaryModuleResultIdentifier,
             from: initialReference,
             in: app,
             timeout: 20

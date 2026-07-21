@@ -571,11 +571,18 @@ public struct SearchView: View {
         }
     }
 
-    /// Stable search-result row tokens exported for UI automation.
+    /// Stable selectable search-result row tokens exported for UI automation.
     private var searchAccessibilityRowsToken: String {
         (groupedResults?.groups ?? [])
             .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
-            .map { "|\(searchResultIdentifier(for: $0))|" }
+            .flatMap { group in
+                group.matches.enumerated().map { index, hit in
+                    let identifier = index == 0
+                        ? searchResultIdentifier(for: group)
+                        : searchModuleResultIdentifier(for: hit)
+                    return "|\(identifier)|"
+                }
+            }
             .joined(separator: ",")
     }
 

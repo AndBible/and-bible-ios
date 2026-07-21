@@ -17,14 +17,14 @@ extension AndBibleUITests {
      * - Side effects:
      *   - launches the reader shell with empty reading-plan state
      *   - opens Reading Plans from the drawer and verifies Android-style destination chrome
-     *   - starts the first Android-parity built-in template and lands on Daily Reading directly
+     *   - starts the first Android-parity built-in template, completes day one, and reopens day two
      *   - returns to the plan list, deletes the active plan, then opens the import picker path
      * - Failure modes:
      *   - fails if Reading Plans regresses to sheet presentation
      *   - fails if the list state does not publish the expected active-plan counts
      *   - fails if the built-in catalog diverges from Android's bundled templates
      *   - fails if the built-in template does not navigate from picker selection to Daily Reading
-     *   - fails if the daily reading route cannot advance through the visible controls
+     *   - fails if the daily reading route cannot complete today's due reading through the visible controls
      *   - fails if the row-level delete action is missing or does not remove the active plan
      *   - fails if the custom import affordance does not request file-picker presentation
      */
@@ -56,20 +56,40 @@ extension AndBibleUITests {
         XCTAssertEqual(currentDay.value as? String, "1")
 
         tapElementReliably(
-            requireElement("dailyReadingMarkAsReadButton", in: app, timeout: 10),
+            requireElement("dailyReadingStatusToggle::1", in: app, timeout: 10),
             timeout: 10
         )
-        waitForElementValue("dailyReadingCurrentDayLabel", toEqual: "2", in: app, timeout: 20)
-
-        let dailyReadingBackButton = app.navigationBars.buttons.element(boundBy: 0)
+        let doneButton = requireElement("dailyReadingDoneButton", in: app, timeout: 10)
         XCTAssertTrue(
-            dailyReadingBackButton.waitForExistence(timeout: 10),
-            "Expected Daily Reading to expose NavigationStack back chrome to the Reading Plans list."
+            waitForUITestCondition("Daily Reading Done button enabled", timeout: 10) {
+                doneButton.isEnabled
+            },
+            "Android enables Done only after every reading for the day is marked read."
         )
-        tapElementReliably(dailyReadingBackButton, timeout: 10)
-        XCTAssertTrue(requireElement("readingPlanListScreen", in: app, timeout: 20).exists)
+        tapElementReliably(doneButton, timeout: 10)
+        XCTAssertTrue(
+            requireElement("readingPlanListScreen", in: app, timeout: 20).exists,
+            "Android closes Daily Reading when the next plan day is not yet due."
+        )
         waitForReadingPlanListState(containing: "active=1", in: app, timeout: 10)
         waitForReadingPlanListState(containing: builtInPlanToken, in: app, timeout: 10)
+
+        tapElementReliably(
+            requireElement("readingPlanActivePlanLink", in: app, timeout: 10),
+            timeout: 10
+        )
+        XCTAssertTrue(requireElement("dailyReadingScreen", in: app, timeout: 20).exists)
+        let advancedDay = requireElement("dailyReadingCurrentDayLabel", in: app, timeout: 15)
+        XCTAssertTrue(
+            waitForUITestCondition("persisted reading-plan day two", timeout: 10) {
+                advancedDay.value as? String == "2"
+            },
+            "Done must persist Android's next current day before dismissing Daily Reading."
+        )
+        let dailyReadingBackButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(dailyReadingBackButton.waitForExistence(timeout: 10))
+        tapElementReliably(dailyReadingBackButton, timeout: 10)
+        XCTAssertTrue(requireElement("readingPlanListScreen", in: app, timeout: 20).exists)
 
         let activePlan = requireElement("readingPlanActivePlanLink", in: app, timeout: 10)
         deleteReadingPlan(activePlan, planCode: builtInPlanCode, in: app, timeout: 10)
@@ -188,6 +208,7 @@ extension AndBibleUITests {
      Failure means the app has regressed to re-sorting the visible list from transient download state.
      */
     func testDownloadsInstallKeepsRowOrderVisibleDuringActivity() {
+        let warningRowIdentifier = "moduleBrowserRow::UITest Downloads--UITESTDLWARN"
         let app = makeApp(heldDownloadModules: ["UITESTDLWARN"])
         app.launch()
 
@@ -206,7 +227,7 @@ extension AndBibleUITests {
         )
 
         tapElementReliably(
-            requireElement("moduleBrowserRow::UITESTDLWARN", in: app, timeout: 10),
+            requireElement(warningRowIdentifier, in: app, timeout: 10),
             timeout: 10
         )
         tapAlertButton("Cancel", in: app, timeout: 10)
@@ -225,7 +246,7 @@ extension AndBibleUITests {
         )
 
         tapElementReliably(
-            requireElement("moduleBrowserRow::UITESTDLWARN", in: app, timeout: 10),
+            requireElement(warningRowIdentifier, in: app, timeout: 10),
             timeout: 10
         )
         tapAlertButton("OK", in: app, timeout: 10)

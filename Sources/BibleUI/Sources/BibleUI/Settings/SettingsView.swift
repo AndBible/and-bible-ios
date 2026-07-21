@@ -1632,7 +1632,11 @@ public struct SettingsView: View {
      Builds the discrete-mode help sheet outside the main form expression.
 
      Splitting this sheet content keeps the large settings screen type-checkable while preserving
-     the same modal behavior and toolbar dismissal.
+     the same modal behavior and toolbar dismissal. Its paragraph stack is an accessibility
+     container so the sheet marker remains distinct from the readable paragraph elements.
+
+     - Side effects: The Done action clears `showDiscreteHelp` and dismisses the sheet.
+     - Failure modes: View construction does not fail.
      */
     @ViewBuilder
     private var discreteHelpSheetContent: some View {
@@ -1645,6 +1649,7 @@ public struct SettingsView: View {
                     Text(String(localized: "discrete_help_ios_note"))
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("discreteModeSecurityHelp")
                 .padding()
             }

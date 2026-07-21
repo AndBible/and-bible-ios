@@ -127,7 +127,13 @@ public struct CalculatorView: View {
     ]
 
     /**
-     Builds the calculator display and keypad layout.
+     Builds the calculator display and keypad layout as one discoverable accessibility container.
+
+     The container identifier marks the active launch gate without replacing the labels or traits
+     of the display and keypad controls that assistive technologies and UI automation operate.
+
+     - Side effects: Button actions mutate calculator input and can invoke `onUnlock`.
+     - Failure modes: Layout and accessibility construction do not fail.
      */
     public var body: some View {
         VStack(spacing: 12) {
@@ -153,6 +159,7 @@ public struct CalculatorView: View {
         .padding()
         .background(Color.black)
         .preferredColorScheme(.dark)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("calculatorGateRoot")
     }
 

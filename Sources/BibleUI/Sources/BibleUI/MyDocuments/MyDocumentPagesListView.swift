@@ -7,6 +7,15 @@ import UniformTypeIdentifiers
 
 /**
  Manages one document's pages with explicit page-level Save/Cancel behavior.
+
+ The parent supplies a value-based management session and a stable document identifier. This view
+ edits only that document's pages, asks the parent to persist explicit saves, and returns selected
+ pages to the owning reader without writing SwiftData directly.
+
+ - Side effects: Mutates the bound draft session, presents import/export and edit surfaces, invokes
+   the parent save callback, and opens selected pages in the reader.
+ - Failure modes: Missing documents render a not-found state. Import, export, validation, and save
+   failures remain visible for correction or retry without silently discarding draft changes.
  */
 struct MyDocumentPagesListView: View {
     @Environment(\.dismiss) private var dismiss
@@ -40,6 +49,14 @@ struct MyDocumentPagesListView: View {
         return pages != baselinePages
     }
 
+    /**
+     Builds the page list, editing controls, and deterministic UI-test state export.
+
+     - Side effects: Appearance captures a page baseline; user gestures may mutate the bound session,
+       present native file surfaces, persist through `onSave`, or invoke `onOpenPage`.
+     - Failure modes: A missing document renders the explicit unavailable state, while workflow
+       failures are shown by the view's alert.
+     */
     var body: some View {
         Group {
             if let document {
@@ -151,6 +168,46 @@ struct MyDocumentPagesListView: View {
             Text(errorMessage ?? "")
         }
         .accessibilityIdentifier("myDocumentPagesScreen")
+        .overlay(alignment: .topLeading) { myDocumentPagesStateExport }
+    }
+
+    /**
+     Serializes the selected document and visible page identities for semantic UI synchronization.
+
+     - Returns: A compact value containing document initials, page count, dirty state, and bounded
+       page-key tokens when detailed UI-test exports are enabled.
+     - Side effects: None.
+     - Failure modes: Missing documents use the stable `missing` token and an empty page list.
+     */
+    private var myDocumentPagesAccessibilityValue: String {
+        let baseState = "document=\(document?.initials ?? "missing");total=\(pages.count);dirty=\(hasPageChanges)"
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
+            return baseState
+        }
+        let rowTokens = pages
+            .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+            .map { "|\(accessibilitySegment($0.pageKey))|" }
+            .joined(separator: ",")
+        return "\(baseState);rows=\(rowTokens)"
+    }
+
+    /**
+     Publishes page-list state through a lightweight hidden element for UI-test polling.
+
+     - Side effects: Adds one noninteractive accessibility element only in detailed UI-test mode.
+     - Failure modes: None; normal app sessions render no export element.
+     */
+    @ViewBuilder
+    private var myDocumentPagesStateExport: some View {
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            Text(myDocumentPagesAccessibilityValue)
+                .font(.system(size: 1))
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("myDocumentPagesStateExport")
+                .accessibilityValue(myDocumentPagesAccessibilityValue)
+        }
     }
 
     @ToolbarContentBuilder

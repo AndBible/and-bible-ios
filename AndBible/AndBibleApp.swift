@@ -332,14 +332,76 @@ struct AndBibleApp: App {
     @AppStorage(AppPreferenceKey.discreteMode.rawValue) private var isDiscreteMode = false
     /// When enabled, calculator gate appears on every app launch/resume.
     @AppStorage(AppPreferenceKey.showCalculator.rawValue) private var showCalculator = false
-    /// Temporary unlock for the current session — does NOT change the persisted setting.
-    @State private var isUnlocked = false
+    /// Temporary unlock until the next scene activation; never changes the persisted gate setting.
+    @State private var isUnlocked: Bool
 
     /**
      UserDefaults key for the iCloud sync toggle.
      Read from UserDefaults (not SwiftData) because we need it before the container is created.
      */
     static let iCloudSyncEnabledKey = "icloud_sync_enabled"
+
+    #if DEBUG
+    /**
+     Applies a one-shot UI-test preference seed through the app's own `UserDefaults` process.
+
+     Host-side fixture tools cannot safely replace a live simulator preference plist because
+     `cfprefsd` may retain the previous domain, and XCTest can reinstall the app after fixture
+     preparation. The UI harness therefore passes an encoded property-list dictionary in the
+     launch environment. A session marker prevents a same-test relaunch from resetting state that
+     the test intentionally changed.
+
+     - Side effects:
+       - clears the app's persistent preference domain
+       - writes every property-list value from the pending seed
+       - records the consuming UI-test session and synchronizes `UserDefaults`
+     - Failure modes:
+       - ignores normal Debug launches that lack a UI-test session or encoded seed
+       - ignores subsequent launches in the same UI-test session
+       - triggers a Debug assertion when the seed is malformed or the bundle identifier is unavailable
+     */
+    private static func applyPendingUITestPreferencesIfNeeded() {
+        let environment = ProcessInfo.processInfo.environment
+        guard let sessionIdentifier = environment["UITEST_SESSION_ID"],
+              !sessionIdentifier.isEmpty,
+              let encodedPreferences = environment["UITEST_PREFERENCE_SEED_BASE64"],
+              !encodedPreferences.isEmpty else {
+            return
+        }
+
+        let consumedSessionKey = "_uitest_consumed_preference_seed_session"
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: consumedSessionKey) != sessionIdentifier else {
+            return
+        }
+
+        do {
+            guard let data = Data(base64Encoded: encodedPreferences) else {
+                assertionFailure("UI-test preference seed was not valid base64.")
+                return
+            }
+            let propertyList = try PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+            )
+            guard let values = propertyList as? [String: Any],
+                  let bundleIdentifier = Bundle.main.bundleIdentifier else {
+                assertionFailure("UI-test preference seed did not contain a keyed dictionary.")
+                return
+            }
+
+            defaults.removePersistentDomain(forName: bundleIdentifier)
+            for (key, value) in values {
+                defaults.set(value, forKey: key)
+            }
+            defaults.set(sessionIdentifier, forKey: consumedSessionKey)
+            _ = defaults.synchronize()
+        } catch {
+            assertionFailure("UI-test preference seed failed: \(error.localizedDescription)")
+        }
+    }
+    #endif
 
     /**
      User-visible recovery message shown when CloudKit-backed SwiftData startup fails.
@@ -529,6 +591,12 @@ struct AndBibleApp: App {
     }
 
     init() {
+        #if DEBUG
+        Self.applyPendingUITestPreferencesIfNeeded()
+        #endif
+        self._isUnlocked = State(
+            initialValue: !UserDefaults.standard.bool(forKey: AppPreferenceKey.showCalculator.rawValue)
+        )
         let productCloudKitContainerIdentifier = ProductCloudKitContainerIdentifier.required(
             in: .main
         )
@@ -664,11 +732,14 @@ struct AndBibleApp: App {
      Handles scene lifecycle events that affect icons, remote sync, and background refresh.
 
      - Parameter newPhase: SwiftUI scene phase emitted by the root scene.
-     - Side effects: Starts/stops lifecycle sync, schedules background refresh, and reconciles the
-       alternate app icon when the app becomes active.
+     - Side effects: Re-arms an enabled calculator gate on activation, starts/stops lifecycle sync,
+       schedules background refresh, and reconciles the alternate app icon when the app becomes active.
      */
     private func handleScenePhaseChange(_ newPhase: ScenePhase) {
         if newPhase == .active {
+            if showCalculator {
+                isUnlocked = false
+            }
             // Reconcile icon state when app becomes active
             // (setAlternateIconName fails if called before app is fully active)
             updateAppIcon(discrete: isDiscreteMode)
@@ -704,11 +775,9 @@ struct AndBibleApp: App {
             .onChange(of: isDiscreteMode) { _, newValue in
                 updateAppIcon(discrete: newValue)
             }
-            .onChange(of: showCalculator) { _, newValue in
-                // When user turns off calculator gate, clear unlock state
-                if !newValue {
-                    isUnlocked = false
-                }
+            .onChange(of: showCalculator) { _, _ in
+                // Android applies this setting on the next resume instead of hiding Settings now.
+                isUnlocked = true
             }
             .onOpenURL { url in
                 handleExternalDocumentURL(url)

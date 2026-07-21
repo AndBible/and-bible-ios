@@ -1358,7 +1358,7 @@ public struct SyncSettingsView: View {
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "org.andbible.ios"
         if UITestRuntimeConfiguration.remoteSyncBootstrapScenario == .adoptExisting {
             return RemoteSyncSynchronizationService(
-                adapter: UITestRemoteSyncAdapter(bundleIdentifier: bundleIdentifier),
+                adapter: UITestRemoteSyncAdapter.appSession,
                 bundleIdentifier: bundleIdentifier,
                 deviceIdentifier: remoteSettingsStore.deviceIdentifier(),
                 nowProvider: { 1_735_689_900_000 }

@@ -8,8 +8,8 @@ import SwordKit
  Host-side fixture writer for XCUITests.
 
  The tool operates directly on the simulator app data container instead of relying on production
- launch arguments or in-app harness UI. It can reset persisted state and seed deterministic
- fixture graphs into the same SwiftData store files the real app uses.
+ harness UI. It can reset persisted state, seed deterministic fixture graphs into the same
+ SwiftData store files the real app uses, and emit preferences for the app to apply on launch.
  */
 @main
 struct UITestFixtureTool {
@@ -167,31 +167,23 @@ private enum FixtureToolError: LocalizedError {
 /// Filesystem layout for the simulator app data container.
 private struct FixturePaths {
     let dataContainerURL: URL
-    let bundleIdentifier: String
     let applicationSupportURL: URL
     let documentsURL: URL
-    let preferencesURL: URL
     let cloudStoreURL: URL
     let localStoreURL: URL
 
     /**
      Creates the derived simulator-container paths used by the tool.
      *
-     * - Parameters:
-     *   - dataContainerURL: Root data container returned by `simctl get_app_container ... data`.
-     *   - bundleIdentifier: App bundle identifier whose preferences file should be managed.
+     * - Parameter dataContainerURL: Root data container returned by
+     *   `simctl get_app_container ... data`.
      */
-    init(dataContainerURL: URL, bundleIdentifier: String) {
+    init(dataContainerURL: URL) {
         self.dataContainerURL = dataContainerURL
-        self.bundleIdentifier = bundleIdentifier
         self.applicationSupportURL = dataContainerURL
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("Application Support", isDirectory: true)
         self.documentsURL = dataContainerURL.appendingPathComponent("Documents", isDirectory: true)
-        self.preferencesURL = dataContainerURL
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Preferences", isDirectory: true)
-            .appendingPathComponent("\(bundleIdentifier).plist", isDirectory: false)
         self.cloudStoreURL = applicationSupportURL.appendingPathComponent("AndBible.store", isDirectory: false)
         self.localStoreURL = applicationSupportURL.appendingPathComponent("LocalStore.store", isDirectory: false)
     }
@@ -219,23 +211,15 @@ private struct FixtureTool {
     }
 
     /**
-     Deletes the app's persisted SwiftData stores, search index, SWORD install metadata, and
-     preferences file.
+     Deletes the app's persisted SwiftData stores, search index, and SWORD install metadata.
      *
      * - Throws: Filesystem errors only when creating the parent directories fails.
      */
     private func resetContainer() throws {
-        let paths = FixturePaths(
-            dataContainerURL: arguments.dataContainerURL,
-            bundleIdentifier: arguments.bundleIdentifier
-        )
+        let paths = FixturePaths(dataContainerURL: arguments.dataContainerURL)
         let fileManager = FileManager.default
 
         try fileManager.createDirectory(at: paths.applicationSupportURL, withIntermediateDirectories: true)
-        try fileManager.createDirectory(
-            at: paths.preferencesURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
         try fileManager.createDirectory(at: paths.documentsURL, withIntermediateDirectories: true)
 
         try removeSQLiteFamily(at: paths.cloudStoreURL)
@@ -247,24 +231,20 @@ private struct FixtureTool {
             try fileManager.removeItem(at: installManagerURL)
         }
         try removeUITestSwordModules(from: paths)
-        if fileManager.fileExists(atPath: paths.preferencesURL.path) {
-            try fileManager.removeItem(at: paths.preferencesURL)
-        }
     }
 
     /**
      Opens the simulator store files and writes one deterministic fixture scenario.
      *
      * - Parameter scenario: Named scenario describing the persisted graph to seed.
+     * - Returns: Base64 property-list preferences for the app to apply on first launch.
      * - Throws: SwiftData or validation errors when the store graph cannot be prepared.
      */
     private func seedScenario(_ scenario: FixtureScenario) throws {
-        let paths = FixturePaths(
-            dataContainerURL: arguments.dataContainerURL,
-            bundleIdentifier: arguments.bundleIdentifier
-        )
+        let paths = FixturePaths(dataContainerURL: arguments.dataContainerURL)
         let context = try FixtureContext(paths: paths, bundleIdentifier: arguments.bundleIdentifier)
-        try context.seed(scenario)
+        let encodedPreferences = try context.seed(scenario)
+        print(encodedPreferences)
     }
 
     /**
@@ -336,10 +316,6 @@ private final class FixtureContext {
         self.paths = paths
         try fileManager.createDirectory(at: paths.applicationSupportURL, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.documentsURL, withIntermediateDirectories: true)
-        try fileManager.createDirectory(
-            at: paths.preferencesURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
 
         let cloudModels: [any PersistentModel.Type] = [
             Workspace.self,
@@ -402,9 +378,10 @@ private final class FixtureContext {
      Writes one named deterministic scenario into the opened simulator stores.
      *
      * - Parameter scenario: Scenario to write.
+     * - Returns: Base64 property-list preferences for the app's first launch in the test session.
      * - Throws: Validation errors when the baseline workspace graph cannot be created.
      */
-    func seed(_ scenario: FixtureScenario) throws {
+    func seed(_ scenario: FixtureScenario) throws -> String {
         let baseline = try ensureBaseline()
 
         switch scenario {
@@ -455,7 +432,7 @@ private final class FixtureContext {
         }
 
         try modelContext.save()
-        try writePreferences(["icloud_sync_enabled": false])
+        return try encodedPreferences(["icloud_sync_enabled": false])
     }
 
     /// Disk shape used by `ModuleRepository.loadCachedCatalogs()` for one UI-test catalog fixture.
@@ -1920,18 +1897,19 @@ private final class FixtureContext {
     }
 
     /**
-     Writes a minimal preferences plist into the simulator container.
+     Encodes a minimal preferences plist for the app to apply through `UserDefaults` on launch.
      *
-     * - Parameter values: Dictionary encoded into the app preferences file.
-     * - Throws: Filesystem or plist-serialization errors.
+     * - Parameter values: Dictionary encoded into the launch-environment payload.
+     * - Returns: Base64 representation of the binary property list.
+     * - Throws: Property-list serialization errors.
      */
-    private func writePreferences(_ values: [String: Any]) throws {
+    private func encodedPreferences(_ values: [String: Any]) throws -> String {
         let data = try PropertyListSerialization.data(
             fromPropertyList: values,
             format: .binary,
             options: 0
         )
-        try data.write(to: paths.preferencesURL, options: .atomic)
+        return data.base64EncodedString()
     }
 
     /**

@@ -110,7 +110,7 @@ extension AndBibleUITests {
             ]
         }
 
-        if identifier.hasSuffix("Toggle") {
+        if identifier.hasSuffix("Toggle") || identifier.contains("Toggle::") {
             return [
                 app.switches[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
@@ -672,7 +672,9 @@ extension AndBibleUITests {
             ]
         }
 
-        if identifier.hasPrefix("searchResultRow::") {
+        if identifier.hasPrefix("searchResultRow::")
+            || identifier.hasPrefix("searchResultModuleRow::")
+        {
             return searchResultRowCandidates(identifier, in: app)
         }
 

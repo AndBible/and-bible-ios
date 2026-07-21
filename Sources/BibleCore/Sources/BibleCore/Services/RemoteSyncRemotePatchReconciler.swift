@@ -48,6 +48,36 @@ public protocol RemoteSyncConditionalFileUploading: Sendable {
 }
 
 /**
+ Shared local-source validation for conditional-upload implementations that materialize bytes.
+
+ Production network adapters may stream a validated descriptor directly. In-memory and deterministic
+ adapters use this namespace to enforce the same no-follow, regular-file, byte-ceiling, complete-read,
+ and identity-revalidation boundary instead of maintaining weaker file readers in other modules.
+ */
+public enum RemoteSyncConditionalUploadSource {
+    /**
+     Reads one complete conditional-upload source through BibleCore's bounded-file safety contract.
+
+     - Parameters:
+       - fileURL: Local source that must remain the same regular file throughout the read.
+       - maximumByteCount: Maximum accepted source size.
+     - Returns: Exact source bytes after descriptor and path identity revalidation.
+     - Side Effects: Opens and reads one no-follow local file descriptor.
+     - Throws: Cancellation is handled by callers; missing, unsafe, replaced, or oversized sources
+       throw BibleCore's bounded-file error without returning partial bytes.
+     */
+    public static func readValidatedBytes(
+        at fileURL: URL,
+        maximumByteCount: Int
+    ) throws -> Data {
+        try RemoteSyncBoundedFileIO.readRegularFile(
+            at: fileURL,
+            maximumByteCount: maximumByteCount
+        )
+    }
+}
+
+/**
  Immutable identity and location of a durable local patch generation awaiting remote acceptance.
 
  Category workers construct this value from their persisted outbox manifest. The reconciler validates

@@ -333,6 +333,9 @@ public struct BibleReaderView: View {
     /// Presents the Android-style left navigation drawer from the reader header.
     @State private var showReaderNavigationDrawer = false
 
+    /// Identifies the only drawer action still allowed to run after its dismissal animation.
+    @State private var pendingReaderNavigationDrawerActionID: UUID?
+
     /// Presents the Android-style Strong's mode chooser launched from the overflow menu.
     @State private var showReaderStrongsModeDialog = false
 
@@ -3327,6 +3330,7 @@ public struct BibleReaderView: View {
             avoidanceInsets: readerWindowControlsAvoidanceInsets,
             surfacePalette: readerThemeSurfacePalette,
             onOpenNavigationDrawer: {
+                pendingReaderNavigationDrawerActionID = nil
                 withAnimation(.easeInOut(duration: 0.2)) {
                     showReaderNavigationDrawer = true
                 }
@@ -3700,17 +3704,48 @@ public struct BibleReaderView: View {
 
     /// Dismisses the drawer immediately using the shared animation.
     private func dismissReaderNavigationDrawer() {
+        pendingReaderNavigationDrawerActionID = nil
         withAnimation(.easeInOut(duration: 0.2)) {
             showReaderNavigationDrawer = false
         }
     }
 
-    /// Dismisses the drawer before running a follow-up action that may present another surface.
+    /**
+     Dismisses the reader drawer before presenting a destination or another transient surface.
+
+     SwiftUI navigation must not begin while the drawer's removal transition still owns the reader
+     hierarchy. Starting both animations together can leave the pushed destination partially
+     presented, so the follow-up runs from the transaction's removal completion instead of a timer.
+
+     - Parameter action: Main-actor presentation or side-effect closure to run after dismissal.
+     - Side effects: Replaces any pending drawer action, hides the reader drawer, and invokes the
+       newest action exactly once. When the drawer is already hidden, invokes that action
+       synchronously.
+     - Failure modes: A superseded action is deliberately discarded. Reduced-motion and interrupted
+       animations still complete the SwiftUI transaction for the current action.
+     - Important: Callers must provide UI work that is valid on the main actor.
+     */
     private func dismissReaderNavigationDrawerAndPerform(_ action: @escaping () -> Void) {
-        if showReaderNavigationDrawer {
-            dismissReaderNavigationDrawer()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: action)
-        } else {
+        let actionID = UUID()
+        pendingReaderNavigationDrawerActionID = actionID
+
+        guard showReaderNavigationDrawer else {
+            pendingReaderNavigationDrawerActionID = nil
+            action()
+            return
+        }
+
+        withAnimation(
+            .easeInOut(duration: 0.2),
+            completionCriteria: .removed
+        ) {
+            showReaderNavigationDrawer = false
+        } completion: {
+            guard pendingReaderNavigationDrawerActionID == actionID,
+                  !showReaderNavigationDrawer else {
+                return
+            }
+            pendingReaderNavigationDrawerActionID = nil
             action()
         }
     }

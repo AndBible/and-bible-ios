@@ -9,13 +9,14 @@ extension AndBibleUITests {
     /**
      Verifies the single installed AndBible app can present and leave its calculator launch gate.
      *
-     * Seven incorrect equals taps, backgrounding, and a full relaunch must retain an enabled gate.
-     * The exact custom PIN then unlocks, after which Settings must retain both runtime controls.
+     * The workflow writes a custom PIN and enables the gate through production Settings without
+     * replacing the active Settings screen. Resume and relaunch must present the gate; seven wrong
+     * attempts must not authorize; and every resume after a valid unlock must re-arm the gate.
      *
      * - Side effects:
      *   - resets and seeds the installed AndBible app container with the baseline fixture
-     *   - enables `show_calculator` and writes a custom PIN before launch
-     *   - backgrounds, terminates, relaunches, and unlocks the same app bundle
+     *   - writes a custom PIN and enables `show_calculator` through the visible Settings controls
+     *   - backgrounds, terminates, relaunches, unlocks, and verifies post-unlock re-locking
      *   - opens Settings after authorization
      * - Failure modes:
      *   - fails when AndBible is not installed on the test simulator
@@ -23,113 +24,45 @@ extension AndBibleUITests {
      *   - fails when runtime security controls or truthful platform help disappear
      */
     func testSingleAppCalculatorGateAndSecuritySettings() {
-        let bundleIdentifier = "org.andbible.ios"
-        let app = XCUIApplication(bundleIdentifier: bundleIdentifier)
-        trackedApp = app
-        app.launchEnvironment["UITEST_SESSION_ID"] = UUID().uuidString
-        app.launchEnvironment["UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"] = "1"
-        app.launchArguments += ["-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"]
-        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-
-        guard let fixtureToolPath = ProcessInfo.processInfo.environment[
-            "UITEST_FIXTURE_TOOL_PATH"
-        ], !fixtureToolPath.isEmpty else {
-            XCTFail("UITEST_FIXTURE_TOOL_PATH is required for the calculator-gate smoke test.")
-            return
-        }
-        guard let dataContainerPath = ensureInstalledAppDataContainer(
-            for: app,
-            bundleIdentifier: bundleIdentifier
-        ) else {
-            return
-        }
-        let resetResult = runHostProcess(
-            executablePath: fixtureToolPath,
-            arguments: [
-                "reset",
-                "--data-container",
-                dataContainerPath,
-                "--bundle-id",
-                bundleIdentifier,
-            ],
-            timeout: 30
-        )
-        XCTAssertEqual(
-            resetResult.status,
-            0,
-            "AndBible fixture reset failed:\n\(resetResult.stderr)"
-        )
-        let seedResult = runHostProcess(
-            executablePath: fixtureToolPath,
-            arguments: [
-                "seed",
-                "--data-container",
-                dataContainerPath,
-                "--scenario",
-                "baseline",
-                "--bundle-id",
-                bundleIdentifier,
-            ],
-            timeout: 30
-        )
-        XCTAssertEqual(
-            seedResult.status,
-            0,
-            "AndBible fixture seed failed:\n\(seedResult.stderr)"
-        )
-
-        guard let simulatorID = resolveCurrentSimulatorID() else {
-            XCTFail("Unable to resolve the AndBible test simulator UDID.")
-            return
-        }
-        let enabledGateResult = runHostProcess(
-            executablePath: "/usr/bin/xcrun",
-            arguments: [
-                "simctl",
-                "spawn",
-                simulatorID,
-                "defaults",
-                "write",
-                bundleIdentifier,
-                "show_calculator",
-                "-bool",
-                "true",
-            ],
-            timeout: 10
-        )
-        XCTAssertEqual(
-            enabledGateResult.status,
-            0,
-            "Could not enable the calculator gate:\n\(enabledGateResult.stderr)"
-        )
         let customPIN = "08642"
-        let customPINResult = runHostProcess(
-            executablePath: "/usr/bin/xcrun",
-            arguments: [
-                "simctl",
-                "spawn",
-                simulatorID,
-                "defaults",
-                "write",
-                bundleIdentifier,
-                "calculator_pin",
-                customPIN,
-            ],
-            timeout: 10
+        let app = makeApp()
+        app.launch()
+        XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 30))
+
+        openSettings(in: app)
+        let initialPinRow = requireSettingsNavigationControl("calculatorPinRow", in: app, timeout: 20)
+        let pinField = initialPinRow.elementType == .textField
+            ? initialPinRow
+            : initialPinRow.textFields.firstMatch
+        XCTAssertTrue(pinField.waitForExistence(timeout: 10), "Calculator PIN row must contain an editable field.")
+        replaceText(in: pinField, with: customPIN, placeholderHints: ["PIN"])
+        XCTAssertEqual(pinField.value as? String, customPIN)
+
+        let initialShowCalculatorToggle = requireSettingsNavigationControl(
+            "showCalculatorToggle",
+            in: app,
+            timeout: 20
         )
-        XCTAssertEqual(
-            customPINResult.status,
-            0,
-            "Could not persist the custom calculator PIN:\n\(customPINResult.stderr)"
+        if initialShowCalculatorToggle.value as? String != "1" {
+            tapElementReliably(initialShowCalculatorToggle, timeout: 10)
+        }
+        XCTAssertTrue(
+            requireSettingsNavigationControl("showCalculatorToggle", in: app, timeout: 10).exists,
+            "Android keeps Settings visible after enabling the gate; it applies on the next resume."
+        )
+        XCTAssertFalse(app.otherElements["calculatorGateRoot"].exists)
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(
+            app.otherElements["calculatorGateRoot"].waitForExistence(timeout: 10),
+            "The first resume after enabling show_calculator must present the calculator gate."
         )
 
-        app.launch()
-        XCTAssertTrue(
-            app.otherElements["calculatorGateRoot"].waitForExistence(timeout: 20),
-            "AndBible must open at its calculator gate when show_calculator is enabled."
-        )
+        let equalsButton = app.buttons["="].firstMatch
+        XCTAssertTrue(equalsButton.waitForExistence(timeout: 10), "The calculator gate must expose its equals key.")
         for _ in 0..<7 {
-            tapElementReliably(requireElement("=", in: app, timeout: 10), timeout: 10)
+            tapElementReliably(equalsButton, timeout: 10)
         }
         XCTAssertTrue(
             app.otherElements["calculatorGateRoot"].exists,
@@ -150,63 +83,48 @@ extension AndBibleUITests {
             "Relaunch must discard calculator input without weakening PIN authorization."
         )
         for key in customPIN.map(String.init) + ["="] {
-            tapElementReliably(requireElement(key, in: app, timeout: 10), timeout: 10)
+            let keyButton = app.buttons[key].firstMatch
+            XCTAssertTrue(keyButton.waitForExistence(timeout: 10), "The calculator gate must expose its \(key) key.")
+            tapElementReliably(keyButton, timeout: 10)
         }
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 30),
             "Only the exact persisted custom PIN should unlock AndBible."
         )
 
-        openSettings(in: app)
-        let settingsForm = requireElement("settingsForm", in: app, timeout: 20)
-        let helpButton = resolveSettingsNavigationControlViaSearch(
-            title: "Read this first!",
-            settingsForm: settingsForm,
-            app: app,
-            timeout: 15,
-            resolveControl: { resolvedElement("discreteHelpButton", in: app) }
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(
+            app.otherElements["calculatorGateRoot"].waitForExistence(timeout: 10),
+            "Android re-arms the enabled calculator gate whenever an unlocked app resumes."
         )
-        XCTAssertNotNil(helpButton, "AndBible Settings must retain its security help row.")
-        guard let helpButton else {
-            return
+        for key in customPIN.map(String.init) + ["="] {
+            let keyButton = app.buttons[key].firstMatch
+            XCTAssertTrue(keyButton.waitForExistence(timeout: 10), "The re-armed gate must expose its \(key) key.")
+            tapElementReliably(keyButton, timeout: 10)
         }
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 30),
+            "The persisted custom PIN must unlock the re-armed gate."
+        )
+
+        openSettings(in: app)
+        let helpButton = requireSettingsNavigationControl("discreteHelpButton", in: app, timeout: 20)
         tapElementReliably(helpButton, timeout: 10)
         XCTAssertTrue(
             app.otherElements["discreteModeSecurityHelp"].waitForExistence(timeout: 10)
         )
+        let platformHelpText = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations."
         XCTAssertTrue(
-            app.staticTexts[
-                "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations."
-            ].exists
+            app.staticTexts.matching(
+                NSPredicate(format: "label == %@", platformHelpText)
+            ).firstMatch.exists
         )
         tapElementReliably(requireElement("Done", in: app, timeout: 10), timeout: 10)
 
-        let pinRow = resolveSettingsNavigationControlViaSearch(
-            title: "Calculator PIN",
-            settingsForm: settingsForm,
-            app: app,
-            timeout: 15,
-            resolveControl: { resolvedElement("calculatorPinRow", in: app) }
-        )
-        XCTAssertNotNil(pinRow, "AndBible Settings must retain its PIN editor.")
-
-        let discreteModeToggle = resolveSettingsNavigationControlViaSearch(
-            title: "Hide religious symbols",
-            settingsForm: settingsForm,
-            app: app,
-            timeout: 10,
-            resolveControl: { resolvedElement("discreteModeToggle", in: app) }
-        )
-        XCTAssertNotNil(discreteModeToggle, "AndBible must expose the runtime icon toggle.")
-
-        let showCalculatorToggle = resolveSettingsNavigationControlViaSearch(
-            title: "Calculator",
-            settingsForm: settingsForm,
-            app: app,
-            timeout: 10,
-            resolveControl: { resolvedElement("showCalculatorToggle", in: app) }
-        )
-        XCTAssertNotNil(showCalculatorToggle, "AndBible must expose the launch-gate toggle.")
+        XCTAssertTrue(requireSettingsNavigationControl("calculatorPinRow", in: app, timeout: 20).exists)
+        XCTAssertTrue(requireSettingsNavigationControl("discreteModeToggle", in: app, timeout: 20).exists)
+        XCTAssertTrue(requireSettingsNavigationControl("showCalculatorToggle", in: app, timeout: 20).exists)
     }
 
     /**
@@ -312,6 +230,7 @@ extension AndBibleUITests {
      create-new branch.
      *
      * - Side effects:
+     *   - resets and seeds the installed AndBible app container with the baseline fixture
      *   - launches Sync Settings with deterministic NextCloud settings and a UI-test remote
      *     backend that reports one existing same-named My Documents sync folder
      *   - scrolls to and enables My Documents sync through the production category row

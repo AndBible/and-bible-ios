@@ -7,23 +7,27 @@ import XCTest
 /**
  Protects the Android AI system resources and initial message-composition contract.
 
- Resource digests come from detached Android `origin/current-stable` commit `0f3b85823`. Tests use
- pure unmanaged prompt/context values and perform no persistence, network, or installed-module I/O.
- A failure means the provider can receive materially different safety, citation, source-selection,
+ Resource digests come from detached Android `origin/current-stable` commit `0f3b85823`. The agent
+ reference digest removes Android's four trailing ASCII spaces because this repository rejects
+ trailing whitespace; the test still hashes the bundled iOS resources byte-for-byte. Tests use pure
+ unmanaged prompt/context values and perform no persistence, network, or installed-module I/O. A
+ failure means the provider can receive materially different safety, citation, source-selection,
  note-writeback, or selected-content instructions on iOS.
  */
 final class AIReaderMessageCompositionParityTests: XCTestCase {
     /**
-     Verifies both bundled system resources remain byte-identical to Android's audited resources.
+     Verifies both bundled system resources remain content-identical to Android's audited resources.
 
-     The digest assertion catches omissions and subtle punctuation drift while representative clause
-     assertions keep a digest failure actionable. Failure requires an intentional cross-platform
-     resource update, not an iOS-only prompt edit.
+     The expected agent digest was calculated after deleting Android's four trailing ASCII spaces;
+     iOS bytes are not normalized here. The assertion therefore catches new tabs, Markdown-significant
+     double spaces, omissions, line-break changes, and punctuation drift, while representative clauses
+     keep a digest failure actionable. Failure requires an intentional cross-platform resource update,
+     not an iOS-only prompt edit.
      */
     func testBundledSystemResourcesMatchAndroidStableDigests() throws {
         let prompts = try AIReaderSystemPromptLoader.load()
 
-        XCTAssertEqual(Self.sha256(prompts.agent), "927842e0650f7bc3ac5cd8e63a4ea3f3950f60890bcacb61ff94e3e0d42d15fb")
+        XCTAssertEqual(Self.sha256(prompts.agent), "b7c20e8611c1ec14a4ec0b3bb3928a86c62b53015d3e849f55678f0b4a9e7a3a")
         XCTAssertEqual(Self.sha256(prompts.transformation), "e1d4d6e2cccbf3a18530087241e27f9e9c71819fd0d89e09693b0cd01d4449c7")
         XCTAssertTrue(prompts.agent.contains("Your response IS the document. Write it as a standalone article"))
         XCTAssertTrue(prompts.agent.contains("EFFICIENCY - taskComplete flag:"))
@@ -332,7 +336,7 @@ final class AIReaderMessageCompositionParityTests: XCTestCase {
         )
     }
 
-    /** Returns a lowercase SHA-256 digest for a UTF-8 prompt resource. */
+    /** Returns the lowercase SHA-256 digest of the exact UTF-8 prompt bytes. */
     private static func sha256(_ value: String) -> String {
         SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
     }
