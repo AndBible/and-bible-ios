@@ -668,7 +668,7 @@ public struct ModuleBrowserView: View {
      - Failure modes: Repository errors are rendered in the list and do not prevent the route from
        opening.
      */
-    private var androidDownloadsScreen: some View {
+    private var androidDownloadsLayout: some View {
         let visibleModules = filteredAvailableModules
         let installedModulesByName = Self.installedModuleLookup(from: installedModules)
 
@@ -678,15 +678,58 @@ public struct ModuleBrowserView: View {
                 visibleModules: visibleModules,
                 installedModulesByName: installedModulesByName
             )
-            VStack(spacing: 0) {
-                androidTopAppBar
-                androidFilterBar(visibleModuleCount: visibleModules.count)
-                androidDownloadsContent(
-                    visibleModules: visibleModules,
-                    installedModulesByName: installedModulesByName
-                )
-            }
-            if showOverflowMenu {
+            androidDownloadsListContent(
+                visibleModules: visibleModules,
+                installedModulesByName: installedModulesByName
+            )
+            androidDownloadsOverflowLayer
+        }
+        .background(ModuleBrowserPalette.background.ignoresSafeArea())
+        .onChange(of: searchText) {
+            alignFiltersWithAndroidSearchState(searchText)
+            captureDownloadListSortSnapshot()
+        }
+        .navigationBarBackButtonHidden(true)
+        #if os(iOS)
+        .toolbar(.hidden, for: .navigationBar)
+        #endif
+    }
+
+    /**
+     Builds the app bar, filters, and download rows as one stable ZStack child.
+
+     - Parameters:
+       - visibleModules: Remote modules matching the current category, language, and search filters.
+       - installedModulesByName: Installed-module lookup used to derive each row's action state.
+     - Returns: Primary Downloads content below the route-level overlays.
+     - Side effects: Child controls can change filters or invoke module actions.
+     - Failure modes: Empty module arrays render the existing empty/error content.
+     */
+    private func androidDownloadsListContent(
+        visibleModules: [RemoteModuleInfo],
+        installedModulesByName: [String: ModuleInfo]
+    ) -> some View {
+        VStack(spacing: 0) {
+            androidTopAppBar
+            androidFilterBar(visibleModuleCount: visibleModules.count)
+            androidDownloadsContent(
+                visibleModules: visibleModules,
+                installedModulesByName: installedModulesByName
+            )
+        }
+    }
+
+    /**
+     Builds the tap-dismiss layer and Android overflow menu only while that menu is visible.
+
+     - Returns: Overflow chrome, or no content when the menu is closed.
+     - Side effects: Tapping outside the menu clears `showOverflowMenu`.
+     - Failure modes: none.
+     */
+    @ViewBuilder
+    private var androidDownloadsOverflowLayer: some View {
+        if showOverflowMenu {
+            ZStack(alignment: .topTrailing) {
                 Color.black.opacity(0.001)
                     .ignoresSafeArea()
                     .accessibilityHidden(true)
@@ -699,15 +742,17 @@ public struct ModuleBrowserView: View {
                     .zIndex(1)
             }
         }
-        .background(ModuleBrowserPalette.background.ignoresSafeArea())
-        .onChange(of: searchText) {
-            alignFiltersWithAndroidSearchState(searchText)
-            captureDownloadListSortSnapshot()
-        }
-        .navigationBarBackButtonHidden(true)
-        #if os(iOS)
-        .toolbar(.hidden, for: .navigationBar)
-        #endif
+    }
+
+    /**
+     Attaches repository navigation, local-file import, and module details presentation.
+
+     - Returns: Downloads layout with non-alert document-management presenters.
+     - Side effects: Presented controls can navigate, import a file, or clear selected details.
+     - Failure modes: Import failures are retained for the later feedback-alert stage.
+     */
+    private var documentManagementPresentedDownloadsScreen: some View {
+        androidDownloadsLayout
         .navigationDestination(isPresented: $showRepositoryManager) {
             RepositoryManagerView()
             #if os(iOS)
@@ -723,6 +768,17 @@ public struct ModuleBrowserView: View {
         .moduleBrowserModuleDetailsDialog(details: selectedModuleDetails) {
             selectedModuleDetails = nil
         }
+    }
+
+    /**
+     Attaches encrypted-module unlock and accumulated download-error presentation.
+
+     - Returns: Document-management content with module-access alerts.
+     - Side effects: Actions can apply a cipher key, clear unlock state, or dismiss error history.
+     - Failure modes: Rejected keys retain retry feedback; download errors remain in their list.
+     */
+    private var moduleAccessPresentedDownloadsScreen: some View {
+        documentManagementPresentedDownloadsScreen
         .alert(
             pendingUnlockModule.map(ModuleUnlockActionCoordinator.promptTitle(for:)) ?? "",
             isPresented: Binding(
@@ -765,6 +821,17 @@ public struct ModuleBrowserView: View {
         } message: {
             Text(downloadErrors.joined(separator: "\n"))
         }
+    }
+
+    /**
+     Attaches overwrite consent and external-file import completion feedback.
+
+     - Returns: Module-access content with local import alerts.
+     - Side effects: Consent can start a replacement install; dismissals clear retained import state.
+     - Failure modes: Import failures remain visible until the feedback alert is dismissed.
+     */
+    private var importFeedbackPresentedDownloadsScreen: some View {
+        moduleAccessPresentedDownloadsScreen
         .alert(
             String(
                 localized: "android_module_backup_overwrite_title",
@@ -810,6 +877,17 @@ public struct ModuleBrowserView: View {
         } message: {
             Text(externalDocumentImportMessage ?? "")
         }
+    }
+
+    /**
+     Attaches download confirmation and destructive installed-row action confirmation.
+
+     - Returns: Import-feedback content with all row-action alerts.
+     - Side effects: Confirmed actions can install, uninstall, or delete a search index.
+     - Failure modes: Cancelling clears only the pending confirmation and leaves module state intact.
+     */
+    private var downloadActionPresentedDownloadsScreen: some View {
+        importFeedbackPresentedDownloadsScreen
         .alert(
             pendingDownloadConfirmation?.title ?? "",
             isPresented: Binding(
@@ -862,6 +940,17 @@ public struct ModuleBrowserView: View {
         } message: { confirmation in
             Text(confirmation.message)
         }
+    }
+
+    /**
+     Attaches initial loading and repository/module change observers to the presented Downloads route.
+
+     - Returns: Fully interactive Android-style Downloads screen.
+     - Side effects: Loads initial state and refreshes sources or installed rows after notifications.
+     - Failure modes: Existing loading and refresh handlers preserve their user-visible error paths.
+     */
+    private var androidDownloadsScreen: some View {
+        downloadActionPresentedDownloadsScreen
         .task {
             await loadInitialStateIfNeeded()
         }
