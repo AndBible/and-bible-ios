@@ -6,7 +6,7 @@ import Foundation
  Identifies the logical data categories Android syncs as separate patch streams.
 
  Android's `SyncableDatabaseDefinition` uses independent categories for bookmarks, workspaces,
- reading plans, and My Documents. The iOS remote-sync implementation preserves that separation so
+ reading plans, My Documents, Progress, and AI settings. The iOS implementation preserves that separation so
  remote folder naming, bootstrap state, and patch progress can be tracked per category instead of
  collapsing all user data into one opaque sync stream.
  */
@@ -26,6 +26,9 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
     /// Reading and memorization progress data.
     case progress = "progress"
 
+    /// Non-secret AI prompts, provider configuration, model metadata, preferences, and usage.
+    case aiSettings = "ai_settings"
+
     /**
      Categories currently backed by iOS sync engines and eligible for lifecycle sweeps.
 
@@ -33,7 +36,7 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
      syncable, so visible settings rows are curated separately by the UI presentation layer.
      */
     public static var activeSyncCases: [RemoteSyncCategory] {
-        [.bookmarks, .workspaces, .readingPlans, .myDocuments, .progress]
+        [.bookmarks, .workspaces, .readingPlans, .myDocuments, .aiSettings, .progress]
     }
 
     /// Highest Android SQLite schema version iOS can currently read and write for this category.

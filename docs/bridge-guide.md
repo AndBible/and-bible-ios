@@ -157,9 +157,9 @@ Notes:
   Text actions retain their explicit document, range, selection, and editor-target identity;
   one AI document marker opens directly while multiple markers use the app-owned chooser; and
   prompt editor requests resolve through the source-aware prompt repository before presentation.
-  Missing or malformed targets fail closed through credential-free native errors. Non-secret AI
-  state is stored in SwiftData while provider credentials remain device-local in Keychain. The
-  related `ai_settings` remote-sync category is a separate parity task tracked in #74.
+  Missing or malformed targets fail closed through credential-free native errors. The seven
+  non-secret Android `ai_settings` tables synchronize through Android-compatible Room artifacts
+  and patch semantics, while provider credentials and raw request logs remain device-local.
 
 ### StudyPad
 

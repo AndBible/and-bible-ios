@@ -57,7 +57,7 @@ final class RemoteSyncAndroidRoomSchemaContractTests: XCTestCase {
     }
 
     /**
-     Verifies all five iOS database shells are structurally identical to Android Room exports.
+     Verifies all six iOS database shells are structurally identical to Android Room exports.
 
      Each case checks the Android export format, schema version, Room identity hash, complete table
      DDL, explicit index DDL, and view DDL after removing only SQLite-insignificant formatting and
@@ -69,6 +69,7 @@ final class RemoteSyncAndroidRoomSchemaContractTests: XCTestCase {
             FixtureCase(category: .workspaces, fileName: "WorkspaceDatabase-v24.json"),
             FixtureCase(category: .readingPlans, fileName: "ReadingPlanDatabase-v1.json"),
             FixtureCase(category: .myDocuments, fileName: "MyDocumentDatabase-v4.json"),
+            FixtureCase(category: .aiSettings, fileName: "AiSettingsDatabase-v23.json"),
             FixtureCase(category: .progress, fileName: "ProgressDatabase-v9.json")
         ]
 
@@ -900,7 +901,7 @@ enum AndroidRuntimeSyncTriggerFixture {
      Returns the exact trigger statements Android generates for one supported sync category.
 
      - Parameters:
-       - category: Workspace or Progress database category.
+       - category: Workspace, Progress, or AI settings database category.
        - deviceIdentifier: Stable source-device literal embedded in every generated trigger.
        - existingTables: Optional predecessor table set used to model older Workspace generations.
      - Returns: Three trigger statements per Android syncable table.
@@ -928,6 +929,16 @@ enum AndroidRuntimeSyncTriggerFixture {
                 ("ChapterReadHistory", "id", nil),
                 ("MemorizationTarget", "id", nil),
                 ("GlobalReadingProgressSettings", "id", nil),
+            ]
+        case .aiSettings:
+            definitions = [
+                ("LlmProviderConfig", "id", nil),
+                ("LlmConfiguredModel", "id", nil),
+                ("AgentPrompt", "id", nil),
+                ("GlobalAiSettings", "id", nil),
+                ("LlmUsageRecord", "id", nil),
+                ("PromptCategory", "id", nil),
+                ("BuiltinPromptOverride", "id", nil),
             ]
         case .bookmarks, .readingPlans, .myDocuments:
             return []

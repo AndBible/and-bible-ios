@@ -38,6 +38,9 @@ public enum RemoteSyncCategoryPatchReplayReport: Sendable, Equatable {
     /// My Documents-category patch replay summary.
     case myDocuments(RemoteSyncMyDocumentPatchApplyReport)
 
+    /// AI Settings-category patch replay summary.
+    case aiSettings(RemoteSyncAISettingsPatchApplyReport)
+
     /// Progress-category patch replay summary.
     case progress(RemoteSyncProgressPatchApplyReport)
 }
@@ -60,6 +63,9 @@ public enum RemoteSyncCategoryPatchUploadReport: Sendable, Equatable {
 
     /// My Documents-category outbound patch upload summary.
     case myDocuments(RemoteSyncMyDocumentPatchUploadReport)
+
+    /// AI Settings-category outbound patch upload summary.
+    case aiSettings(RemoteSyncAISettingsPatchUploadReport)
 
     /// Progress-category outbound patch upload summary.
     case progress(RemoteSyncProgressPatchUploadReport)
@@ -183,6 +189,8 @@ public enum RemoteSyncSynchronizationOutcome: Sendable, Equatable {
  - `RemoteSyncReadingPlanPatchUploadService` exports and uploads outbound sparse reading-plan patches
  - `RemoteSyncMyDocumentPatchApplyService` replays inbound sparse My Documents patches
  - `RemoteSyncMyDocumentPatchUploadService` exports and uploads outbound sparse My Documents patches
+ - `RemoteSyncAISettingsPatchApplyService` replays inbound non-secret AI settings patches
+ - `RemoteSyncAISettingsPatchUploadService` exports non-secret AI settings patches
  - `RemoteSyncStateStore` persists Android-aligned bootstrap and progress metadata locally
  - `RemoteSyncPatchStatusStore` records patch zero after remote initial-backup adoption, matching Android
 
@@ -191,7 +199,7 @@ public enum RemoteSyncSynchronizationOutcome: Sendable, Equatable {
  - may restore a full staged initial backup into local SwiftData
  - may export and upload a full staged initial backup from local SwiftData into a fresh remote folder
  - may replay staged remote patches into local SwiftData and local-only fidelity stores
- - may upload one outbound sparse bookmark, workspace, reading-plan, or My Documents patch and rewrite local baseline metadata after success
+ - may upload one outbound sparse category patch and rewrite local baseline metadata after success
  - persists bootstrap, patch-status, and progress metadata through `SettingsStore`
  - creates and removes temporary staged archive files beneath the configured temporary directory
 
@@ -220,6 +228,8 @@ public final class RemoteSyncSynchronizationService {
     private let workspacePatchUploadService: RemoteSyncWorkspacePatchUploadService
     private let myDocumentPatchApplyService: RemoteSyncMyDocumentPatchApplyService
     private let myDocumentPatchUploadService: RemoteSyncMyDocumentPatchUploadService
+    private let aiSettingsPatchApplyService: RemoteSyncAISettingsPatchApplyService
+    private let aiSettingsPatchUploadService: RemoteSyncAISettingsPatchUploadService
     private let progressPatchApplyService: RemoteSyncProgressPatchApplyService
     private let progressPatchUploadService: RemoteSyncProgressPatchUploadService
     private let fileManager: FileManager
@@ -243,6 +253,8 @@ public final class RemoteSyncSynchronizationService {
        - workspacePatchUploadService: Workspace outbound patch upload service.
        - myDocumentPatchApplyService: My Documents patch replay service.
        - myDocumentPatchUploadService: My Documents outbound patch upload service.
+       - aiSettingsPatchApplyService: AI Settings patch replay service.
+       - aiSettingsPatchUploadService: AI Settings outbound patch upload service.
        - progressPatchApplyService: Progress patch replay service.
        - progressPatchUploadService: Progress outbound patch upload service.
        - fileManager: File manager used for staging cleanup.
@@ -265,6 +277,8 @@ public final class RemoteSyncSynchronizationService {
         workspacePatchUploadService: RemoteSyncWorkspacePatchUploadService? = nil,
         myDocumentPatchApplyService: RemoteSyncMyDocumentPatchApplyService = RemoteSyncMyDocumentPatchApplyService(),
         myDocumentPatchUploadService: RemoteSyncMyDocumentPatchUploadService? = nil,
+        aiSettingsPatchApplyService: RemoteSyncAISettingsPatchApplyService = RemoteSyncAISettingsPatchApplyService(),
+        aiSettingsPatchUploadService: RemoteSyncAISettingsPatchUploadService? = nil,
         progressPatchApplyService: RemoteSyncProgressPatchApplyService = RemoteSyncProgressPatchApplyService(),
         progressPatchUploadService: RemoteSyncProgressPatchUploadService? = nil,
         fileManager: FileManager = .default,
@@ -304,6 +318,12 @@ public final class RemoteSyncSynchronizationService {
         self.myDocumentPatchApplyService = myDocumentPatchApplyService
         self.myDocumentPatchUploadService = myDocumentPatchUploadService
             ?? RemoteSyncMyDocumentPatchUploadService(
+                adapter: adapter,
+                nowProvider: nowProvider
+            )
+        self.aiSettingsPatchApplyService = aiSettingsPatchApplyService
+        self.aiSettingsPatchUploadService = aiSettingsPatchUploadService
+            ?? RemoteSyncAISettingsPatchUploadService(
                 adapter: adapter,
                 nowProvider: nowProvider
             )
@@ -1031,6 +1051,12 @@ public final class RemoteSyncSynchronizationService {
                 modelContext: modelContext,
                 settingsStore: settingsStore
             ).map(RemoteSyncCategoryPatchUploadReport.myDocuments)
+        case .aiSettings:
+            return try await aiSettingsPatchUploadService.resumePendingUploadIfPresent(
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            ).map(RemoteSyncCategoryPatchUploadReport.aiSettings)
         case .progress:
             return try await progressPatchUploadService.resumePendingPatchIfPresent(
                 bootstrapState: bootstrapState,
@@ -1087,6 +1113,14 @@ public final class RemoteSyncSynchronizationService {
         case .myDocuments:
             return .myDocuments(
                 try myDocumentPatchApplyService.applyPatchArchives(
+                    stagedArchives,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore
+                )
+            )
+        case .aiSettings:
+            return .aiSettings(
+                try aiSettingsPatchApplyService.applyPatchArchives(
                     stagedArchives,
                     modelContext: modelContext,
                     settingsStore: settingsStore
@@ -1160,6 +1194,15 @@ public final class RemoteSyncSynchronizationService {
                 settingsStore: settingsStore
             ) {
                 return .myDocuments(report)
+            }
+            return nil
+        case .aiSettings:
+            if let report = try await aiSettingsPatchUploadService.uploadPendingPatch(
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            ) {
+                return .aiSettings(report)
             }
             return nil
         case .progress:

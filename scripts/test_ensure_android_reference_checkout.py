@@ -179,6 +179,62 @@ class EnsureAndroidReferenceCheckoutTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("current\n", updated_marker)
 
+    def test_helper_creates_new_checkout_at_exact_commit(self) -> None:
+        """A raw pinned commit produces a detached checkout without relying on a branch name."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            remote = root / "remote"
+            android = root / "and-bible"
+            marker = "android-ref.txt"
+            subprocess.run(["git", "init", "-q", str(remote)], check=True)
+            (remote / marker).write_text("pinned\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(remote), "add", marker], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(remote),
+                    "-c",
+                    "user.email=ci@example.invalid",
+                    "-c",
+                    "user.name=CI",
+                    "commit",
+                    "-m",
+                    "pinned",
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+            )
+            pinned_commit = subprocess.run(
+                ["git", "-C", str(remote), "rev-parse", "HEAD"],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+
+            result = subprocess.run(
+                ["bash", str(HELPER), str(android)],
+                cwd=REPO_ROOT,
+                env={
+                    "ANDBIBLE_ANDROID_REF": pinned_commit,
+                    "ANDBIBLE_ANDROID_REPO_URL": str(remote),
+                    "PATH": os.environ["PATH"],
+                },
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            checked_out_commit = subprocess.run(
+                ["git", "-C", str(android), "rev-parse", "HEAD"],
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(pinned_commit, checked_out_commit)
+        self.assertIn("Creating Android reference checkout", result.stdout)
+
     def test_helper_updates_existing_checkout_to_remote_head_by_default(self) -> None:
         """Updates an existing checkout to the Android remote default by default.
 

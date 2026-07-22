@@ -1,0 +1,51 @@
+{
+  "androidCommit": "0f3b85823cebbfafeb5a51675827f5314cac3c56",
+  "androidSourceSHA256": {
+    "app/src/main/java/net/bible/android/database/Databases.kt": "c2f5102e1887f55abd94d95bf7c83470e1d7fdcc604b0c7a558adada949fa2dc",
+    "app/src/main/java/net/bible/service/cloudsync/SyncUtilities.kt": "39ad71a66585eb971698351bfe34f026ba4d0124f08f6bf806ec2cd293c5c007",
+    "app/src/main/java/net/bible/service/common/AiSettings.kt": "f5f198cf970a2d8e7dce25e15db1dd36410303584183cb1b7e831079595478a3",
+    "app/src/main/java/net/bible/service/db/DatabaseContainer.kt": "d486a92c74f3cc75886705670a13c155e55795fc283f8836f35a2b97e6c6919f",
+    "app/src/main/java/net/bible/service/llm/AgentPromptEntities.kt": "2385849c7626d7b41dc8008de811eac64b6de53bd6642c41d890e6a6e7a66d45",
+    "app/src/main/java/net/bible/service/llm/LlmCostTracking.kt": "77098da32dea6920efca0bbf0d42c1e83074aabef86219d2f9a4ff9fbbddc44d"
+  },
+  "currentIdentityHash": "c5b1820fd3dfb0390fa3122d2d6e139f",
+  "currentVersion": 23,
+  "derivedSchemaAuthority": {
+    "12": {
+      "baseExportVersion": 11,
+      "canonicalSchemaSHA256": "1fcdbebe0865065824e82c0a995c7c216bce2de8e483f90f6daec3746aa39149",
+      "identityHash": "ce84fdcfd2da69ec7a3dbb0a48598c5b",
+      "introducingAndroidCommit": "b75638905579b061a60485e4559396d5adf755da",
+      "migrationFromVersion": 11,
+      "migrationToVersion": 12,
+      "roomCompilerVersion": "2.7.2"
+    }
+  },
+  "migrationSHA256": "efb0d42f4748a6a3d093d1ba5f824d2bb40ec52e7b4892af4cc6409a2f2255fe",
+  "migrationSQLSHA256": "f578fa0daa2484a115ae8f7fbc682c852c1121e19bee2e1af666a61c4a01c41c",
+  "schemaSHA256": {
+    "1": "4830e45c022f52606a429262d447b8876ce55a01ca4dad60b104a90c3b2e65ed",
+    "2": "675729f112b25639a57d94a46af3b1c6fb00f4c8a0690965d7ae7df347fa09b5",
+    "3": "ebfcc5d4009fe58a9653870659c8e6e519648c7d6012ae22fe17ded3edf7140a",
+    "4": "2032190c61643b424cc7661ad3565005e9643c9f220a070a64fb206e3488da23",
+    "5": "111dd3a9f3fdcd8f459504c254f061b9a5ce831e266d02c43c770f37ca2cd5c0",
+    "6": "de819bed6bbcd2bba7df2946321f7572120254ba132a463d43c3e4157c5aee9d",
+    "7": "2b925287a16f512d145f6f74b8828ab0124d3b2cf62b1ee37805261e2af7b3d8",
+    "8": "0c58783eda96bdbd2d6074855ffc6c6532576597eb7a409c3f59f3375332086c",
+    "9": "8aa3a31355bd5ceb8fc7f1e85d073d1148243b9ee955f725ea8912d8e4d29b3a",
+    "10": "196d0687023d5b891021ed166454e36aa295e2d78bae4d61fb7250f951c7ceb7",
+    "11": "1078c623296925fe5006fa2df921c81bec096ca09a9d479b9ca64bb8ddc1058d",
+    "13": "7f4ae9d7c15b825ecdffb8f5a4bbcd56da16debe500c2b30f55486b2706c5679",
+    "14": "02b94e3020f1b50848b6c12054f55a294dd6d6168f6466d83ec61c2c40423e2f",
+    "15": "95bd373db14d8179f45c1e25917f49e35b505daae161f703853ed4d228141758",
+    "16": "91cc8f7f3769a9e696c448c749bc8a442eab56598e8f85d568833a7292908405",
+    "17": "467c34b5c33c2a8760fecdfebd314c1d2528c048db78b789f982e3c7e92cfa09",
+    "18": "4b5d992a894386597b9469514f573372de2d8580e00bba823657fd04f87c5727",
+    "19": "1b817e89684cb2f4fe90ba29e256750851954ac6b50be7503aee3936992ce9b2",
+    "20": "0ed49e8db55326e84f6a289c77fee9bee3e1809cc01c35157e02f719b09ec85f",
+    "21": "c4fe5713d746e72139120cb4be044c1bbb86a8e8a5b04d2d3dc15ef8a9464952",
+    "22": "8b33721451c80300a1ba9a9a15c44ba97fb2b5a0cc42ee9c7d42bab340a768f7",
+    "23": "20a21c054971dda8911fcbbecb8d5435eefe7534b22c90cb76e0d8e455e8029e"
+  },
+  "utilitySHA256": "9398f2c7b4c02cf3488f48654d33c5d49ad11aff18739ccc8e7706fe40438415"
+}

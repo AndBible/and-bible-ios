@@ -26,6 +26,8 @@ public final class RemoteSyncResetService {
                 return RemoteSyncMyDocumentPatchUploadService.pendingUploadKey
             case .progress:
                 return RemoteSyncProgressPatchUploadService.pendingPatchSettingKey
+            case .aiSettings:
+                return RemoteSyncAISettingsPatchUploadService.pendingUploadKey
             }
         }
 
@@ -42,6 +44,8 @@ public final class RemoteSyncResetService {
                 return RemoteSyncMyDocumentSnapshotService.acceptedBaselineKey
             case .progress:
                 return RemoteSyncProgressSnapshotService.acceptedBaselineKey
+            case .aiSettings:
+                return RemoteSyncAISettingsSnapshotService.acceptedBaselineKey
             }
         }
     }
@@ -95,6 +99,7 @@ public final class RemoteSyncResetService {
             .workspaces: RemoteSyncWorkspacePatchUploadService.defaultOutboxDirectory(fileManager: fileManager),
             .readingPlans: RemoteSyncReadingPlanPatchUploadService.defaultOutboxDirectory(fileManager: fileManager),
             .myDocuments: RemoteSyncMyDocumentPatchUploadService.defaultOutboxDirectory(fileManager: fileManager),
+            .aiSettings: RemoteSyncAISettingsPatchUploadService.defaultOutboxDirectory(fileManager: fileManager),
             .progress: RemoteSyncProgressPatchUploadService.defaultOutboxDirectory(fileManager: fileManager),
         ]
         self.initialUploadRetryDirectory = initialUploadRetryDirectory
@@ -151,6 +156,7 @@ public final class RemoteSyncResetService {
         let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+        let mutationJournal = RemoteSyncMutationJournalService()
 
         try settingsStore.performAtomicBatch {
             for category in RemoteSyncCategory.allCases {
@@ -159,6 +165,10 @@ public final class RemoteSyncResetService {
                 patchStatusStore.clearCategory(category)
                 logEntryStore.clearCategory(category)
                 fingerprintStore.clearCategory(category)
+                mutationJournal.clearPendingMutations(
+                    for: category,
+                    settingsStore: settingsStore
+                )
                 settingsStore.remove(MetadataKey.pendingPublication(for: category))
                 settingsStore.remove(MetadataKey.acceptedBaseline(for: category))
             }

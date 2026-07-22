@@ -558,13 +558,8 @@ public struct SyncSettingsView: View {
      Shared Android-style remote category toggle list used by supported remote backends.
      */
     private var remoteCategoryList: some View {
-        ForEach(SyncSettingsPresentation.visibleCategoryRows) { row in
-            switch row {
-            case .active(let category):
-                activeRemoteCategoryRow(for: category)
-            case .deferred(let category):
-                deferredRemoteCategoryRow(for: category)
-            }
+        ForEach(SyncSettingsPresentation.visibleCategoryRows, id: \.rawValue) { category in
+            activeRemoteCategoryRow(for: category)
         }
     }
 
@@ -607,36 +602,6 @@ public struct SyncSettingsView: View {
             }
             .disabled(isRemoteSyncInteractionLocked)
         }
-    }
-
-    /**
-     Builds one Android-visible category row whose iOS sync implementation is still deferred.
-
-     - Parameter category: Deferred Android-visible category to disclose.
-     - Returns: Disabled row content that mirrors Android ordering, title, summary, and icon.
-     - Side effects: none; the row never writes `sync_enable_*` or starts synchronization.
-     - Failure modes: The row cannot fail; it remains disabled until the referenced follow-up issue
-       implements the category-specific sync engine.
-     */
-    private func deferredRemoteCategoryRow(for category: RemoteSyncDeferredCategory) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            syncSettingsRowLabel(
-                SyncSettingsPresentation.deferredCategory(category),
-                title: deferredRemoteCategoryTitle(for: category),
-                summary: deferredRemoteCategoryContentDescription(for: category),
-                detail: deferredRemoteCategorySupplementalText(for: category),
-                isEnabled: false
-            )
-            .accessibilityIdentifier("syncCategoryDeferred::\(category.rawValue)")
-            .accessibilityValue("deferred")
-
-            Toggle("", isOn: .constant(false))
-                .labelsHidden()
-                .disabled(true)
-                .accessibilityIdentifier("syncCategoryDeferredSwitch::\(category.rawValue)")
-                .accessibilityValue("deferred")
-        }
-        .disabled(true)
     }
 
     /**
@@ -800,7 +765,6 @@ public struct SyncSettingsView: View {
             "restartRequired=\(syncService.requiresRestart)",
             "icloudState=\(syncStateAccessibilityToken)",
             "visible=\(visibleRemoteCategoryRowsAccessibilityToken)",
-            "deferred=\(deferredRemoteCategoryRowsAccessibilityToken)",
             "remoteStatus=\(remoteStatusAccessibilityValue)",
             "presentation=androidRows",
             "bootstrapPrompt=\(remoteBootstrapPromptAccessibilityToken)",
@@ -846,25 +810,8 @@ public struct SyncSettingsView: View {
      */
     private var visibleRemoteCategoryRowsAccessibilityToken: String {
         SyncSettingsPresentation.visibleCategoryRows
-            .map(\.id)
+            .map(\.rawValue)
             .joined(separator: ",")
-    }
-
-    /**
-     Accessibility-exported token for rows shown as deferred rather than interactive.
-
-     - Returns: Comma-separated deferred row identifiers, or `none` when no rows are deferred.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private var deferredRemoteCategoryRowsAccessibilityToken: String {
-        let deferredRows = SyncSettingsPresentation.visibleCategoryRows.compactMap { row -> String? in
-            if case .deferred(let category) = row {
-                return category.rawValue
-            }
-            return nil
-        }
-        return deferredRows.isEmpty ? "none" : deferredRows.joined(separator: ",")
     }
 
     /**
@@ -1306,8 +1253,9 @@ public struct SyncSettingsView: View {
        - error: Failure emitted by remote settings validation or synchronization services.
        - category: Logical sync category that was being synchronized.
        - revertEnablement: Whether the category toggle should be turned off after the failure.
-     - Side effects: Stores a per-category failure message and presents a global alert. Core schema
-       policy owns category enablement and incremental compatibility gates.
+     - Side effects: Reconciles optimistic toggle state, stores a per-category failure message, and
+       presents a global alert. Core schema policy owns persisted category enablement and incremental
+       compatibility gates after synchronization starts.
      - Failure modes: This helper cannot fail.
      */
     @MainActor
@@ -1316,29 +1264,14 @@ public struct SyncSettingsView: View {
         for category: RemoteSyncCategory,
         revertEnablement: Bool
     ) {
-        let message: String
-
-        switch error {
-        case WebDAVClientError.invalidURL:
-            message = String(localized: "invalid_url_message")
-        case RemoteSyncSynchronizationServiceFactoryError.invalidWebDAVConfiguration:
-            message = String(localized: "invalid_url_message")
-        case RemoteSyncSynchronizationServiceFactoryError.missingWebDAVPassword:
-            message = String(localized: "sign_in_failed")
-        case RemoteSyncPatchDiscoveryError.incompatiblePatchVersion:
-            message = [
-                String(localized: "sync_cant_fetch"),
-                String(localized: "sync_update_app"),
-            ]
-            .joined(separator: " ")
-        default:
-            let localizedMessage = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-            message = localizedMessage.isEmpty ? String(localized: "sync_error") : localizedMessage
-            if revertEnablement {
-                disableRemoteSync(for: category)
-            }
+        switch RemoteSyncFailureEnablementResolution(revertEnablement: revertEnablement) {
+        case .disable:
+            disableRemoteSync(for: category)
+        case .reloadPersisted:
+            remoteCategoryEnabled[category] = remoteSettingsStore.isSyncEnabled(for: category)
         }
 
+        let message = RemoteSyncFailurePresentation(error: error).localizedMessage
         remoteCategoryStatuses[category] = .failed(message)
         remoteSyncErrorMessage = message
     }
@@ -1391,45 +1324,6 @@ public struct SyncSettingsView: View {
      */
     private func remoteCategoryContentDescription(for category: RemoteSyncCategory) -> String {
         RemoteSyncCategoryLocalization.text(for: category).contents.localized
-    }
-
-    /**
-     Returns the Android title string for a deferred category row.
-
-     - Parameter category: Deferred category to label.
-     - Returns: Localized title matching Android's visible sync setting where available.
-     - Side effects: none.
-     - Failure modes: Missing localizations fall back to English defaults.
-     */
-    private func deferredRemoteCategoryTitle(for category: RemoteSyncDeferredCategory) -> String {
-        RemoteSyncCategoryLocalization.deferredText(for: category).title.localized
-    }
-
-    /**
-     Returns the Android summary string for a deferred category row.
-
-     - Parameter category: Deferred category to describe.
-     - Returns: Localized summary matching Android's sync setting where available.
-     - Side effects: none.
-     - Failure modes: Missing localizations fall back to English defaults.
-     */
-    private func deferredRemoteCategoryContentDescription(for category: RemoteSyncDeferredCategory) -> String {
-        RemoteSyncCategoryLocalization.deferredText(for: category).contents.localized
-    }
-
-    /**
-     Returns the explicit deferred-state caption for an Android-visible row without iOS sync support.
-
-     - Parameter category: Deferred category whose follow-up issue should be named.
-     - Returns: Human-readable caption that explains why the row is disabled.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private func deferredRemoteCategorySupplementalText(for category: RemoteSyncDeferredCategory) -> String {
-        String(
-            format: String(localized: "sync_category_deferred_issue", defaultValue: "Sync support is deferred (#%d)."),
-            category.trackingIssueNumber
-        )
     }
 
     /**

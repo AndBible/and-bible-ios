@@ -78,11 +78,14 @@ and supported schema versions:
 - Reading Plans
 - My Documents
 
-Unsupported sections remain visible but disabled with a reason. This includes
-Android categories that are present in the archive but do not yet have safe iOS
-mappers, such as Settings, Repositories, Modules, EPUBs, AI Settings, and
-Progress. Future work may enable a category only after adding a source-backed
-mapper, version validation, focused tests, and any required fidelity state.
+Unsupported manual-backup sections remain visible but disabled with a reason.
+This includes Android archive categories whose manual import/export route does
+not yet have an iOS mapper, such as Settings, Repositories, Modules, EPUBs, AI
+Settings, and Progress. AI Settings now has a native semantic model and a
+source-backed remote-sync mapper; that does not implicitly enable this separate
+manual `.abdb.zip` workflow. Future work may enable a manual category only after
+adding archive routing, version validation, focused tests, and required fidelity
+state for that workflow.
 
 Restore mode replaces the selected local category data with the Android backup
 section mapped through the existing restore engine.
@@ -116,10 +119,10 @@ The top-level workflow may use native iOS plumbing:
 - Android application backup exports an APK. iOS apps cannot export their
   installed bundle as an IPA/APK equivalent at runtime, so iOS omits the
   Application/APK backup row instead of presenting an inert choice.
-- Android AI Settings backup/reset is represented by preserved Android-owned
-  database storage until iOS has a native semantic AI settings model. iOS must
-  not synthesize an empty `ai_settings.sqlite3`; it may export that category
-  only after a real Android database was restored or otherwise preserved.
+- Android AI Settings remote sync maps seven non-secret tables through the
+  native iOS AI model. Manual database backup/reset remains disabled until its
+  archive-level selection and merge contract is implemented; remote-sync support
+  must not be presented as manual `.abdb.zip` support.
 - Android crash-info export and local backup listing are platform-adjacent
   features that require dedicated iOS storage/logging contracts before they can
   be surfaced without inventing iOS-only semantics.

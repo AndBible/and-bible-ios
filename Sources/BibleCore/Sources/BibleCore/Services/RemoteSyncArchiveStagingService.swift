@@ -159,7 +159,7 @@ public final class RemoteSyncArchiveStagingService {
        - throws `RemoteSyncArchiveStagingError.decompressionFailed` when gzip extraction fails
        - throws `RemoteSyncArchiveStagingError.invalidSQLiteDatabase` when the extracted file is not a readable SQLite database
        - throws `RemoteSyncArchiveStagingError.incompatibleInitialBackupVersion` when the extracted
-         database generation is not an authoritative workspace source or needs a newer schema
+         database generation is not an authoritative migratable source or needs a newer schema
          version than `currentSchemaVersion`
      */
     public func downloadInitialBackup(
@@ -194,7 +194,11 @@ public final class RemoteSyncArchiveStagingService {
             let schemaVersion = try Self.sqliteUserVersion(at: databaseURL)
             let isUnsupportedWorkspaceGeneration = category == .workspaces
                 && !RemoteSyncWorkspaceDatabaseMigrator.supportsSourceVersion(schemaVersion)
-            if schemaVersion > currentSchemaVersion || isUnsupportedWorkspaceGeneration {
+            let isUnsupportedAISettingsGeneration = category == .aiSettings
+                && !RemoteSyncAISettingsDatabaseMigrator.supportsSourceVersion(schemaVersion)
+            if schemaVersion > currentSchemaVersion
+                || isUnsupportedWorkspaceGeneration
+                || isUnsupportedAISettingsGeneration {
                 throw RemoteSyncArchiveStagingError.incompatibleInitialBackupVersion(schemaVersion)
             }
 

@@ -136,6 +136,7 @@ public final class RemoteSyncInitialBackupUploadService {
         case bookmarks(RemoteSyncBookmarkAcceptedBaseline)
         case workspaces(RemoteSyncWorkspaceAcceptedGeneration)
         case myDocuments(RemoteSyncMyDocumentAcceptedBaseline)
+        case aiSettings(RemoteSyncAISettingsAcceptedBaseline)
         case progress(RemoteSyncProgressAcceptedGeneration)
     }
 
@@ -195,8 +196,30 @@ public final class RemoteSyncInitialBackupUploadService {
             return .workspaces
         case .myDocuments:
             return .myDocuments
+        case .aiSettings:
+            return .aiSettings
         case .progress:
             return .progress
+        }
+    }
+
+    /** Returns the exact row fingerprints carried by one immutable initial-backup generation. */
+    private static func fingerprints(
+        for generation: AcceptedFingerprintGeneration
+    ) -> [String: String] {
+        switch generation {
+        case .readingPlans(let value):
+            return value.fingerprintsByKey
+        case .bookmarks(let value):
+            return value.fingerprintsByKey
+        case .workspaces(let value):
+            return value.fingerprintsByKey
+        case .myDocuments(let value):
+            return value.fingerprintsByKey
+        case .aiSettings(let value):
+            return value.fingerprintsByKey
+        case .progress(let value):
+            return value.fingerprintsByKey
         }
     }
 
@@ -846,6 +869,8 @@ public final class RemoteSyncInitialBackupUploadService {
             tableNames = generation.rowsByKey.values.map(\.tableName)
         case .myDocuments(let baseline):
             tableNames = baseline.rowIdentities.map(\.tableName)
+        case .aiSettings(let baseline):
+            tableNames = baseline.rowIdentities.map(\.tableName)
         case .progress(let generation):
             tableNames = generation.rowsByKey.values.map(\.tableName)
         }
@@ -904,6 +929,12 @@ public final class RemoteSyncInitialBackupUploadService {
                     )
                 case .myDocuments:
                     builtBackup = try buildMyDocumentInitialBackup(
+                        modelContext: modelContext,
+                        settingsStore: settingsStore,
+                        schemaVersion: schemaVersion
+                    )
+                case .aiSettings:
+                    builtBackup = try buildAISettingsInitialBackup(
                         modelContext: modelContext,
                         settingsStore: settingsStore,
                         schemaVersion: schemaVersion
@@ -1007,12 +1038,23 @@ public final class RemoteSyncInitialBackupUploadService {
                         baseline,
                         settingsStore: settingsStore
                     )
+                case .aiSettings(let baseline):
+                    try RemoteSyncAISettingsSnapshotService().acceptBaseline(
+                        baseline,
+                        settingsStore: settingsStore
+                    )
                 case .progress(let generation):
                     try RemoteSyncProgressSnapshotService().acceptBaselineFingerprints(
                         generation,
                         settingsStore: settingsStore
                     )
                 }
+                try RemoteSyncMutationJournalService().clearPendingMutationsAcceptedByBaseline(
+                    Self.fingerprints(for: acceptedInitialBackup.fingerprintGeneration),
+                    for: category,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore
+                )
                 try acceptedBaselineMutations()
             }
         } catch {
@@ -1456,6 +1498,61 @@ public final class RemoteSyncInitialBackupUploadService {
                 acceptedInitialBackup: AcceptedInitialBackup(
                     timestamp: acceptedTimestamp,
                     fingerprintGeneration: .myDocuments(acceptedBaseline),
+                    workspaceHistoryAliases: []
+                )
+            )
+        } catch {
+            try? fileManager.removeItem(at: databaseURL)
+            throw error
+        }
+    }
+
+    /**
+     Builds one full Android AI settings database from the seven synchronized non-secret tables.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns the current AI settings graph.
+       - settingsStore: Local settings store backing sync metadata and the accepted baseline.
+       - schemaVersion: Exact Android Room version written into the database; only v23 is supported.
+     - Returns: Temporary SQLite database and the immutable accepted generation represented by it.
+     - Side Effects: Strictly reads the AI graph and writes one temporary Android-shaped database.
+     - Throws: Rethrows snapshot-integrity, schema, SQLite, filesystem, and timestamp failures; no
+       credential value or raw model log is read or written.
+     */
+    private func buildAISettingsInitialBackup(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        schemaVersion: Int
+    ) throws -> BuiltInitialBackup {
+        guard schemaVersion == RemoteSyncAndroidDatabaseContract.schemaVersion(for: .aiSettings) else {
+            throw RemoteSyncInitialBackupUploadError.unsupportedSchemaVersion(
+                category: .aiSettings,
+                version: schemaVersion
+            )
+        }
+
+        let snapshotService = RemoteSyncAISettingsSnapshotService()
+        let snapshot = try snapshotService.snapshotCurrentStateStrict(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let acceptedBaseline = try snapshotService.acceptedBaseline(from: snapshot)
+        let acceptedTimestamp = try nextAcceptedTimestamp(
+            for: .aiSettings,
+            settingsStore: settingsStore
+        )
+        let databaseURL = temporaryURL(prefix: "remote-sync-ai-settings-initial-", suffix: ".sqlite3")
+        do {
+            _ = try RemoteSyncAISettingsDatabaseWriter(fileManager: fileManager).writeFullDatabase(
+                at: databaseURL,
+                snapshot: snapshot,
+                schemaVersion: schemaVersion
+            )
+            return BuiltInitialBackup(
+                databaseURL: databaseURL,
+                acceptedInitialBackup: AcceptedInitialBackup(
+                    timestamp: acceptedTimestamp,
+                    fingerprintGeneration: .aiSettings(acceptedBaseline),
                     workspaceHistoryAliases: []
                 )
             )

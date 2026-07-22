@@ -16,6 +16,7 @@ env:
   UI_TEST_TIMEOUT_MINUTES: "90"
   UI_TEST_TIMINGS_FILE: Tests/UI/Fixtures/ui_test_timings.json
   ANDBIBLE_ANDROID_ROOT: ../and-bible
+  ANDBIBLE_ANDROID_REF: 0f3b85823cebbfafeb5a51675827f5314cac3c56
 
 jobs:
   repo-standards:
@@ -84,6 +85,9 @@ jobs:
 
       - name: Check Android workspace Room authority
         run: python3 scripts/check_android_workspace_schema_authority.py
+
+      - name: Check Android AI settings Room authority
+        run: python3 scripts/check_android_ai_settings_schema_authority.py
 
       - name: Run repo standards unit tests
         run: python3 -m unittest discover -s scripts -p 'test_*.py'

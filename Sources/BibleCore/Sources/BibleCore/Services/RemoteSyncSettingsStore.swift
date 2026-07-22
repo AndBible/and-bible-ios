@@ -216,11 +216,33 @@ public protocol SecretStoring: AnyObject {
 }
 
 /**
+ Optional strict-read capability for secret stores that can distinguish absence from backend failure.
+
+ Security-sensitive publication paths use this contract to fail closed when Keychain is unavailable,
+ while ordinary credential consumers may continue using `SecretStoring.secret(forKey:)` compatibility
+ semantics. Implementations perform no writes and must return `nil` only for a confirmed missing item.
+ */
+public protocol StrictSecretReading: AnyObject {
+    /**
+     Reads a secret while preserving backend and payload failures.
+
+     - Parameter key: Logical secret identifier.
+     - Returns: Stored UTF-8 secret text, or `nil` only when the item does not exist.
+     - Side Effects: Reads from the concrete secret backend.
+     - Throws: Backend-specific lookup or payload-decoding errors.
+     */
+    func secretStrict(forKey key: String) throws -> String?
+}
+
+/**
  Errors emitted by the Keychain-backed secret store.
  */
 public enum KeychainSecretStoreError: Error, Equatable {
     /// Keychain returned an unexpected status code.
     case unexpectedStatus(OSStatus)
+
+    /// Keychain returned a success payload that was not UTF-8 secret data.
+    case invalidPayload
 }
 
 /**
@@ -229,7 +251,7 @@ public enum KeychainSecretStoreError: Error, Equatable {
  This store is intentionally local-only. Secrets such as WebDAV passwords must never be synced
  through SwiftData or `UserDefaults`.
  */
-public final class KeychainSecretStore: SecretStoring {
+public final class KeychainSecretStore: SecretStoring, StrictSecretReading {
     /// Keychain service namespace shared by all secrets in this store instance.
     private let service: String
 
@@ -256,6 +278,20 @@ public final class KeychainSecretStore: SecretStoring {
        - returns `nil` when Keychain lookup fails or the payload is not UTF-8 text
      */
     public func secret(forKey key: String) -> String? {
+        try? secretStrict(forKey: key)
+    }
+
+    /**
+     Reads a Keychain secret without collapsing access or payload errors into absence.
+
+     - Parameter key: Logical secret identifier stored as the Keychain account.
+     - Returns: UTF-8 secret text, or `nil` only when Keychain confirms the item is absent.
+     - Side Effects: Performs one Keychain lookup through `SecItemCopyMatching`.
+     - Throws:
+       - `KeychainSecretStoreError.unexpectedStatus` for access and backend failures
+       - `KeychainSecretStoreError.invalidPayload` for non-data or non-UTF-8 success payloads
+     */
+    public func secretStrict(forKey key: String) throws -> String? {
         var query = baseQuery(forKey: key)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -263,8 +299,14 @@ public final class KeychainSecretStore: SecretStoring {
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         guard status != errSecItemNotFound else { return nil }
-        guard status == errSecSuccess, let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard status == errSecSuccess else {
+            throw KeychainSecretStoreError.unexpectedStatus(status)
+        }
+        guard let data = item as? Data,
+              let value = String(data: data, encoding: .utf8) else {
+            throw KeychainSecretStoreError.invalidPayload
+        }
+        return value
     }
 
     /**
@@ -664,6 +706,9 @@ public final class RemoteSyncSettingsStore {
      - Failure modes: This helper cannot fail.
      */
     private func legacySyncEnabledKey(for category: RemoteSyncCategory) -> String {
-        "\(Keys.legacySyncCategoryPrefix)\(category.rawValue)"
+        if category == .aiSettings {
+            return "gdrive_llmprocessing"
+        }
+        return "\(Keys.legacySyncCategoryPrefix)\(category.rawValue)"
     }
 }

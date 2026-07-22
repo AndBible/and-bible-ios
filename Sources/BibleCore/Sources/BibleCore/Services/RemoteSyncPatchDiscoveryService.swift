@@ -166,7 +166,7 @@ public final class RemoteSyncPatchDiscoveryService {
      - Failure modes:
        - throws `RemoteSyncPatchDiscoveryError.missingSyncFolderID` when bootstrap state is incomplete
        - throws `RemoteSyncPatchDiscoveryError.incompatiblePatchVersion` when a remote patch targets
-         a newer schema version than `currentSchemaVersion`
+         a newer schema version or an unexported migratable generation
        - throws `RemoteSyncPatchDiscoveryError.patchFilesSkipped` when any required patch is missing
        - rethrows backend transport errors from the adapter
      */
@@ -247,8 +247,13 @@ public final class RemoteSyncPatchDiscoveryService {
                 && !RemoteSyncWorkspaceDatabaseMigrator.supportsSourceVersion(
                     parsedPatch.schemaVersion
                 )
+            let isUnsupportedAISettingsGeneration = category == .aiSettings
+                && !RemoteSyncAISettingsDatabaseMigrator.supportsSourceVersion(
+                    parsedPatch.schemaVersion
+                )
             if parsedPatch.schemaVersion > currentSchemaVersion
-                || isUnsupportedWorkspaceGeneration {
+                || isUnsupportedWorkspaceGeneration
+                || isUnsupportedAISettingsGeneration {
                 throw RemoteSyncPatchDiscoveryError.incompatiblePatchVersion(parsedPatch.schemaVersion)
             }
             if folderState.appliedPatchNumbers.contains(parsedPatch.patchNumber) {

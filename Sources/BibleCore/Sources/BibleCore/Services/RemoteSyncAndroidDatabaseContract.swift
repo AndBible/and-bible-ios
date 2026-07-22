@@ -32,13 +32,14 @@ enum RemoteSyncAndroidDatabaseContractError: Error, Equatable {
  Defines the exact Android Room database contract for every iOS-supported remote-sync category.
 
  The versions, identity hashes, tables, indexes, foreign keys, views, defaults, and primary keys are
- transcribed from Android's checked-in Room schema exports. Initial and sparse databases must both be
- valid Room databases because Android opens every downloaded patch through its production Room
- factory before attaching it for reconciliation.
+ transcribed from Android's Room schema exports. The one omitted AI v12 export is reconstructed from
+ exported v11, Android's exact migration, and Room's compiler identity algorithm. Initial and sparse
+ databases must both be valid Room databases because Android opens every downloaded patch through
+ its production Room factory before attaching it for reconciliation.
  */
 enum RemoteSyncAndroidDatabaseContract {
-    /** Immutable Room identity and canonical-schema digest for one exported workspace generation. */
-    private struct WorkspaceSourceAuthority {
+    /** Immutable Room identity and canonical-schema digest for one exported predecessor generation. */
+    private struct RoomSourceAuthority {
         /// Room identity written by Android's generated schema export.
         let identityHash: String
 
@@ -61,6 +62,7 @@ enum RemoteSyncAndroidDatabaseContract {
         case .readingPlans: 1
         case .myDocuments: 4
         case .progress: 9
+        case .aiSettings: 23
         }
     }
 
@@ -79,6 +81,7 @@ enum RemoteSyncAndroidDatabaseContract {
         case .readingPlans: "d465b2a4bc2012fff3a69d3eaff9b5ff"
         case .myDocuments: "3f0946602099d896c8d47129233c1794"
         case .progress: "76330d8367020840e56e6b92d921522a"
+        case .aiSettings: "c5b1820fd3dfb0390fa3122d2d6e139f"
         }
     }
 
@@ -105,6 +108,8 @@ enum RemoteSyncAndroidDatabaseContract {
             myDocumentsSchemaSQL
         case .progress:
             progressSchemaSQL
+        case .aiSettings:
+            aiSettingsSchemaSQL
         }
     }
 
@@ -228,6 +233,50 @@ enum RemoteSyncAndroidDatabaseContract {
         return runtimeTriggerNames
     }
 
+    /**
+     Validates one advertised AI settings predecessor against its exported Room generation.
+
+     - Parameters:
+       - database: Open staged AI settings database.
+       - sourceVersion: Advertised Android Room generation.
+     - Returns: Exact validated runtime trigger names, which migration may safely remove.
+     - Side Effects: Reads SQLite metadata and computes an in-memory schema digest only.
+     - Throws: Typed version, identity, trigger, or schema errors before migration mutates the file.
+     */
+    static func validateAISettingsSourceDatabase(
+        _ database: OpaquePointer,
+        sourceVersion: Int
+    ) throws -> Set<String> {
+        guard let authority = aiSettingsSourceAuthorities[sourceVersion] else {
+            throw RemoteSyncAndroidDatabaseContractError.invalidUserVersion(
+                expected: schemaVersion(for: .aiSettings),
+                actual: sourceVersion
+            )
+        }
+        let actualVersion = try integerPragma("user_version", in: database)
+        guard actualVersion == sourceVersion else {
+            throw RemoteSyncAndroidDatabaseContractError.invalidUserVersion(
+                expected: sourceVersion,
+                actual: actualVersion
+            )
+        }
+        try validateIdentity(in: database, expectedHash: authority.identityHash)
+        let runtimeTriggerNames = try validatedRuntimeSyncTriggerNames(
+            in: database,
+            category: .aiSettings
+        )
+        let actualDigest = try schemaSHA256(
+            in: database,
+            excludingObjects: runtimeTriggerNames
+        )
+        guard actualDigest == authority.schemaSHA256 else {
+            throw RemoteSyncAndroidDatabaseContractError.schemaMismatch(
+                "ai-settings-v\(sourceVersion)"
+            )
+        }
+        return runtimeTriggerNames
+    }
+
     /** Validates bounded row and scalar domains before any caller materializes database content. */
     private static func validatePayloadBounds(
         in database: OpaquePointer,
@@ -339,9 +388,145 @@ enum RemoteSyncAndroidDatabaseContract {
                 ],
                 in: database
             )
+        case .aiSettings:
+            try validateAISettingsPayloadBounds(in: database)
         case .bookmarks, .myDocuments:
             break
         }
+    }
+
+    /** Validates Android AI settings row domains without materializing unbounded prompt content. */
+    private static func validateAISettingsPayloadBounds(in database: OpaquePointer) throws {
+        let uuidTables = [
+            "LlmProviderConfig",
+            "LlmConfiguredModel",
+            "AgentPrompt",
+            "GlobalAiSettings",
+            "LlmUsageRecord",
+            "LlmRawLogRecord",
+            "PromptCategory",
+            "BuiltinPromptOverride",
+        ]
+        for table in uuidTables {
+            let maximumRows: Int64
+            switch table {
+            case "GlobalAiSettings":
+                maximumRows = 1
+            case "LlmRawLogRecord":
+                maximumRows = 100_000
+            default:
+                maximumRows = 100_000
+            }
+            try requireRowCount(table, maximum: maximumRows, in: database)
+            try requireBlobUUID(table, column: "id", in: database)
+        }
+        try requireFixedBlobIdentifier(
+            "GlobalAiSettings",
+            column: "id",
+            hexadecimal: "A1000000000000000000000000000001",
+            in: database
+        )
+
+        try requireBoundedText("LlmProviderConfig", column: "providerType", maximum: 128, permitsEmpty: false, in: database)
+        try requireBoundedText("LlmProviderConfig", column: "displayName", maximum: 1_048_576, permitsEmpty: true, in: database)
+        try requireNullableText("LlmProviderConfig", column: "endpoint", maximum: 1_048_576, in: database)
+        try requireNullableText("LlmProviderConfig", column: "apiFormat", maximum: 128, in: database)
+        try requireInt32("LlmProviderConfig", column: "orderNumber", in: database)
+
+        try requireBlobUUID("LlmConfiguredModel", column: "providerConfigId", in: database)
+        try requireBoundedText("LlmConfiguredModel", column: "modelId", maximum: 1_048_576, permitsEmpty: true, in: database)
+        try requireInt32("LlmConfiguredModel", column: "orderNumber", in: database)
+        for column in [
+            "inputPricePerMillion",
+            "outputPricePerMillion",
+            "cacheCreationPricePerMillion",
+            "cacheReadPricePerMillion",
+        ] {
+            try requireNonnegativeFiniteReal("LlmConfiguredModel", column: column, in: database)
+        }
+
+        for column in ["name", "promptTemplate", "showIn"] {
+            try requireBoundedText("AgentPrompt", column: column, maximum: 16_777_216, permitsEmpty: true, in: database)
+        }
+        for column in ["description", "permissionMode", "allowedTools", "deniedTools"] {
+            try requireNullableText("AgentPrompt", column: column, maximum: 16_777_216, in: database)
+        }
+        try requireInt32("AgentPrompt", column: "orderNumber", in: database)
+        try requireInteger("AgentPrompt", column: "createdAt", in: database)
+        try requireNullableBlobUUID("AgentPrompt", column: "configuredModelId", in: database)
+        try requireNullableBlobUUID("AgentPrompt", column: "categoryId", in: database)
+        try requireNullableInt32("AgentPrompt", column: "maxIterations", in: database)
+        for column in [
+            "strictContextMatching",
+            "editBeforeRun",
+            "noDocumentCreation",
+            "autoIncludeDocuments",
+            "autoIncludeCommentaries",
+            "bibleOnly",
+            "isTextTransformation",
+        ] {
+            try requireBoolean("AgentPrompt", column: column, in: database)
+        }
+
+        for column in [
+            "agentPermissionMode",
+            "permanentlyAllowedTools",
+            "permanentlyDeniedTools",
+            "aiLanguage",
+            "customAgentSystemPrompt",
+            "customTextTransformationSystemPrompt",
+        ] {
+            try requireNullableText("GlobalAiSettings", column: column, maximum: 16_777_216, in: database)
+        }
+        for column in [
+            "aiExcludedDocuments",
+            "hiddenBuiltInPrompts",
+            "commentaryDeselected",
+            "hiddenBuiltInCategories",
+            "favoritePrompts",
+        ] {
+            try requireBoundedText("GlobalAiSettings", column: column, maximum: 16_777_216, permitsEmpty: true, in: database)
+        }
+        try requireInt32("GlobalAiSettings", column: "commentaryMaxResponseTokens", in: database)
+        try requireInt32("GlobalAiSettings", column: "maxIterations", in: database)
+        try requireNullableInt32("GlobalAiSettings", column: "rawLogRetentionDays", in: database)
+        try requireNullableBlobUUID("GlobalAiSettings", column: "defaultModelId", in: database)
+        for column in ["askModelBeforeRun", "aiDisclaimerAccepted", "autoHideAgentLogOnCompletion"] {
+            try requireBoolean("GlobalAiSettings", column: column, in: database)
+        }
+
+        try requireBlobUUID("LlmUsageRecord", column: "configuredModelId", in: database)
+        try requireBoundedText("LlmUsageRecord", column: "deviceId", maximum: 512, permitsEmpty: true, in: database)
+        for column in ["inputTokens", "outputTokens", "cacheCreationTokens", "cacheReadTokens"] {
+            try requireInteger("LlmUsageRecord", column: column, range: 0...Int64.max, in: database)
+        }
+        try requireNonnegativeFiniteReal("LlmUsageRecord", column: "estimatedCostUsd", in: database)
+
+        try requireBoundedText("PromptCategory", column: "name", maximum: 1_048_576, permitsEmpty: true, in: database)
+        try requireInt32("PromptCategory", column: "orderNumber", in: database)
+        try requireBoolean("PromptCategory", column: "hidden", in: database)
+        try requireNullableBlobUUID("BuiltinPromptOverride", column: "configuredModelId", in: database)
+
+        try rejectAny(
+            "SELECT 1 FROM LlmRawLogRecord WHERE length(logData) > 67108864 LIMIT 1",
+            error: .fieldTooLarge(table: "LlmRawLogRecord", column: "logData"),
+            in: database
+        )
+        try validateSyncMetadataBounds(
+            nativeTables: [
+                "LlmProviderConfig",
+                "LlmConfiguredModel",
+                "AgentPrompt",
+                "GlobalAiSettings",
+                "LlmUsageRecord",
+                "PromptCategory",
+                "BuiltinPromptOverride",
+            ],
+            fixedIdentifiers: [
+                "GlobalAiSettings": "A1000000000000000000000000000001"
+            ],
+            in: database
+        )
     }
 
     /** Validates exact Android workspace row storage classes and bounded materialization sizes. */
@@ -780,6 +965,20 @@ enum RemoteSyncAndroidDatabaseContract {
         )
     }
 
+    /** Requires exact SQLite REAL storage within the nonnegative finite IEEE-754 domain. */
+    private static func requireNonnegativeFiniteReal(
+        _ table: String,
+        column: String,
+        in database: OpaquePointer
+    ) throws {
+        let identifier = sqlIdentifier(column)
+        try rejectAny(
+            "SELECT 1 FROM \(sqlIdentifier(table)) WHERE typeof(\(identifier)) != 'real' OR \(identifier) < 0.0 OR \(identifier) > 1.7976931348623157e308 LIMIT 1",
+            error: .invalidRowValue(table: table, column: column),
+            in: database
+        )
+    }
+
     /** Requires every non-null value in one column to use exact SQLite REAL storage. */
     private static func requireNullableReal(
         _ table: String,
@@ -1050,6 +1249,16 @@ enum RemoteSyncAndroidDatabaseContract {
                 ("MemorizationTarget", "id", nil),
                 ("GlobalReadingProgressSettings", "id", nil),
             ]
+        case .aiSettings:
+            return [
+                ("LlmProviderConfig", "id", nil),
+                ("LlmConfiguredModel", "id", nil),
+                ("AgentPrompt", "id", nil),
+                ("GlobalAiSettings", "id", nil),
+                ("LlmUsageRecord", "id", nil),
+                ("PromptCategory", "id", nil),
+                ("BuiltinPromptOverride", "id", nil),
+            ]
         case .bookmarks, .readingPlans, .myDocuments:
             return []
         }
@@ -1138,9 +1347,9 @@ enum RemoteSyncAndroidDatabaseContract {
      Builds Room-equivalent semantic signatures for every non-internal SQLite schema object.
 
      Table columns are keyed independently of physical `cid` order, matching Room's `TableInfo`
-     comparison. Defaults remain exact except `PageManager.jsState`, whose Android 4-to-5 migration
-     explicitly adds `DEFAULT NULL` while later generated exports omit that semantically equivalent
-     clause. Raw table SQL is also tokenized for material features omitted by SQLite PRAGMAs,
+     comparison. Defaults remain exact except where Android migrations add a compatibility default
+     that a later generated entity export omits; Room treats those migrated and fresh-install forms
+     as equivalent. Raw table SQL is also tokenized for material features omitted by SQLite PRAGMAs,
      including collations, checks, conflict clauses, deferrability, autoincrement, strict tables, and
      `WITHOUT ROWID`.
 
@@ -1192,8 +1401,8 @@ enum RemoteSyncAndroidDatabaseContract {
                     }
                     var semanticColumn = Array(row.dropFirst())
                     let columnName = try serializedTextValue(row[1])
-                    if semanticColumn[3] == "t:NULL",
-                       defaultNullEquivalentColumns.contains("\(name).\(columnName)") {
+                    let columnKey = "\(name).\(columnName)"
+                    if defaultAbsentEquivalentValues[columnKey]?.contains(semanticColumn[3]) == true {
                         semanticColumn[3] = "n:"
                     }
                     return semanticColumn
@@ -1244,8 +1453,13 @@ enum RemoteSyncAndroidDatabaseContract {
         return signatures
     }
 
-    /** Computes a stable SHA-256 over length-delimited canonical schema signatures. */
-    private static func schemaSHA256(
+    /**
+     Computes a stable SHA-256 over length-delimited canonical schema signatures.
+
+     Staged-database migrators use this internal authority digest before changing predecessor files;
+     tests derive the pinned values from Android's checked-in Room exports.
+     */
+    static func schemaSHA256(
         in database: OpaquePointer,
         excludingObjects: Set<String>
     ) throws -> String {
@@ -1470,11 +1684,28 @@ enum RemoteSyncAndroidDatabaseContract {
     private static let progressSettingsIdentifierHex =
         "B2000000000000000000000000000001"
 
-    /// Sole documented default-null equivalence produced by Android's workspace migration chain.
-    private static let defaultNullEquivalentColumns: Set<String> = ["PageManager.jsState"]
+    /// Exact historical migration defaults that Room accepts as equivalent to no entity default.
+    private static let defaultAbsentEquivalentValues: [String: Set<String>] = [
+        "PageManager.jsState": ["t:NULL"],
+        "GlobalAiSettings.hiddenBuiltInPrompts": ["t:''"],
+        "GlobalAiSettings.commentaryDeselected": ["t:''"],
+        "GlobalAiSettings.hiddenBuiltInCategories": ["t:''"],
+        "GlobalAiSettings.favoritePrompts": ["t:''"],
+        "LlmProviderConfig.endpoint": ["t:NULL"],
+        "LlmProviderConfig.apiFormat": ["t:NULL"],
+        "LlmRawLogRecord.promptId": ["t:NULL"],
+        "LlmRawLogRecord.promptName": ["t:''"],
+        "LlmRawLogRecord.promptDescription": ["t:NULL"],
+        "LlmRawLogRecord.configuredModelId": ["t:NULL"],
+        "LlmRawLogRecord.modelName": ["t:''"],
+        "LlmRawLogRecord.providerType": ["t:''"],
+        "LlmRawLogRecord.timestamp": ["t:0"],
+        "LlmRawLogRecord.totalInputTokens": ["t:0"],
+        "LlmRawLogRecord.totalOutputTokens": ["t:0"],
+    ]
 
     /// Source-derived Room identities and canonical schema digests for supported workspace versions.
-    private static let workspaceSourceAuthorities: [Int: WorkspaceSourceAuthority] = [
+    private static let workspaceSourceAuthorities: [Int: RoomSourceAuthority] = [
         1: .init(identityHash: "4bf98e71faae835422c6aad319b3c3e6", schemaSHA256: "99057f0bb023884c8712d504809d48e4b681d62a3508aa9ba25af8f8a7dd8a4a"),
         2: .init(identityHash: "4bf98e71faae835422c6aad319b3c3e6", schemaSHA256: "99057f0bb023884c8712d504809d48e4b681d62a3508aa9ba25af8f8a7dd8a4a"),
         3: .init(identityHash: "039ea7732752b2ad4b4ef67168479e0d", schemaSHA256: "19580320104c86a1f6b1b3d0c5970c2c09a822ea554e10c9c86d4837e658f328"),
@@ -1497,6 +1728,33 @@ enum RemoteSyncAndroidDatabaseContract {
         22: .init(identityHash: "4a38e9989c3075a4382c417b41f0c4a6", schemaSHA256: "02bf74d0597649e20e8e687fb5ee5987048a0ed246022bb4832c70cddcacc904"),
         23: .init(identityHash: "7ba9fd73c4f856535b0ccf704686a631", schemaSHA256: "c9c377e975adaeb46be155fab7595019195c56bcf4c7994f7a9c7a54f517c6b2"),
         24: .init(identityHash: "59b8635a1eb5125e32e2789eedd02ab2", schemaSHA256: "033e08ef59637066efeeb2dec2dbbb5e6bb7700e41f48930ef099d421b96387a"),
+    ]
+
+    /// Exported or exactly derived Room identities and schema digests for AI settings generations.
+    private static let aiSettingsSourceAuthorities: [Int: RoomSourceAuthority] = [
+        1: .init(identityHash: "9acb139ce0350ae8d45abe791a34d5a6", schemaSHA256: "8317465a0a2d4ce6f303c1edb132bb363a81cbbf0eeada2179f0cc8c7e187152"),
+        2: .init(identityHash: "959f762d0c6e5b46c0e2972d78da075b", schemaSHA256: "76437b02a23a03083fc290649609f03bf2eee7f51bb36a7f30aa4ff762af8594"),
+        3: .init(identityHash: "8c4ba2db34ea934850985ef133401c84", schemaSHA256: "ebfa80f29e704e4213aad749dab68a43e809aa870d02c3ac1acd9d675a1b63f1"),
+        4: .init(identityHash: "f2617a01e732d92655cc482da61ab59b", schemaSHA256: "79f66898cc6ab75b22a1469be7eedefca7cdf38ef45c4180561005be0d976174"),
+        5: .init(identityHash: "79f56a8289168f6c523498ee304a77f7", schemaSHA256: "02f5f5b27e4dc1d04b90999833f4e3940aff25a4fb17dbd379d89f42c5728108"),
+        6: .init(identityHash: "44771286d77cd66ed6bd171f22b85f48", schemaSHA256: "00372b77b0cf8d17fd1efc13cd965196981685688765665568f34cc63bfa473f"),
+        7: .init(identityHash: "d7f999f5bfbe041800525de7ea079ced", schemaSHA256: "d3819c99432c935ce64086ebdd5459cfa70be782eda0dc6a664097ba9c056420"),
+        8: .init(identityHash: "beaee5ab47416e0e33fe1b5648280860", schemaSHA256: "92c6f887f5e6d2242ece2fd1d08c09d9746c8616d7bdd7046791cc270249ca51"),
+        9: .init(identityHash: "c72ce2565d4b73f61bfe567e97dfc07f", schemaSHA256: "f1f098dfc7889eeed4a7e8c7abf4e6c55891aa6ae95a7259c66e2049dba29165"),
+        10: .init(identityHash: "4ac43f9df1b74a5aeb31ad2928ec31d9", schemaSHA256: "93297f28c42cf45ef5f8391740abbbea64d5e7f1ed49fda97ae2f1ec5b0bd632"),
+        11: .init(identityHash: "ba66632b571047b0d26b028d68a09fd4", schemaSHA256: "d76f70c62584fb144a0b345d973d26603b24102c039f5c4bee023c6712146340"),
+        12: .init(identityHash: "ce84fdcfd2da69ec7a3dbb0a48598c5b", schemaSHA256: "1fcdbebe0865065824e82c0a995c7c216bce2de8e483f90f6daec3746aa39149"),
+        13: .init(identityHash: "7f78373ef09d4a39963a6d36fb1af07c", schemaSHA256: "8025bb17bd61933adaa64434a2479ea09579ae4494b576259d1c62bc2ed3c640"),
+        14: .init(identityHash: "a58582f787ab00d65317d194b512d65d", schemaSHA256: "26a16acf0751f124dfe3315c966f2011803535dfce863b35bf991914df6bbe65"),
+        15: .init(identityHash: "74162a4c9fee3d05e66dea913f3a8ecc", schemaSHA256: "fe2dd0d8b2ad5660576b195c937744fbc8e2f8fbbaf30751eabeb4f37a9ba8f5"),
+        16: .init(identityHash: "44ee4b49c2dc4b97f4d47d5d05f9c106", schemaSHA256: "90bf4c6f2794dcc2271c8e2bbaf02ff5699f28237e24d1f3b96057b0042f2a32"),
+        17: .init(identityHash: "db8c5d0eaebf6bb8660ad4bffdd5e634", schemaSHA256: "c90ed042f68c6b84ceae4d0d87449930c141e080dd5983419745337a1c86b15d"),
+        18: .init(identityHash: "94c3097da2ba84700e7a99b45be93354", schemaSHA256: "472beb6e51dc3cf12877d9c014263ad2cdd5c40492c00d4d3697f01e77152175"),
+        19: .init(identityHash: "9ebbedb251fc0892363a38ef2f3aa314", schemaSHA256: "bb099daf645b7909bff6c3f3cc1c5ec12c0b8a573d7f91e0f9a9431729266006"),
+        20: .init(identityHash: "2fb949a3f2269f9ea913d71ec86e9a2c", schemaSHA256: "f777f05ca16b0982802cd559d935a43761e9d2ad8fda5d1302863f5df53f2cab"),
+        21: .init(identityHash: "78dc0aed47cda9c269d076d4bff4353e", schemaSHA256: "1b8a59bcc8acb858597ab678088ed7e23cd33d6bc57809696e009e0b6973bdd0"),
+        22: .init(identityHash: "cd5d541ba5aee11ecf5cf66642675607", schemaSHA256: "6893f3914273d7b6cb22147d0faf5f4b190df3c24abbe285b22a8b3129076093"),
+        23: .init(identityHash: "c5b1820fd3dfb0390fa3122d2d6e139f", schemaSHA256: "43904463fc915222308d336b104b42f042178d53602eef65f6de5c196da0f7f9"),
     ]
 
     /// Shared Android Room sync metadata tables and indexes.
@@ -1553,6 +1811,35 @@ enum RemoteSyncAndroidDatabaseContract {
     CREATE VIEW `AiCachedPageWithContent` AS SELECT c.pageId, c.sourcePromptId, c.sourceContext, c.kjvOrdinalStart, c.kjvOrdinalEnd, c.contextHash, c.usedWriteTools, c.sourceModelName, c.sourceBookInitials, c.sourceBookKey, p.title, p.pageKey, p.contentType, p.documentId, p.orderNumber, p.createdAt, p.updatedAt, p.languageCode, cnt.content FROM AiPageCacheEntry c INNER JOIN MyDocumentPage p ON c.pageId = p.id LEFT OUTER JOIN MyDocumentPageContent cnt ON p.id = cnt.pageId;
     CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY, identity_hash TEXT);
     INSERT OR REPLACE INTO room_master_table (id, identity_hash) VALUES (42, '3f0946602099d896c8d47129233c1794');
+    """
+
+    /// Complete Android `AiSettingsDatabase` version 23 schema.
+    private static let aiSettingsSchemaSQL = """
+    PRAGMA user_version = 23;
+    CREATE TABLE IF NOT EXISTS `AgentPrompt` (`id` BLOB NOT NULL, `name` TEXT NOT NULL, `description` TEXT DEFAULT NULL, `promptTemplate` TEXT NOT NULL, `showIn` TEXT NOT NULL, `orderNumber` INTEGER NOT NULL DEFAULT 0, `createdAt` INTEGER NOT NULL DEFAULT 0, `strictContextMatching` INTEGER NOT NULL DEFAULT 1, `permissionMode` TEXT DEFAULT NULL, `allowedTools` TEXT DEFAULT NULL, `deniedTools` TEXT DEFAULT NULL, `configuredModelId` BLOB DEFAULT NULL, `editBeforeRun` INTEGER NOT NULL DEFAULT 0, `noDocumentCreation` INTEGER NOT NULL DEFAULT 0, `maxIterations` INTEGER DEFAULT NULL, `autoIncludeDocuments` INTEGER NOT NULL DEFAULT 0, `autoIncludeCommentaries` INTEGER NOT NULL DEFAULT 0, `bibleOnly` INTEGER NOT NULL DEFAULT 0, `isTextTransformation` INTEGER NOT NULL DEFAULT 0, `categoryId` BLOB DEFAULT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`configuredModelId`) REFERENCES `LlmConfiguredModel`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL );
+    CREATE INDEX IF NOT EXISTS `index_AgentPrompt_orderNumber` ON `AgentPrompt` (`orderNumber`);
+    CREATE INDEX IF NOT EXISTS `index_AgentPrompt_createdAt` ON `AgentPrompt` (`createdAt`);
+    CREATE INDEX IF NOT EXISTS `index_AgentPrompt_configuredModelId` ON `AgentPrompt` (`configuredModelId`);
+    CREATE INDEX IF NOT EXISTS `index_AgentPrompt_categoryId` ON `AgentPrompt` (`categoryId`);
+    CREATE TABLE IF NOT EXISTS `LlmProviderConfig` (`id` BLOB NOT NULL, `providerType` TEXT NOT NULL, `displayName` TEXT NOT NULL, `endpoint` TEXT, `apiFormat` TEXT, `orderNumber` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`));
+    CREATE INDEX IF NOT EXISTS `index_LlmProviderConfig_orderNumber` ON `LlmProviderConfig` (`orderNumber`);
+    CREATE TABLE IF NOT EXISTS `LlmConfiguredModel` (`id` BLOB NOT NULL, `providerConfigId` BLOB NOT NULL, `modelId` TEXT NOT NULL, `orderNumber` INTEGER NOT NULL DEFAULT 0, `inputPricePerMillion` REAL NOT NULL DEFAULT 0.0, `outputPricePerMillion` REAL NOT NULL DEFAULT 0.0, `cacheCreationPricePerMillion` REAL NOT NULL DEFAULT 0.0, `cacheReadPricePerMillion` REAL NOT NULL DEFAULT 0.0, PRIMARY KEY(`id`), FOREIGN KEY(`providerConfigId`) REFERENCES `LlmProviderConfig`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE );
+    CREATE INDEX IF NOT EXISTS `index_LlmConfiguredModel_providerConfigId` ON `LlmConfiguredModel` (`providerConfigId`);
+    CREATE UNIQUE INDEX IF NOT EXISTS `index_LlmConfiguredModel_providerConfigId_modelId` ON `LlmConfiguredModel` (`providerConfigId`, `modelId`);
+    CREATE TABLE IF NOT EXISTS `GlobalAiSettings` (`id` BLOB NOT NULL, `agentPermissionMode` TEXT DEFAULT NULL, `permanentlyAllowedTools` TEXT DEFAULT NULL, `permanentlyDeniedTools` TEXT DEFAULT NULL, `aiExcludedDocuments` TEXT NOT NULL, `commentaryMaxResponseTokens` INTEGER NOT NULL DEFAULT 15000, `hiddenBuiltInPrompts` TEXT NOT NULL, `maxIterations` INTEGER NOT NULL DEFAULT 10, `commentaryDeselected` TEXT NOT NULL, `defaultModelId` BLOB DEFAULT NULL, `aiLanguage` TEXT DEFAULT NULL, `askModelBeforeRun` INTEGER NOT NULL DEFAULT 0, `aiDisclaimerAccepted` INTEGER NOT NULL DEFAULT 0, `hiddenBuiltInCategories` TEXT NOT NULL, `customAgentSystemPrompt` TEXT DEFAULT NULL, `customTextTransformationSystemPrompt` TEXT DEFAULT NULL, `favoritePrompts` TEXT NOT NULL, `rawLogRetentionDays` INTEGER DEFAULT 30, `autoHideAgentLogOnCompletion` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`));
+    CREATE TABLE IF NOT EXISTS `LlmUsageRecord` (`id` BLOB NOT NULL, `configuredModelId` BLOB NOT NULL, `deviceId` TEXT NOT NULL, `inputTokens` INTEGER NOT NULL DEFAULT 0, `outputTokens` INTEGER NOT NULL DEFAULT 0, `cacheCreationTokens` INTEGER NOT NULL DEFAULT 0, `cacheReadTokens` INTEGER NOT NULL DEFAULT 0, `estimatedCostUsd` REAL NOT NULL DEFAULT 0.0, PRIMARY KEY(`id`));
+    CREATE INDEX IF NOT EXISTS `index_LlmUsageRecord_configuredModelId` ON `LlmUsageRecord` (`configuredModelId`);
+    CREATE UNIQUE INDEX IF NOT EXISTS `index_LlmUsageRecord_configuredModelId_deviceId` ON `LlmUsageRecord` (`configuredModelId`, `deviceId`);
+    CREATE TABLE IF NOT EXISTS `LlmRawLogRecord` (`id` BLOB NOT NULL, `promptId` BLOB, `promptName` TEXT NOT NULL, `promptDescription` TEXT, `configuredModelId` BLOB, `modelName` TEXT NOT NULL, `providerType` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `totalInputTokens` INTEGER NOT NULL, `totalOutputTokens` INTEGER NOT NULL, `estimatedCostUsd` REAL NOT NULL DEFAULT 0.0, `logData` BLOB NOT NULL, `iterationCount` INTEGER NOT NULL DEFAULT 0, `wasError` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`));
+    CREATE INDEX IF NOT EXISTS `index_LlmRawLogRecord_timestamp` ON `LlmRawLogRecord` (`timestamp`);
+    CREATE INDEX IF NOT EXISTS `index_LlmRawLogRecord_promptId` ON `LlmRawLogRecord` (`promptId`);
+    CREATE INDEX IF NOT EXISTS `index_LlmRawLogRecord_configuredModelId` ON `LlmRawLogRecord` (`configuredModelId`);
+    CREATE TABLE IF NOT EXISTS `PromptCategory` (`id` BLOB NOT NULL, `name` TEXT NOT NULL, `orderNumber` INTEGER NOT NULL DEFAULT 0, `hidden` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`));
+    CREATE TABLE IF NOT EXISTS `BuiltinPromptOverride` (`id` BLOB NOT NULL, `configuredModelId` BLOB DEFAULT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`configuredModelId`) REFERENCES `LlmConfiguredModel`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL );
+    CREATE INDEX IF NOT EXISTS `index_BuiltinPromptOverride_configuredModelId` ON `BuiltinPromptOverride` (`configuredModelId`);
+    \(syncMetadataSQL)
+    CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY, identity_hash TEXT);
+    INSERT OR REPLACE INTO room_master_table (id, identity_hash) VALUES (42, 'c5b1820fd3dfb0390fa3122d2d6e139f');
     """
 
     /// Complete Android `WorkspaceDatabase` version 24 schema.
