@@ -1024,3 +1024,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "AI-konektaj kaj antaŭformularaj agordoj";
 "prefs_features_cat" = "Ebloj";
+
+/* Android shared translations */
+"ai_configure_button" = "Agordi konekton";
+"ai_disclaimer_warning_summary" = "Riskoj kaj respondecoj pri uzado de AI";
+"ai_provider_tier_community" = "Aliaj provizantoj (ne testitaj)";
+"ai_provider_tier_recommended" = "Rekomendita";
+"ai_providers_category" = "Provizantoj";
+"easy_setup_anthropic_desc" = "Malmultekosta, bonega kvalito";
+"easy_setup_api_key_instructions" = "Akiru vian API-ŝlosilon de:";
+"easy_setup_done_message" = "Elektu tekston en la Biblio kaj provu la AI-funkciojn. Vi povas aldoni pliajn modelojn kaj provizantojn en la agordoj.";
+"easy_setup_done_title" = "AI pretas!";
+"easy_setup_free_tier" = "Senpaga nivelo";
+"easy_setup_gemini_desc" = "Senpaga nivelo disponebla, bona kvalito";
+"easy_setup_openai_desc" = "Konata, fidinda";
+"easy_setup_pref_summary" = "Agordi AI kun rekomendata provizanto en kelkaj paŝoj";
+"edit_model_title" = "Redakti modelon";
+"show_also_unsupported_providers" = "Montri ankaŭ nesubtenatajn provizantojn";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maksimuma nombro da ripetoj (iteracioj) antaŭ ol montri demandon ĉu pluigi (0 = senlima)";
+"ai_document_filter_summary" = "Elekti kiujn dokumentojn la AI povas legi";
+"ai_document_filter_summary_count" = "%d dokumentoj ekskluditaj";
+"ai_document_filter_title" = "Aliro al dokumentoj";
+"ai_language_app_default" = "lingvo de aplikaĵo (%1$@)";
+"ai_language_custom" = "propra…";
+"ai_language_custom_example" = "ekz. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Enigu nomon aŭ ISO-kodon de lingvo";
+"ai_prompts_restored" = "Kaŝitaj invitoj restarigitaj";
+"ai_restore_hidden_prompts" = "Restarigi kaŝitajn invitojn";
+"are_you_sure" = "Ĉu vi certas?";
+"ask_model_before_run_summary" = "Montri fenestron kun elekto de modelo antaŭ ol plenumi demandon al artefarita intelekto (preterpasita, kiam la demando precize difinas modelon)";
+"auto_hide_agent_log_summary" = "Aŭtomate kaŝi la panelon de artefarita intelekto kiam tasko sukcese finiĝas aŭ estas nuligita. Ĉe eraro la panelo restos videbla.";
+"commentary_max_response_dialog_message" = "Kiam la AI alportas komentarojn kaj la tuta respondo superas tiun ĵetonian limon, elekta dialogo permesas al vi elekti kiujn komentarojn sendi al la AI.\n\n0 = sen limo (ĉiuj komentaroj estas senditaj aŭtomate).";
+"commentary_max_response_dialog_title" = "Agordi maksimuman respondan grandecon (ĵetonoj)";
+"commentary_max_response_value" = "~%@ ĵetonoj";
+"csv_export_failed" = "Malsukcesis elporti CSV-dosieron: %@";
+"csv_import_errors" = "Finis enportadon kun eraroj: %1$d kreitaj, %2$d ĝisdatigitaj, %3$d eraroj";
+"csv_import_failed" = "Malsukcesis enporti CSV-dosieron: %@";
+"csv_import_success" = "Finis enportadon: %1$d kreitaj, %2$d ĝisdatigitaj";
+"custom_system_prompt_default" = "Implicita";
+"delete_prompt_confirm_message" = "Ĉu vi certe volas forigi ĉi tiun inviton?";
+"discard_changes_confirmation" = "Ĉu forĵeti nekonservitajn ŝanĝojn?";
+"doc_type_commentary" = "Komentaro";
+"export_prompts_csv" = "Elporti demandojn al CSV";
+"global_tool_permissions_title" = "Defaŭltaj ilaj agordoj";
+"help_ai_connection_text" = "Tie ĉi vi povas agordi artefaritan intelekton: modelojn, permesojn kaj konektajn agordojn. Ĉiu liveranto bezonas sian propran API-ŝlosilon. Vi povas aldoni plurajn liverantojn kaj elekti implicitan modelon.";
+"help_ai_document_filter_text" = "Ebligas limigi kiujn Bibliojn, komentarojn kaj aliajn modulojn la AI-agento povas legi. Implicite la agento vidas ĉiujn instalitajn modulojn; filtri helpas redukti bruon kaj koston kiam vi volas por ke la agento pritraktu nur specifajn fontojn.";
+"help_ai_models_text" = "Tie ĉi vi povas administri modelojn por tiu ĉi liveranto. Vi povas ĝisdatigi la liston de modelon el la API de la liveranto por ekhavi novajn eldonojn, aŭ aldoni nomon de modelo permane se ĝi ne estas en la ŝargita listo.";
+"help_ai_providers_text" = "Tie ĉi vi povas administri viajn liverantojn de artefarita intelekto (Google Gemini, OpenAI, Anthropic, ktp.). Ĉiu liveranto bezonas sian propran API-ŝlosilon. Vi povas aldoni plurajn liverantojn kaj asigni malsamajn al specifaj demandoj.";
+"help_ai_settings_text" = "AI-agordoj estas kie vi administras viajn demandojn kaj kategoriojn. De tie ĉi vi povas krei novajn demandojn, organizi ilin en kategoriojn, enporti/elporti demandojn kiel CSV, instali aldonajn demandpakaĵojn, kaj atingi la AI-konektajn agordojn.";
+"help_global_tool_permissions_text" = "Ebligas agordi permesojn por individuaj iloj. Por ĉiu leganta ilo, elektu ĉu la artefarita intelekto povos uzi ĝin (“Permesi” aŭ “Malpermesi”). Por ĉiu skribanta ilo, elektu “Ĉiam permesi”, “Ĉiam malpermesi”, aŭ “Demandi” (aplikiĝos la ĝenerala reĝimo de permesoj agordita en konektaj agordoj de AI).";
+"import_prompts_addon" = "Instali kiel aldonaĵon (nurlegenda)";
+"import_prompts_csv" = "Enporti demandojn el CSV";
+"import_prompts_editable" = "Enporti kiel redakteblajn demandojn";
+"llm_custom_model" = "propra…";
+"llm_openrouter_category" = "Kategorio";
+"llm_openrouter_category_all" = "Ĉiuj";
+"llm_reset_usage_summary" = "Forviŝi historiojn de uzitaj ĵetonoj kaj kostoj";
+"llm_usage_summary_format" = "Enigo: %1$d ĵetonoj | Eligo: %2$d ĵetonoj\nKalkulita kosto: %3$@";
+"manage_tool_permissions_summary" = "Administri permesajn anstataŭigojn por ĉiu ilo";
+"model_delete_confirm" = "Forigi modelon \"%1$@\"?";
+"model_supported_badge" = "✓ Subtenata";
+"move_to_category" = "Movi al kategorio…";
+"no_prompts_to_export" = "Neniu demando de uzanto por elporti";
+"prompts_csv_export_success" = "Elportis %d demandojn al CSV";
+"raw_llm_log_copied" = "Protokolo kopiita al tondujo";
+"raw_llm_log_empty" = "Neniuj krudaj protokolaj datumoj estas disponeblaj";
+"raw_llm_log_total" = "Entute: en %1$@ / el %2$@%3$@";
+"raw_log_delete_confirm" = "%d elektita(j)";
+"raw_log_delete_old" = "Forigi malnovajn protokolojn…";
+"raw_log_delete_selected" = "Forigi elektitajn";
+"raw_log_history_summary" = "Rigardi kaj administri konservitajn protokolojn pri interagoj kun artefarita intelekto";
+"raw_log_retention_summary_days" = "Post %d tagoj";
+"show_also_unsupported_models" = "Montri ankaŭ nesubtenatajn modelojn";
+"tool_category_read" = "Legi";
+"tool_category_write" = "Skribi";
+"tool_option_disabled" = "Malŝaltita";
+"tool_option_enabled" = "Ebligita";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Raporti eraron pri AI";
+"bug_report_email_text" = "Sekve elektu vian preferatan retpoŝtilon (ekzemple Gmail) por sendi raporton al la programistoj.";
+"send_ai_bug_report_title" = "Raporti eraron pri AI";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Aldonaĵo: %@";
+"addon_prompt_notice" = "Ĉi tiu demando estas el aldonaĵmodulo \"%@\" kaj ne povas esti redaktita. Uzu \"Kopii por agordi\" por krei redakteblan kopion.";
+"ai_available_tools" = "Haveblaj iloj";
+"ai_read_tools" = "Legaj iloj";
+"ai_write_tools" = "Skribaj iloj";
+"delete_category_confirm_title" = "Forigi kategorion \"%@\"?";
+"delete_prompt_confirmation" = "Forigi demandon \"%@\"?";
+"edit_prompt" = "Redakti demandon";
+"help_prompt_edit_text" = "Propraj demandoj ebligas al vi krei reuzeblajn instrukciojn de artefarita intelekto por via studo. Ebligas agordi nomon, priskribon, ŝablonon, la kuntekstojn kie ĝi aperu, kaj laŭvole propran liveranton/modelon. Enkonstruitajn demandojn ne eblas redakti rekte – uzu la menuon “Kopii por alĝustigi” por krei vian propran version.";
+"help_tool_info_text" = "AI-iloj estas specialigitaj funkcioj, kiujn la artefarita intelekto povas voki por legi viajn datumojn aŭ fari ŝanĝojn komisie de vi. Legantaj iloj (legi versojn, komentarojn, vortarojn, legosignojn) neniam bezonas permeson. Skribantaj iloj (krei legosignojn, notojn, notblokojn) estas regataj de la permesa sistemo.";
+"prompt_name_required" = "Demandnomo estas postulata";
+"prompt_template_required" = "Demandoŝablono estas postulata";
+"raw_llm_log_entry_api_response" = "API-respondo (ripeto %d)";
+"raw_llm_log_entry_assistant" = "Respondo de asistanto";
+"raw_llm_log_entry_empty" = "(malplena)";
+"raw_llm_log_entry_system" = "Sistema demando";
+"raw_llm_log_entry_tokens" = "≈%@ ĵetonoj";
+"raw_llm_log_entry_tool_call" = "Alvoko de ilo: %@";
+"raw_llm_log_entry_tool_definitions" = "Difinoj de iloj (%d iloj)";
+"raw_llm_log_entry_tool_desc" = "Priskribo: %@";
+"raw_llm_log_entry_tool_params" = "Parametroj: %@";
+"raw_llm_log_entry_tool_result" = "Rezulto de ilo [%@]";
+"raw_llm_log_entry_usage" = "en: %1$@ / el: %2$@%3$@";
+"raw_llm_log_entry_user" = "Mesaĝo de uzanto";
+"raw_llm_log_title" = "Kruda protokolo de GLM";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Aŭtomate alkalkulas kaj inkluzivas komentarajn enirojn por la elektitaj versoj, ŝparante AI-ripeton.";
+"prompt_auto_include_documents_description" = "Aŭtomate inkluzivas la liston de instalitaj dokumentoj en la kontekston de la invito, ŝparante AI-ripeton.";
+"prompt_copied" = "Demando kopiita";
+"prompt_edit_before_run_description" = "Montri tekstan kampon por precizigi la taskon antaŭ rulado de la demando";
+"prompt_is_text_transformation_description" = "Uzas simpligitan sisteman inviton kiu konservas formatadon (ligiloj, titoloj, grasa/kursiva) dum transformas tekstenhavon. Neniuj iloj estas uzataj. Ideala por tradukaj kaj redaktaj invitoj.";
+"prompt_max_iterations" = "Transpasi maksimuman ripetkvanton";
+"prompt_max_iterations_description" = "Transpasi la ĝeneralan maksimuman ripetkvanton por tiu ĉi demando. Malplena = ĝenerala implicito, 0 = senlima.";
+"prompt_no_document_creation_description" = "Kiam ŝaltita, la AI ne kreos dokumenton. Rezultoj estas nur montrataj en la agadregistro. Utila por nur-aga demandoj (legosignoj, etikedoj, notblokaj operacioj).";
+"prompt_strict_context_matching_description" = "Kiam ŝaltita, kaŝmemoro kongruas nur kiam ĉiu kunteksto (Biblio-versio, elektita teksto) estas la sama. Kiam malŝaltita, kaŝmemoro kongruas kiam versoj estas la samaj sendepende de Biblio-versio.";

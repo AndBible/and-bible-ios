@@ -1025,3 +1025,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "הגדרות חיבור בינה מלאכותית והנחיות";
 "prefs_features_cat" = "תכונות";
+
+/* Android shared translations */
+"ai_configure_button" = "הגדר חיבור";
+"ai_disclaimer_warning_summary" = "סיכונים ואחריות השימוש בבינה מלאכותית";
+"ai_provider_tier_community" = "ספקים אחרים (לא נבדקו)";
+"ai_provider_tier_recommended" = "מומלץ";
+"ai_providers_category" = "ספקים";
+"easy_setup_anthropic_desc" = "במחיר סביר, איכות מצוינת";
+"easy_setup_api_key_instructions" = "קבל את מפתח ה-API שלך מ:";
+"easy_setup_done_message" = "בחר טקסט בתנ\"ך ונסה את תכונות הבינה המלאכותית. ניתן להוסיף מודלים וספקים נוספים בהגדרות.";
+"easy_setup_done_title" = "הבינה המלאכותית מוכנה!";
+"easy_setup_free_tier" = "רמת חינם";
+"easy_setup_gemini_desc" = "רמת חינם זמינה, איכות טובה";
+"easy_setup_openai_desc" = "מוכר ואמין";
+"easy_setup_pref_summary" = "הגדר בינה מלאכותית עם ספק מומלץ בכמה שלבים";
+"edit_model_title" = "ערוך מודל";
+"show_also_unsupported_providers" = "הצג גם ספקים שאינם נתמכים";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "מקסימום איטרציות לפני בקשה להמשך (0 = ללא הגבלה)";
+"ai_document_filter_summary" = "בחר אילו מסמכים הבינה המלאכותית יכולה לקרוא";
+"ai_document_filter_summary_count" = "%d מסמכים מוחרגים";
+"ai_document_filter_title" = "גישה למסמכים";
+"ai_language_app_default" = "שפת אפליקציה (%1$@)";
+"ai_language_custom" = "מותאם אישית…";
+"ai_language_custom_example" = "לדוגמה: עברית, Tagalog, en";
+"ai_language_custom_hint" = "הכנס שם שפה או קוד";
+"ai_prompts_restored" = "הנחיות מוסתרות שוחזרו";
+"ai_restore_hidden_prompts" = "שחזר הנחיות מוסתרות";
+"are_you_sure" = "האם אתה בטוח?";
+"ask_model_before_run_summary" = "הצג תיבת בחירת מודל לפני הפעלת הנחיה (מדולג כאשר להנחיה יש עקיפת מודל מפורשת)";
+"auto_hide_agent_log_summary" = "הסתרה אוטומטית של חלונית הבינה המלאכותית כאשר משימה מסתיימת בהצלחה או מבוטלת. במקרה של שגיאה החלונית נשארת גלויה.";
+"commentary_max_response_dialog_message" = "כאשר הבינה המלאכותית מביאה פרשנויות והתגובה הכוללת חורגת ממגבלת טוקנים זו, תיבת בחירה מאפשרת לך לבחור אילו פרשנויות לשלוח לבינה המלאכותית.\n\n0 = ללא הגבלה (כל הפרשנויות נשלחות אוטומטית).";
+"commentary_max_response_dialog_title" = "הגדר גודל תגובה מקסימלי (טוקנים)";
+"commentary_max_response_value" = "~%@ טוקנים";
+"csv_export_failed" = "יצוא CSV נכשל: %@";
+"csv_import_errors" = "הייבוא הושלם עם שגיאות: %1$d נוצרו, %2$d עודכנו, %3$d שגיאות";
+"csv_import_failed" = "ייבוא CSV נכשל: %@";
+"csv_import_success" = "הייבוא הושלם: %1$d נוצרו, %2$d עודכנו";
+"custom_system_prompt_default" = "ברירת מחדל";
+"delete_prompt_confirm_message" = "האם אתה בטוח שברצונך למחוק הנחיה זו?";
+"discard_changes_confirmation" = "לבטל שינויים שלא נשמרו?";
+"doc_type_commentary" = "פרשנות";
+"export_prompts_csv" = "יצא הנחיות ל-CSV";
+"global_tool_permissions_title" = "הגדרות כלים ברירת מחדל";
+"help_ai_connection_text" = "הגדר כאן את ספקי ה-AI, המודלים, ההרשאות ואפשרויות חיבור אחרות. לכל ספק נדרש מפתח API משלו. ניתן להוסיף מספר ספקים ולבחור מודל ברירת מחדל.";
+"help_ai_document_filter_text" = "הגבל אילו תנ\"ך, פרשנויות ומודולים אחרים יכול ה-AI לקרוא. כברירת מחדל ה-AI רואה את כל המודולים המותקנים; סינון מסייע להפחית רעש ועלויות כאשר אתה רוצה שיתייחס רק למקורות ספציפיים.";
+"help_ai_models_text" = "נהל מודלים עבור ספק זה. ניתן לרענן את רשימת המודלים מה-API של הספק כדי לקבל מהדורות חדשות, או להוסיף שם מודל ידנית אם אינו ברשימה שנשלפה.";
+"help_ai_providers_text" = "נהל ספקי AI (Google Gemini, OpenAI, Anthropic וכו'). לכל ספק נדרש מפתח API משלו. ניתן להוסיף מספר ספקים ולהקצות ספקים שונים להנחיות ספציפיות.";
+"help_ai_settings_text" = "הגדרות AI הוא המקום שבו אתה מנהל את ההנחיות והקטגוריות שלך. מכאן תוכל ליצור הנחיות חדשות, לארגן אותן בקטגוריות, לייצא/לייבא הנחיות כ-CSV, להתקין חבילות הנחיות נוספות, ולגשת להגדרות חיבור ה-AI.";
+"help_global_tool_permissions_text" = "הגדר הרשאות עבור כלי AI בודדים. לכל כלי קריאה, בחר אם ה-AI רשאי להשתמש בו (מאופשר או מושבת). לכל כלי כתיבה, בחר תמיד לאפשר, תמיד לדחות, או שאל (שחוזר למצב ההרשאות הגלובלי שנקבע בהגדרות חיבור ה-AI).";
+"import_prompts_addon" = "התקן כתוסף (לקריאה בלבד)";
+"import_prompts_csv" = "ייבא הנחיות מ-CSV";
+"import_prompts_editable" = "ייבא כהנחיות ניתנות לעריכה";
+"llm_custom_model" = "מותאם אישית…";
+"llm_openrouter_category" = "קטגוריה";
+"llm_openrouter_category_all" = "הכל";
+"llm_reset_usage_summary" = "נקה מעקב מצטבר של טוקנים ועלויות";
+"llm_usage_summary_format" = "קלט: %1$d טוקנים | פלט: %2$d טוקנים\nעלות משוערת: %3$@";
+"manage_tool_permissions_summary" = "נהל עקיפות הרשאות לכלים פרטניים";
+"model_delete_confirm" = "למחוק מודל \"%1$@\"?";
+"model_supported_badge" = "✓ נתמך";
+"move_to_category" = "העבר לקטגוריה…";
+"no_prompts_to_export" = "אין הנחיות משתמש לייצוא";
+"prompts_csv_export_success" = "יוצאו %d הנחיות ל-CSV";
+"raw_llm_log_copied" = "היומן הועתק ללוח";
+"raw_llm_log_empty" = "אין נתוני יומן זמינים";
+"raw_llm_log_total" = "סה\"כ: קלט %1$@ / פלט %2$@%3$@";
+"raw_log_delete_confirm" = "%d נבחרו";
+"raw_log_delete_old" = "מחק יומנים ישנים…";
+"raw_log_delete_selected" = "מחק נבחרים";
+"raw_log_history_summary" = "צפה ונהל יומני שיחות בינה מלאכותית שנשמרו";
+"raw_log_retention_summary_days" = "לאחר %d ימים";
+"show_also_unsupported_models" = "הצג גם מודלים שאינם נתמכים";
+"tool_category_read" = "קריאה";
+"tool_category_write" = "כתיבה";
+"tool_option_disabled" = "מושבת";
+"tool_option_enabled" = "מופעל";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "דווח על באג בבינה מלאכותית";
+"bug_report_email_text" = "לאחר מכן, אנא בחר את אפליקציית הדוא\"ל המועדפת עליך (Gmail למשל) לשליחת הדוח לצוות המפתחים.";
+"send_ai_bug_report_title" = "דווח על באג בבינה מלאכותית";
+
+/* Android shared translations */
+"addon_prompt_badge" = "תוסף: %@";
+"addon_prompt_notice" = "הנחיה זו היא ממודול תוסף \"%@\" ולא ניתן לערוך אותה. השתמש ב\"העתק להתאמה\" כדי ליצור עותק ניתן לעריכה.";
+"ai_available_tools" = "כלים זמינים";
+"ai_read_tools" = "כלי קריאה";
+"ai_write_tools" = "כלי כתיבה";
+"delete_category_confirm_title" = "למחוק קטגוריה \"%@\"?";
+"delete_prompt_confirmation" = "למחוק הנחיה \"%@\"?";
+"edit_prompt" = "ערוך הנחיה";
+"help_prompt_edit_text" = "הנחיות מותאמות אישית מאפשרות לך ליצור הוראות AI לשימוש חוזר בלימוד שלך. הגדר שם, תיאור, תבנית, ההקשרים שבהם היא תופיע, ובאפשרות ספק/מודל מותאם אישית. הנחיות מובנות לא ניתנות לעריכה ישירה — השתמש ב\"העתק להתאמה אישית\" כדי ליצור גרסה משלך.";
+"help_tool_info_text" = "כלי AI הם פונקציות מיוחדות שה-AI יכול לקרוא כדי לקרוא את הנתונים שלך או לבצע שינויים בשמך. כלי קריאה (פסוקים, פרשנויות, מילונים, סימניות) אינם דורשים אישור. כלי כתיבה (יצירת סימניות, הערות, רשומות בפנקס לימוד) כפופים למערכת ההרשאות.";
+"prompt_name_required" = "נדרש שם הנחיה";
+"prompt_template_required" = "נדרשת תבנית הנחיה";
+"raw_llm_log_entry_api_response" = "תגובת API (איטרציה %d)";
+"raw_llm_log_entry_assistant" = "תגובת עוזר";
+"raw_llm_log_entry_empty" = "(ריק)";
+"raw_llm_log_entry_system" = "הנחיית מערכת";
+"raw_llm_log_entry_tokens" = "~%@ טוקנים";
+"raw_llm_log_entry_tool_call" = "קריאת כלי: %@";
+"raw_llm_log_entry_tool_definitions" = "הגדרות כלים (%d כלים)";
+"raw_llm_log_entry_tool_desc" = "תיאור: %@";
+"raw_llm_log_entry_tool_params" = "פרמטרים: %@";
+"raw_llm_log_entry_tool_result" = "תוצאת כלי [%@]";
+"raw_llm_log_entry_usage" = "קלט: %1$@ / פלט: %2$@%3$@";
+"raw_llm_log_entry_user" = "הודעת משתמש";
+"raw_llm_log_title" = "יומן LLM גולמי";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "אחזר וכלול אוטומטית רשומות פרשנות לפסוקים שנבחרו, חוסך איטרציה אחת של בינה מלאכותית.";
+"prompt_auto_include_documents_description" = "כלול אוטומטית את רשימת המסמכים המותקנים בהקשר ההנחיה, חוסך איטרציה אחת של בינה מלאכותית.";
+"prompt_copied" = "ההנחיה הועתקה";
+"prompt_edit_before_run_description" = "הצג שדה טקסט לציון המשימה לפני הפעלת ההנחיה";
+"prompt_is_text_transformation_description" = "משתמש בהנחיית מערכת פשוטה יותר שמשמרת עיצוב (קישורים, כותרות, מודגש/נטוי) תוך המרת תוכן הטקסט. לא נעשה שימוש בכלים. אידיאלי להנחיות תרגום ועריכה.";
+"prompt_max_iterations" = "עקיפת מקסימום איטרציות";
+"prompt_max_iterations_description" = "עקוף את מקסימום האיטרציות הכלליות להנחיה זו. ריק = ברירת מחדל כללית, 0 = ללא הגבלה.";
+"prompt_no_document_creation_description" = "כשמופעל, הבינה המלאכותית לא תיצור מסמך. התוצאות מוצגות רק ביומן הפעילות. שימושי להנחיות פעולה בלבד (סימניות, תוויות, פעולות פנקס לימוד).";
+"prompt_strict_context_matching_description" = "כשמופעל, המטמון תואם רק כאשר כל ההקשר (גרסת תנ\"ך, טקסט שנבחר) זהה. כשמושבת, המטמון תואם כשהפסוקים זהים ללא תלות בגרסת התנ\"ך.";

@@ -1142,3 +1142,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "การตั้งค่าการเชื่อมต่อ AI และพรอมต์";
 "prefs_features_cat" = "คุณสมบัติ";
+
+/* Android shared translations */
+"ai_configure_button" = "กำหนดค่าการเชื่อมต่อ";
+"ai_disclaimer_warning_summary" = "ความเสี่ยงและความรับผิดชอบในการใช้ AI";
+"ai_provider_tier_community" = "ผู้ให้บริการอื่น (ยังไม่ผ่านการทดสอบ)";
+"ai_provider_tier_recommended" = "แนะนำ";
+"ai_providers_category" = "ผู้ให้บริการ";
+"easy_setup_anthropic_desc" = "ราคาประหยัด คุณภาพยอดเยี่ยม";
+"easy_setup_api_key_instructions" = "รับ API key จาก:";
+"easy_setup_done_message" = "เลือกข้อความในพระคัมภีร์แล้วลองใช้ฟีเจอร์ AI คุณสามารถเพิ่มโมเดลและผู้ให้บริการเพิ่มเติมได้ในการตั้งค่า";
+"easy_setup_done_title" = "AI พร้อมใช้งานแล้ว!";
+"easy_setup_free_tier" = "ฟรีเทียร์";
+"easy_setup_gemini_desc" = "มีฟรีเทียร์ คุณภาพดี";
+"easy_setup_openai_desc" = "เป็นที่รู้จัก เชื่อถือได้";
+"easy_setup_pref_summary" = "ตั้งค่า AI กับผู้ให้บริการที่แนะนำในไม่กี่ขั้นตอน";
+"edit_model_title" = "แก้ไขโมเดล";
+"show_also_unsupported_providers" = "แสดงผู้ให้บริการที่ไม่รองรับด้วย";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "จำนวนการทำซ้ำสูงสุดก่อนถามว่าจะดำเนินการต่อหรือไม่ (0 = ไม่จำกัด)";
+"ai_document_filter_summary" = "เลือกเอกสารที่ AI สามารถอ่านได้";
+"ai_document_filter_summary_count" = "ไม่รวม %d เอกสาร";
+"ai_document_filter_title" = "การเข้าถึงเอกสาร";
+"ai_language_app_default" = "ภาษาของแอป (%1$@)";
+"ai_language_custom" = "กำหนดเอง…";
+"ai_language_custom_example" = "เช่น suomi, Tagalog, en";
+"ai_language_custom_hint" = "ป้อนชื่อหรือรหัสภาษา";
+"ai_prompts_restored" = "คืนค่าคำสั่งที่ซ่อนไว้แล้ว";
+"ai_restore_hidden_prompts" = "คืนค่าคำสั่งที่ซ่อนไว้";
+"are_you_sure" = "คุณแน่ใจหรือไม่?";
+"ask_model_before_run_summary" = "แสดงกล่องโต้ตอบเลือกโมเดลก่อนเรียกใช้พรอมต์ (ข้ามเมื่อพรอมต์มีการกำหนดโมเดลอย่างชัดเจน)";
+"auto_hide_agent_log_summary" = "ซ่อนแผง AI โดยอัตโนมัติเมื่องานเสร็จสมบูรณ์หรือถูกยกเลิก เมื่อเกิดข้อผิดพลาด แผงจะยังคงแสดงอยู่";
+"commentary_max_response_dialog_message" = "เมื่อ AI ดึงข้อมูลคำอธิบายพระคัมภีร์และการตอบสนองรวมเกินขีดจำกัด token นี้ กล่องโต้ตอบการเลือกจะให้คุณเลือกว่าจะส่งคำอธิบายใดไปยัง AI\n\n0 = ไม่จำกัด (ส่งคำอธิบายทั้งหมดโดยอัตโนมัติ)";
+"commentary_max_response_dialog_title" = "กำหนดขนาดการตอบสนองสูงสุด (tokens)";
+"commentary_max_response_value" = "~%@ โทเคน";
+"csv_export_failed" = "การส่งออก CSV ล้มเหลว: %@";
+"csv_import_errors" = "นำเข้าเสร็จสมบูรณ์พร้อมข้อผิดพลาด: สร้าง %1$d รายการ, อัปเดต %2$d รายการ, ข้อผิดพลาด %3$d รายการ";
+"csv_import_failed" = "การนำเข้า CSV ล้มเหลว: %@";
+"csv_import_success" = "นำเข้าเสร็จสมบูรณ์: สร้าง %1$d รายการ, อัปเดต %2$d รายการ";
+"custom_system_prompt_default" = "ค่าเริ่มต้น";
+"delete_prompt_confirm_message" = "คุณต้องการลบคำสั่งนี้ใช่หรือไม่?";
+"discard_changes_confirmation" = "ยกเลิกการเปลี่ยนแปลงที่ยังไม่ได้บันทึก?";
+"doc_type_commentary" = "คำอธิบาย";
+"export_prompts_csv" = "ส่งออกพรอมต์เป็น CSV";
+"global_tool_permissions_title" = "การตั้งค่าเครื่องมือเริ่มต้น";
+"help_ai_connection_text" = "กำหนดค่าผู้ให้บริการ AI โมเดล สิทธิ์ และตัวเลือกการเชื่อมต่ออื่นๆ ที่นี่ ผู้ให้บริการแต่ละรายต้องใช้คีย์ API ของตนเอง คุณสามารถเพิ่มผู้ให้บริการหลายรายและเลือกโมเดลเริ่มต้นได้";
+"help_ai_document_filter_text" = "จำกัดว่า AI สามารถอ่านพระคัมภีร์ คำอธิบาย และโมดูลอื่นๆ ใดได้บ้าง โดยค่าเริ่มต้น AI จะเห็นโมดูลที่ติดตั้งทั้งหมด การกรองช่วยลดสัญญาณรบกวนและค่าใช้จ่ายเมื่อคุณต้องการให้ AI พิจารณาเฉพาะแหล่งที่มาบางส่วน";
+"help_ai_models_text" = "จัดการโมเดลสำหรับผู้ให้บริการนี้ คุณสามารถรีเฟรชรายการโมเดลจาก API ของผู้ให้บริการเพื่อรับโมเดลใหม่ หรือเพิ่มชื่อโมเดลด้วยตนเองหากไม่อยู่ในรายการที่ดึงมา";
+"help_ai_providers_text" = "จัดการผู้ให้บริการ AI (Google Gemini, OpenAI, Anthropic เป็นต้น) ผู้ให้บริการแต่ละรายต้องใช้คีย์ API ของตนเอง คุณสามารถเพิ่มผู้ให้บริการหลายรายและกำหนดรายการที่แตกต่างกันให้กับพรอมต์เฉพาะได้";
+"help_ai_settings_text" = "การตั้งค่า AI คือที่จัดการพรอมต์และหมวดหมู่ของคุณ จากที่นี่คุณสามารถสร้างพรอมต์ใหม่ จัดระเบียบเป็นหมวดหมู่ นำเข้า/ส่งออกพรอมต์เป็น CSV ติดตั้งชุดพรอมต์เสริม และเข้าถึงการตั้งค่าการเชื่อมต่อ AI";
+"help_global_tool_permissions_text" = "กำหนดค่าสิทธิ์สำหรับเครื่องมือ AI แต่ละรายการ สำหรับเครื่องมืออ่านแต่ละรายการ เลือกว่า AI สามารถใช้งานได้หรือไม่ (เปิดใช้งานหรือปิดใช้งาน) สำหรับเครื่องมือเขียนแต่ละรายการ เลือก อนุญาตเสมอ ปฏิเสธเสมอ หรือ ถาม (ซึ่งจะใช้โหมดสิทธิ์ทั่วไปที่ตั้งค่าในการตั้งค่าการเชื่อมต่อ AI)";
+"import_prompts_addon" = "ติดตั้งเป็นส่วนเสริม (อ่านอย่างเดียว)";
+"import_prompts_csv" = "นำเข้าพรอมต์จาก CSV";
+"import_prompts_editable" = "นำเข้าเป็นพรอมต์ที่แก้ไขได้";
+"llm_custom_model" = "กำหนดเอง…";
+"llm_openrouter_category" = "หมวดหมู่";
+"llm_openrouter_category_all" = "ทั้งหมด";
+"llm_reset_usage_summary" = "ล้างการติดตามโทเคนและค่าใช้จ่ายสะสม";
+"llm_usage_summary_format" = "อินพุต: %1$d โทเคน | เอาต์พุต: %2$d โทเคน\nค่าใช้จ่ายโดยประมาณ: %3$@";
+"manage_tool_permissions_summary" = "จัดการการตั้งค่าสิทธิ์แต่ละเครื่องมือ";
+"model_delete_confirm" = "ลบโมเดล \"%1$@\"?";
+"model_supported_badge" = "✓ รองรับแล้ว";
+"move_to_category" = "ย้ายไปหมวดหมู่…";
+"no_prompts_to_export" = "ไม่มีพรอมต์ของผู้ใช้สำหรับส่งออก";
+"prompts_csv_export_success" = "ส่งออก %d พรอมต์เป็น CSV แล้ว";
+"raw_llm_log_copied" = "คัดลอกบันทึกไปยังคลิปบอร์ดแล้ว";
+"raw_llm_log_empty" = "ไม่มีข้อมูลบันทึกดิบ";
+"raw_llm_log_total" = "รวม: นำเข้า %1$@ / ส่งออก %2$@%3$@";
+"raw_log_delete_confirm" = "%d รายการที่เลือก";
+"raw_log_delete_old" = "ลบบันทึกเก่า…";
+"raw_log_delete_selected" = "ลบที่เลือก";
+"raw_log_history_summary" = "ดูและจัดการบันทึกการสนทนา AI ที่บันทึกไว้";
+"raw_log_retention_summary_days" = "หลังจาก %d วัน";
+"show_also_unsupported_models" = "แสดงโมเดลที่ไม่รองรับด้วย";
+"tool_category_read" = "อ่าน";
+"tool_category_write" = "เขียน";
+"tool_option_disabled" = "ปิดใช้งาน";
+"tool_option_enabled" = "เปิดใช้งาน";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "รายงานข้อบกพร่องของ AI";
+"bug_report_email_text" = "ถัดไป กรุณาเลือกแอปอีเมลที่คุณต้องการ (เช่น Gmail) เพื่อส่งรายงานให้ทีมนักพัฒนา";
+"send_ai_bug_report_title" = "รายงานข้อบกพร่องของ AI";
+
+/* Android shared translations */
+"addon_prompt_badge" = "ส่วนเสริม: %@";
+"addon_prompt_notice" = "พรอมต์นี้มาจากโมดูลส่วนเสริม \"%@\" และไม่สามารถแก้ไขได้ ใช้ \"คัดลอกเพื่อปรับแต่ง\" เพื่อสร้างสำเนาที่แก้ไขได้";
+"ai_available_tools" = "เครื่องมือที่ใช้ได้";
+"ai_read_tools" = "เครื่องมืออ่าน";
+"ai_write_tools" = "เครื่องมือเขียน";
+"delete_category_confirm_title" = "ลบหมวดหมู่ \"%@\"?";
+"delete_prompt_confirmation" = "ลบพรอมต์ \"%@\"?";
+"edit_prompt" = "แก้ไขพรอมต์";
+"help_prompt_edit_text" = "พรอมต์ที่กำหนดเองช่วยให้คุณสร้างคำสั่ง AI ที่นำกลับมาใช้ซ้ำได้สำหรับการศึกษาของคุณ ตั้งชื่อ คำอธิบาย เทมเพลต บริบทที่ควรปรากฏ และอาจเลือกผู้ให้บริการ/โมเดลที่กำหนดเองได้ พรอมต์ที่มีในตัวไม่สามารถแก้ไขได้โดยตรง — ใช้ \"คัดลอกเพื่อปรับแต่ง\" เพื่อสร้างเวอร์ชันของคุณเอง";
+"help_tool_info_text" = "เครื่องมือ AI คือฟังก์ชันเฉพาะทางที่ AI สามารถเรียกใช้เพื่ออ่านข้อมูลของคุณหรือดำเนินการแทนคุณ เครื่องมืออ่าน (ข้อพระคัมภีร์ คำอธิบาย พจนานุกรม ที่คั่นหน้า) ไม่ต้องขอสิทธิ์ เครื่องมือเขียน (การสร้างที่คั่นหน้า บันทึก รายการในแผ่นบันทึกการศึกษา) ถูกควบคุมด้วยระบบสิทธิ์";
+"prompt_name_required" = "จำเป็นต้องมีชื่อพรอมต์";
+"prompt_template_required" = "จำเป็นต้องมีเทมเพลตพรอมต์";
+"raw_llm_log_entry_api_response" = "การตอบสนอง API (รอบที่ %d)";
+"raw_llm_log_entry_assistant" = "การตอบสนองของผู้ช่วย";
+"raw_llm_log_entry_empty" = "(ว่างเปล่า)";
+"raw_llm_log_entry_system" = "พรอมต์ระบบ";
+"raw_llm_log_entry_tokens" = "~%@ โทเค็น";
+"raw_llm_log_entry_tool_call" = "การเรียกใช้เครื่องมือ: %@";
+"raw_llm_log_entry_tool_definitions" = "นิยามเครื่องมือ (%d เครื่องมือ)";
+"raw_llm_log_entry_tool_desc" = "คำอธิบาย: %@";
+"raw_llm_log_entry_tool_params" = "พารามิเตอร์: %@";
+"raw_llm_log_entry_tool_result" = "ผลลัพธ์เครื่องมือ [%@]";
+"raw_llm_log_entry_usage" = "นำเข้า: %1$@ / ส่งออก: %2$@%3$@";
+"raw_llm_log_entry_user" = "ข้อความผู้ใช้";
+"raw_llm_log_title" = "บันทึก LLM ดิบ";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "ดึงและรวมรายการคำอธิบายสำหรับข้อพระคัมภีร์ที่เลือกโดยอัตโนมัติ ช่วยประหยัดการวนซ้ำของ AI";
+"prompt_auto_include_documents_description" = "รวมรายการเอกสารที่ติดตั้งในบริบทพรอมต์โดยอัตโนมัติ ช่วยประหยัดการวนซ้ำของ AI";
+"prompt_copied" = "คัดลอกพรอมต์แล้ว";
+"prompt_edit_before_run_description" = "แสดงช่องข้อความสำหรับระบุงานก่อนเรียกใช้พรอมต์";
+"prompt_is_text_transformation_description" = "ใช้พรอมต์ระบบแบบง่ายที่รักษาการจัดรูปแบบ (ลิงก์ หัวข้อ ตัวหนา/เอียง) ขณะแปลงเนื้อหาข้อความ ไม่ใช้เครื่องมือ เหมาะสำหรับพรอมต์การแปลและการแก้ไข";
+"prompt_max_iterations" = "จำนวนการทำซ้ำสูงสุด (แทนที่ค่าหลัก)";
+"prompt_max_iterations_description" = "แทนที่จำนวนการทำซ้ำสูงสุดส่วนกลางสำหรับพรอมต์นี้ ว่าง = ค่าเริ่มต้นส่วนกลาง, 0 = ไม่จำกัด";
+"prompt_no_document_creation_description" = "เมื่อเปิดใช้งาน AI จะไม่สร้างเอกสาร ผลลัพธ์จะแสดงเฉพาะในบันทึกกิจกรรม เหมาะสำหรับพรอมต์ที่เน้นการกระทำ (ที่คั่นหน้า ป้ายกำกับ การดำเนินการแผ่นบันทึกการศึกษา)";
+"prompt_strict_context_matching_description" = "เมื่อเปิดใช้งาน แคชจะจับคู่เฉพาะเมื่อบริบททั้งหมด (เวอร์ชันพระคัมภีร์ ข้อความที่เลือก) เหมือนกัน เมื่อปิดใช้งาน แคชจะจับคู่เมื่อข้อพระคัมภีร์เหมือนกันโดยไม่คำนึงถึงเวอร์ชันพระคัมภีร์";

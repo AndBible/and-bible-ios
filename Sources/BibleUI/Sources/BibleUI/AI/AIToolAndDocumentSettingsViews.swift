@@ -1,0 +1,567 @@
+// AIToolAndDocumentSettingsViews.swift -- Android AI access-control destinations
+
+import BibleCore
+import SwiftData
+import SwiftUI
+import SwordKit
+
+/** Three-state global override shown for Android write tools. */
+private enum AIToolOverrideSelection: String, CaseIterable, Identifiable {
+    /// Inherit Android's default ask behavior.
+    case ask
+    /// Permanently allow the tool.
+    case allow
+    /// Permanently deny or disable the tool.
+    case deny
+
+    /// Stable segmented-control identity.
+    var id: String { rawValue }
+}
+
+/** App-owned Android discard-confirmation overlay shared by explicit-save AI screens. */
+private struct AISettingsDiscardOverlay: View {
+    /// Confirms discarding all unsaved drafts.
+    let onDiscard: () -> Void
+    /// Returns to editing without changing draft or persistence.
+    let onCancel: () -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.4)
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
+                AIAndroidDialogSurface(title: "") {
+                    Text(String(localized: "discard_changes_confirmation", defaultValue: "Discard unsaved changes?"))
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                } actions: {
+                    Spacer()
+                    AIAndroidDialogAction(
+                        title: String(localized: "no", defaultValue: "No"),
+                        action: onCancel
+                    )
+                    AIAndroidDialogAction(
+                        title: String(localized: "yes", defaultValue: "Yes"),
+                        isDestructive: true,
+                        action: onDiscard
+                    )
+                }
+                .padding(.horizontal, 24)
+                .frame(maxHeight: geometry.size.height * 0.8)
+            }
+        }
+        .zIndex(20)
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
+        .accessibilityIdentifier("aiDiscardChangesDialog")
+    }
+}
+
+/**
+ Android's full-screen global tool-permission editor.
+
+ The view drafts category toggles and per-tool choices locally, then writes both global override sets
+ only through the toolbar Save action. Back navigation asks before discarding dirty state, matching
+ `GlobalToolPermissionsActivity` rather than persisting every picker change immediately.
+ */
+struct AIToolPermissionsView: View {
+    /// Pops the pushed Android-style destination after save or confirmed discard.
+    @Environment(\.dismiss) private var dismiss
+    /// SwiftData context containing Android's global allow and deny sets.
+    @Environment(\.modelContext) private var modelContext
+
+    /// Draft tools that bypass write confirmation.
+    @State private var allowedTools: Set<AgentTool> = []
+    /// Draft tools that are denied or read-disabled.
+    @State private var deniedTools: Set<AgentTool> = []
+    /// Original allow set used for dirty-state comparison.
+    @State private var initialAllowedTools: Set<AgentTool> = []
+    /// Original deny set used for dirty-state comparison.
+    @State private var initialDeniedTools: Set<AgentTool> = []
+    /// Categories whose tool rows are currently expanded.
+    @State private var expandedCategories: Set<AgentTool.Category> = []
+    /// Whether Android's discard confirmation is visible.
+    @State private var showsDiscardConfirmation = false
+    /// Credential-free persistence error.
+    @State private var failureMessage: String?
+    /// Android's app-owned Help dialog.
+    @State private var helpDialog: AIConfigurationDialog?
+
+    /// Whether any draft differs from its loaded persisted value.
+    private var isDirty: Bool {
+        allowedTools != initialAllowedTools || deniedTools != initialDeniedTools
+    }
+
+    var body: some View {
+        ZStack {
+            List {
+                ForEach(AIPermissionPresentation.categories, id: \.category.rawValue) { group in
+                    Section {
+                        if expandedCategories.contains(group.category) {
+                            ForEach(group.tools, id: \.self) { tool in
+                                toolRow(tool)
+                            }
+                        }
+                    } header: {
+                        categoryHeader(group)
+                    }
+                }
+            }
+            .accessibilityHidden(showsDiscardConfirmation)
+            .disabled(showsDiscardConfirmation)
+
+            if showsDiscardConfirmation {
+                AISettingsDiscardOverlay(
+                    onDiscard: { dismiss() },
+                    onCancel: { showsDiscardConfirmation = false }
+                )
+            }
+        }
+        .navigationTitle(String(localized: "global_tool_permissions_title", defaultValue: "Default tool settings"))
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: requestClose) { Image(systemName: "chevron.left") }
+                    .disabled(showsDiscardConfirmation || helpDialog != nil)
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button(action: saveAndClose) { Image(systemName: "checkmark") }
+                    .accessibilityLabel(String(localized: "okay", defaultValue: "OK"))
+                    .disabled(showsDiscardConfirmation || helpDialog != nil)
+                Menu {
+                    Button(action: resetAll) {
+                        Label(
+                            String(localized: "reset_all_permissions", defaultValue: "Reset all"),
+                            systemImage: "arrow.counterclockwise"
+                        )
+                    }
+                    Button {
+                        helpDialog = .information(
+                            title: String(localized: "help", defaultValue: "Help"),
+                            message: String(
+                                localized: "help_global_tool_permissions_text",
+                                defaultValue: "Configure permissions for individual AI tools. For each read tool, choose whether the AI may use it (Enabled or Disabled). For each write tool, choose Always allow, Always deny, or Ask (which falls back to the global permission mode set in AI Connection settings)."
+                            )
+                        )
+                    } label: {
+                        Label(String(localized: "help", defaultValue: "Help"), systemImage: "questionmark.circle")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
+                .disabled(showsDiscardConfirmation || helpDialog != nil)
+            }
+        }
+        .task { load() }
+        .aiConfigurationDialog($helpDialog, credentialStore: .keychain())
+        .alert(
+            String(localized: "error", defaultValue: "Error"),
+            isPresented: Binding(
+                get: { failureMessage != nil },
+                set: { if !$0 { failureMessage = nil } }
+            )
+        ) {
+            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
+        } message: {
+            Text(failureMessage ?? "")
+        }
+    }
+
+    /** Builds Android's category header with expansion and read/write group toggles. */
+    private func categoryHeader(_ group: AIPermissionPresentation.CategoryGroup) -> some View {
+        let readTools = group.tools.filter { $0.access == .read }
+        let writeTools = group.tools.filter { $0.access != .read }
+        return HStack(spacing: 8) {
+            Button {
+                if expandedCategories.contains(group.category) {
+                    expandedCategories.remove(group.category)
+                } else {
+                    expandedCategories.insert(group.category)
+                }
+            } label: {
+                Image(systemName: expandedCategories.contains(group.category) ? "chevron.up" : "chevron.down")
+                Text(group.title).fontWeight(.semibold)
+            }
+            .buttonStyle(.plain)
+            Spacer(minLength: 4)
+            if !readTools.isEmpty {
+                categoryToggle(
+                    title: String(localized: "tool_category_read", defaultValue: "Read"),
+                    tools: readTools
+                )
+            }
+            if !writeTools.isEmpty {
+                categoryToggle(
+                    title: String(localized: "tool_category_write", defaultValue: "Write"),
+                    tools: writeTools
+                )
+            }
+        }
+        .textCase(nil)
+    }
+
+    /** Builds one Android category checkbox controlling all tools of the supplied access class. */
+    private func categoryToggle(title: String, tools: [AgentTool]) -> some View {
+        let isEnabled = tools.allSatisfy { !deniedTools.contains($0) }
+        return Button {
+            for tool in tools {
+                allowedTools.remove(tool)
+                if isEnabled {
+                    deniedTools.insert(tool)
+                } else {
+                    deniedTools.remove(tool)
+                }
+            }
+            updateExpansion(for: tools.first?.category)
+        } label: {
+            Label(title, systemImage: isEnabled ? "checkmark.square.fill" : "square")
+        }
+        .buttonStyle(.plain)
+        .font(.caption)
+    }
+
+    /** Builds Android's read two-option or write three-option tool row. */
+    private func toolRow(_ tool: AgentTool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(AIPermissionPresentation.title(for: tool))
+                .font(.subheadline.weight(.semibold))
+            Picker("", selection: permissionBinding(for: tool)) {
+                Text(
+                    tool.access == .read
+                        ? String(localized: "tool_option_enabled", defaultValue: "Enabled")
+                        : String(localized: "permission_status_default", defaultValue: "Ask (default)")
+                )
+                .tag(AIToolOverrideSelection.ask)
+                if tool.access != .read {
+                    Text(String(localized: "permission_option_always_allow", defaultValue: "Always allow"))
+                        .tag(AIToolOverrideSelection.allow)
+                }
+                Text(
+                    tool.access == .read
+                        ? String(localized: "tool_option_disabled", defaultValue: "Disabled")
+                        : String(localized: "permission_option_always_deny", defaultValue: "Always deny")
+                )
+                .tag(AIToolOverrideSelection.deny)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+        .padding(.vertical, 4)
+    }
+
+    /** Resolves and mutates one tool's draft Android override state. */
+    private func permissionBinding(for tool: AgentTool) -> Binding<AIToolOverrideSelection> {
+        Binding(
+            get: {
+                if allowedTools.contains(tool) { return .allow }
+                if deniedTools.contains(tool) { return .deny }
+                return .ask
+            },
+            set: { selection in
+                allowedTools.remove(tool)
+                deniedTools.remove(tool)
+                switch selection {
+                case .ask: break
+                case .allow: allowedTools.insert(tool)
+                case .deny: deniedTools.insert(tool)
+                }
+                updateExpansion(for: tool.category)
+            }
+        )
+    }
+
+    /** Loads durable override sets and Android's initial collapsed-category state. */
+    private func load() {
+        do {
+            let settings = try AISettingsStore(modelContext: modelContext).globalSettings()
+            allowedTools = settings.permanentlyAllowedTools ?? []
+            deniedTools = settings.permanentlyDeniedTools ?? []
+            initialAllowedTools = allowedTools
+            initialDeniedTools = deniedTools
+            expandedCategories = Set(
+                AIPermissionPresentation.categories.compactMap { group in
+                    group.tools.allSatisfy(deniedTools.contains) ? nil : group.category
+                }
+            )
+        } catch {
+            failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
+        }
+    }
+
+    /** Resets every draft row to Android's inherited/default state without saving. */
+    private func resetAll() {
+        allowedTools = []
+        deniedTools = []
+        expandedCategories = Set(AIPermissionPresentation.categories.map(\.category))
+    }
+
+    /** Saves both override sets atomically and pops the destination. */
+    private func saveAndClose() {
+        do {
+            let store = AISettingsStore(modelContext: modelContext)
+            let settings = try store.globalSettings()
+            settings.permanentlyAllowedTools = allowedTools
+            settings.permanentlyDeniedTools = deniedTools
+            try store.save()
+            dismiss()
+        } catch {
+            failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
+        }
+    }
+
+    /** Pops clean state immediately or opens Android's dirty-state discard dialog. */
+    private func requestClose() {
+        if isDirty { showsDiscardConfirmation = true } else { dismiss() }
+    }
+
+    /** Auto-collapses a category only when every contained tool is denied. */
+    private func updateExpansion(for category: AgentTool.Category?) {
+        guard let category,
+              let tools = AIPermissionPresentation.categories.first(where: { $0.category == category })?.tools
+        else { return }
+        if tools.allSatisfy(deniedTools.contains) {
+            expandedCategories.remove(category)
+        } else {
+            expandedCategories.insert(category)
+        }
+    }
+}
+
+/**
+ Android's full-screen installed-document access editor.
+
+ Checked rows are readable by AI and unchecked rows are stored in the global exclusion set. Drafts
+ are grouped by SWORD category, saved only through the toolbar, and protected by discard confirmation.
+ */
+struct AIDocumentAccessView: View {
+    /// Pops the pushed destination.
+    @Environment(\.dismiss) private var dismiss
+    /// SwiftData context containing the exclusion set.
+    @Environment(\.modelContext) private var modelContext
+
+    /// Installed SWORD module source supplied by the reader/application host.
+    let swordManager: SwordManager?
+
+    /// Draft excluded module initials.
+    @State private var excludedDocuments: Set<String> = []
+    /// Android-compatible installed-book inventory loaded when the destination opens.
+    @State private var installedDocuments: [ModuleInfo] = []
+    /// Loaded exclusion set used for dirty-state comparison.
+    @State private var initialExcludedDocuments: Set<String> = []
+    /// Whether Android's discard confirmation is visible.
+    @State private var showsDiscardConfirmation = false
+    /// Credential-free persistence failure.
+    @State private var failureMessage: String?
+    /// Android's app-owned Help dialog.
+    @State private var helpDialog: AIConfigurationDialog?
+
+    /// Android-supported categories and their installed modules.
+    private var documentGroups: [(category: ModuleCategory, documents: [ModuleInfo])] {
+        let categories: [ModuleCategory] = [.bible, .commentary, .dictionary, .generalBook]
+        return categories.compactMap { category in
+            let documents = installedDocuments
+                .filter { $0.category == category }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            return documents.isEmpty ? nil : (category, documents)
+        }
+    }
+
+    /// Whether the draft exclusion set differs from persistence.
+    private var isDirty: Bool { excludedDocuments != initialExcludedDocuments }
+
+    var body: some View {
+        ZStack {
+            List {
+                ForEach(documentGroups, id: \.category.rawValue) { group in
+                    Section(documentCategoryTitle(group.category)) {
+                        ForEach(group.documents, id: \.name) { document in
+                            documentRow(document)
+                        }
+                    }
+                }
+            }
+            .accessibilityHidden(showsDiscardConfirmation)
+            .disabled(showsDiscardConfirmation)
+
+            if showsDiscardConfirmation {
+                AISettingsDiscardOverlay(
+                    onDiscard: { dismiss() },
+                    onCancel: { showsDiscardConfirmation = false }
+                )
+            }
+        }
+        .navigationTitle(
+            String(localized: "ai_document_filter_activity_title", defaultValue: "AI document access")
+        )
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: requestClose) { Image(systemName: "chevron.left") }
+                    .disabled(showsDiscardConfirmation || helpDialog != nil)
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button(action: saveAndClose) { Image(systemName: "checkmark") }
+                    .accessibilityLabel(String(localized: "okay", defaultValue: "OK"))
+                    .disabled(showsDiscardConfirmation || helpDialog != nil)
+                Menu {
+                    Button { excludedDocuments = [] } label: {
+                        Label(
+                            String(localized: "reset_all_permissions", defaultValue: "Reset all"),
+                            systemImage: "arrow.counterclockwise"
+                        )
+                    }
+                    Button {
+                        helpDialog = .information(
+                            title: String(localized: "help", defaultValue: "Help"),
+                            message: String(
+                                localized: "help_ai_document_filter_text",
+                                defaultValue: "Limit which Bibles, commentaries and other modules the AI agent can read. By default the AI sees all installed modules; filtering helps reduce noise and cost when you only want it to consider specific sources."
+                            )
+                        )
+                    } label: {
+                        Label(String(localized: "help", defaultValue: "Help"), systemImage: "questionmark.circle")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
+                .disabled(showsDiscardConfirmation || helpDialog != nil)
+            }
+        }
+        .task { load() }
+        .aiConfigurationDialog($helpDialog, credentialStore: .keychain())
+        .alert(
+            String(localized: "error", defaultValue: "Error"),
+            isPresented: Binding(
+                get: { failureMessage != nil },
+                set: { if !$0 { failureMessage = nil } }
+            )
+        ) {
+            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
+        } message: {
+            Text(failureMessage ?? "")
+        }
+    }
+
+    /** Returns Android's category header for one SWORD module group. */
+    private func documentCategoryTitle(_ category: ModuleCategory) -> String {
+        switch category {
+        case .bible: return String(localized: "bible", defaultValue: "Bible")
+        case .commentary: return String(localized: "doc_type_commentary", defaultValue: "Commentary")
+        case .dictionary: return String(localized: "dictionary", defaultValue: "Dictionary")
+        case .generalBook: return String(localized: "general_book", defaultValue: "Book")
+        default: return category.rawValue
+        }
+    }
+
+    /** Builds Android's full-width checked-is-allowed document row. */
+    private func documentRow(_ document: ModuleInfo) -> some View {
+        let isIncluded = !excludedDocuments.contains(document.name)
+        return Button {
+            if isIncluded {
+                excludedDocuments.insert(document.name)
+            } else {
+                excludedDocuments.remove(document.name)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: isIncluded ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(isIncluded ? Color.accentColor : Color.secondary)
+                Text("\(document.name) — \(document.description)")
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /** Loads Android's global blacklist into explicit draft and baseline sets. */
+    private func load() {
+        installedDocuments = AIDocumentAccessInventory.installedModules(
+            swordManager: swordManager
+        )
+        do {
+            let value = try AISettingsStore(modelContext: modelContext).globalSettings().aiExcludedDocuments
+            excludedDocuments = value
+            initialExcludedDocuments = value
+        } catch {
+            failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
+        }
+    }
+
+    /** Saves the document blacklist atomically and pops the destination. */
+    private func saveAndClose() {
+        do {
+            let store = AISettingsStore(modelContext: modelContext)
+            let settings = try store.globalSettings()
+            settings.aiExcludedDocuments = excludedDocuments
+            try store.save()
+            dismiss()
+        } catch {
+            failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
+        }
+    }
+
+    /** Pops clean state immediately or asks before discarding dirty document choices. */
+    private func requestClose() {
+        if isDirty { showsDiscardConfirmation = true } else { dismiss() }
+    }
+}
+
+/** Android `Books.installed()` projection shared by AI document-access presentation and tests. */
+enum AIDocumentAccessInventory {
+    /// Categories Android exposes in `AiDocumentFilterActivity`.
+    private static let visibleCategories: Set<ModuleCategory> = [
+        .bible, .commentary, .dictionary, .generalBook,
+    ]
+
+    /**
+     Discovers and merges every document backend registered by the reader.
+
+     - Parameter swordManager: Installed SWORD registry and module-root owner.
+     - Returns: Android-visible SWORD and SQLite modules with SWORD-first initials precedence.
+     - Side effects: Discovers MyBible, MySword, and e-Sword files below the module root.
+     - Failure modes: Missing managers and malformed SQLite files yield only readable modules.
+     */
+    static func installedModules(swordManager: SwordManager?) -> [ModuleInfo] {
+        guard let swordManager else { return [] }
+        let sqliteModules = SQLiteDocumentModuleLibrary(
+            moduleRootURL: URL(fileURLWithPath: swordManager.modulePath, isDirectory: true)
+        ).modules.map(\.info)
+        return merge(
+            swordModules: swordManager.installedModules(),
+            sqliteModules: sqliteModules
+        )
+    }
+
+    /**
+     Applies Android's installed-book category and duplicate-registration contract.
+
+     - Parameters:
+       - swordModules: Native SWORD modules registered first.
+       - sqliteModules: Android SQLite modules registered afterward.
+     - Returns: Visible documents in backend registration order with the first initials retained.
+     - Side effects: None.
+     - Failure modes: None; unsupported categories are omitted.
+     */
+    static func merge(
+        swordModules: [ModuleInfo],
+        sqliteModules: [ModuleInfo]
+    ) -> [ModuleInfo] {
+        var seenInitials = Set<String>()
+        return (swordModules + sqliteModules).filter { module in
+            visibleCategories.contains(module.category)
+                && seenInitials.insert(module.name).inserted
+        }
+    }
+}

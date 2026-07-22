@@ -368,6 +368,8 @@ final class AIReaderRunCoordinator {
 
   private(set) var runTitle = ""
   private(set) var runLog: [AIReaderRunLogEntry] = []
+  /// Terminal in-memory transcript exposed only from the current live AI panel.
+  private(set) var liveRawLog: AIReaderLiveRawLogSnapshot?
   private(set) var isRunning = false
   private(set) var runCompleted = false
   private(set) var pendingPermission: AIReaderPendingPermission?
@@ -847,6 +849,7 @@ final class AIReaderRunCoordinator {
     activeRunID = runID
     runTitle = prompt.name
     runLog = []
+    liveRawLog = nil
     failureMessage = nil
     isRunning = true
     runCompleted = false
@@ -1028,6 +1031,7 @@ final class AIReaderRunCoordinator {
         transcriptRecorder,
         prompt: prompt,
         model: model,
+        runID: runID,
         outcome: .completed
       )
       finishSuccess(
@@ -1039,6 +1043,7 @@ final class AIReaderRunCoordinator {
         transcriptRecorder,
         prompt: prompt,
         model: model,
+        runID: runID,
         outcome: .cancelled
       )
       throw CancellationError()
@@ -1047,6 +1052,7 @@ final class AIReaderRunCoordinator {
         transcriptRecorder,
         prompt: prompt,
         model: model,
+        runID: runID,
         outcome: .failed
       )
       throw error
@@ -1065,17 +1071,41 @@ final class AIReaderRunCoordinator {
     )
   }
 
-  /** Persists one terminal transcript without allowing diagnostics to replace the run outcome. */
+  /**
+   Publishes and persists one terminal transcript without replacing the run outcome.
+
+   - Parameters:
+     - recorder: Actor-isolated credential-free transcript source.
+     - prompt: Effective prompt retained with persisted history.
+     - model: Resolved model supplying report eligibility and pricing identity.
+     - runID: Active run identity reused by the full-screen in-memory destination.
+     - outcome: Terminal state mapped to persisted Android error semantics.
+   - Side effects: Publishes a detached panel snapshot and may insert one local raw-log row.
+   - Failure modes: Persistence failures remain diagnostic-only and never replace execution status.
+   */
   private func persistTelemetry(
     _ recorder: AgentExecutionTranscriptRecorder,
     prompt: AgentPrompt,
     model: ResolvedLLMModel,
+    runID: UUID,
     outcome: LLMRunOutcome
   ) async {
     let transcript = await recorder.transcript()
     let providerType =
       (try? settingsStore.provider(id: model.providerConfigId))?.providerType
       ?? ""
+    let configuredModel = try? settingsStore.model(id: model.configuredModelId)
+    let snapshot = AIReaderLiveRawLogSnapshot(
+      id: runID,
+      transcript: transcript,
+      modelName: model.modelId,
+      providerType: providerType,
+      pricing: AIReaderLiveRawLogPricing.resolve(
+        modelName: model.modelId,
+        configuredModel: configuredModel
+      )
+    )
+    liveRawLog = snapshot.isEmpty ? nil : snapshot
     _ = try? telemetryService().persistRawLog(
       transcript: transcript,
       metadata: LLMRunMetadata(

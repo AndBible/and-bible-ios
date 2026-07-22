@@ -997,3 +997,123 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Paramètres de connexion AI et d'invite";
 "prefs_features_cat" = "Fonctionnalités";
+
+/* Android shared translations */
+"ai_configure_button" = "Configurer la connexion";
+"ai_disclaimer_warning_summary" = "Risques et responsabilités liés à l'utilisation de l'IA";
+"ai_provider_tier_community" = "Autres fournisseurs (non testés)";
+"ai_provider_tier_recommended" = "Recommandé";
+"ai_providers_category" = "Fournisseurs";
+"easy_setup_anthropic_desc" = "Abordable, excellente qualité";
+"easy_setup_api_key_instructions" = "Obtenez votre clé API depuis :";
+"easy_setup_done_message" = "Sélectionnez du texte dans la Bible et essayez les fonctionnalités IA. Vous pouvez ajouter d'autres modèles et fournisseurs dans les paramètres.";
+"easy_setup_done_title" = "L'IA est prête !";
+"easy_setup_free_tier" = "Niveau gratuit";
+"easy_setup_gemini_desc" = "Niveau gratuit disponible, bonne qualité";
+"easy_setup_openai_desc" = "Bien connu, fiable";
+"easy_setup_pref_summary" = "Configurez l'IA avec un fournisseur recommandé en quelques étapes";
+"edit_model_title" = "Modifier le modèle";
+"show_also_unsupported_providers" = "Afficher aussi les fournisseurs non pris en charge";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Nombre maximum d'itérations avant de demander de continuer (0 = illimité)";
+"ai_document_filter_summary" = "Choisir les documents que l'AI peut lire";
+"ai_document_filter_summary_count" = "%d documents exclus";
+"ai_document_filter_title" = "Accès aux documents";
+"ai_language_app_default" = "Langue de l'application (%1$@)";
+"ai_language_custom" = "Personnalisé…";
+"ai_language_custom_example" = "ex. : suomi, Tagalog, fr";
+"ai_language_custom_hint" = "Entrez le nom ou le code de la langue";
+"ai_prompts_restored" = "Prompts masqués restaurés";
+"ai_restore_hidden_prompts" = "Restaurer les prompts masqués";
+"are_you_sure" = "Êtes-vous certain ?";
+"ask_model_before_run_summary" = "Afficher une boîte de dialogue de sélection de modèle avant d'exécuter une invite (ignoré si l'invite a un modèle explicitement défini)";
+"auto_hide_agent_log_summary" = "Masquer automatiquement le panneau IA lorsqu'une tâche se termine avec succès ou est annulée. En cas d'erreur, le panneau reste visible.";
+"commentary_max_response_dialog_message" = "Lorsque l'AI récupère des commentaires et que la réponse totale dépasse cette limite de jetons, une boîte de dialogue de sélection vous permet de choisir quels commentaires envoyer à l'AI.\n\n0 = sans limite (tous les commentaires sont envoyés automatiquement).";
+"commentary_max_response_dialog_title" = "Définir la taille maximale de réponse (jetons)";
+"commentary_max_response_value" = "~%@ jetons";
+"csv_export_failed" = "L’exportation du CSV a échoué : %@";
+"csv_import_errors" = "Importation terminée avec des erreurs : création de %1$d, mise à jour de %2$d, erreurs avec %3$d";
+"csv_import_failed" = "L'importation du CSV a échoué : %@";
+"csv_import_success" = "Importation terminée : %1$dest crée, %2$d est mise à jour";
+"custom_system_prompt_default" = "Par défaut";
+"delete_prompt_confirm_message" = "Êtes-vous sûr de vouloir supprimer ce prompt ?";
+"discard_changes_confirmation" = "Ignorer les modifications non enregistrées ?";
+"doc_type_commentary" = "Commentaire";
+"export_prompts_csv" = "Exporter les prompts en CSV";
+"global_tool_permissions_title" = "Paramètres d'outils par défaut";
+"help_ai_connection_text" = "Configurez vos fournisseurs IA, modèles, autorisations et autres options de connexion ici. Chaque fournisseur nécessite sa propre clé API. Vous pouvez ajouter plusieurs fournisseurs et sélectionner un modèle par défaut.";
+"help_ai_document_filter_text" = "Limitez les Bibles, commentaires et autres modules que l'agent IA peut lire. Par défaut, l'IA voit tous les modules installés ; le filtrage aide à réduire le bruit et le coût lorsque vous souhaitez qu'il ne prenne en compte que des sources spécifiques.";
+"help_ai_models_text" = "Gérez les modèles pour ce fournisseur. Vous pouvez actualiser la liste des modèles depuis l'API du fournisseur pour récupérer les nouvelles versions, ou ajouter manuellement un nom de modèle s'il ne figure pas dans la liste récupérée.";
+"help_ai_providers_text" = "Gérez les fournisseurs IA (Google Gemini, OpenAI, Anthropic, etc.). Chaque fournisseur nécessite sa propre clé API. Vous pouvez ajouter plusieurs fournisseurs et en attribuer différents à des invites spécifiques.";
+"help_ai_settings_text" = "Les paramètres IA vous permettent de gérer vos invites et catégories. Depuis ici, vous pouvez créer de nouvelles invites, les organiser en catégories, importer/exporter des invites en CSV, installer des packs d'invites supplémentaires et accéder aux paramètres de connexion IA.";
+"help_global_tool_permissions_text" = "Configurez les autorisations pour les outils IA individuels. Pour chaque outil de lecture, choisissez si l'IA peut l'utiliser (Activé ou Désactivé). Pour chaque outil d'écriture, choisissez Toujours autoriser, Toujours refuser ou Demander (ce qui revient au mode de permission global défini dans les paramètres de connexion IA).";
+"import_prompts_addon" = "Installer comme module complémentaire (lecture seule)";
+"import_prompts_csv" = "Importer les prompts depuis CSV";
+"import_prompts_editable" = "Importer comme prompts modifiables";
+"llm_custom_model" = "Personnalisé…";
+"llm_openrouter_category" = "Catégorie";
+"llm_openrouter_category_all" = "Tout";
+"llm_reset_usage_summary" = "Effacer le suivi cumulatif des jetons et des coûts";
+"llm_usage_summary_format" = "Entrée : %1$d jetons | Sortie : %2$d jetons\nCoût estimé : %3$@";
+"manage_tool_permissions_summary" = "Gérer les remplacements de permissions par outil";
+"model_delete_confirm" = "Supprimer le modèle \"%1$@\" ?";
+"model_supported_badge" = "✓ Pris en charge";
+"move_to_category" = "Déplacer vers la catégorie…";
+"no_prompts_to_export" = "Aucun prompt utilisateur à exporter";
+"prompts_csv_export_success" = "%d prompts exportés en CSV";
+"raw_llm_log_copied" = "Journal copié dans le presse-papiers";
+"raw_llm_log_empty" = "Aucune donnée de journal disponible";
+"raw_llm_log_total" = "Total : entrée %1$@ / sortie %2$@%3$@";
+"raw_log_delete_confirm" = "%d sélectionné(s)";
+"raw_log_delete_old" = "Supprimer les anciens journaux…";
+"raw_log_delete_selected" = "Supprimer la sélection";
+"raw_log_history_summary" = "Afficher et gérer les journaux de conversation IA enregistrés";
+"raw_log_retention_summary_days" = "Après %d jours";
+"show_also_unsupported_models" = "Afficher aussi les modèles non pris en charge";
+"tool_category_read" = "Lecture";
+"tool_category_write" = "Écriture";
+"tool_option_disabled" = "Désactivé";
+"tool_option_enabled" = "Activé";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Signaler un bug IA";
+"bug_report_email_text" = "Ensuite, veuillez sélectionner votre application de messagerie préférée (Gmail par exemple) pour envoyer le rapport à l’équipe de développeurs.";
+"send_ai_bug_report_title" = "Signaler un bug IA";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Module complémentaire : %@";
+"addon_prompt_notice" = "Ce prompt provient du module complémentaire \"%@\" et ne peut pas être modifié. Utilisez « Copier pour personnaliser » pour créer une copie modifiable.";
+"ai_available_tools" = "Outils disponibles";
+"ai_read_tools" = "Outils de lecture";
+"ai_write_tools" = "Outils d'écriture";
+"delete_category_confirm_title" = "Supprimer la catégorie \"%@\" ?";
+"delete_prompt_confirmation" = "Supprimer le prompt \"%@\" ?";
+"edit_prompt" = "Modifier le prompt";
+"help_prompt_edit_text" = "Les invites personnalisées vous permettent de créer des instructions IA réutilisables pour votre étude. Définissez un nom, une description, un modèle, les contextes dans lesquels il doit apparaître, et éventuellement un fournisseur/modèle personnalisé. Les invites intégrées ne peuvent pas être modifiées directement — utilisez \"Copier pour personnaliser\" pour créer votre propre version.";
+"help_tool_info_text" = "Les outils IA sont des fonctions spécialisées que l'IA peut appeler pour lire vos données ou effectuer des modifications en votre nom. Les outils de lecture (versets, commentaires, dictionnaires, signets) ne nécessitent jamais de permission. Les outils d'écriture (création de signets, notes, entrées de bloc-notes) sont soumis au système de permissions.";
+"prompt_name_required" = "Le nom du prompt est requis";
+"prompt_template_required" = "Le modèle de prompt est requis";
+"raw_llm_log_entry_api_response" = "Réponse API (itération %d)";
+"raw_llm_log_entry_assistant" = "Réponse de l'assistant";
+"raw_llm_log_entry_empty" = "(vide)";
+"raw_llm_log_entry_system" = "Invite système";
+"raw_llm_log_entry_tool_call" = "Appel d'outil : %@";
+"raw_llm_log_entry_tool_definitions" = "Définitions d'outils (%d outils)";
+"raw_llm_log_entry_tool_desc" = "Description : %@";
+"raw_llm_log_entry_tool_params" = "Paramètres : %@";
+"raw_llm_log_entry_tool_result" = "Résultat d'outil [%@]";
+"raw_llm_log_entry_usage" = "entrée : %1$@ / sortie : %2$@%3$@";
+"raw_llm_log_entry_user" = "Message utilisateur";
+"raw_llm_log_title" = "Journal LLM brut";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Récupérer et inclure automatiquement les entrées de commentaires pour les versets sélectionnés, économisant une itération IA.";
+"prompt_auto_include_documents_description" = "Inclure automatiquement la liste des documents installés dans le contexte du prompt, économisant une itération IA.";
+"prompt_copied" = "Prompt copié";
+"prompt_edit_before_run_description" = "Afficher un champ de texte pour préciser la tâche avant d'exécuter le prompt";
+"prompt_is_text_transformation_description" = "Utilise un prompt système simplifié qui préserve la mise en forme (liens, titres, gras/italique) tout en transformant le contenu textuel. Aucun outil n'est utilisé. Idéal pour les prompts de traduction et de modification.";
+"prompt_max_iterations" = "Limite max d'itérations";
+"prompt_max_iterations_description" = "Remplacer la limite max d'itérations globale pour cette invite. Vide = valeur par défaut globale, 0 = illimité.";
+"prompt_no_document_creation_description" = "Lorsque cette option est activée, l'IA ne crée pas de document. Les résultats sont uniquement affichés dans le journal d'activité. Utile pour les prompts d'action uniquement (signets, étiquettes, opérations StudyPad).";
+"prompt_strict_context_matching_description" = "Lorsque cette option est activée, le cache ne correspond que si tout le contexte (version biblique, texte sélectionné) est identique. Lorsqu'elle est désactivée, le cache correspond quand les versets sont les mêmes quelle que soit la version biblique.";

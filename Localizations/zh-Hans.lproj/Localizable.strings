@@ -1009,3 +1009,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "AI连接和提示词设置";
 "prefs_features_cat" = "功能";
+
+/* Android shared translations */
+"ai_configure_button" = "配置连接";
+"ai_disclaimer_warning_summary" = "使用AI的风险与责任";
+"ai_provider_tier_community" = "其他提供商（未经测试）";
+"ai_provider_tier_recommended" = "推荐";
+"ai_providers_category" = "提供商";
+"easy_setup_anthropic_desc" = "价格实惠，质量出色";
+"easy_setup_api_key_instructions" = "从以下地址获取API密钥：";
+"easy_setup_done_message" = "在圣经中选择文本，然后尝试AI功能。您可以在设置中添加更多模型和提供商。";
+"easy_setup_done_title" = "AI已就绪！";
+"easy_setup_free_tier" = "免费套餐";
+"easy_setup_gemini_desc" = "提供免费套餐，质量良好";
+"easy_setup_openai_desc" = "广为人知，稳定可靠";
+"easy_setup_pref_summary" = "通过推荐提供商几步完成AI设置";
+"edit_model_title" = "编辑模型";
+"show_also_unsupported_providers" = "同时显示不支持的提供商";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "询问是否继续前的最大迭代次数（0 = 不限）";
+"ai_document_filter_summary" = "选择AI可以读取的文档";
+"ai_document_filter_summary_count" = "已排除%d个文档";
+"ai_document_filter_title" = "文档访问";
+"ai_language_app_default" = "应用语言（%1$@）";
+"ai_language_custom" = "自定义…";
+"ai_language_custom_example" = "例如：suomi、Tagalog、en";
+"ai_language_custom_hint" = "输入语言名称或代码";
+"ai_prompts_restored" = "已隐藏的提示词已恢复";
+"ai_restore_hidden_prompts" = "恢复已隐藏的提示词";
+"are_you_sure" = "你确定吗？";
+"ask_model_before_run_summary" = "执行提示词前显示模型选择对话框（当提示词有明确的模型指定时跳过）";
+"auto_hide_agent_log_summary" = "当任务成功完成或被取消时，自动隐藏 AI 面板。出错时面板将保持可见。";
+"commentary_max_response_dialog_message" = "当AI获取注释且总回应超过此词元限制时，选择对话框将让您选择要发送给AI的注释。\n\n0 = 无限制（所有注释自动发送）。";
+"commentary_max_response_dialog_title" = "设置最大回应大小（词元）";
+"commentary_max_response_value" = "约%@个词元";
+"csv_export_failed" = "CSV 导出失败：%@";
+"csv_import_errors" = "导入完成但有错误：已创建 %1$d 个，已更新 %2$d 个，%3$d 个错误";
+"csv_import_failed" = "CSV 导入失败：%@";
+"csv_import_success" = "导入完成：已创建 %1$d 个，已更新 %2$d 个";
+"custom_system_prompt_default" = "默认";
+"delete_prompt_confirm_message" = "确定要删除此提示词吗？";
+"discard_changes_confirmation" = "放弃未保存的更改？";
+"doc_type_commentary" = "注释";
+"export_prompts_csv" = "将提示词导出为 CSV";
+"global_tool_permissions_title" = "默认工具设置";
+"help_ai_connection_text" = "在此处配置您的AI提供商、模型、权限和其他连接选项。每个提供商需要各自的API密钥。您可以添加多个提供商并选择默认模型。";
+"help_ai_document_filter_text" = "限制AI代理可以读取的圣经、注释和其他模块。默认情况下，AI可以查看所有已安装的模块；当您只想让其考虑特定来源时，过滤有助于减少噪音和成本。";
+"help_ai_models_text" = "管理此提供商的模型。您可以从提供商的API刷新模型列表以获取新版本，或者手动添加模型名称（如果未在获取的列表中出现）。";
+"help_ai_providers_text" = "管理AI提供商（Google Gemini、OpenAI、Anthropic等）。每个提供商需要各自的API密钥。您可以添加多个提供商，并为特定提示词分配不同的提供商。";
+"help_ai_settings_text" = "AI设置是您管理提示词和类别的地方。在这里您可以创建新提示词、将其整理到类别中、以CSV格式导入/导出提示词、安装附加提示词包，以及访问AI连接设置。";
+"help_global_tool_permissions_text" = "为各个AI工具配置权限。对于每个读取工具，选择AI是否可以使用（已启用或已禁用）。对于每个写入工具，选择始终允许、始终拒绝或询问（回退到AI连接设置中设定的全局权限模式）。";
+"import_prompts_addon" = "安装为插件（只读）";
+"import_prompts_csv" = "从 CSV 导入提示词";
+"import_prompts_editable" = "作为可编辑提示词导入";
+"llm_custom_model" = "自定义…";
+"llm_openrouter_category" = "类别";
+"llm_openrouter_category_all" = "全部";
+"llm_reset_usage_summary" = "清除累计的 token 和费用记录";
+"llm_usage_summary_format" = "输入：%1$d 个 token | 输出：%2$d 个 token\n预估费用：%3$@";
+"manage_tool_permissions_summary" = "管理每个工具的权限覆盖设置";
+"model_delete_confirm" = "删除模型\"%1$@\"？";
+"model_supported_badge" = "✓ 支持";
+"move_to_category" = "移动到分类…";
+"no_prompts_to_export" = "无用户提示词可导出";
+"prompts_csv_export_success" = "已将 %d 个提示词导出为 CSV";
+"raw_llm_log_copied" = "日志已复制到剪贴板";
+"raw_llm_log_empty" = "暂无原始日志数据";
+"raw_llm_log_total" = "总计：输入 %1$@ / 输出 %2$@%3$@";
+"raw_log_delete_confirm" = "已选择 %d 项";
+"raw_log_delete_old" = "删除旧日志…";
+"raw_log_delete_selected" = "删除所选";
+"raw_log_history_summary" = "查看和管理已保存的AI对话日志";
+"raw_log_retention_summary_days" = "%d 天后";
+"show_also_unsupported_models" = "同时显示不支持的模型";
+"tool_category_read" = "读取";
+"tool_category_write" = "写入";
+"tool_option_disabled" = "已禁用";
+"tool_option_enabled" = "已启用";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "报告AI问题";
+"bug_report_email_text" = "请在下一步选择您想要的电子邮件应用（例如 Gmail）来将报告发送给开发者团队。";
+"send_ai_bug_report_title" = "报告AI问题";
+
+/* Android shared translations */
+"addon_prompt_badge" = "附加模块：%@";
+"addon_prompt_notice" = "此提示词来自附加模块\"%@\"，无法编辑。请使用\"复制以自定义\"创建可编辑副本。";
+"ai_available_tools" = "可用工具";
+"ai_read_tools" = "读取工具";
+"ai_write_tools" = "写入工具";
+"delete_category_confirm_title" = "删除分类\"%@\"？";
+"delete_prompt_confirmation" = "删除提示词\"%@\"？";
+"edit_prompt" = "编辑提示词";
+"help_prompt_edit_text" = "自定义提示词让您为研经创建可复用的AI指令。设置名称、描述、模板、出现的上下文，以及可选的自定义提供商/模型。内置提示词无法直接编辑——请使用\"复制以自定义\"来创建您自己的版本。";
+"help_tool_info_text" = "AI工具是AI可以调用的专用功能，用于读取您的数据或代表您进行更改。读取工具（经文、注释、字典、书签）无需任何权限。写入工具（创建书签、笔记、学习笔记条目）受权限系统管控。";
+"prompt_name_required" = "提示词名称不能为空";
+"prompt_template_required" = "提示词模板不能为空";
+"raw_llm_log_entry_api_response" = "API 响应（第 %d 次迭代）";
+"raw_llm_log_entry_assistant" = "助手回复";
+"raw_llm_log_entry_empty" = "（空）";
+"raw_llm_log_entry_system" = "系统提示词";
+"raw_llm_log_entry_tokens" = "约 %@ 个 token";
+"raw_llm_log_entry_tool_call" = "工具调用：%@";
+"raw_llm_log_entry_tool_definitions" = "工具定义（%d 个工具）";
+"raw_llm_log_entry_tool_desc" = "描述：%@";
+"raw_llm_log_entry_tool_params" = "参数：%@";
+"raw_llm_log_entry_tool_result" = "工具结果 [%@]";
+"raw_llm_log_entry_usage" = "输入：%1$@ / 输出：%2$@%3$@";
+"raw_llm_log_entry_user" = "用户消息";
+"raw_llm_log_title" = "原始 LLM 日志";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "自动获取并将所选经文的注释条目包含在内，减少AI迭代次数。";
+"prompt_auto_include_documents_description" = "自动将已安装文档列表包含在提示词上下文中，减少AI迭代次数。";
+"prompt_copied" = "提示词已复制";
+"prompt_edit_before_run_description" = "在运行提示词前显示文本输入框以指定任务";
+"prompt_is_text_transformation_description" = "使用简化的系统提示词，在转换文本内容的同时保留格式（链接、标题、粗体/斜体）。不使用工具。适合翻译和编辑类提示词。";
+"prompt_max_iterations" = "最大迭代次数覆盖";
+"prompt_max_iterations_description" = "覆盖此提示词的全局最大迭代次数。留空 = 全局默认，0 = 不限。";
+"prompt_no_document_creation_description" = "启用后，AI将不会创建文档。结果仅显示在活动日志中。适用于仅执行操作的提示词（书签、标签、学习笔记操作）。";
+"prompt_strict_context_matching_description" = "启用后，仅在所有上下文（圣经版本、所选文本）相同时才匹配缓存。禁用后，无论圣经版本如何，只要经文相同即匹配缓存。";

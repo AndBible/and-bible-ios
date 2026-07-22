@@ -1018,3 +1018,123 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "KI-Verbindungs- und Prompt-Einstellungen";
 "prefs_features_cat" = "Funktionen";
+
+/* Android shared translations */
+"ai_configure_button" = "Verbindung konfigurieren";
+"ai_disclaimer_warning_summary" = "Risiken und Verantwortlichkeiten bei der Nutzung von KI";
+"ai_provider_tier_community" = "Andere Anbieter (nicht getestet)";
+"ai_provider_tier_recommended" = "Empfohlen";
+"ai_providers_category" = "Anbieter";
+"easy_setup_anthropic_desc" = "Erschwinglich, ausgezeichnete Qualität";
+"easy_setup_api_key_instructions" = "Holen Sie sich Ihren API-Schlüssel von:";
+"easy_setup_done_message" = "Wählen Sie Text in der Bibel aus und probieren Sie die KI-Funktionen. Sie können in den Einstellungen weitere Modelle und Anbieter hinzufügen.";
+"easy_setup_done_title" = "KI ist bereit!";
+"easy_setup_free_tier" = "Kostenlose Stufe";
+"easy_setup_gemini_desc" = "Kostenlose Stufe verfügbar, gute Qualität";
+"easy_setup_openai_desc" = "Bekannt und zuverlässig";
+"easy_setup_pref_summary" = "KI mit einem empfohlenen Anbieter in wenigen Schritten einrichten";
+"edit_model_title" = "Modell bearbeiten";
+"show_also_unsupported_providers" = "Auch nicht unterstützte Anbieter anzeigen";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maximale Iterationen vor Nachfrage zum Fortfahren (0 = unbegrenzt)";
+"ai_document_filter_summary" = "Wählen Sie, welche Dokumente die KI lesen kann";
+"ai_document_filter_summary_count" = "%d Dokumente ausgeschlossen";
+"ai_document_filter_title" = "Dokumentzugriff";
+"ai_language_app_default" = "App-Sprache (%1$@)";
+"ai_language_custom" = "Benutzerdefiniert…";
+"ai_language_custom_example" = "z. B. suomi, Tagalog, de";
+"ai_language_custom_hint" = "Sprachname oder -code eingeben";
+"ai_prompts_restored" = "Ausgeblendete Prompts wiederhergestellt";
+"ai_restore_hidden_prompts" = "Ausgeblendete Prompts wiederherstellen";
+"are_you_sure" = "Bist du sicher?";
+"ask_model_before_run_summary" = "Vor der Ausführung eines Prompts einen Modellauswahldialog anzeigen (wird übersprungen, wenn der Prompt eine explizite Modellüberschreibung hat)";
+"auto_hide_agent_log_summary" = "Den KI-Bereich automatisch ausblenden, wenn eine Aufgabe erfolgreich abgeschlossen oder abgebrochen wird. Bei einem Fehler bleibt der Bereich sichtbar.";
+"commentary_max_response_dialog_message" = "Wenn die KI Kommentare abruft und die Gesamtantwort dieses Token-Limit überschreitet, können Sie in einem Auswahldialog festlegen, welche Kommentare an die KI gesendet werden.\n\n0 = kein Limit (alle Kommentare werden automatisch gesendet).";
+"commentary_max_response_dialog_title" = "Maximale Antwortgröße festlegen (Token)";
+"commentary_max_response_value" = "~%@ Token";
+"csv_export_failed" = "CSV-Export fehlgeschlagen: %@";
+"csv_import_errors" = "Import mit Fehlern abgeschlossen: %1$d erzeugt, %2$d aktualisiert, %3$d Fehler";
+"csv_import_failed" = "CSV-Import fehlgeschlagen: %@";
+"csv_import_success" = "Import abgeschlossen: %1$d erzeugt, %2$d aktualisiert";
+"custom_system_prompt_default" = "Standard";
+"delete_prompt_confirm_message" = "Möchten Sie diesen Prompt wirklich löschen?";
+"discard_changes_confirmation" = "Nicht gespeicherte Änderungen verwerfen?";
+"doc_type_commentary" = "Kommentar";
+"export_prompts_csv" = "Prompts als CSV exportieren";
+"global_tool_permissions_title" = "Standard-Werkzeugeinstellungen";
+"help_ai_connection_text" = "Konfigurieren Sie hier Ihre KI-Anbieter, Modelle, Berechtigungen und andere Verbindungsoptionen. Jeder Anbieter benötigt einen eigenen API-Schlüssel. Sie können mehrere Anbieter hinzufügen und ein Standardmodell auswählen.";
+"help_ai_document_filter_text" = "Begrenzen Sie, welche Bibeln, Kommentare und andere Module der KI-Agent lesen kann. Standardmäßig sieht die KI alle installierten Module; die Filterung hilft, Rauschen und Kosten zu reduzieren, wenn Sie nur bestimmte Quellen berücksichtigen möchten.";
+"help_ai_models_text" = "Verwalten Sie Modelle für diesen Anbieter. Sie können die Modellliste über die API des Anbieters aktualisieren, um neue Versionen zu erhalten, oder einen Modellnamen manuell hinzufügen, wenn er nicht in der abgerufenen Liste enthalten ist.";
+"help_ai_providers_text" = "Verwalten Sie KI-Anbieter (Google Gemini, OpenAI, Anthropic usw.). Jeder Anbieter benötigt einen eigenen API-Schlüssel. Sie können mehrere Anbieter hinzufügen und verschiedene Anbieter bestimmten Prompts zuweisen.";
+"help_ai_settings_text" = "In den KI-Einstellungen verwalten Sie Ihre Prompts und Kategorien. Von hier aus können Sie neue Prompts erstellen, sie in Kategorien organisieren, Prompts als CSV importieren/exportieren, Add-on-Prompt-Pakete installieren und die KI-Verbindungseinstellungen aufrufen.";
+"help_global_tool_permissions_text" = "Konfigurieren Sie Berechtigungen für einzelne KI-Tools. Wählen Sie für jedes Lese-Tool, ob die KI es verwenden darf (Aktiviert oder Deaktiviert). Wählen Sie für jedes Schreib-Tool „Immer erlauben\", „Immer ablehnen\" oder „Fragen\" (was auf den globalen Berechtigungsmodus zurückgreift, der in den KI-Verbindungseinstellungen festgelegt ist).";
+"import_prompts_addon" = "Als Add-on installieren (schreibgeschützt)";
+"import_prompts_csv" = "Prompts aus CSV importieren";
+"import_prompts_editable" = "Als bearbeitbare Prompts importieren";
+"llm_custom_model" = "Benutzerdefiniert…";
+"llm_openrouter_category" = "Kategorie";
+"llm_openrouter_category_all" = "Alle";
+"llm_reset_usage_summary" = "Kumulative Token- und Kostenverfolgung löschen";
+"llm_usage_summary_format" = "Eingabe: %1$d Token | Ausgabe: %2$d Token\nGeschätzte Kosten: %3$@";
+"manage_tool_permissions_summary" = "Werkzeugspezifische Berechtigungen verwalten";
+"model_delete_confirm" = "Modell \"%1$@\" löschen?";
+"model_supported_badge" = "✓ Unterstützt";
+"move_to_category" = "In Kategorie verschieben…";
+"no_prompts_to_export" = "Keine Benutzer-Prompts zum Exportieren";
+"prompts_csv_export_success" = "%d Prompts als CSV exportiert";
+"raw_llm_log_copied" = "Protokoll in die Zwischenablage kopiert";
+"raw_llm_log_empty" = "Keine Protokolldaten verfügbar";
+"raw_llm_log_total" = "Gesamt: ein %1$@ / aus %2$@%3$@";
+"raw_log_delete_confirm" = "%d ausgewählt";
+"raw_log_delete_old" = "Alte Protokolle löschen…";
+"raw_log_delete_selected" = "Ausgewählte löschen";
+"raw_log_history_summary" = "Gespeicherte KI-Gesprächsprotokolle anzeigen und verwalten";
+"raw_log_retention_summary_days" = "Nach %d Tagen";
+"show_also_unsupported_models" = "Auch nicht unterstützte Modelle anzeigen";
+"tool_category_read" = "Lesen";
+"tool_category_write" = "Schreiben";
+"tool_option_disabled" = "Deaktiviert";
+"tool_option_enabled" = "Aktiviert";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "KI-Fehler melden";
+"bug_report_email_text" = "Als nächstes wähle bitte deine bevorzugte E-Mail Anwendung (z.B. Gmail) aus, um den Fehlerbericht an das Entwicklerteam zu senden.";
+"send_ai_bug_report_title" = "KI-Fehler melden";
+
+/* Android shared translations */
+"addon_prompt_notice" = "Dieser Prompt stammt aus dem Add-on-Modul \"%@\" und kann nicht bearbeitet werden. Verwenden Sie \"Zum Anpassen kopieren\", um eine bearbeitbare Kopie zu erstellen.";
+"ai_available_tools" = "Verfügbare Werkzeuge";
+"ai_read_tools" = "Lese-Werkzeuge";
+"ai_write_tools" = "Schreib-Werkzeuge";
+"delete_category_confirm_title" = "Kategorie „%@\" löschen?";
+"delete_prompt_confirmation" = "Prompt „%@\" löschen?";
+"edit_prompt" = "Prompt bearbeiten";
+"help_prompt_edit_text" = "Mit benutzerdefinierten Prompts können Sie wiederverwendbare KI-Anweisungen für Ihr Studium erstellen. Legen Sie einen Namen, eine Beschreibung, eine Vorlage, die Kontexte, in denen er erscheinen soll, und optional einen benutzerdefinierten Anbieter/Modell fest. Integrierte Prompts können nicht direkt bearbeitet werden – verwenden Sie \"Kopieren zum Anpassen\", um Ihre eigene Version zu erstellen.";
+"help_tool_info_text" = "KI-Tools sind spezialisierte Funktionen, die die KI aufrufen kann, um Ihre Daten zu lesen oder in Ihrem Auftrag Änderungen vorzunehmen. Lese-Tools (Verse, Kommentare, Wörterbücher, Lesezeichen) benötigen keine Berechtigung. Schreib-Tools (Lesezeichen erstellen, Notizen, Studienmappe-Einträge) werden durch das Berechtigungssystem gesteuert.";
+"prompt_name_required" = "Prompt-Name ist erforderlich";
+"prompt_template_required" = "Prompt-Vorlage ist erforderlich";
+"raw_llm_log_entry_api_response" = "API-Antwort (Iteration %d)";
+"raw_llm_log_entry_assistant" = "Assistenten-Antwort";
+"raw_llm_log_entry_empty" = "(leer)";
+"raw_llm_log_entry_system" = "System-Prompt";
+"raw_llm_log_entry_tokens" = "~%@ Tokens";
+"raw_llm_log_entry_tool_call" = "Werkzeugaufruf: %@";
+"raw_llm_log_entry_tool_definitions" = "Werkzeugdefinitionen (%d Werkzeuge)";
+"raw_llm_log_entry_tool_desc" = "Beschreibung: %@";
+"raw_llm_log_entry_tool_params" = "Parameter: %@";
+"raw_llm_log_entry_tool_result" = "Werkzeugergebnis [%@]";
+"raw_llm_log_entry_usage" = "ein: %1$@ / aus: %2$@%3$@";
+"raw_llm_log_entry_user" = "Benutzernachricht";
+"raw_llm_log_title" = "KI-Rohprotokoll";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Kommentareinträge für die ausgewählten Verse automatisch abrufen und einbeziehen, wodurch eine KI-Iteration gespart wird.";
+"prompt_auto_include_documents_description" = "Die Liste der installierten Dokumente automatisch in den Prompt-Kontext einbeziehen, wodurch eine KI-Iteration gespart wird.";
+"prompt_copied" = "Prompt kopiert";
+"prompt_edit_before_run_description" = "Ein Textfeld zum Angeben der Aufgabe vor dem Ausführen des Prompts anzeigen";
+"prompt_is_text_transformation_description" = "Verwendet einen vereinfachten System-Prompt, der die Formatierung (Links, Überschriften, Fett/Kursiv) beibehält und gleichzeitig den Textinhalt transformiert. Es werden keine Werkzeuge verwendet. Ideal für Übersetzungs- und Bearbeitungs-Prompts.";
+"prompt_max_iterations" = "Maximale Iterationen überschreiben";
+"prompt_max_iterations_description" = "Globale maximale Iterationen für diesen Prompt überschreiben. Leer = globaler Standard, 0 = unbegrenzt.";
+"prompt_no_document_creation_description" = "Wenn aktiviert, erstellt die KI kein Dokument. Ergebnisse werden nur im Aktivitätsprotokoll angezeigt. Nützlich für aktionsbasierte Prompts (Lesezeichen, Kategorien, Studienblock-Operationen).";
+"prompt_strict_context_matching_description" = "Wenn aktiviert, stimmt der Cache nur überein, wenn der gesamte Kontext (Bibelversion, ausgewählter Text) gleich ist. Wenn deaktiviert, stimmt der Cache überein, wenn die Verse unabhängig von der Bibelversion gleich sind.";

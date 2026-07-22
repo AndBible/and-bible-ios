@@ -438,6 +438,60 @@ final class LLMRunTelemetryServiceTests: XCTestCase {
     }
 
     /**
+     Verifies the log reader decodes Android gzip records and early iOS plain-text records, while
+     bug-report attachments always use Android's gzip shape.
+
+     Failure means persisted history could show an empty document even though telemetry retained a
+     valid conversation. The malformed payload assertion pins fail-closed behavior for corrupt rows.
+     */
+    func testRawLogPayloadDecoderSupportsAndroidGzipAndLegacyPlainText() throws {
+        let text = "=== USER ===\nExplain Genesis 1:1"
+        let plainData = try XCTUnwrap(text.data(using: .utf8))
+        let compressedData = try RemoteSyncArchiveStagingService.gzip(plainData)
+
+        XCTAssertEqual(try LLMRawLogPayloadDecoder.decode(compressedData), text)
+        XCTAssertEqual(try LLMRawLogPayloadDecoder.decode(plainData), text)
+        XCTAssertEqual(
+            try LLMRawLogPayloadDecoder.gzipAttachmentData(compressedData),
+            compressedData
+        )
+        XCTAssertEqual(
+            try LLMRawLogPayloadDecoder.decode(
+                LLMRawLogPayloadDecoder.gzipAttachmentData(plainData)
+            ),
+            text
+        )
+        XCTAssertThrowsError(try LLMRawLogPayloadDecoder.decode(Data([0x1f, 0x8b, 0x00]))) { error in
+            XCTAssertEqual(error as? LLMRawLogPayloadDecoderError, .invalidPayload)
+        }
+        XCTAssertThrowsError(
+            try LLMRawLogPayloadDecoder.gzipAttachmentData(Data([0x1f, 0x8b, 0x00]))
+        ) { error in
+            XCTAssertEqual(error as? LLMRawLogPayloadDecoderError, .invalidPayload)
+        }
+    }
+
+    /**
+     Verifies Android's contextual Delete selected action removes only the chosen raw-log IDs.
+
+     Three rows make omissions and accidental delete-all behavior observable. An unknown ID is
+     included to pin Android's no-op treatment for stale contextual selections.
+     */
+    func testDeleteSelectedRawLogsRetainsUnselectedRows() throws {
+        let store = AISettingsStore(modelContext: ModelContext(try makeContainer()))
+        let firstID = UUID()
+        let secondID = UUID()
+        let retainedID = UUID()
+        try store.insertRawLog(rawLog(id: firstID, timestampMilliseconds: 100))
+        try store.insertRawLog(rawLog(id: secondID, timestampMilliseconds: 200))
+        try store.insertRawLog(rawLog(id: retainedID, timestampMilliseconds: 300))
+
+        try store.deleteRawLogs(ids: Set([firstID, secondID, UUID()]))
+
+        XCTAssertEqual(Set(try store.rawLogs().map(\.id)), Set([retainedID]))
+    }
+
+    /**
      Builds an isolated SwiftData container with exactly the AI model registration groups.
 
      - Returns: Empty in-memory container with syncable and local-only AI schemas registered.

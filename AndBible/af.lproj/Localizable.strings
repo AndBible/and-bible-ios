@@ -1024,3 +1024,121 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "KI-verbinding en opdraginstellings";
 "prefs_features_cat" = "Funksies";
+
+/* Android shared translations */
+"ai_configure_button" = "Stel verbinding op";
+"ai_disclaimer_warning_summary" = "Risiko's en verantwoordelikhede van KI-gebruik";
+"ai_provider_tier_community" = "Ander verskaffers (nie getoets nie)";
+"ai_provider_tier_recommended" = "Aanbeveel";
+"ai_providers_category" = "Verskaffers";
+"easy_setup_anthropic_desc" = "Bekostigbaar, uitstekende kwaliteit";
+"easy_setup_api_key_instructions" = "Kry jou API-sleutel by:";
+"easy_setup_done_message" = "Kies teks in die Bybel en probeer die KI-funksies. Jy kan meer modelle en verskaffers in die instellings byvoeg.";
+"easy_setup_done_title" = "KI is gereed!";
+"easy_setup_free_tier" = "Gratis vlak";
+"easy_setup_gemini_desc" = "Gratis vlak beskikbaar, goeie kwaliteit";
+"easy_setup_openai_desc" = "Welbekend, betroubaar";
+"easy_setup_pref_summary" = "Stel KI op met 'n aanbevole verskaffer in 'n paar stappe";
+"edit_model_title" = "Wysig model";
+"show_also_unsupported_providers" = "Wys ook nie-ondersteunde verskaffers";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maksimum herhalings voor om voort te gaan gevra word (0 = onbeperk)";
+"ai_document_filter_summary" = "Kies watter dokumente die KI kan lees";
+"ai_document_filter_summary_count" = "%d dokumente uitgesluit";
+"ai_document_filter_title" = "Dokumenttoegang";
+"ai_language_app_default" = "Programtaal (%1$@)";
+"ai_language_custom" = "Pasgemaak…";
+"ai_language_custom_example" = "bv. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Voer taalnaam of -kode in";
+"ai_prompts_restored" = "Verborge aanwysings herstel";
+"ai_restore_hidden_prompts" = "Herstel verborge aanwysings";
+"are_you_sure" = "Is jy seker?";
+"ask_model_before_run_summary" = "Wys 'n modelkeusedialoog voor 'n opdrag uitgevoer word (oorgesla wanneer die opdrag 'n uitdruklike modeloorskrywing het)";
+"auto_hide_agent_log_summary" = "Versteek die KI-paneel outomaties wanneer 'n taak suksesvol voltooi of gekanselleer word. By 'n fout bly die paneel sigbaar.";
+"commentary_max_response_dialog_message" = "Wanneer die KI kommentare haal en die totale reaksie hierdie tokenlimiet oorskry, laat 'n keusdialoog jou toe om te kies watter kommentare na die KI gestuur word.\n\n0 = geen limiet (alle kommentare word outomaties gestuur).";
+"commentary_max_response_dialog_title" = "Stel maksimum reaksiegrootte (tokens)";
+"csv_export_failed" = "CSV-uitvoer het misluk: %@";
+"csv_import_errors" = "Invoer voltooi met foute: %1$d geskep, %2$d bygewerk, %3$d foute";
+"csv_import_failed" = "CSV-invoer het misluk: %@";
+"csv_import_success" = "Invoer voltooi: %1$d geskep, %2$d bygewerk";
+"custom_system_prompt_default" = "Verstek";
+"delete_prompt_confirm_message" = "Is jy seker jy wil hierdie aanwysing verwyder?";
+"discard_changes_confirmation" = "Ongestoorde wysigings weggooi?";
+"doc_type_commentary" = "Kommentaar";
+"export_prompts_csv" = "Voer aanwysings na CSV uit";
+"global_tool_permissions_title" = "Verstekgereedskap-instellings";
+"help_ai_connection_text" = "Stel jou KI-verskaffers, modelle, toestemmings en ander verbindingsopsies hier in. Elke verskaffer benodig sy eie API-sleutel. Jy kan verskeie verskaffers byvoeg en 'n verstekmodel kies.";
+"help_ai_document_filter_text" = "Beperk watter Bybels, kommentare en ander modules die KI-agent kan lees. By verstek sien die KI alle geïnstalleerde modules; filtering help om ruis en koste te verminder wanneer jy slegs wil hê dit moet spesifieke bronne oorweeg.";
+"help_ai_models_text" = "Bestuur modelle vir hierdie verskaffer. Jy kan die modellys vanaf die verskaffer se API verfris om nuwe vrystellings op te tel, of 'n modelnaam handmatig byvoeg as dit nie in die opgehaalde lys is nie.";
+"help_ai_providers_text" = "Bestuur KI-verskaffers (Google Gemini, OpenAI, Anthropic, ens.). Elke verskaffer benodig sy eie API-sleutel. Jy kan verskeie verskaffers byvoeg en verskillende een aan spesifieke opdragte toewys.";
+"help_ai_settings_text" = "KI-instellings is waar jy jou opdragte en kategorieë bestuur. Van hier af kan jy nuwe opdragte skep, hulle in kategorieë organiseer, opdragte as CSV invoer/uitvoer, byvoegsel-opdragpakkette installeer, en die KI-verbindingsinstellings bereik.";
+"help_global_tool_permissions_text" = "Stel toestemmings in vir individuele KI-hulpmiddels. Vir elke lees-hulpmiddel, kies of die KI dit mag gebruik (Geaktiveer of Gedeaktiveer). Vir elke skryf-hulpmiddel, kies Altyd toelaat, Altyd weier, of Vra (wat terugval op die globale toestemmingsmodus wat in KI-verbindingsinstellings gestel is).";
+"import_prompts_addon" = "Installeer as byvoeging (leesalleen)";
+"import_prompts_csv" = "Invoer aanwysings vanaf CSV";
+"import_prompts_editable" = "Invoer as wysigbare aanwysings";
+"llm_custom_model" = "Pasgemaak…";
+"llm_openrouter_category" = "Kategorie";
+"llm_openrouter_category_all" = "Almal";
+"llm_reset_usage_summary" = "Maak kumulatiewe token- en koste-opvolging skoon";
+"llm_usage_summary_format" = "Invoer: %1$d tokens | Uitvoer: %2$d tokens\nGeskatte koste: %3$@";
+"manage_tool_permissions_summary" = "Bestuur per-gereedskap toestemmings-oorskrywings";
+"model_delete_confirm" = "Skrap model \"%1$@\"?";
+"model_supported_badge" = "✓ Ondersteun";
+"move_to_category" = "Skuif na kategorie…";
+"no_prompts_to_export" = "Geen gebruikersaanwysings om uit te voer nie";
+"prompts_csv_export_success" = "%d aanwysings na CSV uitgevoer";
+"raw_llm_log_copied" = "Logboek na knipbord gekopieer";
+"raw_llm_log_empty" = "Geen rou logdata beskikbaar nie";
+"raw_llm_log_total" = "Totaal: in %1$@ / uit %2$@%3$@";
+"raw_log_delete_confirm" = "%d gekies";
+"raw_log_delete_old" = "Verwyder ou logboeke…";
+"raw_log_delete_selected" = "Verwyder gekose";
+"raw_log_history_summary" = "Bekyk en bestuur gestoorde KI-gespreklogboeke";
+"raw_log_retention_summary_days" = "Na %d dae";
+"show_also_unsupported_models" = "Wys ook nie-ondersteunde modelle";
+"tool_category_read" = "Lees";
+"tool_category_write" = "Skryf";
+"tool_option_disabled" = "Gedeaktiveer";
+"tool_option_enabled" = "Geaktiveer";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Rapporteer KI-fout";
+"bug_report_email_text" = "Kies vervolgens u voorkeur-e-postoepassing (byvoorbeeld Gmail) om die verslag aan die ontwikkelaarspan te stuur.";
+"send_ai_bug_report_title" = "Rapporteer KI-fout";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Byvoeging: %@";
+"addon_prompt_notice" = "Hierdie opdrag is van byvoegingmodule \"%@\" en kan nie gewysig word nie. Gebruik \"Kopieer om aan te pas\" om 'n wysigbare kopie te skep.";
+"ai_available_tools" = "Beskikbare gereedskap";
+"ai_read_tools" = "Lees gereedskap";
+"ai_write_tools" = "Skryf gereedskap";
+"delete_category_confirm_title" = "Skrap kategorie \"%@\"?";
+"delete_prompt_confirmation" = "Verwyder aanwysing \"%@\"?";
+"edit_prompt" = "Wysig aanwysing";
+"help_prompt_edit_text" = "Gepasmaakte opdragte laat jou toe om herbruikbare KI-instruksies vir jou studie te skep. Stel 'n naam, beskrywing, sjabloon, die kontekste waar dit moet verskyn, en opsioneel 'n gepasmaakte verskaffer/model in. Ingeboude opdragte kan nie direk gewysig word nie — gebruik \"Kopieer om aan te pas\" om jou eie weergawe te skep.";
+"help_tool_info_text" = "KI-hulpmiddels is gespesialiseerde funksies wat die KI kan aanroep om jou data te lees of namens jou veranderinge aan te bring. Lees-hulpmiddels (verse, kommentaar, woordeboeke, boekmerke) benodig nooit toestemming nie. Skryf-hulpmiddels (skep van boekmerke, notas, studie blok-inskrywings) word beheer deur die toestemmingstelsel.";
+"prompt_name_required" = "Aanwysingnaam is vereis";
+"prompt_template_required" = "Aanwysingssjabloon is vereis";
+"raw_llm_log_entry_api_response" = "API-respons (iterasie %d)";
+"raw_llm_log_entry_assistant" = "Assistent-respons";
+"raw_llm_log_entry_empty" = "(leeg)";
+"raw_llm_log_entry_system" = "Stelselaanwysing";
+"raw_llm_log_entry_tool_call" = "Gereedskaproep: %@";
+"raw_llm_log_entry_tool_definitions" = "Gereedskap-definisies (%d gereedskap)";
+"raw_llm_log_entry_tool_desc" = "Beskrywing: %@";
+"raw_llm_log_entry_tool_result" = "Gereedskap-resultaat [%@]";
+"raw_llm_log_entry_usage" = "in: %1$@ / uit: %2$@%3$@";
+"raw_llm_log_entry_user" = "Gebruikersboodskap";
+"raw_llm_log_title" = "Rou KI-logboek";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Haal kommentaarinligting vir die geselekteerde verse outomaties op en sluit dit in, wat 'n KI-iterasie bespaar.";
+"prompt_auto_include_documents_description" = "Sluit die lys van geïnstalleerde dokumente outomaties in die aanwysingskonteks in, wat 'n KI-iterasie bespaar.";
+"prompt_copied" = "Aanwysing gekopieer";
+"prompt_edit_before_run_description" = "Wys 'n teksveld om die taak te spesifiseer voor die aanwysing uitgevoer word";
+"prompt_is_text_transformation_description" = "Gebruik 'n vereenvoudigde stelselaanwysing wat opmaak (skakels, opskrifte, vet/kursief) behou terwyl teksinhoud getransformeer word. Geen gereedskappe word gebruik nie. Ideaal vir vertaling- en redigeeraanwysings.";
+"prompt_max_iterations" = "Maks. herhalings-oorskrywing";
+"prompt_max_iterations_description" = "Oorskryf die globale maks. herhalings vir hierdie opdrag. Leeg = globale verstek, 0 = onbeperk.";
+"prompt_no_document_creation_description" = "Wanneer geaktiveer, sal die KI nie 'n dokument skep nie. Resultate word slegs in die aktiwiteitslogboek gewys. Nuttig vir aksie-slegs aanwysings (boekmerke, etikette, Studieblok-bewerkings).";
+"prompt_strict_context_matching_description" = "Wanneer geaktiveer, stem kas slegs ooreen wanneer alle konteks (Bybelweergawe, geselekteerde teks) dieselfde is. Wanneer gedeaktiveer, stem kas ooreen wanneer verse dieselfde is ongeag die Bybelweergawe.";

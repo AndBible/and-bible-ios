@@ -1003,3 +1003,122 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "AI-anslutning och promptinställningar";
 "prefs_features_cat" = "Funktioner";
+
+/* Android shared translations */
+"ai_configure_button" = "Konfigurera anslutning";
+"ai_disclaimer_warning_summary" = "Risker och ansvar vid användning av AI";
+"ai_provider_tier_community" = "Andra leverantörer (ej testade)";
+"ai_provider_tier_recommended" = "Rekommenderade";
+"ai_providers_category" = "Leverantörer";
+"easy_setup_anthropic_desc" = "Prisvärd, utmärkt kvalitet";
+"easy_setup_api_key_instructions" = "Hämta din API-nyckel från:";
+"easy_setup_done_message" = "Markera text i Bibeln och prova AI-funktionerna. Du kan lägga till fler modeller och leverantörer i inställningarna.";
+"easy_setup_done_title" = "AI är redo!";
+"easy_setup_free_tier" = "Gratisnivå";
+"easy_setup_gemini_desc" = "Gratisnivå tillgänglig, bra kvalitet";
+"easy_setup_openai_desc" = "Välkänd, pålitlig";
+"easy_setup_pref_summary" = "Konfigurera AI med en rekommenderad leverantör i några steg";
+"edit_model_title" = "Redigera modell";
+"show_also_unsupported_providers" = "Visa även leverantörer som inte stöds";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maximalt antal iterationer innan fortsättning efterfrågas (0 = obegränsat)";
+"ai_document_filter_summary" = "Välj vilka dokument AI kan läsa";
+"ai_document_filter_summary_count" = "%d dokument exkluderade";
+"ai_document_filter_title" = "Dokumentåtkomst";
+"ai_language_app_default" = "Appspråk (%1$@)";
+"ai_language_custom" = "Anpassat…";
+"ai_language_custom_example" = "t.ex. suomi, Tagalog, sv";
+"ai_language_custom_hint" = "Ange språknamn eller kod";
+"ai_prompts_restored" = "Dolda promptar återställda";
+"ai_restore_hidden_prompts" = "Återställ dolda prompter";
+"are_you_sure" = "Är du säker?";
+"ask_model_before_run_summary" = "Visa en modellvalsdialog innan en prompt körs (hoppas över om prompten har en explicit modellöverstyrning)";
+"auto_hide_agent_log_summary" = "Dölj AI-panelen automatiskt när en uppgift slutförs eller avbryts. Vid fel förblir panelen synlig.";
+"commentary_max_response_dialog_message" = "När AI hämtar kommentarer och det totala svaret överskrider den här tokengränsen visas en valsdialog där du kan välja vilka kommentarer som skickas till AI.\n\n0 = ingen gräns (alla kommentarer skickas automatiskt).";
+"commentary_max_response_dialog_title" = "Ange maximal svarsstorlek (tokens)";
+"csv_export_failed" = "CSV-export misslyckades: %@";
+"csv_import_errors" = "Import slutförd med fel: %1$d skapade, %2$d uppdaterade, %3$d fel";
+"csv_import_failed" = "CSV-import misslyckades: %@";
+"csv_import_success" = "Import slutförd: %1$d skapade, %2$d uppdaterade";
+"custom_system_prompt_default" = "Standard";
+"delete_prompt_confirm_message" = "Är du säker på att du vill radera den här prompten?";
+"discard_changes_confirmation" = "Ignorera osparade ändringar?";
+"doc_type_commentary" = "Kommentar";
+"export_prompts_csv" = "Exportera prompter till CSV";
+"global_tool_permissions_title" = "Standardverktygsinställningar";
+"help_ai_connection_text" = "Konfigurera dina AI-leverantörer, modeller, behörigheter och andra anslutningsalternativ här. Varje leverantör behöver sin egen API-nyckel. Du kan lägga till flera leverantörer och välja en standardmodell.";
+"help_ai_document_filter_text" = "Begränsa vilka biblar, kommentarer och andra moduler som AI-agenten kan läsa. Som standard ser AI:n alla installerade moduler; filtrering hjälper till att minska brus och kostnader när du bara vill att den ska beakta specifika källor.";
+"help_ai_models_text" = "Hantera modeller för denna leverantör. Du kan uppdatera modellistan från leverantörens API för att hämta nya versioner, eller lägga till ett modellnamn manuellt om det inte finns i den hämtade listan.";
+"help_ai_providers_text" = "Hantera AI-leverantörer (Google Gemini, OpenAI, Anthropic m.fl.). Varje leverantör behöver sin egen API-nyckel. Du kan lägga till flera leverantörer och tilldela olika sådana till specifika promptar.";
+"help_ai_settings_text" = "AI-inställningar är där du hanterar dina promptar och kategorier. Härifrån kan du skapa nya promptar, organisera dem i kategorier, importera/exportera promptar som CSV, installera tilläggspromptar och nå AI-anslutningsinställningarna.";
+"help_global_tool_permissions_text" = "Konfigurera behörigheter för enskilda AI-verktyg. För varje läsverktyg väljer du om AI:n får använda det (Aktiverat eller Inaktiverat). För varje skrivverktyg väljer du Tillåt alltid, Neka alltid eller Fråga (som återfaller till det globala behörighetsläget inställt i AI-anslutningsinställningarna).";
+"import_prompts_addon" = "Installera som tillägg (skrivskyddat)";
+"import_prompts_csv" = "Importera prompter från CSV";
+"import_prompts_editable" = "Importera som redigerbara prompter";
+"llm_custom_model" = "Anpassad…";
+"llm_openrouter_category" = "Kategori";
+"llm_openrouter_category_all" = "Alla";
+"llm_reset_usage_summary" = "Rensa ackumulerad token- och kostnadsuppföljning";
+"llm_usage_summary_format" = "Inmatning: %1$d tokens | Utmatning: %2$d tokens\nBeräknad kostnad: %3$@";
+"manage_tool_permissions_summary" = "Hantera behörighetsåsidosättningar per verktyg";
+"model_delete_confirm" = "Ta bort modellen \"%1$@\"?";
+"model_supported_badge" = "✓ Stöds";
+"move_to_category" = "Flytta till kategori…";
+"no_prompts_to_export" = "Inga användarpromptar att exportera";
+"prompts_csv_export_success" = "Exporterade %d promptar till CSV";
+"raw_llm_log_copied" = "Loggen kopierades till urklipp";
+"raw_llm_log_empty" = "Ingen råloggdata tillgänglig";
+"raw_llm_log_total" = "Totalt: in %1$@ / ut %2$@%3$@";
+"raw_log_delete_confirm" = "%d valda";
+"raw_log_delete_old" = "Radera gamla loggar…";
+"raw_log_delete_selected" = "Radera valda";
+"raw_log_history_summary" = "Visa och hantera sparade AI-konversationsloggar";
+"raw_log_retention_summary_days" = "Efter %d dagar";
+"show_also_unsupported_models" = "Visa även modeller som inte stöds";
+"tool_category_read" = "Läs";
+"tool_category_write" = "Skriv";
+"tool_option_disabled" = "Inaktiverad";
+"tool_option_enabled" = "Aktiverad";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Rapportera AI-fel";
+"bug_report_email_text" = "Välj nu den e-postapp du föredrar (t.ex. Gmail) för att skicka rapporten till utvecklarna.";
+"send_ai_bug_report_title" = "Rapportera AI-fel";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Tillägg: %@";
+"addon_prompt_notice" = "Den här prompten kommer från tilläggsmodulen \"%@\" och kan inte redigeras. Använd \"Kopiera för att anpassa\" för att skapa en redigerbar kopia.";
+"ai_available_tools" = "Tillgängliga verktyg";
+"ai_read_tools" = "Läsverktyg";
+"ai_write_tools" = "Skrivverktyg";
+"delete_category_confirm_title" = "Radera kategorin \"%@\"?";
+"delete_prompt_confirmation" = "Radera prompten \"%@\"?";
+"edit_prompt" = "Redigera prompt";
+"help_prompt_edit_text" = "Anpassade promptar låter dig skapa återanvändbara AI-instruktioner för din bibelstudium. Ange ett namn, beskrivning, mall, de sammanhang där den ska visas och valfritt en anpassad leverantör/modell. Inbyggda promptar kan inte redigeras direkt — använd \"Kopiera för att anpassa\" för att skapa din egen version.";
+"help_tool_info_text" = "AI-verktyg är specialiserade funktioner som AI:n kan anropa för att läsa dina data eller göra ändringar för din räkning. Läsverktyg (verser, kommentarer, lexikon, bokmärken) kräver aldrig tillåtelse. Skrivverktyg (skapa bokmärken, anteckningar, studieblocksposter) styrs av behörighetssystemet.";
+"prompt_name_required" = "Promptnamn krävs";
+"prompt_template_required" = "Promptmall krävs";
+"raw_llm_log_entry_api_response" = "API-svar (iteration %d)";
+"raw_llm_log_entry_assistant" = "Assistentsvar";
+"raw_llm_log_entry_empty" = "(tomt)";
+"raw_llm_log_entry_system" = "Systemprompt";
+"raw_llm_log_entry_tool_call" = "Verktygsanrop: %@";
+"raw_llm_log_entry_tool_definitions" = "Verktygsdefinitioner (%d verktyg)";
+"raw_llm_log_entry_tool_desc" = "Beskrivning: %@";
+"raw_llm_log_entry_tool_params" = "Parametrar: %@";
+"raw_llm_log_entry_tool_result" = "Verktygsresultat [%@]";
+"raw_llm_log_entry_usage" = "in: %1$@ / ut: %2$@%3$@";
+"raw_llm_log_entry_user" = "Användarmeddelande";
+"raw_llm_log_title" = "Rå LLM-logg";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Hämta och inkludera automatiskt kommentarsposter för de valda verserna, vilket sparar en AI-iteration.";
+"prompt_auto_include_documents_description" = "Inkludera automatiskt listan över installerade dokument i promptkontexten, vilket sparar en AI-iteration.";
+"prompt_copied" = "Prompt kopierad";
+"prompt_edit_before_run_description" = "Visa ett textfält för att specificera uppgiften innan prompten körs";
+"prompt_is_text_transformation_description" = "Använder en förenklad systemprompt som bevarar formatering (länkar, rubriker, fet/kursiv) vid texttransformation. Inga verktyg används. Idealisk för översättnings- och redigeringspromptar.";
+"prompt_max_iterations" = "Åsidosättning av maximala iterationer";
+"prompt_max_iterations_description" = "Åsidosätt globalt maximalt antal iterationer för denna prompt. Tom = globalt standard, 0 = obegränsat.";
+"prompt_no_document_creation_description" = "När aktiverad skapar inte AI:n ett dokument. Resultaten visas endast i aktivitetsloggen. Användbart för åtgärdspromptar (bokmärken, etiketter, studieblockoperationer).";
+"prompt_strict_context_matching_description" = "När aktiverad matchar cachen bara när all kontext (bibelversion, markerad text) är densamma. När inaktiverad matchar cachen när verserna är desamma oavsett bibelversion.";

@@ -1009,3 +1009,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "إعدادات اتصال الذكاء الاصطناعي والموجّهات";
 "prefs_features_cat" = "الميزات";
+
+/* Android shared translations */
+"ai_configure_button" = "تكوين الاتصال";
+"ai_disclaimer_warning_summary" = "المخاطر والمسؤوليات المتعلقة باستخدام الذكاء الاصطناعي";
+"ai_provider_tier_community" = "موفرون آخرون (غير مختبَرين)";
+"ai_provider_tier_recommended" = "موصى به";
+"ai_providers_category" = "الموفرون";
+"easy_setup_anthropic_desc" = "بأسعار معقولة، جودة ممتازة";
+"easy_setup_api_key_instructions" = "احصل على مفتاح API من:";
+"easy_setup_done_message" = "حدّد نصاً في الكتاب المقدس وجرّب ميزات الذكاء الاصطناعي. يمكنك إضافة المزيد من النماذج والموفرين في الإعدادات.";
+"easy_setup_done_title" = "الذكاء الاصطناعي جاهز!";
+"easy_setup_free_tier" = "المستوى المجاني";
+"easy_setup_gemini_desc" = "مستوى مجاني متاح، جودة جيدة";
+"easy_setup_openai_desc" = "معروف وموثوق";
+"easy_setup_pref_summary" = "إعداد الذكاء الاصطناعي مع موفر موصى به في بضع خطوات";
+"edit_model_title" = "تعديل نموذج";
+"show_also_unsupported_providers" = "إظهار الموفرين غير المدعومين أيضاً";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "الحد الأقصى للتكرارات قبل طلب المتابعة (0 = غير محدود)";
+"ai_document_filter_summary" = "اختر المستندات التي يمكن للذكاء الاصطناعي قراءتها";
+"ai_document_filter_summary_count" = "%d مستند مستبعد";
+"ai_document_filter_title" = "الوصول إلى المستندات";
+"ai_language_app_default" = "لغة التطبيق (%1$@)";
+"ai_language_custom" = "مخصصة…";
+"ai_language_custom_example" = "مثال: عربي، Tagalog، en";
+"ai_language_custom_hint" = "أدخل اسم اللغة أو رمزها";
+"ai_prompts_restored" = "تمت استعادة الموجّهات المخفية";
+"ai_restore_hidden_prompts" = "استعادة الموجّهات المخفية";
+"are_you_sure" = "هل أنت متأكد؟";
+"ask_model_before_run_summary" = "عرض مربع حوار اختيار النموذج قبل تنفيذ موجّه (يُتخطى عند وجود تجاوز نموذج صريح في الموجّه)";
+"auto_hide_agent_log_summary" = "إخفاء لوحة الذكاء الاصطناعي تلقائياً عند انتهاء المهمة بنجاح أو عند إلغائها. في حالة حدوث خطأ تبقى اللوحة ظاهرة.";
+"commentary_max_response_dialog_message" = "عندما يجلب الذكاء الاصطناعي التعليقات ويتجاوز إجمالي الرد حد الرموز هذا، يتيح مربع حوار الاختيار تحديد التعليقات التي تريد إرسالها للذكاء الاصطناعي.\n\n0 = بدون حد (يتم إرسال جميع التعليقات تلقائياً).";
+"commentary_max_response_dialog_title" = "تعيين الحد الأقصى لحجم الرد (رموز)";
+"commentary_max_response_value" = "~%@ رمز";
+"csv_export_failed" = "فشل تصدير CSV: %@";
+"csv_import_errors" = "اكتمل الاستيراد مع وجود أخطاء: تم إنشاء %1$d وتحديث %2$d وحدث %3$d خطأ";
+"csv_import_failed" = "فشل استيراد CSV: %@";
+"csv_import_success" = "اكتمل الاستيراد: تم إنشاء %1$d وتحديث %2$d";
+"custom_system_prompt_default" = "افتراضي";
+"delete_prompt_confirm_message" = "هل أنت متأكد أنك تريد حذف هذا الموجّه؟";
+"discard_changes_confirmation" = "تجاهل التغييرات غير المحفوظة؟";
+"doc_type_commentary" = "تعليق";
+"export_prompts_csv" = "تصدير الموجّهات بتنسيق CSV";
+"global_tool_permissions_title" = "إعدادات الأدوات الافتراضية";
+"help_ai_connection_text" = "قم بتهيئة موفري الذكاء الاصطناعي والنماذج والأذونات وخيارات الاتصال الأخرى هنا. يحتاج كل موفر إلى مفتاح API خاص به. يمكنك إضافة موفرين متعددين واختيار نموذج افتراضي.";
+"help_ai_document_filter_text" = "تحديد الأناجيل والتعليقات والوحدات الأخرى التي يمكن لوكيل الذكاء الاصطناعي قراءتها. بشكل افتراضي يرى الذكاء الاصطناعي جميع الوحدات المثبتة؛ يساعد التصفية على تقليل الضوضاء والتكلفة عندما تريد فقط مراعاة مصادر محددة.";
+"help_ai_models_text" = "إدارة النماذج لهذا الموفر. يمكنك تحديث قائمة النماذج من واجهة API الخاصة بالموفر للحصول على الإصدارات الجديدة، أو إضافة اسم نموذج يدويًا إذا لم يكن في القائمة المُحضَرة.";
+"help_ai_providers_text" = "إدارة موفري الذكاء الاصطناعي (Google Gemini وOpenAI وAnthropic وغيرهم). يحتاج كل موفر إلى مفتاح API خاص به. يمكنك إضافة موفرين متعددين وتعيين موفرين مختلفين لموجّهات محددة.";
+"help_ai_settings_text" = "إعدادات الذكاء الاصطناعي هي المكان الذي تدير فيه موجّهاتك وفئاتك. من هنا يمكنك إنشاء موجّهات جديدة وتنظيمها في فئات واستيراد/تصدير الموجّهات بصيغة CSV وتثبيت حزم موجّهات إضافية والوصول إلى إعدادات اتصال الذكاء الاصطناعي.";
+"help_global_tool_permissions_text" = "تهيئة الأذونات لأدوات الذكاء الاصطناعي الفردية. لكل أداة قراءة، اختر ما إذا كان يجوز للذكاء الاصطناعي استخدامها (ممكّنة أو معطّلة). لكل أداة كتابة، اختر السماح دائمًا أو الرفض دائمًا أو السؤال (الذي يرجع إلى وضع الأذونات العام المحدد في إعدادات اتصال الذكاء الاصطناعي).";
+"import_prompts_addon" = "تثبيت كإضافة (للقراءة فقط)";
+"import_prompts_csv" = "استيراد الموجّهات من CSV";
+"import_prompts_editable" = "استيراد كموجّهات قابلة للتعديل";
+"llm_custom_model" = "مخصص…";
+"llm_openrouter_category" = "الفئة";
+"llm_openrouter_category_all" = "الكل";
+"llm_reset_usage_summary" = "مسح تتبع الرموز والتكلفة التراكمي";
+"llm_usage_summary_format" = "الإدخال: %1$d رمز | الإخراج: %2$d رمز\nالتكلفة المقدّرة: %3$@";
+"manage_tool_permissions_summary" = "إدارة تجاوزات أذونات الأدوات الفردية";
+"model_delete_confirm" = "حذف النموذج \"%1$@\"؟";
+"model_supported_badge" = "✓ مدعوم";
+"move_to_category" = "نقل إلى فئة…";
+"no_prompts_to_export" = "لا توجد موجّهات مستخدم للتصدير";
+"prompts_csv_export_success" = "تم تصدير %d موجّه بتنسيق CSV";
+"raw_llm_log_copied" = "تم نسخ السجل إلى الحافظة";
+"raw_llm_log_empty" = "لا توجد بيانات سجل خام";
+"raw_llm_log_total" = "الإجمالي: داخل %1$@ / خارج %2$@%3$@";
+"raw_log_delete_confirm" = "%d محدد";
+"raw_log_delete_old" = "حذف السجلات القديمة…";
+"raw_log_delete_selected" = "حذف المحدد";
+"raw_log_history_summary" = "عرض وإدارة سجلات محادثات الذكاء الاصطناعي المحفوظة";
+"raw_log_retention_summary_days" = "بعد %d يوم";
+"show_also_unsupported_models" = "إظهار النماذج غير المدعومة أيضاً";
+"tool_category_read" = "قراءة";
+"tool_category_write" = "كتابة";
+"tool_option_disabled" = "معطّل";
+"tool_option_enabled" = "مفعّل";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "الإبلاغ عن خطأ في الذكاء الاصطناعي";
+"bug_report_email_text" = "تالياً، الرجاء تحديد تطبيق البريد الإلكتروني المفضل (Gmail مثلا) لإرسال التقرير لفريق التطوير.";
+"send_ai_bug_report_title" = "الإبلاغ عن خطأ في الذكاء الاصطناعي";
+
+/* Android shared translations */
+"addon_prompt_badge" = "إضافة: %@";
+"addon_prompt_notice" = "هذا الموجّه من وحدة إضافة \"%@\" ولا يمكن تعديله. استخدم \"نسخ للتخصيص\" لإنشاء نسخة قابلة للتعديل.";
+"ai_available_tools" = "الأدوات المتاحة";
+"ai_read_tools" = "أدوات القراءة";
+"ai_write_tools" = "أدوات الكتابة";
+"delete_category_confirm_title" = "حذف الفئة \"%@\"؟";
+"delete_prompt_confirmation" = "حذف الموجّه \"%@\"؟";
+"edit_prompt" = "تعديل الموجّه";
+"help_prompt_edit_text" = "تتيح لك الموجّهات المخصصة إنشاء تعليمات ذكاء اصطناعي قابلة لإعادة الاستخدام لدراستك. حدد اسمًا ووصفًا وقالبًا والسياقات التي يجب أن تظهر فيها، وبشكل اختياري موفرًا/نموذجًا مخصصًا. لا يمكن تعديل الموجّهات المدمجة مباشرةً — استخدم \"نسخ للتخصيص\" لإنشاء نسختك الخاصة.";
+"help_tool_info_text" = "أدوات الذكاء الاصطناعي هي وظائف متخصصة يمكن للذكاء الاصطناعي استدعاؤها لقراءة بياناتك أو إجراء تغييرات نيابةً عنك. أدوات القراءة (الآيات والتعليقات والقواميس والإشارات المرجعية) لا تتطلب إذنًا أبدًا. أدوات الكتابة (إنشاء الإشارات المرجعية والملاحظات وإدخالات لوحة الدراسة) تخضع لنظام الأذونات.";
+"prompt_name_required" = "اسم الموجّه مطلوب";
+"prompt_template_required" = "قالب الموجّه مطلوب";
+"raw_llm_log_entry_api_response" = "رد API (التكرار %d)";
+"raw_llm_log_entry_assistant" = "رد المساعد";
+"raw_llm_log_entry_empty" = "(فارغ)";
+"raw_llm_log_entry_system" = "موجّه النظام";
+"raw_llm_log_entry_tokens" = "~%@ رمز";
+"raw_llm_log_entry_tool_call" = "استدعاء أداة: %@";
+"raw_llm_log_entry_tool_definitions" = "تعريفات الأدوات (%d أداة)";
+"raw_llm_log_entry_tool_desc" = "الوصف: %@";
+"raw_llm_log_entry_tool_params" = "المعاملات: %@";
+"raw_llm_log_entry_tool_result" = "نتيجة الأداة [%@]";
+"raw_llm_log_entry_usage" = "داخل: %1$@ / خارج: %2$@%3$@";
+"raw_llm_log_entry_user" = "رسالة المستخدم";
+"raw_llm_log_title" = "سجل نموذج اللغة الخام";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "جلب وتضمين إدخالات التعليقات للآيات المحددة تلقائياً، مما يوفر تكراراً للذكاء الاصطناعي.";
+"prompt_auto_include_documents_description" = "تضمين قائمة المستندات المثبّتة تلقائياً في سياق الموجّه، مما يوفر تكراراً للذكاء الاصطناعي.";
+"prompt_copied" = "تم نسخ الموجّه";
+"prompt_edit_before_run_description" = "عرض حقل نص لتحديد المهمة قبل تشغيل الموجّه";
+"prompt_is_text_transformation_description" = "يستخدم موجّه نظام مبسّطاً يحافظ على التنسيق (الروابط والعناوين والغامق/المائل) مع تحويل محتوى النص. لا تُستخدم أدوات. مثالي لموجّهات الترجمة والتحرير.";
+"prompt_max_iterations" = "تجاوز الحد الأقصى للتكرارات";
+"prompt_max_iterations_description" = "تجاوز الحد الأقصى العام للتكرارات لهذا الموجّه. فارغ = الافتراضي العام، 0 = غير محدود.";
+"prompt_no_document_creation_description" = "عند التفعيل، لن ينشئ الذكاء الاصطناعي مستنداً. تُعرض النتائج في سجل النشاط فقط. مفيد للموجّهات ذات الإجراء فقط (الإشارات المرجعية والتسميات وعمليات لوحة الدراسة).";
+"prompt_strict_context_matching_description" = "عند التفعيل، تتطابق الذاكرة المؤقتة فقط عند تطابق كل السياق (إصدار الكتاب المقدس، النص المحدد). عند التعطيل، تتطابق الذاكرة المؤقتة عندما تتطابق الآيات بغض النظر عن إصدار الكتاب المقدس.";

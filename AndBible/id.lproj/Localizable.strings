@@ -1018,3 +1018,120 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Pengaturan koneksi dan prompt AI";
 "prefs_features_cat" = "Fitur";
+
+/* Android shared translations */
+"ai_configure_button" = "Konfigurasikan Koneksi";
+"ai_disclaimer_warning_summary" = "Risiko dan tanggung jawab penggunaan AI";
+"ai_provider_tier_community" = "Penyedia lain (belum diuji)";
+"ai_provider_tier_recommended" = "Direkomendasikan";
+"ai_providers_category" = "Penyedia";
+"easy_setup_anthropic_desc" = "Terjangkau, kualitas sangat baik";
+"easy_setup_api_key_instructions" = "Dapatkan kunci API Anda dari:";
+"easy_setup_done_message" = "Pilih teks dalam Alkitab dan coba fitur AI. Anda dapat menambahkan lebih banyak model dan penyedia di pengaturan.";
+"easy_setup_done_title" = "AI siap digunakan!";
+"easy_setup_free_tier" = "Paket gratis";
+"easy_setup_gemini_desc" = "Paket gratis tersedia, kualitas bagus";
+"easy_setup_openai_desc" = "Terkenal, andal";
+"easy_setup_pref_summary" = "Siapkan AI dengan penyedia yang direkomendasikan dalam beberapa langkah";
+"show_also_unsupported_providers" = "Tampilkan juga penyedia yang tidak didukung";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Iterasi maksimum sebelum meminta untuk melanjutkan (0 = tidak terbatas)";
+"ai_document_filter_summary" = "Pilih dokumen mana yang dapat dibaca oleh AI";
+"ai_document_filter_summary_count" = "%d dokumen dikecualikan";
+"ai_document_filter_title" = "Akses dokumen";
+"ai_language_app_default" = "Bahasa aplikasi (%1$@)";
+"ai_language_custom" = "Kustom…";
+"ai_language_custom_example" = "mis. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Masukkan nama atau kode bahasa";
+"ai_prompts_restored" = "Perintah yang disembunyikan telah dipulihkan";
+"ai_restore_hidden_prompts" = "Pulihkan perintah yang disembunyikan";
+"are_you_sure" = "Apakah Anda yakin?";
+"ask_model_before_run_summary" = "Tampilkan dialog pemilihan model sebelum menjalankan prompt (dilewati jika prompt memiliki penggantian model yang ditentukan)";
+"auto_hide_agent_log_summary" = "Secara otomatis sembunyikan panel AI ketika tugas selesai dengan sukses atau dibatalkan. Jika terjadi kesalahan, panel tetap terlihat.";
+"commentary_max_response_dialog_message" = "Ketika AI mengambil tafsiran dan total respons melebihi batas token ini, dialog pemilihan memungkinkan Anda memilih tafsiran mana yang akan dikirim ke AI.\n\n0 = tanpa batas (semua tafsiran dikirim secara otomatis).";
+"commentary_max_response_dialog_title" = "Tetapkan ukuran respons maksimum (token)";
+"commentary_max_response_value" = "~%@ token";
+"csv_export_failed" = "Ekspor CSV gagal: %@";
+"csv_import_errors" = "Impor selesai dengan kesalahan: %1$d dibuat, %2$d diperbarui, %3$d kesalahan";
+"csv_import_failed" = "Impor CSV gagal: %@";
+"csv_import_success" = "Impor selesai: %1$d dibuat, %2$d diperbarui";
+"delete_prompt_confirm_message" = "Apakah Anda yakin ingin menghapus perintah ini?";
+"discard_changes_confirmation" = "Buang perubahan yang belum disimpan?";
+"doc_type_commentary" = "Tafsiran";
+"export_prompts_csv" = "Ekspor prompt ke CSV";
+"global_tool_permissions_title" = "Pengaturan alat default";
+"help_ai_connection_text" = "Konfigurasikan penyedia AI, model, izin, dan opsi koneksi lainnya di sini. Setiap penyedia membutuhkan kunci API-nya sendiri. Anda dapat menambahkan beberapa penyedia dan memilih model default.";
+"help_ai_document_filter_text" = "Batasi Alkitab, tafsiran, dan modul lain yang dapat dibaca agen AI. Secara default AI melihat semua modul yang terpasang; pemfilteran membantu mengurangi gangguan dan biaya saat Anda hanya ingin mempertimbangkan sumber tertentu.";
+"help_ai_models_text" = "Kelola model untuk penyedia ini. Anda dapat memperbarui daftar model dari API penyedia untuk mendapatkan rilis terbaru, atau menambahkan nama model secara manual jika tidak ada dalam daftar yang diambil.";
+"help_ai_providers_text" = "Kelola penyedia AI (Google Gemini, OpenAI, Anthropic, dll.). Setiap penyedia membutuhkan kunci API-nya sendiri. Anda dapat menambahkan beberapa penyedia dan menetapkan yang berbeda untuk prompt tertentu.";
+"help_ai_settings_text" = "Pengaturan AI adalah tempat Anda mengelola prompt dan kategori. Dari sini Anda dapat membuat prompt baru, mengatur dalam kategori, impor/ekspor prompt sebagai CSV, memasang paket prompt tambahan, dan mengakses pengaturan koneksi AI.";
+"help_global_tool_permissions_text" = "Konfigurasikan izin untuk alat AI individual. Untuk setiap alat baca, pilih apakah AI boleh menggunakannya (Aktif atau Nonaktif). Untuk setiap alat tulis, pilih Selalu izinkan, Selalu tolak, atau Tanya (yang menggunakan mode izin global yang diatur di pengaturan Koneksi AI).";
+"import_prompts_addon" = "Instal sebagai add-on (hanya baca)";
+"import_prompts_csv" = "Impor prompt dari CSV";
+"import_prompts_editable" = "Impor sebagai prompt yang dapat diedit";
+"llm_custom_model" = "Kustom…";
+"llm_openrouter_category" = "Kategori";
+"llm_openrouter_category_all" = "Semua";
+"llm_reset_usage_summary" = "Hapus pelacakan token dan biaya kumulatif";
+"llm_usage_summary_format" = "Masukan: %1$d token | Keluaran: %2$d token\nPerkiraan biaya: %3$@";
+"manage_tool_permissions_summary" = "Kelola penggantian izin per alat";
+"model_delete_confirm" = "Hapus model \"%1$@\"?";
+"model_supported_badge" = "✓ Didukung";
+"move_to_category" = "Pindah ke kategori…";
+"no_prompts_to_export" = "Tidak ada prompt pengguna untuk diekspor";
+"prompts_csv_export_success" = "%d prompt diekspor ke CSV";
+"raw_llm_log_copied" = "Log disalin ke clipboard";
+"raw_llm_log_empty" = "Tidak ada data log mentah yang tersedia";
+"raw_llm_log_total" = "Total: masuk %1$@ / keluar %2$@%3$@";
+"raw_log_delete_confirm" = "%d dipilih";
+"raw_log_delete_old" = "Hapus log lama…";
+"raw_log_delete_selected" = "Hapus yang dipilih";
+"raw_log_history_summary" = "Lihat dan kelola log percakapan AI yang tersimpan";
+"raw_log_retention_summary_days" = "Setelah %d hari";
+"show_also_unsupported_models" = "Tampilkan juga model yang tidak didukung";
+"tool_category_read" = "Baca";
+"tool_category_write" = "Tulis";
+"tool_option_disabled" = "Dinonaktifkan";
+"tool_option_enabled" = "Diaktifkan";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Laporkan bug AI";
+"bug_report_email_text" = "Selanjutnya, silakan pilih aplikasi email pilihan Anda (misalnya Gmail) untuk mengirim laporan ke tim pengembang.";
+"send_ai_bug_report_title" = "Laporkan Bug AI";
+
+/* Android shared translations */
+"addon_prompt_notice" = "Prompt ini berasal dari modul add-on \"%@\" dan tidak dapat diedit. Gunakan \"Salin untuk dikustomisasi\" untuk membuat salinan yang dapat diedit.";
+"ai_available_tools" = "Alat yang tersedia";
+"ai_read_tools" = "Alat Baca";
+"ai_write_tools" = "Alat Tulis";
+"delete_category_confirm_title" = "Hapus kategori \"%@\"?";
+"delete_prompt_confirmation" = "Hapus prompt \"%@\"?";
+"help_prompt_edit_text" = "Prompt kustom memungkinkan Anda membuat instruksi AI yang dapat digunakan ulang untuk studi Anda. Atur nama, deskripsi, template, konteks di mana instruksi akan muncul, dan opsional penyedia/model kustom. Prompt bawaan tidak dapat diedit langsung — gunakan \"Salin untuk dikustomisasi\" untuk membuat versi Anda sendiri.";
+"help_tool_info_text" = "Alat AI adalah fungsi khusus yang dapat dipanggil AI untuk membaca data Anda atau membuat perubahan atas nama Anda. Alat baca (ayat-ayat, tafsiran, kamus, penanda buku) tidak pernah memerlukan izin. Alat tulis (membuat penanda buku, catatan, entri lembar studi) dikendalikan oleh sistem izin.";
+"prompt_name_required" = "Nama prompt diperlukan";
+"prompt_template_required" = "Template prompt diperlukan";
+"raw_llm_log_entry_api_response" = "Respons API (iterasi %d)";
+"raw_llm_log_entry_assistant" = "Respons asisten";
+"raw_llm_log_entry_empty" = "(kosong)";
+"raw_llm_log_entry_system" = "Prompt sistem";
+"raw_llm_log_entry_tokens" = "~%@ token";
+"raw_llm_log_entry_tool_call" = "Panggilan alat: %@";
+"raw_llm_log_entry_tool_definitions" = "Definisi alat (%d alat)";
+"raw_llm_log_entry_tool_desc" = "Deskripsi: %@";
+"raw_llm_log_entry_tool_params" = "Parameter: %@";
+"raw_llm_log_entry_tool_result" = "Hasil alat [%@]";
+"raw_llm_log_entry_usage" = "masuk: %1$@ / keluar: %2$@%3$@";
+"raw_llm_log_entry_user" = "Pesan pengguna";
+"raw_llm_log_title" = "Log LLM Mentah";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Secara otomatis mengambil dan menyertakan entri tafsiran untuk ayat yang dipilih, menghemat satu iterasi AI.";
+"prompt_auto_include_documents_description" = "Secara otomatis menyertakan daftar dokumen yang terinstal dalam konteks prompt, menghemat satu iterasi AI.";
+"prompt_copied" = "Prompt disalin";
+"prompt_edit_before_run_description" = "Tampilkan kolom teks untuk menentukan tugas sebelum menjalankan prompt";
+"prompt_is_text_transformation_description" = "Menggunakan prompt sistem yang disederhanakan yang mempertahankan format (tautan, judul, tebal/miring) sambil mengubah konten teks. Tidak menggunakan alat. Ideal untuk prompt terjemahan dan pengeditan.";
+"prompt_max_iterations" = "Penggantian iterasi maksimum";
+"prompt_max_iterations_description" = "Ganti iterasi maksimum global untuk prompt ini. Kosong = default global, 0 = tidak terbatas.";
+"prompt_no_document_creation_description" = "Jika diaktifkan, AI tidak akan membuat dokumen. Hasil hanya ditampilkan di log aktivitas. Berguna untuk prompt berbasis tindakan (penanda buku, label, operasi LembarStudi).";
+"prompt_strict_context_matching_description" = "Jika diaktifkan, cache hanya cocok ketika semua konteks (versi Alkitab, teks yang dipilih) sama. Jika dinonaktifkan, cache cocok ketika ayat sama terlepas dari versi Alkitab.";

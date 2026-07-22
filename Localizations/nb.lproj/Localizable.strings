@@ -1006,3 +1006,123 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "KI-tilkoblings- og promptinnstillinger";
 "prefs_features_cat" = "Funksjoner";
+
+/* Android shared translations */
+"ai_configure_button" = "Konfigurer tilkobling";
+"ai_disclaimer_warning_summary" = "Risikoer og ansvar ved bruk av KI";
+"ai_provider_tier_community" = "Andre leverandører (ikke testet)";
+"ai_provider_tier_recommended" = "Anbefalt";
+"ai_providers_category" = "Leverandører";
+"easy_setup_anthropic_desc" = "Rimelig, utmerket kvalitet";
+"easy_setup_api_key_instructions" = "Hent API-nøkkelen din fra:";
+"easy_setup_done_message" = "Velg tekst i Bibelen og prøv KI-funksjonene. Du kan legge til flere modeller og leverandører i innstillingene.";
+"easy_setup_done_title" = "KI er klar!";
+"easy_setup_free_tier" = "Gratisnivå";
+"easy_setup_gemini_desc" = "Gratisnivå tilgjengelig, god kvalitet";
+"easy_setup_openai_desc" = "Velkjent, pålitelig";
+"easy_setup_pref_summary" = "Sett opp KI med en anbefalt leverandør i noen enkle trinn";
+"edit_model_title" = "Rediger modell";
+"show_also_unsupported_providers" = "Vis også ustøttede leverandører";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maksimale iterasjoner før man spør om å fortsette (0 = ubegrenset)";
+"ai_document_filter_summary" = "Velg hvilke dokumenter KI kan lese";
+"ai_document_filter_summary_count" = "%d dokumenter ekskludert";
+"ai_document_filter_title" = "Dokumenttilgang";
+"ai_language_app_default" = "Appspråk (%1$@)";
+"ai_language_custom" = "Egendefinert…";
+"ai_language_custom_example" = "f.eks. norsk, suomi, Tagalog, en";
+"ai_language_custom_hint" = "Skriv inn språknavn eller kode";
+"ai_prompts_restored" = "Skjulte prompter gjenopprettet";
+"ai_restore_hidden_prompts" = "Gjenopprett skjulte prompter";
+"are_you_sure" = "Er du sikker?";
+"ask_model_before_run_summary" = "Vis en modellvalgsdialog før prompten kjøres (hoppes over når prompten har en eksplisitt modelloverstyring)";
+"auto_hide_agent_log_summary" = "Skjul KI-panelet automatisk når en oppgave fullføres eller avbrytes. Ved feil forblir panelet synlig.";
+"commentary_max_response_dialog_message" = "Når KI henter kommentarer og totalsvaret overskrider denne tokengrensen, lar en valgdialog deg velge hvilke kommentarer som sendes til KI.\n\n0 = ingen grense (alle kommentarer sendes automatisk).";
+"commentary_max_response_dialog_title" = "Angi maksimal svarstørrelse (tokens)";
+"csv_export_failed" = "CSV-eksport mislyktes: %@";
+"csv_import_errors" = "Import fullført med feil: %1$d opprettet, %2$d oppdatert, %3$d feil";
+"csv_import_failed" = "CSV-import mislyktes: %@";
+"csv_import_success" = "Import fullført: %1$d opprettet, %2$d oppdatert";
+"custom_system_prompt_default" = "Standard";
+"delete_prompt_confirm_message" = "Er du sikker på at du vil slette denne prompten?";
+"discard_changes_confirmation" = "Forkaste ulagrede endringer?";
+"doc_type_commentary" = "Bibelkommentarer";
+"export_prompts_csv" = "Eksporter prompter til CSV";
+"global_tool_permissions_title" = "Standard verktøyinnstillinger";
+"help_ai_connection_text" = "Konfigurer KI-leverandørene, modellene, tillatelsene og andre tilkoblingsalternativer her. Hver leverandør trenger sin egen API-nøkkel. Du kan legge til flere leverandører og velge en standardmodell.";
+"help_ai_document_filter_text" = "Begrens hvilke bibler, bibelkommentarer og andre moduler KI-agenten kan lese. Som standard ser KI-en alle installerte moduler; filtrering bidrar til å redusere støy og kostnader når du bare vil at den skal vurdere bestemte kilder.";
+"help_ai_models_text" = "Administrer modeller for denne leverandøren. Du kan oppdatere modellisten fra leverandørens API for å hente nye utgivelser, eller legge til et modellnavn manuelt hvis det ikke er i den hentede listen.";
+"help_ai_providers_text" = "Administrer KI-leverandører (Google Gemini, OpenAI, Anthropic osv.). Hver leverandør trenger sin egen API-nøkkel. Du kan legge til flere leverandører og tildele forskjellige til bestemte instruksjoner.";
+"help_ai_settings_text" = "KI-innstillinger er stedet der du administrerer instruksjonene og kategoriene dine. Herfra kan du opprette nye instruksjoner, organisere dem i kategorier, importere/eksportere instruksjoner som CSV, installere tilleggsinnstruksjonspakker og nå KI-tilkoblingsinnstillingene.";
+"help_global_tool_permissions_text" = "Konfigurer tillatelser for individuelle KI-verktøy. For hvert leseverktøy, velg om KI-en kan bruke det (Aktivert eller Deaktivert). For hvert skriveverktøy, velg Tillat alltid, Avslå alltid eller Spør (som faller tilbake til den globale tillatelsesmodusen angitt i KI-tilkoblingsinnstillinger).";
+"import_prompts_addon" = "Installer som tillegg (skrivebeskyttet)";
+"import_prompts_csv" = "Importer prompter fra CSV";
+"import_prompts_editable" = "Importer som redigerbare prompter";
+"llm_custom_model" = "Egendefinert…";
+"llm_openrouter_category" = "Kategori";
+"llm_openrouter_category_all" = "Alle";
+"llm_reset_usage_summary" = "Slett kumulativ token- og kostnadssporing";
+"llm_usage_summary_format" = "Inndata: %1$d tokens | Utdata: %2$d tokens\nEstimert kostnad: %3$@";
+"manage_tool_permissions_summary" = "Administrer tillatelsesoverstyrelser per verktøy";
+"model_delete_confirm" = "Slett modellen \"%1$@\"?";
+"model_supported_badge" = "✓ Støttet";
+"move_to_category" = "Flytt til kategori…";
+"no_prompts_to_export" = "Ingen brukerprompter å eksportere";
+"prompts_csv_export_success" = "Eksporterte %d prompter til CSV";
+"raw_llm_log_copied" = "Logg kopiert til utklippstavle";
+"raw_llm_log_empty" = "Ingen råloggdata tilgjengelig";
+"raw_llm_log_total" = "Totalt: inn %1$@ / ut %2$@%3$@";
+"raw_log_delete_confirm" = "%d valgt";
+"raw_log_delete_old" = "Slett gamle logger…";
+"raw_log_delete_selected" = "Slett valgte";
+"raw_log_history_summary" = "Vis og administrer lagrede KI-samtalelogger";
+"raw_log_retention_summary_days" = "Etter %d dager";
+"show_also_unsupported_models" = "Vis også ustøttede modeller";
+"tool_category_read" = "Les";
+"tool_category_write" = "Skriv";
+"tool_option_disabled" = "Deaktivert";
+"tool_option_enabled" = "Aktivert";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Rapporter KI-feil";
+"bug_report_email_text" = "Vennligst velg din foretrukne e-post app for å sende rapporten til utviklerteamet.";
+"send_ai_bug_report_title" = "Rapporter KI-feil";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Tillegg: %@";
+"addon_prompt_notice" = "Denne prompten er fra tilleggsmodulen \"%@\" og kan ikke redigeres. Bruk «Kopier for tilpasning» for å opprette en redigerbar kopi.";
+"ai_available_tools" = "Tilgjengelige verktøy";
+"ai_read_tools" = "Leseverktøy";
+"ai_write_tools" = "Skriveverktøy";
+"delete_category_confirm_title" = "Slette kategorien \"%@\"?";
+"delete_prompt_confirmation" = "Slett prompten \"%@\"?";
+"edit_prompt" = "Rediger prompt";
+"help_prompt_edit_text" = "Egendefinerte instruksjoner lar deg opprette gjenbrukbare KI-instruksjoner for studiet ditt. Angi navn, beskrivelse, mal, kontekstene den skal vises i, og eventuelt en egendefinert leverandør/modell. Innebygde instruksjoner kan ikke redigeres direkte — bruk \"Kopier for å tilpasse\" for å opprette din egen versjon.";
+"help_tool_info_text" = "KI-verktøy er spesialiserte funksjoner KI-en kan kalle for å lese dataene dine eller gjøre endringer på dine vegne. Leseverktøy (vers, bibelkommentarer, bibelordbok, bokmerker) krever aldri tillatelse. Skriveverktøy (opprette bokmerker, notater, studiebrett-innlegg) styres av tillatelsessystemet.";
+"prompt_name_required" = "Promptnavn er påkrevd";
+"prompt_template_required" = "Promptmal er påkrevd";
+"raw_llm_log_entry_api_response" = "API-svar (iterasjon %d)";
+"raw_llm_log_entry_assistant" = "Assistentsvar";
+"raw_llm_log_entry_empty" = "(tom)";
+"raw_llm_log_entry_system" = "Systemmelding";
+"raw_llm_log_entry_tokens" = "~%@ tegn";
+"raw_llm_log_entry_tool_call" = "Verktøykall: %@";
+"raw_llm_log_entry_tool_definitions" = "Verktøydefinisjoner (%d verktøy)";
+"raw_llm_log_entry_tool_desc" = "Beskrivelse: %@";
+"raw_llm_log_entry_tool_params" = "Parametere: %@";
+"raw_llm_log_entry_tool_result" = "Verktøyresultat [%@]";
+"raw_llm_log_entry_usage" = "inn: %1$@ / ut: %2$@%3$@";
+"raw_llm_log_entry_user" = "Brukermelding";
+"raw_llm_log_title" = "Rå KI-logg";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Hent og inkluder kommentaroppføringer for valgte vers automatisk, og spar en KI-iterasjon.";
+"prompt_auto_include_documents_description" = "Inkluder automatisk listen over installerte dokumenter i promptkonteksten, og spar en KI-iterasjon.";
+"prompt_copied" = "Prompt kopiert";
+"prompt_edit_before_run_description" = "Vis et tekstfelt for å spesifisere oppgaven før prompten kjøres";
+"prompt_is_text_transformation_description" = "Bruker en forenklet systemmelding som bevarer formatering (lenker, overskrifter, fet/kursiv) mens tekstinnholdet transformeres. Ingen verktøy brukes. Ideelt for oversettelse og redigeringsprompter.";
+"prompt_max_iterations" = "Overstyr maks iterasjoner";
+"prompt_max_iterations_description" = "Overstyr de globale maks iterasjonene for denne prompten. Tom = global standard, 0 = ubegrenset.";
+"prompt_no_document_creation_description" = "Når aktivert, vil ikke KI opprette et dokument. Resultater vises bare i aktivitetsloggen. Nyttig for handlingsbaserte prompter (bokmerker, grupper, studiebrettoperasjoner).";
+"prompt_strict_context_matching_description" = "Når aktivert, matcher cache bare når all kontekst (bibelversjon, valgt tekst) er den samme. Når deaktivert, matcher cache når vers er de samme uavhengig av bibelversjon.";

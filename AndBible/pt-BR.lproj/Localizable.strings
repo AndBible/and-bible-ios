@@ -1023,3 +1023,122 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Configurações de conexão de IA e prompt";
 "prefs_features_cat" = "Recursos";
+
+/* Android shared translations */
+"ai_configure_button" = "Configurar conexão";
+"ai_disclaimer_warning_summary" = "Riscos e responsabilidades do uso de IA";
+"ai_provider_tier_community" = "Outros provedores (não testados)";
+"ai_provider_tier_recommended" = "Recomendado";
+"ai_providers_category" = "Provedores";
+"easy_setup_anthropic_desc" = "Acessível, excelente qualidade";
+"easy_setup_api_key_instructions" = "Obtenha sua chave de API em:";
+"easy_setup_done_message" = "Selecione um texto na Bíblia e experimente os recursos de IA. Você pode adicionar mais modelos e provedores nas configurações.";
+"easy_setup_done_title" = "A IA está pronta!";
+"easy_setup_free_tier" = "Plano gratuito";
+"easy_setup_gemini_desc" = "Plano gratuito disponível, boa qualidade";
+"easy_setup_openai_desc" = "Bem conhecido, confiável";
+"easy_setup_pref_summary" = "Configure a IA com um provedor recomendado em poucos passos";
+"edit_model_title" = "Editar modelo";
+"show_also_unsupported_providers" = "Mostrar também provedores não compatíveis";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Máximo de iterações antes de perguntar para continuar (0 = ilimitado)";
+"ai_document_filter_summary" = "Escolher quais documentos a IA pode ler";
+"ai_document_filter_summary_count" = "%d documentos excluídos";
+"ai_document_filter_title" = "Acesso a documentos";
+"ai_language_app_default" = "Idioma do aplicativo (%1$@)";
+"ai_language_custom" = "Personalizado…";
+"ai_language_custom_example" = "ex.: suomi, Tagalog, pt";
+"ai_language_custom_hint" = "Insira o nome ou código do idioma";
+"ai_prompts_restored" = "Prompts ocultos restaurados";
+"ai_restore_hidden_prompts" = "Restaurar prompts ocultos";
+"are_you_sure" = "Você tem certeza?";
+"ask_model_before_run_summary" = "Mostrar um diálogo de seleção de modelo antes de executar um prompt (ignorado quando o prompt tem uma substituição de modelo explícita)";
+"auto_hide_agent_log_summary" = "Ocultar automaticamente o painel de IA quando uma tarefa for concluída com sucesso ou cancelada. Em caso de erro, o painel permanece visível.";
+"commentary_max_response_dialog_message" = "Quando a IA buscar comentários e a resposta total exceder este limite de tokens, um diálogo de seleção permite escolher quais comentários enviar à IA.\n\n0 = sem limite (todos os comentários são enviados automaticamente).";
+"commentary_max_response_dialog_title" = "Definir tamanho máximo de resposta (tokens)";
+"csv_export_failed" = "Falha na exportação do CSV: %@";
+"csv_import_errors" = "Importação concluída com erros: %1$d criados, %2$d atualizados, %3$d erros";
+"csv_import_failed" = "Falha na importação do CSV: %@";
+"csv_import_success" = "Importação concluída: %1$d criados, %2$d atualizados";
+"custom_system_prompt_default" = "Padrão";
+"delete_prompt_confirm_message" = "Tem certeza de que deseja excluir este prompt?";
+"discard_changes_confirmation" = "Descartar alterações não salvas?";
+"doc_type_commentary" = "Comentário";
+"export_prompts_csv" = "Exportar prompts para CSV";
+"global_tool_permissions_title" = "Configurações padrão de ferramentas";
+"help_ai_connection_text" = "Configure seus provedores de IA, modelos, permissões e outras opções de conexão aqui. Cada provedor precisa de sua própria chave de API. Você pode adicionar vários provedores e selecionar um modelo padrão.";
+"help_ai_document_filter_text" = "Limite quais Bíblias, comentários e outros módulos o agente de IA pode ler. Por padrão, a IA vê todos os módulos instalados; filtrar ajuda a reduzir ruído e custo quando você deseja que ela considere apenas fontes específicas.";
+"help_ai_models_text" = "Gerencie modelos para este provedor. Você pode atualizar a lista de modelos da API do provedor para obter novas versões, ou adicionar um nome de modelo manualmente se ele não estiver na lista obtida.";
+"help_ai_providers_text" = "Gerencie provedores de IA (Google Gemini, OpenAI, Anthropic, etc.). Cada provedor precisa de sua própria chave de API. Você pode adicionar vários provedores e atribuir diferentes a prompts específicos.";
+"help_ai_settings_text" = "Configurações de IA é onde você gerencia seus prompts e categorias. Aqui você pode criar novos prompts, organizá-los em categorias, importar/exportar prompts como CSV, instalar pacotes de prompts adicionais e acessar as configurações de conexão de IA.";
+"help_global_tool_permissions_text" = "Configure permissões para ferramentas de IA individuais. Para cada ferramenta de leitura, escolha se a IA pode usá-la (Ativada ou Desativada). Para cada ferramenta de escrita, escolha Sempre permitir, Sempre negar ou Perguntar (que volta ao modo de permissão global definido nas configurações de conexão de IA).";
+"import_prompts_addon" = "Instalar como complemento (somente leitura)";
+"import_prompts_csv" = "Importar prompts de CSV";
+"import_prompts_editable" = "Importar como prompts editáveis";
+"llm_custom_model" = "Personalizado…";
+"llm_openrouter_category" = "Categoria";
+"llm_openrouter_category_all" = "Todos";
+"llm_reset_usage_summary" = "Limpar rastreamento acumulado de tokens e custos";
+"llm_usage_summary_format" = "Entrada: %1$d tokens | Saída: %2$d tokens\nCusto estimado: %3$@";
+"manage_tool_permissions_summary" = "Gerenciar substituições de permissão por ferramenta";
+"model_delete_confirm" = "Excluir modelo \"%1$@\"?";
+"model_supported_badge" = "✓ Compatível";
+"move_to_category" = "Mover para categoria…";
+"no_prompts_to_export" = "Nenhum prompt de usuário para exportar";
+"prompts_csv_export_success" = "%d prompts exportados para CSV";
+"raw_llm_log_copied" = "Log copiado para a área de transferência";
+"raw_llm_log_empty" = "Nenhum dado de log bruto disponível";
+"raw_llm_log_total" = "Total: entrada %1$@ / saída %2$@%3$@";
+"raw_log_delete_confirm" = "%d selecionado(s)";
+"raw_log_delete_old" = "Excluir logs antigos…";
+"raw_log_delete_selected" = "Excluir selecionados";
+"raw_log_history_summary" = "Visualizar e gerenciar logs de conversa de IA salvos";
+"raw_log_retention_summary_days" = "Após %d dias";
+"show_also_unsupported_models" = "Mostrar também modelos não compatíveis";
+"tool_category_read" = "Leitura";
+"tool_category_write" = "Escrita";
+"tool_option_disabled" = "Desativado";
+"tool_option_enabled" = "Ativado";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Reportar bug de IA";
+"bug_report_email_text" = "Próximo, selecione seu aplicativo de e-mail preferencial (Gmail por exemplo) para enviar o relatório para a equipe de desenvolvimento.";
+"send_ai_bug_report_title" = "Reportar Bug de IA";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Complemento: %@";
+"addon_prompt_notice" = "Este prompt é do módulo complemento \"%@\" e não pode ser editado. Use \"Copiar para personalizar\" para criar uma cópia editável.";
+"ai_available_tools" = "Ferramentas disponíveis";
+"ai_read_tools" = "Ferramentas de leitura";
+"ai_write_tools" = "Ferramentas de escrita";
+"delete_category_confirm_title" = "Excluir categoria \"%@\"?";
+"delete_prompt_confirmation" = "Excluir prompt \"%@\"?";
+"edit_prompt" = "Editar prompt";
+"help_prompt_edit_text" = "Prompts personalizados permitem criar instruções de IA reutilizáveis para seu estudo. Defina um nome, descrição, modelo, os contextos onde deve aparecer e, opcionalmente, um provedor/modelo personalizado. Prompts integrados não podem ser editados diretamente — use \"Copiar para personalizar\" para criar sua própria versão.";
+"help_tool_info_text" = "Ferramentas de IA são funções especializadas que a IA pode chamar para ler seus dados ou fazer alterações em seu nome. Ferramentas de leitura (versículos, comentários, dicionários, marcadores) nunca requerem permissão. Ferramentas de escrita (criar marcadores, notas, entradas no bloco de estudo) são controladas pelo sistema de permissões.";
+"prompt_name_required" = "O nome do prompt é obrigatório";
+"prompt_template_required" = "O modelo do prompt é obrigatório";
+"raw_llm_log_entry_api_response" = "Resposta da API (iteração %d)";
+"raw_llm_log_entry_assistant" = "Resposta do assistente";
+"raw_llm_log_entry_empty" = "(vazio)";
+"raw_llm_log_entry_system" = "Prompt do sistema";
+"raw_llm_log_entry_tool_call" = "Chamada de ferramenta: %@";
+"raw_llm_log_entry_tool_definitions" = "Definições de ferramentas (%d ferramentas)";
+"raw_llm_log_entry_tool_desc" = "Descrição: %@";
+"raw_llm_log_entry_tool_params" = "Parâmetros: %@";
+"raw_llm_log_entry_tool_result" = "Resultado da ferramenta [%@]";
+"raw_llm_log_entry_usage" = "entrada: %1$@ / saída: %2$@%3$@";
+"raw_llm_log_entry_user" = "Mensagem do usuário";
+"raw_llm_log_title" = "Log bruto do LLM";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Busca e inclui automaticamente entradas de comentários para os versículos selecionados, economizando uma iteração de IA.";
+"prompt_auto_include_documents_description" = "Inclui automaticamente a lista de documentos instalados no contexto do prompt, economizando uma iteração de IA.";
+"prompt_copied" = "Prompt copiado";
+"prompt_edit_before_run_description" = "Exibir um campo de texto para especificar a tarefa antes de executar o prompt";
+"prompt_is_text_transformation_description" = "Usa um prompt de sistema simplificado que preserva a formatação (links, títulos, negrito/itálico) enquanto transforma o conteúdo do texto. Nenhuma ferramenta é usada. Ideal para prompts de tradução e edição.";
+"prompt_max_iterations" = "Substituição de máximo de iterações";
+"prompt_max_iterations_description" = "Substitua o máximo de iterações global para este prompt. Vazio = padrão global, 0 = ilimitado.";
+"prompt_no_document_creation_description" = "Quando ativado, a IA não criará um documento. Os resultados são exibidos apenas no registro de atividades. Útil para prompts de ação apenas (marcadores, etiquetas, operações do StudyPad).";
+"prompt_strict_context_matching_description" = "Quando ativado, o cache é correspondido apenas quando todo o contexto (versão da Bíblia, texto selecionado) é o mesmo. Quando desativado, o cache é correspondido quando os versículos são os mesmos, independentemente da versão da Bíblia.";

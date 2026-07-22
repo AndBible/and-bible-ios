@@ -1021,3 +1021,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Nastavitve AI povezave in pozivov";
 "prefs_features_cat" = "Funkcije";
+
+/* Android shared translations */
+"ai_configure_button" = "Konfiguriraj povezavo";
+"ai_disclaimer_warning_summary" = "Tveganja in odgovornosti pri uporabi AI";
+"ai_provider_tier_community" = "Drugi ponudniki (ni testirano)";
+"ai_provider_tier_recommended" = "Priporočeno";
+"ai_providers_category" = "Ponudniki";
+"easy_setup_anthropic_desc" = "Cenovno dostopen, odlična kakovost";
+"easy_setup_api_key_instructions" = "Pridobi svoj API ključ na:";
+"easy_setup_done_message" = "Izberi besedilo v Bibliji in preizkusi funkcije AI. V nastavitvah lahko dodaš več modelov in ponudnikov.";
+"easy_setup_done_title" = "AI je pripravljen!";
+"easy_setup_free_tier" = "Brezplačni nivo";
+"easy_setup_gemini_desc" = "Na voljo brezplačni nivo, dobra kakovost";
+"easy_setup_openai_desc" = "Znan, zanesljiv";
+"easy_setup_pref_summary" = "Nastavi AI s priporočenim ponudnikom v nekaj korakih";
+"edit_model_title" = "Uredi model";
+"show_also_unsupported_providers" = "Prikaži tudi nepodprte ponudnike";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Največje število ponovitev, preden vpraša za nadaljevanje (0 = neomejeno)";
+"ai_document_filter_summary" = "Izberite, katere dokumente lahko AI prebere";
+"ai_document_filter_summary_count" = "%d dokumentov izključenih";
+"ai_document_filter_title" = "Dostop do dokumentov";
+"ai_language_app_default" = "Jezik aplikacije (%1$@)";
+"ai_language_custom" = "Po meri…";
+"ai_language_custom_example" = "npr. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Vnesite ime ali kodo jezika";
+"ai_prompts_restored" = "Skriti pozivi obnovljeni";
+"ai_restore_hidden_prompts" = "Obnovi skrite pozive";
+"are_you_sure" = "Si prepričan?";
+"ask_model_before_run_summary" = "Prikaži pogovorno okno za izbiro modela pred izvajanjem poziva (preskočeno, ko ima poziv izrecno preglasitev modela)";
+"auto_hide_agent_log_summary" = "Samodejno skrij ploščo UI, ko se opravilo uspešno zaključi ali se prekliče. Ob napaki plošča ostane vidna.";
+"commentary_max_response_dialog_message" = "Ko AI pridobi komentarje in skupni odgovor preseže to omejitev žetonov, pogovorno okno za izbiro omogoča, da izberete, katere komentarje pošljete AI.\n\n0 = brez omejitve (vsi komentarji se pošljejo samodejno).";
+"commentary_max_response_dialog_title" = "Nastavi največjo velikost odgovora (žetoni)";
+"commentary_max_response_value" = "~%@ žetonov";
+"csv_export_failed" = "CSV izvoz ni uspel: %@";
+"csv_import_errors" = "Uvoz zaključen z napakami: %1$d ustvarjenih, %2$d posodobljenih, %3$d napak";
+"csv_import_failed" = "Uvoz CSV ni uspel: %@";
+"csv_import_success" = "Uvoz zaključen: %1$d ustvarjenih, %2$d posodobljenih";
+"custom_system_prompt_default" = "Privzeto";
+"delete_prompt_confirm_message" = "Ali ste prepričani, da želite izbrisati ta poziv?";
+"discard_changes_confirmation" = "Želite zavrniti nespremenjene spremembe?";
+"doc_type_commentary" = "Komentar";
+"export_prompts_csv" = "Izvozi pozive v CSV";
+"global_tool_permissions_title" = "Privzete nastavitve orodij";
+"help_ai_connection_text" = "Tukaj konfigurirajte svoje ponudnike UI, modele, dovoljenja in druge možnosti povezave. Vsak ponudnik potrebuje lasten ključ API. Dodate lahko več ponudnikov in izberete privzeti model.";
+"help_ai_document_filter_text" = "Omejite, katere Biblije, komentarje in druge module lahko bere UI. Privzeto UI vidi vse nameščene module; filtriranje pomaga zmanjšati hrup in stroške, kadar želite, da upošteva le določene vire.";
+"help_ai_models_text" = "Upravljajte modele za tega ponudnika. Osvežite lahko seznam modelov iz API-ja ponudnika, da pridobite nove različice, ali pa ručno dodate ime modela, če ga ni na prenesenem seznamu.";
+"help_ai_providers_text" = "Upravljajte ponudnike UI (Google Gemini, OpenAI, Anthropic itd.). Vsak ponudnik potrebuje lasten ključ API. Dodate lahko več ponudnikov in različnim pozivom dodelite različne ponudnike.";
+"help_ai_settings_text" = "Nastavitve UI je mesto, kjer upravljate svoje pozive in kategorije. Od tu lahko ustvarjate nove pozive, jih razvrščate v kategorije, uvažate/izvažate pozive kot CSV, nameščate dodatne pakete pozivov in dostopate do nastavitev povezave UI.";
+"help_global_tool_permissions_text" = "Konfigurirajte dovoljenja za posamezna orodja UI. Za vsako orodje za branje izberite, ali ga UI sme uporabljati (Omogočeno ali Onemogočeno). Za vsako orodje za pisanje izberite Vedno dovoli, Vedno zavrni ali Vprašaj (kar privzeto uporablja globalni način dovoljenj, nastavljen v nastavitvah povezave UI).";
+"import_prompts_addon" = "Namesti kot dodatek (samo za branje)";
+"import_prompts_csv" = "Uvozi pozive iz CSV";
+"import_prompts_editable" = "Uvozi kot urejevalne pozive";
+"llm_custom_model" = "Po meri…";
+"llm_openrouter_category" = "Kategorija";
+"llm_openrouter_category_all" = "Vsi";
+"llm_reset_usage_summary" = "Počisti skupno sledenje žetonov in stroškov";
+"llm_usage_summary_format" = "Vhod: %1$d žetonov | Izhod: %2$d žetonov\nOcenjeni strošek: %3$@";
+"manage_tool_permissions_summary" = "Upravljaj preglasitve dovoljenj za posamezno orodje";
+"model_delete_confirm" = "Izbrišem model \"%1$@\"?";
+"model_supported_badge" = "✓ Podprto";
+"move_to_category" = "Premakni v kategorijo…";
+"no_prompts_to_export" = "Ni uporabniških pozivov za izvoz";
+"prompts_csv_export_success" = "Izvoženih %d pozivov v CSV";
+"raw_llm_log_copied" = "Zapis je bil kopiran na odložišče";
+"raw_llm_log_empty" = "Izvirni podatki iz dnevnika niso na voljo";
+"raw_llm_log_total" = "Skupaj: vhod %1$@ / izhod %2$@%3$@";
+"raw_log_delete_confirm" = "%d izbrano";
+"raw_log_delete_old" = "Izbriši stare dnevnike…";
+"raw_log_delete_selected" = "Izbriši izbrano";
+"raw_log_history_summary" = "Ogled in upravljanje shranjenih dnevnikov pogovorov z AI";
+"raw_log_retention_summary_days" = "Po %d dneh";
+"show_also_unsupported_models" = "Prikaži tudi nepodprte modele";
+"tool_category_read" = "Branje";
+"tool_category_write" = "Pisanje";
+"tool_option_disabled" = "Onemogočeno";
+"tool_option_enabled" = "Omogočeno";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Poročaj o napaki AI";
+"bug_report_email_text" = "Nato izberite želeno e-poštno aplikacijo (na primer Gmail) da pošljete poročilo ekipi razvijalcev.";
+"send_ai_bug_report_title" = "Poročaj o napaki AI";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Dodatek: %@";
+"addon_prompt_notice" = "Ta poziv je iz dodatnega modula \"%@\" in ga ni mogoče urejati. Uporabi »Kopiraj za prilagoditev« za ustvarjanje urejevalne kopije.";
+"ai_available_tools" = "Razpoložljiva orodja";
+"ai_read_tools" = "Orodja za branje";
+"ai_write_tools" = "Orodja za pisanje";
+"delete_category_confirm_title" = "Izbrišem kategorijo »%@«?";
+"delete_prompt_confirmation" = "Izbrišem poziv »%@«?";
+"edit_prompt" = "Uredi poziv";
+"help_prompt_edit_text" = "Po meri narejeni pozivi vam omogočajo ustvarjanje večkrat uporabnih navodil za umetno inteligenco pri vašem študiju. Nastavite ime, opis, predlogo, kontekste, v katerih naj se prikaže, in po želji pošiljatelja/model. Vgrajenih pozivov ni mogoče neposredno urejati — uporabite \"Kopiraj za prilagoditev\", da ustvarite svojo različico.";
+"help_tool_info_text" = "Orodja UI so specializirane funkcije, ki jih UI lahko kliče za branje vaših podatkov ali izvajanje sprememb v vašem imenu. Orodja za branje (vrstice, komentarji, slovarji, zaznamki) nikoli ne zahtevajo dovoljenja. Orodja za pisanje (ustvarjanje zaznamkov, opomb, vnosov v beležko) so nadzorovana s sistemom dovoljenj.";
+"prompt_name_required" = "Ime poziva je obvezno";
+"prompt_template_required" = "Predloga poziva je obvezna";
+"raw_llm_log_entry_api_response" = "Odgovor API (ponovitev %d)";
+"raw_llm_log_entry_assistant" = "Odgovor asistenta";
+"raw_llm_log_entry_empty" = "(prazno)";
+"raw_llm_log_entry_system" = "Sistemski poziv";
+"raw_llm_log_entry_tokens" = "~%@ žetonov";
+"raw_llm_log_entry_tool_call" = "Klic orodja: %@";
+"raw_llm_log_entry_tool_definitions" = "Definicije orodij (%d orodij)";
+"raw_llm_log_entry_tool_desc" = "Opis: %@";
+"raw_llm_log_entry_tool_params" = "Parametri: %@";
+"raw_llm_log_entry_tool_result" = "Rezultat orodja [%@]";
+"raw_llm_log_entry_usage" = "vhod: %1$@ / izhod: %2$@%3$@";
+"raw_llm_log_entry_user" = "Sporočilo uporabnika";
+"raw_llm_log_title" = "Izvirni dnevnik LLM";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Samodejno pridobi in vključi vnose komentarjev za izbrane vrstice ter s tem prihrani eno iteracijo AI.";
+"prompt_auto_include_documents_description" = "Samodejno vključi seznam nameščenih dokumentov v kontekst poziva in s tem prihrani eno iteracijo AI.";
+"prompt_copied" = "Poziv kopiran";
+"prompt_edit_before_run_description" = "Pred zagonom poziva prikaži besedilno polje za določitev naloge";
+"prompt_is_text_transformation_description" = "Uporablja poenostavljen sistemski poziv, ki ohranja oblikovanje (povezave, naslove, krepko/ležeče) hkrati s preoblikovanjem vsebine besedila. Orodja niso uporabljena. Idealno za prevode in pozive za urejanje.";
+"prompt_max_iterations" = "Preglasitev največjega števila ponovitev";
+"prompt_max_iterations_description" = "Preglasi globalno največje število ponovitev za ta poziv. Prazno = globalna privzeta vrednost, 0 = neomejeno.";
+"prompt_no_document_creation_description" = "Kadar je omogočeno, AI ne bo ustvaril dokumenta. Rezultati so prikazani samo v dnevniku dejavnosti. Uporabno za pozive, usmerjene le v dejanja (zaznamki, oznake, beležke).";
+"prompt_strict_context_matching_description" = "Ko je omogočeno, se predpomnilnik ujema samo, ko je ves kontekst (različica Biblije, izbrano besedilo) enak. Ko je onemogočeno, se predpomnilnik ujema, ko so vrstice enake, ne glede na različico Biblije.";

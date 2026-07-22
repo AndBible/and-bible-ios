@@ -11,22 +11,27 @@ extension AndBibleUITests {
      *
      * Package tests own the full Application Preferences row catalog. This UI smoke keeps the live
      * route contract: About, Label Settings, and AI Settings remain reachable from the reader menu;
-     * AI setup is blocked by Android's explicit disclaimer acceptance; Application Preferences
-     * opens the same AI screen; and Global text options opens root-scoped Text Display settings.
+     * AI Settings reproduces Android's setup-to-connection hierarchy and explicit disclaimer gate;
+     * Application Preferences opens the same AI screen; and Global text options opens root-scoped
+     * Text Display settings.
      *
      * - Side effects:
      *   - launches the app with deterministic in-memory persistence
      *   - opens and dismisses About from the reader menu
      *   - opens and dismisses Label Manager from the reader menu's Label Settings action
-     *   - opens AI Settings directly from the reader drawer and cancels both protected entry points
-     *   - explicitly accepts once, then verifies Quick Setup resumes and both actions bypass the gate
+     *   - opens AI Settings directly from the reader drawer and pushes Connection settings
+     *   - verifies Android's zero-provider row visibility and cancels both protected entry points
+     *   - explicitly accepts once, then verifies Quick Setup resumes at provider selection
+     *   - verifies persisted acceptance bypasses the gate for Quick Setup and Add Provider
      *   - pushes Settings from the reader action surface
      *   - opens the shared AI Settings destination from Application Preferences
      *   - activates the production Global text options row
      * - Failure modes:
      *   - fails if About no longer opens from the reader menu or cannot return to the reader shell
      *   - fails if Label Settings cannot reach `LabelManagerView` readiness exports
-     *   - fails if AI Settings is absent from the drawer or cancellation counts as acceptance
+     *   - fails if AI Settings skips Android's centered setup or separate Connection settings screen
+     *   - fails if zero-provider Connection settings exposes configured-only rows
+     *   - fails if cancellation counts as disclaimer acceptance
      *   - fails if explicit acceptance does not resume and persist for the protected action
      *   - fails if disclaimer copy renders localization identifiers instead of Android's text
      *   - fails if Settings still presents as a sheet instead of a reader destination
@@ -69,6 +74,23 @@ extension AndBibleUITests {
         tapReaderAction("readerOpenAISettingsAction", in: app, timeout: 20)
         XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 20).exists)
         waitForReaderRenderedContentState(containing: "readerDestination=aiSettings", in: app, timeout: 10)
+        XCTAssertTrue(
+            app.staticTexts["Configure AI"].waitForExistence(timeout: 10),
+            "Expected Android's centered Configure AI state before any provider exists."
+        )
+        XCTAssertTrue(requireElement("aiConfigureConnectionButton", in: app, timeout: 10).exists)
+        XCTAssertFalse(unresolvedElement("aiQuickSetupButton", in: app).exists)
+        XCTAssertFalse(unresolvedElement("aiAddProviderLink", in: app).exists)
+
+        tapElementReliably(requireElement("aiConfigureConnectionButton", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiQuickSetupButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiProvidersLink", in: app, timeout: 10).exists)
+        XCTAssertFalse(
+            unresolvedElement("aiModelsLink", in: app).exists,
+            "Android hides Models, Behavior, Advanced, and Usage until a provider exists."
+        )
+
         tapElementReliably(requireElement("aiQuickSetupButton", in: app, timeout: 10), timeout: 10)
         XCTAssertTrue(requireElement("aiDisclaimerScreen", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("aiDisclaimerAcceptButton", in: app, timeout: 10).exists)
@@ -80,16 +102,28 @@ extension AndBibleUITests {
             "Expected Android's localized disclaimer point instead of a raw resource key."
         )
         XCTAssertFalse(app.staticTexts["ai_disclaimer_point1"].exists)
+        XCTAssertFalse(
+            unresolvedElement("aiQuickSetupButton", in: app).isHittable,
+            "Android's modal disclaimer must block the underlying Quick Setup row."
+        )
+        XCTAssertFalse(
+            app.navigationBars.buttons.element(boundBy: 0).isEnabled,
+            "Android's modal disclaimer must block the underlying navigation toolbar."
+        )
         tapElementReliably(requireElement("aiDisclaimerCancelButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
 
+        tapElementReliably(requireElement("aiProvidersLink", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(requireElement("aiProvidersScreen", in: app, timeout: 10).exists)
         tapElementReliably(requireElement("aiAddProviderLink", in: app, timeout: 10), timeout: 10)
         XCTAssertTrue(
             requireElement("aiDisclaimerScreen", in: app, timeout: 10).exists,
             "Add Provider must use Android's same explicit disclaimer gate."
         )
         tapElementReliably(requireElement("aiDisclaimerCancelButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiProvidersScreen", in: app, timeout: 10).exists)
+        tapElementReliably(app.navigationBars.buttons.element(boundBy: 0), timeout: 10)
+        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
 
         tapElementReliably(requireElement("aiQuickSetupButton", in: app, timeout: 10), timeout: 10)
         XCTAssertTrue(
@@ -107,28 +141,38 @@ extension AndBibleUITests {
         )
         tapElementReliably(disclaimerAcceptButton, timeout: 10)
         XCTAssertTrue(
-            requireElement("aiQuickSetupSaveButton", in: app, timeout: 10).exists,
-            "Explicit acceptance must resume the exact Quick Setup action."
+            requireElement("aiQuickSetupProvider_GEMINI", in: app, timeout: 10).exists,
+            "Explicit acceptance must resume Android's Quick Setup provider chooser."
         )
+        tapElementReliably(requireElement("aiQuickSetupProvider_GEMINI", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(requireElement("aiQuickSetupCredentialScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiQuickSetupSaveButton", in: app, timeout: 10).exists)
         tapElementReliably(requireElement("aiQuickSetupCancelButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
 
         tapElementReliably(requireElement("aiQuickSetupButton", in: app, timeout: 10), timeout: 10)
         XCTAssertTrue(
-            requireElement("aiQuickSetupSaveButton", in: app, timeout: 10).exists,
+            requireElement("aiQuickSetupProvider_GEMINI", in: app, timeout: 10).exists,
             "Persisted acceptance must bypass the disclaimer on later protected actions."
         )
         XCTAssertFalse(unresolvedElement("aiDisclaimerScreen", in: app).exists)
         tapElementReliably(requireElement("aiQuickSetupCancelButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
 
+        tapElementReliably(requireElement("aiProvidersLink", in: app, timeout: 10), timeout: 10)
         tapElementReliably(requireElement("aiAddProviderLink", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(requireElement("aiProviderTypeSelectionScreen", in: app, timeout: 10).exists)
+        XCTAssertFalse(unresolvedElement("aiDisclaimerScreen", in: app).exists)
+        tapElementReliably(requireElement("aiProviderType_GEMINI", in: app, timeout: 10), timeout: 10)
         XCTAssertTrue(
             requireElement("aiProviderSaveButton", in: app, timeout: 10).exists,
             "Persisted acceptance must resume Add Provider without another disclaimer."
         )
-        XCTAssertFalse(unresolvedElement("aiDisclaimerScreen", in: app).exists)
-        tapElementReliably(requireElement("aiProviderCloseButton", in: app, timeout: 10), timeout: 10)
+        tapElementReliably(requireElement("aiProviderCancelButton", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(requireElement("aiProvidersScreen", in: app, timeout: 10).exists)
+        tapElementReliably(app.navigationBars.buttons.element(boundBy: 0), timeout: 10)
+        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
+        tapElementReliably(app.navigationBars.buttons.element(boundBy: 0), timeout: 10)
         XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 10).exists)
 
         let aiSettingsBackButton = app.navigationBars.buttons.element(boundBy: 0)

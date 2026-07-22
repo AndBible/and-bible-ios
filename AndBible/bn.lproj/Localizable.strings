@@ -1025,3 +1025,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "AI সংযোগ ও প্রম্পট সেটিংস";
 "prefs_features_cat" = "বৈশিষ্ট্য";
+
+/* Android shared translations */
+"ai_configure_button" = "সংযোগ কনফিগার করুন";
+"ai_disclaimer_warning_summary" = "AI ব্যবহারের ঝুঁকি ও দায়িত্ব";
+"ai_provider_tier_community" = "অন্যান্য প্রদানকারী (পরীক্ষিত নয়)";
+"ai_provider_tier_recommended" = "প্রস্তাবিত";
+"ai_providers_category" = "প্রদানকারী";
+"easy_setup_anthropic_desc" = "সাশ্রয়ী, চমৎকার মান";
+"easy_setup_api_key_instructions" = "এখান থেকে API কী নিন:";
+"easy_setup_done_message" = "বাইবেলে টেক্সট নির্বাচন করুন এবং AI বৈশিষ্ট্য ব্যবহার করে দেখুন। আপনি সেটিংসে আরও মডেল ও প্রদানকারী যোগ করতে পারেন।";
+"easy_setup_done_title" = "AI প্রস্তুত!";
+"easy_setup_free_tier" = "বিনামূল্যে স্তর";
+"easy_setup_gemini_desc" = "বিনামূল্যে স্তর পাওয়া যায়, ভালো মান";
+"easy_setup_openai_desc" = "সুপরিচিত, নির্ভরযোগ্য";
+"easy_setup_pref_summary" = "কয়েক ধাপে একটি প্রস্তাবিত প্রদানকারীর সাথে AI সেটআপ করুন";
+"edit_model_title" = "মডেল সম্পাদনা করুন";
+"show_also_unsupported_providers" = "অসমর্থিত প্রদানকারীও দেখান";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "চালিয়ে যেতে জিজ্ঞাসার আগে সর্বোচ্চ পুনরাবৃত্তি (০ = সীমাহীন)";
+"ai_document_filter_summary" = "AI কোন নথি পড়তে পারবে তা বেছে নিন";
+"ai_document_filter_summary_count" = "%d টি নথি বাদ দেওয়া";
+"ai_document_filter_title" = "নথির প্রবেশাধিকার";
+"ai_language_app_default" = "অ্যাপের ভাষা (%1$@)";
+"ai_language_custom" = "কাস্টম…";
+"ai_language_custom_example" = "যেমন suomi, Tagalog, en";
+"ai_language_custom_hint" = "ভাষার নাম বা কোড লিখুন";
+"ai_prompts_restored" = "লুকানো প্রম্পট পুনরুদ্ধার হয়েছে";
+"ai_restore_hidden_prompts" = "লুকানো প্রম্পট পুনরুদ্ধার করুন";
+"are_you_sure" = "আপনি কি নিশ্চিত?";
+"ask_model_before_run_summary" = "একটি প্রম্পট কার্যকর করার আগে মডেল নির্বাচন ডায়ালগ দেখান (প্রম্পটে স্পষ্ট মডেল ওভাররাইড থাকলে এড়ানো হবে)";
+"auto_hide_agent_log_summary" = "কোনো কাজ সফলভাবে শেষ হলে বা বাতিল হলে AI প্যানেল স্বয়ংক্রিয়ভাবে লুকান। ত্রুটি ঘটলে প্যানেলটি দৃশ্যমান থাকবে।";
+"commentary_max_response_dialog_message" = "AI ভাষ্য আনলে এবং মোট প্রতিক্রিয়া এই টোকেন সীমা ছাড়িয়ে গেলে, একটি নির্বাচন ডায়ালগ আপনাকে AI-এ কোন ভাষ্য পাঠাবেন তা বেছে নিতে দেয়।\n\n০ = কোনো সীমা নেই (সব ভাষ্য স্বয়ংক্রিয়ভাবে পাঠানো হয়)।";
+"commentary_max_response_dialog_title" = "সর্বোচ্চ প্রতিক্রিয়ার আকার সেট করুন (টোকেন)";
+"commentary_max_response_value" = "~%@ টোকেন";
+"csv_export_failed" = "CSV রপ্তানি ব্যর্থ হয়েছে: %@";
+"csv_import_errors" = "ত্রুটিসহ আমদানি সম্পন্ন: %1$d তৈরি, %2$d আপডেট, %3$d ত্রুটি";
+"csv_import_failed" = "CSV আমদানি ব্যর্থ হয়েছে: %@";
+"csv_import_success" = "আমদানি সম্পন্ন: %1$d তৈরি, %2$d আপডেট";
+"custom_system_prompt_default" = "ডিফল্ট";
+"delete_prompt_confirm_message" = "আপনি কি এই প্রম্পটটি মুছতে চান?";
+"discard_changes_confirmation" = "সংরক্ষণ না করা পরিবর্তন বাতিল করবেন?";
+"doc_type_commentary" = "ব্যাক্ষা";
+"export_prompts_csv" = "প্রম্পট CSV-তে রপ্তানি করুন";
+"global_tool_permissions_title" = "ডিফল্ট টুল সেটিংস";
+"help_ai_connection_text" = "এখানে আপনার AI প্রদানকারী, মডেল, অনুমতি এবং অন্যান্য সংযোগ বিকল্পগুলি কনফিগার করুন। প্রতিটি প্রদানকারীর নিজস্ব API কী প্রয়োজন। আপনি একাধিক প্রদানকারী যোগ করতে এবং একটি ডিফল্ট মডেল নির্বাচন করতে পারবেন।";
+"help_ai_document_filter_text" = "AI এজেন্ট কোন বাইবেল, ব্যাক্ষা এবং অন্যান্য মডিউল পড়তে পারবে তা সীমাবদ্ধ করুন। ডিফল্টরূপে AI সমস্ত ইনস্টল করা মডিউল দেখতে পায়; ফিল্টারিং শব্দের পরিমাণ ও খরচ কমাতে সাহায্য করে যখন আপনি শুধুমাত্র নির্দিষ্ট উৎস বিবেচনা করতে চান।";
+"help_ai_models_text" = "এই প্রদানকারীর জন্য মডেলগুলি পরিচালনা করুন। নতুন রিলিজ নিতে আপনি প্রদানকারীর API থেকে মডেল তালিকা রিফ্রেশ করতে পারেন, অথবা যদি এটি প্রাপ্ত তালিকায় না থাকে তবে ম্যানুয়ালি একটি মডেলের নাম যোগ করতে পারেন।";
+"help_ai_providers_text" = "AI প্রদানকারীগুলি পরিচালনা করুন (Google Gemini, OpenAI, Anthropic, ইত্যাদি)। প্রতিটি প্রদানকারীর নিজস্ব API কী প্রয়োজন। আপনি একাধিক প্রদানকারী যোগ করতে এবং নির্দিষ্ট প্রম্পটে বিভিন্ন প্রদানকারী নির্ধারণ করতে পারবেন।";
+"help_ai_settings_text" = "AI সেটিংস হল যেখানে আপনি আপনার প্রম্পট এবং বিভাগগুলি পরিচালনা করেন। এখান থেকে আপনি নতুন প্রম্পট তৈরি করতে, সেগুলিকে বিভাগে সংগঠিত করতে, প্রম্পটগুলি CSV হিসাবে আমদানি/রপ্তানি করতে, অ্যাড-অন প্রম্পট প্যাক ইনস্টল করতে এবং AI সংযোগ সেটিংসে পৌঁছাতে পারবেন।";
+"help_global_tool_permissions_text" = "পৃথক AI টুলগুলির জন্য অনুমতি কনফিগার করুন। প্রতিটি রিড টুলের জন্য, AI এটি ব্যবহার করতে পারবে কিনা তা বেছে নিন (সক্রিয় বা নিষ্ক্রিয়)। প্রতিটি রাইট টুলের জন্য, সর্বদা অনুমতি দিন, সর্বদা অস্বীকার করুন, বা জিজ্ঞেস করুন (যা AI সংযোগ সেটিংসে নির্ধারিত বৈশ্বিক অনুমতি মোডে ফিরে যায়) বেছে নিন।";
+"import_prompts_addon" = "অ্যাড-অন হিসেবে ইনস্টল করুন (শুধু পড়া)";
+"import_prompts_csv" = "CSV থেকে প্রম্পট আমদানি করুন";
+"import_prompts_editable" = "সম্পাদনযোগ্য প্রম্পট হিসেবে আমদানি করুন";
+"llm_custom_model" = "কাস্টম…";
+"llm_openrouter_category" = "বিভাগ";
+"llm_openrouter_category_all" = "সব";
+"llm_reset_usage_summary" = "সঞ্চিত টোকেন ও খরচ ট্র্যাকিং সাফ করুন";
+"llm_usage_summary_format" = "ইনপুট: %1$d টোকেন | আউটপুট: %2$d টোকেন\nআনুমানিক খরচ: %3$@";
+"manage_tool_permissions_summary" = "প্রতি-টুল অনুমতি ওভাররাইড পরিচালনা করুন";
+"model_delete_confirm" = "মডেল \"%1$@\" মুছবেন?";
+"model_supported_badge" = "✓ সমর্থিত";
+"move_to_category" = "বিভাগে সরান…";
+"no_prompts_to_export" = "রপ্তানির জন্য কোনো ব্যবহারকারী প্রম্পট নেই";
+"prompts_csv_export_success" = "%d প্রম্পট CSV-তে রপ্তানি হয়েছে";
+"raw_llm_log_copied" = "লগ ক্লিপবোর্ডে কপি হয়েছে";
+"raw_llm_log_empty" = "কোনো অপরিশোধিত লগ ডেটা পাওয়া যায়নি";
+"raw_llm_log_total" = "মোট: ইনপুট %1$@ / আউটপুট %2$@%3$@";
+"raw_log_delete_confirm" = "%d টি নির্বাচিত";
+"raw_log_delete_old" = "পুরানো লগ মুছুন…";
+"raw_log_delete_selected" = "নির্বাচিত মুছুন";
+"raw_log_history_summary" = "সংরক্ষিত AI কথোপকথন লগ দেখুন ও পরিচালনা করুন";
+"raw_log_retention_summary_days" = "%d দিন পরে";
+"show_also_unsupported_models" = "অসমর্থিত মডেলও দেখান";
+"tool_category_read" = "পড়া";
+"tool_category_write" = "লেখা";
+"tool_option_disabled" = "অক্ষম";
+"tool_option_enabled" = "সক্ষম";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "AI বাগ রিপোর্ট করুন";
+"bug_report_email_text" = "এরপর, ডেভেলপার দলের কাছে রিপোর্ট পাঠাতে অনুগ্রহ করে আপনার পছন্দের ইমেল অ্যাপ্লিকেশন (উদাহরণস্বরূপ Gmail) নির্বাচন করুন।";
+"send_ai_bug_report_title" = "AI বাগ রিপোর্ট করুন";
+
+/* Android shared translations */
+"addon_prompt_badge" = "অ্যাড-অন: %@";
+"addon_prompt_notice" = "এই প্রম্পটটি অ্যাড-অন মডিউল \"%@\" থেকে এবং সম্পাদনা করা যাবে না। সম্পাদনযোগ্য কপি তৈরি করতে \"কাস্টমাইজ করতে কপি করুন\" ব্যবহার করুন।";
+"ai_available_tools" = "উপলব্ধ টুল";
+"ai_read_tools" = "পড়ার টুল";
+"ai_write_tools" = "লেখার টুল";
+"delete_category_confirm_title" = "বিভাগ \"%@\" মুছবেন?";
+"delete_prompt_confirmation" = "প্রম্পট \"%@\" মুছবেন?";
+"edit_prompt" = "প্রম্পট সম্পাদনা করুন";
+"help_prompt_edit_text" = "কাস্টম প্রম্পটগুলি আপনাকে আপনার অধ্যয়নের জন্য পুনরায় ব্যবহারযোগ্য AI নির্দেশনা তৈরি করতে দেয়। একটি নাম, বিবরণ, টেমপ্লেট, যে প্রসঙ্গে এটি প্রদর্শিত হবে এবং ঐচ্ছিকভাবে একটি কাস্টম প্রদানকারী/মডেল সেট করুন। বিল্ট-ইন প্রম্পটগুলি সরাসরি সম্পাদনা করা যায় না — আপনার নিজস্ব সংস্করণ তৈরি করতে \"কাস্টমাইজ করতে কপি করুন\" ব্যবহার করুন।";
+"help_tool_info_text" = "AI টুলগুলি বিশেষায়িত ফাংশন যা AI আপনার পক্ষে আপনার ডেটা পড়তে বা পরিবর্তন করতে কল করতে পারে। রিড টুলগুলি (পদ্গুলি, ব্যাক্ষা, অবিধান, বুকমার্ক) কখনও অনুমতির প্রয়োজন হয় না। রাইট টুলগুলি (বুকমার্ক, নোট, স্টাডি প্যাড এন্ট্রি তৈরি করা) অনুমতি সিস্টেম দ্বারা নিয়ন্ত্রিত।";
+"prompt_name_required" = "প্রম্পটের নাম প্রয়োজন";
+"prompt_template_required" = "প্রম্পট টেমপ্লেট প্রয়োজন";
+"raw_llm_log_entry_api_response" = "API প্রতিক্রিয়া (পুনরাবৃত্তি %d)";
+"raw_llm_log_entry_assistant" = "সহকারীর প্রতিক্রিয়া";
+"raw_llm_log_entry_empty" = "(খালি)";
+"raw_llm_log_entry_system" = "সিস্টেম প্রম্পট";
+"raw_llm_log_entry_tokens" = "~%@ টোকেন";
+"raw_llm_log_entry_tool_call" = "টুল কল: %@";
+"raw_llm_log_entry_tool_definitions" = "টুল সংজ্ঞা (%d টুল)";
+"raw_llm_log_entry_tool_desc" = "বিবরণ: %@";
+"raw_llm_log_entry_tool_params" = "প্যারামিটার: %@";
+"raw_llm_log_entry_tool_result" = "টুল ফলাফল [%@]";
+"raw_llm_log_entry_usage" = "ইনপুট: %1$@ / আউটপুট: %2$@%3$@";
+"raw_llm_log_entry_user" = "ব্যবহারকারীর বার্তা";
+"raw_llm_log_title" = "অপরিশোধিত LLM লগ";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "নির্বাচিত পদের জন্য ভাষ্যের এন্ট্রি স্বয়ংক্রিয়ভাবে আনুন ও অন্তর্ভুক্ত করুন, একটি AI পুনরাবৃত্তি বাঁচান।";
+"prompt_auto_include_documents_description" = "ইনস্টল করা নথিপত্রের তালিকা স্বয়ংক্রিয়ভাবে প্রম্পট প্রসঙ্গে অন্তর্ভুক্ত করুন, একটি AI পুনরাবৃত্তি বাঁচান।";
+"prompt_copied" = "প্রম্পট কপি হয়েছে";
+"prompt_edit_before_run_description" = "প্রম্পট চালানোর আগে কাজ নির্দিষ্ট করার জন্য একটি টেক্সট ফিল্ড দেখান";
+"prompt_is_text_transformation_description" = "একটি সরলীকৃত সিস্টেম প্রম্পট ব্যবহার করে যা টেক্সট বিষয়বস্তু রূপান্তর করার সময় ফরম্যাটিং (লিঙ্ক, শিরোনাম, বোল্ড/ইটালিক) সংরক্ষণ করে। কোনো টুল ব্যবহার করা হয় না। অনুবাদ ও সম্পাদনা প্রম্পটের জন্য আদর্শ।";
+"prompt_max_iterations" = "সর্বোচ্চ পুনরাবৃত্তি ওভাররাইড";
+"prompt_max_iterations_description" = "এই প্রম্পটের জন্য বৈশ্বিক সর্বোচ্চ পুনরাবৃত্তি ওভাররাইড করুন। খালি = বৈশ্বিক ডিফল্ট, ০ = সীমাহীন।";
+"prompt_no_document_creation_description" = "সক্ষম হলে, AI কোনো নথি তৈরি করবে না। ফলাফল শুধুমাত্র কার্যক্রম লগে দেখানো হবে। কেবল-অ্যাকশন প্রম্পটের জন্য (বুকমার্ক, লেবেল, স্টাডিপ্যাড অপারেশন) উপযোগী।";
+"prompt_strict_context_matching_description" = "সক্ষম হলে, সমস্ত প্রসঙ্গ (বাইবেল সংস্করণ, নির্বাচিত টেক্সট) একই হলে ক্যাশ মেলে। অক্ষম হলে, বাইবেল সংস্করণ নির্বিশেষে পদ একই হলে ক্যাশ মেলে।";

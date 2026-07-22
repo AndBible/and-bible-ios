@@ -432,6 +432,21 @@ public final class AISettingsStore {
     }
 
     /**
+     Deletes the selected device-local raw logs and saves once.
+
+     - Parameter ids: Stable log identities selected in Android's contextual action mode.
+     - Side effects: Deletes matching local-only rows from the bound model context.
+     - Throws: SwiftData fetch or save errors.
+     - Important: Unknown identities are ignored, matching Android's ID-list delete operation.
+     */
+    public func deleteRawLogs(ids: Set<UUID>) throws {
+        guard !ids.isEmpty else { return }
+        let records = try rawLogs().filter { ids.contains($0.id) }
+        records.forEach(modelContext.delete)
+        try saveSynchronizedChanges()
+    }
+
+    /**
      Commits pending AI model changes with Android-compatible mutation metadata.
 
      Raw-log-only mutations pass through the same atomic boundary but produce no `AI_SETTINGS`
