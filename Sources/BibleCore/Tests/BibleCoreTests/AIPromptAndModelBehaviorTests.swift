@@ -336,11 +336,13 @@ final class AIPromptAndModelBehaviorTests: XCTestCase {
     }
 
     /**
-     Verifies configured-model deletion clears prompt, default, override, and usage references.
+     Verifies configured-model deletion clears formal references but preserves usage history.
 
-     Failure means a settings edit could leave synced rows pointing at a deleted model.
+     Android retains `LlmUsageRecord` through model deletion because its model identity is a logical
+     reference rather than a foreign key. Failure means iOS either leaves formal dependents invalid
+     or destroys synchronized historical usage that Android retains.
      */
-    func testDeletingConfiguredModelClearsEveryDependentReference() throws {
+    func testDeletingConfiguredModelClearsFormalReferencesAndPreservesUsageHistory() throws {
         let container = try makeAIContainer()
         let store = AISettingsStore(modelContext: ModelContext(container))
         let provider = LLMProviderConfig(provider: .openAI, displayName: "OpenAI")
@@ -371,7 +373,8 @@ final class AIPromptAndModelBehaviorTests: XCTestCase {
         XCTAssertNil(prompt.configuredModelId)
         XCTAssertNil(settings.defaultModelId)
         XCTAssertNil(try store.builtInOverride(id: builtInID)?.configuredModelId)
-        XCTAssertTrue(try store.usageRecords().isEmpty)
+        let retainedUsage = try XCTUnwrap(store.usageRecords().first)
+        XCTAssertEqual(retainedUsage.configuredModelId, model.id)
     }
 
     /**

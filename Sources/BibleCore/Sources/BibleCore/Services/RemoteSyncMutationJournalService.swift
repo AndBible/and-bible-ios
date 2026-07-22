@@ -64,7 +64,7 @@ private struct RemoteSyncPreparedMutation {
  Records Android-compatible `LogEntry` rows when local stores persist user mutations.
 
  Android installs Room triggers on every syncable table, so pending changes exist before transport
- begins. iOS projects the same five category graphs at each database-store save boundary, compares
+ begins. iOS projects the same category graphs at each database-store save boundary, compares
  them with the last accepted generation, and writes deterministic local log entries in the same
  transaction as the graph/settings mutation. Upload acceptance can then merge a newer in-flight
  journal entry instead of replacing it with the generation that finished transport.
@@ -95,16 +95,28 @@ final class RemoteSyncMutationJournalService {
 
     private let nowProvider: () -> Int64
     private let readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService
+    private let aiSettingsSnapshotService: RemoteSyncAISettingsSnapshotService
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    /** Creates a mutation journal with an exact clock and reading-plan definition source. */
+    /**
+     Creates a mutation journal with exact category snapshot dependencies.
+
+     - Parameters:
+       - nowProvider: Android-compatible logical timestamp source.
+       - readingPlanSnapshotService: Reading-plan projector bound to custom definition storage.
+       - aiSettingsSnapshotService: AI projector bound to the device-local credential reader.
+     - Side Effects: none until a category projection is requested.
+     - Failure Modes: Construction cannot fail; strict projectors preserve their own failures.
+     */
     init(
         nowProvider: @escaping () -> Int64 = { AndroidTimestamp.currentMilliseconds() },
-        readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService()
+        readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService(),
+        aiSettingsSnapshotService: RemoteSyncAISettingsSnapshotService = RemoteSyncAISettingsSnapshotService()
     ) {
         self.nowProvider = nowProvider
         self.readingPlanSnapshotService = readingPlanSnapshotService
+        self.aiSettingsSnapshotService = aiSettingsSnapshotService
         encoder.outputFormatting = [.sortedKeys]
     }
 
@@ -118,6 +130,7 @@ final class RemoteSyncMutationJournalService {
      - Parameters:
        - category: Remote-sync category mutated by the database store.
        - modelContext: Context containing the already-staged graph mutation.
+       - aiSettingsSnapshotService: AI projector bound to the caller's credential reader.
      - Side Effects:
        - processes pending SwiftData changes so strict snapshot fetches exclude staged deletions
        - commits graph and journal together, or directly saves graph-only test schemas
@@ -125,7 +138,8 @@ final class RemoteSyncMutationJournalService {
      */
     static func savePendingGraphChanges(
         for category: RemoteSyncCategory,
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        aiSettingsSnapshotService: RemoteSyncAISettingsSnapshotService = RemoteSyncAISettingsSnapshotService()
     ) throws {
         guard modelContext.container.schema.entitiesByName["Setting"] != nil else {
             try modelContext.save()
@@ -134,7 +148,9 @@ final class RemoteSyncMutationJournalService {
 
         let settingsStore = SettingsStore(modelContext: modelContext)
         modelContext.processPendingChanges()
-        let journal = RemoteSyncMutationJournalService()
+        let journal = RemoteSyncMutationJournalService(
+            aiSettingsSnapshotService: aiSettingsSnapshotService
+        )
         let stagedDeletedIdentities = try journal.stagedDeletedIdentities(
             for: category,
             modelContext: modelContext,
@@ -350,6 +366,69 @@ final class RemoteSyncMutationJournalService {
     }
 
     /**
+     Removes every pending mutation marker for a category without decoding abandoned payloads.
+
+     Full remote restore and explicit reset replace or abandon the complete accepted generation, so
+     no prior local marker remains meaningful. Raw prefix removal also lets reset recover from a
+     malformed marker that strict synchronization would otherwise reject.
+
+     - Parameters:
+       - category: Category whose pending mutation generation is being abandoned.
+       - settingsStore: Store containing category-scoped marker rows.
+     - Side Effects: Removes every settings row under the category marker prefix.
+     - Failure modes: None; settings removal is staged in the caller's transaction.
+     */
+    func clearPendingMutations(
+        for category: RemoteSyncCategory,
+        settingsStore: SettingsStore
+    ) {
+        for entry in settingsStore.entries(withPrefix: markerPrefix(for: category)) {
+            settingsStore.remove(entry.key)
+        }
+    }
+
+    /**
+     Clears only pending mutations represented by an accepted full-backup snapshot.
+
+     Initial upload can suspend after capturing its immutable archive. A marker is accepted only when
+     its exact fingerprint matches both that archive and the current graph; later edits and deletions
+     therefore survive as the next sparse generation.
+
+     - Parameters:
+       - acceptedFingerprints: Exact row fingerprints carried by the accepted initial backup.
+       - category: Category whose initial generation was accepted.
+       - modelContext: Current graph context, or the settings context for progress.
+       - settingsStore: Store containing pending mutation markers.
+     - Side Effects: Strictly reads current category state and removes only fully accepted markers.
+     - Throws: Rethrows strict projection or marker decoding failures before caller commit.
+     */
+    func clearPendingMutationsAcceptedByBaseline(
+        _ acceptedFingerprints: [String: String],
+        for category: RemoteSyncCategory,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws {
+        let currentFingerprints = try projection(
+            for: category,
+            modelContext: category == .progress ? nil : modelContext,
+            settingsStore: settingsStore,
+            stagedDeletedIdentities: []
+        ).currentFingerprints
+        let markers = try pendingMutations(for: category, settingsStore: settingsStore)
+        let logPrefix = RemoteSyncLogEntryStore(settingsStore: settingsStore).prefix(for: category)
+
+        for (key, marker) in markers {
+            guard marker.stateFingerprint == acceptedFingerprints[key],
+                  currentFingerprints[key] == acceptedFingerprints[key] else {
+                continue
+            }
+            settingsStore.remove(
+                markerKey(forLogKey: key, category: category, logPrefix: logPrefix)
+            )
+        }
+    }
+
+    /**
      Resolves the mutation-time log row for one exact outbound row generation.
 
      - Parameters:
@@ -558,6 +637,33 @@ final class RemoteSyncMutationJournalService {
                 acceptedRows: accepted?.rowsByKey ?? [:],
                 suppressedKeys: snapshot.suppressedKeys
             )
+
+        case .aiSettings:
+            guard let modelContext else {
+                throw SettingsStoreAtomicBatchError.modelContextMismatch
+            }
+            let snapshot = try aiSettingsSnapshotService.snapshotCurrentStateStrict(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            let current = try aiSettingsSnapshotService.acceptedBaseline(from: snapshot)
+            let accepted = try aiSettingsSnapshotService.storedAcceptedBaseline(
+                settingsStore: settingsStore
+            )
+            return excludingStagedDeletions(
+                from: RemoteSyncMutationProjection(
+                    currentFingerprints: snapshot.fingerprintsByKey,
+                    currentRowsByKey: Dictionary(uniqueKeysWithValues: current.rowIdentities.map {
+                        ($0.key, Self.identity(from: $0))
+                    }),
+                    acceptedFingerprints: accepted?.fingerprintsByKey ?? [:],
+                    acceptedRowsByKey: Dictionary(uniqueKeysWithValues: (accepted?.rowIdentities ?? []).map {
+                        ($0.key, Self.identity(from: $0))
+                    }),
+                    suppressedKeys: []
+                ),
+                stagedDeletedIdentities: stagedDeletedIdentities
+            )
         }
     }
 
@@ -743,6 +849,28 @@ final class RemoteSyncMutationJournalService {
 
         case .progress:
             break
+
+        case .aiSettings:
+            for model in deletedModels {
+                switch model {
+                case let row as LLMProviderConfig:
+                    append("LlmProviderConfig", row.id)
+                case let row as LLMConfiguredModel:
+                    append("LlmConfiguredModel", row.id)
+                case let row as AgentPrompt:
+                    append("AgentPrompt", row.id)
+                case let row as GlobalAISettings:
+                    append("GlobalAiSettings", row.id)
+                case let row as LLMUsageRecord:
+                    append("LlmUsageRecord", row.id)
+                case let row as PromptCategory:
+                    append("PromptCategory", row.id)
+                case let row as BuiltInPromptOverride:
+                    append("BuiltinPromptOverride", row.id)
+                default:
+                    continue
+                }
+            }
         }
 
         return identities
@@ -913,6 +1041,17 @@ final class RemoteSyncMutationJournalService {
 
     private static func identity(
         from value: RemoteSyncProgressAcceptedRowIdentity
+    ) -> RemoteSyncMutationRowIdentity {
+        RemoteSyncMutationRowIdentity(
+            tableName: value.tableName,
+            entityID1: value.entityID1,
+            entityID2: value.entityID2
+        )
+    }
+
+    /** Adapts one accepted AI settings identity into the shared journal projection. */
+    private static func identity(
+        from value: RemoteSyncAISettingsAcceptedRowIdentity
     ) -> RemoteSyncMutationRowIdentity {
         RemoteSyncMutationRowIdentity(
             tableName: value.tableName,

@@ -1467,19 +1467,7 @@ struct AndBibleApp: App {
      */
     @MainActor
     private func handleRemoteSyncError(_ error: Error, for category: RemoteSyncCategory) {
-        switch error {
-        case WebDAVClientError.invalidURL:
-            remoteSyncErrorMessage = String(localized: "invalid_url_message")
-        case RemoteSyncPatchDiscoveryError.incompatiblePatchVersion:
-            remoteSyncErrorMessage = [
-                String(localized: "sync_cant_fetch"),
-                String(localized: "sync_update_app"),
-            ]
-            .joined(separator: " ")
-        default:
-            let localizedMessage = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-            remoteSyncErrorMessage = localizedMessage.isEmpty ? String(localized: "sync_error") : localizedMessage
-        }
+        remoteSyncErrorMessage = RemoteSyncFailurePresentation(error: error).localizedMessage
     }
 
     /**

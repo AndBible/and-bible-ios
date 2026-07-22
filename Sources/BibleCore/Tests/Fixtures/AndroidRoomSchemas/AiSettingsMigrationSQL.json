@@ -1,0 +1,110 @@
+{
+  "1": [
+    "ALTER TABLE `AgentPrompt` ADD COLUMN `editBeforeRun` INTEGER NOT NULL DEFAULT 0"
+  ],
+  "10": [
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `aiLanguage` TEXT DEFAULT NULL"
+  ],
+  "11": [
+    "ALTER TABLE `AgentPrompt` ADD COLUMN `autoIncludeDocuments` INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE `AgentPrompt` ADD COLUMN `autoIncludeCommentaries` INTEGER NOT NULL DEFAULT 0"
+  ],
+  "12": [
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `askModelBeforeRun` INTEGER NOT NULL DEFAULT 0"
+  ],
+  "13": [
+    "ALTER TABLE `AgentPrompt` ADD COLUMN `bibleOnly` INTEGER NOT NULL DEFAULT 0"
+  ],
+  "14": [
+    "ALTER TABLE `AgentPrompt` ADD COLUMN `isTextTransformation` INTEGER NOT NULL DEFAULT 0"
+  ],
+  "15": [
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `aiDisclaimerAccepted` INTEGER NOT NULL DEFAULT 0"
+  ],
+  "16": [
+    "CREATE TABLE IF NOT EXISTS `PromptCategory` ( `id` BLOB NOT NULL PRIMARY KEY, `name` TEXT NOT NULL, `orderNumber` INTEGER NOT NULL DEFAULT 0 )",
+    "ALTER TABLE `AgentPrompt` ADD COLUMN `categoryId` BLOB DEFAULT NULL",
+    "CREATE INDEX IF NOT EXISTS `index_AgentPrompt_categoryId` ON `AgentPrompt` (`categoryId`)"
+  ],
+  "17": [
+    "ALTER TABLE `PromptCategory` ADD COLUMN `hidden` INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `hiddenBuiltInCategories` TEXT NOT NULL DEFAULT ''"
+  ],
+  "18": [
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `customAgentSystemPrompt` TEXT DEFAULT NULL",
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `customTextTransformationSystemPrompt` TEXT DEFAULT NULL"
+  ],
+  "19": [
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `favoritePrompts` TEXT NOT NULL DEFAULT ''"
+  ],
+  "2": [
+    "ALTER TABLE `AgentPrompt` ADD COLUMN `noDocumentCreation` INTEGER NOT NULL DEFAULT 0"
+  ],
+  "20": [
+    "CREATE TABLE IF NOT EXISTS `LlmRawLogRecord` ( `id` BLOB NOT NULL PRIMARY KEY, `promptId` BLOB DEFAULT NULL, `promptName` TEXT NOT NULL DEFAULT '', `promptDescription` TEXT DEFAULT NULL, `configuredModelId` BLOB DEFAULT NULL, `modelName` TEXT NOT NULL DEFAULT '', `providerType` TEXT NOT NULL DEFAULT '', `timestamp` INTEGER NOT NULL DEFAULT 0, `totalInputTokens` INTEGER NOT NULL DEFAULT 0, `totalOutputTokens` INTEGER NOT NULL DEFAULT 0, `estimatedCostUsd` REAL NOT NULL DEFAULT 0.0, `logData` BLOB NOT NULL, `iterationCount` INTEGER NOT NULL DEFAULT 0, `wasError` INTEGER NOT NULL DEFAULT 0 )",
+    "CREATE INDEX IF NOT EXISTS `index_LlmRawLogRecord_timestamp` ON `LlmRawLogRecord` (`timestamp`)",
+    "CREATE INDEX IF NOT EXISTS `index_LlmRawLogRecord_promptId` ON `LlmRawLogRecord` (`promptId`)",
+    "CREATE INDEX IF NOT EXISTS `index_LlmRawLogRecord_configuredModelId` ON `LlmRawLogRecord` (`configuredModelId`)",
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `rawLogRetentionDays` INTEGER DEFAULT 30"
+  ],
+  "21": [
+    "CREATE TABLE IF NOT EXISTS `BuiltinPromptOverride` ( `id` BLOB NOT NULL PRIMARY KEY, `configuredModelId` BLOB DEFAULT NULL, FOREIGN KEY(`configuredModelId`) REFERENCES `LlmConfiguredModel`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+    "CREATE INDEX IF NOT EXISTS `index_BuiltinPromptOverride_configuredModelId` ON `BuiltinPromptOverride` (`configuredModelId`)"
+  ],
+  "22": [
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `autoHideAgentLogOnCompletion` INTEGER NOT NULL DEFAULT 0"
+  ],
+  "3": [
+    "CREATE TABLE IF NOT EXISTS `GlobalAiSettings` ( `id` BLOB NOT NULL PRIMARY KEY, `agentPermissionMode` TEXT DEFAULT NULL, `permanentlyAllowedTools` TEXT DEFAULT NULL, `permanentlyDeniedTools` TEXT DEFAULT NULL, `aiExcludedDocuments` TEXT NOT NULL, `commentaryMaxResponseTokens` INTEGER NOT NULL DEFAULT 0 )",
+    "CREATE TABLE IF NOT EXISTS `LlmUsageRecord` ( `id` BLOB NOT NULL PRIMARY KEY, `providerConfigId` BLOB NOT NULL, `deviceId` TEXT NOT NULL, `inputTokens` INTEGER NOT NULL DEFAULT 0, `outputTokens` INTEGER NOT NULL DEFAULT 0, `cacheCreationTokens` INTEGER NOT NULL DEFAULT 0, `cacheReadTokens` INTEGER NOT NULL DEFAULT 0, `estimatedCostUsd` REAL NOT NULL DEFAULT 0.0, FOREIGN KEY(`providerConfigId`) REFERENCES `LlmProviderConfig`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+    "CREATE INDEX IF NOT EXISTS `index_LlmUsageRecord_providerConfigId` ON `LlmUsageRecord` (`providerConfigId`)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS `index_LlmUsageRecord_providerConfigId_deviceId` ON `LlmUsageRecord` (`providerConfigId`, `deviceId`)",
+    "ALTER TABLE `LlmProviderConfig` ADD COLUMN `customInputPrice` REAL NOT NULL DEFAULT 0.0",
+    "ALTER TABLE `LlmProviderConfig` ADD COLUMN `customOutputPrice` REAL NOT NULL DEFAULT 0.0"
+  ],
+  "4": [
+    "CREATE TABLE IF NOT EXISTS `GlobalAiSettings_new` ( `id` BLOB NOT NULL PRIMARY KEY, `agentPermissionMode` TEXT DEFAULT NULL, `permanentlyAllowedTools` TEXT DEFAULT NULL, `permanentlyDeniedTools` TEXT DEFAULT NULL, `aiExcludedDocuments` TEXT NOT NULL, `commentaryMaxResponseTokens` INTEGER NOT NULL DEFAULT 4000 )",
+    "INSERT INTO `GlobalAiSettings_new` (`id`, `agentPermissionMode`, `permanentlyAllowedTools`, `permanentlyDeniedTools`, `aiExcludedDocuments`, `commentaryMaxResponseTokens`) SELECT `id`, `agentPermissionMode`, `permanentlyAllowedTools`, `permanentlyDeniedTools`, `aiExcludedDocuments`, CASE WHEN `commentaryMaxResponseTokens` = 0 THEN 4000 ELSE `commentaryMaxResponseTokens` END FROM `GlobalAiSettings`",
+    "DROP TABLE `GlobalAiSettings`",
+    "ALTER TABLE `GlobalAiSettings_new` RENAME TO `GlobalAiSettings`"
+  ],
+  "5": [
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `hiddenBuiltInPrompts` TEXT NOT NULL DEFAULT ''"
+  ],
+  "6": [
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `maxIterations` INTEGER NOT NULL DEFAULT 10",
+    "ALTER TABLE `AgentPrompt` ADD COLUMN `maxIterations` INTEGER DEFAULT NULL"
+  ],
+  "7": [
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `commentaryDeselected` TEXT NOT NULL DEFAULT ''"
+  ],
+  "8": [
+    "CREATE TABLE IF NOT EXISTS `LlmConfiguredModel` ( `id` BLOB NOT NULL PRIMARY KEY, `providerConfigId` BLOB NOT NULL, `modelId` TEXT NOT NULL, `orderNumber` INTEGER NOT NULL DEFAULT 0, `inputPricePerMillion` REAL NOT NULL DEFAULT 0.0, `outputPricePerMillion` REAL NOT NULL DEFAULT 0.0, `cacheCreationPricePerMillion` REAL NOT NULL DEFAULT 0.0, `cacheReadPricePerMillion` REAL NOT NULL DEFAULT 0.0, FOREIGN KEY(`providerConfigId`) REFERENCES `LlmProviderConfig`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+    "CREATE INDEX IF NOT EXISTS `index_LlmConfiguredModel_providerConfigId` ON `LlmConfiguredModel` (`providerConfigId`)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS `index_LlmConfiguredModel_providerConfigId_modelId` ON `LlmConfiguredModel` (`providerConfigId`, `modelId`)",
+    "CREATE TABLE IF NOT EXISTS `LlmProviderConfig_new` ( `id` BLOB NOT NULL PRIMARY KEY, `providerType` TEXT NOT NULL, `displayName` TEXT NOT NULL, `endpoint` TEXT DEFAULT NULL, `apiFormat` TEXT DEFAULT NULL, `orderNumber` INTEGER NOT NULL DEFAULT 0 )",
+    "INSERT INTO `LlmProviderConfig_new` (`id`, `providerType`, `displayName`, `endpoint`, `apiFormat`, `orderNumber`) SELECT `id`, `providerType`, `displayName`, `endpoint`, `apiFormat`, `orderNumber` FROM `LlmProviderConfig`",
+    "DROP TABLE `LlmProviderConfig`",
+    "ALTER TABLE `LlmProviderConfig_new` RENAME TO `LlmProviderConfig`",
+    "CREATE INDEX IF NOT EXISTS `index_LlmProviderConfig_orderNumber` ON `LlmProviderConfig` (`orderNumber`)",
+    "CREATE TABLE IF NOT EXISTS `AgentPrompt_new` ( `id` BLOB NOT NULL PRIMARY KEY, `name` TEXT NOT NULL, `description` TEXT DEFAULT NULL, `promptTemplate` TEXT NOT NULL, `showIn` TEXT NOT NULL, `orderNumber` INTEGER NOT NULL DEFAULT 0, `createdAt` INTEGER NOT NULL DEFAULT 0, `strictContextMatching` INTEGER NOT NULL DEFAULT 1, `permissionMode` TEXT DEFAULT NULL, `allowedTools` TEXT DEFAULT NULL, `deniedTools` TEXT DEFAULT NULL, `configuredModelId` BLOB DEFAULT NULL, `editBeforeRun` INTEGER NOT NULL DEFAULT 0, `noDocumentCreation` INTEGER NOT NULL DEFAULT 0, `maxIterations` INTEGER DEFAULT NULL, FOREIGN KEY(`configuredModelId`) REFERENCES `LlmConfiguredModel`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+    "INSERT INTO `AgentPrompt_new` (`id`, `name`, `description`, `promptTemplate`, `showIn`, `orderNumber`, `createdAt`, `strictContextMatching`, `permissionMode`, `allowedTools`, `deniedTools`, `configuredModelId`, `editBeforeRun`, `noDocumentCreation`, `maxIterations`) SELECT `id`, `name`, `description`, `promptTemplate`, `showIn`, `orderNumber`, `createdAt`, `strictContextMatching`, `permissionMode`, `allowedTools`, `deniedTools`, NULL, `editBeforeRun`, `noDocumentCreation`, `maxIterations` FROM `AgentPrompt`",
+    "DROP TABLE `AgentPrompt`",
+    "ALTER TABLE `AgentPrompt_new` RENAME TO `AgentPrompt`",
+    "CREATE INDEX IF NOT EXISTS `index_AgentPrompt_orderNumber` ON `AgentPrompt` (`orderNumber`)",
+    "CREATE INDEX IF NOT EXISTS `index_AgentPrompt_createdAt` ON `AgentPrompt` (`createdAt`)",
+    "CREATE INDEX IF NOT EXISTS `index_AgentPrompt_configuredModelId` ON `AgentPrompt` (`configuredModelId`)",
+    "CREATE TABLE IF NOT EXISTS `LlmUsageRecord_new` ( `id` BLOB NOT NULL PRIMARY KEY, `configuredModelId` BLOB NOT NULL, `deviceId` TEXT NOT NULL, `inputTokens` INTEGER NOT NULL DEFAULT 0, `outputTokens` INTEGER NOT NULL DEFAULT 0, `cacheCreationTokens` INTEGER NOT NULL DEFAULT 0, `cacheReadTokens` INTEGER NOT NULL DEFAULT 0, `estimatedCostUsd` REAL NOT NULL DEFAULT 0.0 )",
+    "DROP TABLE `LlmUsageRecord`",
+    "ALTER TABLE `LlmUsageRecord_new` RENAME TO `LlmUsageRecord`",
+    "CREATE INDEX IF NOT EXISTS `index_LlmUsageRecord_configuredModelId` ON `LlmUsageRecord` (`configuredModelId`)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS `index_LlmUsageRecord_configuredModelId_deviceId` ON `LlmUsageRecord` (`configuredModelId`, `deviceId`)",
+    "ALTER TABLE `GlobalAiSettings` ADD COLUMN `defaultModelId` BLOB DEFAULT NULL"
+  ],
+  "9": [
+    "CREATE TABLE IF NOT EXISTS `GlobalAiSettings_new` ( `id` BLOB NOT NULL PRIMARY KEY, `agentPermissionMode` TEXT DEFAULT NULL, `permanentlyAllowedTools` TEXT DEFAULT NULL, `permanentlyDeniedTools` TEXT DEFAULT NULL, `aiExcludedDocuments` TEXT NOT NULL, `commentaryMaxResponseTokens` INTEGER NOT NULL DEFAULT 15000, `hiddenBuiltInPrompts` TEXT NOT NULL, `maxIterations` INTEGER NOT NULL DEFAULT 10, `commentaryDeselected` TEXT NOT NULL, `defaultModelId` BLOB DEFAULT NULL )",
+    "INSERT INTO `GlobalAiSettings_new` (`id`, `agentPermissionMode`, `permanentlyAllowedTools`, `permanentlyDeniedTools`, `aiExcludedDocuments`, `commentaryMaxResponseTokens`, `hiddenBuiltInPrompts`, `maxIterations`, `commentaryDeselected`, `defaultModelId`) SELECT `id`, `agentPermissionMode`, `permanentlyAllowedTools`, `permanentlyDeniedTools`, `aiExcludedDocuments`, CASE WHEN `commentaryMaxResponseTokens` = 4000 THEN 15000 ELSE `commentaryMaxResponseTokens` END, `hiddenBuiltInPrompts`, `maxIterations`, `commentaryDeselected`, `defaultModelId` FROM `GlobalAiSettings`",
+    "DROP TABLE `GlobalAiSettings`",
+    "ALTER TABLE `GlobalAiSettings_new` RENAME TO `GlobalAiSettings`"
+  ]
+}

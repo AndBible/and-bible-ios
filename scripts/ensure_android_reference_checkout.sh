@@ -58,10 +58,13 @@ fi
 
 mkdir -p "$(dirname -- "${android_root}")"
 
-clone_args=(--depth 1)
 if [[ -n "${ANDBIBLE_ANDROID_REF:-}" ]]; then
-  clone_args+=(--branch "${ANDBIBLE_ANDROID_REF}")
+  echo "Creating Android reference checkout at ${ANDBIBLE_ANDROID_REF}: ${android_root}"
+  git init --quiet "${android_root}"
+  git -C "${android_root}" remote add origin "${android_repo_url}"
+  git -C "${android_root}" fetch --depth 1 "${android_repo_url}" "${ANDBIBLE_ANDROID_REF}"
+  git -C "${android_root}" checkout --detach --quiet FETCH_HEAD
+else
+  echo "Cloning Android reference checkout into ${android_root}"
+  git clone --depth 1 "${android_repo_url}" "${android_root}"
 fi
-
-echo "Cloning Android reference checkout into ${android_root}"
-git clone "${clone_args[@]}" "${android_repo_url}" "${android_root}"

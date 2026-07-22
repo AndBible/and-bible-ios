@@ -23,6 +23,9 @@ public enum RemoteSyncInitialBackupRestoreReport: Sendable, Equatable {
     /// Successful restore report for the My Documents sync category.
     case myDocuments(RemoteSyncMyDocumentRestoreReport)
 
+    /// Successful restore report for the AI Settings sync category.
+    case aiSettings(RemoteSyncAISettingsRestoreReport)
+
     /// Successful restore report for the Progress sync category.
     case progress(AndroidDatabaseBackupProgressReport)
 }
@@ -40,6 +43,8 @@ through one generic SQLite importer.
  - `RemoteSyncReadingPlanRestoreService` restores staged Android `readingplans.sqlite3` backups
  - `RemoteSyncWorkspaceRestoreService` restores staged Android `workspaces.sqlite3` backups
  - `RemoteSyncMyDocumentRestoreService` restores staged Android `mydocuments.sqlite3` backups
+ - `RemoteSyncAISettingsRestoreService` restores seven non-secret AI settings tables while
+   preserving device-local raw logs and credentials
  - `RemoteSyncInitialBackupMetadataRestoreService` preserves staged Android `LogEntry` and
    `SyncStatus` rows needed for later patch replay
  - `RemoteSyncBookmarkSnapshotService` refreshes outbound bookmark fingerprint baselines after
@@ -75,11 +80,13 @@ public final class RemoteSyncInitialBackupRestoreService {
     private let readingPlanRestoreService: RemoteSyncReadingPlanRestoreService
     private let workspaceRestoreService: RemoteSyncWorkspaceRestoreService
     private let myDocumentRestoreService: RemoteSyncMyDocumentRestoreService
+    private let aiSettingsRestoreService: RemoteSyncAISettingsRestoreService
     private let metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService
     private let bookmarkSnapshotService: RemoteSyncBookmarkSnapshotService
     private let workspaceSnapshotService: RemoteSyncWorkspaceSnapshotService
     private let readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService
     private let myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService
+    private let aiSettingsSnapshotService: RemoteSyncAISettingsSnapshotService
     private let progressSnapshotService: RemoteSyncProgressSnapshotService
 
     /**
@@ -90,6 +97,7 @@ public final class RemoteSyncInitialBackupRestoreService {
        - readingPlanRestoreService: Restore service used for the reading-plan category.
        - workspaceRestoreService: Restore service used for the workspace category.
        - myDocumentRestoreService: Restore service used for the My Documents category.
+       - aiSettingsRestoreService: Restore service used for the non-secret AI Settings category.
        - metadataRestoreService: Restore service used to preserve Android `LogEntry` and `SyncStatus`
          rows after content restore succeeds.
        - bookmarkSnapshotService: Snapshot service used to refresh outbound bookmark fingerprint
@@ -99,6 +107,8 @@ public final class RemoteSyncInitialBackupRestoreService {
        - readingPlanSnapshotService: Snapshot service used to refresh outbound reading-plan
          fingerprint baselines after successful remote restores.
        - myDocumentSnapshotService: Snapshot service used to refresh outbound My Documents
+         fingerprint baselines after successful remote restores.
+       - aiSettingsSnapshotService: Snapshot service used to refresh outbound AI Settings
          fingerprint baselines after successful remote restores.
        - progressSnapshotService: Snapshot service used to refresh outbound Progress fingerprint
          baselines after successful remote restores.
@@ -110,22 +120,26 @@ public final class RemoteSyncInitialBackupRestoreService {
         readingPlanRestoreService: RemoteSyncReadingPlanRestoreService = RemoteSyncReadingPlanRestoreService(),
         workspaceRestoreService: RemoteSyncWorkspaceRestoreService = RemoteSyncWorkspaceRestoreService(),
         myDocumentRestoreService: RemoteSyncMyDocumentRestoreService = RemoteSyncMyDocumentRestoreService(),
+        aiSettingsRestoreService: RemoteSyncAISettingsRestoreService = RemoteSyncAISettingsRestoreService(),
         metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService(),
         bookmarkSnapshotService: RemoteSyncBookmarkSnapshotService = RemoteSyncBookmarkSnapshotService(),
         workspaceSnapshotService: RemoteSyncWorkspaceSnapshotService = RemoteSyncWorkspaceSnapshotService(),
         readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService(),
         myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService = RemoteSyncMyDocumentSnapshotService(),
+        aiSettingsSnapshotService: RemoteSyncAISettingsSnapshotService = RemoteSyncAISettingsSnapshotService(),
         progressSnapshotService: RemoteSyncProgressSnapshotService = RemoteSyncProgressSnapshotService()
     ) {
         self.bookmarkRestoreService = bookmarkRestoreService
         self.readingPlanRestoreService = readingPlanRestoreService
         self.workspaceRestoreService = workspaceRestoreService
         self.myDocumentRestoreService = myDocumentRestoreService
+        self.aiSettingsRestoreService = aiSettingsRestoreService
         self.metadataRestoreService = metadataRestoreService
         self.bookmarkSnapshotService = bookmarkSnapshotService
         self.workspaceSnapshotService = workspaceSnapshotService
         self.readingPlanSnapshotService = readingPlanSnapshotService
         self.myDocumentSnapshotService = myDocumentSnapshotService
+        self.aiSettingsSnapshotService = aiSettingsSnapshotService
         self.progressSnapshotService = progressSnapshotService
     }
 
@@ -213,6 +227,15 @@ public final class RemoteSyncInitialBackupRestoreService {
         } else {
             workspaceSnapshot = nil
         }
+        let aiSettingsSnapshot: RemoteSyncAndroidAISettingsSnapshot?
+        if category == .aiSettings {
+            aiSettingsSnapshot = try aiSettingsRestoreService.readSnapshot(
+                from: stagedBackup.databaseFileURL,
+                expectedSourceVersion: stagedBackup.schemaVersion
+            )
+        } else {
+            aiSettingsSnapshot = nil
+        }
         if category == .progress {
             try Self.validateProgressDatabaseBeforeMetadata(
                 at: stagedBackup.databaseFileURL
@@ -270,6 +293,16 @@ public final class RemoteSyncInitialBackupRestoreService {
                         settingsStore: settingsStore
                     )
                     report = .myDocuments(myDocumentReport)
+                case .aiSettings:
+                    guard let aiSettingsSnapshot else {
+                        throw RemoteSyncAISettingsRestoreError.invalidSQLiteDatabase
+                    }
+                    let aiSettingsReport = try aiSettingsRestoreService.replaceLocalAISettings(
+                        from: aiSettingsSnapshot,
+                        modelContext: modelContext,
+                        settingsStore: settingsStore
+                    )
+                    report = .aiSettings(aiSettingsReport)
                 case .progress:
                     let progressReport = try AndroidDatabaseBackupProgressMapper.apply(
                         from: stagedBackup.databaseFileURL,
@@ -282,6 +315,10 @@ public final class RemoteSyncInitialBackupRestoreService {
                 _ = metadataRestoreService.replaceLocalMetadata(
                     from: metadataSnapshot,
                     category: category,
+                    settingsStore: settingsStore
+                )
+                RemoteSyncMutationJournalService().clearPendingMutations(
+                    for: category,
                     settingsStore: settingsStore
                 )
                 if category == .bookmarks {
@@ -301,6 +338,11 @@ public final class RemoteSyncInitialBackupRestoreService {
                     )
                 } else if category == .myDocuments {
                     try myDocumentSnapshotService.refreshBaselineFingerprintsThrowing(
+                        modelContext: modelContext,
+                        settingsStore: settingsStore
+                    )
+                } else if category == .aiSettings {
+                    try aiSettingsSnapshotService.refreshBaselineFingerprintsStrict(
                         modelContext: modelContext,
                         settingsStore: settingsStore
                     )

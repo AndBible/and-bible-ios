@@ -1,5 +1,6 @@
 // SyncSettingsPresentation.swift - Android-backed sync settings row metadata
 
+import Foundation
 import BibleCore
 
 /**
@@ -49,6 +50,129 @@ public struct RemoteSyncLocalizedString: Equatable, Sendable {
 }
 
 /**
+ Android-aligned user-facing classification for remote synchronization failures.
+
+ Both the settings screen and app lifecycle route errors through this value so initial-backup and
+ incremental schema incompatibilities cannot drift into different messages. The initializer keeps
+ transport and schema types out of view-specific switch statements while preserving an underlying
+ localized message for failures Android does not classify specially.
+
+ - Side effects: none.
+ - Failure modes: Empty underlying messages resolve to Android's generic sync error text.
+ */
+public enum RemoteSyncFailurePresentation: Equatable, Sendable {
+    /// Backend URL or saved WebDAV configuration is invalid.
+    case invalidURL
+
+    /// A required device-local WebDAV password is absent.
+    case signInFailed
+
+    /// Remote initial or incremental data requires a newer app schema.
+    case updateRequired
+
+    /// Transport or domain failure that should retain its supplied localized description.
+    case underlying(String)
+
+    /**
+     Classifies one core synchronization error using Android's visible failure groups.
+
+     - Parameter error: Error emitted by backend construction, bootstrap, staging, or patch replay.
+     - Returns: Stable presentation category shared by manual and lifecycle synchronization.
+     - Side effects: Reads only the error's localized description.
+     - Failure modes: Unknown errors become `.underlying`; an empty description is handled by
+       `localizedMessage`.
+     */
+    public init(error: Error) {
+        switch error {
+        case WebDAVClientError.invalidURL,
+             RemoteSyncSynchronizationServiceFactoryError.invalidWebDAVConfiguration:
+            self = .invalidURL
+        case RemoteSyncSynchronizationServiceFactoryError.missingWebDAVPassword:
+            self = .signInFailed
+        case RemoteSyncArchiveStagingError.incompatibleInitialBackupVersion,
+             RemoteSyncPatchDiscoveryError.incompatiblePatchVersion,
+             RemoteSyncSchemaCompatibilityPolicyError.disabledForCurrentVersion:
+            self = .updateRequired
+        default:
+            self = .underlying(
+                error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+    }
+
+    /**
+     Resolves the classified failure through Android-backed localization keys.
+
+     - Returns: Localized alert text with checked-in English fallbacks.
+     - Side effects: Reads the process localization bundle.
+     - Failure modes: Missing keys use the documented English fallback; empty underlying errors use
+       Android's generic cloud-sync error.
+     */
+    public var localizedMessage: String {
+        switch self {
+        case .invalidURL:
+            return RemoteSyncLocalizedString(
+                key: "invalid_url_message",
+                defaultValue: "The URL you entered is invalid. Please enter a valid URL (e.g., https://nextcloud.example.com)"
+            ).localized
+        case .signInFailed:
+            return RemoteSyncLocalizedString(
+                key: "sign_in_failed",
+                defaultValue: "Signing in to synchronization backend service failed."
+            ).localized
+        case .updateRequired:
+            return [
+                RemoteSyncLocalizedString(
+                    key: "sync_cant_fetch",
+                    defaultValue: "The version of database or patch file stored in Cloud is higher than the one supported by this app."
+                ).localized,
+                RemoteSyncLocalizedString(
+                    key: "sync_update_app",
+                    defaultValue: "Please update the app to continue synchronization."
+                ).localized,
+            ]
+            .joined(separator: " ")
+        case .underlying(let message):
+            guard !message.isEmpty else {
+                return RemoteSyncLocalizedString(
+                    key: "sync_error",
+                    defaultValue: "Error occurred in Cloud synchronization"
+                ).localized
+            }
+            return message
+        }
+    }
+}
+
+/**
+ Determines how the settings screen reconciles its optimistic category-toggle state after failure.
+
+ Configuration failures occur before the persisted toggle is enabled and must turn the visible
+ switch off. Failures after synchronization starts may have changed the persisted value through
+ schema policy, so the UI must reload that authoritative value instead of retaining its optimistic
+ state.
+ */
+enum RemoteSyncFailureEnablementResolution: Equatable, Sendable {
+    /// Persist and display the category as disabled.
+    case disable
+
+    /// Reload the displayed state from the already-authoritative persisted toggle.
+    case reloadPersisted
+
+    /**
+     Maps the caller's failure phase to one deterministic toggle reconciliation action.
+
+     - Parameter revertEnablement: `true` when setup failed before the toggle was persisted.
+     - Returns: Disable for setup failure, otherwise reload persisted state.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    init(revertEnablement: Bool) {
+        self = revertEnablement ? .disable : .reloadPersisted
+    }
+}
+
+/**
  Android-backed title and content strings for one remote sync category.
 
  Android exposes each sync category as a preference title plus summary. iOS uses this descriptor
@@ -84,8 +208,8 @@ public struct RemoteSyncCategoryText: Equatable, Sendable {
 /**
  Android-backed localization catalog for remote sync categories.
 
- The catalog centralizes category title and summary keys so active settings rows, deferred rows,
- and app lifecycle error copy cannot drift independently.
+ The catalog centralizes category title and summary keys so settings rows and app lifecycle error
+ copy cannot drift independently.
 
  - Returns: Android string descriptors for sync category copy.
  - Side effects: none.
@@ -122,6 +246,14 @@ public enum RemoteSyncCategoryLocalization {
                 title: .init(key: "my_documents", defaultValue: "My Documents"),
                 contents: .init(key: "my_documents_contents", defaultValue: "My Documents and their content")
             )
+        case .aiSettings:
+            return RemoteSyncCategoryText(
+                title: .init(key: "ai_settings_sync_title", defaultValue: "AI Settings"),
+                contents: .init(
+                    key: "ai_settings_sync_contents",
+                    defaultValue: "AI prompts and provider configurations"
+                )
+            )
         case .progress:
             return RemoteSyncCategoryText(
                 title: .init(key: "progress_sync_title", defaultValue: "Reading Progress"),
@@ -133,29 +265,6 @@ public enum RemoteSyncCategoryLocalization {
         }
     }
 
-    /**
-     Returns Android title and summary descriptors for a visible deferred sync category.
-
-     Deferred categories use the same Android title/content resources as the future active
-     implementation so the visible parity surface does not change when the engine lands.
-
-     - Parameter category: Android-visible category whose iOS sync engine is not implemented yet.
-     - Returns: Android-backed title/content descriptors.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail because all deferred categories are mapped.
-     */
-    static func deferredText(for category: RemoteSyncDeferredCategory) -> RemoteSyncCategoryText {
-        switch category {
-        case .aiSettings:
-            return RemoteSyncCategoryText(
-                title: .init(key: "ai_settings_sync_title", defaultValue: "AI Settings"),
-                contents: .init(
-                    key: "ai_settings_sync_contents",
-                    defaultValue: "AI prompts and provider configurations"
-                )
-            )
-        }
-    }
 }
 
 /**
@@ -217,15 +326,14 @@ enum SyncSettingsPresentation {
 
     /**
      Android runtime-visible category rows, excluding Reading Plans because `SyncSettings.kt`
-     hides that XML-declared preference and including deferred rows whose iOS sync engines are
-     tracked separately.
+     hides that XML-declared preference.
      */
-    static let visibleCategoryRows: [SyncSettingsCategoryRow] = [
-        .active(.bookmarks),
-        .active(.workspaces),
-        .active(.myDocuments),
-        .deferred(.aiSettings),
-        .active(.progress),
+    static let visibleCategoryRows: [RemoteSyncCategory] = [
+        .bookmarks,
+        .workspaces,
+        .myDocuments,
+        .aiSettings,
+        .progress,
     ]
 
     /**
@@ -246,87 +354,10 @@ enum SyncSettingsPresentation {
             return Row(androidKey: "sync_reading_plans")
         case .myDocuments:
             return Row(androidKey: "sync_documents")
-        case .progress:
-            return Row(androidKey: "sync_reading_progress")
-        }
-    }
-
-    /**
-     Returns the Android presentation row for a deferred remote sync category.
-
-     Deferred rows are visible because Android shows their toggles, but iOS keeps them disabled
-     until the category-specific sync implementation exists. Keeping their Android icon mapping
-     here prevents the UI from drifting while those follow-up issues remain open.
-
-     - Parameter category: Deferred Android-visible category shown in the sync settings list.
-     - Returns: Android-backed row metadata for the deferred category.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail; every deferred category has an Android row mapping.
-     */
-    static func deferredCategory(_ category: RemoteSyncDeferredCategory) -> Row {
-        switch category {
         case .aiSettings:
             return Row(androidKey: "sync_ai")
-        }
-    }
-}
-
-/**
- Android-visible sync categories that iOS intentionally displays as disabled deferred rows.
-
- Android exposes AI Settings in `sync_settings.xml` and wires it through `SyncSettings.kt`. iOS
- does not yet have that category-specific sync engine, so this value preserves the visible parity
- surface without letting users start an unsupported sync stream.
-
- - Returns: Value semantics for visible settings rows and tests.
- - Side effects: none.
- - Failure modes: Deferred categories cannot start synchronization until their follow-up issue
-   provides a real `RemoteSyncCategory` implementation.
- */
-enum RemoteSyncDeferredCategory: String, CaseIterable, Sendable {
-    /// Android `sync_enable_ai_settings`; iOS implementation tracked by issue #74.
-    case aiSettings = "ai_settings"
-
-    /// Stable Android-compatible toggle key reserved for the future category implementation.
-    var androidSyncEnabledKey: String {
-        "sync_enable_\(rawValue)"
-    }
-
-    /// GitHub issue that owns implementing this deferred category's sync engine.
-    var trackingIssueNumber: Int {
-        switch self {
-        case .aiSettings:
-            return 74
-        }
-    }
-}
-
-/**
- One row in the Android-runtime-visible sync category section.
-
- Active rows map to implemented iOS `RemoteSyncCategory` values and can start synchronization.
- Deferred rows map to Android-visible categories whose iOS sync implementation is intentionally
- pending, so the settings screen can disclose the gap without mutating unsupported state.
-
- - Returns: Identifiable row values for `SyncSettingsView` and parity tests.
- - Side effects: none.
- - Failure modes: This enum itself cannot fail; consumers decide how to render active versus
-   deferred rows.
- */
-enum SyncSettingsCategoryRow: Identifiable, Equatable, Sendable {
-    /// Implemented category with an interactive toggle.
-    case active(RemoteSyncCategory)
-
-    /// Android-visible category rendered as disabled until its sync implementation lands.
-    case deferred(RemoteSyncDeferredCategory)
-
-    /// Stable row identity used by SwiftUI lists and tests.
-    var id: String {
-        switch self {
-        case .active(let category):
-            return category.rawValue
-        case .deferred(let category):
-            return category.rawValue
+        case .progress:
+            return Row(androidKey: "sync_reading_progress")
         }
     }
 }

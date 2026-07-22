@@ -544,35 +544,44 @@ final class RemoteSyncStateTests: XCTestCase {
         XCTAssertFalse(store.isSyncEnabled(for: .workspaces))
         XCTAssertFalse(store.isSyncEnabled(for: .readingPlans))
         XCTAssertFalse(store.isSyncEnabled(for: .myDocuments))
+        XCTAssertFalse(store.isSyncEnabled(for: .aiSettings))
 
         store.setSyncEnabled(true, for: .bookmarks)
         store.setSyncEnabled(true, for: .readingPlans)
         store.setSyncEnabled(false, for: .workspaces)
         store.setSyncEnabled(true, for: .myDocuments)
+        store.setSyncEnabled(true, for: .aiSettings)
 
         XCTAssertEqual(settingsStore.getString("sync_enable_bookmarks"), "true")
         XCTAssertEqual(settingsStore.getString("sync_enable_workspaces"), "false")
         XCTAssertEqual(settingsStore.getString("sync_enable_readingplans"), "true")
         XCTAssertEqual(settingsStore.getString("sync_enable_mydocuments"), "true")
+        XCTAssertEqual(settingsStore.getString("sync_enable_ai_settings"), "true")
         XCTAssertTrue(store.isSyncEnabled(for: .bookmarks))
         XCTAssertFalse(store.isSyncEnabled(for: .workspaces))
         XCTAssertTrue(store.isSyncEnabled(for: .readingPlans))
         XCTAssertTrue(store.isSyncEnabled(for: .myDocuments))
+        XCTAssertTrue(store.isSyncEnabled(for: .aiSettings))
     }
 
     func testRemoteSyncSettingsStoreReadsLegacyCategoryToggleKeys() throws {
         let settingsStore = try makeInMemorySettingsStore()
         settingsStore.setString("gdrive_mydocuments", value: "true")
+        settingsStore.setString("gdrive_llmprocessing", value: "true")
         let store = RemoteSyncSettingsStore(
             settingsStore: settingsStore,
             secretStore: InMemorySecretStore()
         )
 
         XCTAssertTrue(store.isSyncEnabled(for: .myDocuments))
+        XCTAssertTrue(store.isSyncEnabled(for: .aiSettings))
 
         store.setSyncEnabled(false, for: .myDocuments)
         XCTAssertEqual(settingsStore.getString("sync_enable_mydocuments"), "false")
         XCTAssertFalse(store.isSyncEnabled(for: .myDocuments))
+        store.setSyncEnabled(false, for: .aiSettings)
+        XCTAssertEqual(settingsStore.getString("sync_enable_ai_settings"), "false")
+        XCTAssertFalse(store.isSyncEnabled(for: .aiSettings))
     }
 
     func testRemoteSyncSettingsStoreGeneratesStableLowercaseDeviceIdentifier() throws {
@@ -693,10 +702,10 @@ final class RemoteSyncStateTests: XCTestCase {
         )
     }
 
-    func testRemoteSyncCategoryActiveSyncCasesExposeMyDocuments() {
+    func testRemoteSyncCategoryActiveSyncCasesExposeAllAndroidDatabaseCategories() {
         XCTAssertEqual(
             RemoteSyncCategory.activeSyncCases,
-            [.bookmarks, .workspaces, .readingPlans, .myDocuments, .progress]
+            [.bookmarks, .workspaces, .readingPlans, .myDocuments, .aiSettings, .progress]
         )
     }
 
@@ -1596,6 +1605,46 @@ final class RemoteSyncStateTests: XCTestCase {
         }
     }
 
+    /** Rejects the transient AI v17 patch shape that Android itself cannot migrate forward. */
+    func testRemoteSyncPatchDiscoveryRejectsUnsupportedAISettingsGeneration() async throws {
+        let statusStore = RemoteSyncPatchStatusStore(settingsStore: try makeInMemorySettingsStore())
+        let adapter = RemoteSyncMockAdapter()
+        let syncFolderID = "/org.andbible.ios-sync-ai-settings"
+        let deviceFolderID = "\(syncFolderID)/device-a"
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: deviceFolderID,
+                name: "device-a",
+                size: 0,
+                timestamp: 1_000,
+                parentID: syncFolderID,
+                mimeType: NextCloudSyncAdapter.folderMimeType
+            )
+        ])
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: "\(deviceFolderID)/1.17.sqlite3.gz",
+                name: "1.17.sqlite3.gz",
+                size: 333,
+                timestamp: 2_000,
+                parentID: deviceFolderID,
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            )
+        ])
+
+        let service = RemoteSyncPatchDiscoveryService(adapter: adapter, statusStore: statusStore)
+        await XCTAssertThrowsErrorAsync(
+            try await service.discoverPendingPatches(
+                for: .aiSettings,
+                bootstrapState: RemoteSyncBootstrapState(syncFolderID: syncFolderID),
+                progressState: RemoteSyncProgressState(),
+                currentSchemaVersion: 23
+            )
+        ) { error in
+            XCTAssertEqual(error as? RemoteSyncPatchDiscoveryError, .incompatiblePatchVersion(17))
+        }
+    }
+
     func testRemoteSyncArchiveStagingDownloadsInitialBackupAndExtractsSQLiteFile() async throws {
         let adapter = RemoteSyncMockAdapter()
         let initialDatabaseURL = try makeTemporarySQLiteDatabase(userVersion: 3)
@@ -1688,6 +1737,39 @@ final class RemoteSyncStateTests: XCTestCase {
             XCTAssertEqual(
                 error as? RemoteSyncArchiveStagingError,
                 .incompatibleInitialBackupVersion(10)
+            )
+        }
+    }
+
+    /** Rejects an initial AI settings generation outside the authenticated migration source set. */
+    func testRemoteSyncArchiveStagingRejectsUnsupportedAISettingsGeneration() async throws {
+        let adapter = RemoteSyncMockAdapter()
+        let initialDatabaseURL = try makeTemporarySQLiteDatabase(userVersion: 17)
+        defer { try? FileManager.default.removeItem(at: initialDatabaseURL) }
+        let initialArchiveData = try RemoteSyncArchiveStagingService.gzip(
+            Data(contentsOf: initialDatabaseURL)
+        )
+        let remoteID = "/org.andbible.ios-sync-ai-settings/initial.sqlite3.gz"
+        await adapter.setDownloadData(initialArchiveData, forID: remoteID)
+
+        let service = RemoteSyncArchiveStagingService(adapter: adapter)
+        await XCTAssertThrowsErrorAsync(
+            try await service.downloadInitialBackup(
+                RemoteSyncFile(
+                    id: remoteID,
+                    name: "initial.sqlite3.gz",
+                    size: Int64(initialArchiveData.count),
+                    timestamp: 1_000,
+                    parentID: "/org.andbible.ios-sync-ai-settings",
+                    mimeType: NextCloudSyncAdapter.gzipMimeType
+                ),
+                category: .aiSettings,
+                currentSchemaVersion: 23
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteSyncArchiveStagingError,
+                .incompatibleInitialBackupVersion(17)
             )
         }
     }

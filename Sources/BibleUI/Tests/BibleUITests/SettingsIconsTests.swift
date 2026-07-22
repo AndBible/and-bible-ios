@@ -267,11 +267,11 @@ final class SettingsIconsTests: XCTestCase {
         XCTAssertEqual(
             SyncSettingsPresentation.visibleCategoryRows,
             [
-                .active(.bookmarks),
-                .active(.workspaces),
-                .active(.myDocuments),
-                .deferred(.aiSettings),
-                .active(.progress),
+                .bookmarks,
+                .workspaces,
+                .myDocuments,
+                .aiSettings,
+                .progress,
             ]
         )
     }
@@ -298,11 +298,11 @@ final class SettingsIconsTests: XCTestCase {
             "ic_baseline_description_gray_24"
         )
         XCTAssertEqual(
-            SyncSettingsPresentation.deferredCategory(.aiSettings).androidKey,
+            SyncSettingsPresentation.category(.aiSettings).androidKey,
             "sync_ai"
         )
         XCTAssertEqual(
-            SyncSettingsPresentation.deferredCategory(.aiSettings).icon?.androidDrawableName,
+            SyncSettingsPresentation.category(.aiSettings).icon?.androidDrawableName,
             "icon_robot"
         )
         XCTAssertEqual(
@@ -343,9 +343,87 @@ final class SettingsIconsTests: XCTestCase {
         XCTAssertNotEqual(active.title.key, active.contents.key)
     }
 
-    func testDeferredSyncCategoriesReserveAndroidCompatibleKeysAndTrackingIssues() {
-        XCTAssertEqual(RemoteSyncDeferredCategory.aiSettings.androidSyncEnabledKey, "sync_enable_ai_settings")
-        XCTAssertEqual(RemoteSyncDeferredCategory.aiSettings.trackingIssueNumber, 74)
+    func testAISettingsUsesAndroidCategoryIdentityAndLocalization() {
+        XCTAssertEqual(RemoteSyncCategory.aiSettings.rawValue, "ai_settings")
+        XCTAssertEqual(RemoteSyncCategoryLocalization.text(for: .aiSettings).title.key, "ai_settings_sync_title")
+        XCTAssertEqual(RemoteSyncCategoryLocalization.text(for: .aiSettings).contents.key, "ai_settings_sync_contents")
+    }
+
+    /**
+     Verifies manual and lifecycle synchronization classify every schema incompatibility identically.
+
+     Android shows its update-app message for an incompatible initial database, a newer incremental
+     patch, and a category already gated for the current schema. Configuration failures retain their
+     distinct URL and sign-in messages, while unknown transport text passes through. Failure means
+     one synchronization route can regress to a generic enum description.
+     */
+    func testRemoteSyncFailurePresentationMatchesAndroidConfigurationAndSchemaMessages() {
+        XCTAssertEqual(
+            RemoteSyncFailurePresentation(error: WebDAVClientError.invalidURL),
+            .invalidURL
+        )
+        XCTAssertEqual(
+            RemoteSyncFailurePresentation(
+                error: RemoteSyncSynchronizationServiceFactoryError.invalidWebDAVConfiguration
+            ),
+            .invalidURL
+        )
+        XCTAssertEqual(
+            RemoteSyncFailurePresentation(
+                error: RemoteSyncSynchronizationServiceFactoryError.missingWebDAVPassword
+            ),
+            .signInFailed
+        )
+        XCTAssertEqual(
+            RemoteSyncFailurePresentation(
+                error: RemoteSyncArchiveStagingError.incompatibleInitialBackupVersion(24)
+            ),
+            .updateRequired
+        )
+        XCTAssertEqual(
+            RemoteSyncFailurePresentation(
+                error: RemoteSyncPatchDiscoveryError.incompatiblePatchVersion(24)
+            ),
+            .updateRequired
+        )
+        XCTAssertEqual(
+            RemoteSyncFailurePresentation(
+                error: RemoteSyncSchemaCompatibilityPolicyError.disabledForCurrentVersion(
+                    category: .aiSettings,
+                    version: 23
+                )
+            ),
+            .updateRequired
+        )
+        XCTAssertEqual(
+            RemoteSyncFailurePresentation(
+                error: NSError(
+                    domain: "RemoteSyncFailurePresentationTests",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Transport failed"]
+                )
+            ),
+            .underlying("Transport failed")
+        )
+    }
+
+    /**
+     Pins optimistic switch reconciliation at both synchronization failure boundaries.
+
+     Setup failures occur before persistence and must explicitly disable the category. Failures
+     after synchronization begins must reload the persisted setting because initial-schema policy
+     may have disabled it while ordinary transport failures retain it. Failure recreates a visible
+     switch whose value disagrees with lifecycle routing.
+     */
+    func testRemoteSyncFailureEnablementAlwaysReconcilesOptimisticToggleState() {
+        XCTAssertEqual(
+            RemoteSyncFailureEnablementResolution(revertEnablement: true),
+            .disable
+        )
+        XCTAssertEqual(
+            RemoteSyncFailureEnablementResolution(revertEnablement: false),
+            .reloadPersisted
+        )
     }
 
     func testTextDisplayIconsComeFromAndroidOptionsMenuItems() {
