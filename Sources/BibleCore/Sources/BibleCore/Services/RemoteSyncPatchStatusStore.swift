@@ -43,6 +43,18 @@ public struct RemoteSyncPatchStatus: Sendable, Equatable, Codable {
 }
 
 /**
+ Errors raised by strict applied-patch bookkeeping reads.
+
+ Compatibility readers continue to ignore malformed rows for non-authoritative display and reset
+ callers. Synchronization paths use the strict reader so corrupt accepted metadata cannot be
+ mistaken for an empty patch history.
+ */
+public enum RemoteSyncPatchStatusStoreError: Error, Equatable {
+    /// One stored row was malformed or its payload did not match its scoped settings key.
+    case invalidStoredStatus(String)
+}
+
+/**
  Persists applied remote patch statuses in the local settings table.
 
  Android uses a dedicated `SyncStatus` table keyed by `(sourceDevice, patchNumber)`. iOS does not
@@ -57,7 +69,8 @@ public struct RemoteSyncPatchStatus: Sendable, Equatable, Codable {
  - writes and deletes local `Setting` rows in the `LocalStore`
 
  Failure modes:
- - malformed stored JSON values are ignored during reads
+ - compatibility reads ignore malformed stored JSON values
+ - strict reads throw before returning a partial accepted history
  - underlying `SettingsStore` writes swallow save errors, so callers should treat persistence as
    best-effort bookkeeping rather than a hard guarantee
  */
@@ -94,11 +107,31 @@ public final class RemoteSyncPatchStatusStore {
        - underlying `SettingsStore` save failures are swallowed
      */
     public func addStatus(_ status: RemoteSyncPatchStatus, for category: RemoteSyncCategory) {
-        guard let data = try? encoder.encode(status),
-              let payload = String(data: data, encoding: .utf8) else {
-            return
-        }
-        settingsStore.setString(key(for: category, sourceDevice: status.sourceDevice, patchNumber: status.patchNumber), value: payload)
+        try? addStatusStrict(status, for: category)
+    }
+
+    /**
+     Persists one applied patch status while surfacing serialization and atomic settings failures.
+
+     - Parameters:
+       - status: Applied patch metadata to persist.
+       - category: Logical sync category that owns the patch.
+     - Side effects: Encodes and stages one category-scoped status setting.
+     - Throws: Rethrows JSON encoding failures; settings failures invalidate an enclosing atomic batch.
+     */
+    public func addStatusStrict(
+        _ status: RemoteSyncPatchStatus,
+        for category: RemoteSyncCategory
+    ) throws {
+        let data = try encoder.encode(status)
+        settingsStore.setString(
+            key(
+                for: category,
+                sourceDevice: status.sourceDevice,
+                patchNumber: status.patchNumber
+            ),
+            value: String(decoding: data, as: UTF8.self)
+        )
     }
 
     /**
@@ -179,6 +212,57 @@ public final class RemoteSyncPatchStatusStore {
                 }
                 return try? decoder.decode(RemoteSyncPatchStatus.self, from: data)
             }
+    }
+
+    /**
+     Reads one category's complete applied-patch history without suppressing corrupt metadata.
+
+     Each decoded payload must match the source device and patch number encoded in its settings key.
+     This prevents a valid JSON payload stored under the wrong key from silently changing patch
+     numbering or discovery classification.
+
+     - Parameter category: Logical sync category to inspect.
+     - Returns: Complete decoded patch statuses for the category.
+     - Side effects: Performs one strict settings transaction and reads category-prefixed rows.
+     - Throws:
+       - `RemoteSyncPatchStatusStoreError.invalidStoredStatus` for malformed JSON or key/payload mismatch
+       - rethrows strict settings fetch, cancellation, and transaction failures
+     */
+    public func statusesStrict(for category: RemoteSyncCategory) throws -> [RemoteSyncPatchStatus] {
+        try settingsStore.performAtomicBatch {
+            try settingsStore.entries(withPrefix: prefix(for: category)).map { entry in
+                guard let data = entry.value.data(using: .utf8),
+                      let status = try? decoder.decode(RemoteSyncPatchStatus.self, from: data),
+                      entry.key == key(
+                          for: category,
+                          sourceDevice: status.sourceDevice,
+                          patchNumber: status.patchNumber
+                      ) else {
+                    throw RemoteSyncPatchStatusStoreError.invalidStoredStatus(entry.key)
+                }
+                return status
+            }
+        }
+    }
+
+    /**
+     Returns the highest strictly decoded patch number for one source device.
+
+     - Parameters:
+       - category: Logical sync category to inspect.
+       - sourceDevice: Source device whose accepted sequence should be scanned.
+     - Returns: Highest accepted patch number, or `nil` for a genuinely empty sequence.
+     - Side effects: Delegates to `statusesStrict(for:)`.
+     - Throws: Rethrows malformed metadata and strict settings failures.
+     */
+    public func lastPatchNumberStrict(
+        for category: RemoteSyncCategory,
+        sourceDevice: String
+    ) throws -> Int64? {
+        try statusesStrict(for: category)
+            .filter { $0.sourceDevice == sourceDevice }
+            .map(\.patchNumber)
+            .max()
     }
 
     /**

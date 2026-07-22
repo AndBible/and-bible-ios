@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "受逼迫地區的設定";
 "discrete_mode" = "隱藏宗教符號";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "關於";
 "version" = "Version";
 "export" = "Export";
@@ -405,10 +405,6 @@
 "calculator_pin_description" = "計算機打開後需要輸入的PIN碼。";
 "discrete_help_title" = "請先閱讀！";
 "discrete_help_summary" = "如何對特殊版本進行設定及其他訊息。";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "程式行為";
 "prefs_display_customization_cat" = "外觀與感覺";
@@ -479,7 +475,6 @@
 
 "prefs_volume_keys_scroll_title" = "Volume buttons scroll";
 "prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Experimental features";
 "prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
@@ -607,3 +602,89 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "SD卡中有使用者jsword/readingplan的讀經計劃 它與內部讀經計劃名稱相同，不能在此列舉。 請重新命名至其他名稱，並將副檔名轉為 *.properties";
 "error_no_content" = "選定經節沒有內容";
+
+/* Android shared translations */
+"calculator_par1" = "在進入主程式前，會顯示計算機界面。";
+"calculator_par2" = "在這個界面，你可以進行一般運算。如果你想進入主程式，只需輸入你的PIN碼 (預設是1234) 後按 \"=\" 鈕";
+"calculator_par3" = "你可以在「計算機PIN」更改自訂的PIN碼。";
+"give_passphrase_for_module" = "%@ 文件已加密，需要密碼解鎖。";
+"show_unlock_info" = "模組及解鎖資訊";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "正在解壓縮Zip檔案...";
+"install_failed_reason" = "無法安裝模組。原因：%@";
+"install_zip_successfull" = "模組已成功安裝";
+"module_install_phase_committing" = "請稍等。正在從檔案載入模組。";
+"module_install_phase_downloading" = "下載";
+"module_install_phase_queued" = "請稍候...";
+"storage_space_warning" = "SD卡儲存空間不足";
+
+/* Android shared translations */
+"error_occurred" = "發生錯誤";
+
+/* Android shared translations */
+"conf_change_chapter" = "章節改變";
+"conf_change_title" = "標題";
+"conf_replace_divinename" = "以Yahweh取代聖名";
+"conf_save_playback_settings_to_bookmarks" = "儲存播放設定至書籤";
+"conf_speak_auto_bookmark" = "自動標記書籤";
+"conf_speak_footnotes" = "註腳";
+"conf_speak_sleep_timer" = "設定睡眠計時器";
+"conf_speak_synchronize" = "文字跟隨語音";
+"forward" = "快進";
+"playback_settings_title" = "播放設定";
+"rewind" = "倒帶";
+"speak_bookmarks_menu_title" = "朗讀書籤";
+"speak_next" = "下一個";
+"speak_previous" = "上一個";
+"speak_settings_title" = "一般朗讀設定";
+
+/* Android shared translations */
+"sleep_timer_title" = "睡眠時間單位為分鐘";
+"speak_beginning_of_passage" = "選取段落開結";
+"speak_ending_of_passage" = "選擇段落結尾";
+"speak_ending_verse_must_be_later" = "結束節數必須在開始節數之後";
+"speak_verse_range_to_repeat" = "設定重複節數範圍";
+
+/* Android shared translations */
+"tts_lang_not_available" = "不支持此語言";
+
+/* Android shared translations */
+"errorTitle" = "發生錯誤";
+"error_executing_search" = "搜尋項目無效";
+"import_items" = "以%@匯入";
+"install_zip_module" = "安裝聖經模組";
+"okay" = "確定";
+"overwrite" = "是";
+"package_directory" = "封包目錄 (Zip檔案)";
+"reading_plan_set_current_day" = "設定為目前日子...";
+"reading_plan_set_start_date" = "設定開始日期...";
+"search_all_words" = "所有的詞";
+"search_any_word" = "任何一詞";
+"search_phrase" = "完整句子";
+"search_words_group_prompt" = "尋找經文";
+"show_notes" = "顯示筆記";
+"speak_book_changed" = "書本已更改。";
+"speak_chapter_changed" = "章節";
+"success" = "完成";
+"undo" = "取消";
+
+/* Android shared translations */
+"error_key_not_in_document" = "文件內沒有發現";
+"system_items1" = "更多";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "你須下載具有Strong's編碼的聖經及於搜尋中建立索引";
+
+/* Android shared translations */
+"bookmarks_and_mynotes_title" = "書籤及我的筆記";
+"doc_type_addons" = "附加";
+"help_bookmarks_text" = "選取文字後可以在彈出視窗點選書籤功能。你可以對書籤自訂筆記。「我的筆記」功能，也可讓你在新視窗中開啟你專屬的筆記。";
+"save_and_exit" = "儲存";
+"verse_tip" = "長按以選擇部份或多節經文";
+"watch_tutorial_video" = "觀看示範影片 (英文)";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

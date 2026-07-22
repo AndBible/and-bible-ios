@@ -1,5 +1,6 @@
 // BibleWebView.swift — WKWebView container for Vue.js Bible rendering
 
+import BibleCore
 import SwiftUI
 import WebKit
 #if os(macOS)
@@ -313,6 +314,7 @@ extension BibleWebView {
      */
     func createWebView(coordinator: WebViewCoordinator) -> WKWebView {
         let config = WKWebViewConfiguration()
+        config.setURLSchemeHandler(EpubResourceSchemeHandler(), forURLScheme: EpubResourceLocator.scheme)
         let iosDeviceClass = Self.iosDeviceClass()
 
         // Register bridge message handler

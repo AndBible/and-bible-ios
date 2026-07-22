@@ -40,15 +40,15 @@ final class SearchIndexServiceQueryTests: XCTestCase {
         ])
 
         XCTAssertEqual(
-            service.search(query: "earth void", moduleName: "KJV", wordMode: .allWords).map(\.key),
+            try service.search(query: "earth void", moduleName: "KJV", wordMode: .allWords).hits.map(\.key),
             ["Genesis 1:2"]
         )
         XCTAssertEqual(
-            service.search(query: "earth void", moduleName: "KJV", wordMode: .phrase).map(\.key),
+            try service.search(query: "earth void", moduleName: "KJV", wordMode: .phrase).hits.map(\.key),
             []
         )
         XCTAssertEqual(
-            service.search(query: "earth void", moduleName: "KJV", wordMode: .anyWord).map(\.key),
+            try service.search(query: "earth void", moduleName: "KJV", wordMode: .anyWord).hits.map(\.key),
             ["Genesis 1:1", "Genesis 1:2", "Genesis 1:3"]
         )
     }
@@ -68,42 +68,58 @@ final class SearchIndexServiceQueryTests: XCTestCase {
 
         let service = SearchIndexService(databasePath: databaseURL.path)
         try await seedSearchIndex(service: service, rows: [
-            SearchIndexFixtureRow(key: "Genesis 1:3", text: "light", moduleName: "KJV", order: 0),
-            SearchIndexFixtureRow(key: "Matthew 1:1", text: "light", moduleName: "KJV", order: 1),
-            SearchIndexFixtureRow(key: "John 1:4", text: "light", moduleName: "KJV", order: 2),
-            SearchIndexFixtureRow(key: "Revelation of John 22:5", text: "light", moduleName: "KJV", order: 3),
+            SearchIndexFixtureRow(
+                key: "創世記 1:3", text: "light", moduleName: "KJV", order: 0,
+                displayBook: "創世記", osisBookId: "Gen", chapter: 1, verse: 3
+            ),
+            SearchIndexFixtureRow(
+                key: "馬太福音 1:1", text: "light", moduleName: "KJV", order: 1,
+                displayBook: "馬太福音", osisBookId: "Matt", chapter: 1, verse: 1
+            ),
+            SearchIndexFixtureRow(
+                key: "ヨハネ 1:4", text: "light", moduleName: "KJV", order: 2,
+                displayBook: "ヨハネ", osisBookId: "John", chapter: 1, verse: 4
+            ),
+            SearchIndexFixtureRow(
+                key: "默示録 22:5", text: "light", moduleName: "KJV", order: 3,
+                displayBook: "默示録", osisBookId: "Rev", chapter: 22, verse: 5
+            ),
+            SearchIndexFixtureRow(
+                key: "Tobie 1:1", text: "light", moduleName: "KJV", order: 4,
+                displayBook: "Tobie", osisBookId: "Tob", chapter: 1, verse: 1
+            ),
         ])
 
         XCTAssertEqual(
-            service.search(query: "light", moduleName: "KJV", wordMode: .allWords).map(\.key),
-            ["Genesis 1:3", "Matthew 1:1", "John 1:4", "Revelation of John 22:5"]
+            try service.search(query: "light", moduleName: "KJV", wordMode: .allWords).hits.map(\.key),
+            ["創世記 1:3", "馬太福音 1:1", "ヨハネ 1:4", "默示録 22:5", "Tobie 1:1"]
         )
         XCTAssertEqual(
-            service.search(
+            try service.search(
                 query: "light",
                 moduleName: "KJV",
                 wordMode: .allWords,
-                scopeTestament: "OT"
-            ).map(\.key),
-            ["Genesis 1:3"]
+                scope: .oldTestament
+            ).hits.map(\.key),
+            ["創世記 1:3"]
         )
         XCTAssertEqual(
-            service.search(
+            try service.search(
                 query: "light",
                 moduleName: "KJV",
                 wordMode: .allWords,
-                scopeTestament: "NT"
-            ).map(\.key),
-            ["Matthew 1:1", "John 1:4", "Revelation of John 22:5"]
+                scope: .newTestament
+            ).hits.map(\.key),
+            ["馬太福音 1:1", "ヨハネ 1:4", "默示録 22:5"]
         )
         XCTAssertEqual(
-            service.search(
+            try service.search(
                 query: "light",
                 moduleName: "KJV",
                 wordMode: .allWords,
-                scopeBookName: "John"
-            ).map(\.key),
-            ["John 1:4"]
+                scope: .currentBook(osisBookId: "John")
+            ).hits.map(\.key),
+            ["ヨハネ 1:4"]
         )
     }
 
@@ -122,19 +138,39 @@ final class SearchIndexServiceQueryTests: XCTestCase {
         let service = SearchIndexService(databasePath: databaseURL.path)
         try await seedSearchIndex(service: service, rows: [
             SearchIndexFixtureRow(key: "Genesis 1:2", text: "earth", moduleName: "KJV", order: 0),
-            SearchIndexFixtureRow(key: "John 3:16", text: "earth", moduleName: "AATESTWEB", order: 1),
-            SearchIndexFixtureRow(key: "Romans 8:1", text: "earth", moduleName: "AATESTWEB", order: 2),
+            SearchIndexFixtureRow(
+                key: "Genèse 1:2", text: "earth", moduleName: "AATESTWEB", order: 0,
+                displayBook: "Genèse", osisBookId: "Gen", chapter: 1, verse: 2
+            ),
+            SearchIndexFixtureRow(key: "Romans 8:1", text: "earth", moduleName: "AATESTWEB", order: 1),
         ])
 
-        let grouped = service.searchMultiple(
+        let grouped = try service.searchMultiple(
             query: "earth",
             moduleNames: ["AATESTWEB", "KJV"],
             wordMode: .allWords
         )
 
-        XCTAssertEqual(grouped["KJV"]?.map(\.key), ["Genesis 1:2"])
-        XCTAssertEqual(grouped["AATESTWEB"]?.map(\.key), ["John 3:16", "Romans 8:1"])
-        XCTAssertEqual(grouped.values.reduce(0) { $0 + $1.count }, 3)
+        XCTAssertEqual(grouped.groups.count, 2)
+        XCTAssertEqual(grouped.groups.first?.identity.osisBookId, "Gen")
+        XCTAssertEqual(grouped.groups.first?.matches.map(\.moduleName), ["AATESTWEB", "KJV"])
+        XCTAssertEqual(grouped.moduleCounts.map(\.moduleName), ["AATESTWEB", "KJV"])
+        XCTAssertEqual(grouped.moduleCounts.map(\.count), [2, 1])
+        XCTAssertEqual(grouped.totalHitCount, 3)
+
+        let secondTranslationHit = try XCTUnwrap(
+            grouped.groups.first?.matches.first(where: { $0.moduleName == "AATESTWEB" })
+        )
+        XCTAssertEqual(
+            SearchNavigationTarget(hit: secondTranslationHit),
+            SearchNavigationTarget(
+                moduleName: "AATESTWEB",
+                osisBookId: "Gen",
+                displayBook: "Genèse",
+                chapter: 1,
+                verse: 2
+            )
+        )
     }
 
     /**
@@ -185,13 +221,52 @@ final class SearchIndexServiceQueryTests: XCTestCase {
         XCTAssertTrue(service.hasIndex(for: "KJV"))
         XCTAssertTrue(service.hasStrongsIndex(for: "KJV"))
 
-        let hits = service.searchStrongs(canonicalTokens: ["H0430"], moduleName: "KJV")
+        let hits = try service.searchStrongs(canonicalTokens: ["H0430"], moduleName: "KJV").hits
 
         XCTAssertEqual(hits.map(\.key), ["Genesis 1:1", "Genesis 1:2"])
         XCTAssertTrue(
             hits.allSatisfy { !$0.snippet.contains("<H") && !$0.snippet.contains("<G") },
             "Expected indexed Strong's previews to use cleaned verse text rather than raw Strong's tags"
         )
+    }
+
+    /**
+     Verifies Strong's queries retain every selected module and group equivalent verses.
+
+     Failure means Search has regressed to choosing one Strong's-capable fallback module or has
+     dropped selected translations with zero matches from Android's result-count contract.
+     */
+    func testIndexedStrongsSearchGroupsAcrossAllSelectedTranslations() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-query-strongs-multi-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let service = SearchIndexService(databasePath: databaseURL.path)
+        try await seedSearchIndex(service: service, rows: [
+            SearchIndexFixtureRow(
+                key: "Genesis 1:1", text: "God created", moduleName: "KJV", order: 0,
+                strongTokens: ["H0430"]
+            ),
+            SearchIndexFixtureRow(
+                key: "Genèse 1:1", text: "Dieu créa", moduleName: "LSG", order: 0,
+                strongTokens: ["H0430"], displayBook: "Genèse", osisBookId: "Gen",
+                chapter: 1, verse: 1
+            ),
+            SearchIndexFixtureRow(
+                key: "Genesis 1:1", text: "God created", moduleName: "PLAIN", order: 0
+            ),
+        ])
+
+        let grouped = try service.searchStrongsMultiple(
+            canonicalTokens: ["H0430"],
+            moduleNames: ["LSG", "PLAIN", "KJV"]
+        )
+
+        XCTAssertEqual(grouped.groups.count, 1)
+        XCTAssertEqual(grouped.groups[0].matches.map(\.moduleName), ["LSG", "KJV"])
+        XCTAssertEqual(grouped.moduleCounts.map(\.moduleName), ["LSG", "PLAIN", "KJV"])
+        XCTAssertEqual(grouped.moduleCounts.map(\.count), [1, 0, 1])
+        XCTAssertEqual(grouped.totalHitCount, 2)
     }
 
     /**
@@ -247,9 +322,9 @@ final class SearchIndexServiceQueryTests: XCTestCase {
             ),
         ])
 
-        let earthHits = service.search(query: "earth", moduleName: "KJV", wordMode: .allWords)
-        let jesusHits = service.search(query: "jesus", moduleName: "KJV", wordMode: .allWords)
-        let noahHits = service.search(query: "noah", moduleName: "KJV", wordMode: .allWords)
+        let earthHits = try service.search(query: "earth", moduleName: "KJV", wordMode: .allWords).hits
+        let jesusHits = try service.search(query: "jesus", moduleName: "KJV", wordMode: .allWords).hits
+        let noahHits = try service.search(query: "noah", moduleName: "KJV", wordMode: .allWords).hits
 
         XCTAssertEqual(
             Array(earthHits.prefix(2).map(\.key)),
@@ -305,8 +380,10 @@ final class SearchIndexServiceQueryTests: XCTestCase {
      */
     private func insert(_ row: SearchIndexFixtureRow, db: OpaquePointer?) throws {
         let sql = """
-            INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO verse_fts (
+                search_text, verse_key, plain_text, module_name, entry_order, osis_book,
+                display_book, display_book_mode, chapter, verse, book_order, canon_scope
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -314,10 +391,34 @@ final class SearchIndexServiceQueryTests: XCTestCase {
         }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, row.key, -1, searchIndexQueryFixtureSQLiteTransient)
-        sqlite3_bind_text(stmt, 2, row.text, -1, searchIndexQueryFixtureSQLiteTransient)
-        sqlite3_bind_text(stmt, 3, row.moduleName, -1, searchIndexQueryFixtureSQLiteTransient)
-        sqlite3_bind_int(stmt, 4, Int32(row.order))
+        let analyzedText = try SearchTextAnalyzer.analyzedText(
+            row.text,
+            profile: SearchTextAnalyzer.profile(for: "en")
+        )
+        sqlite3_bind_text(stmt, 1, analyzedText, -1, searchIndexQueryFixtureSQLiteTransient)
+        sqlite3_bind_text(stmt, 2, row.key, -1, searchIndexQueryFixtureSQLiteTransient)
+        sqlite3_bind_text(stmt, 3, row.text, -1, searchIndexQueryFixtureSQLiteTransient)
+        sqlite3_bind_text(stmt, 4, row.moduleName, -1, searchIndexQueryFixtureSQLiteTransient)
+        sqlite3_bind_int(stmt, 5, Int32(row.order))
+        sqlite3_bind_text(stmt, 6, row.osisBookId, -1, searchIndexQueryFixtureSQLiteTransient)
+        sqlite3_bind_text(stmt, 7, row.displayBook, -1, searchIndexQueryFixtureSQLiteTransient)
+        sqlite3_bind_text(
+            stmt,
+            8,
+            SearchBookNamePresentation.source.rawValue,
+            -1,
+            searchIndexQueryFixtureSQLiteTransient
+        )
+        sqlite3_bind_int(stmt, 9, Int32(row.chapter))
+        sqlite3_bind_int(stmt, 10, Int32(row.verse))
+        sqlite3_bind_int(stmt, 11, Int32(SearchCanonicalBookCatalog.order(of: row.osisBookId)))
+        sqlite3_bind_text(
+            stmt,
+            12,
+            SearchCanonicalBookCatalog.section(of: row.osisBookId).rawValue,
+            -1,
+            searchIndexQueryFixtureSQLiteTransient
+        )
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw SearchIndexQueryFixtureError.writeFailed
         }
@@ -365,8 +466,13 @@ final class SearchIndexServiceQueryTests: XCTestCase {
      */
     private func markModuleIndexed(moduleName: String, rowCount: Int, db: OpaquePointer?) throws {
         let sql = """
-            INSERT OR REPLACE INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
-            VALUES (?, ?, datetime('now'), ?)
+            INSERT OR REPLACE INTO indexed_modules (
+                module_name, verse_count, indexed_at, schema_version, language_code, analyzer_id,
+                strongs_complete, source_version, source_fingerprint, store_generation
+            ) VALUES (
+                ?, ?, datetime('now'), ?, 'en', ?, 1, '', ?,
+                (SELECT store_generation FROM search_index_state WHERE id = 1)
+            )
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -377,6 +483,20 @@ final class SearchIndexServiceQueryTests: XCTestCase {
         sqlite3_bind_text(stmt, 1, moduleName, -1, searchIndexQueryFixtureSQLiteTransient)
         sqlite3_bind_int(stmt, 2, Int32(rowCount))
         sqlite3_bind_int(stmt, 3, Int32(SearchIndexService.currentSchemaVersion))
+        sqlite3_bind_text(
+            stmt,
+            4,
+            SearchTextAnalyzer.profile(for: "en").identifier,
+            -1,
+            searchIndexQueryFixtureSQLiteTransient
+        )
+        sqlite3_bind_text(
+            stmt,
+            5,
+            String(repeating: "a", count: 64),
+            -1,
+            searchIndexQueryFixtureSQLiteTransient
+        )
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw SearchIndexQueryFixtureError.writeFailed
         }
@@ -395,7 +515,43 @@ private struct SearchIndexFixtureRow {
     let text: String
     let moduleName: String
     let order: Int
-    var strongTokens: [String] = []
+    let strongTokens: [String]
+    let displayBook: String
+    let osisBookId: String
+    let chapter: Int
+    let verse: Int
+
+    init(
+        key: String,
+        text: String,
+        moduleName: String,
+        order: Int,
+        strongTokens: [String] = [],
+        displayBook explicitDisplayBook: String? = nil,
+        osisBookId explicitOsisBookId: String? = nil,
+        chapter explicitChapter: Int? = nil,
+        verse explicitVerse: Int? = nil
+    ) {
+        let components = key.split(separator: " ")
+        let chapterVerse = components.last?.split(separator: ":") ?? []
+        let parsedDisplayBook = components.dropLast().joined(separator: " ")
+        self.key = key
+        self.text = text
+        self.moduleName = moduleName
+        self.order = order
+        self.strongTokens = strongTokens
+        self.displayBook = explicitDisplayBook ?? parsedDisplayBook
+        self.osisBookId = explicitOsisBookId ?? [
+            "Genesis": "Gen",
+            "Matthew": "Matt",
+            "John": "John",
+            "Luke": "Luke",
+            "Romans": "Rom",
+            "Revelation of John": "Rev",
+        ][parsedDisplayBook] ?? parsedDisplayBook
+        self.chapter = explicitChapter ?? chapterVerse.first.flatMap { Int($0) } ?? 0
+        self.verse = explicitVerse ?? chapterVerse.dropFirst().first.flatMap { Int($0) } ?? 0
+    }
 }
 
 private enum SearchIndexQueryFixtureError: Error {

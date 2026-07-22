@@ -99,6 +99,7 @@ struct SwordModuleConfig: Sendable {
             description: description,
             category: category,
             language: language,
+            moduleDriver: modDrv,
             version: version,
             features: features,
             isRightToLeft: direction.caseInsensitiveCompare("RtoL") == .orderedSame,

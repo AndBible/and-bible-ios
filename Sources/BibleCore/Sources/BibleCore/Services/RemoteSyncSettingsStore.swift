@@ -61,8 +61,10 @@ public struct WebDAVSyncConfiguration: Sendable, Equatable {
      - Returns: Normalized DAV base URL suitable for `WebDAVClient` requests.
      - Side Effects: none.
      - Failure modes:
-       - throws `WebDAVClientError.invalidURL` when the server URL is malformed, uses a non-HTTP
-         scheme, contains whitespace, or points at a login page instead of a DAV root
+       - throws `WebDAVClientError.invalidURL` when the server URL is malformed, uses a non-HTTPS
+         scheme, contains credentials/query/fragment syntax, has unsafe path components, or points
+         at a login page instead of a DAV root
+       - throws `WebDAVClientError.invalidPath` when the username cannot be one DAV path component
      */
     public func resolvedDAVBaseURL() throws -> URL {
         let trimmedServerURL = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -76,11 +78,21 @@ public struct WebDAVSyncConfiguration: Sendable, Equatable {
         guard var components = URLComponents(string: trimmedServerURL) else {
             throw WebDAVClientError.invalidURL
         }
-        guard let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+        guard let scheme = components.scheme?.lowercased(),
+              scheme == "https",
+              components.host?.isEmpty == false,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil else {
             throw WebDAVClientError.invalidURL
         }
 
-        let normalizedPathComponents = components.path
+        let canonicalServerPath = try WebDAVPathValidator.canonicalAbsolutePath(
+            components.percentEncodedPath.isEmpty ? "/" : components.percentEncodedPath,
+            error: .invalidURL
+        )
+        let normalizedPathComponents = canonicalServerPath
             .split(separator: "/")
             .map(String.init)
         if normalizedPathComponents.last?.lowercased() == "login" {
@@ -88,12 +100,14 @@ public struct WebDAVSyncConfiguration: Sendable, Equatable {
         }
 
         if !Self.pathAlreadyPointsAtDAVRoot(normalizedPathComponents) {
-            let encodedUsername = trimmedUsername.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
-                ?? trimmedUsername
+            let validatedUsername = try WebDAVPathValidator.canonicalRelativePath(trimmedUsername)
+            guard !validatedUsername.isEmpty, !validatedUsername.contains("/") else {
+                throw WebDAVClientError.invalidPath
+            }
             let prefix = normalizedPathComponents.isEmpty
                 ? ""
                 : "/" + normalizedPathComponents.joined(separator: "/")
-            components.path = "\(prefix)/remote.php/dav/files/\(encodedUsername)"
+            components.path = "\(prefix)/remote.php/dav/files/\(validatedUsername)"
         } else {
             components.path = "/" + normalizedPathComponents.joined(separator: "/")
         }
@@ -123,7 +137,7 @@ public struct WebDAVSyncConfiguration: Sendable, Equatable {
         WebDAVClient(
             baseURL: try resolvedDAVBaseURL(),
             username: username.trimmingCharacters(in: .whitespacesAndNewlines),
-            password: password.trimmingCharacters(in: .whitespacesAndNewlines),
+            password: password,
             session: session
         )
     }
@@ -566,11 +580,10 @@ public final class RemoteSyncSettingsStore {
         guard let configuration = loadWebDAVConfiguration() else {
             return nil
         }
-        let trimmedPassword = webDAVPassword()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmedPassword.isEmpty else {
+        guard let password = webDAVPassword(), !password.isEmpty else {
             return nil
         }
-        return try configuration.makeWebDAVClient(password: trimmedPassword, session: session)
+        return try configuration.makeWebDAVClient(password: password, session: session)
     }
 
     /**
@@ -578,7 +591,8 @@ public final class RemoteSyncSettingsStore {
 
      - Parameters:
        - configuration: Non-secret WebDAV settings to persist.
-       - password: Optional password to write to the secret store. Empty strings clear the secret.
+       - password: Optional exact password to write to the secret store. `nil` and empty strings
+         clear the secret; whitespace is credential data and is preserved.
      - Side Effects:
        - writes server URL, username, and folder path to `SettingsStore` using Android-compatible
          keys
@@ -603,12 +617,11 @@ public final class RemoteSyncSettingsStore {
             value: configuration.folderPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         )
 
-        let trimmedPassword = password?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if trimmedPassword.isEmpty {
+        guard let password, !password.isEmpty else {
             try secretStore.removeSecret(forKey: Keys.webDAVPassword)
-        } else {
-            try secretStore.setSecret(trimmedPassword, forKey: Keys.webDAVPassword)
+            return
         }
+        try secretStore.setSecret(password, forKey: Keys.webDAVPassword)
     }
 
     /**

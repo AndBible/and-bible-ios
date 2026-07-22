@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Asetuksia vainotuille";
 "discrete_mode" = "Piilota uskonnolliset symbolit";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "Tietoja";
 "version" = "Version";
 "export" = "Vie";
@@ -405,10 +405,6 @@
 "calculator_pin_description" = "PIN numero joka tarvitaan jotta päästään sovellukseen laskimesta.";
 "discrete_help_title" = "Lue tämä ensin!";
 "discrete_help_summary" = "Ohjeita asetusten tekemiseen ja tietoa erillisestä vainotuille tarkoitetusta versiosta.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Sovelluksen käyttäytyminen";
 "prefs_display_customization_cat" = "Ulkonäkö";
@@ -479,7 +475,6 @@
 
 "prefs_volume_keys_scroll_title" = "Äänenvoimakkuuspainikkeet vierittävät";
 "prefs_volume_keys_scroll_summary" = "Käytä äänenvoimakkuuspainikkeita raamatuntekstin vierittämiseen";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Kokeelliset ominaisuudet";
 "prefs_experimental_features_summary" = "Valitse käyttöön otettavat kokeelliset ominaisuudet. Nämä ominaisuudet ovat vielä kehitteillä ja voivat muuttua tai poistua";
 "experimental_feature_bookmark_edit_actions" = "Kirjanmerkkien muokkaustoiminnot";
@@ -625,3 +620,390 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "SD-kortilla on käyttäjän lukusuunnitelma jsword/readingplan joka on saman niminen kuin sisäänrakennettu lukusuunnitelma. Sitä ei voida näyttää tässä. Nimeä tiedosto uudelleen siten että sen tiedostotunniste on .properties.";
 "error_no_content" = "Ei sisältöä valitulle jakeelle";
+
+/* Android shared translations */
+"calculator_par1" = "Ennen kuin etenet sovellukseen, laskin näytetään.";
+"calculator_par2" = "Voit tehdä siinä tavallisia laskutoimituksia ja kun haluat edetä sovellukseen, näppäile PIN numero (oletus 1234) ja paina \"=\"-nappia.";
+"calculator_par3" = "Voit asettaa oman PIN-numeron \"Laskimen PIN\"-asetuksesta.";
+"give_passphrase_for_module" = "Dokumentti %@ on salattu ja tarvitset salasanan avataksesi sen";
+"show_unlock_info" = "Moduulin tiedot & ohjeet salasanan hankkimiseksi";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Puretaan Zip-tiedostoa…";
+"install_failed_reason" = "Moduulin asentaminen epäonnistui seuraavasta syystä: %@.";
+"install_zip_successfull" = "Moduuli asennettiin onnistuneesti";
+"module_install_phase_committing" = "Odota hetki. Lataan moduuleja tiedostosta.";
+"module_install_phase_downloading" = "Lataa";
+"module_install_phase_queued" = "Odota…";
+"storage_space_warning" = "Liian vähän tallennustilaa teoksen tallentamiseen.";
+
+/* Android shared translations */
+"error_occurred" = "Tapahtui virhe";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Opettelu";
+"memorize_tab_reading" = "Lukeminen";
+"reading_progress_active_days" = "aktiivisia päiviä";
+"reading_progress_bible_heatmap" = "Raamatun yleiskatsaus";
+"reading_progress_calendar" = "Lukutoiminta";
+"reading_progress_chapters_read" = "lukua luettu";
+"reading_progress_cycle" = "Kierros %d";
+"reading_progress_history_for" = "Lukuhistoria: %1$@";
+"reading_progress_history_no_entries" = "Ei luettuja jakeita tälle valinnalle.";
+"reading_progress_history_title" = "Lukuhistoria";
+"reading_progress_history_version_unknown" = "Tuntematon versio";
+"reading_progress_new_cycle" = "Uusi kierros";
+"reading_progress_new_cycle_confirm" = "Aloitetaanko uusi lukukierros? Edistymistä aletaan seurata alusta, mutta edellisen kierroksen tiedot säilytetään.";
+"reading_progress_new_testament" = "Uusi testamentti";
+"reading_progress_next_cycle" = "Seuraava kierros";
+"reading_progress_old_testament" = "Vanha testamentti";
+"reading_progress_overall" = "%@%% Raamatusta luettu";
+"reading_progress_percent_read_scale" = "Luettu\n%";
+"reading_progress_previous_cycle" = "Edellinen kierros";
+"reading_progress_read_count_scale" = "Luettu\nkpl";
+"reading_progress_title" = "Luku-/opetteluedistyminen";
+
+/* Android shared translations */
+"conf_change_chapter" = "Luvun vaihdokset";
+"conf_change_title" = "Otsikot";
+"conf_replace_divinename" = "Korvaa Jumalan nimi Jahvella";
+"conf_save_playback_settings_to_bookmarks" = "Tallenna soiton asetukset kirjanmerkkeihin";
+"conf_speak_auto_bookmark" = "Automaattiset kirjanmerkit";
+"conf_speak_footnotes" = "Alaviitteet";
+"conf_speak_sleep_timer" = "Aseta uniajastin";
+"conf_speak_synchronize" = "Teksti seuraa puhetta";
+"forward" = "Eteen";
+"playback_settings_title" = "Soiton asetukset";
+"rewind" = "Taakse";
+"speak_bookmarks_menu_title" = "Aloita puhe kirjanmerkistä";
+"speak_next" = "Seuraava";
+"speak_previous" = "Edellinen";
+"speak_settings_title" = "Yleiset puheen asetukset";
+
+/* Android shared translations */
+"sleep_timer_title" = "Uniajastimen ajastus minuuteissa";
+"speak_beginning_of_passage" = "Valitse toistettavan alueen alkukohta";
+"speak_ending_of_passage" = "Valitse toistettavan alueen loppukohta";
+"speak_ending_verse_must_be_later" = "Lopetusjakeen pitää olla myöhemmin kuin aloitusjakeen";
+"speak_verse_range_to_repeat" = "Valitse jaejakso jota toistetaan";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Tätä kieltä ei voi käyttää.";
+
+/* Android shared translations */
+"ai_unknown_prompt" = "Tekoäly";
+"description" = "Kuvaus";
+"errorTitle" = "Tapahtui virhe";
+"error_executing_search" = "Virheellinen haku";
+"export_something" = "Vie %@";
+"import_items" = "Tuo muodossa %@";
+"install_zip_module" = "Asenna raamattumoduuli";
+"my_document_content_type_label" = "Sisältötyyppi";
+"my_document_create_title" = "Luo uusi dokumentti";
+"my_document_import_document" = "Tuo tiedostot dokumenttina";
+"my_document_new_name" = "Dokumentti %d";
+"my_document_new_page_name" = "Sivu %1$d";
+"my_document_rename_title" = "Nimeä dokumentti uudelleen";
+"my_document_save_changes" = "Tallennetaanko muutokset?";
+"overwrite" = "Kyllä";
+"package_directory" = "Pakettien hakemisto (Zip-tiedostot)";
+"read" = "Luku";
+"reading_plan_set_current_day" = "Aseta nykyiseksi päiväksi…";
+"reading_plan_set_start_date" = "Aseta alkupäivämäärä…";
+"search_all_words" = "Kaikkia sanoja";
+"search_any_word" = "Jotain sanoista";
+"search_fts_query" = "Raa'an kyselyn syntaksi";
+"search_phrase" = "Lausetta";
+"search_words_group_prompt" = "Etsi jakeista";
+"show_notes" = "Näytä merkinnät";
+"speak_book_changed" = "Kirja vaihtui.";
+"speak_chapter_changed" = "Luku";
+"success" = "Valmis";
+"summary" = "Tiivistelmä";
+"undo" = "Peruuta";
+
+/* Android shared translations */
+"my_document_no_description" = "Ei kuvausta";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Ei löytynyt teoksesta";
+"my_document_cannot_delete_ai_documents" = "Tekoälydokumenttia ei voi poistaa, kun se sisältää sivuja. Poista ensin sivut.";
+"my_document_create_page_title" = "Uusi sivu";
+"my_document_import_empty_selection" = "Tuotavia tiedostoja ei valittu";
+"system_items1" = "Lisää";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Lataa ensin Raamattu, joka sisältää Strongin numeroinnin ja muodosta myös sen indeksi Haku-toiminnossa";
+
+/* Android shared translations */
+"add_model" = "Lisää malli";
+"agent_already_running" = "Tekoälyagentti on jo käynnissä. Odota tai pysäytä se ensin.";
+"agent_log_cancelled" = "Peruutettu";
+"agent_log_completed" = "Valmis";
+"agent_log_executing" = "Suoritetaan: %@";
+"agent_log_idle" = "Tekoälyavustaja";
+"agent_log_iteration" = "Iteraatio %d";
+"agent_log_model_not_configured" = "Mallia ei ole määritetty";
+"agent_log_tool_failed" = "Työkalu %@ epäonnistui";
+"agent_log_view_raw" = "Näytä raaka LLM-loki";
+"agent_max_iterations_title" = "Agentin iteraatioiden enimmäismäärä";
+"agent_permission_mode_summary" = "Määrittää, milloin käyttäjän vahvistus vaaditaan ennen tekoälyn kirjoitustoimintoja";
+"agent_permission_title" = "Agentin käyttöoikeus";
+"ai_add_provider" = "Lisää palveluntarjoaja";
+"ai_advanced_category" = "Lisäasetukset";
+"ai_agent_notification_running" = "Tekoälyagentti työskentelee…";
+"ai_behavior_category" = "Käyttäytyminen";
+"ai_connection_settings" = "Yhteysasetukset";
+"ai_disclaimer_approach" = "AndBible käyttää tekoälyä ensisijaisesti asentamiesi teosten — kommentaarien, sanakirjojen ja muiden moduulien — tekstin käsittelyyn sen sijaan, että luottaisi mallin omaan opetusaineistoon.";
+"ai_disclaimer_dialog_title" = "Tekoälytyökalut — tärkeää tietoa";
+"ai_disclaimer_intro" = "Tekoälytyökalut voivat rikastuttaa merkittävästi raamatuntutkimuskokemustasi ja avata uusia tapoja syventyä Raamattuun.";
+"ai_disclaimer_point1" = "Tekoäly voi tehdä virheitä, mukaan lukien \"hallusinaatioita\" (väittää varmasti vääriä tai keksittyjä tietoja). Älä koskaan hyväksy sen tuotosta sokeasti.";
+"ai_disclaimer_point2" = "Tekoälyn vastaukset voivat heijastaa opetusaineiston vinoumia, olla tarkoituksellisesti harhaanjohtavia tai esittää tietyn teologisen näkökulman ikään kuin se olisi neutraali tai kattava.";
+"ai_disclaimer_point3" = "Olet vastuussa siitä, miten käytät tekoälyn tuottamaa sisältöä. Tarkista tulokset aina Raamatusta ennen kuin luotat niihin.";
+"ai_disclaimer_point4" = "AndBible pyrkii helpottamaan todentamista (esim. tarkat lähdeviittaukset kommentaareissa), mutta lopullinen vastuu on aina sinulla.";
+"ai_disclaimer_point5" = "\"Koetelkaa kaikkea ja pitäkää se, mikä on hyvää.\" (1. Tess. 5:21)";
+"ai_disclaimer_point6" = "Näillä työkaluilla ei ole sielua eikä Pyhää Henkeä. Ne ovat tekstinkäsittelytyökaluja, eivät hengellisiä oppaita. Ne eivät sovellu suoraan saarnojen, hartauksien tai muun hengellisen sisällön valmisteluun ilman huolellista ihmisen valvontaa, rukousta ja erottamiskykyä.";
+"ai_disclaimer_point7" = "Viisaasti käytettynä ne voivat hyödyttää monia käyttäjiä ja käyttötarkoituksia. Mutta jos et ole varma riskien hyväksymisestä, myös niiden käyttämättä jättäminen on täysin pätevä valinta.";
+"ai_disclaimer_point8" = "Tietosi lähetetään valitsemasi tekoälypalveluntarjoajan palvelimille. Käyttämällä API-avainta hyväksyt kyseisen palveluntarjoajan ehdot ja tietosuojakäytännön. Itse isännöidyt mallit ovat mahdollisia, mutta vaativat enemmän teknistä osaamista, eivätkä tulokset välttämättä ole yhtä hyviä kuin kaupallisilla malleilla.";
+"ai_disclaimer_point9" = "Tekoälypalveluntarjoajat veloittavat API-käytöstä. AndBiblessä näytetyt kustannusarviot ovat likimääräisiä — tarkista todelliset kulut aina palveluntarjoajasi laskutuksesta.";
+"ai_disclaimer_responsibility" = "Ne ovat kuitenkin tehokkaita työkaluja — ja suuri voima tuo mukanaan suuren vastuun. Pidä seuraavat asiat mielessä.";
+"ai_disclaimer_warning_title" = "Tärkeää: Lue ennen tekoälytyökalujen käyttöä";
+"ai_doc_choose_page" = "Valitse tekoälydokumentin sivu";
+"ai_document_filter_activity_title" = "Tekoälyn dokumenttien käyttöoikeus";
+"ai_document_regenerate" = "Luo uudelleen";
+"ai_hidden_status" = "piilotettu";
+"ai_hide_prompt" = "Piilota";
+"ai_language_title" = "Tekoälyn vastauskieli";
+"ai_models_category" = "Mallit";
+"ai_models_summary_none" = "Malleja ei ole määritetty";
+"ai_provider_api_format" = "API-muoto";
+"ai_provider_api_key" = "API-avain";
+"ai_provider_api_key_not_set" = "API-avainta ei ole asetettu";
+"ai_provider_delete_confirm" = "Poistetaanko palveluntarjoaja \"%1$@\"? Tätä palveluntarjoajaa käyttävät kehotteet palautuvat oletusasetuksiin.";
+"ai_provider_edit" = "Muokkaa";
+"ai_provider_endpoint" = "API-päätepiste";
+"ai_provider_endpoint_description" = "Vain perus-URL. AndBible lisää automaattisesti \"/chat/completions\" (OpenAI-muoto) tai \"/messages\" (Anthropic-muoto). Malliluettelot haetaan osoitteesta \"/models\".";
+"ai_provider_name" = "Palveluntarjoajan nimi";
+"ai_provider_saved" = "Palveluntarjoaja tallennettu";
+"ai_provider_select_type" = "Valitse palveluntarjoajan tyyppi";
+"ai_providers_models_category" = "Palveluntarjoajat & mallit";
+"ai_providers_summary_none" = "Ei määritettyjä palveluntarjoajia";
+"ai_regenerate_fresh_run" = "Uusi ajo (ohita aiempi tulos)";
+"ai_regenerate_instructions_hint" = "Lisäohjeet (valinnainen)";
+"ai_regenerate_keep_previous" = "Säilytä aiempi versio";
+"ai_regenerate_prompt_not_found" = "Uudelleenluonti ei onnistu: alkuperäistä kehotetta ei löytynyt. Se on ehkä poistettu.";
+"ai_regenerate_title" = "Luo uudelleen";
+"ai_settings" = "Tekoälyn asetukset";
+"ai_setup_description" = "AndBible voi käyttää tekoälyä Raamatun tekstin kääntämiseen, jakeiden selittämiseen, tiivistelmien luomiseen ja muuhun. Aloita määrittämällä yhteys OpenAI-yhteensopivaan API-palveluntarjoajaan.";
+"ai_setup_title" = "Määritä tekoäly";
+"ai_usage_category" = "Käyttö";
+"ask_model_before_run_title" = "Kysy malli ennen suoritusta";
+"auto_hide_agent_log_title" = "Piilota tekoälypaneeli, kun valmis";
+"bookmarks_and_mynotes_title" = "Kirjanmerkit & Omat Merkinnät";
+"built_in_prompt" = "Sisäänrakennettu";
+"built_in_prompt_notice" = "Tämä on sisäänrakennettu kehote, jota ei voi muokata. Luo muokattava kopio valitsemalla \"Kopioi muokattavaksi\".";
+"category_none" = "Ei kategoriaa";
+"commentary_max_response_no_limit" = "Ei rajaa";
+"commentary_max_response_title" = "Kommentaarivastauksen kokoraja";
+"copy_to_customize" = "Kopioi muokattavaksi";
+"custom_agent_system_prompt_title" = "Agentin järjestelmäkehote";
+"custom_system_prompt_custom" = "Mukautettu";
+"custom_text_transform_system_prompt_title" = "Tekstinmuunnoksen järjestelmäkehote";
+"default_prompt_ask_question" = "Esitä kysymys";
+"default_prompt_ask_question_desc" = "Esitä mikä tahansa kysymys valitusta tekstijaksosta";
+"default_prompt_bookmark_annotate" = "Lisää kirjanmerkki ja merkintä";
+"default_prompt_bookmark_annotate_desc" = "Luo kirjanmerkin ja tekoälyn tuottaman tutkimusmerkinnän";
+"default_prompt_compare_translations" = "Vertaile käännöksiä";
+"default_prompt_compare_translations_desc" = "Näyttää, miten eri asennetut käännökset esittävät tekstin";
+"default_prompt_cross_references" = "Ristiviitteet";
+"default_prompt_cross_references_desc" = "Etsii ja selittää aiheeseen liittyviä Raamatun kohtia";
+"default_prompt_custom" = "Mukautettu kehote";
+"default_prompt_custom_desc" = "Suorita mukautettu tehtävä valitulle tekstijaksolle";
+"default_prompt_custom_template" = "Noudata käyttäjän tehtävämääritystä valitulle Raamatun tekstijaksolle.";
+"default_prompt_enhance_note" = "Paranna merkintää";
+"default_prompt_enhance_note_desc" = "Parantaa merkinnän kielioppia, selkeyttä ja luettavuutta";
+"default_prompt_explain_verses" = "Selitä jakeet";
+"default_prompt_explain_verses_desc" = "Selittää valittujen jakeiden merkityksen ja kontekstin";
+"default_prompt_explain_verses_studypad" = "Selitä jakeet → Opintoalusta";
+"default_prompt_explain_verses_studypad_desc" = "Luo opintoalustan jaekohtaisella selityksellä ja kirjanmerkeillä";
+"default_prompt_study_layout" = "Avaa tutkimusasettelu";
+"default_prompt_study_layout_desc" = "Avaa kommentaari- ja rinnakkaiskäännösikkunat tutkimista varten";
+"default_prompt_summary" = "Tiivistelmä";
+"default_prompt_summary_desc" = "Luo tiiviin yhteenvedon valitusta tekstistä";
+"default_prompt_thematic_study" = "Temaattinen tutkimus";
+"default_prompt_thematic_study_desc" = "Kokoaa opintoalustalle tekstikohtia ja muistiinpanoja keskeisestä teemasta";
+"default_prompt_translate_to_language" = "Käännä kielelle %@";
+"default_prompt_translate_to_ui_language_desc" = "Kääntää teoksen tekstin sovelluksen käyttöliittymän kielelle";
+"default_prompt_word_study" = "Sanatutkimus";
+"default_prompt_word_study_desc" = "Analysoi alkuperäisiä heprean ja kreikan sanoja";
+"default_prompt_workspace_assistant" = "Työtila-avustaja";
+"default_prompt_workspace_assistant_desc" = "Hallitse ikkunoita: luo, sulje, järjestä uudelleen, vaihda teoksia";
+"delete_category" = "Poista kategoria";
+"delete_category_and_prompts" = "Poista kategoria ja sen kehotteet";
+"delete_category_keep_prompts" = "Siirrä kehotteet juureen ja poista kategoria";
+"doc_type_addons" = "Lisäosat";
+"easy_setup_enter_api_key" = "Syötä API-avaimesi";
+"easy_setup_success" = "Yhteys onnistui!";
+"easy_setup_test_connection" = "Testaa yhteys";
+"easy_setup_testing" = "Testataan…";
+"easy_setup_title" = "Pika-asennus";
+"help_bookmarks_text" = "Voit luoda kirjanmerkkejä valitsemalla tekstiä ja valitsemalla \"Kirjanmerkki\" ponnahdusvalikosta. Voit lisätä omia huomioita uuteen kirjanmerkkiin painamalla korostettua tekstiä raamattunäkymässä. Voit myös käyttää \"Omat Merkinnät\" -erikoisdokumenttia, joka löytyy kommentaareista. Sen avulla voit tarkastella huomioitasi erillisessä ikkunassa.";
+"help_memorize_text" = "Opettele-näkymä auttaa sinua oppimaan kohtia ulkoa. Käytä Sanasumutu-, Sanasekoitus-, Sanatyyppi- tai Sanajärjestys-harjoituksia. Onnistuneet harjoitukset merkitsevät jakeet automaattisesti opitelluiksi (tämän voi poistaa käytöstä).";
+"help_read_more_link" = "Lue lisää käyttöoppaasta";
+"hide_category" = "Piilota tekoälytoiminnoista";
+"llm_actions" = "Tekoälytoiminnot";
+"llm_continue_iterations_message" = "Tekoälyagentti on saavuttanut %1$d iteraation rajan eikä ole valmis. Jatketaanko vielä %2$d iteraatiota?";
+"llm_continue_iterations_title" = "Jatketaanko?";
+"llm_custom_input_price_title" = "Syötehinta ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Syötä mallin tunniste";
+"llm_custom_output_price_title" = "Tulostehinta ($/Mtoken)";
+"llm_error_max_iterations" = "Enimmäisiteraatiot (%1$d) saavutettu ilman valmistumista";
+"llm_error_unknown" = "Tuntematon virhe";
+"llm_note_updated" = "Merkintä päivitetty";
+"llm_openrouter_model" = "Malli";
+"llm_provider_custom" = "Mukautettu (OpenAI-yhteensopiva)";
+"llm_reset_usage_confirm_message" = "Tämä tyhjentää kaikki kertyneet käyttötiedot.";
+"llm_reset_usage_confirm_title" = "Nollataanko käyttötiedot?";
+"llm_reset_usage_title" = "Nollaa käyttötiedot";
+"llm_usage_summary_default" = "Ei käyttötietoja";
+"llm_usage_summary_title" = "Tokenien käyttö";
+"manage_prompts" = "Hallitse tekoälykehotteita";
+"manage_tool_permissions_title" = "Työkalujen käyttöoikeudet";
+"model_pricing_summary" = "%1$@ sisään / %2$@ ulos per Mtoken";
+"model_select_provider" = "Palveluntarjoaja";
+"model_set_default" = "Aseta oletusmalliks";
+"move_category_down" = "Siirrä alas";
+"move_category_up" = "Siirrä ylös";
+"new_category" = "Uusi kategoria";
+"new_category_name" = "Kategorian nimi";
+"new_prompt" = "Uusi kehote";
+"permission_allow_all" = "Salli kaikki";
+"permission_allow_all_session" = "Salli kaikki työkalut tälle istunnolle";
+"permission_allow_for_session" = "Salli tälle istunnolle";
+"permission_allow_once" = "Salli kerran";
+"permission_always_allow_confirm" = "Haluatko varmasti sallia pysyvästi \"%1$@\"?";
+"permission_always_allow_confirm_reset_hint" = "Voit nollata tämän tekoälyn asetuksista.";
+"permission_always_ask" = "Kysy aina";
+"permission_ask_once_per_run" = "Kysy kerran per suoritus";
+"permission_deny" = "Estä";
+"permission_deny_all" = "Estä kaikki";
+"permission_option_always_allow" = "Salli aina";
+"permission_option_always_deny" = "Estä aina";
+"permission_status_default" = "Kysy (oletus)";
+"prompt_auto_include_commentaries" = "Sisällytä kommentaarit automaattisesti";
+"prompt_auto_include_documents" = "Sisällytä asennetut teokset automaattisesti";
+"prompt_bible_only" = "Vain raamattuteokset";
+"prompt_category" = "Kategoria";
+"prompt_category_favorites" = "Suosikit";
+"prompt_category_general" = "Yleinen";
+"prompt_category_notes" = "Muistiinpanot";
+"prompt_category_study" = "Tutkimus";
+"prompt_category_uncategorized" = "Luokittelematon";
+"prompt_context_note_editor" = "Muistiinpanoeditori";
+"prompt_context_text_selection" = "Tekstivalinta";
+"prompt_context_verse_selection" = "Jaevalinta";
+"prompt_context_window_menu" = "Ikkunan valikko";
+"prompt_context_workspace_menu" = "Työtilan valikko";
+"prompt_description" = "Kuvaus";
+"prompt_edit_before_run" = "Tarkenna ennen suoritusta";
+"prompt_is_text_transformation" = "Tekstin muunnos";
+"prompt_max_iterations_hint" = "Jätä tyhjäksi yleistä oletusta varten";
+"prompt_max_iterations_unlimited" = "Rajoittamaton";
+"prompt_model_default" = "Oletus";
+"prompt_model_override" = "Malli";
+"prompt_name" = "Nimi";
+"prompt_no_document_creation" = "Ei dokumentin luontia";
+"prompt_permission_mode" = "Käyttöoikeustila";
+"prompt_permission_mode_description" = "Hallitsee milloin käyttäjän vahvistus vaaditaan ennen tekoälyn kirjoitustoimintoja. Alla olevat työkalukohtaiset asetukset voivat ohittaa tämän yksittäisille työkaluille.";
+"prompt_permission_use_default" = "Käytä oletusta";
+"prompt_show_in" = "Näytä kohteessa";
+"prompt_strict_context_matching" = "Kontekstiriippuvainen välimuisti";
+"prompt_tab_advanced" = "Lisäasetukset";
+"prompt_tab_permissions" = "Käyttöoikeudet";
+"prompt_tab_prompt" = "Kehote";
+"prompt_template" = "Kehotepohja";
+"prompt_tool_permissions" = "Työkalujen käyttöoikeudet";
+"raw_log_delete_all" = "Poista kaikki";
+"raw_log_error_indicator" = "Virhe";
+"raw_log_history_empty" = "Ei tallennettuja lokeja";
+"raw_log_history_title" = "Tekoälyn lokihistoria";
+"raw_log_item_tokens" = "%1$@ sisään / %2$@ ulos";
+"raw_log_older_1_month" = "Yli kuukauden vanhat";
+"raw_log_older_1_week" = "Yli viikon vanhat";
+"raw_log_older_3_months" = "Yli 3 kuukauden vanhat";
+"raw_log_retention_summary_disabled" = "Ei käytössä (säilytä kaikki)";
+"raw_log_retention_title" = "Poista vanhat lokit automaattisesti";
+"reset_all_ai_settings" = "Nollaa kaikki tekoälyasetukset";
+"reset_all_ai_settings_confirm_message" = "Tämä poistaa API-avaimen, palveluntarjoajan, päätepisteen, mallin ja nollaa kaikki kehotteet oletusarvoihin. Jatketaanko?";
+"reset_all_ai_settings_confirm_title" = "Nollatanko kaikki tekoälyasetukset?";
+"reset_all_permissions" = "Nollaa kaikki";
+"reset_to_default" = "Palauta oletukseksi";
+"save_and_exit" = "Tallenna";
+"select_llm_prompt" = "Valitse tekoälytoiminto";
+"select_model_before_run_title" = "Valitse malli";
+"set_default_model_for_prompt" = "Aseta oletusmalliksi tälle kehotteelle";
+"show_category" = "Näytä tekoälytoiminnoissa";
+"specify_before_run_title" = "Tarkenna tehtävä";
+"tool_add_bookmark_note" = "Lisää kirjanmerkkimerkintä";
+"tool_add_label_to_bookmark" = "Lisää kirjanmerkkiryhmä kirjanmerkkiin";
+"tool_add_my_document_page" = "Lisää Oma dokumentti -sivu";
+"tool_add_study_pad_entry" = "Lisää opintoalustamerkintä";
+"tool_category_bible_search" = "Raamattu & haku";
+"tool_category_bookmarks" = "Kirjanmerkit";
+"tool_category_general_books" = "Yleiset kirjat";
+"tool_category_labels" = "Kirjanmerkkiryhmät";
+"tool_category_my_documents" = "Omat dokumentit";
+"tool_category_study_pads" = "Opintoalustat";
+"tool_category_windows" = "Ikkunat";
+"tool_create_bookmark" = "Luo kirjanmerkki";
+"tool_create_label" = "Luo kirjanmerkkiryhmä";
+"tool_create_my_document" = "Luo Oma dokumentti";
+"tool_create_study_pad" = "Luo opintoalusta";
+"tool_create_window" = "Luo ikkuna";
+"tool_delete_bookmark" = "Poista kirjanmerkki";
+"tool_delete_label" = "Poista kirjanmerkkiryhmä";
+"tool_delete_my_document_page" = "Poista Oma dokumentti -sivu";
+"tool_edit_my_document_page" = "Muokkaa Oma dokumentti -sivua";
+"tool_finish_with_my_document_page" = "Avaa Oma dokumentti -sivu";
+"tool_finish_with_study_pad" = "Avaa opintoalusta";
+"tool_finish_without_document" = "Lopeta ilman dokumenttia";
+"tool_get_all_labels" = "Listaa kaikki kirjanmerkkiryhmät";
+"tool_get_bookmarks_for_verse" = "Hae jakeen kirjanmerkit";
+"tool_get_bookmarks_with_label" = "Hae kirjanmerkkiryhmän kirjanmerkit";
+"tool_get_commentaries" = "Lue kommentaareja";
+"tool_get_dictionary_entry" = "Hae sanakirjamerkintä";
+"tool_get_genbook_content" = "Lue yleisen kirjan sisältö";
+"tool_get_genbook_keys" = "Listaa yleisten kirjojen avaimet";
+"tool_get_installed_documents" = "Listaa asennetut teokset";
+"tool_get_my_document_pages" = "Listaa Oma dokumentti -sivut";
+"tool_get_my_documents" = "Listaa Omat dokumentit";
+"tool_get_study_pad_content" = "Lue opintoalustan sisältö";
+"tool_get_verse_content" = "Lue jakeen sisältö";
+"tool_get_windows" = "Listaa ikkunat";
+"tool_manage_window" = "Hallitse ikkunaa";
+"tool_remove_label_from_bookmark" = "Poista kirjanmerkkiryhmä kirjanmerkistä";
+"tool_search_bible" = "Hae Raamatusta";
+"tool_search_by_strongs" = "Hae Strongin numerolla";
+"tool_search_study_pads" = "Hae opintoalustoista";
+"tool_set_document_title" = "Aseta dokumentin otsikko";
+"tool_set_window_document" = "Aseta ikkunan teos";
+"tool_update_bookmark_note" = "Päivitä kirjanmerkkimerkintä";
+"tool_update_studypad_text_entry" = "Päivitä opintoalustan tekstimerkintä";
+"verse_tip" = "Valitaksesi osittaisia tai useita jakeita, napauta pitkään Raamatun tekstiä";
+"watch_tutorial_video" = "Katso ohjevideo (englanninkielinen)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Luodaan tekoälydokumenttia uudelleen…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Hyväksyn ja otan täyden vastuun";
+"ai_disclaimer_accept_title" = "Hyväksy tekoälyä koskeva vastuuvapauslauseke";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Tekoälyn yhteys- ja kehoteasetukset";
+"prefs_features_cat" = "Ominaisuudet";

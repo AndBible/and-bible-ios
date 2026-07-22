@@ -5,9 +5,9 @@ import Foundation
 /**
  Preserves Android-only workspace restore data in iOS's local-only settings store.
 
- Android's workspace sync database contains several values that the current iOS SwiftData models do
- not represent directly:
- - raw `WorkspaceSettings.speakSettings` JSON
+ Android's workspace sync database contains exact wire payloads and values that the current iOS
+ SwiftData models do not represent directly:
+ - raw `WorkspaceSettings.speakSettings` JSON retained alongside native `SpeakSettings` projection
  - raw `PageManager.currentCategoryName` strings, which use Android enum-style names instead of the
    lower-case page-manager keys persisted by iOS
  - commentary/dictionary/general-book/map anchor fields that iOS does not store in `PageManager`
@@ -34,8 +34,8 @@ public final class RemoteSyncWorkspaceFidelityStore {
     /**
      One preserved Android workspace-level fidelity payload.
 
-     `speakSettingsJSON` is stored verbatim because iOS does not yet project Android's richer
-     workspace speech settings into a native model.
+     `speakSettingsJSON` is stored verbatim as round-trip provenance while the current Android schema
+     is also decoded into the workspace's native `SpeakSettings` model.
      */
     public struct WorkspaceEntry: Sendable, Equatable {
         /// Workspace identifier shared by Android and iOS.
@@ -157,7 +157,7 @@ public final class RemoteSyncWorkspaceFidelityStore {
     }
 
     /// Local-only settings persistence dependency shared by every fidelity operation.
-    private let settingsStore: SettingsStore
+    let settingsStore: SettingsStore
 
     /// JSON encoder used for `StoredPageManagerEntry` payloads.
     private let encoder = JSONEncoder()
@@ -394,6 +394,7 @@ public final class RemoteSyncWorkspaceFidelityStore {
                 settingsStore.remove(entry.key)
             }
         }
+        clearWorkspaceRoomFidelity()
     }
 
     /**

@@ -432,8 +432,10 @@ public struct SyncSettingsView: View {
             Section {
                 LabeledContent {
                     TextField(String(localized: "auth_server_uri"), text: $serverURL)
+                        #if os(iOS)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        #endif
                         .multilineTextAlignment(.trailing)
                         .focused($focusedNextCloudCredentialField, equals: .serverURL)
                         .onSubmit {
@@ -454,8 +456,10 @@ public struct SyncSettingsView: View {
 
                 LabeledContent {
                     TextField(String(localized: "auth_username"), text: $username)
+                        #if os(iOS)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        #endif
                         .multilineTextAlignment(.trailing)
                         .accessibilityIdentifier("syncNextCloudUsernameField")
                         #if os(iOS)
@@ -470,8 +474,10 @@ public struct SyncSettingsView: View {
 
                 LabeledContent {
                     SecureField(String(localized: "auth_password"), text: $password)
+                        #if os(iOS)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        #endif
                         .multilineTextAlignment(.trailing)
                         .accessibilityIdentifier("syncNextCloudPasswordField")
                         #if os(iOS)
@@ -486,8 +492,10 @@ public struct SyncSettingsView: View {
 
                 LabeledContent {
                     TextField(String(localized: "auth_folder_path"), text: $folderPath)
+                        #if os(iOS)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        #endif
                         .multilineTextAlignment(.trailing)
                         .accessibilityIdentifier("syncNextCloudFolderPathField")
                 } label: {
@@ -1298,9 +1306,8 @@ public struct SyncSettingsView: View {
        - error: Failure emitted by remote settings validation or synchronization services.
        - category: Logical sync category that was being synchronized.
        - revertEnablement: Whether the category toggle should be turned off after the failure.
-     - Side effects:
-       - may disable the category toggle for validation or incompatibility failures
-       - stores a per-category failure message and presents a global alert
+     - Side effects: Stores a per-category failure message and presents a global alert. Core schema
+       policy owns category enablement and incremental compatibility gates.
      - Failure modes: This helper cannot fail.
      */
     @MainActor
@@ -1319,13 +1326,8 @@ public struct SyncSettingsView: View {
         case RemoteSyncSynchronizationServiceFactoryError.missingWebDAVPassword:
             message = String(localized: "sign_in_failed")
         case RemoteSyncPatchDiscoveryError.incompatiblePatchVersion:
-            disableRemoteSync(for: category)
             message = [
                 String(localized: "sync_cant_fetch"),
-                String(
-                    format: String(localized: "sync_disabling"),
-                    remoteCategoryContentDescription(for: category)
-                ),
                 String(localized: "sync_update_app"),
             ]
             .joined(separator: " ")
@@ -1356,7 +1358,7 @@ public struct SyncSettingsView: View {
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "org.andbible.ios"
         if UITestRuntimeConfiguration.remoteSyncBootstrapScenario == .adoptExisting {
             return RemoteSyncSynchronizationService(
-                adapter: UITestRemoteSyncAdapter(bundleIdentifier: bundleIdentifier),
+                adapter: UITestRemoteSyncAdapter.appSession,
                 bundleIdentifier: bundleIdentifier,
                 deviceIdentifier: remoteSettingsStore.deviceIdentifier(),
                 nowProvider: { 1_735_689_900_000 }

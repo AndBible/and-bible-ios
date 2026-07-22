@@ -95,7 +95,9 @@ npm run type-check
 npm run build-debug
 ```
 
-Rebuild the frontend bundle before app validation when frontend assets changed.
+Rebuild and atomically sync the production frontend fallback with
+`scripts/manage_bibleview_bundle.py` before app validation when frontend assets changed. CI packages
+its own verified Debug build, and release archives always package a fresh Production build.
 
 ## Troubleshooting
 

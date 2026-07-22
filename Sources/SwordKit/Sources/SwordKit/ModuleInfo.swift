@@ -367,6 +367,16 @@ public struct BookInfo: Sendable, Identifiable, Equatable {
 
 /// Metadata about a SWORD module (installed or remote).
 public struct ModuleInfo: Sendable, Identifiable {
+    /// Case-insensitive SWORD/Android `ModDrv` names registered by Android at application startup.
+    private static let androidSupportedModuleDrivers: Set<String> = [
+        "rawtext", "ztext", "ztext4",
+        "rawcom", "rawcom4", "zcom", "zcom4", "hrefcom", "rawfiles",
+        "rawld", "rawld4", "zld", "rawgenbook",
+        "mybiblebible", "mybiblecommentary", "mybibledictionary",
+        "myswordbible", "myswordcommentary", "mysworddictionary",
+        "epubbook", "eswordbible",
+    ]
+
     /// Module abbreviation (e.g., "KJV", "ESV").
     public let name: String
 
@@ -381,6 +391,9 @@ public struct ModuleInfo: Sendable, Identifiable {
 
     /// Module version string.
     public let version: String
+
+    /// Raw SWORD/Android book driver declared by `ModDrv`.
+    public let moduleDriver: String
 
     /// Whether the module requires a cipher key.
     public let isEncrypted: Bool
@@ -405,21 +418,53 @@ public struct ModuleInfo: Sendable, Identifiable {
 
      Android excludes an unsupported book from `Books.installed()` at the registry level, so it is
      invisible everywhere (not readable, not in pickers, not shown as installed). iOS mirrors that by
-     filtering `SwordManager.installedModules()` and `module(named:)` on this predicate. Today the
-     only actionable reason a book is unsupported is a Bible whose declared versification SWORD does
-     not recognize (its verses would be mis-numbered under KJV); this is the single, extensible home
-     for any future unsupported reason (driver/type), as on Android. Non-Bible categories are
-     supported. See ADR-0010.
+     filtering `SwordManager.installedModules()` and `module(named:)` on this predicate. JSword first
+     requires `ModDrv` to name a registered `BookType`, then requires a registered versification for
+     every category. Bible modules additionally need a libsword-renderable canon on iOS. Requiring
+     those same metadata boundaries prevents malformed dictionaries, commentaries, books, and Bibles
+     from entering the installed registry. See ADR-0010.
+     - Returns: `true` only when Android recognizes the driver and versification and, for a Bible,
+       libsword can render the same canon.
+     - Side effects: Reads the validated bundled JSword registry and libsword's canon registry.
+     - Failure modes: Missing or unknown drivers, unknown versifications, and unrenderable Bible
+       canons fail closed.
      */
     public var isSupported: Bool {
-        category != .bible || SwordVersification.isVersificationDefined(aboutMetadata.versification)
+        let normalizedDriver = moduleDriver
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard Self.androidSupportedModuleDrivers.contains(normalizedDriver),
+              JSwordVersificationRegistry.supports(aboutMetadata.versification) else {
+            return false
+        }
+        return category != .bible || SwordVersification.supports(aboutMetadata.versification)
     }
 
+    /**
+     Creates installed-module metadata used by inventory, reader, and Downloads surfaces.
+
+     - Parameters:
+       - name: Module initials.
+       - description: User-visible module name.
+       - category: Category resolved from driver and config metadata.
+       - language: Module language code.
+       - moduleDriver: Raw `ModDrv` value. An empty value remains unsupported, matching JSword.
+       - version: Module version string.
+       - isEncrypted: Whether a cipher key entry exists.
+       - isUnlocked: Whether an encrypted module currently has a verified key.
+       - features: Feature flags projected from module configuration.
+       - isRightToLeft: Whether the module's configured text direction is right-to-left.
+       - aboutMetadata: Android-compatible About and versification metadata.
+     - Side effects: None.
+     - Failure modes: Invalid support metadata is retained for diagnostics but `isSupported` returns
+       `false`, keeping the module outside installed-book APIs.
+     */
     public init(
         name: String,
         description: String,
         category: ModuleCategory,
         language: String,
+        moduleDriver: String = "",
         version: String = "",
         isEncrypted: Bool = false,
         isUnlocked: Bool = true,
@@ -431,6 +476,7 @@ public struct ModuleInfo: Sendable, Identifiable {
         self.description = description
         self.category = category
         self.language = language
+        self.moduleDriver = moduleDriver
         self.version = version
         self.isEncrypted = isEncrypted
         self.isUnlocked = isUnlocked

@@ -199,6 +199,20 @@ public struct RepositoryManagerView: View {
         )
     }
 
+    /// Binding for Android's editable SWORD package-directory field.
+    private var editorPackageDirectoryBinding: Binding<String> {
+        Binding(
+            get: { editorState?.packageDirectory ?? "" },
+            set: { newValue in
+                if var current = editorState {
+                    current.packageDirectory = newValue
+                    editorState = current
+                    editorErrorMessage = nil
+                }
+            }
+        )
+    }
+
     /// Whether the current editor URL is empty or a validation request is already in flight.
     private var editorSaveDisabled: Bool {
         editorState?.repositoryURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false || isSavingSource
@@ -377,6 +391,25 @@ public struct RepositoryManagerView: View {
                 .accessibilityIdentifier("repositoryManagerRepositoryURLField")
             }
 
+            Section {
+                TextField(
+                    String(localized: "package_directory", defaultValue: "Package directory"),
+                    text: editorPackageDirectoryBinding
+                )
+                #if os(iOS)
+                .autocapitalization(.none)
+                #endif
+                .disabled(isSavingSource)
+                .accessibilityIdentifier("repositoryManagerPackageDirectoryField")
+            } header: {
+                Text(String(localized: "package_directory", defaultValue: "Package directory"))
+            } footer: {
+                Text(String(
+                    localized: "package_directory_optional_help",
+                    defaultValue: "Optional for SWORD repositories. Leave blank to use the repository-provided packages path."
+                ))
+            }
+
             if isSavingSource {
                 Section {
                     HStack(spacing: 12) {
@@ -439,7 +472,11 @@ public struct RepositoryManagerView: View {
      */
     private func beginAddingSource() {
         editorErrorMessage = nil
-        editorState = RepositorySourceEditorState(originalName: nil, repositoryURL: "")
+        editorState = RepositorySourceEditorState(
+            originalName: nil,
+            repositoryURL: "",
+            packageDirectory: ""
+        )
     }
 
     /**
@@ -455,7 +492,8 @@ public struct RepositoryManagerView: View {
         editorErrorMessage = nil
         editorState = RepositorySourceEditorState(
             originalName: source.name,
-            repositoryURL: source.editableURLString
+            repositoryURL: source.editableURLString,
+            packageDirectory: source.packageDirectory ?? ""
         )
     }
 
@@ -490,10 +528,14 @@ public struct RepositoryManagerView: View {
                 if let originalName = editorState.originalName {
                     try await sourceManager.replaceCustomSource(
                         named: originalName,
-                        with: editorState.repositoryURL
+                        with: editorState.repositoryURL,
+                        packageDirectory: editorState.packageDirectory
                     )
                 } else {
-                    try await sourceManager.addCustomSource(from: editorState.repositoryURL)
+                    try await sourceManager.addCustomSource(
+                        from: editorState.repositoryURL,
+                        packageDirectory: editorState.packageDirectory
+                    )
                 }
 
                 await MainActor.run {
@@ -555,6 +597,9 @@ private struct RepositorySourceEditorState: Identifiable {
 
     /// User-entered HTTPS manifest or direct SWORD catalog URL.
     var repositoryURL: String
+
+    /// Optional Android SWORD package directory; blank preserves repository discovery/defaulting.
+    var packageDirectory: String
 
     /// Navigation title matching the current add or replace mode.
     var title: String {

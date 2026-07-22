@@ -20,7 +20,6 @@ import { mount } from "@vue/test-utils";
 import MemorizeDocument from "@/components/documents/MemorizeDocument.vue";
 import WordBlur from "@/components/memorize/WordBlur.vue";
 import WordOrder from "@/components/memorize/WordOrder.vue";
-import WordScramble from "@/components/memorize/WordScramble.vue";
 import WordType from "@/components/memorize/WordType.vue";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { MemorizeStateModeEnum } from "@/types/documents";
@@ -58,7 +57,7 @@ vi.mock("@/composables", () => ({
   })
 }));
 
-globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
+window.ResizeObserver = vi.fn().mockImplementation(() => ({
   observe: vi.fn(),
   unobserve: vi.fn(),
   disconnect: vi.fn(),

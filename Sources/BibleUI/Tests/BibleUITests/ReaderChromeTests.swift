@@ -286,6 +286,7 @@ final class ReaderChromeTests: XCTestCase {
             showsReverseSplitModeToggle: true,
             reverseSplitModeEnabled: false,
             windowPinningEnabled: false,
+            showsAIActions: true,
             showsBibleDisplayOptions: true,
             sectionTitlesEnabled: true,
             moduleHasStrongs: true,
@@ -311,6 +312,39 @@ final class ReaderChromeTests: XCTestCase {
     func testBibleReaderDownloadsUsesReaderDestinationRoute() {
         XCTAssertEqual(BibleReaderView.ReaderDestination.downloads.rawValue, "downloads")
         XCTAssertEqual(BibleReaderView.ReaderDestination.downloads.id, "downloads")
+    }
+
+    /**
+     Verifies Android's Administration-drawer AI shortcut uses a reader-stack destination.
+
+     Android opens the same AI Settings activity from both its drawer and Application Preferences.
+     This identity assertion protects the direct drawer route without introducing a second screen.
+     */
+    func testBibleReaderAISettingsUsesReaderDestinationRoute() {
+        XCTAssertEqual(BibleReaderView.ReaderDestination.aiSettings.rawValue, "aiSettings")
+        XCTAssertEqual(BibleReaderView.ReaderDestination.aiSettings.id, "aiSettings")
+    }
+
+    /**
+     Verifies the rendered Administration rows follow Android's drawer menu order exactly.
+
+     `BibleReaderNavigationDrawer` iterates this same case list, so failure means Download, Backup,
+     Sync, AI Settings, or Application Preferences moved relative to Android's
+     `main_bible_drawer_menu.xml` contract.
+     */
+    func testAdministrationDrawerRowsMatchAndroidOrder() {
+        let items = BibleReaderAdministrationDrawerItem.allCases
+        XCTAssertEqual(items, [.downloads, .importExport, .syncSettings, .aiSettings, .settings])
+        XCTAssertEqual(
+            items.map(\.accessibilityIdentifier),
+            [
+                "readerOpenDownloadsAction",
+                "readerOpenImportExportAction",
+                "readerOpenSyncSettingsAction",
+                "readerOpenAISettingsAction",
+                "readerOpenSettingsAction",
+            ]
+        )
     }
 
     /**

@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Настройки за преследваните";
 "discrete_mode" = "Скрий религиозните символи";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "Относно";
 "version" = "Version";
 "export" = "Експортирай";
@@ -405,10 +405,6 @@
 "calculator_pin_description" = "PIN код за влизане в приложението, когато е показан калкулаторът.";
 "discrete_help_title" = "Прочети това първо!";
 "discrete_help_summary" = "Инструкции за настройките и информация за специалната дискретна версия.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Поведение на приложението";
 "prefs_display_customization_cat" = "Вид и усещане";
@@ -479,7 +475,6 @@
 
 "prefs_volume_keys_scroll_title" = "Превъртане с бутоните за сила на звука";
 "prefs_volume_keys_scroll_summary" = "Използвай бутоните за увеличаване/намаляване на звука за превъртане на текста на Библията";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Експериментални функции";
 "prefs_experimental_features_summary" = "Изберете кои експериментални функции да се активират. Тези функции все още са в разработка и може да се променят или да бъдат премахнати";
 "experimental_feature_bookmark_edit_actions" = "Действия за редактиране на отметки";
@@ -625,3 +620,390 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "На SD картата има потребителски план за четене в jsword/readingplan със същото име като вътрешен план. Той не може да бъде показан тук. Моля, преименувайте файла на друго название, запазвайки разширението му .properties";
 "error_no_content" = "Избранният стих няма съдържание";
+
+/* Android shared translations */
+"calculator_par1" = "Преди влизане в приложението се показва екранът на калкулатора.";
+"calculator_par2" = "В него можете да извършвате стандартни изчисления, а когато искате да влезете в приложението, просто въведете своя PIN код (по подразбиране е 1234) и след това натиснете бутона „=\".";
+"calculator_par3" = "Можете да зададете персонализиран PIN код чрез настройката „PIN код на калкулатора\".";
+"give_passphrase_for_module" = "Ресурсът %@ е шифрован и изисква парола за отключване";
+"show_unlock_info" = "Модул и информация за отключване";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Разархивиране на Zip файла…";
+"install_failed_reason" = "Инсталирането на модула не бе успешно поради следната причина: %@.";
+"install_zip_successfull" = "Успешна инсталация на модула";
+"module_install_phase_committing" = "Моля изчакайте. Зареждане на Zip файла.";
+"module_install_phase_downloading" = "Изтегляне";
+"module_install_phase_queued" = "Моля, изчакайте…";
+"storage_space_warning" = "Недотатъчно пространство на устройството.";
+
+/* Android shared translations */
+"error_occurred" = "Грешка";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Наизустяване";
+"memorize_tab_reading" = "Четене";
+"reading_progress_active_days" = "активни дни";
+"reading_progress_bible_heatmap" = "Преглед на библията";
+"reading_progress_calendar" = "Активност при четене";
+"reading_progress_chapters_read" = "прочетени глави";
+"reading_progress_cycle" = "Цикъл %d";
+"reading_progress_history_for" = "Напредък в четенето за %1$@";
+"reading_progress_history_no_entries" = "Няма записи за четене за тази селекция.";
+"reading_progress_history_title" = "История на четенето";
+"reading_progress_history_version_unknown" = "Неизвестна версия";
+"reading_progress_new_cycle" = "Нов цикъл";
+"reading_progress_new_cycle_confirm" = "Да се започне нов цикъл на четене? Това ще започне проследяване на напредъка ви отначало, като се запазват данните от предишния цикъл.";
+"reading_progress_new_testament" = "Нов завет";
+"reading_progress_next_cycle" = "Следващ цикъл";
+"reading_progress_old_testament" = "Стар завет";
+"reading_progress_overall" = "%@%% от библията прочетена";
+"reading_progress_percent_read_scale" = "Процент\nпрочетено";
+"reading_progress_previous_cycle" = "Предишен цикъл";
+"reading_progress_read_count_scale" = "Брой\nпрочетени";
+"reading_progress_title" = "Напредък в четенето/запаметяването";
+
+/* Android shared translations */
+"conf_change_chapter" = "Промяна на глава";
+"conf_change_title" = "Заглавия";
+"conf_replace_divinename" = "Показвай Yahweh вместо името на Бога";
+"conf_save_playback_settings_to_bookmarks" = "Запази настройките за възпроизвеждане в отметките";
+"conf_speak_auto_bookmark" = "Автоматично поставяне на отметки";
+"conf_speak_footnotes" = "Бележки под линия";
+"conf_speak_sleep_timer" = "Задай таймер за заспиване";
+"conf_speak_synchronize" = "Текстът следва речта";
+"forward" = "Напред";
+"playback_settings_title" = "Настройки за възпроизвеждане";
+"rewind" = "Назад";
+"speak_bookmarks_menu_title" = "Реч от отметка";
+"speak_next" = "Следващ";
+"speak_previous" = "Предишен";
+"speak_settings_title" = "Общи настройки за реч";
+
+/* Android shared translations */
+"sleep_timer_title" = "Време за заспиване в минути";
+"speak_beginning_of_passage" = "Избери начало на пасажа";
+"speak_ending_of_passage" = "Избери край на пасажа";
+"speak_ending_verse_must_be_later" = "Крайният стих трябва да е след началния стих";
+"speak_verse_range_to_repeat" = "Избери диапазон от стихове за повтаряне";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Езикът не е инсталиран";
+
+/* Android shared translations */
+"description" = "Описание";
+"errorTitle" = "Грешка";
+"error_executing_search" = "Невалидно търсене";
+"export_something" = "Експортирай %@";
+"import_items" = "Импортирай %@";
+"install_zip_module" = "Инсталирай модул";
+"my_document_content_type_label" = "Тип съдържание";
+"my_document_create_title" = "Създай нов документ";
+"my_document_import_document" = "Импортирай файлове като документ";
+"my_document_new_name" = "Документ %d";
+"my_document_new_page_name" = "Страница %1$d";
+"my_document_rename_title" = "Преименувай документ";
+"my_document_save_changes" = "Запази промените?";
+"okay" = "ОК";
+"overwrite" = "Да";
+"package_directory" = "Директория с пакети (Zip файлове)";
+"read" = "Четене";
+"reading_plan_set_current_day" = "Задай като текущ ден…";
+"reading_plan_set_start_date" = "Задай начална дата…";
+"search_all_words" = "Всички думи.";
+"search_any_word" = "Която и да е от думите.";
+"search_fts_query" = "Синтаксис на необработена заявка";
+"search_phrase" = "Фраза";
+"search_words_group_prompt" = "Намери стиховете.";
+"show_notes" = "Показвай бележки";
+"speak_book_changed" = "Книгата е сменена.";
+"speak_chapter_changed" = "Глава";
+"success" = "Готово";
+"summary" = "Резюме";
+"undo" = "Отмяна";
+
+/* Android shared translations */
+"my_document_no_description" = "Няма описание";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Не се намира в зададения ресурс";
+"my_document_cannot_delete_ai_documents" = "AI документите не могат да бъдат изтрити, докато съдържат страници. Изтрийте първо страниците.";
+"my_document_create_page_title" = "Нова страница";
+"my_document_import_empty_selection" = "Не са избрани файлове за импортиране";
+"system_items1" = "Още";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Трябва да изтеглите текст който съдържа числата на Стронг, както и сътветен индекс за текста.";
+
+/* Android shared translations */
+"add_model" = "Добави модел";
+"agent_already_running" = "Вече работи AI агент. Изчакайте или го спрете първо.";
+"agent_log_cancelled" = "Отменено";
+"agent_log_completed" = "Завършено";
+"agent_log_executing" = "Изпълнява се: %@";
+"agent_log_idle" = "AI асистент";
+"agent_log_iteration" = "Итерация %d";
+"agent_log_model_not_configured" = "Не е конфигуриран модел";
+"agent_log_tool_failed" = "Инструментът %@ се провали";
+"agent_log_view_raw" = "Виж необработения LLM регистър";
+"agent_max_iterations_title" = "Максимален брой итерации на агента";
+"agent_permission_mode_summary" = "Контролира кога е необходимо потвърждение от потребителя преди AI операции на запис";
+"agent_permission_title" = "Разрешение за агент";
+"ai_add_provider" = "Добави доставчик";
+"ai_advanced_category" = "Разширени";
+"ai_agent_notification_running" = "AI агентът работи…";
+"ai_behavior_category" = "Поведение";
+"ai_connection_settings" = "Настройки на връзката";
+"ai_disclaimer_approach" = "AndBible използва AI предимно за обработка на текст от инсталираните от вас ресурси — коментари, речници и други модули — вместо да разчита на собствените обучителни данни на модела.";
+"ai_disclaimer_dialog_title" = "AI инструменти — Важна информация";
+"ai_disclaimer_intro" = "AI инструментите могат значително да обогатят вашето изучаване на Библията и да открият нови начини за ангажиране с Писанието.";
+"ai_disclaimer_point1" = "AI може да допуска грешки, включително „халюцинации\" (уверено излагане на невярна или измислена информация). Никога не приемайте резултатите му сляпо.";
+"ai_disclaimer_point2" = "AI отговорите могат да отразяват предразсъдъци от обучителните данни, да бъдат умишлено подвеждащи или да представят определена теологична гледна точка като неутрална или пълна.";
+"ai_disclaimer_point3" = "Вие носите отговорност за начина, по който използвате съдържанието, генерирано от AI. Винаги проверявайте резултатите спрямо Писанието, преди да им се доверите.";
+"ai_disclaimer_point4" = "AndBible се стреми да улесни проверката (напр. точни цитати на източници в коментарите), но крайната отговорност винаги е ваша.";
+"ai_disclaimer_point5" = "„Изпитвайте всичко; дръжте се за доброто.\" (1 Солунци 5:21)";
+"ai_disclaimer_point6" = "Тези инструменти нямат душа и Свети Дух. Те са инструменти за обработка на текст, не духовни водачи. Не са подходящи за пряко подготвяне на проповеди, поклонение или друго духовно съдържание без внимателен човешки надзор, молитва и разсъждение.";
+"ai_disclaimer_point7" = "Използвани мъдро, те могат да бъдат от полза за много потребители и случаи на употреба. Но ако не сте сигурни дали приемате рисковете, отказването от тяхното използване е също напълно валиден избор.";
+"ai_disclaimer_point8" = "Вашите данни се изпращат до сървърите на избрания от вас AI доставчик. Използвайки API ключ, вие приемате условията и политиката за поверителност на този доставчик. Самостоятелно хостваните модели са възможни, но изискват по-голяма техническа компетентност и може да не дават резултати, толкова добри, колкото търговските модели.";
+"ai_disclaimer_point9" = "AI доставчиците начисляват такси за използване на API. Оценките на разходите, показани в AndBible, са приблизителни — винаги проверявайте фактурирането на вашия доставчик за действителните суми.";
+"ai_disclaimer_responsibility" = "Въпреки това те остават мощни инструменти — а с голямата сила идва голяма отговорност. Моля, имайте предвид следното.";
+"ai_disclaimer_warning_title" = "Важно: Прочетете преди да използвате AI инструментите";
+"ai_doc_choose_page" = "Избери страница от AI документ";
+"ai_document_filter_activity_title" = "Достъп на ИИ до ресурси";
+"ai_document_regenerate" = "Генерирай повторно";
+"ai_hidden_status" = "скрито";
+"ai_hide_prompt" = "Скрий";
+"ai_language_title" = "Език на AI отговорите";
+"ai_models_category" = "Модели";
+"ai_models_summary_none" = "Няма конфигурирани модели";
+"ai_provider_api_format" = "API формат";
+"ai_provider_api_key" = "API ключ";
+"ai_provider_api_key_not_set" = "API ключът не е зададен";
+"ai_provider_delete_confirm" = "Изтрий доставчика \"%1$@\"? Подканите, използващи този доставчик, ще се върнат към стандартния.";
+"ai_provider_edit" = "Редактирай";
+"ai_provider_endpoint" = "API крайна точка";
+"ai_provider_endpoint_description" = "Само основен URL адрес. AndBible автоматично добавя \"/chat/completions\" (OpenAI формат) или \"/messages\" (Anthropic формат). Списъците с модели се извличат от \"/models\".";
+"ai_provider_name" = "Име на доставчика";
+"ai_provider_saved" = "Доставчикът е запазен";
+"ai_provider_select_type" = "Избери тип доставчик";
+"ai_providers_models_category" = "Доставчици и модели";
+"ai_providers_summary_none" = "Няма конфигурирани доставчици";
+"ai_regenerate_fresh_run" = "Ново стартиране (игнорирай предишния резултат)";
+"ai_regenerate_instructions_hint" = "Допълнителни инструкции (незадължително)";
+"ai_regenerate_keep_previous" = "Запази предишната версия";
+"ai_regenerate_prompt_not_found" = "Не може да се генерира повторно: оригиналната подсказка не е намерена. Може би е била изтрита.";
+"ai_regenerate_title" = "Повторно генериране";
+"ai_settings" = "AI настройки";
+"ai_setup_description" = "AndBible може да използва AI за превод на библейски текст, обяснение на стихове, създаване на резюмета и др. За да започнете, конфигурирайте връзка с доставчик, съвместим с OpenAI API.";
+"ai_setup_title" = "Конфигуриране на AI";
+"ai_usage_category" = "Използване";
+"ask_model_before_run_title" = "Питай за модел преди изпълнение";
+"auto_hide_agent_log_title" = "Скрий ИИ панела при завършване";
+"bookmarks_and_mynotes_title" = "Отметки и мои бележки";
+"built_in_prompt" = "Вградена";
+"built_in_prompt_notice" = "Това е вградена подсказка и не може да се редактира. Използвайте „Копирай за персонализиране\", за да създадете редактируемо копие.";
+"category_none" = "Без категория";
+"commentary_max_response_no_limit" = "Без ограничение";
+"commentary_max_response_title" = "Ограничение на размера на отговора с коментар";
+"copy_to_customize" = "Копирай за персонализиране";
+"custom_agent_system_prompt_title" = "Системна подкана на агента";
+"custom_system_prompt_custom" = "Персонализирана";
+"custom_text_transform_system_prompt_title" = "Системна подкана за трансформация на текст";
+"default_prompt_ask_question" = "Задай въпрос";
+"default_prompt_ask_question_desc" = "Задайте всякакъв въпрос относно избрания пасаж";
+"default_prompt_bookmark_annotate" = "Отметка и анотация";
+"default_prompt_bookmark_annotate_desc" = "Създава отметка с генерирана от AI учебна бележка";
+"default_prompt_compare_translations" = "Сравни преводи";
+"default_prompt_compare_translations_desc" = "Показва как различните инсталирани преводи предават текста";
+"default_prompt_cross_references" = "Препратки";
+"default_prompt_cross_references_desc" = "Открива и обяснява свързани библейски пасажи";
+"default_prompt_custom" = "Потребителска подсказка";
+"default_prompt_custom_desc" = "Изпълнява потребителска задача върху избрания пасаж";
+"default_prompt_custom_template" = "Изпълни спецификацията на задачата на потребителя за избрания библейски пасаж.";
+"default_prompt_enhance_note" = "Подобри бележката";
+"default_prompt_enhance_note_desc" = "Подобрява граматиката, яснотата и четимостта на вашата бележка";
+"default_prompt_explain_verses" = "Обясни стиховете";
+"default_prompt_explain_verses_desc" = "Обяснява смисъла и контекста на избраните стихове";
+"default_prompt_explain_verses_studypad" = "Обясни стиховете → Бележник";
+"default_prompt_explain_verses_studypad_desc" = "Създава бележник с обяснение стих по стих и отметки";
+"default_prompt_study_layout" = "Отвори оформление за изучаване";
+"default_prompt_study_layout_desc" = "Отваря прозорци с коментар и паралелен превод за изучаване";
+"default_prompt_summary" = "Резюме";
+"default_prompt_summary_desc" = "Създава кратко резюме на избрания текст";
+"default_prompt_thematic_study" = "Тематично изучаване";
+"default_prompt_thematic_study_desc" = "Създава бележник с пасажи и бележки по централната тема";
+"default_prompt_translate_to_language" = "Преведи на %@";
+"default_prompt_translate_to_ui_language_desc" = "Превежда текста на ресурса на езика на интерфейса на приложението";
+"default_prompt_word_study" = "Изучаване на думи";
+"default_prompt_word_study_desc" = "Анализира оригинални еврейски/гръцки думи";
+"default_prompt_workspace_assistant" = "Асистент за работно пространство";
+"default_prompt_workspace_assistant_desc" = "Управлява прозорци: създаване, затваряне, пренареждане, смяна на ресурси";
+"delete_category" = "Изтрий категория";
+"delete_category_and_prompts" = "Изтрий категорията и нейните подсказки";
+"delete_category_keep_prompts" = "Премести подсказките в корена и изтрий категорията";
+"doc_type_addons" = "Добавки";
+"easy_setup_enter_api_key" = "Въведете вашия API ключ";
+"easy_setup_success" = "Връзката е успешна!";
+"easy_setup_test_connection" = "Тествай връзката";
+"easy_setup_testing" = "Тестване…";
+"easy_setup_title" = "Бързо настройване";
+"help_bookmarks_text" = "Отметките могат да се създават, като изберете текст и изберете „Отметка\" от изскачащото меню. Можете да добавите свои бележки към новата отметка, като докоснете маркирания текст в изгледа на Библията. Има и специален документ „Моите бележки\" в коментарите, който ви позволява да видите бележките си в отделен прозорец.";
+"help_memorize_text" = "Изгледът за наизустяване ви помага да научите пасажи наизуст. Използвайте Размиване на думи, Разбъркване на думи, Въвеждане на думи или Наредба на думи за упражняване. Успешните упражнения автоматично маркират стиховете като наизустени (това може да се деактивира).";
+"help_read_more_link" = "Прочетете повече в ръководството";
+"hide_category" = "Скрий от AI действия";
+"llm_actions" = "AI действия";
+"llm_continue_iterations_message" = "AI агентът достигна лимита от %1$d итерации без завършване. Продължи с още %2$d итерации?";
+"llm_continue_iterations_title" = "Продължи?";
+"llm_custom_input_price_title" = "Цена за вход ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Въведете идентификатора на модела";
+"llm_custom_output_price_title" = "Цена за изход ($/Mtoken)";
+"llm_error_max_iterations" = "Достигнат е максималният брой итерации (%1$d) без завършване";
+"llm_error_unknown" = "Неизвестна грешка";
+"llm_note_updated" = "Бележката е обновена";
+"llm_openrouter_model" = "Модел";
+"llm_provider_custom" = "Персонализиран (съвместим с OpenAI)";
+"llm_reset_usage_confirm_message" = "Това ще изчисти всички натрупани данни за използване.";
+"llm_reset_usage_confirm_title" = "Нулиране на данните за използване?";
+"llm_reset_usage_title" = "Нулиране на данните за използване";
+"llm_usage_summary_default" = "Няма данни за използване";
+"llm_usage_summary_title" = "Използване на токени";
+"manage_prompts" = "Управление на AI подканите";
+"manage_tool_permissions_title" = "Разрешения за инструменти";
+"model_pricing_summary" = "%1$@ вх. / %2$@ изх. на Мтокен";
+"model_select_provider" = "Доставчик";
+"model_set_default" = "Задай като модел по подразбиране";
+"move_category_down" = "Премести надолу";
+"move_category_up" = "Премести нагоре";
+"new_category" = "Нова категория";
+"new_category_name" = "Наименование на категория";
+"new_prompt" = "Нова подсказка";
+"permission_allow_all" = "Разреши всичко";
+"permission_allow_all_session" = "Разреши всички инструменти за тази сесия";
+"permission_allow_for_session" = "Разреши за тази сесия";
+"permission_allow_once" = "Разреши веднъж";
+"permission_always_allow_confirm" = "Сигурни ли сте, че искате постоянно да разрешите \"%1$@\"?";
+"permission_always_allow_confirm_reset_hint" = "Можете да нулирате това в настройките за ИИ.";
+"permission_always_ask" = "Винаги питай";
+"permission_ask_once_per_run" = "Питай веднъж за стартиране";
+"permission_deny" = "Откажи";
+"permission_deny_all" = "Откажи всичко";
+"permission_option_always_allow" = "Винаги разрешавай";
+"permission_option_always_deny" = "Винаги отказвай";
+"permission_status_default" = "Питай (по подразбиране)";
+"prompt_auto_include_commentaries" = "Автоматично включване на коментари";
+"prompt_auto_include_documents" = "Автоматично включване на инсталирани ресурси";
+"prompt_bible_only" = "Само библейски ресурси";
+"prompt_category" = "Категория";
+"prompt_category_favorites" = "Любими";
+"prompt_category_general" = "Общи";
+"prompt_category_notes" = "Бележки";
+"prompt_category_study" = "Изучаване";
+"prompt_category_uncategorized" = "Некатегоризирани";
+"prompt_context_note_editor" = "Редактор на бележки";
+"prompt_context_text_selection" = "Избор на текст";
+"prompt_context_verse_selection" = "Избор на стих";
+"prompt_context_window_menu" = "Меню на прозорец";
+"prompt_context_workspace_menu" = "Меню на работно пространство";
+"prompt_description" = "Описание";
+"prompt_edit_before_run" = "Уточни преди стартиране";
+"prompt_is_text_transformation" = "Трансформация на текст";
+"prompt_max_iterations_hint" = "Оставете празно за глобалното по подразбиране";
+"prompt_max_iterations_unlimited" = "Без ограничение";
+"prompt_model_default" = "По подразбиране";
+"prompt_model_override" = "Модел";
+"prompt_name" = "Наименование";
+"prompt_no_document_creation" = "Без създаване на ресурс";
+"prompt_permission_mode" = "Режим на разрешения";
+"prompt_permission_mode_description" = "Контролира кога е необходимо потвърждение от потребителя, преди AI да извърши операции на запис. Настройките за отделни инструменти по-долу могат да заменят това за конкретни инструменти.";
+"prompt_permission_use_default" = "Използвай стандартното";
+"prompt_show_in" = "Показване в";
+"prompt_strict_context_matching" = "Кеш, зависим от контекста";
+"prompt_tab_advanced" = "Разширени";
+"prompt_tab_permissions" = "Разрешения";
+"prompt_tab_prompt" = "Подкана";
+"prompt_template" = "Шаблон за подсказка";
+"prompt_tool_permissions" = "Разрешения за инструменти";
+"raw_log_delete_all" = "Изтрий всички";
+"raw_log_error_indicator" = "Грешка";
+"raw_log_history_empty" = "Няма запазени журнали";
+"raw_log_history_title" = "История на AI журнала";
+"raw_log_item_tokens" = "%1$@ вх. / %2$@ изх.";
+"raw_log_older_1_month" = "По-стари от 1 месец";
+"raw_log_older_1_week" = "По-стари от 1 седмица";
+"raw_log_older_3_months" = "По-стари от 3 месеца";
+"raw_log_retention_summary_disabled" = "Изключено (запази всички)";
+"raw_log_retention_title" = "Автоматично изтриване на стари журнали";
+"reset_all_ai_settings" = "Изчистване на всички AI настройки";
+"reset_all_ai_settings_confirm_message" = "Това ще изчисти API ключа, доставчика, крайната точка, модела и ще върне всички подсказки към стандартните. Продължавате?";
+"reset_all_ai_settings_confirm_title" = "Изчистване на всички AI настройки?";
+"reset_all_permissions" = "Нулирай всички";
+"reset_to_default" = "Изчисти до стандартните";
+"save_and_exit" = "Запази";
+"select_llm_prompt" = "Избери AI действие";
+"select_model_before_run_title" = "Избери модел";
+"set_default_model_for_prompt" = "Задай като модел по подразбиране за тази подкана";
+"show_category" = "Покажи в AI действия";
+"specify_before_run_title" = "Уточнете задачата";
+"tool_add_bookmark_note" = "Добави бележка към отметка";
+"tool_add_label_to_bookmark" = "Добави етикет към отметка";
+"tool_add_my_document_page" = "Добави страница към моя ресурс";
+"tool_add_study_pad_entry" = "Добави запис в бележника";
+"tool_category_bible_search" = "Библия и търсене";
+"tool_category_bookmarks" = "Отметки";
+"tool_category_general_books" = "Общи книги";
+"tool_category_labels" = "Етикети";
+"tool_category_my_documents" = "Мои ресурси";
+"tool_category_study_pads" = "Бележници";
+"tool_category_windows" = "Прозорци";
+"tool_create_bookmark" = "Създай отметка";
+"tool_create_label" = "Създай етикет";
+"tool_create_my_document" = "Създай мой ресурс";
+"tool_create_study_pad" = "Създай бележник";
+"tool_create_window" = "Създай прозорец";
+"tool_delete_bookmark" = "Изтрий отметка";
+"tool_delete_label" = "Изтрий етикет";
+"tool_delete_my_document_page" = "Изтрий страница от моя ресурс";
+"tool_edit_my_document_page" = "Редактирай страница от моя ресурс";
+"tool_finish_with_my_document_page" = "Отвори страница от моя ресурс";
+"tool_finish_with_study_pad" = "Отвори бележника";
+"tool_finish_without_document" = "Завърши без ресурс";
+"tool_get_all_labels" = "Изброй всички етикети";
+"tool_get_bookmarks_for_verse" = "Вземи отметките за стих";
+"tool_get_bookmarks_with_label" = "Вземи отметките с етикет";
+"tool_get_commentaries" = "Прочети коментари";
+"tool_get_dictionary_entry" = "Потърси в речника";
+"tool_get_genbook_content" = "Прочети съдържание на общата книга";
+"tool_get_genbook_keys" = "Изброй ключовете на общата книга";
+"tool_get_installed_documents" = "Изброй инсталираните ресурси";
+"tool_get_my_document_pages" = "Изброй страниците на моя ресурс";
+"tool_get_my_documents" = "Изброй моите ресурси";
+"tool_get_study_pad_content" = "Прочети съдържание на бележника";
+"tool_get_verse_content" = "Прочети съдържание на стих";
+"tool_get_windows" = "Изброй прозорците";
+"tool_manage_window" = "Управлявай прозорец";
+"tool_remove_label_from_bookmark" = "Премахни етикет от отметка";
+"tool_search_bible" = "Търси в библията";
+"tool_search_by_strongs" = "Търси по номер на Strong's";
+"tool_search_study_pads" = "Търси в бележниците";
+"tool_set_document_title" = "Задай заглавие на ресурса";
+"tool_set_window_document" = "Задай ресурс на прозорец";
+"tool_update_bookmark_note" = "Обнови бележката на отметката";
+"tool_update_studypad_text_entry" = "Обнови текстовия запис в бележника";
+"verse_tip" = "За да изберете частичен или много стихове, можете да натиснете продължително върху библейския текст";
+"watch_tutorial_video" = "Гледай гид на потребителя (на английски)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Повторно генериране на AI ресурс…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Приемам и поемам пълна отговорност";
+"ai_disclaimer_accept_title" = "Приеми отказа от отговорност за AI";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Настройки на AI връзката и подканите";
+"prefs_features_cat" = "Функции";

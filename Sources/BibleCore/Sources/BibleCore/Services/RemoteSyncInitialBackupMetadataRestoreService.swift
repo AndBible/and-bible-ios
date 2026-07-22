@@ -161,6 +161,7 @@ public final class RemoteSyncInitialBackupMetadataRestoreService {
     - Side effects:
       - clears and rewrites the category-scoped rows in `RemoteSyncLogEntryStore`
       - clears and rewrites the category-scoped rows in `RemoteSyncPatchStatusStore`
+      - rewrites legacy bookmark single-identifier secondary keys from SQLite `NULL` to `''`
     - Failure modes:
       - this method does not throw, but underlying `SettingsStore` persistence remains best-effort
         because its save failures are swallowed by design
@@ -173,7 +174,10 @@ public final class RemoteSyncInitialBackupMetadataRestoreService {
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
 
-        logEntryStore.replaceEntries(snapshot.logEntries, for: category)
+        let logEntries = category == .bookmarks
+            ? snapshot.logEntries.map(AndroidBookmarkDatabaseContract.normalizedLogEntry)
+            : snapshot.logEntries
+        logEntryStore.replaceEntries(logEntries, for: category)
         patchStatusStore.clearCategory(category)
         patchStatusStore.addStatuses(snapshot.patchStatuses, for: category)
 

@@ -40,7 +40,9 @@ class BookmarkLabelStudyPadParityGuardrailsTests(unittest.TestCase):
         self.assertIn("refreshBookmarkInVueJS", reader_source)
         self.assertIn("onAssignLabels", pane_source)
         self.assertNotIn("pendingLabelBookmarkId", pane_source)
-        self.assertNotIn(".sheet(item:", pane_source)
+        self.assertNotIn("activeReaderLabelAssignmentRoute", pane_source)
+        self.assertNotIn(".sheet(item: $pendingLabelBookmarkId)", pane_source)
+        self.assertNotIn("LabelAssignmentView(", pane_source)
 
     def test_unused_native_studypad_sheet_route_is_removed(self) -> None:
         """StudyPad add/edit must stay in the WebView document route, not the old native sheet."""

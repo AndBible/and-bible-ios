@@ -13,6 +13,7 @@ enum BibleReaderNavigationDrawerAction {
     case downloads
     case importExport
     case syncSettings
+    case aiSettings
     case settings
     case help
     case sponsorDevelopment
@@ -23,6 +24,75 @@ enum BibleReaderNavigationDrawerAction {
     case tellFriend
     case rateApp
     case reportBug
+}
+
+/**
+ Android's ordered Administration drawer rows.
+
+ Case declaration order matches `main_bible_drawer_menu.xml` and directly drives SwiftUI rendering,
+ allowing tests to protect placement without maintaining a second presentation-only list.
+ */
+enum BibleReaderAdministrationDrawerItem: CaseIterable, Hashable {
+    case downloads
+    case importExport
+    case syncSettings
+    case aiSettings
+    case settings
+
+    /// Android localization key used as the row title.
+    var titleKey: String {
+        switch self {
+        case .downloads: return "download"
+        case .importExport: return "backup_and_restore"
+        case .syncSettings: return "cloud_sync_title"
+        case .aiSettings: return "ai_settings"
+        case .settings: return "application_preferences"
+        }
+    }
+
+    /// English fallback used only when the Android key is unavailable.
+    var defaultTitle: String {
+        switch self {
+        case .downloads: return "Download Documents"
+        case .importExport: return "Backup & Restore"
+        case .syncSettings: return "Device synchronization"
+        case .aiSettings: return "AI Settings"
+        case .settings: return "Application preferences"
+        }
+    }
+
+    /// Bundled icon asset associated with the Android row.
+    var iconAssetName: String {
+        switch self {
+        case .downloads: return "DrawerDownloads"
+        case .importExport: return "DrawerBackupRestore"
+        case .syncSettings: return "DrawerSync"
+        case .aiSettings: return "SettingsIconRobot"
+        case .settings: return "DrawerSettings"
+        }
+    }
+
+    /// Accessibility identifier used by UI automation and reader action routing.
+    var accessibilityIdentifier: String {
+        switch self {
+        case .downloads: return "readerOpenDownloadsAction"
+        case .importExport: return "readerOpenImportExportAction"
+        case .syncSettings: return "readerOpenSyncSettingsAction"
+        case .aiSettings: return "readerOpenAISettingsAction"
+        case .settings: return "readerOpenSettingsAction"
+        }
+    }
+
+    /// Reader action emitted when the row is selected.
+    var action: BibleReaderNavigationDrawerAction {
+        switch self {
+        case .downloads: return .downloads
+        case .importExport: return .importExport
+        case .syncSettings: return .syncSettings
+        case .aiSettings: return .aiSettings
+        case .settings: return .settings
+        }
+    }
 }
 
 /**
@@ -102,33 +172,14 @@ struct BibleReaderNavigationDrawer: View {
                 }
 
                 drawerSection(title: localizedDrawerString("administration", default: "Administration")) {
-                    drawerRow(
-                        title: localizedDrawerString("download", default: "Download Documents"),
-                        icon: .asset("DrawerDownloads"),
-                        identifier: "readerOpenDownloadsAction",
-                        action: .downloads
-                    )
-                    drawerRow(
-                        title: localizedDrawerString("backup_and_restore", default: "Backup & Restore"),
-                        icon: .asset("DrawerBackupRestore"),
-                        identifier: "readerOpenImportExportAction",
-                        action: .importExport
-                    )
-                    drawerRow(
-                        title: localizedDrawerString("cloud_sync_title", default: "Device synchronization"),
-                        icon: .asset("DrawerSync"),
-                        identifier: "readerOpenSyncSettingsAction",
-                        action: .syncSettings
-                    )
-                    drawerRow(
-                        title: localizedDrawerString(
-                            "application_preferences",
-                            default: "Application preferences"
-                        ),
-                        icon: .asset("DrawerSettings"),
-                        identifier: "readerOpenSettingsAction",
-                        action: .settings
-                    )
+                    ForEach(BibleReaderAdministrationDrawerItem.allCases, id: \.self) { item in
+                        drawerRow(
+                            title: localizedDrawerString(item.titleKey, default: item.defaultTitle),
+                            icon: .asset(item.iconAssetName),
+                            identifier: item.accessibilityIdentifier,
+                            action: item.action
+                        )
+                    }
                 }
 
                 drawerSection(title: localizedDrawerString("information", default: "Information")) {

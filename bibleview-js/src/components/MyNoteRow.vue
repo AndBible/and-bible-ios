@@ -66,6 +66,7 @@
           ref="editor"
           :text="bookmark.notes"
           :content-type="bookmark.notesContentType"
+          :note-editor-context="{ entityType: 'BOOKMARK_NOTE', entityId: bookmark.id }"
           :display-accessibility-label="myNotesEditAccessibilityLabel"
           :editor-accessibility-label="myNotesEditorAccessibilityLabel"
           @save="save"

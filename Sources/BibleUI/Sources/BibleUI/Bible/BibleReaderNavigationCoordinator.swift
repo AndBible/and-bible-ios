@@ -365,7 +365,8 @@ final class BibleReaderNavigationCoordinator {
        - ordinal: Target-local ordinal for the verse.
        - context: Controller-owned state and persistence callbacks.
      - Side effects: Updates controller position, writes PageManager Bible fields, records the
-       target ordinal as the next content restore anchor, and schedules visible-position persistence.
+       target ordinal as the next content restore anchor, clears any superseded explicit-navigation
+       highlight, and schedules visible-position persistence.
      - Failure modes: If no PageManager is available, native position and restore target still update
        while durable persistence is skipped.
      */
@@ -378,6 +379,7 @@ final class BibleReaderNavigationCoordinator {
     ) {
         let position = BibleReaderNavigationPosition(book: book, chapter: chapter, verse: verse)
         context.setCurrentPosition(position)
+        originalNavigationOrdinalRange = nil
         lastScrollTarget = .ordinal(ordinal)
         shouldRestoreScroll = true
 

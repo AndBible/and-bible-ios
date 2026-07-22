@@ -1,4 +1,5 @@
 import XCTest
+import SwiftData
 import UniformTypeIdentifiers
 @testable import BibleCore
 @testable import BibleUI
@@ -10,6 +11,49 @@ import UniformTypeIdentifiers
  the BibleUI-only localized strings that the Backup & Restore screen presents around those services.
  */
 final class AndroidDatabaseBackupPresentationTests: XCTestCase {
+    /** Verifies restored settings/workspaces immediately rebind and reload the live speech service. */
+    func testAndroidBackupRestoreReloadsLiveSpeechRuntimeOnlyForRelevantSections() throws {
+        let container = try makeWorkspaceModelContainer()
+        let settingsStore = SettingsStore(modelContext: ModelContext(container))
+        var globalSettings = SpeakSettings()
+        globalSettings.playbackSettings.speed = 173
+        settingsStore.setString("SpeakSettings", value: try globalSettings.androidJSON())
+        let speakService = SpeakService()
+
+        XCTAssertFalse(
+            AndroidBackupSpeechRuntimeReloader.reloadIfNeeded(
+                selections: [.init(category: .bookmarks, mode: .restore)],
+                settingsStore: settingsStore,
+                activeWorkspaceSettings: nil,
+                speakService: speakService
+            )
+        )
+        XCTAssertEqual(speakService.settings.playbackSettings.speed, 100)
+
+        XCTAssertTrue(
+            AndroidBackupSpeechRuntimeReloader.reloadIfNeeded(
+                selections: [.init(category: .settings, mode: .restore)],
+                settingsStore: settingsStore,
+                activeWorkspaceSettings: nil,
+                speakService: speakService
+            )
+        )
+        XCTAssertEqual(speakService.settings, globalSettings)
+
+        var workspaceSettings = SpeakSettings()
+        workspaceSettings.playbackSettings.speed = 189
+        workspaceSettings.sleepTimer = 12
+        XCTAssertTrue(
+            AndroidBackupSpeechRuntimeReloader.reloadIfNeeded(
+                selections: [.init(category: .workspaces, mode: .import)],
+                settingsStore: settingsStore,
+                activeWorkspaceSettings: workspaceSettings,
+                speakService: speakService
+            )
+        )
+        XCTAssertEqual(speakService.settings, workspaceSettings)
+    }
+
     /**
      Verifies Backup & Restore reset success copy names the category that was reset.
 

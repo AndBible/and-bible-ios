@@ -74,6 +74,14 @@
       <button class="pell-button" :disabled="redoStack.length === 0" @click="redo"><FontAwesomeIcon :icon="faRedo"/></button>
       <button class="pell-button" @click="insertBibleLink"><FontAwesomeIcon :icon="faBible"/></button>
       <span class="pell-divider"/>
+      <button
+          v-if="noteEditorContext"
+          class="pell-button"
+          title="AI"
+          @click="triggerAI"
+      >
+        <FontAwesomeIcon :icon="faRobot"/>
+      </button>
       <button class="pell-button end" @click="closeEditor"><FontAwesomeIcon :icon="faTimes"/></button>
     </div>
     <div class="saved-notice" v-if="!dirty">
@@ -88,12 +96,13 @@
  *
  * @param text - Current Markdown source text.
  * @param contentAccessibilityLabel - Optional accessible label for the textarea.
+ * @param noteEditorContext - Exact native note owner; nil suppresses the AI action.
+ * @param contentTypeName - Durable source representation forwarded to native writeback.
  * @fires save - Emitted after debounced edits and before close/unmount when source text is dirty.
  * @fires close - Emitted when the user closes the editor.
  * @remarks The editor stores Markdown source text and mirrors Android's core editing controls:
  * headings, inline styles, lists, indentation, undo/redo, reference insertion, auto-list
- * continuation, and keyboard shortcuts. Android's AI action is intentionally omitted because the
- * iOS bridge does not expose `noteEditorLlmAction`.
+ * continuation, keyboard shortcuts, and native AI transformation for typed note destinations.
  */
 import {debounce} from "lodash";
 import {computed, inject, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch} from "vue";
@@ -109,6 +118,7 @@ import {
     faListUl,
     faOutdent,
     faRedo,
+    faRobot,
     faTimes,
     faUnderline,
     faUndo,
@@ -118,11 +128,17 @@ import InputText from "@/components/modals/InputText.vue";
 import ModalDialog from "@/components/modals/ModalDialog.vue";
 import {useStrings} from "@/composables/strings";
 import {androidKey, appSettingsKey, customFeaturesKey, keyboardKey} from "@/types/constants";
+import type {NoteEditorContext} from "@/components/EditableText.vue";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     text: string
     contentAccessibilityLabel?: string
-}>();
+    noteEditorContext?: NoteEditorContext | null
+    contentTypeName?: string
+}>(), {
+    noteEditorContext: null,
+    contentTypeName: "MARKDOWN",
+});
 const emit = defineEmits(["save", "close"]);
 
 const android = inject(androidKey)!;
@@ -559,6 +575,25 @@ async function insertBibleLink() {
 
 function closeEditor() {
     save();
+    emit("close");
+}
+
+/**
+ * Saves current Markdown and hands the exact target identity to native AI execution.
+ *
+ * - Side effects: flushes pending save state, emits one native bridge call, and closes the editor.
+ * - Failure modes: missing note context fails closed without a bridge call.
+ */
+function triggerAI() {
+    if (!props.noteEditorContext) return;
+    debouncedSave.cancel();
+    save();
+    android.noteEditorLlmAction(
+        props.noteEditorContext.entityType,
+        props.noteEditorContext.entityId,
+        editText.value,
+        props.contentTypeName,
+    );
     emit("close");
 }
 

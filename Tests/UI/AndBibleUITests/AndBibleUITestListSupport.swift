@@ -1239,10 +1239,14 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
         func candidateElements() -> [XCUIElement] {
             var candidates = [
+                settingsForm.switches[identifier].firstMatch,
+                settingsForm.textFields[identifier].firstMatch,
                 settingsForm.links[identifier].firstMatch,
                 settingsForm.buttons[identifier].firstMatch,
                 settingsForm.cells[identifier].firstMatch,
                 settingsForm.otherElements[identifier].firstMatch,
+                app.switches[identifier].firstMatch,
+                app.textFields[identifier].firstMatch,
                 app.links[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.cells[identifier].firstMatch,
@@ -1251,11 +1255,15 @@ extension AndBibleUITests {
 
             if let visibleTitle {
                 candidates.insert(contentsOf: [
+                    settingsForm.switches[visibleTitle].firstMatch,
+                    settingsForm.textFields[visibleTitle].firstMatch,
                     settingsForm.links[visibleTitle].firstMatch,
                     settingsForm.buttons[visibleTitle].firstMatch,
                     settingsForm.cells[visibleTitle].firstMatch,
                     settingsForm.otherElements[visibleTitle].firstMatch,
                     settingsForm.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
+                    app.switches[visibleTitle].firstMatch,
+                    app.textFields[visibleTitle].firstMatch,
                     app.links[visibleTitle].firstMatch,
                     app.buttons[visibleTitle].firstMatch,
                     app.cells[visibleTitle].firstMatch,
@@ -1472,7 +1480,7 @@ extension AndBibleUITests {
             return nil
         }
 
-        replaceText(in: searchField, with: title, placeholderHints: ["Search"])
+        replaceText(in: searchField, with: title, placeholderHints: ["Find", "Search"])
 
         let resultDeadline = Date().addingTimeInterval(min(max(timeout / 2, 3), 5))
         repeat {
@@ -1488,6 +1496,10 @@ extension AndBibleUITests {
     /**
      Returns Settings search-field candidates exposed by SwiftUI's `searchable` modifier.
 
+     Type-only search-field candidates come first because the localized Android-parity prompt is
+     not guaranteed to be the English word "Search". Ordinary text fields remain prompt-qualified
+     so preference editors cannot be mistaken for the Settings search control.
+
      * - Parameters:
      *   - app: Running application under test.
      *   - settingsForm: The live Settings form element.
@@ -1497,6 +1509,15 @@ extension AndBibleUITests {
      */
     func settingsSearchFieldCandidates(in app: XCUIApplication, settingsForm: XCUIElement) -> [XCUIElement] {
         [
+            settingsForm.searchFields.firstMatch,
+            app.navigationBars.searchFields.firstMatch,
+            app.searchFields.firstMatch,
+            settingsForm.searchFields["Find"].firstMatch,
+            settingsForm.textFields["Find"].firstMatch,
+            app.navigationBars.searchFields["Find"].firstMatch,
+            app.navigationBars.textFields["Find"].firstMatch,
+            app.searchFields["Find"].firstMatch,
+            app.textFields["Find"].firstMatch,
             settingsForm.searchFields["Search"].firstMatch,
             settingsForm.textFields["Search"].firstMatch,
             app.navigationBars.searchFields["Search"].firstMatch,
@@ -1531,10 +1552,20 @@ extension AndBibleUITests {
             "Global text options"
         case "settingsSyncLink":
             "Device synchronization"
+        case "settingsAISettingsLink":
+            "AI Settings"
         case "settingsReadingProgressLink":
             "Reading Progress Settings"
         case "settingsLabelsLink":
             "Labels"
+        case "discreteHelpButton":
+            "Read this first!"
+        case "discreteModeToggle":
+            "Hide religious symbols"
+        case "showCalculatorToggle":
+            "Calculator"
+        case "calculatorPinRow":
+            "Calculator PIN"
         default:
             nil
         }

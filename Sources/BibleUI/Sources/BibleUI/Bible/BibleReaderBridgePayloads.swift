@@ -58,43 +58,73 @@ struct ReaderSetupContentPayload: Encodable {
         case jumpToId
         case topOffset
         case bottomOffset
+        case ordinalStart
+        case ordinalEnd
+        case highlight
+        case bookInitials
+        case osisRef
     }
 
     /// Optional ordinal to scroll to after document setup.
     let jumpToOrdinal: Int?
-    /// Optional anchor id to scroll to after document setup.
-    let jumpToAnchor: String?
+    /// Optional ordinal anchor to scroll to after document setup.
+    let jumpToAnchor: Int?
     /// Optional element id to scroll to after document setup.
     let jumpToId: String?
     /// Top inset passed to the web client.
     let topOffset: Int
     /// Bottom inset passed to the web client.
     let bottomOffset: Int
+    /// First ordinal in the temporary anchor-highlight range.
+    let ordinalStart: Int?
+    /// Last ordinal in the temporary anchor-highlight range.
+    let ordinalEnd: Int?
+    /// Whether Vue should paint the anchor range after scrolling.
+    let highlight: Bool
+    /// Source document initials used to scope the temporary highlight.
+    let bookInitials: String?
+    /// Source document key used to scope the temporary highlight.
+    let osisRef: String?
 
     /**
      Creates a setup-content event payload with zero offsets by default.
 
      - Parameters:
        - jumpToOrdinal: Optional ordinal scroll target.
-       - jumpToAnchor: Optional anchor scroll target.
+       - jumpToAnchor: Optional ordinal anchor scroll target.
        - jumpToId: Optional element-id scroll target.
        - topOffset: Top inset for the web client.
        - bottomOffset: Bottom inset for the web client.
+       - ordinalStart: Optional first ordinal to highlight.
+       - ordinalEnd: Optional last ordinal to highlight.
+       - highlight: Whether the anchor range should be highlighted.
+       - bookInitials: Optional source document initials for highlight scoping.
+       - osisRef: Optional source document key for highlight scoping.
      - Side effects: None.
      - Failure modes: None.
      */
     init(
         jumpToOrdinal: Int? = nil,
-        jumpToAnchor: String? = nil,
+        jumpToAnchor: Int? = nil,
         jumpToId: String? = nil,
         topOffset: Int = 0,
-        bottomOffset: Int = 0
+        bottomOffset: Int = 0,
+        ordinalStart: Int? = nil,
+        ordinalEnd: Int? = nil,
+        highlight: Bool = false,
+        bookInitials: String? = nil,
+        osisRef: String? = nil
     ) {
         self.jumpToOrdinal = jumpToOrdinal
         self.jumpToAnchor = jumpToAnchor
         self.jumpToId = jumpToId
         self.topOffset = topOffset
         self.bottomOffset = bottomOffset
+        self.ordinalStart = ordinalStart
+        self.ordinalEnd = ordinalEnd
+        self.highlight = highlight
+        self.bookInitials = bookInitials
+        self.osisRef = osisRef
     }
 
     /**
@@ -123,7 +153,43 @@ struct ReaderSetupContentPayload: Encodable {
         }
         try container.encode(topOffset, forKey: .topOffset)
         try container.encode(bottomOffset, forKey: .bottomOffset)
+        if let ordinalStart {
+            try container.encode(ordinalStart, forKey: .ordinalStart)
+        } else {
+            try container.encodeNil(forKey: .ordinalStart)
+        }
+        if let ordinalEnd {
+            try container.encode(ordinalEnd, forKey: .ordinalEnd)
+        } else {
+            try container.encodeNil(forKey: .ordinalEnd)
+        }
+        try container.encode(highlight, forKey: .highlight)
+        if let bookInitials {
+            try container.encode(bookInitials, forKey: .bookInitials)
+        } else {
+            try container.encodeNil(forKey: .bookInitials)
+        }
+        if let osisRef {
+            try container.encode(osisRef, forKey: .osisRef)
+        } else {
+            try container.encodeNil(forKey: .osisRef)
+        }
     }
+}
+
+/**
+ Android commentary block metadata attached to one rendered OSIS document.
+
+ The range identifies the complete linked commentary block even when the selected verse is inside
+ it. Vue uses the exact OSIS endpoints for annotation and navigation context.
+ */
+struct ReaderCommentaryRangePayload: Encodable, Equatable {
+    /// First OSIS verse represented by the commentary block.
+    let startOsisRef: String
+    /// Last OSIS verse represented by the commentary block.
+    let endOsisRef: String
+    /// Human-readable Android range label.
+    let name: String
 }
 
 /**
@@ -259,10 +325,20 @@ private struct DynamicCodingKey: CodingKey {
 /**
  Wire payload for Vue's multi-fragment document.
 
- `state` and `contentType` are omitted when absent, matching the previous document shape while
- using typed `OsisFragment` values for all rendered fragments.
+ Android always emits `contentType`, using JSON null for an ordinary Multi document, while an
+ absent `state` remains JavaScript undefined and therefore omitted from JSON. The custom encoder
+ preserves that distinction while using typed `OsisFragment` values for every rendered fragment.
  */
 struct MultiFragmentDocumentPayload: Encodable {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case type
+        case osisFragments
+        case compare
+        case contentType
+        case state
+    }
+
     /// Stable document identifier.
     let id: String
     /// Client document discriminator, always `multi`.
@@ -275,6 +351,30 @@ struct MultiFragmentDocumentPayload: Encodable {
     let contentType: String?
     /// Optional opaque Vue state restored into the document.
     let state: BridgeJSONValue?
+
+    /**
+     Encodes Android's exact Multi document nullability contract.
+
+     - Parameter encoder: Destination bridge encoder.
+     - Side effects: Writes all required Multi fields, an explicit null `contentType` when absent,
+       and `state` only when a value exists.
+     - Failure modes: Rethrows encoder failures.
+     */
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(osisFragments, forKey: .osisFragments)
+        try container.encode(compare, forKey: .compare)
+        if let contentType {
+            try container.encode(contentType, forKey: .contentType)
+        } else {
+            try container.encodeNil(forKey: .contentType)
+        }
+        if let state {
+            try container.encode(state, forKey: .state)
+        }
+    }
 }
 
 /**

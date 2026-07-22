@@ -50,8 +50,8 @@ private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDele
     /// Total planned files used to scale progress.
     private let totalFiles: Double
 
-    /// Optional normalized progress callback supplied by the UI layer.
-    private let progress: ((Double) -> Void)?
+    /// Optional byte-progress callback; `nil` means the response length is indeterminate.
+    private let progress: ((Double?) -> Void)?
 
     /// Serializes continuation, task, and progress-throttle state across URLSession callbacks.
     private let lock = NSLock()
@@ -82,7 +82,8 @@ private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDele
        - fileName: Repository file name used in diagnostics.
        - completedFiles: Number of files already staged.
        - totalFiles: Total planned files for progress scaling.
-       - progress: Optional normalized progress callback.
+       - progress: Optional byte-progress callback. A `nil` fraction represents an unknown response
+         length and is emitted once before the task starts by the repository.
      - Side effects: none until a URLSession task starts delivering callbacks.
      - Failure modes: none.
      */
@@ -91,7 +92,7 @@ private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDele
         fileName: String,
         completedFiles: Int,
         totalFiles: Double,
-        progress: ((Double) -> Void)?
+        progress: ((Double?) -> Void)?
     ) {
         self.destinationURL = destinationURL
         self.fileName = fileName
@@ -190,8 +191,8 @@ private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDele
      - invokes the caller's progress callback when a new integer percent boundary is crossed
 
      Failure modes:
-     - unknown content length disables in-file progress until the package install reports
-       completion after a successful commit
+     - unknown content length produces no determinate fraction; the caller's pre-download
+       indeterminate event remains current until another installer phase starts
      */
     func urlSession(
         _ session: URLSession,
@@ -555,6 +556,12 @@ public final class ModuleRepository: @unchecked Sendable {
     private let swordPath: String
     private let session: URLSession
 
+    /// Shared Android-compatible capacity gate used by remote and local package paths.
+    private let storagePreflight: ModuleStoragePreflight
+
+    /// Process-wide, canonical-root transaction publisher shared by every repository instance.
+    private let mutationPublisher: ModuleStoreTransactionPublisher
+
     /**
      Catalog entries cached per source name for install lookups after a refresh or disk restore.
 
@@ -604,14 +611,6 @@ public final class ModuleRepository: @unchecked Sendable {
 
     private var defaultDocumentsCachePath: String {
         (metadataCacheDir as NSString).appendingPathComponent("default_documents_v2.json")
-    }
-
-    /// Directory where Android-compatible MyBible packages are installed outside the SWORD tree.
-    private var myBibleInstallDir: URL {
-        let dir = URL(fileURLWithPath: swordPath, isDirectory: true)
-            .appendingPathComponent("mybible", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
     }
 
     /**
@@ -668,9 +667,31 @@ public final class ModuleRepository: @unchecked Sendable {
         return catalogCache
     }
 
-    public init(basePath: String? = nil, swordPath: String? = nil, session: URLSession? = nil) {
+    /**
+     Creates a repository facade for catalog and package operations.
+
+     - Parameters:
+       - basePath: Install-manager metadata/cache directory.
+       - swordPath: Destination SWORD home containing `mods.d` and `modules`.
+       - session: Optional URL session used by deterministic tests or custom networking.
+       - storageCapacityProvider: Optional destination-volume capacity provider. Production reads
+         Foundation volume metadata; tests can inject low-space conditions.
+     - Side effects: none. Live module roots are created only inside a mutation transaction.
+     - Failure modes: none during initialization.
+     */
+    public init(
+        basePath: String? = nil,
+        swordPath: String? = nil,
+        session: URLSession? = nil,
+        storageCapacityProvider: (@Sendable (URL) -> Int64?)? = nil
+    ) {
         self.basePath = basePath ?? InstallManager.defaultBasePath()
-        self.swordPath = swordPath ?? SwordManager.defaultModulePath()
+        let resolvedSwordPath = swordPath ?? SwordManager.defaultModulePath()
+        self.swordPath = resolvedSwordPath
+        self.storagePreflight = ModuleStoragePreflight(capacityProvider: storageCapacityProvider)
+        self.mutationPublisher = ModuleStoreTransactionPublisher(
+            moduleRootURL: URL(fileURLWithPath: resolvedSwordPath, isDirectory: true)
+        )
 
         if let session {
             self.session = session
@@ -680,12 +701,6 @@ public final class ModuleRepository: @unchecked Sendable {
             config.timeoutIntervalForResource = 600
             self.session = URLSession(configuration: config)
         }
-
-        // Ensure sword directories exist
-        let fm = FileManager.default
-        try? fm.createDirectory(atPath: self.swordPath, withIntermediateDirectories: true)
-        let modsD = (self.swordPath as NSString).appendingPathComponent("mods.d")
-        try? fm.createDirectory(atPath: modsD, withIntermediateDirectories: true)
     }
 
     // MARK: - Source Configuration
@@ -1277,13 +1292,44 @@ public final class ModuleRepository: @unchecked Sendable {
      */
     public func installModule(named moduleName: String, from source: SourceConfig,
                               progress: ((Double) -> Void)? = nil) async throws {
+        try await installModule(named: moduleName, from: source, progressState: { state in
+            guard let progress,
+                  let legacyFraction = Self.legacyOverallProgress(for: state) else {
+                return
+            }
+            progress(legacyFraction)
+        })
+    }
+
+    /**
+     Installs one remote module while reporting durable Android-style job phases.
+
+     - Parameters:
+       - moduleName: Module initials from the selected catalog row.
+       - source: Exact repository row that supplied the module.
+       - progressState: Optional phase-aware progress observer. Download fractions are
+         indeterminate when the server omits `Content-Length`; `.complete` is emitted only after
+         publish and cache invalidation.
+     - Side effects: Performs the same network, staging, publish, cache, and notification work as
+       the compatibility `progress` overload.
+     - Throws: The same repository, HTTP, ZIP, cancellation, storage, and filesystem errors as the
+       compatibility overload.
+     */
+    public func installModule(
+        named moduleName: String,
+        from source: SourceConfig,
+        progressState: ((ModuleInstallProgress) -> Void)?
+    ) async throws {
+        progressState?(ModuleInstallProgress(phase: .queued))
         guard let entries = cachedCatalogEntries(for: source.name),
               let entry = entries.first(where: { $0.name == moduleName }) else {
             throw ModuleRepositoryError.moduleNotFound(moduleName)
         }
 
+        try requireStorageCapacity(estimatedAdditionalBytes: Self.installSizeBytes(from: entry.size))
+
         if source.isMyBibleRepository || entry.repositoryType == SourceConfig.myBibleHTTPSRepositoryType {
-            try await installMyBibleModule(entry, progress: progress)
+            try await installMyBibleModule(entry, progressState: progressState)
             return
         }
 
@@ -1291,27 +1337,22 @@ public final class ModuleRepository: @unchecked Sendable {
             throw ModuleRepositoryError.invalidURL(source.name)
         }
 
-        let fm = FileManager.default
-
-        // 1. Determine local directory.
-        //    For verse-keyed modules (ztext, rawtext, zcom, rawcom), DataPath is a directory
-        //    (e.g. "modules/texts/ztext/kjv/") and files go directly inside.
-        //    For lexicon/genbook modules (rawld, zld, rawgenbook), DataPath ends with a
-        //    filename prefix (e.g. "modules/lexdict/rawld/strongshebrew/strongshebrew")
-        //    — the parent is the directory, and files like "strongshebrew.dat" go there.
-        let driver = entry.modDrv.lowercased()
-        let moduleDataPath = moduleDataDirectoryPath(for: entry.dataPath, driver: driver)
-        let localDir = (swordPath as NSString).appendingPathComponent(moduleDataPath)
-        let localDirURL = URL(fileURLWithPath: localDir, isDirectory: true)
-        let localParentURL = localDirURL.deletingLastPathComponent()
-        try fm.createDirectory(at: localParentURL, withIntermediateDirectories: true)
+        let layout: ModuleStoreInstalledLayout
+        do {
+            layout = try mutationPublisher.resolveCatalogLayout(
+                moduleName: moduleName,
+                configurationContent: entry.confContent
+            )
+        } catch {
+            throw ModuleRepositoryError.invalidZip(error.localizedDescription)
+        }
 
         let packageInstallResult = try await installModulePackage(
             named: moduleName,
             entry: entry,
             source: source,
-            localDirURL: localDirURL,
-            progress: progress
+            layout: layout,
+            progressState: progressState
         )
         switch packageInstallResult {
         case .installed:
@@ -1324,6 +1365,81 @@ public final class ModuleRepository: @unchecked Sendable {
     }
 
     /**
+     Returns the current shared storage requirement without starting an install.
+
+     - Parameter estimatedAdditionalBytes: Known package or expanded bytes beyond Android's 50 MiB
+       reserve.
+     - Returns: Capacity requirement when the destination volume reports capacity; otherwise `nil`.
+     - Side effects: Reads destination-volume metadata.
+     - Failure modes: Missing filesystem quota metadata returns `nil` rather than blocking work.
+     */
+    public func storageRequirement(
+        estimatedAdditionalBytes: Int64? = nil
+    ) -> ModuleStorageRequirement? {
+        storagePreflight.requirement(
+            for: URL(fileURLWithPath: swordPath, isDirectory: true),
+            estimatedAdditionalBytes: estimatedAdditionalBytes
+        )
+    }
+
+    /**
+     Enforces Android's storage reserve plus any known install allocation.
+
+     - Parameter estimatedAdditionalBytes: Known package or expanded bytes beyond the fixed reserve.
+     - Side effects: Reads destination-volume metadata.
+     - Throws: `ModuleRepositoryError.insufficientStorage` when reported capacity is below the
+       requirement. Missing capacity metadata fails open because insufficiency cannot be established.
+     */
+    private func requireStorageCapacity(estimatedAdditionalBytes: Int64? = nil) throws {
+        guard let requirement = storageRequirement(estimatedAdditionalBytes: estimatedAdditionalBytes),
+              !requirement.isSatisfied else {
+            return
+        }
+        throw ModuleRepositoryError.insufficientStorage(
+            requiredBytes: requirement.requiredBytes,
+            availableBytes: requirement.availableBytes
+        )
+    }
+
+    /**
+     Maps phase-aware progress onto the former normalized callback without reporting success early.
+
+     - Parameter state: Current structured installer phase.
+     - Returns: A monotonic best-effort overall fraction, or `nil` for indeterminate download work.
+     - Side effects: none.
+     - Failure modes: none; structured fractions are already normalized.
+     */
+    private static func legacyOverallProgress(for state: ModuleInstallProgress) -> Double? {
+        switch state.phase {
+        case .queued:
+            return 0
+        case .downloading:
+            return state.fraction.map { $0 * 0.70 }
+        case .extracting:
+            return 0.70 + (state.fraction ?? 0) * 0.20
+        case .committing:
+            return 0.95
+        case .complete:
+            return 1
+        }
+    }
+
+    /**
+     Parses catalog `InstallSize` for storage preflight without changing display semantics.
+
+     - Parameter value: Raw catalog install-size value.
+     - Returns: Positive byte count, or `nil` when absent, malformed, or non-positive.
+     - Side effects: none.
+     - Failure modes: Numeric overflow returns `nil`.
+     */
+    private static func installSizeBytes(from value: String) -> Int64? {
+        guard let bytes = Int64(value.trimmingCharacters(in: .whitespacesAndNewlines)), bytes > 0 else {
+            return nil
+        }
+        return bytes
+    }
+
+    /**
      Streams one repository payload into a destination using URLSession's native download task.
 
      - Parameters:
@@ -1332,7 +1448,7 @@ public final class ModuleRepository: @unchecked Sendable {
        - fileName: Repository payload name used in user-visible failure messages.
        - completedFiles: Number of payloads already staged before this download.
        - totalFiles: Total payload count for the install, used for progress scaling.
-       - progress: Optional progress callback receiving throttled normalized completion.
+       - progress: Optional byte-progress callback; `nil` fractions represent unknown length.
 
      Side effects:
      - creates the destination parent directory
@@ -1352,7 +1468,7 @@ public final class ModuleRepository: @unchecked Sendable {
         fileName: String,
         completedFiles: Int,
         totalFiles: Double,
-        progress: ((Double) -> Void)?
+        progress: ((Double?) -> Void)?
     ) async throws {
         try Task.checkCancellation()
         let delegate = ModuleFileDownloadDelegate(
@@ -1406,7 +1522,7 @@ public final class ModuleRepository: @unchecked Sendable {
      */
     private func installMyBibleModule(
         _ entry: CatalogModule,
-        progress: ((Double) -> Void)?
+        progressState: ((ModuleInstallProgress) -> Void)?
     ) async throws {
         guard let downloadURL = entry.downloadURL else {
             throw ModuleRepositoryError.invalidURL(entry.name)
@@ -1419,6 +1535,7 @@ public final class ModuleRepository: @unchecked Sendable {
             try? fm.removeItem(at: packageDownloadURL)
         }
 
+        progressState?(ModuleInstallProgress(phase: .downloading))
         do {
             try await downloadRequiredModuleFile(
                 from: downloadURL,
@@ -1426,24 +1543,33 @@ public final class ModuleRepository: @unchecked Sendable {
                 fileName: downloadURL.lastPathComponent,
                 completedFiles: 0,
                 totalFiles: 1,
-                progress: progress
+                progress: { fraction in
+                    progressState?(ModuleInstallProgress(phase: .downloading, fraction: fraction))
+                }
             )
         } catch let statusError as ModuleFileHTTPStatusError {
             throw ModuleRepositoryError.downloadFailed(statusError.localizedDescription)
         }
 
         try Task.checkCancellation()
-        let stagingDirURL = myBibleInstallDir
-            .appendingPathComponent(".\(entry.name)-\(UUID().uuidString).installing", isDirectory: true)
+        let stagingDirURL = fm.temporaryDirectory
+            .appendingPathComponent("mybible-\(entry.name)-\(UUID().uuidString).staging", isDirectory: true)
         try fm.createDirectory(at: stagingDirURL, withIntermediateDirectories: true)
         defer {
             try? fm.removeItem(at: stagingDirURL)
         }
 
+        let packageEntries = try readFileBackedZipEntries(from: packageDownloadURL)
+        try requireStorageCapacity(estimatedAdditionalBytes: try estimatedExpandedBytes(for: packageEntries))
+        progressState?(ModuleInstallProgress(phase: .extracting, fraction: 0))
         let extractionResult = try extractMyBiblePackagePayloads(
             from: packageDownloadURL,
             to: stagingDirURL,
-            packageFileName: entry.packageFileName
+            packageFileName: entry.packageFileName,
+            entries: packageEntries,
+            progress: { fraction in
+                progressState?(ModuleInstallProgress(phase: .extracting, fraction: fraction))
+            }
         )
         guard extractionResult.entryCount > 0 else {
             throw ModuleRepositoryError.invalidZip("\(downloadURL.lastPathComponent) is empty")
@@ -1473,9 +1599,14 @@ public final class ModuleRepository: @unchecked Sendable {
         )
 
         try Task.checkCancellation()
-        try commitStagedMyBibleInstall(stagingDirURL: stagingDirURL, moduleName: entry.name)
-        SwordModuleStore.notifyModulesDidChange()
-        progress?(1.0)
+        try mutationPublisher.publishStagedMyBibleInstall(
+            from: stagingDirURL,
+            moduleName: entry.name,
+            onCommitStarted: {
+                progressState?(ModuleInstallProgress(phase: .committing))
+            }
+        )
+        progressState?(ModuleInstallProgress(phase: .complete, fraction: 1))
     }
 
     /**
@@ -1516,8 +1647,35 @@ public final class ModuleRepository: @unchecked Sendable {
         /// Uncompressed byte count advertised by ZIP metadata.
         let uncompressedSize: UInt64
 
+        /// CRC32 of the uncompressed payload advertised by ZIP metadata.
+        let checksum: UInt32
+
         /// Offset of the entry's local file header in the package file.
         let localHeaderOffset: UInt64
+    }
+
+    /**
+     Sums advertised uncompressed entry sizes for storage preflight.
+
+     - Parameter entries: File-backed ZIP metadata entries to be considered for staging.
+     - Returns: Saturation-safe signed byte estimate.
+     - Side effects: none.
+     - Throws: `ModuleRepositoryError.invalidZip` when an entry size or aggregate cannot fit in
+       `Int64`, preventing a crafted archive from bypassing capacity checks through overflow.
+     */
+    private func estimatedExpandedBytes(for entries: [FileBackedZipEntry]) throws -> Int64 {
+        var total: Int64 = 0
+        for entry in entries {
+            guard entry.uncompressedSize <= UInt64(Int64.max) else {
+                throw ModuleRepositoryError.invalidZip("ZIP entry size exceeds supported limits")
+            }
+            let (next, overflow) = total.addingReportingOverflow(Int64(entry.uncompressedSize))
+            guard !overflow else {
+                throw ModuleRepositoryError.invalidZip("ZIP expanded size exceeds supported limits")
+            }
+            total = next
+        }
+        return total
     }
 
     /**
@@ -1527,6 +1685,8 @@ public final class ModuleRepository: @unchecked Sendable {
        - zipURL: Temporary package file produced by `downloadRequiredModuleFile`.
        - stagingDirURL: Empty installation staging directory for the module.
        - packageFileName: Manifest package name used to accept legacy payloads without an extension.
+       - entries: Validated file-backed entries read once before storage preflight.
+       - progress: Optional extraction progress observer.
      - Returns: Counts for total entries inspected and MyBible payload files written.
      - Side effects: reads ZIP metadata from `zipURL` and writes matching payload files into
        `stagingDirURL`.
@@ -1538,14 +1698,18 @@ public final class ModuleRepository: @unchecked Sendable {
     private func extractMyBiblePackagePayloads(
         from zipURL: URL,
         to stagingDirURL: URL,
-        packageFileName: String?
+        packageFileName: String?,
+        entries: [FileBackedZipEntry],
+        progress: ((Double) -> Void)? = nil
     ) throws -> MyBiblePackageExtractionResult {
-        let entries = try readFileBackedZipEntries(from: zipURL)
         let fm = FileManager.default
         var payloadCount = 0
 
-        for entry in entries {
+        for (index, entry) in entries.enumerated() {
             try Task.checkCancellation()
+            defer {
+                progress?(Double(index + 1) / Double(max(entries.count, 1)))
+            }
             guard let fileName = Self.normalizedMyBiblePackageEntryName(
                 entry.name,
                 packageFileName: packageFileName
@@ -1563,14 +1727,7 @@ public final class ModuleRepository: @unchecked Sendable {
             }
 
             do {
-                switch entry.compressionMethod {
-                case 0:
-                    try copyStoredZipEntry(entry, from: zipURL, to: destinationURL)
-                case 8:
-                    try inflateDeflatedZipEntry(entry, from: zipURL, to: destinationURL)
-                default:
-                    continue
-                }
+                try writeSwordZipEntry(entry, from: zipURL, to: destinationURL)
                 payloadCount += 1
             } catch {
                 try? fm.removeItem(at: destinationURL)
@@ -1628,10 +1785,56 @@ public final class ModuleRepository: @unchecked Sendable {
                     "Unsupported ZIP compression method \(entry.compressionMethod)"
                 )
             }
+            let attributes = try fm.attributesOfItem(atPath: destinationURL.path)
+            guard let writtenSize = (attributes[.size] as? NSNumber)?.uint64Value,
+                  writtenSize == entry.uncompressedSize else {
+                throw ModuleRepositoryError.decompressionFailed
+            }
+            guard try ArchiveCRC32.checksum(fileAt: destinationURL) == entry.checksum else {
+                throw ModuleRepositoryError.invalidZip(
+                    "ZIP entry checksum mismatch: \(entry.name)"
+                )
+            }
         } catch {
-            try? fm.removeItem(at: destinationURL)
+            if fm.fileExists(atPath: destinationURL.path) {
+                try? fm.removeItem(at: destinationURL)
+            }
             throw error
         }
+    }
+
+    /**
+     Reads one staged config entry through the file-backed ZIP extractor used for publication.
+
+     - Parameters:
+       - entry: Direct-root `mods.d/<initials>.conf` entry whose size and compression metadata were parsed.
+       - zipURL: Archive containing the config payload.
+     - Returns: UTF-8 or Latin-1 config text for semantic layout validation.
+     - Side effects: Writes and removes one temporary metadata file.
+     - Throws: `ModuleRepositoryError.invalidZip` for oversized or undecodable config data, plus
+       extractor and temporary filesystem errors.
+     */
+    private func configurationContent(
+        for entry: FileBackedZipEntry,
+        in zipURL: URL
+    ) throws -> String {
+        guard entry.uncompressedSize <= 1_024 * 1_024 else {
+            throw ModuleRepositoryError.invalidZip("Module config exceeds the 1 MiB metadata limit")
+        }
+        let temporaryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("module-config-\(UUID().uuidString).conf")
+        defer {
+            if FileManager.default.fileExists(atPath: temporaryURL.path) {
+                try? FileManager.default.removeItem(at: temporaryURL)
+            }
+        }
+        try writeSwordZipEntry(entry, from: zipURL, to: temporaryURL)
+        let data = try Data(contentsOf: temporaryURL)
+        guard let content = String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: .isoLatin1) else {
+            throw ModuleRepositoryError.invalidZip("Module config is not UTF-8 or Latin-1 text")
+        }
+        return content
     }
 
     /**
@@ -1705,7 +1908,8 @@ public final class ModuleRepository: @unchecked Sendable {
         let dataOffset = try zipEntryDataOffset(entry, in: handle, fileSize: fileSize)
 
         guard dataOffset <= UInt64(UInt.max),
-              entry.compressedSize <= UInt64(UInt.max) else {
+              entry.compressedSize <= UInt64(UInt.max),
+              entry.uncompressedSize <= UInt64(UInt.max) else {
             throw ModuleRepositoryError.invalidZip("ZIP entry is too large")
         }
 
@@ -1718,6 +1922,7 @@ public final class ModuleRepository: @unchecked Sendable {
                     inputPath,
                     UInt(dataOffset),
                     UInt(entry.compressedSize),
+                    UInt(entry.uncompressedSize),
                     outputPath
                 )
             }
@@ -1781,46 +1986,6 @@ public final class ModuleRepository: @unchecked Sendable {
     }
 
     /**
-     Atomically publishes a staged MyBible module directory with rollback protection.
-
-     - Parameters:
-       - stagingDirURL: Directory containing extracted MyBible payload and sidecar metadata.
-       - moduleName: MyBible module initials used as the final directory name.
-     - Side effects:
-       - moves any existing install to a backup directory
-       - moves the staging directory into the final MyBible install location
-       - removes the backup after a successful publish
-     - Failure modes:
-       - restores the previous directory on publish failure, then rethrows the original error.
-     */
-    private func commitStagedMyBibleInstall(stagingDirURL: URL, moduleName: String) throws {
-        let fm = FileManager.default
-        let finalDirURL = myBibleInstallDir.appendingPathComponent(moduleName, isDirectory: true)
-        let backupDirURL = myBibleInstallDir
-            .appendingPathComponent(".\(moduleName)-\(UUID().uuidString).backup", isDirectory: true)
-        var movedExisting = false
-
-        do {
-            if fm.fileExists(atPath: finalDirURL.path) {
-                try fm.moveItem(at: finalDirURL, to: backupDirURL)
-                movedExisting = true
-            }
-
-            try fm.moveItem(at: stagingDirURL, to: finalDirURL)
-
-            if movedExisting {
-                try? fm.removeItem(at: backupDirURL)
-            }
-        } catch {
-            if movedExisting {
-                try? fm.removeItem(at: finalDirURL)
-                try? fm.moveItem(at: backupDirURL, to: finalDirURL)
-            }
-            throw error
-        }
-    }
-
-    /**
      Result of attempting a SWORD package ZIP install.
 
      The installer needs to distinguish an unavailable package from a source that cannot produce a
@@ -1856,29 +2021,31 @@ public final class ModuleRepository: @unchecked Sendable {
        - moduleName: Catalog module abbreviation whose package should be downloaded.
        - entry: Parsed catalog entry providing `DataPath`, `ModDrv`, and `.conf` content.
        - source: Repository source used to derive package ZIP candidate URLs.
-       - localDirURL: Final module data directory that will receive the extracted package data.
-       - progress: Optional normalized progress callback shared with the caller.
+       - layout: Catalog layout validated before any package request or destination creation. The
+         downloaded package config must resolve to this same identity, driver, and data path.
+       - progressState: Optional phase-aware progress observer shared with the caller.
      - Returns: `.installed` when a package was committed, `.unavailable` when package URLs existed
        but returned 404, or `.noCandidates` when no package URL could be built.
      - Side effects:
        - downloads a candidate ZIP into a temporary file
-       - extracts only `modules/` entries into a temporary staging tree
-       - commits the staged module data and catalog `.conf` through the rollback-safe publish path
+       - parses and validates the package's direct-root `.conf` against catalog metadata
+       - extracts only payload owned by that validated package config into a temporary staging tree
+       - commits the package `.conf` plus repository attribution through the rollback-safe path
        - invalidates SWORD's module cache after a successful package install
      - Throws:
        - `CancellationError` when the surrounding task is cancelled
        - `ModuleRepositoryError.downloadFailed` when a package candidate returns a non-404 HTTP
          failure
-       - `ModuleRepositoryError.invalidZip` when a downloaded candidate is malformed or lacks the
-         catalog data directory
+       - `ModuleRepositoryError.invalidZip` when a downloaded candidate is malformed, has a
+         placeholder/mismatched config, or contains payload outside the catalog-owned data path
        - file-system errors from temporary extraction or final publish
      */
     private func installModulePackage(
         named moduleName: String,
         entry: CatalogModule,
         source: SourceConfig,
-        localDirURL: URL,
-        progress: ((Double) -> Void)?
+        layout: ModuleStoreInstalledLayout,
+        progressState: ((ModuleInstallProgress) -> Void)?
     ) async throws -> ModulePackageInstallResult {
         let candidates = packageZipCandidateURLs(
             for: moduleName,
@@ -1898,13 +2065,16 @@ public final class ModuleRepository: @unchecked Sendable {
             try Task.checkCancellation()
             do {
                 logger.info("Trying package install \(candidate.absoluteString)")
+                progressState?(ModuleInstallProgress(phase: .downloading))
                 try await downloadRequiredModuleFile(
                     from: candidate,
                     to: packageDownloadURL,
                     fileName: candidate.lastPathComponent,
                     completedFiles: 0,
                     totalFiles: 1,
-                    progress: progress
+                    progress: { fraction in
+                        progressState?(ModuleInstallProgress(phase: .downloading, fraction: fraction))
+                    }
                 )
                 downloadedPackageURL = candidate
                 break
@@ -1922,8 +2092,8 @@ public final class ModuleRepository: @unchecked Sendable {
         guard !entries.isEmpty else {
             throw ModuleRepositoryError.invalidZip("\(downloadedPackageURL.lastPathComponent) is empty")
         }
+        try requireStorageCapacity(estimatedAdditionalBytes: try estimatedExpandedBytes(for: entries))
 
-        let moduleDataPath = moduleDataDirectoryPath(for: entry.dataPath, driver: entry.modDrv)
         let extractionRootURL = fm.temporaryDirectory
             .appendingPathComponent("\(moduleName)-\(UUID().uuidString).package", isDirectory: true)
         try fm.createDirectory(at: extractionRootURL, withIntermediateDirectories: true)
@@ -1931,40 +2101,228 @@ public final class ModuleRepository: @unchecked Sendable {
             try? fm.removeItem(at: extractionRootURL)
         }
 
-        let dataPathPrefix = moduleDataPath.hasSuffix("/") ? moduleDataPath : "\(moduleDataPath)/"
-        var extractedDataFileCount = 0
-
-        for entry in entries {
-            try Task.checkCancellation()
-            guard let relativePath = normalizedSwordPackageEntryPath(entry.name),
-                  relativePath.hasPrefix(dataPathPrefix) else {
+        var directRootEntries: [(FileBackedZipEntry, String)] = []
+        for archiveEntry in entries {
+            if archiveEntry.name.hasSuffix("/") {
+                guard isDirectSwordPackageDirectoryPath(archiveEntry.name) else {
+                    throw ModuleRepositoryError.invalidZip(
+                        "Unsupported remote package entry path: \(archiveEntry.name)"
+                    )
+                }
                 continue
             }
+            guard let relativePath = normalizedSwordPackageEntryPath(archiveEntry.name) else {
+                throw ModuleRepositoryError.invalidZip(
+                    "Unsupported remote package entry path: \(archiveEntry.name)"
+                )
+            }
+            directRootEntries.append((archiveEntry, relativePath))
+        }
+        let expectedConfigPath = layout.configRelativePath
+        let packageConfigEntries = directRootEntries.filter { item in
+            item.1.hasPrefix("mods.d/") && item.1.lowercased().hasSuffix(".conf")
+        }
+        guard packageConfigEntries.count == 1,
+              let packageConfigEntry = packageConfigEntries.first,
+              packageConfigEntry.1.caseInsensitiveCompare(expectedConfigPath) == .orderedSame else {
+            throw ModuleRepositoryError.invalidZip(
+                "\(downloadedPackageURL.lastPathComponent) must contain only \(expectedConfigPath) as its module config"
+            )
+        }
+        let packageConfigurationContent = try configurationContent(
+            for: packageConfigEntry.0,
+            in: packageDownloadURL
+        )
+        let packageLayout = try validatedRemotePackageLayout(
+            configurationContent: packageConfigurationContent,
+            moduleName: moduleName,
+            catalogEntry: entry,
+            catalogLayout: layout
+        )
 
-            let destinationPath = (extractionRootURL.path as NSString).appendingPathComponent(relativePath)
+        let matchingEntries = directRootEntries.filter { item in
+            packageLayout.ownsPayload(atRelativePath: item.1)
+        }
+        let unexpectedEntries = directRootEntries.filter { item in
+            item.1.caseInsensitiveCompare(expectedConfigPath) != .orderedSame
+                && !packageLayout.ownsPayload(atRelativePath: item.1)
+        }
+        guard unexpectedEntries.isEmpty else {
+            throw ModuleRepositoryError.invalidZip(
+                "Package contains payload outside \(packageLayout.dataPath): \(unexpectedEntries[0].1)"
+            )
+        }
+        progressState?(ModuleInstallProgress(phase: .extracting, fraction: 0))
+
+        for (index, item) in matchingEntries.enumerated() {
+            try Task.checkCancellation()
+            let destinationPath = (extractionRootURL.path as NSString).appendingPathComponent(item.1)
             let destinationURL = URL(fileURLWithPath: destinationPath)
-            try writeSwordZipEntry(entry, from: packageDownloadURL, to: destinationURL)
-            extractedDataFileCount += 1
+            try writeSwordZipEntry(item.0, from: packageDownloadURL, to: destinationURL)
+            progressState?(ModuleInstallProgress(
+                phase: .extracting,
+                fraction: Double(index + 1) / Double(max(matchingEntries.count, 1))
+            ))
         }
 
-        let stagedDataDirURL = extractionRootURL.appendingPathComponent(moduleDataPath, isDirectory: true)
-        guard extractedDataFileCount > 0,
-              fm.fileExists(atPath: stagedDataDirURL.path) else {
+        guard !matchingEntries.isEmpty else {
             throw ModuleRepositoryError.invalidZip(
-                "\(downloadedPackageURL.lastPathComponent) did not contain \(moduleDataPath)"
+                "\(downloadedPackageURL.lastPathComponent) did not contain payload for \(packageLayout.dataPath)"
             )
         }
 
-        try Task.checkCancellation()
-        try commitStagedModuleInstall(
-            stagingDirURL: stagedDataDirURL,
-            localDirURL: localDirURL,
-            moduleName: moduleName,
-            confContent: entry.confContent
+        let publishedConfContent = Self.confContent(
+            packageConfigurationContent,
+            settingRepository: source.name
         )
-        invalidateModuleCache()
-        progress?(1.0)
+        let stagedConfigURL = extractionRootURL.appendingPathComponent(packageLayout.configRelativePath)
+        try fm.createDirectory(
+            at: stagedConfigURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try publishedConfContent.write(to: stagedConfigURL, atomically: true, encoding: .utf8)
+        let plan: ModuleStoreStagedInstallPlan
+        do {
+            plan = try mutationPublisher.validateStagedInstall(
+                configurations: [ModuleStoreStagedConfiguration(
+                    relativePath: packageLayout.configRelativePath,
+                    content: publishedConfContent
+                )],
+                payloadRelativePaths: matchingEntries.map { $0.1 }
+            )
+        } catch {
+            throw ModuleRepositoryError.invalidZip(error.localizedDescription)
+        }
+
+        try Task.checkCancellation()
+        try mutationPublisher.publishStagedInstall(
+            plan,
+            from: extractionRootURL,
+            allowOverwrite: true,
+            kind: .remoteSword,
+            onCommitStarted: {
+                progressState?(ModuleInstallProgress(phase: .committing))
+            }
+        )
+        progressState?(ModuleInstallProgress(phase: .complete, fraction: 1))
         return .installed
+    }
+
+    /**
+     Parses one remote package config and proves it describes exactly the requested catalog module.
+
+     SWORD permits repeated keys and multiple sections in a config file, while the shared metadata
+     projection intentionally reads the first value. A package could otherwise pass validation with
+     a matching first section/key and publish a second module or conflicting driver/path consumed by
+     another backend. Remote packages therefore require one section and one `ModDrv`/`DataPath`.
+
+     - Parameters:
+       - configurationContent: UTF-8 or Latin-1 package `.conf` text extracted from the ZIP.
+       - moduleName: Module initials requested by the caller and used for the package filename.
+       - catalogEntry: Refreshed repository catalog row selected for installation.
+       - catalogLayout: Safety-validated layout derived from the catalog config before download.
+     - Returns: Safety-validated package layout identical to the catalog identity, driver, and path.
+     - Side effects: Resolves existing module-root symlinks through the shared layout resolver; no
+       package or installed files are written.
+     - Throws: `ModuleRepositoryError.invalidZip` for malformed, ambiguous, placeholder, mismatched,
+       or unsafe package configuration.
+     */
+    private func validatedRemotePackageLayout(
+        configurationContent: String,
+        moduleName: String,
+        catalogEntry: CatalogModule,
+        catalogLayout: ModuleStoreInstalledLayout
+    ) throws -> ModuleStoreInstalledLayout {
+        guard let parsedConfig = SwordModuleConfig.parse(configurationContent),
+              Self.moduleConfigSectionNames(in: configurationContent) == [parsedConfig.name],
+              parsedConfig.values["moddrv"]?.count == 1,
+              parsedConfig.values["datapath"]?.count == 1 else {
+            throw ModuleRepositoryError.invalidZip(
+                "Package config for \(moduleName) must contain one module section, ModDrv, and DataPath"
+            )
+        }
+
+        let packageLayout: ModuleStoreInstalledLayout
+        do {
+            packageLayout = try mutationPublisher.resolveCatalogLayout(
+                moduleName: moduleName,
+                configurationContent: configurationContent
+            )
+        } catch {
+            throw ModuleRepositoryError.invalidZip(
+                "Package config for \(moduleName) is invalid: \(error.localizedDescription)"
+            )
+        }
+        guard packageLayout.moduleName.caseInsensitiveCompare(moduleName) == .orderedSame,
+              packageLayout.moduleName.caseInsensitiveCompare(catalogEntry.name) == .orderedSame,
+              packageLayout.moduleName.caseInsensitiveCompare(catalogLayout.moduleName) == .orderedSame else {
+            throw ModuleRepositoryError.invalidZip(
+                "Package config section \(packageLayout.moduleName) does not match catalog module \(moduleName)"
+            )
+        }
+        guard packageLayout.driver.caseInsensitiveCompare(catalogLayout.driver) == .orderedSame else {
+            throw ModuleRepositoryError.invalidZip(
+                "Package ModDrv \(packageLayout.driver) does not match catalog ModDrv \(catalogLayout.driver)"
+            )
+        }
+        guard packageLayout.dataPath == catalogLayout.dataPath else {
+            throw ModuleRepositoryError.invalidZip(
+                "Package DataPath \(packageLayout.dataPath) does not match catalog DataPath \(catalogLayout.dataPath)"
+            )
+        }
+        return packageLayout
+    }
+
+    /**
+     Collects exact section headers from a SWORD module config for ambiguity checks.
+
+     - Parameter content: Package config text using SWORD's line-oriented INI syntax.
+     - Returns: Trimmed section names in source order, or an empty array when any bracket-prefixed
+       line is malformed.
+     - Side effects: none.
+     - Failure modes: Malformed section syntax returns an empty array so package validation fails
+       closed; ordinary comments, blank lines, and key/value lines are ignored.
+     */
+    private static func moduleConfigSectionNames(in content: String) -> [String] {
+        var sectionNames: [String] = []
+        for line in content.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("[") else { continue }
+            guard trimmed.hasSuffix("]") else { return [] }
+            let sectionName = String(trimmed.dropFirst().dropLast())
+                .trimmingCharacters(in: .whitespaces)
+            guard !sectionName.isEmpty else { return [] }
+            sectionNames.append(sectionName)
+        }
+        return sectionNames
+    }
+
+    /**
+     Persists Android's installed repository origin in a SWORD config before publish.
+
+     Android records `SourceRepository` after JSword installation and uses it to distinguish
+     same-initials rows from different repositories. iOS stores the equivalent value in the
+     `Repository` config field already projected by `SwordModuleConfig.aboutMetadata`.
+
+     - Parameters:
+       - content: Validated package `.conf` content to publish.
+       - repository: Exact source name selected for installation.
+     - Returns: Config content with one canonical `Repository=` line.
+     - Side effects: none.
+     - Failure modes: Malformed non-key lines are preserved; any existing case-insensitive
+       `Repository` assignments are replaced.
+     */
+    private static func confContent(_ content: String, settingRepository repository: String) -> String {
+        var lines = content.components(separatedBy: .newlines).filter { line in
+            let key = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).first?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return key?.caseInsensitiveCompare("Repository") != .orderedSame
+        }
+        while lines.last?.isEmpty == true {
+            lines.removeLast()
+        }
+        lines.append("Repository=\(repository)")
+        return lines.joined(separator: "\n") + "\n"
     }
 
     /**
@@ -2049,124 +2407,52 @@ public final class ModuleRepository: @unchecked Sendable {
      Normalizes a SWORD package ZIP entry to a safe path rooted at the local SWORD home.
 
      - Parameter path: Raw ZIP entry name.
-     - Returns: A relative path beginning with `mods.d/` or `modules/`, with any single enclosing
-       package folder removed; returns `nil` for absolute paths, traversal paths, directories, or
-       unsupported archive entries.
+     - Returns: An unchanged relative path beginning exactly with `mods.d/` or `modules/`; returns
+       `nil` for wrappers, absolute paths, traversal paths, backslashes, directories, or unsupported
+       archive entries.
      - Side effects: none.
-     - Failure modes: unsafe paths are filtered out instead of throwing so unrelated archive entries
-       do not fail an otherwise valid package.
+     - Failure modes: Invalid paths return `nil`; the caller rejects the entire remote package.
      */
     private func normalizedSwordPackageEntryPath(_ path: String) -> String? {
-        var relativePath = path.replacingOccurrences(of: "\\", with: "/")
-        while relativePath.hasPrefix("./") {
-            relativePath = String(relativePath.dropFirst(2))
-        }
-        guard !relativePath.isEmpty,
-              !relativePath.hasPrefix("/"),
-              !relativePath.hasSuffix("/") else {
+        guard !path.isEmpty,
+              !path.hasPrefix("/"),
+              !path.hasPrefix("./"),
+              !path.hasSuffix("/"),
+              !path.contains("\\"),
+              !path.contains("%") else {
             return nil
         }
 
-        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
-        guard !components.contains(where: { $0 == ".." || $0.isEmpty }) else {
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard !components.contains(where: { $0 == "." || $0 == ".." || $0.isEmpty }) else {
             return nil
         }
 
-        let lowercasedPath = relativePath.lowercased()
-        if lowercasedPath.hasPrefix("mods.d/") || lowercasedPath.hasPrefix("modules/") {
-            return relativePath
-        }
-
-        guard let slashIndex = relativePath.firstIndex(of: "/") else { return nil }
-        let nestedPath = String(relativePath[relativePath.index(after: slashIndex)...])
-        let lowercasedNestedPath = nestedPath.lowercased()
-        guard lowercasedNestedPath.hasPrefix("mods.d/")
-            || lowercasedNestedPath.hasPrefix("modules/") else {
+        guard path.hasPrefix("mods.d/") || path.hasPrefix("modules/") else {
             return nil
         }
-        return nestedPath
+        return path
     }
 
-    /**
-     Publishes a fully staged module install with rollback protection for updates.
-
-     - Parameters:
-       - stagingDirURL: Directory containing all freshly downloaded required files.
-       - localDirURL: Final SWORD module data directory.
-       - moduleName: Module abbreviation used to resolve the `.conf` marker path.
-       - confContent: Catalog `.conf` content to publish after staged data is in place.
-
-     Side effects:
-     - moves the previous module data directory and config marker to hidden backups when present
-     - moves the staged directory into the final location
-     - writes the `.conf` installed marker atomically
-     - removes backups after a successful publish
-
-     Failure modes:
-     - restores previous data/config backups when any publish step fails, then rethrows the error
-     - best-effort cleanup is used for rollback failures because the original error is the caller's
-       actionable failure
-     */
-    private func commitStagedModuleInstall(
-        stagingDirURL: URL,
-        localDirURL: URL,
-        moduleName: String,
-        confContent: String
-    ) throws {
-        let fm = FileManager.default
-        let nonce = UUID().uuidString
-        let localParentURL = localDirURL.deletingLastPathComponent()
-        let backupDirURL = localParentURL.appendingPathComponent(
-            ".\(localDirURL.lastPathComponent)-\(nonce).backup",
-            isDirectory: true
-        )
-        let modsDirURL = URL(fileURLWithPath: swordPath, isDirectory: true)
-            .appendingPathComponent("mods.d", isDirectory: true)
-        try fm.createDirectory(at: modsDirURL, withIntermediateDirectories: true)
-        let confURL = modsDirURL.appendingPathComponent(moduleName.lowercased() + ".conf")
-        let backupConfURL = modsDirURL.appendingPathComponent(
-            ".\(moduleName.lowercased()).conf-\(nonce).backup"
-        )
-
-        var movedExistingDir = false
-        var movedExistingConf = false
-        var movedStagingIntoPlace = false
-
-        do {
-            if fm.fileExists(atPath: localDirURL.path) {
-                try fm.moveItem(at: localDirURL, to: backupDirURL)
-                movedExistingDir = true
-            }
-            if fm.fileExists(atPath: confURL.path) {
-                try fm.moveItem(at: confURL, to: backupConfURL)
-                movedExistingConf = true
-            }
-
-            try fm.moveItem(at: stagingDirURL, to: localDirURL)
-            movedStagingIntoPlace = true
-            try confContent.write(to: confURL, atomically: true, encoding: .utf8)
-
-            if movedExistingDir {
-                try? fm.removeItem(at: backupDirURL)
-            }
-            if movedExistingConf {
-                try? fm.removeItem(at: backupConfURL)
-            }
-        } catch {
-            if movedStagingIntoPlace {
-                try? fm.removeItem(at: localDirURL)
-            }
-            if movedExistingDir {
-                try? fm.moveItem(at: backupDirURL, to: localDirURL)
-            }
-            if movedStagingIntoPlace || movedExistingConf {
-                try? fm.removeItem(at: confURL)
-            }
-            if movedExistingConf {
-                try? fm.moveItem(at: backupConfURL, to: confURL)
-            }
-            throw error
+    /** Validates an optional directory marker rooted directly at `mods.d/` or `modules/`. */
+    private func isDirectSwordPackageDirectoryPath(_ path: String) -> Bool {
+        guard path.hasSuffix("/") else { return false }
+        let filePath = String(path.dropLast())
+        guard !filePath.isEmpty,
+              !filePath.hasPrefix("/"),
+              !filePath.hasPrefix("./"),
+              !filePath.contains("\\"),
+              !filePath.contains("%") else {
+            return false
         }
+        let components = filePath.split(separator: "/", omittingEmptySubsequences: false)
+        guard !components.contains(where: { $0 == "." || $0 == ".." || $0.isEmpty }) else {
+            return false
+        }
+        return filePath == "mods.d"
+            || filePath == "modules"
+            || filePath.hasPrefix("mods.d/")
+            || filePath.hasPrefix("modules/")
     }
 
     /**
@@ -2187,161 +2473,335 @@ public final class ModuleRepository: @unchecked Sendable {
     /**
      Uninstalls either a MyBible sidecar module or a SWORD module by name.
 
-     MyBible modules are removed from the non-SWORD install store only when their `module.json`
-     sidecar is present. Other names follow the existing SWORD uninstall path, which deletes data
-     and config files and invalidates SWORD's module cache.
+     MyBible modules are removed only when their `module.json` sidecar is present. SWORD modules are
+     resolved through the shared driver-aware layout contract, then config and uniquely owned payload
+     are moved to rollback storage before cache invalidation and notification. Bible removal is
+     approved from fresh inventory while the shared mutation lease is held, so concurrent calls
+     cannot both remove the final installed Bible.
 
      - Parameter moduleName: Installed module initials to remove.
      - Side effects:
-       - deletes module files
-       - invalidates SWORD's module cache for SWORD modules
-       - posts `SwordModuleStore.modulesDidChangeNotification` when a module is actually removed
-     - Throws: file-system errors when deletion fails; SWORD lookup failures surface as
-       `ModuleRepositoryError.moduleNotFound`.
+       - acquires the process-wide canonical-root mutation lease
+       - transactionally removes module files and posts the terminal store notification
+     - Throws: `ModuleRepositoryError.moduleNotFound`, `.lastInstalledBible`,
+       `.installedInventoryUnavailable`, unsafe-layout/ownership errors, public filesystem errors,
+       or rollback failures.
      */
     public func uninstallModule(named moduleName: String) throws {
-        if try uninstallMyBibleModuleIfPresent(named: moduleName) {
-            return
-        }
-
-        let fm = FileManager.default
-
-        // Find and read .conf file
-        let modsDir = (swordPath as NSString).appendingPathComponent("mods.d")
-        let confPath = (modsDir as NSString)
-            .appendingPathComponent(moduleName.lowercased() + ".conf")
-
-        // Read DataPath before deleting
-        var dataPath: String?
-        if let content = try? String(contentsOfFile: confPath, encoding: .utf8) {
-            for line in content.components(separatedBy: .newlines) {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.lowercased().hasPrefix("datapath=") {
-                    let idx = trimmed.index(trimmed.startIndex, offsetBy: 9)
-                    dataPath = String(trimmed[idx...])
-                        .trimmingCharacters(in: .whitespaces)
-                        .replacingOccurrences(of: "./", with: "")
-                    break
+        do {
+            try mutationPublisher.uninstallPreservingAtLeastOneBible(
+                moduleName: moduleName,
+                inventoryProvider: { [swordPath] in
+                    SwordManager(modulePath: swordPath)?.installedModules()
                 }
-            }
+            )
+        } catch ModuleStoreMutationError.moduleNotFound {
+            throw ModuleRepositoryError.moduleNotFound(moduleName)
+        } catch ModuleStoreBibleRetentionError.lastInstalledBible(let name) {
+            throw ModuleRepositoryError.lastInstalledBible(name)
+        } catch ModuleStoreBibleRetentionError.inventoryUnavailable {
+            throw ModuleRepositoryError.installedInventoryUnavailable
         }
-
-        // Remove .conf file
-        try? fm.removeItem(atPath: confPath)
-
-        // Remove data directory
-        if let dataPath, !dataPath.isEmpty {
-            let fullDataPath = (swordPath as NSString).appendingPathComponent(dataPath)
-            try? fm.removeItem(atPath: fullDataPath)
-        }
-
-        // Invalidate SWORD's module cache
-        invalidateModuleCache()
-    }
-
-    /**
-     Removes one installed MyBible module directory when it has a valid sidecar marker.
-
-     - Parameter moduleName: MyBible module initials to remove.
-     - Returns: `true` when a MyBible install was found and removed, otherwise `false`.
-     - Side effects:
-       - deletes the installed MyBible module directory
-       - posts `SwordModuleStore.modulesDidChangeNotification` after successful removal
-     - Failure modes: propagates file-system deletion errors.
-     */
-    private func uninstallMyBibleModuleIfPresent(named moduleName: String) throws -> Bool {
-        let moduleDirURL = myBibleInstallDir.appendingPathComponent(moduleName, isDirectory: true)
-        let metadataURL = moduleDirURL.appendingPathComponent("module.json")
-        guard FileManager.default.fileExists(atPath: metadataURL.path) else {
-            return false
-        }
-        try FileManager.default.removeItem(at: moduleDirURL)
-        SwordModuleStore.notifyModulesDidChange()
-        return true
-    }
-
-    /**
-     Deletes SWORD's module cache and announces that installed-module snapshots should rescan.
-
-     Side effects:
-     - deletes `mods.d/modules-conf.cache` on a best-effort basis
-     - posts `SwordModuleStore.modulesDidChangeNotification` after successful module install or
-       uninstall paths publish their file-system mutations
-
-     Failure modes:
-     - cache deletion errors are ignored because SWORD can rebuild the cache and callers have already
-       completed the user-visible storage operation.
-     */
-    private func invalidateModuleCache() {
-        let cachePath = (swordPath as NSString)
-            .appendingPathComponent("mods.d")
-            .appending("/modules-conf.cache")
-        try? FileManager.default.removeItem(atPath: cachePath)
-        SwordModuleStore.notifyModulesDidChange()
     }
 
     // MARK: - Install from ZIP
 
     /**
-     Install a SWORD module from a local `.zip` file.
+     Inspects a local SWORD ZIP using Android's exact root-layout and overwrite contract.
 
-     The archive must contain one or more module config files under `mods.d/` plus the
-     corresponding module data directory, such as `modules/`.
+     Android accepts SWORD files only when `mods.d/` and `modules/` are archive-root directories;
+     an enclosing package folder is invalid. Inspection performs no writes and returns destination
+     conflicts so UI entry points can present Android's explicit overwrite confirmation.
 
-     - Parameter url: Local archive URL to install.
-     - Returns: The installed module identifier derived from the config filename.
-     - Side effects:
-       - extracts archive entries into the configured SWORD home directory
-       - invalidates the SWORD module cache after extraction completes
-     - Failure modes:
-       - throws `ModuleRepositoryError.invalidZip` when the file cannot be read, parsed, or does
-         not contain a valid module layout
-       - rethrows filesystem failures while creating directories or writing extracted files
+     - Parameter url: Local archive URL to inspect.
+     - Returns: Validated module names, conflicts, entry count, and expanded-size estimate.
+     - Side effects: Reads ZIP metadata and checks destination file existence.
+     - Throws: `ModuleRepositoryError.invalidZip` for empty, malformed, unsafe, duplicate,
+       unsupported-root, config-less, or data-less archives.
+     */
+    public func inspectLocalSwordZip(at url: URL) throws -> LocalSwordZipInspection {
+        try localSwordZipPlan(from: url).inspection
+    }
+
+    /**
+     Installs a local SWORD ZIP without implicit overwrite permission.
+
+     This source-compatible entry point now fails safely when destination files exist. Interactive
+     callers must inspect, confirm, and invoke the explicit-policy overload.
+
+     - Parameter url: Local Android-compatible SWORD archive.
+     - Returns: First installed module initials in archive order.
+     - Side effects: Stages and transactionally publishes package files, then invalidates SWORD's
+       module cache.
+     - Throws: ZIP validation, conflict, storage, extraction, or transactional filesystem errors.
      */
     public func installFromZip(at url: URL) throws -> String {
-        let entries = try readFileBackedZipEntries(from: url)
-        guard !entries.isEmpty else {
+        try installFromZip(at: url, overwritePolicy: .reject, progressState: nil)
+    }
+
+    /**
+     Installs a preflighted local SWORD ZIP with archive-bound overwrite consent and phase progress.
+
+     Every accepted file is expanded under an isolated staging root. The archive digest is checked
+     before and after extraction. Publish overlays only exact archive paths, moves existing files
+     into a backup root, writes module data before `.conf` installed markers, and restores all moved
+     files if any commit operation fails. Validation and conflict detection are repeated under the
+     mutation lease so stale UI preflight cannot broaden overwrite consent.
+
+     - Parameters:
+       - url: Local Android-compatible SWORD archive.
+       - overwritePolicy: Strict rejection or archive-bound authorization for exact conflicts shown
+         during read-only preflight.
+       - progressState: Optional phase-aware progress observer.
+     - Returns: First installed module initials in archive order.
+     - Side effects: Reads the archive; creates/removes staging and backup directories; may replace
+       module files; invalidates module cache and posts the module-change notification on success.
+     - Throws:
+       - `ModuleRepositoryError.moduleFilesAlreadyExist` when conflicts exist under `.reject`
+       - `ModuleRepositoryError.insufficientStorage` when known staging bytes violate the shared gate
+       - `ModuleRepositoryError.invalidZip` for Android-incompatible layout or ZIP metadata
+       - extraction and filesystem errors; rollback is attempted before they escape
+     */
+    public func installFromZip(
+        at url: URL,
+        overwritePolicy: LocalSwordZipOverwritePolicy,
+        progressState: ((ModuleInstallProgress) -> Void)? = nil
+    ) throws -> String {
+        progressState?(ModuleInstallProgress(phase: .queued))
+        let plan = try localSwordZipPlan(from: url)
+        let authorizedExistingPaths: Set<String>
+        switch overwritePolicy {
+        case .reject:
+            guard !plan.inspection.requiresOverwriteConfirmation else {
+                throw ModuleRepositoryError.moduleFilesAlreadyExist(plan.inspection.conflictingPaths)
+            }
+            authorizedExistingPaths = []
+        case .replaceExisting(let authorization):
+            guard authorization.archiveSHA256 == plan.inspection.archiveSHA256 else {
+                throw ModuleRepositoryError.invalidZip(
+                    "Selected ZIP changed after overwrite confirmation. Inspect it again before installing."
+                )
+            }
+            authorizedExistingPaths = Set(authorization.conflictingPaths)
+        }
+        try requireStorageCapacity(estimatedAdditionalBytes: plan.inspection.estimatedExpandedBytes)
+
+        let fileManager = FileManager.default
+        let stagingRootURL = fileManager.temporaryDirectory
+            .appendingPathComponent("local-sword-\(UUID().uuidString).staging", isDirectory: true)
+        try fileManager.createDirectory(at: stagingRootURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: stagingRootURL) }
+
+        progressState?(ModuleInstallProgress(phase: .extracting, fraction: 0))
+        for (index, item) in plan.entries.enumerated() {
+            let destinationURL = stagingRootURL.appendingPathComponent(item.path)
+            try writeSwordZipEntry(item.entry, from: url, to: destinationURL)
+            progressState?(ModuleInstallProgress(
+                phase: .extracting,
+                fraction: Double(index + 1) / Double(max(plan.entries.count, 1))
+            ))
+        }
+
+        let extractedArchiveSHA256: String
+        do {
+            extractedArchiveSHA256 = try ArchiveFingerprint.sha256Hex(at: url)
+        } catch {
+            throw ModuleRepositoryError.invalidZip(
+                "Unable to verify selected ZIP after extraction: \(error.localizedDescription)"
+            )
+        }
+        guard extractedArchiveSHA256 == plan.inspection.archiveSHA256 else {
+            throw ModuleRepositoryError.invalidZip(
+                "Selected ZIP changed during installation. No module files were published."
+            )
+        }
+
+        do {
+            try mutationPublisher.publishStagedOverlay(
+                plan.storePlan,
+                from: stagingRootURL,
+                authorizedExistingPaths: authorizedExistingPaths,
+                kind: .localSwordZip,
+                onCommitStarted: {
+                    progressState?(ModuleInstallProgress(phase: .committing))
+                }
+            )
+        } catch ModuleStoreMutationError.destinationFilesExist(let paths) {
+            throw ModuleRepositoryError.moduleFilesAlreadyExist(paths)
+        } catch ModuleStoreMutationError.destinationTypeConflict(let paths) {
+            throw ModuleRepositoryError.invalidZip(
+                "Module destinations are not replaceable regular files: \(paths.joined(separator: ", "))"
+            )
+        }
+        progressState?(ModuleInstallProgress(phase: .complete, fraction: 1))
+
+        guard let installedModuleName = plan.inspection.moduleNames.first else {
+            throw ModuleRepositoryError.invalidZip("No module name found in .conf files")
+        }
+        return installedModuleName
+    }
+
+    /**
+     One accepted local ZIP file entry and its exact Android-rooted destination path.
+     */
+    private struct LocalSwordZipPlannedEntry {
+        /// File-backed ZIP metadata used by the shared extractor.
+        let entry: FileBackedZipEntry
+
+        /// Relative `mods.d/` or `modules/` destination path.
+        let path: String
+    }
+
+    /**
+     Validated local ZIP plan shared by inspection and installation.
+     */
+    private struct LocalSwordZipPlan {
+        /// Public read-only facts used by UI and storage preflight.
+        let inspection: LocalSwordZipInspection
+
+        /// Accepted non-directory entries in archive order.
+        let entries: [LocalSwordZipPlannedEntry]
+
+        /// Config-to-payload ownership plan revalidated by the shared publisher under its lease.
+        let storePlan: ModuleStoreStagedInstallPlan
+    }
+
+    /**
+     Builds a strict Android-compatible local SWORD ZIP plan.
+
+     - Parameter url: Archive URL to parse.
+     - Returns: Validated plan containing only direct-root SWORD files.
+     - Side effects: Reads ZIP metadata and destination existence.
+     - Throws: `ModuleRepositoryError.invalidZip` for unsupported or unsafe layouts.
+     */
+    private func localSwordZipPlan(from url: URL) throws -> LocalSwordZipPlan {
+        let initialArchiveSHA256: String
+        do {
+            initialArchiveSHA256 = try ArchiveFingerprint.sha256Hex(at: url)
+        } catch {
+            throw ModuleRepositoryError.invalidZip(
+                "Unable to fingerprint selected ZIP: \(error.localizedDescription)"
+            )
+        }
+        let archiveEntries = try readFileBackedZipEntries(from: url)
+        guard !archiveEntries.isEmpty else {
             throw ModuleRepositoryError.invalidZip("ZIP file is empty")
         }
 
-        let installableEntries = entries.compactMap { entry -> (entry: FileBackedZipEntry, path: String)? in
-            guard let relativePath = normalizedSwordPackageEntryPath(entry.name) else {
+        let fileManager = FileManager.default
+        var seenPaths: Set<String> = []
+        var plannedEntries: [LocalSwordZipPlannedEntry] = []
+        var configurations: [ModuleStoreStagedConfiguration] = []
+        var payloadPaths: [String] = []
+        var conflicts: [String] = []
+
+        for archiveEntry in archiveEntries {
+            let rawPath = archiveEntry.name
+            if rawPath == "AndBibleBackupManifest.json" {
+                continue
+            }
+            guard let relativePath = localSwordZipEntryPath(rawPath) else {
+                throw ModuleRepositoryError.invalidZip("Unsupported ZIP entry path: \(archiveEntry.name)")
+            }
+            if relativePath.hasSuffix("/") {
+                continue
+            }
+            guard seenPaths.insert(relativePath.lowercased()).inserted else {
+                throw ModuleRepositoryError.invalidZip("Duplicate ZIP entry path: \(relativePath)")
+            }
+
+            if relativePath.hasPrefix("modules/") {
+                payloadPaths.append(relativePath)
+            }
+            if relativePath.hasPrefix("mods.d/"), relativePath.hasSuffix(".conf") {
+                configurations.append(ModuleStoreStagedConfiguration(
+                    relativePath: relativePath,
+                    content: try configurationContent(for: archiveEntry, in: url)
+                ))
+            }
+
+            let destinationURL = URL(fileURLWithPath: swordPath, isDirectory: true)
+                .appendingPathComponent(relativePath)
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                let values = try destinationURL.resourceValues(
+                    forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+                )
+                guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                    throw ModuleRepositoryError.invalidZip(
+                        "Module destination is not a replaceable regular file: \(relativePath)"
+                    )
+                }
+                conflicts.append(relativePath)
+            }
+            plannedEntries.append(LocalSwordZipPlannedEntry(entry: archiveEntry, path: relativePath))
+        }
+
+        guard !plannedEntries.isEmpty else {
+            throw ModuleRepositoryError.invalidZip("ZIP file did not contain installable module files")
+        }
+        let storePlan: ModuleStoreStagedInstallPlan
+        do {
+            storePlan = try mutationPublisher.validateStagedInstall(
+                configurations: configurations,
+                payloadRelativePaths: payloadPaths
+            )
+        } catch {
+            throw ModuleRepositoryError.invalidZip(error.localizedDescription)
+        }
+        let finalArchiveSHA256: String
+        do {
+            finalArchiveSHA256 = try ArchiveFingerprint.sha256Hex(at: url)
+        } catch {
+            throw ModuleRepositoryError.invalidZip(
+                "Unable to fingerprint selected ZIP: \(error.localizedDescription)"
+            )
+        }
+        guard finalArchiveSHA256 == initialArchiveSHA256 else {
+            throw ModuleRepositoryError.invalidZip(
+                "Selected ZIP changed during inspection. Inspect it again before installing."
+            )
+        }
+
+        return LocalSwordZipPlan(
+            inspection: LocalSwordZipInspection(
+                moduleNames: storePlan.moduleNames,
+                conflictingPaths: Array(Set(conflicts)).sorted(),
+                installableEntryCount: plannedEntries.count,
+                estimatedExpandedBytes: try estimatedExpandedBytes(for: plannedEntries.map(\.entry)),
+                archiveSHA256: finalArchiveSHA256
+            ),
+            entries: plannedEntries,
+            storePlan: storePlan
+        )
+    }
+
+    /**
+     Validates one local ZIP entry against Android `InstallZip.checkZipFile()` root rules.
+
+     - Parameter path: Raw archive entry name using slash or Android-accepted backslash separators.
+     - Returns: Slash-normalized relative path for direct `mods.d/` or `modules/` entries, including
+       directory entries, or `nil` for wrappers, traversal, absolute paths, and other roots.
+     - Side effects: none.
+     - Failure modes: Invalid paths return `nil` for the caller to reject with archive context.
+     */
+    private func localSwordZipEntryPath(_ path: String) -> String? {
+        let normalizedPath = path.replacingOccurrences(of: "\\", with: "/")
+        guard !normalizedPath.isEmpty,
+              !normalizedPath.hasPrefix("/"),
+              !normalizedPath.hasPrefix("./"),
+              !normalizedPath.contains("%") else {
+            return nil
+        }
+        let components = normalizedPath.split(separator: "/", omittingEmptySubsequences: false)
+        for (index, component) in components.enumerated() {
+            if component == ".." || component == "." || (component.isEmpty && index != components.indices.last) {
                 return nil
             }
-            return (entry, relativePath)
         }
-
-        let confEntries = installableEntries.filter { entry in
-            let name = entry.path.lowercased()
-            return name.hasPrefix("mods.d/") && name.hasSuffix(".conf")
+        guard normalizedPath.hasPrefix("mods.d/") || normalizedPath.hasPrefix("modules/") else {
+            return nil
         }
-
-        guard !confEntries.isEmpty else {
-            throw ModuleRepositoryError.invalidZip("No module .conf files found in mods.d/")
-        }
-
-        var installedModuleName = ""
-
-        for entry in installableEntries {
-            let relativePath = entry.path
-            let destPath = (swordPath as NSString).appendingPathComponent(relativePath)
-            try writeSwordZipEntry(entry.entry, from: url, to: URL(fileURLWithPath: destPath))
-
-            // Track the module name from .conf filename
-            if relativePath.lowercased().hasPrefix("mods.d/") && relativePath.lowercased().hasSuffix(".conf") {
-                let confName = ((relativePath as NSString).lastPathComponent as NSString).deletingPathExtension
-                installedModuleName = confName.uppercased()
-            }
-        }
-
-        // Invalidate SWORD's module cache
-        invalidateModuleCache()
-
-        guard !installedModuleName.isEmpty else {
-            throw ModuleRepositoryError.invalidZip("No module name found in .conf files")
-        }
-
-        return installedModuleName
+        return normalizedPath
     }
 
     // MARK: - ZIP Parsing
@@ -2479,6 +2939,7 @@ public final class ModuleRepository: @unchecked Sendable {
 
             let generalPurposeFlags = readUInt16(centralDirectory, at: offset + 8)
             let compressionMethod = readUInt16(centralDirectory, at: offset + 10)
+            let checksum = readUInt32(centralDirectory, at: offset + 16)
             let compressedSize32 = readUInt32(centralDirectory, at: offset + 20)
             let uncompressedSize32 = readUInt32(centralDirectory, at: offset + 24)
             let nameLength = Int(readUInt16(centralDirectory, at: offset + 28))
@@ -2509,6 +2970,7 @@ public final class ModuleRepository: @unchecked Sendable {
                 generalPurposeFlags: generalPurposeFlags,
                 compressedSize: UInt64(compressedSize32),
                 uncompressedSize: UInt64(uncompressedSize32),
+                checksum: checksum,
                 localHeaderOffset: UInt64(localHeaderOffset32)
             ))
             offset = nextOffset
@@ -2555,6 +3017,7 @@ public final class ModuleRepository: @unchecked Sendable {
             }
 
             let compressionMethod = readUInt16(header, at: 8)
+            let checksum = readUInt32(header, at: 14)
             let compressedSize32 = readUInt32(header, at: 18)
             let uncompressedSize32 = readUInt32(header, at: 22)
             let nameLength = Int(readUInt16(header, at: 26))
@@ -2586,6 +3049,7 @@ public final class ModuleRepository: @unchecked Sendable {
                 generalPurposeFlags: generalPurposeFlags,
                 compressedSize: compressedSize,
                 uncompressedSize: UInt64(uncompressedSize32),
+                checksum: checksum,
                 localHeaderOffset: offset
             ))
             offset = dataOffset + compressedSize
@@ -2828,31 +3292,6 @@ public final class ModuleRepository: @unchecked Sendable {
         )
     }
 
-    /**
-     Resolves the directory that contains data files for a module `DataPath`.
-
-     - Parameters:
-       - dataPath: Normalized SWORD `DataPath` from the catalog.
-       - driver: SWORD module driver name.
-     - Returns: A relative path under the SWORD home where data files should be read or written.
-     - Side effects: none.
-     - Failure modes: none; unknown drivers treat `DataPath` as a directory.
-     */
-    private func moduleDataDirectoryPath(for dataPath: String, driver: String) -> String {
-        var normalizedPath = dataPath
-        if normalizedPath.hasPrefix("./") {
-            normalizedPath = String(normalizedPath.dropFirst(2))
-        }
-        while normalizedPath.hasSuffix("/") {
-            normalizedPath = String(normalizedPath.dropLast())
-        }
-
-        let normalizedDriver = driver.lowercased()
-        if ["rawld", "rawld4", "zld", "rawgenbook"].contains(normalizedDriver) {
-            return (normalizedPath as NSString).deletingLastPathComponent
-        }
-        return normalizedPath
-    }
 }
 
 /// Errors from ModuleRepository operations.
@@ -2861,8 +3300,15 @@ public enum ModuleRepositoryError: Error, LocalizedError {
     case downloadFailed(String)
     case decompressionFailed
     case moduleNotFound(String)
+    /// Removal was rejected because the named module is the sole installed Bible.
+    case lastInstalledBible(String)
+
+    /// Removal was rejected before mutation because installed inventory could not be verified.
+    case installedInventoryUnavailable
     case installFailed(String)
     case invalidZip(String)
+    case moduleFilesAlreadyExist([String])
+    case insufficientStorage(requiredBytes: Int64, availableBytes: Int64)
 
     public var errorDescription: String? {
         switch self {
@@ -2870,8 +3316,21 @@ public enum ModuleRepositoryError: Error, LocalizedError {
         case .downloadFailed(let msg): return msg
         case .decompressionFailed: return "Failed to decompress catalog data"
         case .moduleNotFound(let name): return "Module '\(name)' not found in catalog"
+        case .lastInstalledBible(let name):
+            return "Module '\(name)' is the only installed Bible and cannot be removed"
+        case .installedInventoryUnavailable:
+            return "Installed module inventory could not be verified; no module was removed"
         case .installFailed(let msg): return "Installation failed: \(msg)"
         case .invalidZip(let msg): return "Invalid ZIP module: \(msg)"
+        case .moduleFilesAlreadyExist(let paths):
+            let listedPaths = paths.joined(separator: "\n")
+            return listedPaths.isEmpty
+                ? "Module files already exist. Confirm overwrite before installing."
+                : "Module files already exist. Confirm overwrite before installing:\n\(listedPaths)"
+        case .insufficientStorage(let requiredBytes, let availableBytes):
+            let formatter = ByteCountFormatter()
+            formatter.countStyle = .file
+            return "Insufficient local storage space. \(formatter.string(fromByteCount: availableBytes)) available; \(formatter.string(fromByteCount: requiredBytes)) required."
         }
     }
 }

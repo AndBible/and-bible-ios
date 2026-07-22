@@ -13,6 +13,21 @@ import XCTest
  */
 final class WorkspaceWindowStoreTests: XCTestCase {
     /**
+     Verifies new and historical workspace settings use Android's enabled auto-pin default.
+
+     The empty JSON payload models an iOS workspace written before `autoPin` was serialized. Both
+     construction paths must resolve to Android's Room default without changing an explicit false.
+     */
+    func testWorkspaceSettingsUseAndroidAutoPinDefault() throws {
+        XCTAssertTrue(WorkspaceSettings().autoPin)
+
+        let decoded = try JSONDecoder().decode(WorkspaceSettings.self, from: Data("{}".utf8))
+
+        XCTAssertTrue(decoded.autoPin)
+        XCTAssertFalse(WorkspaceSettings(autoPin: false).autoPin)
+    }
+
+    /**
      Verifies workspace settings clear an auto-assign primary label when no auto-assigned labels remain.
      */
     func testWorkspaceSettingsClearsAutoAssignPrimaryLabelWhenAutoAssignLabelsAreEmpty() {
@@ -90,11 +105,37 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         store.insert(matchingLabel)
         store.insert(otherLabel)
 
-        let matchingBookmark = BibleBookmark(kjvOrdinalStart: 1, kjvOrdinalEnd: 1)
+        let matchingBookmark = BibleBookmark(
+            kjvOrdinalStart: 4,
+            kjvOrdinalEnd: 4,
+            ordinalStart: 4,
+            ordinalEnd: 4,
+            v11n: "KJVA",
+            ordinalTrustMetadata: PersistedOrdinalTrustPolicy.androidImportMetadata(
+                sourceVersification: "KJVA",
+                sourceOrdinalStart: 4,
+                sourceOrdinalEnd: 4,
+                kjvaOrdinalStart: 4,
+                kjvaOrdinalEnd: 4
+            )
+        )
         matchingBookmark.book = "Genesis"
         store.insert(matchingBookmark)
 
-        let otherBookmark = BibleBookmark(kjvOrdinalStart: 2, kjvOrdinalEnd: 2)
+        let otherBookmark = BibleBookmark(
+            kjvOrdinalStart: 5,
+            kjvOrdinalEnd: 5,
+            ordinalStart: 5,
+            ordinalEnd: 5,
+            v11n: "KJVA",
+            ordinalTrustMetadata: PersistedOrdinalTrustPolicy.androidImportMetadata(
+                sourceVersification: "KJVA",
+                sourceOrdinalStart: 5,
+                sourceOrdinalEnd: 5,
+                kjvaOrdinalStart: 5,
+                kjvaOrdinalEnd: 5
+            )
+        )
         otherBookmark.book = "Genesis"
         store.insert(otherBookmark)
 
@@ -261,6 +302,35 @@ final class WorkspaceWindowStoreTests: XCTestCase {
 
         XCTAssertEqual(Workspace.defaultWorkspaceColor, Int(Int32(bitPattern: 0xFF444444)))
         XCTAssertEqual(workspace.workspaceColor, Workspace.defaultWorkspaceColor)
+        XCTAssertEqual(workspace.workspaceSettings?.autoPin, true)
+    }
+
+    /**
+     Verifies a legacy workspace with no settings opens a second Bible as another split pane.
+
+     The first pane is deliberately raw-unpinned to reproduce the simulator regression. Android's
+     missing/default `autoPin=true` value makes both panes effectively pinned, so creating the clone
+     must not minimize the original Bible.
+     */
+    func testLegacyWorkspaceWithoutSettingsKeepsTwoBiblePanesVisible() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Legacy")
+        let first = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        workspace.workspaceSettings = nil
+        first.isPinMode = false
+        first.pageManager?.bibleDocument = "KJV"
+        store.persistChanges()
+        manager.setActiveWorkspace(workspace)
+
+        let second = try XCTUnwrap(manager.addWindow(document: "ESV2011", from: first))
+
+        XCTAssertTrue(manager.isEffectivelyPinned(first))
+        XCTAssertTrue(manager.isEffectivelyPinned(second))
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [first.id, second.id])
+        XCTAssertEqual(first.layoutState, "split")
+        XCTAssertEqual(second.layoutState, "split")
     }
 
     /**
@@ -475,6 +545,62 @@ final class WorkspaceWindowStoreTests: XCTestCase {
     }
 
     /**
+     Verifies links creation classifies the pane before enforcing unpinned-normal visibility.
+
+     The source starts raw-unpinned with auto-pin disabled. Creating its links target must preserve
+     source visibility and focus, clone the raw pin value, expose both panes as effectively unpinned,
+     and keep the normal-only one-visible invariant intact. Toggling auto-pin must alter only each
+     pane's effective state, and a fresh persistence context must recover the original raw values.
+     */
+    func testWindowManagerLinksCreationPreservesUnpinnedSourceAndRawPinAcrossAutoPin() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Unpinned Links")
+        let workspaceID = workspace.id
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: false)
+        let source = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        source.isPinMode = false
+        source.layoutWeight = 0.63
+        store.persistChanges()
+        manager.setActiveWorkspace(workspace)
+
+        let links = try XCTUnwrap(manager.linksWindow(for: source))
+
+        XCTAssertFalse(source.isPinMode)
+        XCTAssertFalse(links.isPinMode)
+        XCTAssertFalse(manager.isEffectivelyPinned(source))
+        XCTAssertFalse(manager.isEffectivelyPinned(links))
+        XCTAssertEqual(source.layoutState, "split")
+        XCTAssertEqual(links.layoutState, "split")
+        XCTAssertEqual(manager.activeWindow?.id, source.id)
+        XCTAssertEqual(
+            manager.visibleWindows.filter { !$0.isLinksWindow && !manager.isEffectivelyPinned($0) }.map(\.id),
+            [source.id]
+        )
+        XCTAssertEqual(workspace.unPinnedWeight ?? 0, 0.63, accuracy: 0.001)
+
+        manager.setAutoPinEnabled(true)
+        XCTAssertTrue(manager.isEffectivelyPinned(source))
+        XCTAssertTrue(manager.isEffectivelyPinned(links))
+        XCTAssertFalse(source.isPinMode)
+        XCTAssertFalse(links.isPinMode)
+
+        manager.setAutoPinEnabled(false)
+        XCTAssertFalse(manager.isEffectivelyPinned(source))
+        XCTAssertFalse(manager.isEffectivelyPinned(links))
+
+        let reloadedStore = WorkspaceStore(modelContext: ModelContext(container))
+        let reloadedWindows = reloadedStore.windows(workspaceId: workspaceID)
+        let reloadedSource = try XCTUnwrap(reloadedWindows.first(where: { $0.id == source.id }))
+        let reloadedLinks = try XCTUnwrap(reloadedWindows.first(where: { $0.id == links.id }))
+        XCTAssertFalse(reloadedSource.isPinMode)
+        XCTAssertFalse(reloadedLinks.isPinMode)
+        XCTAssertEqual(reloadedSource.layoutState, "split")
+        XCTAssertEqual(reloadedLinks.layoutState, "split")
+    }
+
+    /**
      Verifies stale primary-links metadata is repaired to an existing links pane.
 
      The setup creates a primary links window, then corrupts the workspace's stored primary target id.
@@ -539,6 +665,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let workspaceStore = WorkspaceStore(modelContext: context)
         let windowManager = WindowManager(workspaceStore: workspaceStore)
         let workspace = workspaceStore.createWorkspace(name: "Pinned Order")
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: false)
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
@@ -623,6 +750,352 @@ final class WorkspaceWindowStoreTests: XCTestCase {
     }
 
     /**
+     Verifies fresh and cloned windows preserve Android's raw pinned default contract.
+
+     The setup creates a workspace, appends a fresh window, then clones a raw-unpinned workspace.
+     The expected result is that fresh windows are pinned while clone rows preserve the source's raw
+     choice. A failure means auto-pin toggles cannot restore prior per-window intent.
+     */
+    func testWorkspaceWindowsDefaultPinnedAndClonePreservesRawPinState() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let store = WorkspaceStore(modelContext: context)
+        let workspace = store.createWorkspace(name: "Pinned Defaults")
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        let freshWindow = store.addWindow(to: workspace)
+
+        XCTAssertTrue(firstWindow.isPinMode)
+        XCTAssertTrue(freshWindow.isPinMode)
+
+        firstWindow.isPinMode = false
+        store.persistChanges()
+        let clone = store.cloneWorkspace(workspace, newName: "Pinned Defaults Clone")
+        let clonedFirstWindow = try XCTUnwrap(
+            store.windows(workspaceId: clone.id).first(where: { $0.orderNumber == firstWindow.orderNumber })
+        )
+
+        XCTAssertFalse(clonedFirstWindow.isPinMode)
+    }
+
+    /**
+     Verifies workspace cloning remaps layout references without collapsing raw and effective pins.
+
+     The source graph combines auto-pin, a raw-unpinned normal pane, a links pane, shared unpinned
+     geometry, maximize state, and both links-target identifiers. The clone must preserve raw values
+     and effective behavior while remapping every identifier to its own window graph.
+     */
+    func testWorkspaceClonePreservesPinGeometryAndRemapsLayoutReferences() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let source = store.createWorkspace(name: "Clone Source")
+        source.workspaceSettings = WorkspaceSettings(autoPin: true)
+        source.unPinnedWeight = 0.72
+        let sourceNormal = try XCTUnwrap(store.windows(workspaceId: source.id).first)
+        sourceNormal.isPinMode = false
+        let sourceLinks = store.addWindow(to: source)
+        sourceLinks.isLinksWindow = true
+        sourceNormal.targetLinksWindowId = sourceLinks.id
+        source.primaryTargetLinksWindowId = sourceLinks.id
+        source.maximizedWindowId = sourceNormal.id
+        store.persistChanges()
+
+        let clone = store.cloneWorkspace(source, newName: "Clone Target")
+        let clonedWindows = store.windows(workspaceId: clone.id)
+        let clonedNormal = try XCTUnwrap(clonedWindows.first(where: { !$0.isLinksWindow }))
+        let clonedLinks = try XCTUnwrap(clonedWindows.first(where: { $0.isLinksWindow }))
+        let manager = WindowManager(workspaceStore: store)
+        manager.setActiveWorkspace(clone)
+
+        XCTAssertFalse(clonedNormal.isPinMode)
+        XCTAssertTrue(clonedLinks.isPinMode)
+        XCTAssertTrue(manager.isEffectivelyPinned(clonedNormal))
+        XCTAssertTrue(manager.isEffectivelyPinned(clonedLinks))
+        XCTAssertEqual(clone.unPinnedWeight ?? 0, 0.72, accuracy: 0.001)
+        XCTAssertEqual(clone.maximizedWindowId, clonedNormal.id)
+        XCTAssertEqual(clone.primaryTargetLinksWindowId, clonedLinks.id)
+        XCTAssertEqual(clonedNormal.targetLinksWindowId, clonedLinks.id)
+        XCTAssertNotEqual(clonedNormal.id, sourceNormal.id)
+        XCTAssertNotEqual(clonedLinks.id, sourceLinks.id)
+
+        manager.setAutoPinEnabled(false)
+
+        XCTAssertFalse(clonedNormal.isPinMode)
+        XCTAssertTrue(clonedLinks.isPinMode)
+        XCTAssertFalse(manager.isEffectivelyPinned(clonedNormal))
+        XCTAssertFalse(manager.isEffectivelyPinned(clonedLinks))
+    }
+
+    /**
+     Verifies effective pin mode matches Android for normal and links windows.
+
+     Normal windows become pinned while auto-pin is enabled but retain their raw value. Links windows
+     expose exactly the workspace auto-pin value regardless of their raw stored pin.
+     */
+    func testWindowEffectivePinModeMatchesAndroidAutoPinRules() {
+        let normal = Window(isPinMode: false)
+        let links = Window(isPinMode: true, isLinksWindow: true)
+
+        XCTAssertFalse(normal.effectivePinMode(autoPin: false))
+        XCTAssertTrue(normal.effectivePinMode(autoPin: true))
+        XCTAssertFalse(links.effectivePinMode(autoPin: false))
+        XCTAssertTrue(links.effectivePinMode(autoPin: true))
+    }
+
+    /**
+     Exercises clone and restore transitions for the one-visible-unpinned-normal invariant.
+
+     Cloning an unpinned pane should copy its raw state, hide the previous unpinned normal pane, and
+     focus the clone. Restoring the original should reverse which unpinned normal pane is visible.
+     */
+    func testWindowManagerCloneAndRestoreKeepOnlyOneUnpinnedNormalVisible() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Unpinned Clone")
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: false)
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+        manager.setPinMode(firstWindow, value: false)
+
+        let clonedWindow = try XCTUnwrap(manager.addWindow(from: firstWindow))
+
+        XCTAssertFalse(clonedWindow.isPinMode)
+        XCTAssertEqual(firstWindow.layoutState, "minimized")
+        XCTAssertEqual(clonedWindow.layoutState, "split")
+        XCTAssertEqual(manager.activeWindow?.id, clonedWindow.id)
+        XCTAssertEqual(
+            manager.visibleWindows.filter { !$0.isLinksWindow && !manager.isEffectivelyPinned($0) }.map(\.id),
+            [clonedWindow.id]
+        )
+
+        manager.restoreWindow(firstWindow)
+
+        XCTAssertEqual(firstWindow.layoutState, "split")
+        XCTAssertEqual(clonedWindow.layoutState, "minimized")
+        XCTAssertEqual(manager.activeWindow?.id, firstWindow.id)
+    }
+
+    /**
+     Verifies unpinning a visible pane hides that pane when another unpinned normal remains visible.
+
+     This mirrors Android's force-minimize branch and prevents two replaceable normal panes from
+     becoming visible through a pin toggle.
+     */
+    func testWindowManagerUnpinMinimizesTargetWhenAnotherUnpinnedNormalIsVisible() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Unpin")
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: false)
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+        let secondWindow = try XCTUnwrap(manager.addWindow(from: firstWindow))
+
+        manager.setPinMode(firstWindow, value: false)
+        manager.setPinMode(secondWindow, value: false)
+
+        XCTAssertEqual(firstWindow.layoutState, "split")
+        XCTAssertEqual(secondWindow.layoutState, "minimized")
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id])
+    }
+
+    /**
+     Attacks auto-pin disable with multiple raw-unpinned visible panes.
+
+     While auto-pin is enabled both panes are effectively pinned and may remain visible. Disabling it
+     must keep the first persisted unpinned normal and minimize every later one without changing raw
+     pin values.
+     */
+    func testWindowManagerAutoPinDisableNormalizesRawUnpinnedWindows() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let workspace = store.createWorkspace(name: "Auto Pin")
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: true)
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        let secondWindow = store.addWindow(to: workspace)
+        firstWindow.isPinMode = false
+        secondWindow.isPinMode = false
+        store.persistChanges()
+        let manager = WindowManager(workspaceStore: store)
+        manager.setActiveWorkspace(workspace)
+
+        XCTAssertEqual(manager.visibleWindows.count, 2)
+        XCTAssertTrue(manager.visibleWindows.allSatisfy(manager.isEffectivelyPinned))
+
+        manager.setAutoPinEnabled(false)
+
+        XCTAssertFalse(firstWindow.isPinMode)
+        XCTAssertFalse(secondWindow.isPinMode)
+        XCTAssertEqual(firstWindow.layoutState, "split")
+        XCTAssertEqual(secondWindow.layoutState, "minimized")
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id])
+    }
+
+    /**
+     Verifies workspace activation repairs legacy impossible unpinned visibility state.
+
+     A persisted graph with two visible raw-unpinned normal windows is normalized before manager
+     collections publish, preventing a relaunch from bypassing runtime pin controls.
+     */
+    func testWindowManagerActivationRepairsMultipleVisibleUnpinnedNormals() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let workspace = store.createWorkspace(name: "Legacy Visibility")
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: false)
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        let secondWindow = store.addWindow(to: workspace)
+        firstWindow.isPinMode = false
+        secondWindow.isPinMode = false
+        store.persistChanges()
+
+        let manager = WindowManager(workspaceStore: store)
+        manager.setActiveWorkspace(workspace)
+
+        XCTAssertEqual(firstWindow.layoutState, "split")
+        XCTAssertEqual(secondWindow.layoutState, "minimized")
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id])
+    }
+
+    /**
+     Verifies closing the only visible pane restores the nearest persisted hidden fallback.
+
+     The second pane is hidden before the first is closed. The expected result is one surviving,
+     focused, visible pane with reset weight, including after a new persistence context loads it.
+     */
+    func testWindowManagerCloseOnlyVisibleWindowRestoresNearestFallbackAndPersists() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Close Fallback")
+        let workspaceID = workspace.id
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+        let secondWindow = try XCTUnwrap(manager.addWindow(from: firstWindow))
+        secondWindow.layoutWeight = 0.4
+        store.persistChanges()
+        manager.minimizeWindow(secondWindow)
+
+        manager.removeWindow(firstWindow)
+
+        XCTAssertEqual(manager.allWindows.map(\.id), [secondWindow.id])
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [secondWindow.id])
+        XCTAssertEqual(manager.activeWindow?.id, secondWindow.id)
+        XCTAssertEqual(secondWindow.layoutState, "split")
+        XCTAssertEqual(secondWindow.layoutWeight, 1.0, accuracy: 0.001)
+
+        let reloadedStore = WorkspaceStore(modelContext: ModelContext(container))
+        let reloadedWindow = try XCTUnwrap(reloadedStore.windows(workspaceId: workspaceID).first)
+        XCTAssertEqual(reloadedWindow.layoutState, "split")
+        XCTAssertEqual(reloadedWindow.layoutWeight, 1.0, accuracy: 0.001)
+    }
+
+    /**
+     Verifies the final workspace window cannot be closed.
+
+     A failure would leave a workspace with no pane and force startup code to invent state outside
+     the window manager's lifecycle contract.
+     */
+    func testWindowManagerRejectsClosingFinalWindow() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Final Window")
+        let onlyWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+
+        manager.removeWindow(onlyWindow)
+
+        XCTAssertEqual(manager.allWindows.map(\.id), [onlyWindow.id])
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [onlyWindow.id])
+    }
+
+    /**
+     Exercises persisted maximize, restore-size, and maximized-close transitions as one state machine.
+
+     A maximized pane must remain the sole published pane after reload. Restoring size must recover
+     both underlying split panes, and closing a maximized pane while its peer is minimized must clear
+     stale maximize metadata and restore that nearest peer as the visible, focused fallback.
+     */
+    func testWindowManagerMaximizeRestoreAndCloseMaintainPersistedVisibleFallback() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Maximize Lifecycle")
+        let workspaceID = workspace.id
+        let first = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+        let second = try XCTUnwrap(manager.addWindow(from: first))
+
+        manager.maximizeWindow(second)
+
+        XCTAssertEqual(workspace.maximizedWindowId, second.id)
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [second.id])
+        XCTAssertEqual(manager.activeWindow?.id, second.id)
+
+        let reloadedStore = WorkspaceStore(modelContext: ModelContext(container))
+        let reloadedWorkspace = try XCTUnwrap(reloadedStore.workspace(id: workspaceID))
+        let reloadedManager = WindowManager(workspaceStore: reloadedStore)
+        reloadedManager.setActiveWorkspace(reloadedWorkspace)
+        let reloadedWindows = reloadedStore.windows(workspaceId: workspaceID)
+        let reloadedFirst = try XCTUnwrap(reloadedWindows.first(where: { $0.id == first.id }))
+        let reloadedSecond = try XCTUnwrap(reloadedWindows.first(where: { $0.id == second.id }))
+
+        XCTAssertEqual(reloadedManager.visibleWindows.map(\.id), [reloadedSecond.id])
+        reloadedManager.unmaximize()
+        XCTAssertNil(reloadedWorkspace.maximizedWindowId)
+        XCTAssertEqual(reloadedManager.visibleWindows.map(\.id), [reloadedFirst.id, reloadedSecond.id])
+
+        reloadedManager.minimizeWindow(reloadedFirst)
+        reloadedManager.maximizeWindow(reloadedSecond)
+        reloadedManager.removeWindow(reloadedSecond)
+
+        XCTAssertNil(reloadedWorkspace.maximizedWindowId)
+        XCTAssertEqual(reloadedFirst.layoutState, "split")
+        XCTAssertEqual(reloadedManager.visibleWindows.map(\.id), [reloadedFirst.id])
+        XCTAssertEqual(reloadedManager.activeWindow?.id, reloadedFirst.id)
+    }
+
+    /**
+     Verifies manager-routed tab state and resize weights survive a new persistence context.
+
+     The test changes pin, synchronization, group, pinned weights, and shared unpinned weight, then
+     reloads the workspace graph. A failure identifies a tab/separator action that only mutated memory.
+     */
+    func testWindowManagerTabActionsAndResizeWeightsPersistAcrossReload() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Persisted Actions")
+        workspace.workspaceSettings = WorkspaceSettings(autoPin: false)
+        let workspaceID = workspace.id
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+        let secondWindow = try XCTUnwrap(manager.addWindow(from: firstWindow))
+
+        manager.changeSyncGroup(firstWindow, groupNumber: 4)
+        manager.setSynchronized(firstWindow, value: false)
+        manager.resizeWindows(firstWindow, firstWeight: 1.75, secondWindow, secondWeight: 0.65, persist: true)
+        manager.setPinMode(firstWindow, value: false)
+        manager.resizeWindows(firstWindow, firstWeight: 0.8, secondWindow, secondWeight: 1.2, persist: true)
+
+        let reloadedStore = WorkspaceStore(modelContext: ModelContext(container))
+        let reloadedWorkspace = try XCTUnwrap(reloadedStore.workspace(id: workspaceID))
+        let reloadedWindows = reloadedStore.windows(workspaceId: workspaceID)
+        let reloadedFirst = try XCTUnwrap(reloadedWindows.first(where: { $0.id == firstWindow.id }))
+        let reloadedSecond = try XCTUnwrap(reloadedWindows.first(where: { $0.id == secondWindow.id }))
+        let reloadedManager = WindowManager(workspaceStore: reloadedStore)
+        reloadedManager.setActiveWorkspace(reloadedWorkspace)
+
+        XCTAssertFalse(reloadedFirst.isPinMode)
+        XCTAssertFalse(reloadedFirst.isSynchronized)
+        XCTAssertEqual(reloadedFirst.syncGroup, 4)
+        XCTAssertEqual(reloadedFirst.layoutWeight, 1.75, accuracy: 0.001)
+        XCTAssertEqual(reloadedWorkspace.unPinnedWeight ?? 0, 0.8, accuracy: 0.001)
+        XCTAssertEqual(reloadedManager.effectiveLayoutWeight(for: reloadedFirst), 0.8, accuracy: 0.001)
+        XCTAssertEqual(reloadedSecond.layoutWeight, 1.2, accuracy: 0.001)
+    }
+
+    /**
      Protects workspace activation persistence and visible-window rebinding.
 
      The setup creates two workspaces and activates each through `WorkspaceSelectionService`. The
@@ -654,6 +1127,80 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         XCTAssertEqual(settingsStore.activeWorkspaceId, second.id)
         XCTAssertEqual(windowManager.activeWorkspace?.id, second.id)
         XCTAssertEqual(windowManager.visibleWindows.first?.workspace?.id, second.id)
+    }
+
+    /**
+     Verifies workspace activation stops old speech before atomically applying new speech settings.
+
+     A fake synthesizer holds an active session while the selector switches workspaces. The stopped
+     callback observes the old workspace, and the final assertions require the new complete settings
+     both in memory and in `SettingsStore` without firing the workspace-write callback. The shared
+     bookmark owner must remain attached so resume and stopped-setting behavior keep working after
+     the switch. A failure means a switch can persist settings into the workspace being left,
+     retain stale TTS state, or disconnect Android's Speak-label lifecycle.
+     */
+    func testWorkspaceSelectionServiceStopsOldSpeechAndAppliesSelectedSettingsAtomically() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let settingsStore = SettingsStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let speakService = SpeakService(synthesizer: FakeSpeechSynthesizer())
+        speakService.settingsStore = settingsStore
+        let bookmarkManager = BookmarkService(store: BookmarkStore(modelContext: context))
+        speakService.bookmarkManager = bookmarkManager
+        let selectionService = WorkspaceSelectionService(
+            workspaceStore: workspaceStore,
+            settingsStore: settingsStore,
+            windowManager: windowManager,
+            speakService: speakService
+        )
+
+        let first = workspaceStore.createWorkspace(name: "First")
+        var firstSettings = WorkspaceSettings()
+        firstSettings.speakSettings.playbackSettings.speed = 120
+        first.workspaceSettings = firstSettings
+        let second = workspaceStore.createWorkspace(name: "Second")
+        var secondSettings = WorkspaceSettings()
+        secondSettings.speakSettings = SpeakSettings(
+            playbackSettings: PlaybackSettings(
+                speakChapterChanges: false,
+                speakTitles: false,
+                speakFootnotes: true,
+                speed: 177
+            ),
+            sleepTimer: 9,
+            lastSleepTimer: 21,
+            queue: false,
+            repeatPlayback: true,
+            numPagesToSpeakId: 44
+        )
+        second.workspaceSettings = secondSettings
+        try context.save()
+        XCTAssertEqual(second.workspaceSettings?.speakSettings, secondSettings.speakSettings)
+
+        selectionService.activate(first)
+        var activeWorkspaceWhenStopped: UUID?
+        var workspaceWriteCount = 0
+        speakService.onSpeechStopped = {
+            activeWorkspaceWhenStopped = windowManager.activeWorkspace?.id
+        }
+        speakService.onSettingsChanged = { _ in workspaceWriteCount += 1 }
+        speakService.speak(text: "Workspace transition")
+
+        selectionService.activate(second)
+
+        XCTAssertEqual(activeWorkspaceWhenStopped, first.id)
+        XCTAssertEqual(windowManager.activeWorkspace?.id, second.id)
+        XCTAssertEqual(settingsStore.activeWorkspaceId, second.id)
+        XCTAssertFalse(speakService.isSpeaking)
+        XCTAssertEqual(speakService.settings, secondSettings.speakSettings)
+        XCTAssertEqual(
+            SpeakSettings.fromAndroidJSON(try XCTUnwrap(settingsStore.getString("SpeakSettings"))),
+            secondSettings.speakSettings
+        )
+        XCTAssertEqual(workspaceWriteCount, 0)
+        XCTAssertTrue(speakService.bookmarkManager === bookmarkManager)
     }
 
     /**

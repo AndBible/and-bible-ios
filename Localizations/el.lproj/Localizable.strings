@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Ρυθμίσεις για τους διωκόμενους";
 "discrete_mode" = "Απόκρυψη θρησκευτικών συμβόλων";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "Σχετικά με";
 "version" = "Version";
 "export" = "Εξαγωγή";
@@ -405,10 +405,6 @@
 "calculator_pin_description" = "Κωδικός PIN για να εισέλθετε στην εφαρμογή όταν εμφανίζετε η Αριθμομηχανή.";
 "discrete_help_title" = "Διαβάστε αυτό πρώτα!";
 "discrete_help_summary" = "Οδηγίες για τις ρυθμίσεις και πληροφορίες για την συγκεκριμένη ξεχωριστή έκδοση";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Συμπεριφορά εφαρμογής";
 "prefs_display_customization_cat" = "Εμφάνιση & αίσθηση";
@@ -479,7 +475,6 @@
 
 "prefs_volume_keys_scroll_title" = "Κύλιση με κουμπιά έντασης";
 "prefs_volume_keys_scroll_summary" = "Χρήση κουμπιών έντασης πάνω/κάτω για κύλιση κειμένου Αγίας Γραφής";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Πειραματικες δυνατότητες";
 "prefs_experimental_features_summary" = "Επιλέξτε ποιές πειραματικές δυνατότητες θέλετε να ενεργοποιήσετε. Αυτές οι δυνατότητες βρίσκονται ακόμα υπό ανάπτυξη και μπορεί να αλλάξουν ή να καταργηθούν";
 "experimental_feature_bookmark_edit_actions" = "Ενέργειες επεξεργασίας σελιδοδείκτη";
@@ -625,3 +620,389 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Υπάρχει στην κάρτα μνήμης σχέδιο ανάγνωσης του χρήστη jsword/readingplan με όνομα ίδιο με τοπικά αποθηκευμένο σχέδιο. Δεν γίνεται να εμφανιστεί εδώ. Παρακαλώ μετονομάστε το αρχείο σε κάτι άλλο,διατηρώντας την επέκτασή του ως .properties";
 "error_no_content" = "Δεν υπάρχει περιεχόμενο για τον επιλεγμένο στίχο";
+
+/* Android shared translations */
+"calculator_par1" = "Πριν την είσοδο στην εφαρμογή, προβάλλεται η Αριθμομηχανή.";
+"calculator_par2" = "Σ' αυτή, μπορείτε να κάνετε απλούς υπολογισμούς, και αν θέλετε να μπείτε στην εφαρμογή, απλά πατήστε τον κωδικό σας PIN (προκαθορισμένος είναι το 1234) και στη συνέχεια πατήστε το πλήκτρο \"=\".";
+"calculator_par3" = "Μπορείτε να ορίσετε ένα δικό σας κωδικό PIN μέσω της ρύθμισης \"PIN Αριθμομηχανής\".";
+"give_passphrase_for_module" = "Το έγγραφο %@ είναι κρυπτογραφημένο και χρειάζεται φραση πρόσβασης για να ξεκλειδωθεί";
+"show_unlock_info" = "Πληροφορίες ξεκλειδώματος προσθέτου &";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Αποσυμπίεση αρχείου zip τώρα...";
+"install_failed_reason" = "Εγκατάσταση προσθέτου απέτυχε για τον ακόλουθο λόγο: %@.";
+"install_zip_successfull" = "Το πρόσθετο εγκαταστάθηκε επιτυχώς";
+"module_install_phase_committing" = "Παρακαλώ περιμένετε. Φόρτωση προσθέτων από αρχείο.";
+"module_install_phase_downloading" = "Λήψη";
+"module_install_phase_queued" = "Παρακαλώ περιμένετε...";
+"storage_space_warning" = "Ανεπαρκής τοπικός χώρος αποθήκευσης.";
+
+/* Android shared translations */
+"error_occurred" = "Παρουσιάστηκε ένα σφάλμα";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Απομνημόνευση";
+"memorize_tab_reading" = "Ανάγνωση";
+"reading_progress_active_days" = "ενεργές ημέρες";
+"reading_progress_bible_heatmap" = "Επισκόπηση Αγίας Γραφής";
+"reading_progress_calendar" = "Δραστηριότητα Ανάγνωσης";
+"reading_progress_chapters_read" = "κεφάλαια που διαβάστηκαν";
+"reading_progress_cycle" = "Κύκλος %d";
+"reading_progress_history_for" = "Πρόοδος ανάγνωσης για %1$@";
+"reading_progress_history_no_entries" = "Δεν υπάρχουν καταχωρίσεις ανάγνωσης για αυτήν την επιλογή.";
+"reading_progress_history_title" = "Ιστορικό Ανάγνωσης";
+"reading_progress_history_version_unknown" = "Άγνωστη έκδοση";
+"reading_progress_new_cycle" = "Νέος Κύκλος";
+"reading_progress_new_cycle_confirm" = "Έναρξη νέου κύκλου ανάγνωσης; Θα ξεκινήσει η παρακολούθηση της προόδου σας από την αρχή, διατηρώντας τα δεδομένα του προηγούμενου κύκλου.";
+"reading_progress_new_testament" = "Καινή Διαθήκη";
+"reading_progress_next_cycle" = "Επόμενος κύκλος";
+"reading_progress_old_testament" = "Παλαιά Διαθήκη";
+"reading_progress_overall" = "%@%% της Αγίας Γραφής διαβάστηκε";
+"reading_progress_percent_read_scale" = "Ποσοστό\nΑνάγνωσης";
+"reading_progress_previous_cycle" = "Προηγούμενος κύκλος";
+"reading_progress_read_count_scale" = "Πλήθος\nΑναγνώσεων";
+"reading_progress_title" = "Πρόοδος Ανάγνωσης/Απομνημόνευσης";
+
+/* Android shared translations */
+"conf_change_chapter" = "Αλλαγές κεφαλαίων";
+"conf_change_title" = "Τίτλοι";
+"conf_replace_divinename" = "Αντικατάσταση ονόματος Θεού με Γιαχβέ";
+"conf_save_playback_settings_to_bookmarks" = "Αποθήκευση ρυθμίσεων αναπαραγωγής στους σελιδοδείκτες";
+"conf_speak_auto_bookmark" = "Αυτόματοι σελιδοδείκτες";
+"conf_speak_footnotes" = "Υποσημειώσεις";
+"conf_speak_sleep_timer" = "Ρύθμιση χρονοδιακόπτη ύπνου";
+"conf_speak_synchronize" = "Το κείμενο να ακολουθεί την ομιλία";
+"forward" = "Προώθηση";
+"playback_settings_title" = "Ρυθμίσεις αναπαραγωγής";
+"rewind" = "Επαναφορά";
+"speak_bookmarks_menu_title" = "Ακρόαση από σελιδοδείκτη";
+"speak_next" = "Επόμενος";
+"speak_previous" = "Προηγούμενος";
+"speak_settings_title" = "Γενικές ρυθμίσεις ομιλίας";
+
+/* Android shared translations */
+"sleep_timer_title" = "Ώρα ύπνου σε λεπτά";
+"speak_beginning_of_passage" = "Διαλέξτε το ξεκίνημα του αποσπάσματος";
+"speak_ending_of_passage" = "Διαλέξτε το τέλος του αποσπάσματος";
+"speak_ending_verse_must_be_later" = "Ο τελευταίος στίχος πρέπει να έπεται του πρώτου στίχου";
+"speak_verse_range_to_repeat" = "Διαλέξτε εύρος στίχων για επανάληψη";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Η γλώσσα δεν είναι διαθέσιμη.";
+
+/* Android shared translations */
+"description" = "Περιγραφή";
+"errorTitle" = "Παρουσιάστηκε ένα σφάλμα";
+"error_executing_search" = "Μη έγκυρο ερώτημα αναζήτησης";
+"export_something" = "Εξαγωγή %@";
+"import_items" = "Εισαγωγή %@";
+"install_zip_module" = "Εγκατάσταση Προσθέτου Βίβλου";
+"my_document_content_type_label" = "Τύπος περιεχομένου";
+"my_document_create_title" = "Δημιουργία νέου εγγράφου";
+"my_document_import_document" = "Εισαγωγή αρχείων ως έγγραφο";
+"my_document_new_name" = "Έγγραφο %d";
+"my_document_new_page_name" = "Σελίδα %1$d";
+"my_document_rename_title" = "Μετονομασία εγγράφου";
+"my_document_save_changes" = "Αποθήκευση αλλαγών;";
+"overwrite" = "Ναί";
+"package_directory" = "Κατάλογος πακέτων (αρχεία Zip)";
+"read" = "Ανάγνωση";
+"reading_plan_set_current_day" = "Ρύθμιση ως τρέχουσα ημέρα...";
+"reading_plan_set_start_date" = "Ρύθμιση Ημερομηνίας έναρξης...";
+"search_all_words" = "Όλες οι λέξεις";
+"search_any_word" = "Κάθε λέξη";
+"search_fts_query" = "Σύνταξη ακατέργαστου ερωτήματος";
+"search_phrase" = "Φράση";
+"search_words_group_prompt" = "Εύρεση στίχων";
+"show_notes" = "Εμφάνιση σημειώσεων";
+"speak_book_changed" = "Το βιβλίο άλλαξε";
+"speak_chapter_changed" = "Κεφάλαιο";
+"success" = "Τελος";
+"summary" = "Περίληψη";
+"undo" = "Ακύρωση";
+
+/* Android shared translations */
+"my_document_no_description" = "Χωρίς περιγραφή";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Δεν βρέθηκε στο έγγραφο";
+"my_document_cannot_delete_ai_documents" = "Τα έγγραφα AI δεν μπορούν να διαγραφούν ενώ περιέχουν σελίδες. Διαγράψτε πρώτα τις σελίδες.";
+"my_document_create_page_title" = "Νέα σελίδα";
+"my_document_import_empty_selection" = "Δεν επιλέχθηκαν αρχεία για εισαγωγή";
+"system_items1" = "Περισσότερα";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Πρέπει να κατεβάσετε Βίβλο που περιέχει αριθμούς Strong και να κατασκευαστεί το ευρετήριό της μέσω της Αναζήτησης";
+
+/* Android shared translations */
+"add_model" = "Προσθήκη μοντέλου";
+"agent_already_running" = "Ένας βοηθός AI εκτελείται ήδη. Παρακαλώ περιμένετε ή σταματήστε τον πρώτα.";
+"agent_log_cancelled" = "Ακυρώθηκε";
+"agent_log_completed" = "Ολοκληρώθηκε";
+"agent_log_executing" = "Εκτέλεση: %@";
+"agent_log_idle" = "Βοηθός AI";
+"agent_log_iteration" = "Επανάληψη %d";
+"agent_log_model_not_configured" = "Δεν έχει ρυθμιστεί μοντέλο";
+"agent_log_tool_failed" = "Το εργαλείο %@ απέτυχε";
+"agent_log_view_raw" = "Προβολή ακατέργαστου αρχείου LLM";
+"agent_max_iterations_title" = "Μέγιστες επαναλήψεις βοηθού";
+"agent_permission_mode_summary" = "Ελέγχει πότε απαιτείται επιβεβαίωση χρήστη πριν από εγγραφές του AI";
+"agent_permission_title" = "Δικαίωμα βοηθού";
+"ai_add_provider" = "Προσθήκη παρόχου";
+"ai_advanced_category" = "Για προχωρημένους";
+"ai_agent_notification_running" = "Ο βοηθός AI εργάζεται…";
+"ai_behavior_category" = "Συμπεριφορά";
+"ai_connection_settings" = "Ρυθμίσεις σύνδεσης";
+"ai_disclaimer_approach" = "Το AndBible χρησιμοποιεί κυρίως AI για επεξεργασία κειμένου από τα έγγραφα που έχετε εγκαταστήσει — υπομνήματα, λεξικά και άλλα πρόσθετα — αντί να βασίζεται στα δεδομένα εκπαίδευσης του μοντέλου.";
+"ai_disclaimer_dialog_title" = "Εργαλεία AI — Σημαντικές πληροφορίες";
+"ai_disclaimer_intro" = "Τα εργαλεία AI μπορούν να εμπλουτίσουν σημαντικά την εμπειρία μελέτης της Αγίας Γραφής και να ανοίξουν νέους τρόπους ενασχόλησης με τη Γραφή.";
+"ai_disclaimer_point1" = "Το AI μπορεί να κάνει λάθη, συμπεριλαμβανομένων \"ψευδαισθήσεων\" (να δηλώνει με σιγουριά ψευδείς ή κατασκευασμένες πληροφορίες). Μην αποδέχεστε ποτέ τυφλά τα αποτελέσματά του.";
+"ai_disclaimer_point2" = "Οι απαντήσεις AI μπορεί να αντανακλούν προκαταλήψεις από τα δεδομένα εκπαίδευσής τους, να είναι σκόπιμα παραπλανητικές, ή να παρουσιάζουν μια συγκεκριμένη θεολογική προοπτική ως ουδέτερη ή πλήρη.";
+"ai_disclaimer_point3" = "Εσείς είστε υπεύθυνοι για τον τρόπο που χρησιμοποιείτε το περιεχόμενο που παράγεται από AI. Πάντα επαληθεύετε τα αποτελέσματα με βάση τη Γραφή πριν βασιστείτε σε αυτά.";
+"ai_disclaimer_point4" = "Το AndBible προσπαθεί να κάνει εύκολη την επαλήθευση (π.χ. ακριβείς αναφορές πηγών σε υπομνήματα), αλλά η τελική ευθύνη βαρύνει πάντα εσάς.";
+"ai_disclaimer_point5" = "\"Πάντα δοκιμάζετε, το καλόν κατέχετε.\" (Α' Θεσσαλονικείς 5:21)";
+"ai_disclaimer_point6" = "Αυτά τα εργαλεία δεν έχουν ψυχή ούτε Άγιο Πνεύμα. Είναι εργαλεία επεξεργασίας κειμένου, όχι πνευματικοί οδηγοί. Δεν είναι κατάλληλα για την άμεση προετοιμασία κηρυγμάτων, ομιλιών ή άλλου πνευματικού περιεχομένου χωρίς προσεκτική ανθρώπινη επίβλεψη, προσευχή και διάκριση.";
+"ai_disclaimer_point7" = "Χρησιμοποιούμενα με σύνεση, μπορούν να ωφελήσουν πολλούς χρήστες και περιπτώσεις χρήσης. Αλλά αν δεν είστε σίγουροι ότι αποδέχεστε τους κινδύνους, η επιλογή να μην τα χρησιμοποιήσετε είναι επίσης απολύτως έγκυρη.";
+"ai_disclaimer_point8" = "Τα δεδομένα σας αποστέλλονται στους διακομιστές του παρόχου AI που επιλέξατε. Χρησιμοποιώντας ένα κλειδί API, αποδέχεστε τους όρους και την πολιτική απορρήτου αυτού του παρόχου. Τα αυτο-φιλοξενούμενα μοντέλα είναι δυνατά αλλά απαιτούν περισσότερη τεχνική εξειδίκευση, και μπορεί να μην παράγουν αποτελέσματα τόσο καλά όσο τα εμπορικά μοντέλα.";
+"ai_disclaimer_point9" = "Οι πάροχοι AI χρεώνουν για τη χρήση API. Οι εκτιμήσεις κόστους που εμφανίζονται στο AndBible είναι κατά προσέγγιση — πάντα ελέγχετε τη χρέωση του παρόχου σας για τις πραγματικές χρεώσεις.";
+"ai_disclaimer_responsibility" = "Ωστόσο, παραμένουν ισχυρά εργαλεία — και με μεγάλη δύναμη έρχεται μεγάλη ευθύνη. Παρακαλώ λάβετε υπόψη τα ακόλουθα.";
+"ai_disclaimer_warning_title" = "Σημαντικό: Διαβάστε πριν χρησιμοποιήσετε τα εργαλεία AI";
+"ai_doc_choose_page" = "Επιλογή σελίδας εγγράφου AI";
+"ai_document_filter_activity_title" = "Πρόσβαση εγγράφων AI";
+"ai_document_regenerate" = "Αναδημιουργία";
+"ai_hidden_status" = "κρυφό";
+"ai_hide_prompt" = "Απόκρυψη";
+"ai_language_title" = "Γλώσσα απαντήσεων AI";
+"ai_models_category" = "Μοντέλα";
+"ai_models_summary_none" = "Δεν έχουν ρυθμιστεί μοντέλα";
+"ai_provider_api_format" = "Μορφή API";
+"ai_provider_api_key" = "Κλειδί API";
+"ai_provider_api_key_not_set" = "Το κλειδί API δεν έχει οριστεί";
+"ai_provider_delete_confirm" = "Διαγραφή παρόχου \"%1$@\"; Οι εντολές που χρησιμοποιούν αυτόν τον πάροχο θα επιστρέψουν στον προεπιλεγμένο.";
+"ai_provider_edit" = "Επεξεργασία";
+"ai_provider_endpoint" = "Τελικό σημείο API";
+"ai_provider_endpoint_description" = "Μόνο βασική URL. Το AndBible προσθέτει \"/chat/completions\" (μορφή OpenAI) ή \"/messages\" (μορφή Anthropic) αυτόματα. Οι λίστες μοντέλων λαμβάνονται από \"/models\".";
+"ai_provider_name" = "Όνομα παρόχου";
+"ai_provider_saved" = "Ο πάροχος αποθηκεύτηκε";
+"ai_provider_select_type" = "Επιλογή τύπου παρόχου";
+"ai_providers_models_category" = "Πάροχοι & Μοντέλα";
+"ai_providers_summary_none" = "Δεν έχουν ρυθμιστεί πάροχοι";
+"ai_regenerate_fresh_run" = "Νέα εκτέλεση (αγνόηση προηγούμενου αποτελέσματος)";
+"ai_regenerate_instructions_hint" = "Πρόσθετες οδηγίες (προαιρετικό)";
+"ai_regenerate_keep_previous" = "Διατήρηση προηγούμενης έκδοσης";
+"ai_regenerate_prompt_not_found" = "Αδυναμία αναδημιουργίας: η αρχική εντολή δεν βρέθηκε. Ενδέχεται να έχει διαγραφεί.";
+"ai_regenerate_title" = "Αναδημιουργία";
+"ai_settings" = "Ρυθμίσεις AI";
+"ai_setup_description" = "Το AndBible μπορεί να χρησιμοποιήσει AI για μετάφραση κειμένου της Αγίας Γραφής, επεξήγηση στίχων, δημιουργία περιλήψεων και άλλα. Για να ξεκινήσετε, ρυθμίστε μια σύνδεση με έναν πάροχο API συμβατό με OpenAI.";
+"ai_setup_title" = "Ρύθμιση AI";
+"ai_usage_category" = "Χρήση";
+"ask_model_before_run_title" = "Ερώτηση μοντέλου πριν την εκτέλεση";
+"auto_hide_agent_log_title" = "Απόκρυψη πίνακα AI όταν ολοκληρωθεί";
+"bookmarks_and_mynotes_title" = "Σελιδοδείκτες & Οι Σημειώσεις μου";
+"built_in_prompt" = "Ενσωματωμένη";
+"built_in_prompt_notice" = "Αυτή είναι μια ενσωματωμένη εντολή και δεν μπορεί να επεξεργαστεί. Χρησιμοποιήστε \"Αντιγραφή για προσαρμογή\" για να δημιουργήσετε ένα επεξεργάσιμο αντίγραφο.";
+"category_none" = "Χωρίς κατηγορία";
+"commentary_max_response_no_limit" = "Χωρίς όριο";
+"commentary_max_response_title" = "Όριο μεγέθους απάντησης σχολίων";
+"copy_to_customize" = "Αντιγραφή για προσαρμογή";
+"custom_agent_system_prompt_title" = "Εντολή συστήματος πράκτορα";
+"custom_system_prompt_custom" = "Προσαρμοσμένη";
+"custom_text_transform_system_prompt_title" = "Εντολή συστήματος μετασχηματισμού κειμένου";
+"default_prompt_ask_question" = "Υποβολή ερώτησης";
+"default_prompt_ask_question_desc" = "Κάντε οποιαδήποτε ερώτηση σχετικά με το επιλεγμένο χωρίο";
+"default_prompt_bookmark_annotate" = "Σελιδοδείκτης & σχολιασμός";
+"default_prompt_bookmark_annotate_desc" = "Δημιουργεί σελιδοδείκτη με σημείωση μελέτης από AI";
+"default_prompt_compare_translations" = "Σύγκριση μεταφράσεων";
+"default_prompt_compare_translations_desc" = "Δείχνει πώς διαφορετικές εγκατεστημένες μεταφράσεις αποδίδουν το κείμενο";
+"default_prompt_cross_references" = "Παραπομπές";
+"default_prompt_cross_references_desc" = "Βρίσκει και επεξηγεί σχετικά χωρία της Αγίας Γραφής";
+"default_prompt_custom" = "Προσαρμοσμένη εντολή";
+"default_prompt_custom_desc" = "Εκτέλεση προσαρμοσμένης εργασίας στο επιλεγμένο χωρίο";
+"default_prompt_custom_template" = "Ακολουθήστε τις προδιαγραφές εργασίας του χρήστη για το επιλεγμένο χωρίο της Αγίας Γραφής.";
+"default_prompt_enhance_note" = "Βελτίωση σημείωσης";
+"default_prompt_enhance_note_desc" = "Βελτιώνει τη γραμματική, τη σαφήνεια και την αναγνωσιμότητα της σημείωσής σας";
+"default_prompt_explain_verses" = "Επεξήγηση στίχων";
+"default_prompt_explain_verses_desc" = "Εξηγεί τη σημασία και το πλαίσιο των επιλεγμένων στίχων";
+"default_prompt_explain_verses_studypad" = "Επεξήγηση στίχων → Χώρος Μελέτης";
+"default_prompt_explain_verses_studypad_desc" = "Δημιουργεί Χώρο Μελέτης με επεξήγηση στίχο προς στίχο και σελιδοδείκτες";
+"default_prompt_study_layout" = "Άνοιγμα διάταξης μελέτης";
+"default_prompt_study_layout_desc" = "Ανοίγει παράθυρα σχολίων και παράλληλης μετάφρασης για μελέτη";
+"default_prompt_summary" = "Περίληψη";
+"default_prompt_summary_desc" = "Δημιουργεί μια σύντομη περίληψη του επιλεγμένου κειμένου";
+"default_prompt_thematic_study" = "Θεματική μελέτη";
+"default_prompt_thematic_study_desc" = "Δημιουργεί Χώρο Μελέτης με χωρία και σημειώσεις για το κεντρικό θέμα";
+"default_prompt_translate_to_language" = "Μετάφραση στα %@";
+"default_prompt_translate_to_ui_language_desc" = "Μεταφράζει το κείμενο του εγγράφου στη γλώσσα διεπαφής της εφαρμογής";
+"default_prompt_word_study" = "Μελέτη λέξεων";
+"default_prompt_word_study_desc" = "Αναλύει τις αρχικές λέξεις στα Εβραϊκά/Ελληνικά";
+"default_prompt_workspace_assistant" = "Βοηθός Χώρου Εργασίας";
+"default_prompt_workspace_assistant_desc" = "Διαχείριση παραθύρων: δημιουργία, κλείσιμο, αναδιάταξη, αλλαγή εγγράφων";
+"delete_category" = "Διαγραφή κατηγορίας";
+"delete_category_and_prompts" = "Διαγραφή κατηγορίας και των εντολών της";
+"delete_category_keep_prompts" = "Μετακίνηση εντολών στη ρίζα και διαγραφή κατηγορίας";
+"doc_type_addons" = "Πρόσθετα";
+"easy_setup_enter_api_key" = "Εισαγάγετε το κλειδί API σας";
+"easy_setup_success" = "Επιτυχής σύνδεση!";
+"easy_setup_test_connection" = "Δοκιμή σύνδεσης";
+"easy_setup_testing" = "Δοκιμή…";
+"easy_setup_title" = "Γρήγορη Ρύθμιση";
+"help_bookmarks_text" = "Σελιδοδείκτες μπορούν να δημιουργηθούν επιλέγοντας κάποιο κείμενο και διαλέγοντας \"Σελιδοδείκτης\" από το αναδυόμενο μενού. Μπορείτε να προσθέσετε τις δικές σας σημειώσεις στον νέο σελιδοδείκτη πατώντας το πλέον επισημασμένο κείμενο στην προβολή Βίβλου. Υπάρχει επίσης ένα ειδικό έγγραφο \"Οι Σημειώσεις μου\" στα Σχόλια που σας επιτρέπει να δείτε τις σημειώσεις σας σε ένα ξεχωριστό παράθυρο.";
+"help_memorize_text" = "Η προβολή Απομνημόνευση σας βοηθά να μάθετε αποσπάσματα απέξω. Χρησιμοποιήστε Θόλωμα λέξεων, Ανακατανομή λέξεων, Πληκτρολόγηση λέξεων ή Σειρά λέξεων για εξάσκηση. Οι επιτυχείς ασκήσεις επισημαίνουν αυτόματα στίχους ως απομνημονευμένους (αυτό μπορεί να απενεργοποιηθεί).";
+"help_read_more_link" = "Διαβάστε περισσότερα στο εγχειρίδιο";
+"hide_category" = "Απόκρυψη από ενέργειες AI";
+"llm_actions" = "Ενέργειες AI";
+"llm_continue_iterations_message" = "Ο βοηθός AI έφτασε το όριο των %1$d επαναλήψεων χωρίς να ολοκληρώσει. Συνέχεια για %2$d ακόμη επαναλήψεις;";
+"llm_continue_iterations_title" = "Συνέχεια;";
+"llm_custom_input_price_title" = "Τιμή εισόδου ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Εισαγάγετε το αναγνωριστικό μοντέλου";
+"llm_custom_output_price_title" = "Τιμή εξόδου ($/Mtoken)";
+"llm_error_max_iterations" = "Συμπληρώθηκε το μέγιστο πλήθος επαναλήψεων (%1$d) χωρίς ολοκλήρωση";
+"llm_error_unknown" = "Άγνωστο σφάλμα";
+"llm_note_updated" = "Η σημείωση ενημερώθηκε";
+"llm_openrouter_model" = "Μοντέλο";
+"llm_provider_custom" = "Προσαρμοσμένος (συμβατός με OpenAI)";
+"llm_reset_usage_confirm_message" = "Αυτό θα διαγράψει όλα τα σωρευτικά δεδομένα χρήσης.";
+"llm_reset_usage_confirm_title" = "Επαναφορά δεδομένων χρήσης;";
+"llm_reset_usage_title" = "Επαναφορά δεδομένων χρήσης";
+"llm_usage_summary_default" = "Δεν υπάρχουν δεδομένα χρήσης";
+"llm_usage_summary_title" = "Χρήση token";
+"manage_prompts" = "Διαχείριση εντολών AI";
+"manage_tool_permissions_title" = "Δικαιώματα εργαλείων";
+"model_pricing_summary" = "%1$@ εισ. / %2$@ εξ. ανά Mtoken";
+"model_select_provider" = "Πάροχος";
+"model_set_default" = "Ορισμός ως προεπιλεγμένο μοντέλο";
+"move_category_down" = "Μετακίνηση κάτω";
+"move_category_up" = "Μετακίνηση πάνω";
+"new_category" = "Νέα κατηγορία";
+"new_category_name" = "Όνομα κατηγορίας";
+"new_prompt" = "Νέα εντολή";
+"permission_allow_all" = "Αποδοχή όλων";
+"permission_allow_all_session" = "Αποδοχή όλων των εργαλείων για αυτή τη συνεδρία";
+"permission_allow_for_session" = "Αποδοχή για αυτή τη συνεδρία";
+"permission_allow_once" = "Αποδοχή μία φορά";
+"permission_always_allow_confirm" = "Είστε βέβαιοι ότι θέλετε να επιτρέψετε μόνιμα το \"%1$@\";";
+"permission_always_allow_confirm_reset_hint" = "Μπορείτε να το επαναφέρετε στις Ρυθμίσεις AI.";
+"permission_always_ask" = "Πάντα ερώτηση";
+"permission_ask_once_per_run" = "Ερώτηση μία φορά ανά εκτέλεση";
+"permission_deny" = "Απόρριψη";
+"permission_deny_all" = "Απόρριψη όλων";
+"permission_option_always_allow" = "Πάντα αποδοχή";
+"permission_option_always_deny" = "Πάντα απόρριψη";
+"permission_status_default" = "Ερώτηση (προεπιλογή)";
+"prompt_auto_include_commentaries" = "Αυτόματη συμπερίληψη υπομνημάτων";
+"prompt_auto_include_documents" = "Αυτόματη συμπερίληψη εγκατεστημένων εγγράφων";
+"prompt_bible_only" = "Μόνο έγγραφα Αγίας Γραφής";
+"prompt_category" = "Κατηγορία";
+"prompt_category_favorites" = "Αγαπημένα";
+"prompt_category_general" = "Γενικά";
+"prompt_category_notes" = "Σημειώσεις";
+"prompt_category_study" = "Μελέτη";
+"prompt_category_uncategorized" = "Χωρίς κατηγορία";
+"prompt_context_note_editor" = "Επεξεργαστής σημειώσεων";
+"prompt_context_text_selection" = "Επιλογή κειμένου";
+"prompt_context_verse_selection" = "Επιλογή στίχου";
+"prompt_context_window_menu" = "Μενού παραθύρου";
+"prompt_context_workspace_menu" = "Μενού Χώρου Εργασίας";
+"prompt_description" = "Περιγραφή";
+"prompt_edit_before_run" = "Καθορισμός πριν την εκτέλεση";
+"prompt_is_text_transformation" = "Μετατροπή κειμένου";
+"prompt_max_iterations_hint" = "Αφήστε κενό για γενική προεπιλογή";
+"prompt_max_iterations_unlimited" = "Απεριόριστο";
+"prompt_model_default" = "Προεπιλογή";
+"prompt_model_override" = "Μοντέλο";
+"prompt_name" = "Όνομα";
+"prompt_no_document_creation" = "Χωρίς δημιουργία εγγράφου";
+"prompt_permission_mode" = "Λειτουργία δικαιωμάτων";
+"prompt_permission_mode_description" = "Ελέγχει πότε απαιτείται επιβεβαίωση χρήστη πριν το AI εκτελέσει λειτουργίες εγγραφής. Οι παρακάτω ρυθμίσεις ανά εργαλείο μπορούν να παρακάμψουν αυτήν τη ρύθμιση για μεμονωμένα εργαλεία.";
+"prompt_permission_use_default" = "Χρήση προεπιλογής";
+"prompt_show_in" = "Εμφάνιση σε";
+"prompt_strict_context_matching" = "Προσωρινή μνήμη βάσει πλαισίου";
+"prompt_tab_advanced" = "Προχωρημένα";
+"prompt_tab_permissions" = "Δικαιώματα";
+"prompt_tab_prompt" = "Εντολή";
+"prompt_template" = "Πρότυπο εντολής";
+"prompt_tool_permissions" = "Δικαιώματα εργαλείων";
+"raw_log_delete_all" = "Διαγραφή όλων";
+"raw_log_error_indicator" = "Σφάλμα";
+"raw_log_history_empty" = "Δεν υπάρχουν αποθηκευμένα αρχεία καταγραφής";
+"raw_log_history_title" = "Ιστορικό αρχείου καταγραφής ΑΙ";
+"raw_log_item_tokens" = "%1$@ εισαγωγή / %2$@ εξαγωγή";
+"raw_log_older_1_month" = "Παλαιότερα από 1 μήνα";
+"raw_log_older_1_week" = "Παλαιότερα από 1 εβδομάδα";
+"raw_log_older_3_months" = "Παλαιότερα από 3 μήνες";
+"raw_log_retention_summary_disabled" = "Απενεργοποιημένο (διατήρηση όλων)";
+"raw_log_retention_title" = "Αυτόματη διαγραφή παλαιών αρχείων";
+"reset_all_ai_settings" = "Επαναφορά όλων των ρυθμίσεων AI";
+"reset_all_ai_settings_confirm_message" = "Αυτό θα διαγράψει το κλειδί API, τον πάροχο, το τελικό σημείο, το μοντέλο και θα επαναφέρει όλες τις εντολές στις προεπιλογές. Συνέχεια;";
+"reset_all_ai_settings_confirm_title" = "Επαναφορά όλων των ρυθμίσεων AI;";
+"reset_all_permissions" = "Επαναφορά όλων";
+"reset_to_default" = "Επαναφορά σε προεπιλογή";
+"save_and_exit" = "Αποθήκευση";
+"select_llm_prompt" = "Επιλογή Ενέργειας AI";
+"select_model_before_run_title" = "Επιλογή μοντέλου";
+"set_default_model_for_prompt" = "Ορισμός ως προεπιλεγμένο μοντέλο για αυτή την εντολή";
+"show_category" = "Εμφάνιση στις ενέργειες AI";
+"specify_before_run_title" = "Καθορισμός εργασίας";
+"tool_add_bookmark_note" = "Προσθήκη σημείωσης σελιδοδείκτη";
+"tool_add_label_to_bookmark" = "Προσθήκη ετικέτας σε σελιδοδείκτη";
+"tool_add_my_document_page" = "Προσθήκη σελίδας Εγγράφου Μου";
+"tool_add_study_pad_entry" = "Προσθήκη καταχώρησης Χώρου Μελέτης";
+"tool_category_bible_search" = "Αγία Γραφή & Αναζήτηση";
+"tool_category_bookmarks" = "Σελιδοδείκτες";
+"tool_category_general_books" = "Γενικά βιβλία";
+"tool_category_labels" = "Ετικέτες";
+"tool_category_my_documents" = "Τα Έγγραφά Μου";
+"tool_category_study_pads" = "Χώροι Μελέτης";
+"tool_category_windows" = "Παράθυρα";
+"tool_create_bookmark" = "Δημιουργία σελιδοδείκτη";
+"tool_create_label" = "Δημιουργία ετικέτας";
+"tool_create_my_document" = "Δημιουργία Εγγράφου Μου";
+"tool_create_study_pad" = "Δημιουργία Χώρου Μελέτης";
+"tool_create_window" = "Δημιουργία παραθύρου";
+"tool_delete_bookmark" = "Διαγραφή σελιδοδείκτη";
+"tool_delete_label" = "Διαγραφή ετικέτας";
+"tool_delete_my_document_page" = "Διαγραφή σελίδας Εγγράφου Μου";
+"tool_edit_my_document_page" = "Επεξεργασία σελίδας Εγγράφου Μου";
+"tool_finish_with_my_document_page" = "Άνοιγμα σελίδας Εγγράφου Μου";
+"tool_finish_with_study_pad" = "Άνοιγμα Χώρου Μελέτης";
+"tool_finish_without_document" = "Ολοκλήρωση χωρίς έγγραφο";
+"tool_get_all_labels" = "Λίστα όλων των ετικετών";
+"tool_get_bookmarks_for_verse" = "Λήψη σελιδοδεικτών για στίχο";
+"tool_get_bookmarks_with_label" = "Λήψη σελιδοδεικτών με ετικέτα";
+"tool_get_commentaries" = "Ανάγνωση υπομνημάτων";
+"tool_get_dictionary_entry" = "Αναζήτηση στο λεξικό";
+"tool_get_genbook_content" = "Ανάγνωση περιεχομένου γενικού βιβλίου";
+"tool_get_genbook_keys" = "Λίστα κλειδιών γενικού βιβλίου";
+"tool_get_installed_documents" = "Λίστα εγκατεστημένων εγγράφων";
+"tool_get_my_document_pages" = "Λίστα σελίδων Εγγράφου Μου";
+"tool_get_my_documents" = "Λίστα Εγγράφων Μου";
+"tool_get_study_pad_content" = "Ανάγνωση περιεχομένου Χώρου Μελέτης";
+"tool_get_verse_content" = "Ανάγνωση περιεχομένου στίχου";
+"tool_get_windows" = "Λίστα παραθύρων";
+"tool_manage_window" = "Διαχείριση παραθύρου";
+"tool_remove_label_from_bookmark" = "Αφαίρεση ετικέτας από σελιδοδείκτη";
+"tool_search_bible" = "Αναζήτηση Αγίας Γραφής";
+"tool_search_by_strongs" = "Αναζήτηση κατά αριθμό Strong's";
+"tool_search_study_pads" = "Αναζήτηση Χώρων Μελέτης";
+"tool_set_document_title" = "Ορισμός τίτλου εγγράφου";
+"tool_set_window_document" = "Ορισμός εγγράφου παραθύρου";
+"tool_update_bookmark_note" = "Ενημέρωση σημείωσης σελιδοδείκτη";
+"tool_update_studypad_text_entry" = "Ενημέρωση καταχώρησης κειμένου Χώρου Μελέτης";
+"verse_tip" = "Για να επιλέξετε πολλούς στίχους ή μέρος τους, μπορείτε να πατήσετε παρατεταμένα στο Βιβλικό κείμενο";
+"watch_tutorial_video" = "Δείτε βίντεο καθοδήγησης (Αγγλικά)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Αναδημιουργία εγγράφου AI…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Αποδέχομαι και αναλαμβάνω πλήρη ευθύνη";
+"ai_disclaimer_accept_title" = "Αποδοχή αποποίησης ευθύνης AI";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Ρυθμίσεις σύνδεσης AI και εντολών";
+"prefs_features_cat" = "Λειτουργίες";

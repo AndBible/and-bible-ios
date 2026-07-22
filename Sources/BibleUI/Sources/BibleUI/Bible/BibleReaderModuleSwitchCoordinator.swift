@@ -19,6 +19,75 @@ enum BibleReaderModuleSwitchFailure: Error, Equatable {
 }
 
 /**
+ Reports the user-visible result of switching a dictionary, general-book, or map document.
+
+ Android retains the current generic key when the target book contains it and opens the key chooser
+ only when that key is absent. A backend read failure is a third state: the switch is not applied, and
+ the caller should keep its current selection visible while offering a retry.
+
+ The value has no side effects. It reports whether content can render immediately, explicit key
+ selection is required, or the preflight failed before any controller/PageManager mutation.
+ */
+public enum BibleReaderGenericModuleSwitchOutcome: Equatable, Sendable {
+    /// The target module contains the current exact key, so content can render immediately.
+    case switchedPreservingKey
+
+    /// The target module does not contain the current key, so the caller should present its chooser.
+    case switchedRequiringKeySelection
+
+    /// SWORD could not validate the key; no module, category, key, or persistence state changed.
+    case failed(message: String)
+}
+
+/**
+ Internal exact-key decision used to prepare one generic module switch atomically.
+
+ Inputs are produced by the throwing target-module key preflight. Outputs retain the exact key, mark
+ explicit selection, or carry an actionable failure. The value itself has no side effects; a failed
+ resolution must never be applied to controller or persisted pane state.
+ */
+enum BibleReaderGenericKeyResolution: Equatable {
+    /// Persist and render the exact key in the target module.
+    case preserve(String)
+    /// Clear the invalid/missing key and request explicit selection.
+    case requireSelection
+    /// Abort before mutation because SWORD could not determine whether the key exists.
+    case failed(message: String)
+
+    /**
+     Projects the key that successful switch application writes to controller and PageManager state.
+
+     - Returns: The byte-exact retained key, or `nil` when explicit selection is required or preflight
+       failed.
+     - Side effects: None.
+     - Failure modes: Failed resolutions intentionally return `nil`; callers must inspect `outcome`
+       before applying a switch plan.
+     */
+    var retainedKey: String? {
+        guard case .preserve(let key) = self else { return nil }
+        return key
+    }
+
+    /**
+     Projects the public result consumed by picker and quick-selector routing.
+
+     - Returns: Immediate rendering, chooser presentation, or actionable retry failure.
+     - Side effects: None.
+     - Failure modes: Failure messages are preserved verbatim for localized error presentation.
+     */
+    var outcome: BibleReaderGenericModuleSwitchOutcome {
+        switch self {
+        case .preserve:
+            return .switchedPreservingKey
+        case .requireSelection:
+            return .switchedRequiringKeySelection
+        case .failed(let message):
+            return .failed(message: message)
+        }
+    }
+}
+
+/**
  Supplies controller-owned state mutations to the module switch coordinator.
 
  The coordinator owns the switching rules, but the controller still owns observed reader state,
@@ -28,6 +97,7 @@ enum BibleReaderModuleSwitchFailure: Error, Equatable {
 
  Inputs:
  - current SWORD manager, active window, client-ready state, and visible category snapshot
+ - throwing exact-key validation and cached key enumeration used to preflight generic switches
  - category-specific setters for active modules and selected keys
  - callbacks for book-list refresh, persistence, and content reload
 
@@ -47,11 +117,21 @@ struct BibleReaderModuleSwitchContext {
     let activeWindow: Window?
     let clientReady: Bool
     let currentCategory: DocumentCategory
+    let currentDictionaryKey: String?
+    let currentGeneralBookKey: String?
+    let currentMapKey: String?
+    /// Exact target-module lookup that distinguishes ordinary misses from backend failures.
+    let containsExactGenericKey: (SwordModule, String) throws -> Bool
+    /// Target-module key snapshot that proves a required chooser can load before state mutation.
+    let loadGenericKeys: (SwordModule) throws -> [String]
     let setBibleModule: (SwordModule, String) -> Void
     let setCommentaryModule: (SwordModule, String) -> Void
     let setDictionaryModule: (SwordModule, String) -> Void
     let setGeneralBookModule: (SwordModule, String) -> Void
     let setMapModule: (SwordModule, String) -> Void
+    let setDictionaryKey: (String?) -> Void
+    let setGeneralBookKey: (String?) -> Void
+    let setMapKey: (String?) -> Void
     let setCurrentCategory: (DocumentCategory) -> Void
     let refreshBookList: () -> Void
     let moduleBookListCount: () -> Int
@@ -75,7 +155,7 @@ struct BibleReaderModuleSwitchContext {
 
  Side effects:
  - writes the category-owned module field
- - clears stale entry keys for dictionary, general-book, and map selections
+ - retains an exact generic entry key or clears an invalid/missing one as planned
  - optionally writes `currentCategoryName`
 
  Failure modes:
@@ -86,6 +166,7 @@ struct BibleReaderModuleSwitchPlan: Equatable {
     let moduleName: String
     let category: DocumentCategory
     let updatesVisibleCategory: Bool
+    let retainedGenericKey: String?
 
     /**
      Writes this switch plan to the pane page manager.
@@ -104,19 +185,36 @@ struct BibleReaderModuleSwitchPlan: Equatable {
             pageManager.commentaryDocument = moduleName
         case .dictionary:
             pageManager.dictionaryDocument = moduleName
-            pageManager.dictionaryKey = nil
+            pageManager.dictionaryKey = retainedGenericKey
         case .generalBook:
             pageManager.generalBookDocument = moduleName
-            pageManager.generalBookKey = nil
+            pageManager.generalBookKey = retainedGenericKey
         case .map:
             pageManager.mapDocument = moduleName
-            pageManager.mapKey = nil
+            pageManager.mapKey = retainedGenericKey
         case .epub, .dailyDevotion:
             break
         }
 
         guard updatesVisibleCategory else { return }
         pageManager.currentCategoryName = category.pageManagerKey
+    }
+
+    /**
+     Copies a validated generic-key decision into this otherwise immutable switch plan.
+
+     - Parameter key: Exact target-module key to preserve, or `nil` to require selection.
+     - Returns: A plan with identical module/category semantics and the requested generic key.
+     - Side effects: None.
+     - Failure modes: None; non-generic categories ignore the key while applying the plan.
+     */
+    func retainingGenericKey(_ key: String?) -> BibleReaderModuleSwitchPlan {
+        BibleReaderModuleSwitchPlan(
+            moduleName: moduleName,
+            category: category,
+            updatesVisibleCategory: updatesVisibleCategory,
+            retainedGenericKey: key
+        )
     }
 }
 
@@ -284,22 +382,38 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed dictionary module initials to activate.
        - context: Controller-owned state and callbacks for the active pane.
-     - Side effects: Mutates active dictionary state, clears stale dictionary keys, and persists the
-       dictionary module/key fields.
-     - Failure modes: Logs and leaves state unchanged when the module cannot be resolved.
+     - Returns: Whether the exact key was retained, selection is required, or validation failed.
+     - Side effects: Mutates active dictionary state, retains an exact target key or clears an invalid
+       key, and persists the dictionary module/key fields.
+     - Failure modes: Logs and leaves state unchanged when the module cannot be resolved or its key
+       backend cannot be read.
      */
-    func switchDictionaryModule(to moduleName: String, context: BibleReaderModuleSwitchContext) {
+    @discardableResult
+    func switchDictionaryModule(
+        to moduleName: String,
+        context: BibleReaderModuleSwitchContext
+    ) -> BibleReaderGenericModuleSwitchOutcome {
         guard let mod = module(named: moduleName, context: context, logSubject: "dictionary module") else {
-            return
+            return .failed(message: "Could not switch to \(moduleName).")
         }
-
-        context.setDictionaryModule(mod, moduleName)
-        moduleSwitchLogger.info("Switched to dictionary module: \(moduleName)")
-
-        persist(
-            moduleOnlySwitchPlan(moduleName: moduleName, targetCategory: .dictionary),
-            context: context
+        let resolution = resolveGenericKey(
+            currentKey: context.currentDictionaryKey,
+            containsExactKey: { try context.containsExactGenericKey(mod, $0) },
+            loadKeys: { try context.loadGenericKeys(mod) }
         )
+        if case .failed(let message) = resolution {
+            moduleSwitchLogger.error("Cannot switch to dictionary module \(moduleName): \(message)")
+            return resolution.outcome
+        }
+        let plan = moduleOnlySwitchPlan(
+            moduleName: moduleName,
+            targetCategory: .dictionary
+        ).retainingGenericKey(resolution.retainedKey)
+        context.setDictionaryModule(mod, moduleName)
+        context.setDictionaryKey(resolution.retainedKey)
+        moduleSwitchLogger.info("Switched to dictionary module: \(moduleName)")
+        persist(plan, context: context)
+        return resolution.outcome
     }
 
     /**
@@ -308,31 +422,48 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed dictionary module initials to make current.
        - context: Controller-owned state and callbacks for the active pane.
-     - Side effects: Mutates active dictionary/category state, clears stale dictionary keys, persists
-       dictionary document/category fields together, and reloads once when ready.
-     - Failure modes: Logs and leaves state unchanged when the module is missing or not a dictionary.
+     - Returns: Whether the exact key was retained, selection is required, or validation failed.
+     - Side effects: Mutates active dictionary/category state, retains an exact target key or clears
+       an invalid key, persists dictionary document/category fields together, and reloads only when
+       an exact key can render immediately.
+     - Failure modes: Logs and leaves state unchanged when the module is missing, has the wrong
+       category, or its key backend cannot be read.
      */
-    func switchDictionaryDocument(to moduleName: String, context: BibleReaderModuleSwitchContext) {
+    @discardableResult
+    func switchDictionaryDocument(
+        to moduleName: String,
+        context: BibleReaderModuleSwitchContext
+    ) -> BibleReaderGenericModuleSwitchOutcome {
         guard let mod = module(named: moduleName, context: context, logSubject: "dictionary document") else {
-            return
+            return .failed(message: "Could not switch to \(moduleName).")
         }
-        guard let plan = validatedDocumentSwitchPlan(
+        guard let basePlan = validatedDocumentSwitchPlan(
             moduleName: moduleName,
             moduleCategory: mod.info.category,
             targetCategory: .dictionary,
             logSubject: "dictionary document"
         ) else {
-            return
+            return .failed(message: "Could not switch to \(moduleName).")
         }
-
+        let resolution = resolveGenericKey(
+            currentKey: context.currentDictionaryKey,
+            containsExactKey: { try context.containsExactGenericKey(mod, $0) },
+            loadKeys: { try context.loadGenericKeys(mod) }
+        )
+        if case .failed(let message) = resolution {
+            moduleSwitchLogger.error("Cannot switch to dictionary document \(moduleName): \(message)")
+            return resolution.outcome
+        }
+        let plan = basePlan.retainingGenericKey(resolution.retainedKey)
         context.setDictionaryModule(mod, moduleName)
+        context.setDictionaryKey(resolution.retainedKey)
         context.setCurrentCategory(plan.category)
         moduleSwitchLogger.info("Switched to dictionary document: \(moduleName)")
-
         persist(plan, context: context)
 
-        guard context.clientReady else { return }
+        guard context.clientReady, case .preserve = resolution else { return resolution.outcome }
         context.loadCurrentContent()
+        return resolution.outcome
     }
 
     /**
@@ -341,22 +472,38 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed general-book module initials to activate.
        - context: Controller-owned state and callbacks for the active pane.
-     - Side effects: Mutates active general-book state, clears stale keys, and persists the selected
-       general-book module/key fields.
-     - Failure modes: Logs and leaves state unchanged when the module cannot be resolved.
+     - Returns: Whether the exact key was retained, selection is required, or validation failed.
+     - Side effects: Mutates active general-book state, retains an exact target key or clears an
+       invalid key, and persists the selected module/key fields.
+     - Failure modes: Logs and leaves state unchanged when the module cannot be resolved or its key
+       backend cannot be read.
      */
-    func switchGeneralBookModule(to moduleName: String, context: BibleReaderModuleSwitchContext) {
+    @discardableResult
+    func switchGeneralBookModule(
+        to moduleName: String,
+        context: BibleReaderModuleSwitchContext
+    ) -> BibleReaderGenericModuleSwitchOutcome {
         guard let mod = module(named: moduleName, context: context, logSubject: "general book module") else {
-            return
+            return .failed(message: "Could not switch to \(moduleName).")
         }
-
-        context.setGeneralBookModule(mod, moduleName)
-        moduleSwitchLogger.info("Switched to general book module: \(moduleName)")
-
-        persist(
-            moduleOnlySwitchPlan(moduleName: moduleName, targetCategory: .generalBook),
-            context: context
+        let resolution = resolveGenericKey(
+            currentKey: context.currentGeneralBookKey,
+            containsExactKey: { try context.containsExactGenericKey(mod, $0) },
+            loadKeys: { try context.loadGenericKeys(mod) }
         )
+        if case .failed(let message) = resolution {
+            moduleSwitchLogger.error("Cannot switch to general book module \(moduleName): \(message)")
+            return resolution.outcome
+        }
+        let plan = moduleOnlySwitchPlan(
+            moduleName: moduleName,
+            targetCategory: .generalBook
+        ).retainingGenericKey(resolution.retainedKey)
+        context.setGeneralBookModule(mod, moduleName)
+        context.setGeneralBookKey(resolution.retainedKey)
+        moduleSwitchLogger.info("Switched to general book module: \(moduleName)")
+        persist(plan, context: context)
+        return resolution.outcome
     }
 
     /**
@@ -365,32 +512,48 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed general-book module initials to make current.
        - context: Controller-owned state and callbacks for the active pane.
-     - Side effects: Mutates active general-book/category state, clears stale keys, persists
-       general-book document/category fields together, and reloads once when ready.
-     - Failure modes: Logs and leaves state unchanged when the module is missing or not a general
-       book.
+     - Returns: Whether the exact key was retained, selection is required, or validation failed.
+     - Side effects: Mutates active general-book/category state, retains an exact target key or
+       clears an invalid key, persists document/category fields together, and reloads only when an
+       exact key can render immediately.
+     - Failure modes: Logs and leaves state unchanged when the module is missing, has the wrong
+       category, or its key backend cannot be read.
      */
-    func switchGeneralBookDocument(to moduleName: String, context: BibleReaderModuleSwitchContext) {
+    @discardableResult
+    func switchGeneralBookDocument(
+        to moduleName: String,
+        context: BibleReaderModuleSwitchContext
+    ) -> BibleReaderGenericModuleSwitchOutcome {
         guard let mod = module(named: moduleName, context: context, logSubject: "general book document") else {
-            return
+            return .failed(message: "Could not switch to \(moduleName).")
         }
-        guard let plan = validatedDocumentSwitchPlan(
+        guard let basePlan = validatedDocumentSwitchPlan(
             moduleName: moduleName,
             moduleCategory: mod.info.category,
             targetCategory: .generalBook,
             logSubject: "general book document"
         ) else {
-            return
+            return .failed(message: "Could not switch to \(moduleName).")
         }
-
+        let resolution = resolveGenericKey(
+            currentKey: context.currentGeneralBookKey,
+            containsExactKey: { try context.containsExactGenericKey(mod, $0) },
+            loadKeys: { try context.loadGenericKeys(mod) }
+        )
+        if case .failed(let message) = resolution {
+            moduleSwitchLogger.error("Cannot switch to general book document \(moduleName): \(message)")
+            return resolution.outcome
+        }
+        let plan = basePlan.retainingGenericKey(resolution.retainedKey)
         context.setGeneralBookModule(mod, moduleName)
+        context.setGeneralBookKey(resolution.retainedKey)
         context.setCurrentCategory(plan.category)
         moduleSwitchLogger.info("Switched to general book document: \(moduleName)")
-
         persist(plan, context: context)
 
-        guard context.clientReady else { return }
+        guard context.clientReady, case .preserve = resolution else { return resolution.outcome }
         context.loadCurrentContent()
+        return resolution.outcome
     }
 
     /**
@@ -399,59 +562,92 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed map module initials to activate.
        - context: Controller-owned state and callbacks for the active pane.
-     - Side effects: Mutates active map state, clears stale map keys, and persists map module/key
-       fields.
-     - Failure modes: Logs and leaves state unchanged when the module cannot be resolved.
+     - Returns: Whether the exact key was retained, selection is required, or validation failed.
+     - Side effects: Mutates active map state, retains an exact target key or clears an invalid key,
+       and persists map module/key fields.
+     - Failure modes: Logs and leaves state unchanged when the module cannot be resolved or its key
+       backend cannot be read.
      */
-    func switchMapModule(to moduleName: String, context: BibleReaderModuleSwitchContext) {
+    @discardableResult
+    func switchMapModule(
+        to moduleName: String,
+        context: BibleReaderModuleSwitchContext
+    ) -> BibleReaderGenericModuleSwitchOutcome {
         guard let mod = module(named: moduleName, context: context, logSubject: "map module") else {
-            return
+            return .failed(message: "Could not switch to \(moduleName).")
         }
-
-        context.setMapModule(mod, moduleName)
-        moduleSwitchLogger.info("Switched to map module: \(moduleName)")
-
-        persist(
-            moduleOnlySwitchPlan(moduleName: moduleName, targetCategory: .map),
-            context: context
+        let resolution = resolveGenericKey(
+            currentKey: context.currentMapKey,
+            containsExactKey: { try context.containsExactGenericKey(mod, $0) },
+            loadKeys: { try context.loadGenericKeys(mod) }
         )
+        if case .failed(let message) = resolution {
+            moduleSwitchLogger.error("Cannot switch to map module \(moduleName): \(message)")
+            return resolution.outcome
+        }
+        let plan = moduleOnlySwitchPlan(
+            moduleName: moduleName,
+            targetCategory: .map
+        ).retainingGenericKey(resolution.retainedKey)
+        context.setMapModule(mod, moduleName)
+        context.setMapKey(resolution.retainedKey)
+        moduleSwitchLogger.info("Switched to map module: \(moduleName)")
+        persist(plan, context: context)
+        return resolution.outcome
     }
 
     /**
      Switches the visible document to a map module in one Android-parity transition.
 
      Android's document chooser routes maps through `setCurrentDocument(book)`, so map selections
-     update the selected map, clear stale map entry state, and switch the visible category as one
-     durable page-manager write before content reload.
+     update the selected map, retain a valid exact map key (or clear an invalid one), and switch the
+     visible category as one durable page-manager write before content reload.
 
      - Parameters:
        - moduleName: Installed map module initials to make current.
        - context: Controller-owned state and callbacks for the active pane.
-     - Side effects: Mutates active map/category state, clears stale map keys, persists map
-       document/category fields together, and reloads once when ready.
-     - Failure modes: Logs and leaves state unchanged when the module is missing or not a map.
+     - Returns: Whether the exact key was retained, selection is required, or validation failed.
+     - Side effects: Mutates active map/category state, retains an exact target key or clears an
+       invalid key, persists map document/category fields together, and reloads only when an exact
+       key can render immediately.
+     - Failure modes: Logs and leaves state unchanged when the module is missing, has the wrong
+       category, or its key backend cannot be read.
      */
-    func switchMapDocument(to moduleName: String, context: BibleReaderModuleSwitchContext) {
+    @discardableResult
+    func switchMapDocument(
+        to moduleName: String,
+        context: BibleReaderModuleSwitchContext
+    ) -> BibleReaderGenericModuleSwitchOutcome {
         guard let mod = module(named: moduleName, context: context, logSubject: "map document") else {
-            return
+            return .failed(message: "Could not switch to \(moduleName).")
         }
-        guard let plan = validatedDocumentSwitchPlan(
+        guard let basePlan = validatedDocumentSwitchPlan(
             moduleName: moduleName,
             moduleCategory: mod.info.category,
             targetCategory: .map,
             logSubject: "map document"
         ) else {
-            return
+            return .failed(message: "Could not switch to \(moduleName).")
         }
-
+        let resolution = resolveGenericKey(
+            currentKey: context.currentMapKey,
+            containsExactKey: { try context.containsExactGenericKey(mod, $0) },
+            loadKeys: { try context.loadGenericKeys(mod) }
+        )
+        if case .failed(let message) = resolution {
+            moduleSwitchLogger.error("Cannot switch to map document \(moduleName): \(message)")
+            return resolution.outcome
+        }
+        let plan = basePlan.retainingGenericKey(resolution.retainedKey)
         context.setMapModule(mod, moduleName)
+        context.setMapKey(resolution.retainedKey)
         context.setCurrentCategory(plan.category)
         moduleSwitchLogger.info("Switched to map document: \(moduleName)")
-
         persist(plan, context: context)
 
-        guard context.clientReady else { return }
+        guard context.clientReady, case .preserve = resolution else { return resolution.outcome }
         context.loadCurrentContent()
+        return resolution.outcome
     }
 
     /**
@@ -502,7 +698,8 @@ struct BibleReaderModuleSwitchCoordinator {
         return .success(BibleReaderModuleSwitchPlan(
             moduleName: moduleName,
             category: targetCategory,
-            updatesVisibleCategory: true
+            updatesVisibleCategory: true,
+            retainedGenericKey: nil
         ))
     }
 
@@ -527,7 +724,8 @@ struct BibleReaderModuleSwitchCoordinator {
         BibleReaderModuleSwitchPlan(
             moduleName: moduleName,
             category: targetCategory,
-            updatesVisibleCategory: false
+            updatesVisibleCategory: false,
+            retainedGenericKey: nil
         )
     }
 
@@ -576,6 +774,44 @@ struct BibleReaderModuleSwitchCoordinator {
             return .map
         case .dailyDevotion, .glossary, .addon, .unknown:
             return nil
+        }
+    }
+
+    /**
+     Resolves Android's retain-or-choose rule for a generic module switch.
+
+     `CurrentPageBase.setCurrentDocument` keeps the current key only when the target `Book` contains
+     it. The injected lookup keeps this decision independently testable while production passes
+     `SwordModule.containsExactKey`, which rejects nearest-key normalization. A missing or invalid key
+     preflights the target key snapshot before mutation so a backend outage cannot commit a partial
+     switch; `SwordModule` caches successful snapshots for the chooser's subsequent read.
+
+     - Parameters:
+       - currentKey: Current dictionary/general-book/map key, if one is selected.
+       - containsExactKey: Target-module lookup that returns true only for the identical key.
+       - loadKeys: Throwing target-module snapshot loaded only when selection is required.
+     - Returns: Exact key preservation, explicit selection requirement, or a failure that must abort
+       the switch before state mutation.
+     - Side effects: Defined by the injected operations; production temporarily moves and restores
+       the target module cursor and caches only a successful immutable key snapshot.
+     - Failure modes: Validation or enumeration errors become `.failed` with their localized
+       description and are never treated as an absent key or a genuinely empty module.
+     */
+    func resolveGenericKey(
+        currentKey: String?,
+        containsExactKey: (String) throws -> Bool,
+        loadKeys: () throws -> [String]
+    ) -> BibleReaderGenericKeyResolution {
+        do {
+            if let currentKey,
+               !currentKey.isEmpty,
+               try containsExactKey(currentKey) {
+                return .preserve(currentKey)
+            }
+            _ = try loadKeys()
+            return .requireSelection
+        } catch {
+            return .failed(message: error.localizedDescription)
         }
     }
 

@@ -26,6 +26,22 @@ export function useCustomCss() {
 
     window.bibleViewDebug.customCssPromises = customCssPromises;
 
+    /**
+     * Resolves Android's module-style token to the platform resource endpoint.
+     *
+     * EPUB documents already register as `epub/<initials>/<key>`. Android serves that path from
+     * its embedded HTTP backend; iOS maps it to the same custom origin as package fonts and images
+     * so nested CSS stays identity-scoped without CORS exceptions. Normal SWORD module URLs remain
+     * unchanged.
+     */
+    function cssHref(bookInitials: string): string {
+        if (bookInitials.startsWith("epub/")) {
+            const [, initials, key] = bookInitials.split("/");
+            return `andbible-resource://epub/${encodeURIComponent(initials)}/.module-style/${encodeURIComponent(key)}/style.css`;
+        }
+        return `/module-style/${bookInitials}/style.css`;
+    }
+
     function addCss(bookInitials: string) {
         console.log(`Adding style for ${bookInitials}`);
         const c = count.get(bookInitials) || 0;
@@ -34,7 +50,7 @@ export function useCustomCss() {
             const onLoadDefer = new Deferred();
             const promise = onLoadDefer.wait();
             customCssPromises.push({bookInitials, promise});
-            link.href = `/module-style/${bookInitials}/style.css`;
+            link.href = cssHref(bookInitials);
             link.type = "text/css";
             link.rel = "stylesheet";
             const cssReady = () => {

@@ -4,6 +4,65 @@ import BibleView
 import SwordKit
 
 /**
+ Resolved source context for one non-Bible bookmark.
+
+ The value is backend-neutral so SWORD modules, My Documents, and EPUB adapters can all provide the
+ same Android `ClientGenericBookmark` fields without substituting the active reader document.
+ */
+struct GenericBookmarkSourceContent {
+    /// User-visible source document name.
+    let bookName: String
+    /// Compact source document abbreviation.
+    let bookAbbreviation: String
+    /// User-visible resolved key name.
+    let keyName: String
+    /// Complete visible text used by Android-compatible UTF-16 offset slicing.
+    let plainText: String
+    /// Optional render context supplied to Vue.
+    let osisFragment: OsisFragment?
+
+    /**
+     Creates a complete stored-source projection.
+
+     - Parameters:
+       - bookName: User-visible source document name.
+       - bookAbbreviation: Compact source document abbreviation.
+       - keyName: User-visible resolved key name.
+       - plainText: Complete visible source text used for selection projection.
+       - osisFragment: Optional whole-page render context for Vue.
+     - Side effects: None.
+     - Failure modes: None; source lookup validates provenance before constructing this value.
+     */
+    init(
+        bookName: String,
+        bookAbbreviation: String,
+        keyName: String,
+        plainText: String,
+        osisFragment: OsisFragment?
+    ) {
+        self.bookName = bookName
+        self.bookAbbreviation = bookAbbreviation
+        self.keyName = keyName
+        self.plainText = plainText
+        self.osisFragment = osisFragment
+    }
+}
+
+/**
+ Couples resolved generic source metadata with the exact per-anchor text sequence Android uses.
+
+ `GenericBookmarkSourceContent` remains backend-neutral for My Documents and EPUB providers. This
+ wrapper adds the ordered `BVA` text segments available from generic SWORD fragments so UTF-16 start
+ and end offsets apply to the first and last selected anchors rather than to one flattened string.
+ */
+private struct ResolvedGenericBookmarkSourceContent {
+    /// Backend-neutral names, plain text, and optional bridge fragment.
+    let content: GenericBookmarkSourceContent
+    /// Ordered text segments for the bookmark's persisted local ordinal range.
+    let selectedTexts: [String]
+}
+
+/**
  Projects reader bookmark, label, My Notes, and StudyPad models into Vue bridge DTOs.
 
  `BibleReaderController` owns navigation state and bridge event routing; this factory owns the
@@ -33,18 +92,14 @@ struct BibleReaderAnnotationPayloadFactory {
     private let activeModuleName: String
     /// Active SWORD module used for ordinal and verse-text projection.
     private let activeModule: SwordModule?
+    /// Resolves an installed SWORD module strictly by stored initials.
+    private let sourceModuleResolver: (String) -> SwordModule?
+    /// Resolves non-SWORD source content strictly by stored initials and key.
+    private let genericSourceResolver: (String, String) -> GenericBookmarkSourceContent?
     /// Active-module-aware catalog used for OSIS lookup and ordinal projection.
     private let bookCatalog: BibleReaderBookCatalog
     /// Synthetic unlabeled label identifier required by the web client.
     private let unlabeledLabelID: String
-    /// Active module versification, read once so per-bookmark projection avoids repeated SWORD reads.
-    private let activeVersification: String
-    /**
-     Whether the active module renders KJVA-compatible numbering (KJV-family), in which case the
-     reverse KJVA->active mapping is identity and can be skipped.
-     */
-    private let activeVersificationIsKJVACompatible: Bool
-
     /**
      Selects the ordinal domain used for Bible bookmark bridge payloads.
 
@@ -86,6 +141,9 @@ struct BibleReaderAnnotationPayloadFactory {
        - currentBook: Display name for the reader's current Bible book.
        - activeModuleName: Initials/name of the active module.
        - activeModule: Active SWORD module, if one is loaded.
+       - sourceModuleResolver: Installed-module lookup keyed by stored initials. When omitted, only
+         the matching active module is visible to the factory.
+       - genericSourceResolver: My Documents/EPUB lookup keyed by stored initials and key.
        - bookCatalog: Active-module-aware catalog boundary for OSIS and ordinal projection.
        - unlabeledLabelID: Stable identifier for the synthetic unlabeled label.
      - Side effects: None during initialization.
@@ -95,19 +153,20 @@ struct BibleReaderAnnotationPayloadFactory {
         currentBook: String,
         activeModuleName: String,
         activeModule: SwordModule?,
+        sourceModuleResolver: ((String) -> SwordModule?)? = nil,
+        genericSourceResolver: @escaping (String, String) -> GenericBookmarkSourceContent? = { _, _ in nil },
         bookCatalog: BibleReaderBookCatalog,
         unlabeledLabelID: String
     ) {
         self.currentBook = currentBook
         self.activeModuleName = activeModuleName
         self.activeModule = activeModule
+        self.sourceModuleResolver = sourceModuleResolver ?? { initials in
+            initials == activeModuleName ? activeModule : nil
+        }
+        self.genericSourceResolver = genericSourceResolver
         self.bookCatalog = bookCatalog
         self.unlabeledLabelID = unlabeledLabelID
-        let versification = activeModule?.configEntry("Versification")?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        self.activeVersification = versification
-        let normalized = versification.uppercased()
-        self.activeVersificationIsKJVACompatible = versification.isEmpty || normalized == "KJV" || normalized == "KJVA"
     }
 
     /**
@@ -158,6 +217,54 @@ struct BibleReaderAnnotationPayloadFactory {
        `BookmarkLabelSerializationSupport`.
      */
     func genericBookmarkJSONForStudyPad(_ bookmark: GenericBookmark) -> GenericBookmarkData {
+        genericBookmarkJSONForStudyPad(
+            bookmark,
+            resolvedSource: genericSourceContent(for: bookmark)
+        )
+    }
+
+    /**
+     Builds the creation-event payload directly from the immutable generic SWORD source seed.
+
+     The persisted bookmark supplies identity, labels, timestamps, and note state; the seed supplies
+     exact source category, key metadata, raw OSIS, ordered anchor text, and UTF-16 selection
+     context. A mismatched seed fails closed to stored identifiers instead of borrowing active Bible
+     metadata.
+
+     - Parameters:
+       - bookmark: Generic bookmark just persisted from `sourceSeed`.
+       - sourceSeed: Validated generic SWORD source and selection contract.
+     - Returns: Android-compatible generic bookmark bridge payload.
+     - Side effects: None; no source reload or module cursor mutation occurs.
+     - Failure modes: A source identity mismatch omits rich source content while retaining the
+       persisted bookmark's initials and key.
+     */
+    func genericBookmarkJSONForStudyPad(
+        _ bookmark: GenericBookmark,
+        sourceSeed: SwordGenericBookmarkSeed
+    ) -> GenericBookmarkData {
+        let resolvedSource = bookmark.bookInitials == sourceSeed.source.bookInitials
+            && bookmark.key == sourceSeed.source.key
+            ? genericSourceContent(for: sourceSeed)
+            : nil
+        return genericBookmarkJSONForStudyPad(bookmark, resolvedSource: resolvedSource)
+    }
+
+    /**
+     Serializes one persisted generic bookmark with an already-resolved exact source.
+
+     - Parameters:
+       - bookmark: Persisted Android-shaped generic bookmark row.
+       - resolvedSource: Exact source metadata and ordered text, or `nil` when unavailable.
+     - Returns: Generic bookmark DTO consumed by Vue and StudyPad.
+     - Side effects: None.
+     - Failure modes: Missing source context emits stable stored identifiers with empty text and no
+       fragment; active-reader metadata is never substituted.
+     */
+    private func genericBookmarkJSONForStudyPad(
+        _ bookmark: GenericBookmark,
+        resolvedSource: ResolvedGenericBookmarkSourceContent?
+    ) -> GenericBookmarkData {
         let id = bookmark.id.uuidString
         let hashCode = Self.normalizedBridgeHashCode(from: id.hashValue)
         let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
@@ -173,20 +280,28 @@ struct BibleReaderAnnotationPayloadFactory {
             primaryLabelID: bookmark.primaryLabelId,
             validLabelIDs: labelPayload.labelIDs
         )
+        let source = resolvedSource?.content
+        let textProjection = genericBookmarkTextProjection(
+            bookmark: bookmark,
+            sourceTexts: resolvedSource?.selectedTexts ?? []
+        )
+        let osisFragment = genericBookmarkOSISFragment(bookmark: bookmark, source: source)
 
         return GenericBookmarkData(
             id: id,
             type: "generic-bookmark",
             hashCode: hashCode,
             ordinalRange: [bookmark.ordinalStart, bookmark.ordinalEnd],
-            offsetRange: bookmarkOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset),
+            offsetRange: bookmark.wholeVerse
+                ? nil
+                : bookmarkOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset),
             labels: labelPayload.labelIDs,
             bookInitials: bookmark.bookInitials,
-            bookName: bookmark.bookInitials,
-            bookAbbreviation: "",
+            bookName: source?.bookName ?? bookmark.bookInitials,
+            bookAbbreviation: source?.bookAbbreviation ?? bookmark.bookInitials,
             createdAt: createdAt,
-            text: "",
-            fullText: "",
+            text: textProjection.text,
+            fullText: textProjection.fullText,
             bookmarkToLabels: labelPayload.relationItems,
             primaryLabelId: primaryLabelId,
             lastUpdatedOn: lastUpdated,
@@ -197,9 +312,251 @@ struct BibleReaderAnnotationPayloadFactory {
             customIcon: bookmark.customIcon,
             editAction: editActionData(bookmark.editAction),
             key: bookmark.key,
-            keyName: bookmark.key,
-            highlightedText: ""
+            keyName: source?.keyName ?? bookmark.key,
+            highlightedText: textProjection.highlightedText,
+            osisFragment: osisFragment
         )
+    }
+
+    /**
+     Applies Android's generic-bookmark fragment rules to resolved source context.
+
+     Android populates `osisFragment` only for whole-page generic bookmarks. Non-verse keys such as
+     dictionary, My Documents, and EPUB pages additionally encode nullable versification and
+     ordinal metadata instead of synthetic empty strings or zero ranges.
+
+     - Parameters:
+       - bookmark: Persisted generic bookmark whose nullable ordinals define whole-page state.
+       - source: Source content resolved strictly from the bookmark's stored provenance.
+     - Returns: Android-compatible whole-page fragment, or `nil` for partial/missing content.
+     - Side effects: None.
+     - Failure modes: Missing source content returns `nil`; unsupported category names are treated
+       as non-verse keys so fabricated versification metadata cannot escape.
+     */
+    private func genericBookmarkOSISFragment(
+        bookmark: GenericBookmark,
+        source: GenericBookmarkSourceContent?
+    ) -> OsisFragment? {
+        guard bookmark.ordinalStart == nil || bookmark.ordinalEnd == nil,
+              var fragment = source?.osisFragment else {
+            return nil
+        }
+        let isVerseKey = fragment.bookCategory == DocumentCategory.bible.rawValue
+            || fragment.bookCategory == DocumentCategory.commentary.rawValue
+        if !isVerseKey {
+            fragment.v11n = nil
+            fragment.ordinalRange = nil
+        }
+        return fragment
+    }
+
+    /**
+     Resolves rich generic bookmark context from its persisted source identity.
+
+     My Documents and EPUB providers retain their existing exact resolver. Installed SWORD sources
+     reload through the raw-fragment API, which rejects nearest-key substitution and restores
+     the same category, OSIS, and local `BVA` text sequence used at creation.
+
+     - Parameter bookmark: Generic bookmark carrying stored `bookInitials` and `key`.
+     - Returns: Exact source content and selected anchor texts, or `nil` when unavailable.
+     - Side effects: May move the resolved SWORD module cursor while reading its stored key; the
+       module serializes cursor access internally.
+     - Failure modes: Missing modules, invalid keys, nearest-key normalization, malformed OSIS, and
+       persisted ordinals outside the exact fragment fail closed without active-module fallback.
+     */
+    private func genericSourceContent(
+        for bookmark: GenericBookmark
+    ) -> ResolvedGenericBookmarkSourceContent? {
+        if let source = genericSourceResolver(bookmark.bookInitials, bookmark.key) {
+            return ResolvedGenericBookmarkSourceContent(
+                content: source,
+                selectedTexts: source.plainText.isEmpty ? [] : [source.plainText]
+            )
+        }
+        guard let module = sourceModuleResolver(bookmark.bookInitials),
+              let fragment = try? module.rawOSISFragment(forKey: bookmark.key) else {
+            return nil
+        }
+
+        let selectedTexts: [String]
+        if let start = bookmark.ordinalStart, let end = bookmark.ordinalEnd {
+            let range = min(start, end)...max(start, end)
+            guard fragment.contentOrdinalRange.contains(range.lowerBound),
+                  fragment.contentOrdinalRange.contains(range.upperBound) else {
+                return nil
+            }
+            selectedTexts = fragment.text(in: range)
+        } else {
+            selectedTexts = fragment.text(in: fragment.contentOrdinalRange)
+        }
+        return resolvedGenericSourceContent(fragment: fragment, selectedTexts: selectedTexts)
+    }
+
+    /**
+     Projects one immutable generic SWORD seed into the payload source used for its creation event.
+
+     - Parameter seed: Validated generic bookmark seed from the exact rendered fragment.
+     - Returns: Exact source metadata and the seed's selected local-anchor texts.
+     - Side effects: None.
+     - Failure modes: None; seed construction validates source identity, ordinals, and offset pairing before
+       constructing the seed.
+     */
+    private func genericSourceContent(
+        for seed: SwordGenericBookmarkSeed
+    ) -> ResolvedGenericBookmarkSourceContent {
+        resolvedGenericSourceContent(
+            fragment: seed.source.osisFragment,
+            selectedTexts: seed.text
+        )
+    }
+
+    /**
+     Converts a generic SWORD raw fragment into Android's generic-bookmark source projection.
+
+     - Parameters:
+       - fragment: Exact source fragment, including module category and raw OSIS metadata.
+       - selectedTexts: Ordered text segments for the bookmark's local ordinal range.
+     - Returns: Backend-neutral source metadata paired with exact selected anchor text.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    private func resolvedGenericSourceContent(
+        fragment: SwordRawOSISFragment,
+        selectedTexts: [String]
+    ) -> ResolvedGenericBookmarkSourceContent {
+        let allTexts = fragment.text(in: fragment.contentOrdinalRange)
+        return ResolvedGenericBookmarkSourceContent(
+            content: GenericBookmarkSourceContent(
+                bookName: fragment.source.name,
+                bookAbbreviation: fragment.source.abbreviation,
+                keyName: fragment.keyName,
+                plainText: allTexts.joined(),
+                osisFragment: bridgeOSISFragment(from: fragment)
+            ),
+            selectedTexts: selectedTexts
+        )
+    }
+
+    /**
+     Maps an immutable generic SWORD fragment into the shared BibleView OSIS bridge contract.
+
+     - Parameter fragment: Raw SWORD fragment whose source metadata must remain exact.
+     - Returns: Bridge fragment preserving module-qualified identity, category, key metadata,
+       original XML, features, language, direction, and verse-key ordinals.
+     - Side effects: None.
+     - Failure modes: None; unknown/add-on categories use the existing generic bridge fallback.
+     */
+    private func bridgeOSISFragment(from fragment: SwordRawOSISFragment) -> OsisFragment {
+        let keyOrdinalRange = fragment.keyOrdinalRange.map { [$0.lowerBound, $0.upperBound] }
+        var bridgeFragment = OsisFragment(
+            xml: fragment.xml,
+            key: fragment.fragmentKey,
+            keyName: fragment.keyName,
+            v11n: fragment.source.versification,
+            bookCategory: bridgeBookCategory(for: fragment.source.category),
+            bookInitials: fragment.source.initials,
+            bookAbbreviation: fragment.source.abbreviation,
+            osisRef: fragment.osisRef,
+            isNewTestament: fragment.isNewTestament,
+            features: OsisFeatures(
+                type: fragment.features["type"],
+                keyName: fragment.features["keyName"]
+            ),
+            hasStrongs: fragment.source.hasStrongs,
+            ordinalRange: keyOrdinalRange,
+            language: fragment.source.language,
+            direction: fragment.source.direction
+        )
+        bridgeFragment.originalXml = fragment.originalXML
+        return bridgeFragment
+    }
+
+    /**
+     Maps SWORD metadata categories to the JSword `BookCategory.name` values emitted by Android.
+
+     - Parameter category: Installed SWORD module category.
+     - Returns: Android bridge category used by `OsisFragment.toHashMap`.
+     - Side effects: None.
+     - Failure modes: Unsupported add-on metadata is represented as `GENERAL_BOOK`, matching
+       Android's generic-document fallback instead of leaking SWORD's display category string.
+     */
+    private func bridgeBookCategory(for category: ModuleCategory) -> String {
+        switch category {
+        case .bible:
+            return DocumentCategory.bible.rawValue
+        case .commentary:
+            return DocumentCategory.commentary.rawValue
+        case .dictionary, .glossary:
+            return DocumentCategory.dictionary.rawValue
+        case .generalBook, .dailyDevotion, .addon, .unknown:
+            return DocumentCategory.generalBook.rawValue
+        case .map:
+            return "MAPS"
+        }
+    }
+
+    /**
+     Projects generic source text through Android's whole-page, whole-entry, and offset rules.
+
+     - Parameters:
+       - bookmark: Persisted selection flags and UTF-16 offsets.
+       - sourceTexts: Ordered text segments for the persisted local ordinal range.
+     - Returns: Preview, full text, and `<b>`-highlighted text fields for the Vue DTO.
+     - Side effects: none.
+     - Failure modes: Missing text returns empty fields. Negative or out-of-range restored offsets
+       clamp to the first/last UTF-16 segment so malformed remote rows cannot trap.
+     */
+    private func genericBookmarkTextProjection(
+        bookmark: GenericBookmark,
+        sourceTexts: [String]
+    ) -> (text: String, fullText: String, highlightedText: String) {
+        guard let firstText = sourceTexts.first else { return ("", "", "") }
+        let first = firstText as NSString
+        let isWholePage = bookmark.ordinalStart == nil || bookmark.ordinalEnd == nil
+        if isWholePage {
+            let preview = first.substring(with: NSRange(location: 0, length: min(200, first.length)))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (preview, preview, "<b>\(preview)</b>")
+        }
+
+        let startOffset = bookmark.wholeVerse
+            ? 0
+            : max(0, min(bookmark.startOffset ?? 0, first.length))
+        let prefix = first.substring(with: NSRange(location: 0, length: startOffset))
+
+        if sourceTexts.count == 1 {
+            let requestedEnd = bookmark.wholeVerse ? first.length : (bookmark.endOffset ?? first.length)
+            let endOffset = max(startOffset, min(max(0, requestedEnd), first.length))
+            let selected = first.substring(
+                with: NSRange(location: startOffset, length: endOffset - startOffset)
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            let suffix = first.substring(
+                with: NSRange(location: endOffset, length: first.length - endOffset)
+            )
+            let fullText = "\(prefix)\(selected)\(suffix)"
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (selected, fullText, "\(prefix)<b>\(selected)</b>\(suffix)")
+        }
+
+        let firstSelection = first.substring(
+            with: NSRange(location: startOffset, length: first.length - startOffset)
+        )
+        let last = (sourceTexts.last ?? "") as NSString
+        let requestedEnd = bookmark.wholeVerse ? last.length : (bookmark.endOffset ?? last.length)
+        let endOffset = max(0, min(requestedEnd, last.length))
+        let lastSelection = last.substring(with: NSRange(location: 0, length: endOffset))
+        let suffix = last.substring(
+            with: NSRange(location: endOffset, length: last.length - endOffset)
+        )
+        let middle = sourceTexts.count > 2
+            ? sourceTexts[1..<(sourceTexts.count - 1)].joined(separator: " ")
+            : ""
+        let selected = "\(firstSelection)\(middle)\(lastSelection)"
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fullText = "\(prefix)\(selected)\(suffix)"
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (selected, fullText, "\(prefix)<b>\(selected)</b>\(suffix)")
     }
 
     /**
@@ -466,11 +823,12 @@ struct BibleReaderAnnotationPayloadFactory {
        - sourceOrdinal: Persisted source ordinal used only by legacy fallback paths.
        - bookName: Stored or current book name used only by legacy fallback paths.
        - ordinalProjection: Target document ordinal domain for emitted ordinals.
-     - Returns: Verse reference with an active-module ordinal when possible, otherwise a KJVA or
-       compatibility fallback reference.
+     - Returns: Verse reference in the requested document domain. Android's ordinal `0` sentinel is
+       used when a public conversion result is not addressable by the active module.
      - Side effects: May temporarily move the active SWORD module cursor through
        `verseOrdinal(osisBookId:chapter:verse:)`.
-     - Failure modes: Malformed KJVA ordinals fall back to legacy source-ordinal resolution.
+     - Failure modes: Malformed KJVA ordinals retain best-effort display coordinates with ordinal
+       `0`; source ordinals are never reinterpreted as KJVA or active-module ordinals.
      */
     private func renderedReference(
         kjvOrdinal: Int,
@@ -478,55 +836,35 @@ struct BibleReaderAnnotationPayloadFactory {
         bookName: String,
         ordinalProjection: BibleBookmarkOrdinalProjection
     ) -> VerseKeyReference {
-        if let kjvaReference = JSwordKJVAVersification.verseReference(ordinal: kjvOrdinal) {
+        if let kjvaReference = JSwordKJVAVersification.referenceIncludingIntroductions(
+            ordinal: kjvOrdinal
+        ) {
             switch ordinalProjection {
             case .activeModule:
-                // KJV-family modules render KJVA numbering identically, so skip the reverse map and
-                // take the active module's ordinal for the KJVA coordinates directly (no SWORD
-                // mapping per bookmark).
-                if activeVersificationIsKJVACompatible {
-                    let renderedOrdinal = activeModule?.verseOrdinal(
-                        osisBookId: kjvaReference.osisId,
-                        chapter: kjvaReference.chapter,
-                        verse: kjvaReference.verse
-                    ) ?? kjvaReference.ordinal
+                guard let activeModule else {
                     return VerseKeyReference(
                         osisBookId: kjvaReference.osisId,
                         chapter: kjvaReference.chapter,
                         verse: kjvaReference.verse,
-                        ordinal: renderedOrdinal
+                        ordinal: kjvaReference.ordinal
                     )
                 }
-                // Divergent canon: reverse-map the stored KJVA reference into the active module's
-                // versification (Android's verseRange.toV11n(activeV11n)), then take that module's
-                // rendered ordinal, so it lands on the true active verse (e.g. KJVA Ps 10:1 ->
-                // Vulgate Ps 9:22) instead of the identically-numbered KJVA verse.
-                if let activeModule,
-                   let mapped = SwordVersification.mapVerseFromKJVA(
-                       osisBookId: kjvaReference.osisId,
-                       chapter: kjvaReference.chapter,
-                       verse: kjvaReference.verse,
-                       targetVersification: activeVersification
-                   ),
-                   let activeOrdinal = activeModule.verseOrdinal(
-                       osisBookId: mapped.osisBookId,
-                       chapter: mapped.chapter,
-                       verse: mapped.verse
-                   ) {
+                guard let projection = VersificationMapper.moduleProjection(
+                    forKJVAOrdinal: kjvOrdinal,
+                    targetModule: activeModule
+                ) else {
                     return VerseKeyReference(
-                        osisBookId: mapped.osisBookId,
-                        chapter: mapped.chapter,
-                        verse: mapped.verse,
-                        ordinal: activeOrdinal
+                        osisBookId: kjvaReference.osisId,
+                        chapter: kjvaReference.chapter,
+                        verse: kjvaReference.verse,
+                        ordinal: 0
                     )
                 }
-                // No active module, or a reference the active module cannot render (e.g. a
-                // superscription): fall back to the KJVA coordinates and ordinal.
                 return VerseKeyReference(
-                    osisBookId: kjvaReference.osisId,
-                    chapter: kjvaReference.chapter,
-                    verse: kjvaReference.verse,
-                    ordinal: kjvaReference.ordinal
+                    osisBookId: projection.reference.osisBookId,
+                    chapter: projection.reference.chapter,
+                    verse: projection.reference.verse,
+                    ordinal: projection.ordinal
                 )
             case .kjva:
                 return VerseKeyReference(
@@ -537,9 +875,15 @@ struct BibleReaderAnnotationPayloadFactory {
                 )
             }
         }
-        return verseReference(book: bookName, ordinal: sourceOrdinal)
+        let fallback = verseReference(book: bookName, ordinal: sourceOrdinal)
             ?? activeModule?.verseReference(ordinal: sourceOrdinal)
             ?? fallbackVerseReference(bookName: bookName, ordinal: sourceOrdinal)
+        return VerseKeyReference(
+            osisBookId: fallback.osisBookId,
+            chapter: fallback.chapter,
+            verse: fallback.verse,
+            ordinal: 0
+        )
     }
 
     /**
@@ -561,11 +905,15 @@ struct BibleReaderAnnotationPayloadFactory {
         guard !initials.isEmpty else {
             return ("", "", "")
         }
-        let activeDescription = activeModuleName == initials
-            ? activeModule?.info.description.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            : ""
-        let name = activeDescription.isEmpty ? initials : activeDescription
-        return (initials, name, initials)
+        guard let sourceModule = sourceModuleResolver(initials) else {
+            return (initials, initials, initials)
+        }
+        let description = sourceModule.info.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (
+            initials,
+            description.isEmpty ? initials : description,
+            sourceModule.info.name.isEmpty ? initials : sourceModule.info.name
+        )
     }
 
     /**

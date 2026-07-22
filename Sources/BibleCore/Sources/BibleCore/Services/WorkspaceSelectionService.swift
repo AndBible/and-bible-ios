@@ -14,6 +14,7 @@ public final class WorkspaceSelectionService {
     private let workspaceStore: WorkspaceStore
     private let settingsStore: SettingsStore
     private let windowManager: WindowManager
+    private weak var speakService: SpeakService?
 
     /**
      Creates an active-workspace selection coordinator.
@@ -22,15 +23,22 @@ public final class WorkspaceSelectionService {
        - workspaceStore: Store used to fetch, delete, and repair workspace rows.
        - settingsStore: Store used to persist the active workspace identifier.
        - windowManager: Live manager whose visible workspace should follow persisted selection.
+       - speakService: Optional live speech service that must stop the old workspace session and
+         adopt the selected workspace's structured settings synchronously.
+     - Side effects: Retains stores and the window manager; the speech service is weakly retained.
+     - Failure modes: Construction cannot fail. Omitting `speakService` preserves headless and test
+       callers that do not own a live speech runtime.
      */
     public init(
         workspaceStore: WorkspaceStore,
         settingsStore: SettingsStore,
-        windowManager: WindowManager
+        windowManager: WindowManager,
+        speakService: SpeakService? = nil
     ) {
         self.workspaceStore = workspaceStore
         self.settingsStore = settingsStore
         self.windowManager = windowManager
+        self.speakService = speakService
     }
 
     /**
@@ -38,11 +46,19 @@ public final class WorkspaceSelectionService {
 
      - Parameter workspace: Workspace to show immediately and restore on next launch.
      - Side effects:
+       - stops and checkpoints speech owned by the previous workspace
        - updates `WindowManager.activeWorkspace`
+       - applies selected speech settings while preserving the shared bookmark owner
        - writes `SettingsStore.activeWorkspaceId`
+     - Failure modes: Missing speech runtime or workspace settings use the normal default settings;
+       activation itself does not throw.
      */
     public func activate(_ workspace: Workspace) {
+        speakService?.stop()
         windowManager.setActiveWorkspace(workspace)
+        speakService?.applyWorkspaceSettings(
+            windowManager.activeWorkspace?.workspaceSettings?.speakSettings ?? SpeakSettings()
+        )
         settingsStore.activeWorkspaceId = workspace.id
     }
 

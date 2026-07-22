@@ -15,6 +15,24 @@ npm run test:ci
 npm run build-debug
 ```
 
+`dist/` is intentionally ignored. To update the checked-in, Node-free Xcode fallback, build and
+atomically install a production bundle:
+
+```bash
+cd bibleview-js
+npm run build-production
+python3 ../scripts/manage_bibleview_bundle.py sync \
+  --source dist \
+  --destination ../Sources/BibleView/Sources/BibleView/Resources/bibleview-js \
+  --mode production
+```
+
+CI rebuilds Debug twice and requires deterministic bytes with no checkout-specific Vue `__file`
+metadata. Xcode test jobs install that verified Debug artifact before SwiftPM resolution. CI also
+rebuilds Production and requires the committed fallback to match source exactly. The release workflow
+always rebuilds Production before either archive and verifies the embedded SwiftPM resource in both
+finished archives.
+
 Available scripts come from:
 - `bibleview-js/package.json`
 

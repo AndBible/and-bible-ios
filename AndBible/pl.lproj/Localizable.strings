@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Ustawienia dla prześladowanych";
 "discrete_mode" = "Ukryj symbole religijne";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "O programie";
 "version" = "Version";
 "export" = "Eksportuj";
@@ -440,10 +440,6 @@
 "calculator_pin_description" = "Kod PIN uruchamiający aplikację, gdy wyświetla się kalkulator.";
 "discrete_help_title" = "Przeczytaj to najpierw!";
 "discrete_help_summary" = "Instrukcje dla ustawień i informacje o specjalnej dyskretnej kompilacji.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Zachowanie";
 "prefs_display_customization_cat" = "Wygląd";
@@ -514,7 +510,6 @@
 
 "prefs_volume_keys_scroll_title" = "Przewijanie przyciskami głośności";
 "prefs_volume_keys_scroll_summary" = "Używaj przycisków głośności do przewijania tekstu Biblii";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Funkcje eksperymentalne";
 "prefs_experimental_features_summary" = "Wybierz funkcje eksperymentalne do aktywacji. Te funkcje są w dalszym ciągu opracowywane i mogą zostać zmienione lub usunięte.";
 "experimental_feature_bookmark_edit_actions" = "Edycja akcji zakładki";
@@ -642,3 +637,387 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Istnieje plan czytania użytkownika w katalogu „jsword/readingplan” na karcie SD o tej samej nazwie co plan wewnętrzny, Nie można go tutaj wyświetlić. Prosimy zmienić nazwę pliku, pozostawiając jego rozszerzenie „.properties”.";
 "error_no_content" = "Brak zawartości dla wybranego wiersza";
+
+/* Android shared translations */
+"calculator_par1" = "Przed otwarciem aplikacji wyświetlany jest kalkulator.";
+"calculator_par2" = "Za jego pomocą możesz wykonywać zwykłe rachunki, a kiedy chcesz otworzyć aplikację, wpisujesz kod PIN (domyślnie 1234) i przycisk „=”.";
+"calculator_par3" = "Możesz zmienić domyślny kod PIN ustawieniem „Kod PIN kalkulatora”.";
+"give_passphrase_for_module" = "Dokument %@ jest zaszyfrowany i wymaga hasła do otwarcia";
+"show_unlock_info" = "O szyfrowanym module";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Rozpakowywanie pliku zip…";
+"install_failed_reason" = "Instalacja modułu nie powiodła się z następującego powodu: %@.";
+"install_zip_successfull" = "Moduł został pomyślnie zainstalowany";
+"module_install_phase_committing" = "Proszę czekać. Trwa wczytywanie modułu z pliku.";
+"module_install_phase_downloading" = "Pobieranie";
+"module_install_phase_queued" = "Proszę czekać…";
+"storage_space_warning" = "Niewystarczająca ilość zasobów pamięci";
+
+/* Android shared translations */
+"error_occurred" = "Wystąpił błąd";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Zapamiętywanie";
+"memorize_tab_reading" = "Czytanie";
+"reading_progress_active_days" = "aktywne dni";
+"reading_progress_bible_heatmap" = "Przegląd Biblii";
+"reading_progress_calendar" = "Aktywność czytania";
+"reading_progress_chapters_read" = "przeczytane rozdziały";
+"reading_progress_cycle" = "Cykl %d";
+"reading_progress_history_for" = "Postęp czytania dla %1$@";
+"reading_progress_history_no_entries" = "Brak wpisów czytania dla tego wyboru.";
+"reading_progress_history_title" = "Historia czytania";
+"reading_progress_history_version_unknown" = "Nieznana wersja";
+"reading_progress_new_cycle" = "Nowy cykl";
+"reading_progress_new_cycle_confirm" = "Rozpocząć nowy cykl czytania? Śledzenie postępów zacznie się od nowa, a dane poprzedniego cyklu zostaną zachowane.";
+"reading_progress_new_testament" = "Nowy Testament";
+"reading_progress_next_cycle" = "Następny cykl";
+"reading_progress_old_testament" = "Stary Testament";
+"reading_progress_overall" = "%@%% Biblii przeczytane";
+"reading_progress_percent_read_scale" = "Procent\nPrzeczytany";
+"reading_progress_previous_cycle" = "Poprzedni cykl";
+"reading_progress_read_count_scale" = "Liczba\nPrzeczytanych";
+"reading_progress_title" = "Postęp czytania/zapamiętywania";
+
+/* Android shared translations */
+"conf_change_chapter" = "nowych rozdziałów";
+"conf_change_title" = "tytułów";
+"conf_replace_divinename" = "Zastąp imię boże słowem Jahwe";
+"conf_save_playback_settings_to_bookmarks" = "Zapisz ustawienia odtwarzania w zakładkach";
+"conf_speak_auto_bookmark" = "Automatycznie twórz zakładki";
+"conf_speak_footnotes" = "przypisów";
+"conf_speak_sleep_timer" = "Automatyczne uśpienie";
+"conf_speak_synchronize" = "Synchronizuj tekst z mową";
+"forward" = "Przewiń w przód";
+"playback_settings_title" = "Ustawienia odtwarzania";
+"rewind" = "Przewiń wstecz";
+"speak_bookmarks_menu_title" = "Mów od zakładki";
+"speak_next" = "Następny";
+"speak_previous" = "Poprzedni";
+"speak_settings_title" = "Ogólne ustawienia mowy";
+
+/* Android shared translations */
+"sleep_timer_title" = "Czas automatycznego uśpienia (minuty)";
+"speak_beginning_of_passage" = "Wybierz początek fragmentu";
+"speak_ending_of_passage" = "Wybierz koniec fragmentu";
+"speak_ending_verse_must_be_later" = "Końcowy werset musi być po początkowym wersecie";
+"speak_verse_range_to_repeat" = "Wybierz zakres wersetu do powtórzenia";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Język niedostępny.";
+
+/* Android shared translations */
+"description" = "Opis";
+"errorTitle" = "Wystąpił błąd";
+"error_executing_search" = "Niepoprawne zapytanie";
+"export_something" = "Eksportuj %@";
+"import_items" = "Importuj %@";
+"install_zip_module" = "Zainstaluj moduł Biblii";
+"my_document_content_type_label" = "Typ zawartości";
+"my_document_create_title" = "Utwórz nowy dokument";
+"my_document_import_document" = "Importuj pliki jako dokument";
+"my_document_new_name" = "Dokument %d";
+"my_document_new_page_name" = "Strona %1$d";
+"my_document_rename_title" = "Zmień nazwę dokumentu";
+"my_document_save_changes" = "Zapisać zmiany?";
+"okay" = "Potwierdź";
+"overwrite" = "Tak";
+"package_directory" = "Katalog paczek (plików zip)";
+"read" = "Czytaj";
+"reading_plan_set_current_day" = "Ustaw jako obecny dzień…";
+"reading_plan_set_start_date" = "Wybierz datę rozpoczęcia…";
+"search_all_words" = "wszystkie słowa";
+"search_any_word" = "dowolne słowo";
+"search_fts_query" = "surowe zapytanie";
+"search_phrase" = "frazę";
+"search_words_group_prompt" = "Znajdź wersety zawierające";
+"show_notes" = "Wyświetl notatki";
+"speak_book_changed" = "Nowa księga.";
+"speak_chapter_changed" = "Rozdział";
+"success" = "Gotowe";
+"summary" = "Podsumowanie";
+"undo" = "Anuluj";
+
+/* Android shared translations */
+"my_document_no_description" = "Brak opisu";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Nie znaleziono w dokumencie";
+"my_document_cannot_delete_ai_documents" = "Nie można usunąć dokumentów AI, gdy zawierają strony. Najpierw usuń strony.";
+"my_document_create_page_title" = "Nowa strona";
+"my_document_import_empty_selection" = "Nie wybrano żadnych plików do importu";
+"system_items1" = "Więcej";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Należy pobrać Biblię zawierającą numery Stronga i następnie utworzyć indeks w oknie „Szukaj”";
+
+/* Android shared translations */
+"add_model" = "Dodaj model";
+"agent_already_running" = "Agent AI jest już uruchomiony. Poczekaj lub najpierw go zatrzymaj.";
+"agent_log_cancelled" = "Anulowano";
+"agent_log_completed" = "Ukończono";
+"agent_log_executing" = "Wykonywanie: %@";
+"agent_log_idle" = "Asystent AI";
+"agent_log_iteration" = "Iteracja %d";
+"agent_log_model_not_configured" = "Nie skonfigurowano modelu";
+"agent_log_tool_failed" = "Narzędzie %@ nie powiodło się";
+"agent_log_view_raw" = "Wyświetl surowy log LLM";
+"agent_max_iterations_title" = "Maks. iteracji agenta";
+"agent_permission_mode_summary" = "Określa, kiedy wymagane jest potwierdzenie użytkownika przed operacjami zapisu AI";
+"agent_permission_title" = "Uprawnienia agenta";
+"ai_add_provider" = "Dodaj dostawcę";
+"ai_advanced_category" = "Zaawansowane";
+"ai_agent_notification_running" = "Agent AI pracuje…";
+"ai_behavior_category" = "Zachowanie";
+"ai_connection_settings" = "Ustawienia połączenia";
+"ai_disclaimer_approach" = "AndBible używa AI przede wszystkim do przetwarzania tekstu z zainstalowanych przez Ciebie dokumentów — komentarzy, słowników i innych modułów — zamiast polegać na danych treningowych modelu.";
+"ai_disclaimer_dialog_title" = "Narzędzia AI — ważne informacje";
+"ai_disclaimer_intro" = "Narzędzia AI mogą znacznie wzbogacić Twoje studium Biblii i otworzyć nowe sposoby kontaktu z Pismem Świętym.";
+"ai_disclaimer_point1" = "AI może popełniać błędy, w tym „halucynacje\" (pewne podawanie fałszywych lub zmyślonych informacji). Nigdy nie akceptuj jej wyników bezkrytycznie.";
+"ai_disclaimer_point2" = "Odpowiedzi AI mogą odzwierciedlać uprzedzenia z danych treningowych, być celowo mylące lub prezentować określone stanowisko teologiczne jako neutralne lub kompletne.";
+"ai_disclaimer_point3" = "Ponosisz odpowiedzialność za sposób wykorzystania treści generowanych przez AI. Zawsze weryfikuj wyniki w oparciu o Pismo Święte przed ich użyciem.";
+"ai_disclaimer_point4" = "AndBible stara się ułatwiać weryfikację (np. precyzyjne cytaty źródłowe w komentarzach), ale ostateczna odpowiedzialność zawsze spoczywa na Tobie.";
+"ai_disclaimer_point5" = "„Wszystko badajcie, a co szlachetne, zachowujcie.\" (1 Tesaloniczan 5:21)";
+"ai_disclaimer_point6" = "Narzędzia te nie mają duszy ani Ducha Świętego. Są narzędziami do przetwarzania tekstu, a nie duchowymi przewodnikami. Nie nadają się do bezpośredniego przygotowywania kazań, nabożeństw ani innych treści duchowych bez starannego nadzoru człowieka, modlitwy i rozeznania.";
+"ai_disclaimer_point7" = "Używane mądrze, mogą być pomocne dla wielu użytkowników i zastosowań. Jeśli jednak nie jesteś pewien, czy chcesz podjąć to ryzyko, rezygnacja z ich używania jest równie dobrym wyborem.";
+"ai_disclaimer_point8" = "Twoje dane są wysyłane na serwery wybranego przez Ciebie dostawcy AI. Używając klucza API, akceptujesz warunki i politykę prywatności tego dostawcy. Modele hostowane lokalnie są możliwe, ale wymagają większej wiedzy technicznej i mogą nie dawać równie dobrych wyników jak modele komercyjne.";
+"ai_disclaimer_point9" = "Dostawcy AI pobierają opłaty za korzystanie z API. Szacunki kosztów pokazywane w AndBible są przybliżone — zawsze sprawdzaj faktyczne opłaty u swojego dostawcy.";
+"ai_disclaimer_responsibility" = "Są to jednak nadal potężne narzędzia — a z wielką mocą wiąże się wielka odpowiedzialność. Pamiętaj o następujących kwestiach.";
+"ai_disclaimer_warning_title" = "Ważne: Przeczytaj przed użyciem narzędzi AI";
+"ai_doc_choose_page" = "Wybierz stronę dokumentu AI";
+"ai_document_filter_activity_title" = "Dostęp do dokumentów AI";
+"ai_document_regenerate" = "Wygeneruj ponownie";
+"ai_hidden_status" = "ukryty";
+"ai_hide_prompt" = "Ukryj";
+"ai_language_title" = "Język odpowiedzi AI";
+"ai_models_category" = "Modele";
+"ai_models_summary_none" = "Nie skonfigurowano żadnych modeli";
+"ai_provider_api_format" = "Format API";
+"ai_provider_api_key" = "Klucz API";
+"ai_provider_api_key_not_set" = "Klucz API nie jest ustawiony";
+"ai_provider_delete_confirm" = "Usunąć dostawcę „%1$@\"? Prompty używające tego dostawcy powrócą do domyślnego.";
+"ai_provider_edit" = "Edytuj";
+"ai_provider_endpoint" = "Punkt końcowy API";
+"ai_provider_endpoint_description" = "Tylko bazowy URL. AndBible automatycznie dołącza \"/chat/completions\" (format OpenAI) lub \"/messages\" (format Anthropic). Listy modeli są pobierane z \"/models\".";
+"ai_provider_name" = "Nazwa dostawcy";
+"ai_provider_saved" = "Dostawca zapisany";
+"ai_provider_select_type" = "Wybierz typ dostawcy";
+"ai_providers_models_category" = "Dostawcy & Modele";
+"ai_providers_summary_none" = "Nie skonfigurowano żadnych dostawców";
+"ai_regenerate_fresh_run" = "Nowe uruchomienie (ignoruj poprzedni wynik)";
+"ai_regenerate_instructions_hint" = "Dodatkowe instrukcje (opcjonalnie)";
+"ai_regenerate_keep_previous" = "Zachowaj poprzednią wersję";
+"ai_regenerate_prompt_not_found" = "Nie można wygenerować ponownie: nie znaleziono oryginalnego promptu. Mógł zostać usunięty.";
+"ai_regenerate_title" = "Wygeneruj ponownie";
+"ai_settings" = "Ustawienia AI";
+"ai_setup_description" = "AndBible może używać AI do tłumaczenia tekstu Biblii, wyjaśniania wersetów, tworzenia podsumowań i więcej. Aby rozpocząć, skonfiguruj połączenie z dostawcą API zgodnym z OpenAI.";
+"ai_setup_title" = "Skonfiguruj AI";
+"ai_usage_category" = "Użycie";
+"ask_model_before_run_title" = "Pytaj o model przed uruchomieniem";
+"auto_hide_agent_log_title" = "Ukryj panel AI po zakończeniu";
+"bookmarks_and_mynotes_title" = "Zakładki i notatki";
+"built_in_prompt" = "Wbudowany";
+"built_in_prompt_notice" = "To jest wbudowany prompt i nie można go edytować. Użyj opcji „Kopiuj, aby dostosować\", aby utworzyć edytowalną kopię.";
+"category_none" = "Brak kategorii";
+"commentary_max_response_no_limit" = "Brak limitu";
+"commentary_max_response_title" = "Limit rozmiaru odpowiedzi komentarza";
+"copy_to_customize" = "Kopiuj, aby dostosować";
+"custom_agent_system_prompt_title" = "Prompt systemowy agenta";
+"custom_system_prompt_custom" = "Własny";
+"custom_text_transform_system_prompt_title" = "Prompt systemowy transformacji tekstu";
+"default_prompt_ask_question" = "Zadaj pytanie";
+"default_prompt_ask_question_desc" = "Zadaj dowolne pytanie dotyczące wybranego fragmentu";
+"default_prompt_bookmark_annotate" = "Zakładka i adnotacja";
+"default_prompt_bookmark_annotate_desc" = "Tworzy zakładkę z notatką studyjną wygenerowaną przez AI";
+"default_prompt_compare_translations" = "Porównaj tłumaczenia";
+"default_prompt_compare_translations_desc" = "Pokazuje, jak różne zainstalowane tłumaczenia oddają tekst";
+"default_prompt_cross_references" = "Odsyłacze wewnętrzne";
+"default_prompt_cross_references_desc" = "Wyszukuje i wyjaśnia powiązane fragmenty Biblii";
+"default_prompt_custom" = "Niestandardowy prompt";
+"default_prompt_custom_desc" = "Wykonaj niestandardowe zadanie na wybranym fragmencie";
+"default_prompt_custom_template" = "Wykonaj zadanie określone przez użytkownika dla wybranego fragmentu Biblii.";
+"default_prompt_enhance_note" = "Ulepsz notatkę";
+"default_prompt_enhance_note_desc" = "Poprawia gramatykę, przejrzystość i czytelność notatki";
+"default_prompt_explain_verses" = "Wyjaśnij wersety";
+"default_prompt_explain_verses_desc" = "Wyjaśnia znaczenie i kontekst wybranych wersetów";
+"default_prompt_explain_verses_studypad" = "Wyjaśnij wersety → Bloczek notatek";
+"default_prompt_explain_verses_studypad_desc" = "Tworzy Bloczek notatek z objaśnieniami werset po wersecie i zakładkami";
+"default_prompt_study_layout" = "Otwórz układ studyjny";
+"default_prompt_study_layout_desc" = "Otwiera okna komentarza i równoległego tłumaczenia do nauki";
+"default_prompt_summary" = "Podsumowanie";
+"default_prompt_summary_desc" = "Tworzy zwięzłe podsumowanie wybranego tekstu";
+"default_prompt_thematic_study" = "Studium tematyczne";
+"default_prompt_thematic_study_desc" = "Buduje Bloczek notatek z fragmentami i notatkami dotyczącymi głównego tematu";
+"default_prompt_translate_to_language" = "Przetłumacz na %@";
+"default_prompt_translate_to_ui_language_desc" = "Tłumaczy tekst dokumentu na język interfejsu aplikacji";
+"default_prompt_word_study" = "Studium słów";
+"default_prompt_word_study_desc" = "Analizuje oryginalne słowa hebrajskie/greckie";
+"default_prompt_workspace_assistant" = "Asystent obszaru roboczego";
+"default_prompt_workspace_assistant_desc" = "Zarządzaj oknami: twórz, zamykaj, zmieniaj układ, zmieniaj dokumenty";
+"delete_category" = "Usuń kategorię";
+"delete_category_and_prompts" = "Usuń kategorię i jej prompty";
+"delete_category_keep_prompts" = "Przenieś prompty do katalogu głównego i usuń kategorię";
+"doc_type_addons" = "Dodatki";
+"easy_setup_enter_api_key" = "Wprowadź klucz API";
+"easy_setup_success" = "Połączenie udane!";
+"easy_setup_test_connection" = "Testuj połączenie";
+"easy_setup_testing" = "Testowanie…";
+"easy_setup_title" = "Szybka konfiguracja";
+"help_bookmarks_text" = "Zaznacz jakiś tekst i wybierz opcję „zakładka” z menu kontekstowego, aby utworzyć zakładkę. Możesz dodać własne notatki do nowo utworzonej zakładki poprzez stuknięcie wyróżnionego tekstu. W dokumentach, w sekcji komentarze zostanie utworzony dokument „moje notatki” umożliwiający przeglądanie wszystkich notatek w osobnym oknie.";
+"help_memorize_text" = "Widok Zapamiętywanie pomaga uczyć się fragmentów na pamięć. Użyj opcji Rozmycie słów, Przestawienie słów, Wpisywanie słów lub Kolejność słów do ćwiczeń. Udane ćwiczenia automatycznie oznaczają wersety jako zapamiętane (można to wyłączyć).";
+"help_read_more_link" = "Czytaj więcej w podręczniku";
+"hide_category" = "Ukryj w akcjach AI";
+"llm_actions" = "Akcje AI";
+"llm_continue_iterations_message" = "Agent AI osiągnął limit %1$d iteracji bez ukończenia. Kontynuować przez kolejne %2$d iteracje?";
+"llm_continue_iterations_title" = "Kontynuować?";
+"llm_custom_input_price_title" = "Cena wejścia ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Wprowadź identyfikator modelu";
+"llm_custom_output_price_title" = "Cena wyjścia ($/Mtoken)";
+"llm_error_max_iterations" = "Osiągnięto maksymalną liczbę iteracji (%1$d) bez ukończenia";
+"llm_error_unknown" = "Nieznany błąd";
+"llm_note_updated" = "Notatka zaktualizowana";
+"llm_provider_custom" = "Niestandardowy (zgodny z OpenAI)";
+"llm_reset_usage_confirm_message" = "Spowoduje to wyczyszczenie wszystkich skumulowanych danych użycia.";
+"llm_reset_usage_confirm_title" = "Zresetować dane użycia?";
+"llm_reset_usage_title" = "Resetuj dane użycia";
+"llm_usage_summary_default" = "Brak danych użycia";
+"llm_usage_summary_title" = "Użycie tokenów";
+"manage_prompts" = "Zarządzaj promptami AI";
+"manage_tool_permissions_title" = "Uprawnienia narzędzi";
+"model_pricing_summary" = "%1$@ wejście / %2$@ wyjście za Mtoken";
+"model_select_provider" = "Dostawca";
+"model_set_default" = "Ustaw jako domyślny model";
+"move_category_down" = "Przesuń w dół";
+"move_category_up" = "Przesuń w górę";
+"new_category" = "Nowa kategoria";
+"new_category_name" = "Nazwa kategorii";
+"new_prompt" = "Nowy prompt";
+"permission_allow_all" = "Zezwól na wszystko";
+"permission_allow_all_session" = "Zezwól na wszystkie narzędzia w tej sesji";
+"permission_allow_for_session" = "Zezwól na tę sesję";
+"permission_allow_once" = "Zezwól raz";
+"permission_always_allow_confirm" = "Czy na pewno chcesz trwale zezwolić na „%1$@\"?";
+"permission_always_allow_confirm_reset_hint" = "Możesz to zresetować w Ustawieniach AI.";
+"permission_always_ask" = "Zawsze pytaj";
+"permission_ask_once_per_run" = "Pytaj raz na uruchomienie";
+"permission_deny" = "Odmów";
+"permission_deny_all" = "Odmów wszystkiego";
+"permission_option_always_allow" = "Zawsze zezwalaj";
+"permission_option_always_deny" = "Zawsze odmawiaj";
+"permission_status_default" = "Pytaj (domyślnie)";
+"prompt_auto_include_commentaries" = "Automatycznie dołączaj komentarze";
+"prompt_auto_include_documents" = "Automatycznie dołączaj zainstalowane dokumenty";
+"prompt_bible_only" = "Tylko dokumenty biblijne";
+"prompt_category" = "Kategoria";
+"prompt_category_favorites" = "Ulubione";
+"prompt_category_general" = "Ogólne";
+"prompt_category_notes" = "Notatki";
+"prompt_category_study" = "Studium";
+"prompt_category_uncategorized" = "Bez kategorii";
+"prompt_context_note_editor" = "Edytor notatek";
+"prompt_context_text_selection" = "Zaznaczenie tekstu";
+"prompt_context_verse_selection" = "Zaznaczenie wersetów";
+"prompt_context_window_menu" = "Menu okna";
+"prompt_context_workspace_menu" = "Menu obszaru roboczego";
+"prompt_description" = "Opis";
+"prompt_edit_before_run" = "Określ przed uruchomieniem";
+"prompt_is_text_transformation" = "Przekształcenie tekstu";
+"prompt_max_iterations_hint" = "Pozostaw puste dla domyślnego globalnego";
+"prompt_max_iterations_unlimited" = "Bez ograniczeń";
+"prompt_model_default" = "Domyślny";
+"prompt_name" = "Nazwa";
+"prompt_no_document_creation" = "Bez tworzenia dokumentu";
+"prompt_permission_mode" = "Tryb uprawnień";
+"prompt_permission_mode_description" = "Kontroluje, kiedy wymagane jest potwierdzenie użytkownika przed wykonaniem przez AI operacji zapisu. Ustawienia poszczególnych narzędzi poniżej mogą to nadpisać dla konkretnych narzędzi.";
+"prompt_permission_use_default" = "Użyj domyślnego";
+"prompt_show_in" = "Pokaż w";
+"prompt_strict_context_matching" = "Pamięć podręczna zależna od kontekstu";
+"prompt_tab_advanced" = "Zaawansowane";
+"prompt_tab_permissions" = "Uprawnienia";
+"prompt_template" = "Szablon promptu";
+"prompt_tool_permissions" = "Uprawnienia narzędzi";
+"raw_log_delete_all" = "Usuń wszystkie";
+"raw_log_error_indicator" = "Błąd";
+"raw_log_history_empty" = "Brak zapisanych dzienników";
+"raw_log_history_title" = "Historia dziennika AI";
+"raw_log_item_tokens" = "%1$@ wej. / %2$@ wyj.";
+"raw_log_older_1_month" = "Starsze niż 1 miesiąc";
+"raw_log_older_1_week" = "Starsze niż 1 tydzień";
+"raw_log_older_3_months" = "Starsze niż 3 miesiące";
+"raw_log_retention_summary_disabled" = "Wyłączone (zachowaj wszystkie)";
+"raw_log_retention_title" = "Automatyczne usuwanie starych dzienników";
+"reset_all_ai_settings" = "Resetuj wszystkie ustawienia AI";
+"reset_all_ai_settings_confirm_message" = "Spowoduje to wyczyszczenie klucza API, dostawcy, punktu końcowego, modelu oraz przywrócenie wszystkich promptów do wartości domyślnych. Kontynuować?";
+"reset_all_ai_settings_confirm_title" = "Zresetować wszystkie ustawienia AI?";
+"reset_all_permissions" = "Resetuj wszystkie";
+"reset_to_default" = "Przywróć domyślne";
+"save_and_exit" = "Zapisz";
+"select_llm_prompt" = "Wybierz akcję AI";
+"select_model_before_run_title" = "Wybierz model";
+"set_default_model_for_prompt" = "Ustaw jako domyślny model dla tego promptu";
+"show_category" = "Pokaż w akcjach AI";
+"specify_before_run_title" = "Określ zadanie";
+"tool_add_bookmark_note" = "Dodaj notatkę do zakładki";
+"tool_add_label_to_bookmark" = "Dodaj etykietę do zakładki";
+"tool_add_my_document_page" = "Dodaj stronę Mojego dokumentu";
+"tool_add_study_pad_entry" = "Dodaj wpis do bloczka notatek";
+"tool_category_bible_search" = "Biblia i wyszukiwanie";
+"tool_category_bookmarks" = "Zakładki";
+"tool_category_general_books" = "Książki ogólne";
+"tool_category_labels" = "Etykiety";
+"tool_category_my_documents" = "Moje dokumenty";
+"tool_category_study_pads" = "Bloczki notatek";
+"tool_category_windows" = "Okna";
+"tool_create_bookmark" = "Utwórz zakładkę";
+"tool_create_label" = "Utwórz etykietę";
+"tool_create_my_document" = "Utwórz Mój dokument";
+"tool_create_study_pad" = "Utwórz bloczek notatek";
+"tool_create_window" = "Utwórz okno";
+"tool_delete_bookmark" = "Usuń zakładkę";
+"tool_delete_label" = "Usuń etykietę";
+"tool_delete_my_document_page" = "Usuń stronę Mojego dokumentu";
+"tool_edit_my_document_page" = "Edytuj stronę Mojego dokumentu";
+"tool_finish_with_my_document_page" = "Otwórz stronę Mojego dokumentu";
+"tool_finish_with_study_pad" = "Otwórz bloczek notatek";
+"tool_finish_without_document" = "Zakończ bez dokumentu";
+"tool_get_all_labels" = "Wylistuj wszystkie etykiety";
+"tool_get_bookmarks_for_verse" = "Pobierz zakładki dla wersetu";
+"tool_get_bookmarks_with_label" = "Pobierz zakładki z etykietą";
+"tool_get_commentaries" = "Czytaj komentarze";
+"tool_get_dictionary_entry" = "Wyszukaj wpis w słowniku";
+"tool_get_genbook_content" = "Odczytaj zawartość książki ogólnej";
+"tool_get_genbook_keys" = "Wyświetl klucze książki ogólnej";
+"tool_get_installed_documents" = "Wylistuj zainstalowane dokumenty";
+"tool_get_my_document_pages" = "Wylistuj strony Moich dokumentów";
+"tool_get_my_documents" = "Wylistuj Moje dokumenty";
+"tool_get_study_pad_content" = "Czytaj zawartość bloczka notatek";
+"tool_get_verse_content" = "Czytaj treść wersetu";
+"tool_get_windows" = "Wylistuj okna";
+"tool_manage_window" = "Zarządzaj oknem";
+"tool_remove_label_from_bookmark" = "Usuń etykietę z zakładki";
+"tool_search_bible" = "Szukaj w Biblii";
+"tool_search_by_strongs" = "Szukaj według numeru Stronga";
+"tool_search_study_pads" = "Szukaj w bloczkach notatek";
+"tool_set_document_title" = "Ustaw tytuł dokumentu";
+"tool_set_window_document" = "Ustaw dokument w oknie";
+"tool_update_bookmark_note" = "Aktualizuj notatkę zakładki";
+"tool_update_studypad_text_entry" = "Aktualizuj wpis tekstowy bloczka notatek";
+"verse_tip" = "Aby wybrać część bądź kilka wersetów, stuknij i przytrzymaj tekst Biblii";
+"watch_tutorial_video" = "Obejrzyj filmik instruktażowy (po angielsku)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Ponowne generowanie dokumentu AI…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Akceptuję i biorę pełną odpowiedzialność";
+"ai_disclaimer_accept_title" = "Zaakceptuj zastrzeżenie AI";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Ustawienia połączenia AI i promptów";
+"prefs_features_cat" = "Funkcje";

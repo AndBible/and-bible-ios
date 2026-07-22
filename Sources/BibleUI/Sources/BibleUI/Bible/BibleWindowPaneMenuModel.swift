@@ -26,6 +26,7 @@ enum BibleWindowPaneMenuAction: Equatable {
     case copySettingsToWindow(UUID)
     case copySettingsToWorkspace
     case copySettingsToGlobal
+    case openAIActions
     case copyLink
     case close
 }
@@ -101,6 +102,7 @@ struct BibleWindowPaneMenuSnapshot: Equatable {
     let moduleHasStrongs: Bool
     let sectionTitlesEnabled: Bool
     let verseNumbersEnabled: Bool
+    let isAIConfigured: Bool
     let allWindowsInPersistedOrder: [BibleWindowPaneMenuWindowSummary]
     let visibleWindows: [BibleWindowPaneMenuWindowSummary]
 }
@@ -177,6 +179,15 @@ struct BibleWindowPaneMenuModel: Equatable {
 
         if snapshot.isVisible {
             resolvedItems.append(Self.textOptionsMenu(snapshot: snapshot))
+        }
+
+        if snapshot.isVisible && snapshot.isAIConfigured {
+            resolvedItems.append(.action(
+                id: "aiActions",
+                title: Self.localized("llm_actions", default: "AI actions"),
+                systemImage: "sparkles",
+                action: .openAIActions
+            ))
         }
 
         if snapshot.canCopyLink {

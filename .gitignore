@@ -47,6 +47,9 @@ libsword/sword-src/
 libsword/libsword.xcframework
 libsword/libsword.xcframework/
 
+# SWORD runtime caches generated beside test module fixtures
+**/mods.d/modules-conf.cache
+
 # macOS
 .DS_Store
 .AppleDouble

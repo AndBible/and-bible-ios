@@ -125,7 +125,7 @@ import WordType from '@/components/memorize/WordType.vue';
 import WordOrder from '@/components/memorize/WordOrder.vue';
 import TabContainer from '@/components/tabs/TabContainer.vue';
 import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
-import {faBrain, faChartLine, faCheck, faCog, faEllipsisV, faEyeSlash, faKeyboard, faQuestionCircle, faRandom, faSort, faTimes, faVolumeUp} from "@fortawesome/free-solid-svg-icons";
+import {faBrain, faChartLine, faCheck, faCog, faEllipsisV, faEyeSlash, faKeyboard, faQuestionCircle, faRandom, faSort, faVolumeUp} from "@fortawesome/free-solid-svg-icons";
 import {inject} from "vue";
 import {memorizationKey, readingProgressSettingsKey} from "@/types/constants";
 

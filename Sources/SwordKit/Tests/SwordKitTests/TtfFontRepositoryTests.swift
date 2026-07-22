@@ -124,4 +124,117 @@ final class TtfFontRepositoryTests: XCTestCase {
             XCTFail("Expected cantRead, got \(error)")
         }
     }
+
+    /** Verifies startup registration publishes generated configs through the transaction path. */
+    func testTtfFontRepositoryRegistersExistingFontAndInvalidatesCache() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let fontURL = tempDir.appendingPathComponent("ttf/Existing.ttf")
+        let cacheURL = tempDir.appendingPathComponent("mods.d/modules-conf.cache")
+        try FileManager.default.createDirectory(
+            at: fontURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: cacheURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        try Data([0x00, 0x01, 0x00, 0x00]).write(to: fontURL)
+        try Data("cache".utf8).write(to: cacheURL)
+
+        let installed = try TtfFontRepository(swordPath: tempDir.path).registerInstalledFonts()
+
+        XCTAssertEqual(installed, [
+            InstalledTtfFont(
+                fontName: "Existing",
+                moduleName: "TTF_Existing",
+                fileName: "Existing.ttf"
+            ),
+        ])
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: tempDir.appendingPathComponent("mods.d/ttf_existing.conf").path
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
+    }
+
+    /**
+     Verifies recursive registration keeps Android's first filename winner and FontPack ownership.
+
+     Two nested files synthesize the same `TTF_Duplicate` initials, a third nested file is unique,
+     and a root file is already referenced by an ordinary FontPack config. Registration must choose
+     the lexicographically first duplicate path, emit nested `DataPath` metadata for both manual
+     winners, and leave the configured FontPack as the sole owner of its file. Failure means an
+     Android restore becomes unusable after restart or one physical font is exported twice.
+     */
+    func testTtfFontRepositoryRegistersNestedFirstWinnersWithoutClaimingFontPackFiles() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let fixtures: [(String, Data)] = [
+            ("ttf/a/Duplicate.ttf", Data("first".utf8)),
+            ("ttf/b/Duplicate.ttf", Data("second".utf8)),
+            ("ttf/nested/Unique.ttf", Data("unique".utf8)),
+            ("ttf/FontPack.ttf", Data("pack".utf8)),
+        ]
+        for (relativePath, data) in fixtures {
+            let url = tempDir.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: url)
+        }
+        let fontPackConfig = tempDir.appendingPathComponent("mods.d/fontpack.conf")
+        try FileManager.default.createDirectory(
+            at: fontPackConfig.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(
+            """
+            [FontPack]
+            Description=Configured pack
+            Category=And Bible
+            ModDrv=RawGenBook
+            DataPath=./ttf/
+            AndBibleProvidesFont=Pack;FontPack.ttf
+
+            """.utf8
+        ).write(to: fontPackConfig)
+
+        let installed = try TtfFontRepository(swordPath: tempDir.path).registerInstalledFonts()
+
+        XCTAssertEqual(installed, [
+            InstalledTtfFont(
+                fontName: "Duplicate",
+                moduleName: "TTF_Duplicate",
+                fileName: "Duplicate.ttf",
+                relativePath: "a/Duplicate.ttf"
+            ),
+            InstalledTtfFont(
+                fontName: "Unique",
+                moduleName: "TTF_Unique",
+                fileName: "Unique.ttf",
+                relativePath: "nested/Unique.ttf"
+            ),
+        ])
+        let duplicateConfig = try String(
+            contentsOf: tempDir.appendingPathComponent("mods.d/ttf_duplicate.conf"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(duplicateConfig.contains("DataPath=./ttf/a/"))
+        XCTAssertTrue(duplicateConfig.contains("AndBibleProvidesFont=Duplicate;Duplicate.ttf"))
+        let uniqueConfig = try String(
+            contentsOf: tempDir.appendingPathComponent("mods.d/ttf_unique.conf"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(uniqueConfig.contains("DataPath=./ttf/nested/"))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: tempDir.appendingPathComponent("mods.d/ttf_fontpack.conf").path
+        ))
+        XCTAssertEqual(
+            try String(contentsOf: fontPackConfig, encoding: .utf8).contains("[FontPack]"),
+            true
+        )
+    }
 }

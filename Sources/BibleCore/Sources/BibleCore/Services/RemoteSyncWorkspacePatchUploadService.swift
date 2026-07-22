@@ -18,6 +18,21 @@ public enum RemoteSyncWorkspacePatchUploadError: Error, Equatable {
 
     /// The generated temporary SQLite patch database could not be opened for writing.
     case invalidSQLiteDatabase
+
+    /// Durable pending-upload metadata could not be encoded or decoded safely.
+    case invalidPendingUpload
+
+    /// A pending archive belongs to a different destination and requires deliberate reset handling.
+    case pendingUploadDestinationMismatch(stored: String, requested: String)
+
+    /// One preserved Android log row was malformed or stored under the wrong key.
+    case invalidStoredLogEntry(String)
+
+    /// The requested wire schema is not the exact Android Room contract supported by this build.
+    case unsupportedSchemaVersion(Int)
+
+    /// Local and remote patch history exhausted Android's signed 64-bit number range.
+    case patchNumberExhausted
 }
 
 /**
@@ -42,6 +57,12 @@ public struct RemoteSyncWorkspacePatchUploadReport: Sendable, Equatable {
 
     /// Number of `PageManager` rows written into the patch database.
     public let upsertedPageManagerCount: Int
+
+    /// Number of `WorkspaceLabelOverride` rows written into the patch database.
+    public let upsertedLabelOverrideCount: Int
+
+    /// Number of `GlobalTextDisplaySettings` rows written into the patch database.
+    public let upsertedGlobalTextDisplaySettingsCount: Int
 
     /// Number of `DELETE` log entries emitted for rows removed locally.
     public let deletedRowCount: Int
@@ -73,6 +94,8 @@ public struct RemoteSyncWorkspacePatchUploadReport: Sendable, Equatable {
         upsertedWorkspaceCount: Int,
         upsertedWindowCount: Int,
         upsertedPageManagerCount: Int,
+        upsertedLabelOverrideCount: Int = 0,
+        upsertedGlobalTextDisplaySettingsCount: Int = 0,
         deletedRowCount: Int,
         logEntryCount: Int,
         lastUpdated: Int64
@@ -82,6 +105,8 @@ public struct RemoteSyncWorkspacePatchUploadReport: Sendable, Equatable {
         self.upsertedWorkspaceCount = upsertedWorkspaceCount
         self.upsertedWindowCount = upsertedWindowCount
         self.upsertedPageManagerCount = upsertedPageManagerCount
+        self.upsertedLabelOverrideCount = upsertedLabelOverrideCount
+        self.upsertedGlobalTextDisplaySettingsCount = upsertedGlobalTextDisplaySettingsCount
         self.deletedRowCount = deletedRowCount
         self.logEntryCount = logEntryCount
         self.lastUpdated = lastUpdated
@@ -127,17 +152,78 @@ public struct RemoteSyncWorkspacePatchUploadReport: Sendable, Equatable {
  - throws `RemoteSyncWorkspacePatchUploadError.invalidSQLiteDatabase` when the temporary SQLite patch file cannot be created
  - rethrows local filesystem write failures while building the temporary SQLite or gzip files
  - rethrows backend transport or local-file read failures from `RemoteSyncAdapting.upload`
- - rethrows gzip-compression failures from `RemoteSyncArchiveStagingService.gzip(_:)`
+ - rethrows bounded file-to-file gzip failures from `RemoteSyncArchiveStagingService`
 
  Concurrency:
  - this type is not `Sendable`; callers must respect the confinement rules of the supplied
    `ModelContext` and `SettingsStore`
  */
 public final class RemoteSyncWorkspacePatchUploadService {
+    /**
+     Durable metadata for one exact workspace patch archive awaiting local acceptance.
+
+     The file-backed archive survives process termination, while this envelope carries every local
+     acceptance input so retry does not reproject concurrent workspace edits.
+     */
+    private struct PendingUpload: Codable, Equatable {
+        let formatVersion: Int
+        let deviceFolderID: String
+        let sourceDevice: String
+        let patchNumber: Int64
+        let schemaVersion: Int
+        let timestamp: Int64
+        let archiveFileName: String
+        let archiveSHA256: String
+        let archiveSize: Int64
+        let expectedBaselineRevision: Int64
+        let acceptedGeneration: RemoteSyncWorkspaceAcceptedGeneration
+        let updatedLogEntries: [RemoteSyncLogEntry]
+        let uploadedLogEntries: [RemoteSyncLogEntry]?
+        let upsertedWorkspaceCount: Int
+        let upsertedWindowCount: Int
+        let upsertedPageManagerCount: Int
+        let upsertedLabelOverrideCount: Int?
+        let upsertedGlobalTextDisplaySettingsCount: Int?
+        let deletedRowCount: Int
+        let logEntryCount: Int
+        var publicationIdentity: RemoteSyncPublicationIdentity? = nil
+
+        /// Android-compatible archive name derived from the durable patch identity.
+        var patchFileName: String {
+            "\(patchNumber).\(schemaVersion).sqlite3.gz"
+        }
+    }
+
+    /**
+     In-memory workspace generation used only until its archive and acceptance envelope are durable.
+     */
+    private struct UploadGeneration {
+        let deviceFolderID: String
+        let sourceDevice: String
+        let patchNumber: Int64
+        let schemaVersion: Int
+        let timestamp: Int64
+        let expectedBaselineRevision: Int64
+        let acceptedGeneration: RemoteSyncWorkspaceAcceptedGeneration
+        let updatedLogEntries: [RemoteSyncLogEntry]
+        let changeSet: ChangeSet
+    }
+
+    /**
+     Result of the single atomic workspace preflight read boundary.
+     */
+    private enum PreflightResult {
+        case noChanges
+        case pending(PendingUpload)
+        case generation(UploadGeneration)
+    }
+
     private struct ChangeSet {
         let workspaceRowsByKey: [String: RemoteSyncCurrentWorkspaceRow]
         let windowRowsByKey: [String: RemoteSyncCurrentWorkspaceWindowRow]
         let pageManagerRowsByKey: [String: RemoteSyncCurrentWorkspacePageManagerRow]
+        let labelOverrideRowsByKey: [String: RemoteSyncCurrentWorkspaceLabelOverrideRow]
+        let globalTextDisplayRowsByKey: [String: RemoteSyncCurrentGlobalTextDisplaySettingsRow]
         let logEntries: [RemoteSyncLogEntry]
         let updatedEntriesByKey: [String: RemoteSyncLogEntry]
 
@@ -161,11 +247,20 @@ public final class RemoteSyncWorkspacePatchUploadService {
     private static let supportedTableNames: Set<String> = ["Workspace", "Window", "PageManager"]
 
     private let adapter: any RemoteSyncAdapting
+    private let remotePatchReconciler: RemoteSyncRemotePatchReconciler
     private let snapshotService: RemoteSyncWorkspaceSnapshotService
     private let fileManager: FileManager
     private let temporaryDirectory: URL
+    private let outboxDirectory: URL
     private let nowProvider: () -> Int64
     private let jsonEncoder: JSONEncoder
+    private let finalAcceptanceCheckpoint: () throws -> Void
+
+    /// Local-only settings key holding the pending workspace upload envelope.
+    static let pendingUploadKey = "remote_sync.workspaces.pending_upload"
+
+    /// Current durable envelope format.
+    private static let pendingUploadFormatVersion = 2
 
     /**
      Creates a workspace patch upload service for one remote backend.
@@ -179,20 +274,61 @@ public final class RemoteSyncWorkspacePatchUploadService {
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
-    public init(
+    public convenience init(
         adapter: any RemoteSyncAdapting,
         snapshotService: RemoteSyncWorkspaceSnapshotService = RemoteSyncWorkspaceSnapshotService(),
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil,
+        outboxDirectory: URL? = nil,
         nowProvider: @escaping () -> Int64 = {
             Int64(Date().timeIntervalSince1970 * 1000.0)
         }
     ) {
+        self.init(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            fileManager: fileManager,
+            temporaryDirectory: temporaryDirectory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: nowProvider,
+            finalAcceptanceCheckpoint: {}
+        )
+    }
+
+    /**
+     Creates a workspace uploader with an internal final-acceptance checkpoint.
+
+     - Parameters:
+       - adapter: Remote backend adapter used for archive upload.
+       - snapshotService: Strict graph projector and accepted-baseline publisher.
+       - fileManager: File manager used for temporary and durable outbox files.
+       - temporaryDirectory: Scratch directory for SQLite construction.
+       - outboxDirectory: Durable directory that survives process termination.
+       - nowProvider: Millisecond clock used for patch metadata.
+       - finalAcceptanceCheckpoint: Synchronous checkpoint run after every local acceptance mutation
+         but before the atomic batch commits.
+     - Side effects: none until upload is requested.
+     - Failure modes: The initializer cannot fail; checkpoint failures are surfaced by upload.
+     */
+    init(
+        adapter: any RemoteSyncAdapting,
+        snapshotService: RemoteSyncWorkspaceSnapshotService = RemoteSyncWorkspaceSnapshotService(),
+        fileManager: FileManager = .default,
+        temporaryDirectory: URL? = nil,
+        outboxDirectory: URL? = nil,
+        nowProvider: @escaping () -> Int64 = {
+            Int64(Date().timeIntervalSince1970 * 1000.0)
+        },
+        finalAcceptanceCheckpoint: @escaping () throws -> Void
+    ) {
         self.adapter = adapter
+        self.remotePatchReconciler = RemoteSyncRemotePatchReconciler(adapter: adapter)
         self.snapshotService = snapshotService
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
+        self.outboxDirectory = outboxDirectory ?? Self.defaultOutboxDirectory(fileManager: fileManager)
         self.nowProvider = nowProvider
+        self.finalAcceptanceCheckpoint = finalAcceptanceCheckpoint
 
         let jsonEncoder = JSONEncoder()
         jsonEncoder.outputFormatting = [.sortedKeys]
@@ -233,120 +369,296 @@ public final class RemoteSyncWorkspacePatchUploadService {
         bootstrapState: RemoteSyncBootstrapState,
         modelContext: ModelContext,
         settingsStore: SettingsStore,
-        schemaVersion: Int = 1
+        schemaVersion: Int = RemoteSyncCategory.workspaces.currentSchemaVersion
     ) async throws -> RemoteSyncWorkspacePatchUploadReport? {
         guard let deviceFolderID = bootstrapState.deviceFolderID?.trimmingCharacters(in: .whitespacesAndNewlines),
               !deviceFolderID.isEmpty else {
             throw RemoteSyncWorkspacePatchUploadError.missingDeviceFolderID
         }
 
-        let sourceDevice = Self.sourceDeviceName(from: deviceFolderID)
-        let timestamp = nowProvider()
-        let snapshot = snapshotService.snapshotCurrentState(
+        if let resumed = try await resumePendingUploadIfPresent(
+            bootstrapState: bootstrapState,
             modelContext: modelContext,
             settingsStore: settingsStore
-        )
-
-        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
-        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
-        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
-        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
-
-        let existingEntriesByKey = Dictionary(
-            uniqueKeysWithValues: logEntryStore.entries(for: .workspaces).map {
-                (logEntryStore.key(for: .workspaces, entry: $0), $0)
-            }
-        )
-        let hadMissingFingerprintBaseline = existingEntriesByKey.contains { key, entry in
-            guard Self.supportedTableNames.contains(entry.tableName),
-                  entry.type != .delete,
-                  currentRowExists(forKey: key, in: snapshot) else {
-                return false
-            }
-            return fingerprintStore.fingerprint(
-                for: .workspaces,
-                tableName: entry.tableName,
-                entityID1: entry.entityID1,
-                entityID2: entry.entityID2
-            ) == nil
+        ) {
+            return resumed
         }
 
-        let changeSet = buildChangeSet(
-            snapshot: snapshot,
-            existingEntriesByKey: existingEntriesByKey,
-            fingerprintStore: fingerprintStore,
-            timestamp: timestamp,
-            sourceDevice: sourceDevice
-        )
-
-        if changeSet.logEntries.isEmpty {
-            if hadMissingFingerprintBaseline {
-                snapshotService.refreshBaselineFingerprints(
-                    modelContext: modelContext,
-                    settingsStore: settingsStore
-                )
-            }
+        let hasPendingMutations = try settingsStore.performAtomicBatch(in: modelContext) {
+            let mutationJournal = RemoteSyncMutationJournalService(nowProvider: nowProvider)
+            try mutationJournal.recordLocalChanges(
+                for: .workspaces,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            return try !mutationJournal.pendingMutations(
+                for: .workspaces,
+                settingsStore: settingsStore
+            ).isEmpty
+        }
+        guard hasPendingMutations else {
             return nil
         }
 
-        let patchNumber = (patchStatusStore.lastPatchNumber(
-            for: .workspaces,
-            sourceDevice: sourceDevice
-        ) ?? 0) + 1
-        let patchFileName = "\(patchNumber).\(schemaVersion).sqlite3.gz"
+        let sourceDevice = Self.sourceDeviceName(from: deviceFolderID)
+        let remotePatchNumber = try await maximumRemotePatchNumber(deviceFolderID: deviceFolderID)
+        let preflight = try settingsStore.performAtomicBatch(in: modelContext) {
+            try Task.checkCancellation()
+            if let pendingUpload = try loadPendingUpload(settingsStore: settingsStore) {
+                guard pendingUpload.deviceFolderID == deviceFolderID else {
+                    throw RemoteSyncWorkspacePatchUploadError.pendingUploadDestinationMismatch(
+                        stored: pendingUpload.deviceFolderID,
+                        requested: deviceFolderID
+                    )
+                }
+                return PreflightResult.pending(pendingUpload)
+            }
 
-        let databaseURL = temporaryURL(prefix: "remote-sync-workspaces-upload-", suffix: ".sqlite3")
-        let archiveURL = temporaryURL(prefix: "remote-sync-workspaces-upload-", suffix: ".sqlite3.gz")
-        defer {
-            try? fileManager.removeItem(at: databaseURL)
-            try? fileManager.removeItem(at: archiveURL)
+            let wallClockTimestamp = nowProvider()
+            let mutationJournal = RemoteSyncMutationJournalService(nowProvider: nowProvider)
+            try mutationJournal.recordLocalChanges(
+                for: .workspaces,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            let pendingMutations = try mutationJournal.pendingMutations(
+                for: .workspaces,
+                settingsStore: settingsStore
+            )
+            let snapshot = try snapshotService.snapshotCurrentStateStrict(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            try snapshotService.validateExportableFingerprints(in: snapshot)
+            let acceptedBaseline = try snapshotService.storedAcceptedBaseline(
+                settingsStore: settingsStore
+            )
+            let acceptedGeneration = snapshotService.acceptedGeneration(
+                from: snapshot,
+                preserving: acceptedBaseline?.generation
+            )
+            let acceptedRows = acceptedBaseline?.generation.rowsByKey
+            let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+            let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+            let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+            let patchStatuses = try patchStatusStore.statusesStrict(for: .workspaces)
+            let existingEntriesByKey = Dictionary(
+                uniqueKeysWithValues: try strictLogEntries(
+                    settingsStore: settingsStore,
+                    logEntryStore: logEntryStore
+                ).map {
+                    (logEntryStore.key(for: .workspaces, entry: $0), $0)
+                }
+            )
+            let progressState = RemoteSyncStateStore(settingsStore: settingsStore)
+                .progressState(for: .workspaces)
+            let timestamp = try RemoteSyncLogicalSequence.nextTimestamp(
+                now: wallClockTimestamp,
+                highWatermarks: existingEntriesByKey.values.map(\.lastUpdated)
+                    + patchStatuses.map(\.appliedDate)
+                    + [progressState.lastPatchWritten, progressState.lastSynchronized].compactMap { $0 }
+            )
+            let changeSet = try buildChangeSet(
+                snapshot: snapshot,
+                acceptedRowsByKey: acceptedRows ?? [:],
+                existingEntriesByKey: existingEntriesByKey,
+                fingerprintStore: fingerprintStore,
+                pendingMutations: pendingMutations,
+                timestamp: timestamp,
+                sourceDevice: sourceDevice
+            )
+
+            if changeSet.logEntries.isEmpty {
+                if acceptedBaseline == nil {
+                    try snapshotService.acceptBaselineFingerprints(
+                        acceptedGeneration,
+                        settingsStore: settingsStore,
+                        expectedRevision: 0
+                    )
+                }
+                return PreflightResult.noChanges
+            }
+
+            let localPatchNumber = patchStatuses
+                .filter { $0.sourceDevice == sourceDevice }
+                .map(\.patchNumber)
+                .max() ?? 0
+            let patchNumber: Int64
+            do {
+                patchNumber = try RemoteSyncPublicationIdentity.nextPatchNumber(
+                    after: [localPatchNumber, remotePatchNumber]
+                )
+            } catch {
+                throw RemoteSyncWorkspacePatchUploadError.patchNumberExhausted
+            }
+            return PreflightResult.generation(
+                UploadGeneration(
+                    deviceFolderID: deviceFolderID,
+                    sourceDevice: sourceDevice,
+                    patchNumber: patchNumber,
+                    schemaVersion: schemaVersion,
+                    timestamp: timestamp,
+                    expectedBaselineRevision: acceptedBaseline?.revision ?? 0,
+                    acceptedGeneration: acceptedGeneration,
+                    updatedLogEntries: changeSet.updatedEntriesByKey.values.sorted(by: Self.logEntrySort),
+                    changeSet: changeSet
+                )
+            )
         }
 
-        try writePatchDatabase(
-            at: databaseURL,
-            schemaVersion: schemaVersion,
-            changeSet: changeSet
-        )
-        let archiveData = try RemoteSyncArchiveStagingService.gzip(Data(contentsOf: databaseURL))
-        try archiveData.write(to: archiveURL, options: .atomic)
-
-        let uploadedFile = try await adapter.upload(
-            name: patchFileName,
-            fileURL: archiveURL,
-            parentID: deviceFolderID,
-            contentType: NextCloudSyncAdapter.gzipMimeType
-        )
-
-        logEntryStore.replaceEntries(
-            changeSet.updatedEntriesByKey.values.sorted(by: Self.logEntrySort),
-            for: .workspaces
-        )
-        patchStatusStore.addStatus(
-            RemoteSyncPatchStatus(
-                sourceDevice: sourceDevice,
-                patchNumber: patchNumber,
-                sizeBytes: uploadedFile.size,
-                appliedDate: timestamp
-            ),
-            for: .workspaces
-        )
-        var progressState = stateStore.progressState(for: .workspaces)
-        progressState.lastPatchWritten = timestamp
-        stateStore.setProgressState(progressState, for: .workspaces)
-        snapshotService.refreshBaselineFingerprints(
+        let pendingUpload: PendingUpload
+        switch preflight {
+        case .noChanges:
+            return nil
+        case .pending(let existingUpload):
+            pendingUpload = existingUpload
+        case .generation(let generation):
+            pendingUpload = try persistPendingUpload(
+                generation,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
+        return try await finishPendingUpload(
+            pendingUpload,
             modelContext: modelContext,
             settingsStore: settingsStore
         )
+    }
 
+    /**
+     Resumes an already-durable workspace generation without projecting or creating new work.
+
+     Synchronization calls this before inbound replay. Destination mismatches remain fail-closed
+     until an explicit category reset/replacement discards the stale outbox.
+
+     - Parameters:
+       - bootstrapState: Ready bootstrap state naming the current device folder.
+       - modelContext: Clean context shared by workspace graph and settings.
+       - settingsStore: Local store containing any durable pending envelope.
+     - Returns: Accepted upload report, or `nil` when no pending generation exists.
+     - Side effects: May reconcile exact remote bytes and atomically accept one durable generation.
+     - Throws: Rethrows destination, outbox, transport, cancellation, CAS, and acceptance failures.
+     */
+    public func resumePendingUploadIfPresent(
+        bootstrapState: RemoteSyncBootstrapState,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) async throws -> RemoteSyncWorkspacePatchUploadReport? {
+        guard let deviceFolderID = bootstrapState.deviceFolderID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !deviceFolderID.isEmpty else {
+            throw RemoteSyncWorkspacePatchUploadError.missingDeviceFolderID
+        }
+        let pendingUpload = try settingsStore.performAtomicBatch(in: modelContext) {
+            try Task.checkCancellation()
+            return try loadPendingUpload(settingsStore: settingsStore)
+        }
+        guard let pendingUpload else {
+            return nil
+        }
+        guard pendingUpload.deviceFolderID == deviceFolderID else {
+            throw RemoteSyncWorkspacePatchUploadError.pendingUploadDestinationMismatch(
+                stored: pendingUpload.deviceFolderID,
+                requested: deviceFolderID
+            )
+        }
+        return try await finishPendingUpload(
+            pendingUpload,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+    }
+
+    /**
+     Reconciles one durable workspace archive and publishes its exact local acceptance generation.
+
+     - Parameters:
+       - pendingUpload: Persisted outbox envelope to finish.
+       - modelContext: Clean context shared by graph and settings.
+       - settingsStore: Local synchronization metadata store.
+     - Returns: Report reconstructed from the durable generation and accepted remote metadata.
+     - Side effects: Conditionally creates or verifies the remote patch, atomically publishes local
+       metadata, and removes the archive only after local commit.
+     - Throws: Rethrows durable-byte, remote conflict, cancellation, stale-baseline, and atomic failures.
+     */
+    private func finishPendingUpload(
+        _ pendingUpload: PendingUpload,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) async throws -> RemoteSyncWorkspacePatchUploadReport {
+        let archiveURL = try pendingArchiveURL(for: pendingUpload)
+        let reconciliation = try await remotePatchReconciler.reconcile(
+            archive: RemoteSyncDurablePatchArchive(
+                fileName: pendingUpload.patchFileName,
+                fileURL: archiveURL,
+                sha256: pendingUpload.archiveSHA256,
+                size: pendingUpload.archiveSize,
+                parentID: pendingUpload.deviceFolderID,
+                contentType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
+        let uploadedFile: RemoteSyncFile
+        switch reconciliation {
+        case .created(let file), .matchedExisting(let file):
+            uploadedFile = file
+        }
+        try Task.checkCancellation()
+
+        try settingsStore.performAtomicBatch(in: modelContext) {
+            guard try loadPendingUpload(settingsStore: settingsStore) == pendingUpload else {
+                throw RemoteSyncWorkspacePatchUploadError.invalidPendingUpload
+            }
+            let currentSnapshot = try snapshotService.snapshotCurrentStateStrict(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            try snapshotService.validateExportableFingerprints(in: currentSnapshot)
+            try RemoteSyncMutationJournalService().mergeAcceptedLogEntries(
+                acceptedEntries: pendingUpload.updatedLogEntries,
+                uploadedEntries: pendingUpload.uploadedLogEntries ?? pendingUpload.updatedLogEntries.filter {
+                    $0.lastUpdated == pendingUpload.timestamp && $0.sourceDevice == pendingUpload.sourceDevice
+                },
+                acceptedFingerprints: pendingUpload.acceptedGeneration.fingerprintsByKey,
+                currentFingerprints: currentSnapshot.fingerprintsByKey,
+                category: .workspaces,
+                settingsStore: settingsStore
+            )
+            try RemoteSyncPatchStatusStore(settingsStore: settingsStore).addStatusStrict(
+                RemoteSyncPatchStatus(
+                    sourceDevice: pendingUpload.sourceDevice,
+                    patchNumber: pendingUpload.patchNumber,
+                    sizeBytes: uploadedFile.size,
+                    appliedDate: uploadedFile.timestamp
+                ),
+                for: .workspaces
+            )
+            let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+            settingsStore.setString(
+                stateStore.scopedKey("lastPatchWritten", category: .workspaces),
+                value: String(pendingUpload.timestamp)
+            )
+            try snapshotService.acceptBaselineFingerprints(
+                pendingUpload.acceptedGeneration,
+                settingsStore: settingsStore,
+                expectedRevision: pendingUpload.expectedBaselineRevision
+            )
+            settingsStore.remove(Self.pendingUploadKey)
+            try finalAcceptanceCheckpoint()
+        }
+
+        try? fileManager.removeItem(at: archiveURL)
         return RemoteSyncWorkspacePatchUploadReport(
             uploadedFile: uploadedFile,
-            patchNumber: patchNumber,
-            upsertedWorkspaceCount: changeSet.workspaceRowsByKey.count,
-            upsertedWindowCount: changeSet.windowRowsByKey.count,
-            upsertedPageManagerCount: changeSet.pageManagerRowsByKey.count,
-            deletedRowCount: changeSet.deletedRowCount,
-            logEntryCount: changeSet.logEntries.count,
-            lastUpdated: timestamp
+            patchNumber: pendingUpload.patchNumber,
+            upsertedWorkspaceCount: pendingUpload.upsertedWorkspaceCount,
+            upsertedWindowCount: pendingUpload.upsertedWindowCount,
+            upsertedPageManagerCount: pendingUpload.upsertedPageManagerCount,
+            upsertedLabelOverrideCount: pendingUpload.upsertedLabelOverrideCount ?? 0,
+            upsertedGlobalTextDisplaySettingsCount:
+                pendingUpload.upsertedGlobalTextDisplaySettingsCount ?? 0,
+            deletedRowCount: pendingUpload.deletedRowCount,
+            logEntryCount: pendingUpload.logEntryCount,
+            lastUpdated: pendingUpload.timestamp
         )
     }
 
@@ -355,108 +667,242 @@ public final class RemoteSyncWorkspacePatchUploadService {
 
      - Parameters:
        - snapshot: Current local workspace state projected into Android-shaped rows.
+       - acceptedRowsByKey: Durable accepted-row identities used to detect baseline rows deleted locally.
        - existingEntriesByKey: Existing Android `LogEntry` baseline keyed by Android composite key.
        - fingerprintStore: Local fingerprint store used to compare current rows against the last uploaded baseline.
        - timestamp: Millisecond timestamp to assign to any emitted outbound `LogEntry` rows.
        - sourceDevice: Local source-device folder name that should own the outbound patch rows.
      - Returns: Sparse change set containing upserted rows, delete entries, and the updated local metadata baseline.
      - Side effects: none.
-     - Failure modes: This helper cannot fail.
+     - Throws: `RemoteSyncWorkspaceSnapshotError.missingProjectedFingerprint` when an exportable
+       row has no hash; strict settings failures are surfaced by the enclosing preflight batch.
      */
     private func buildChangeSet(
         snapshot: RemoteSyncWorkspaceCurrentSnapshot,
+        acceptedRowsByKey: [String: RemoteSyncWorkspaceAcceptedRowIdentity],
         existingEntriesByKey: [String: RemoteSyncLogEntry],
         fingerprintStore: RemoteSyncRowFingerprintStore,
+        pendingMutations: [String: RemoteSyncPendingMutation],
         timestamp: Int64,
         sourceDevice: String
-    ) -> ChangeSet {
+    ) throws -> ChangeSet {
         var workspaceRowsByKey: [String: RemoteSyncCurrentWorkspaceRow] = [:]
         var windowRowsByKey: [String: RemoteSyncCurrentWorkspaceWindowRow] = [:]
         var pageManagerRowsByKey: [String: RemoteSyncCurrentWorkspacePageManagerRow] = [:]
+        var labelOverrideRowsByKey: [String: RemoteSyncCurrentWorkspaceLabelOverrideRow] = [:]
+        var globalTextDisplayRowsByKey: [String: RemoteSyncCurrentGlobalTextDisplaySettingsRow] = [:]
         var logEntries: [RemoteSyncLogEntry] = []
         var updatedEntriesByKey = existingEntriesByKey
 
         for (key, row) in snapshot.workspaceRowsByKey.sorted(by: { $0.key < $1.key }) {
+            guard !snapshot.suppressedKeys.contains(key) else {
+                continue
+            }
+            guard let currentFingerprint = snapshot.fingerprintsByKey[key] else {
+                throw RemoteSyncWorkspaceSnapshotError.missingProjectedFingerprint(key)
+            }
             guard shouldUploadCurrentRow(
                 key: key,
-                currentFingerprint: snapshot.fingerprintsByKey[key],
+                currentFingerprint: currentFingerprint,
+                hasPendingMutation: pendingMutations[key] != nil,
                 existingEntriesByKey: existingEntriesByKey,
                 fingerprintStore: fingerprintStore
             ) else {
                 continue
             }
-            let entry = RemoteSyncLogEntry(
-                tableName: "Workspace",
-                entityID1: .blob(RemoteSyncWorkspaceSnapshotService.uuidBlob(row.id)),
-                entityID2: .text(""),
+            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: currentFingerprint,
                 type: .upsert,
-                lastUpdated: timestamp,
-                sourceDevice: sourceDevice
-            )
+                category: .workspaces,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: "Workspace",
+                    entityID1: .blob(RemoteSyncWorkspaceSnapshotService.uuidBlob(row.id)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             workspaceRowsByKey[key] = row
             logEntries.append(entry)
             updatedEntriesByKey[key] = entry
         }
 
         for (key, row) in snapshot.windowRowsByKey.sorted(by: { $0.key < $1.key }) {
+            guard !snapshot.suppressedKeys.contains(key) else {
+                continue
+            }
+            guard let currentFingerprint = snapshot.fingerprintsByKey[key] else {
+                throw RemoteSyncWorkspaceSnapshotError.missingProjectedFingerprint(key)
+            }
             guard shouldUploadCurrentRow(
                 key: key,
-                currentFingerprint: snapshot.fingerprintsByKey[key],
+                currentFingerprint: currentFingerprint,
+                hasPendingMutation: pendingMutations[key] != nil,
                 existingEntriesByKey: existingEntriesByKey,
                 fingerprintStore: fingerprintStore
             ) else {
                 continue
             }
-            let entry = RemoteSyncLogEntry(
-                tableName: "Window",
-                entityID1: .blob(RemoteSyncWorkspaceSnapshotService.uuidBlob(row.id)),
-                entityID2: .text(""),
+            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: currentFingerprint,
                 type: .upsert,
-                lastUpdated: timestamp,
-                sourceDevice: sourceDevice
-            )
+                category: .workspaces,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: "Window",
+                    entityID1: .blob(RemoteSyncWorkspaceSnapshotService.uuidBlob(row.id)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             windowRowsByKey[key] = row
             logEntries.append(entry)
             updatedEntriesByKey[key] = entry
         }
 
         for (key, row) in snapshot.pageManagerRowsByKey.sorted(by: { $0.key < $1.key }) {
+            guard !snapshot.suppressedKeys.contains(key) else {
+                continue
+            }
+            guard let currentFingerprint = snapshot.fingerprintsByKey[key] else {
+                throw RemoteSyncWorkspaceSnapshotError.missingProjectedFingerprint(key)
+            }
             guard shouldUploadCurrentRow(
                 key: key,
-                currentFingerprint: snapshot.fingerprintsByKey[key],
+                currentFingerprint: currentFingerprint,
+                hasPendingMutation: pendingMutations[key] != nil,
                 existingEntriesByKey: existingEntriesByKey,
                 fingerprintStore: fingerprintStore
             ) else {
                 continue
             }
-            let entry = RemoteSyncLogEntry(
-                tableName: "PageManager",
-                entityID1: .blob(RemoteSyncWorkspaceSnapshotService.uuidBlob(row.windowID)),
-                entityID2: .text(""),
+            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: currentFingerprint,
                 type: .upsert,
-                lastUpdated: timestamp,
-                sourceDevice: sourceDevice
-            )
+                category: .workspaces,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: "PageManager",
+                    entityID1: .blob(RemoteSyncWorkspaceSnapshotService.uuidBlob(row.windowID)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             pageManagerRowsByKey[key] = row
             logEntries.append(entry)
             updatedEntriesByKey[key] = entry
         }
 
-        for (key, entry) in existingEntriesByKey.sorted(by: { $0.key < $1.key }) {
-            guard Self.supportedTableNames.contains(entry.tableName), entry.type != .delete else {
+        for (key, row) in snapshot.labelOverrideRowsByKey.sorted(by: { $0.key < $1.key }) {
+            guard !snapshot.suppressedKeys.contains(key) else { continue }
+            guard let currentFingerprint = snapshot.fingerprintsByKey[key] else {
+                throw RemoteSyncWorkspaceSnapshotError.missingProjectedFingerprint(key)
+            }
+            guard shouldUploadCurrentRow(
+                key: key,
+                currentFingerprint: currentFingerprint,
+                hasPendingMutation: pendingMutations[key] != nil,
+                existingEntriesByKey: existingEntriesByKey,
+                fingerprintStore: fingerprintStore
+            ) else {
+                continue
+            }
+            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: currentFingerprint,
+                type: .upsert,
+                category: .workspaces,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                tableName: "WorkspaceLabelOverride",
+                entityID1: .blob(RemoteSyncWorkspaceSnapshotService.uuidBlob(row.workspaceID)),
+                entityID2: .blob(RemoteSyncWorkspaceSnapshotService.uuidBlob(row.labelID)),
+                type: .upsert,
+                lastUpdated: timestamp,
+                sourceDevice: sourceDevice
+            )
+            labelOverrideRowsByKey[key] = row
+            logEntries.append(entry)
+            updatedEntriesByKey[key] = entry
+        }
+
+        for (key, row) in snapshot.globalTextDisplayRowsByKey.sorted(by: { $0.key < $1.key }) {
+            guard !snapshot.suppressedKeys.contains(key) else { continue }
+            guard let currentFingerprint = snapshot.fingerprintsByKey[key] else {
+                throw RemoteSyncWorkspaceSnapshotError.missingProjectedFingerprint(key)
+            }
+            guard shouldUploadCurrentRow(
+                key: key,
+                currentFingerprint: currentFingerprint,
+                hasPendingMutation: pendingMutations[key] != nil,
+                existingEntriesByKey: existingEntriesByKey,
+                fingerprintStore: fingerprintStore
+            ) else {
+                continue
+            }
+            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: currentFingerprint,
+                type: .upsert,
+                category: .workspaces,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                tableName: "GlobalTextDisplaySettings",
+                entityID1: .blob(RemoteSyncWorkspaceSnapshotService.uuidBlob(row.id)),
+                entityID2: .text(""),
+                type: .upsert,
+                lastUpdated: timestamp,
+                sourceDevice: sourceDevice
+            )
+            globalTextDisplayRowsByKey[key] = row
+            logEntries.append(entry)
+            updatedEntriesByKey[key] = entry
+        }
+
+        let acceptedDeletionCandidates = acceptedRowsByKey.mapValues { identity in
+            RemoteSyncLogEntry(
+                tableName: identity.tableName,
+                entityID1: identity.entityID1,
+                entityID2: identity.entityID2,
+                type: .upsert,
+                lastUpdated: 0,
+                sourceDevice: sourceDevice
+            )
+        }.merging(existingEntriesByKey) { _, logEntry in logEntry }
+
+        for (key, entry) in acceptedDeletionCandidates.sorted(by: { $0.key < $1.key }) {
+            guard !snapshot.suppressedKeys.contains(key) else {
+                continue
+            }
+            guard Self.supportedTableNames.contains(entry.tableName) else {
                 continue
             }
             guard !currentRowExists(forKey: key, in: snapshot) else {
                 continue
             }
-            let deleteEntry = RemoteSyncLogEntry(
-                tableName: entry.tableName,
-                entityID1: entry.entityID1,
-                entityID2: entry.entityID2,
+            guard entry.type != .delete || acceptedRowsByKey[key] != nil || pendingMutations[key] != nil else {
+                continue
+            }
+            let deleteEntry = try RemoteSyncMutationJournalService().entryForUpload(
+                key: key,
+                stateFingerprint: nil,
                 type: .delete,
-                lastUpdated: timestamp,
-                sourceDevice: sourceDevice
-            )
+                category: .workspaces,
+                pendingMutations: pendingMutations
+            ) ?? RemoteSyncLogEntry(
+                    tableName: entry.tableName,
+                    entityID1: entry.entityID1,
+                    entityID2: entry.entityID2,
+                    type: .delete,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                )
             logEntries.append(deleteEntry)
             updatedEntriesByKey[key] = deleteEntry
         }
@@ -465,21 +911,332 @@ public final class RemoteSyncWorkspacePatchUploadService {
             workspaceRowsByKey: workspaceRowsByKey,
             windowRowsByKey: windowRowsByKey,
             pageManagerRowsByKey: pageManagerRowsByKey,
+            labelOverrideRowsByKey: labelOverrideRowsByKey,
+            globalTextDisplayRowsByKey: globalTextDisplayRowsByKey,
             logEntries: logEntries.sorted(by: Self.logEntrySort),
             updatedEntriesByKey: updatedEntriesByKey
         )
     }
 
     /**
+     Reads every preserved workspace log row without dropping malformed metadata.
+
+     - Parameters:
+       - settingsStore: Store containing category-scoped log rows.
+       - logEntryStore: Canonical log-key encoder for key/payload validation.
+     - Returns: Complete decoded workspace log history.
+     - Side effects: Reads settings rows inside the caller's atomic preflight.
+     - Throws: `invalidStoredLogEntry` for malformed JSON or a key/payload mismatch.
+     */
+    private func strictLogEntries(
+        settingsStore: SettingsStore,
+        logEntryStore: RemoteSyncLogEntryStore
+    ) throws -> [RemoteSyncLogEntry] {
+        try settingsStore.entries(withPrefix: logEntryStore.prefix(for: .workspaces)).map { entry in
+            guard let data = entry.value.data(using: .utf8),
+                  let logEntry = try? JSONDecoder().decode(RemoteSyncLogEntry.self, from: data),
+                  entry.key == logEntryStore.key(for: .workspaces, entry: logEntry) else {
+                throw RemoteSyncWorkspacePatchUploadError.invalidStoredLogEntry(entry.key)
+            }
+            return logEntry
+        }
+    }
+
+    /**
+     Replaces workspace log metadata with one fully encoded accepted generation.
+
+     - Parameters:
+       - entries: Exact accepted log rows from the durable outbox.
+       - settingsStore: Store receiving the replacement.
+     - Side effects: Removes prior category log rows and stages encoded replacements.
+     - Throws: Rethrows JSON encoding failures; settings failures invalidate acceptance atomically.
+     */
+    private func replaceLogEntriesStrict(
+        _ entries: [RemoteSyncLogEntry],
+        settingsStore: SettingsStore
+    ) throws {
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        for entry in settingsStore.entries(withPrefix: logEntryStore.prefix(for: .workspaces)) {
+            settingsStore.remove(entry.key)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        for entry in entries {
+            let data = try encoder.encode(entry)
+            settingsStore.setString(
+                logEntryStore.key(for: .workspaces, entry: entry),
+                value: String(decoding: data, as: UTF8.self)
+            )
+        }
+    }
+
+    /**
+     Returns the highest Android patch filename currently present in this device folder.
+
+     - Parameter deviceFolderID: Ready remote device-folder identifier.
+     - Returns: Highest valid Android patch number, or zero when none exists.
+     - Side effects: Performs one strict remote folder listing.
+     - Throws: Rethrows cancellation and backend listing failures.
+     */
+    private func maximumRemotePatchNumber(deviceFolderID: String) async throws -> Int64 {
+        try Task.checkCancellation()
+        let files = try await adapter.listFiles(
+            parentIDs: [deviceFolderID],
+            name: nil,
+            mimeType: nil,
+            modifiedAtLeast: nil
+        )
+        try Task.checkCancellation()
+        return files.compactMap {
+            RemoteSyncPatchDiscoveryService.parsePatchFileName($0.name)?.patchNumber
+        }.max() ?? 0
+    }
+
+    /**
+     Builds and durably records one exact workspace archive before remote transport begins.
+
+     - Parameters:
+       - generation: Atomic preflight generation to serialize.
+       - modelContext: Clean context shared by the graph and settings store.
+       - settingsStore: Local-only store receiving the durable pending-upload envelope.
+     - Returns: Durable pending upload whose archive bytes and acceptance generation are fixed.
+     - Side effects: Writes a temporary SQLite database, atomically writes a durable gzip archive,
+       and commits one pending-upload setting before returning.
+     - Throws: Rethrows SQLite, JSON, compression, filesystem, encoding, and atomic settings failures.
+     */
+    private func persistPendingUpload(
+        _ generation: UploadGeneration,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> PendingUpload {
+        let databaseURL = temporaryURL(prefix: "remote-sync-workspaces-upload-", suffix: ".sqlite3")
+        defer { try? fileManager.removeItem(at: databaseURL) }
+
+        try writePatchDatabase(
+            at: databaseURL,
+            schemaVersion: generation.schemaVersion,
+            changeSet: generation.changeSet
+        )
+        try fileManager.createDirectory(
+            at: outboxDirectory,
+            withIntermediateDirectories: true
+        )
+        let archiveFileName = "workspaces-\(UUID().uuidString.lowercased()).sqlite3.gz"
+        let archiveURL = outboxDirectory.appendingPathComponent(archiveFileName, isDirectory: false)
+        var keepsArchive = false
+        defer {
+            if !keepsArchive {
+                try? fileManager.removeItem(at: archiveURL)
+            }
+        }
+        let archiveFingerprint = try RemoteSyncArchiveStagingService.gzipPatchDatabase(
+            at: databaseURL,
+            to: archiveURL
+        )
+
+        var pendingUpload = PendingUpload(
+            formatVersion: Self.pendingUploadFormatVersion,
+            deviceFolderID: generation.deviceFolderID,
+            sourceDevice: generation.sourceDevice,
+            patchNumber: generation.patchNumber,
+            schemaVersion: generation.schemaVersion,
+            timestamp: generation.timestamp,
+            archiveFileName: archiveFileName,
+            archiveSHA256: archiveFingerprint.sha256,
+            archiveSize: archiveFingerprint.byteCount,
+            expectedBaselineRevision: generation.expectedBaselineRevision,
+            acceptedGeneration: generation.acceptedGeneration,
+            updatedLogEntries: generation.updatedLogEntries,
+            uploadedLogEntries: generation.changeSet.logEntries,
+            upsertedWorkspaceCount: generation.changeSet.workspaceRowsByKey.count,
+            upsertedWindowCount: generation.changeSet.windowRowsByKey.count,
+            upsertedPageManagerCount: generation.changeSet.pageManagerRowsByKey.count,
+            upsertedLabelOverrideCount: generation.changeSet.labelOverrideRowsByKey.count,
+            upsertedGlobalTextDisplaySettingsCount:
+                generation.changeSet.globalTextDisplayRowsByKey.count,
+            deletedRowCount: generation.changeSet.deletedRowCount,
+            logEntryCount: generation.changeSet.logEntries.count
+        )
+        pendingUpload.publicationIdentity = try RemoteSyncPublicationIdentity.patch(
+            category: .workspaces,
+            destinationID: pendingUpload.deviceFolderID,
+            sourceDevice: pendingUpload.sourceDevice,
+            patchNumber: pendingUpload.patchNumber,
+            schemaVersion: pendingUpload.schemaVersion,
+            remoteFileName: pendingUpload.patchFileName,
+            archiveFileName: pendingUpload.archiveFileName,
+            archiveSHA256: pendingUpload.archiveSHA256,
+            archiveSize: pendingUpload.archiveSize,
+            rowCounts: Self.publicationRowCounts(for: pendingUpload),
+            acceptancePayload: pendingUpload
+        )
+
+        var selectedUpload = pendingUpload
+        do {
+            try settingsStore.performAtomicBatch(in: modelContext) {
+                if let existingUpload = try loadPendingUpload(settingsStore: settingsStore) {
+                    guard existingUpload.deviceFolderID == generation.deviceFolderID else {
+                        throw RemoteSyncWorkspacePatchUploadError.pendingUploadDestinationMismatch(
+                            stored: existingUpload.deviceFolderID,
+                            requested: generation.deviceFolderID
+                        )
+                    }
+                    selectedUpload = existingUpload
+                } else {
+                    let data = try jsonEncoder.encode(pendingUpload)
+                    settingsStore.setString(
+                        Self.pendingUploadKey,
+                        value: String(decoding: data, as: UTF8.self)
+                    )
+                }
+            }
+        } catch {
+            throw error
+        }
+        if selectedUpload == pendingUpload {
+            keepsArchive = true
+        }
+        return selectedUpload
+    }
+
+    /**
+     Loads the durable pending workspace-upload envelope when one exists.
+
+     - Parameter settingsStore: Local-only store containing the envelope.
+     - Returns: Decoded pending upload, or `nil` when no upload awaits acceptance.
+     - Side effects: Reads one local setting row.
+     - Throws: `RemoteSyncWorkspacePatchUploadError.invalidPendingUpload` for malformed or future
+       envelope data.
+     */
+    private func loadPendingUpload(settingsStore: SettingsStore) throws -> PendingUpload? {
+        guard let rawValue = settingsStore.getString(Self.pendingUploadKey) else {
+            return nil
+        }
+        guard let data = rawValue.data(using: .utf8),
+              let pendingUpload = try? JSONDecoder().decode(PendingUpload.self, from: data),
+              pendingUpload.formatVersion == Self.pendingUploadFormatVersion else {
+            throw RemoteSyncWorkspacePatchUploadError.invalidPendingUpload
+        }
+        guard let publicationIdentity = pendingUpload.publicationIdentity else {
+            throw RemoteSyncWorkspacePatchUploadError.invalidPendingUpload
+        }
+        var acceptancePayload = pendingUpload
+        acceptancePayload.publicationIdentity = nil
+        do {
+            try publicationIdentity.validate(
+                kind: .patch,
+                category: .workspaces,
+                destinationID: pendingUpload.deviceFolderID,
+                sourceDevice: pendingUpload.sourceDevice,
+                patchNumber: pendingUpload.patchNumber,
+                schemaVersion: pendingUpload.schemaVersion,
+                remoteFileName: pendingUpload.patchFileName,
+                archiveFileName: pendingUpload.archiveFileName,
+                archiveSHA256: pendingUpload.archiveSHA256,
+                archiveSize: pendingUpload.archiveSize,
+                rowCounts: Self.publicationRowCounts(for: pendingUpload),
+                acceptancePayload: acceptancePayload
+            )
+        } catch {
+            throw RemoteSyncWorkspacePatchUploadError.invalidPendingUpload
+        }
+        return pendingUpload
+    }
+
+    /**
+     Returns every operation count bound to one workspace publication.
+
+     - Parameter pendingUpload: Identity-free or decoded workspace outbox envelope.
+     - Returns: Nonempty count dictionary covering every Android workspace Room row family.
+     - Side effects: none.
+     - Failure modes: This deterministic projection cannot fail.
+     */
+    private static func publicationRowCounts(for pendingUpload: PendingUpload) -> [String: Int] {
+        [
+            "workspaces": pendingUpload.upsertedWorkspaceCount,
+            "windows": pendingUpload.upsertedWindowCount,
+            "pageManagers": pendingUpload.upsertedPageManagerCount,
+            "labelOverrides": pendingUpload.upsertedLabelOverrideCount ?? 0,
+            "globalTextDisplaySettings": pendingUpload.upsertedGlobalTextDisplaySettingsCount ?? 0,
+            "deletions": pendingUpload.deletedRowCount,
+            "logEntries": pendingUpload.logEntryCount
+        ]
+    }
+
+    /**
+     Resolves the durable archive path for one pending workspace retry.
+
+     - Parameter pendingUpload: Envelope naming and hashing the expected archive.
+     - Returns: Durable archive URL confined beneath the configured outbox directory.
+     - Side effects: none.
+     - Throws: `invalidPendingUpload` when the manifest contains a path rather than a basename.
+       Byte existence, size, and digest are validated by `RemoteSyncRemotePatchReconciler`.
+     */
+    private func pendingArchiveURL(for pendingUpload: PendingUpload) throws -> URL {
+        guard URL(fileURLWithPath: pendingUpload.archiveFileName).lastPathComponent
+                == pendingUpload.archiveFileName else {
+            throw RemoteSyncWorkspacePatchUploadError.invalidPendingUpload
+        }
+        return outboxDirectory.appendingPathComponent(
+            pendingUpload.archiveFileName,
+            isDirectory: false
+        )
+    }
+
+    /**
+     Deliberately discards a pending archive at a category destination-replacement boundary.
+
+     Reset/re-adoption code must call this before changing the workspace category folder. The
+     accepted fingerprint/log baseline remains untouched, so current rows stay dirty and the next
+     upload builds a fresh patch for the replacement destination.
+
+     - Parameter settingsStore: Local-only store containing any pending upload envelope.
+     - Side effects: Atomically removes the pending envelope, then best-effort deletes its archive.
+     - Throws: Rethrows malformed-envelope and atomic settings failures.
+     */
+    func discardPendingUploadForDestinationReplacement(
+        settingsStore: SettingsStore
+    ) throws {
+        var archiveFileName: String?
+        try settingsStore.performAtomicBatch {
+            archiveFileName = try loadPendingUpload(settingsStore: settingsStore)?.archiveFileName
+            settingsStore.remove(Self.pendingUploadKey)
+        }
+        if let archiveFileName {
+            try? fileManager.removeItem(
+                at: outboxDirectory.appendingPathComponent(archiveFileName, isDirectory: false)
+            )
+        }
+    }
+
+    /**
+     Returns the production durable outbox directory for workspace patches.
+
+     - Parameter fileManager: File manager used to locate Application Support.
+     - Returns: Category-specific Application Support directory, falling back to a stable temporary
+       subdirectory only when the platform exposes no Application Support location.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    static func defaultOutboxDirectory(fileManager: FileManager) -> URL {
+        let root = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        return root
+            .appendingPathComponent("AndBible", isDirectory: true)
+            .appendingPathComponent("RemoteSyncOutbox", isDirectory: true)
+            .appendingPathComponent("Workspaces", isDirectory: true)
+    }
+
+    /**
      Returns whether one current snapshot row should be emitted as an outbound `UPSERT`.
 
-     Missing fingerprints are intentionally treated as unchanged when the row already has a
-     preserved non-delete Android `LogEntry` baseline. That conservative branch prevents a one-time
-     fingerprint migration from generating false-positive uploads for historical restores.
+     A missing fingerprint is treated as upload-needed. Silently accepting a current row without a
+     hash can suppress a real edit, while a redundant Android upsert is idempotent and recoverable.
 
      - Parameters:
        - key: Android composite key for the row.
-       - currentFingerprint: Current stable row fingerprint, if one was computed.
+       - currentFingerprint: Current stable row fingerprint validated during strict projection.
+       - hasPendingMutation: Whether mutation-time journaling recorded this exact row as dirty.
        - existingEntriesByKey: Existing Android `LogEntry` baseline keyed by Android composite key.
        - fingerprintStore: Local fingerprint store used to read the prior baseline for the row.
      - Returns: `true` when the row should be emitted as an outbound upsert.
@@ -488,14 +1245,14 @@ public final class RemoteSyncWorkspacePatchUploadService {
      */
     private func shouldUploadCurrentRow(
         key: String,
-        currentFingerprint: String?,
+        currentFingerprint: String,
+        hasPendingMutation: Bool,
         existingEntriesByKey: [String: RemoteSyncLogEntry],
         fingerprintStore: RemoteSyncRowFingerprintStore
     ) -> Bool {
-        guard let currentFingerprint else {
-            return false
+        if hasPendingMutation {
+            return true
         }
-
         guard let existingEntry = existingEntriesByKey[key] else {
             if let existingFingerprint = fingerprintStore.fingerprint(
                 forLogKey: key,
@@ -520,9 +1277,6 @@ public final class RemoteSyncWorkspacePatchUploadService {
             entityID1: existingEntry.entityID1,
             entityID2: existingEntry.entityID2
         )
-        guard let existingFingerprint else {
-            return false
-        }
         return existingFingerprint != currentFingerprint
     }
 
@@ -540,6 +1294,8 @@ public final class RemoteSyncWorkspacePatchUploadService {
         snapshot.workspaceRowsByKey[key] != nil
             || snapshot.windowRowsByKey[key] != nil
             || snapshot.pageManagerRowsByKey[key] != nil
+            || snapshot.labelOverrideRowsByKey[key] != nil
+            || snapshot.globalTextDisplayRowsByKey[key] != nil
     }
 
     /**
@@ -561,6 +1317,13 @@ public final class RemoteSyncWorkspacePatchUploadService {
         schemaVersion: Int,
         changeSet: ChangeSet
     ) throws {
+        guard schemaVersion == RemoteSyncAndroidDatabaseContract.schemaVersion(for: .workspaces) else {
+            throw RemoteSyncWorkspacePatchUploadError.unsupportedSchemaVersion(schemaVersion)
+        }
+        try fileManager.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         var database: OpaquePointer?
         guard sqlite3_open_v2(
             url.path,
@@ -573,133 +1336,7 @@ public final class RemoteSyncWorkspacePatchUploadService {
         defer { sqlite3_close(database) }
 
         try execute(
-            """
-            PRAGMA user_version = \(schemaVersion);
-            CREATE TABLE Workspace (
-                name TEXT NOT NULL,
-                contentsText TEXT,
-                id BLOB NOT NULL PRIMARY KEY,
-                orderNumber INTEGER NOT NULL DEFAULT 0,
-                unPinnedWeight REAL DEFAULT NULL,
-                maximizedWindowId BLOB,
-                primaryTargetLinksWindowId BLOB DEFAULT NULL,
-                text_display_settings_strongsMode INTEGER DEFAULT NULL,
-                text_display_settings_showMorphology INTEGER DEFAULT NULL,
-                text_display_settings_showFootNotes INTEGER DEFAULT NULL,
-                text_display_settings_showFootNotesInline INTEGER DEFAULT NULL,
-                text_display_settings_expandXrefs INTEGER DEFAULT NULL,
-                text_display_settings_showXrefs INTEGER DEFAULT NULL,
-                text_display_settings_showRedLetters INTEGER DEFAULT NULL,
-                text_display_settings_showSectionTitles INTEGER DEFAULT NULL,
-                text_display_settings_showVerseNumbers INTEGER DEFAULT NULL,
-                text_display_settings_showVersePerLine INTEGER DEFAULT NULL,
-                text_display_settings_showBookmarks INTEGER DEFAULT NULL,
-                text_display_settings_showMyNotes INTEGER DEFAULT NULL,
-                text_display_settings_justifyText INTEGER DEFAULT NULL,
-                text_display_settings_hyphenation INTEGER DEFAULT NULL,
-                text_display_settings_topMargin INTEGER DEFAULT NULL,
-                text_display_settings_fontSize INTEGER DEFAULT NULL,
-                text_display_settings_fontFamily TEXT DEFAULT NULL,
-                text_display_settings_lineSpacing INTEGER DEFAULT NULL,
-                text_display_settings_bookmarksHideLabels TEXT DEFAULT NULL,
-                text_display_settings_showPageNumber INTEGER DEFAULT NULL,
-                text_display_settings_margin_size_marginLeft INTEGER DEFAULT NULL,
-                text_display_settings_margin_size_marginRight INTEGER DEFAULT NULL,
-                text_display_settings_margin_size_maxWidth INTEGER DEFAULT NULL,
-                text_display_settings_colors_dayTextColor INTEGER DEFAULT NULL,
-                text_display_settings_colors_dayBackground INTEGER DEFAULT NULL,
-                text_display_settings_colors_dayNoise INTEGER DEFAULT NULL,
-                text_display_settings_colors_nightTextColor INTEGER DEFAULT NULL,
-                text_display_settings_colors_nightBackground INTEGER DEFAULT NULL,
-                text_display_settings_colors_nightNoise INTEGER DEFAULT NULL,
-                workspace_settings_enableTiltToScroll INTEGER DEFAULT 0,
-                workspace_settings_enableReverseSplitMode INTEGER DEFAULT 0,
-                workspace_settings_autoPin INTEGER DEFAULT 1,
-                workspace_settings_restoreButtonsVisible INTEGER DEFAULT 1,
-                workspace_settings_speakSettings TEXT DEFAULT NULL,
-                workspace_settings_recentLabels TEXT DEFAULT NULL,
-                workspace_settings_autoAssignLabels TEXT DEFAULT NULL,
-                workspace_settings_autoAssignPrimaryLabel BLOB DEFAULT NULL,
-                workspace_settings_studyPadCursors TEXT DEFAULT NULL,
-                workspace_settings_hideCompareDocuments TEXT DEFAULT NULL,
-                workspace_settings_limitAmbiguousModalSize INTEGER DEFAULT 0,
-                workspace_settings_workspaceColor INTEGER DEFAULT NULL
-            );
-            CREATE TABLE "Window" (
-                workspaceId BLOB NOT NULL,
-                isSynchronized INTEGER NOT NULL,
-                isPinMode INTEGER NOT NULL,
-                isLinksWindow INTEGER NOT NULL,
-                id BLOB NOT NULL PRIMARY KEY,
-                orderNumber INTEGER NOT NULL,
-                targetLinksWindowId BLOB DEFAULT NULL,
-                syncGroup INTEGER NOT NULL DEFAULT 0,
-                window_layout_state TEXT NOT NULL,
-                window_layout_weight REAL NOT NULL
-            );
-            CREATE TABLE PageManager (
-                windowId BLOB NOT NULL PRIMARY KEY,
-                currentCategoryName TEXT NOT NULL,
-                jsState TEXT,
-                bible_document TEXT,
-                bible_verse_versification TEXT NOT NULL,
-                bible_verse_bibleBook INTEGER NOT NULL,
-                bible_verse_chapterNo INTEGER NOT NULL,
-                bible_verse_verseNo INTEGER NOT NULL,
-                commentary_document TEXT,
-                commentary_anchorOrdinal INTEGER DEFAULT NULL,
-                commentary_sourceBookAndKey TEXT DEFAULT NULL,
-                dictionary_document TEXT,
-                dictionary_key TEXT,
-                dictionary_anchorOrdinal INTEGER DEFAULT NULL,
-                general_book_document TEXT,
-                general_book_key TEXT,
-                general_book_anchorOrdinal INTEGER DEFAULT NULL,
-                map_document TEXT,
-                map_key TEXT,
-                map_anchorOrdinal INTEGER DEFAULT NULL,
-                text_display_settings_strongsMode INTEGER DEFAULT NULL,
-                text_display_settings_showMorphology INTEGER DEFAULT NULL,
-                text_display_settings_showFootNotes INTEGER DEFAULT NULL,
-                text_display_settings_showFootNotesInline INTEGER DEFAULT NULL,
-                text_display_settings_expandXrefs INTEGER DEFAULT NULL,
-                text_display_settings_showXrefs INTEGER DEFAULT NULL,
-                text_display_settings_showRedLetters INTEGER DEFAULT NULL,
-                text_display_settings_showSectionTitles INTEGER DEFAULT NULL,
-                text_display_settings_showVerseNumbers INTEGER DEFAULT NULL,
-                text_display_settings_showVersePerLine INTEGER DEFAULT NULL,
-                text_display_settings_showBookmarks INTEGER DEFAULT NULL,
-                text_display_settings_showMyNotes INTEGER DEFAULT NULL,
-                text_display_settings_justifyText INTEGER DEFAULT NULL,
-                text_display_settings_hyphenation INTEGER DEFAULT NULL,
-                text_display_settings_topMargin INTEGER DEFAULT NULL,
-                text_display_settings_fontSize INTEGER DEFAULT NULL,
-                text_display_settings_fontFamily TEXT DEFAULT NULL,
-                text_display_settings_lineSpacing INTEGER DEFAULT NULL,
-                text_display_settings_bookmarksHideLabels TEXT DEFAULT NULL,
-                text_display_settings_showPageNumber INTEGER DEFAULT NULL,
-                text_display_settings_margin_size_marginLeft INTEGER DEFAULT NULL,
-                text_display_settings_margin_size_marginRight INTEGER DEFAULT NULL,
-                text_display_settings_margin_size_maxWidth INTEGER DEFAULT NULL,
-                text_display_settings_colors_dayTextColor INTEGER DEFAULT NULL,
-                text_display_settings_colors_dayBackground INTEGER DEFAULT NULL,
-                text_display_settings_colors_dayNoise INTEGER DEFAULT NULL,
-                text_display_settings_colors_nightTextColor INTEGER DEFAULT NULL,
-                text_display_settings_colors_nightBackground INTEGER DEFAULT NULL,
-                text_display_settings_colors_nightNoise INTEGER DEFAULT NULL
-            );
-            CREATE TABLE LogEntry (
-                tableName TEXT NOT NULL,
-                entityId1 BLOB NOT NULL,
-                entityId2 BLOB NOT NULL DEFAULT '',
-                type TEXT NOT NULL,
-                lastUpdated INTEGER NOT NULL,
-                sourceDevice TEXT NOT NULL,
-                PRIMARY KEY (tableName, entityId1, entityId2)
-            );
-            CREATE INDEX index_LogEntry_tableName_entityId1 ON LogEntry (tableName, entityId1);
-            CREATE INDEX index_LogEntry_lastUpdated ON LogEntry (lastUpdated);
-            """,
+            RemoteSyncAndroidDatabaseContract.createSchemaSQL(for: .workspaces),
             in: database
         )
 
@@ -711,6 +1348,14 @@ public final class RemoteSyncWorkspacePatchUploadService {
         }
         for row in changeSet.pageManagerRowsByKey.values.sorted(by: Self.pageManagerSort) {
             try insertPageManagerRow(row, in: database)
+        }
+        for row in changeSet.labelOverrideRowsByKey.values.sorted(by: Self.labelOverrideSort) {
+            try insertWorkspaceLabelOverrideRow(row, in: database)
+        }
+        for row in changeSet.globalTextDisplayRowsByKey.values.sorted(by: {
+            $0.id.uuidString < $1.id.uuidString
+        }) {
+            try insertGlobalTextDisplaySettingsRow(row, in: database)
         }
         for entry in changeSet.logEntries {
             try insertLogEntry(entry, in: database)
@@ -732,7 +1377,30 @@ public final class RemoteSyncWorkspacePatchUploadService {
         _ row: RemoteSyncCurrentWorkspaceRow,
         in database: OpaquePointer
     ) throws {
-        let sql = "INSERT INTO Workspace (name, contentsText, id, orderNumber, unPinnedWeight, maximizedWindowId, primaryTargetLinksWindowId, text_display_settings_strongsMode, text_display_settings_showMorphology, text_display_settings_showFootNotes, text_display_settings_showFootNotesInline, text_display_settings_expandXrefs, text_display_settings_showXrefs, text_display_settings_showRedLetters, text_display_settings_showSectionTitles, text_display_settings_showVerseNumbers, text_display_settings_showVersePerLine, text_display_settings_showBookmarks, text_display_settings_showMyNotes, text_display_settings_justifyText, text_display_settings_hyphenation, text_display_settings_topMargin, text_display_settings_fontSize, text_display_settings_fontFamily, text_display_settings_lineSpacing, text_display_settings_bookmarksHideLabels, text_display_settings_showPageNumber, text_display_settings_margin_size_marginLeft, text_display_settings_margin_size_marginRight, text_display_settings_margin_size_maxWidth, text_display_settings_colors_dayTextColor, text_display_settings_colors_dayBackground, text_display_settings_colors_dayNoise, text_display_settings_colors_nightTextColor, text_display_settings_colors_nightBackground, text_display_settings_colors_nightNoise, workspace_settings_enableTiltToScroll, workspace_settings_enableReverseSplitMode, workspace_settings_autoPin, workspace_settings_restoreButtonsVisible, workspace_settings_speakSettings, workspace_settings_recentLabels, workspace_settings_autoAssignLabels, workspace_settings_autoAssignPrimaryLabel, workspace_settings_studyPadCursors, workspace_settings_hideCompareDocuments, workspace_settings_limitAmbiguousModalSize, workspace_settings_workspaceColor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        let columns = [
+            "name",
+            "contentsText",
+            "id",
+            "orderNumber",
+            "unPinnedWeight",
+            "maximizedWindowId",
+            "primaryTargetLinksWindowId",
+        ] + RemoteSyncWorkspaceTextDisplaySettingsWire.columns() + [
+            "workspace_settings_enableTiltToScroll",
+            "workspace_settings_enableReverseSplitMode",
+            "workspace_settings_autoPin",
+            "workspace_settings_restoreButtonsVisible",
+            "workspace_settings_speakSettings",
+            "workspace_settings_recentLabels",
+            "workspace_settings_autoAssignLabels",
+            "workspace_settings_autoAssignPrimaryLabel",
+            "workspace_settings_studyPadCursors",
+            "workspace_settings_hideCompareDocuments",
+            "workspace_settings_limitAmbiguousModalSize",
+            "workspace_settings_workspaceColor",
+        ]
+        let placeholders = Array(repeating: "?", count: columns.count).joined(separator: ", ")
+        let sql = "INSERT INTO Workspace (\(columns.joined(separator: ", "))) VALUES (\(placeholders))"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncWorkspacePatchUploadError.invalidSQLiteDatabase
@@ -754,7 +1422,12 @@ public final class RemoteSyncWorkspacePatchUploadService {
         index += 1
         Self.bindOptionalUUIDBlob(row.primaryTargetLinksWindowID, to: statement, index: index)
         index += 1
-        try bindTextDisplaySettings(row.textDisplaySettings, to: statement, index: &index)
+        try bindTextDisplaySettings(
+            row.textDisplaySettings,
+            fidelity: row.textDisplayFidelity,
+            to: statement,
+            index: &index
+        )
         try bindWorkspaceSettings(
             row.workspaceSettings,
             speakSettingsJSON: row.speakSettingsJSON,
@@ -820,7 +1493,30 @@ public final class RemoteSyncWorkspacePatchUploadService {
         _ row: RemoteSyncCurrentWorkspacePageManagerRow,
         in database: OpaquePointer
     ) throws {
-        let sql = "INSERT INTO PageManager (windowId, currentCategoryName, jsState, bible_document, bible_verse_versification, bible_verse_bibleBook, bible_verse_chapterNo, bible_verse_verseNo, commentary_document, commentary_anchorOrdinal, commentary_sourceBookAndKey, dictionary_document, dictionary_key, dictionary_anchorOrdinal, general_book_document, general_book_key, general_book_anchorOrdinal, map_document, map_key, map_anchorOrdinal, text_display_settings_strongsMode, text_display_settings_showMorphology, text_display_settings_showFootNotes, text_display_settings_showFootNotesInline, text_display_settings_expandXrefs, text_display_settings_showXrefs, text_display_settings_showRedLetters, text_display_settings_showSectionTitles, text_display_settings_showVerseNumbers, text_display_settings_showVersePerLine, text_display_settings_showBookmarks, text_display_settings_showMyNotes, text_display_settings_justifyText, text_display_settings_hyphenation, text_display_settings_topMargin, text_display_settings_fontSize, text_display_settings_fontFamily, text_display_settings_lineSpacing, text_display_settings_bookmarksHideLabels, text_display_settings_showPageNumber, text_display_settings_margin_size_marginLeft, text_display_settings_margin_size_marginRight, text_display_settings_margin_size_maxWidth, text_display_settings_colors_dayTextColor, text_display_settings_colors_dayBackground, text_display_settings_colors_dayNoise, text_display_settings_colors_nightTextColor, text_display_settings_colors_nightBackground, text_display_settings_colors_nightNoise) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        let columns = [
+            "windowId",
+            "currentCategoryName",
+            "jsState",
+            "bible_document",
+            "bible_verse_versification",
+            "bible_verse_bibleBook",
+            "bible_verse_chapterNo",
+            "bible_verse_verseNo",
+            "commentary_document",
+            "commentary_anchorOrdinal",
+            "commentary_sourceBookAndKey",
+            "dictionary_document",
+            "dictionary_key",
+            "dictionary_anchorOrdinal",
+            "general_book_document",
+            "general_book_key",
+            "general_book_anchorOrdinal",
+            "map_document",
+            "map_key",
+            "map_anchorOrdinal",
+        ] + RemoteSyncWorkspaceTextDisplaySettingsWire.columns()
+        let placeholders = Array(repeating: "?", count: columns.count).joined(separator: ", ")
+        let sql = "INSERT INTO PageManager (\(columns.joined(separator: ", "))) VALUES (\(placeholders))"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncWorkspacePatchUploadError.invalidSQLiteDatabase
@@ -868,8 +1564,79 @@ public final class RemoteSyncWorkspacePatchUploadService {
         index += 1
         Self.bindOptionalInt(row.mapAnchorOrdinal, to: statement, index: index)
         index += 1
-        try bindTextDisplaySettings(row.textDisplaySettings, to: statement, index: &index)
+        try bindTextDisplaySettings(
+            row.textDisplaySettings,
+            fidelity: row.textDisplayFidelity,
+            to: statement,
+            index: &index
+        )
 
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw RemoteSyncWorkspacePatchUploadError.invalidSQLiteDatabase
+        }
+    }
+
+    /**
+     Inserts one Android `WorkspaceLabelOverride` row into a sparse patch database.
+
+     - Parameters:
+       - row: Composite-key label override to serialize.
+       - database: Open writable SQLite database.
+     - Side Effects: Inserts one content row.
+     - Throws: `invalidSQLiteDatabase` when SQLite cannot prepare or execute the insert.
+     */
+    private func insertWorkspaceLabelOverrideRow(
+        _ row: RemoteSyncCurrentWorkspaceLabelOverrideRow,
+        in database: OpaquePointer
+    ) throws {
+        let sql = "INSERT INTO WorkspaceLabelOverride (workspaceId, labelId, overrideMode) VALUES (?, ?, ?)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw RemoteSyncWorkspacePatchUploadError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        Self.bindUUIDBlob(row.workspaceID, to: statement, index: 1)
+        Self.bindUUIDBlob(row.labelID, to: statement, index: 2)
+        Self.bindOptionalInt(row.overrideMode, to: statement, index: 3)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw RemoteSyncWorkspacePatchUploadError.invalidSQLiteDatabase
+        }
+    }
+
+    /**
+     Inserts Android's complete global text-display singleton into a sparse patch database.
+
+     - Parameters:
+       - row: Canonical singleton and all native/fidelity fields.
+       - database: Open writable SQLite database.
+     - Side Effects: Inserts one content row.
+     - Throws: JSON encoding or SQLite preparation/execution failures.
+     */
+    private func insertGlobalTextDisplaySettingsRow(
+        _ row: RemoteSyncCurrentGlobalTextDisplaySettingsRow,
+        in database: OpaquePointer
+    ) throws {
+        let columns = ["id"] + RemoteSyncWorkspaceTextDisplaySettingsWire.columns()
+        let placeholders = Array(repeating: "?", count: columns.count).joined(separator: ", ")
+        let sql = "INSERT INTO GlobalTextDisplaySettings (\(columns.joined(separator: ", "))) VALUES (\(placeholders))"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw RemoteSyncWorkspacePatchUploadError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        var index: Int32 = 1
+        Self.bindUUIDBlob(row.id, to: statement, index: index)
+        index += 1
+        try bindTextDisplaySettings(
+            row.textDisplaySettings,
+            fidelity: row.fidelity,
+            to: statement,
+            index: &index
+        )
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncWorkspacePatchUploadError.invalidSQLiteDatabase
         }
@@ -921,76 +1688,25 @@ public final class RemoteSyncWorkspacePatchUploadService {
      */
     private func bindTextDisplaySettings(
         _ value: TextDisplaySettings?,
+        fidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity,
         to statement: OpaquePointer,
         index: inout Int32
     ) throws {
-        let settings = value
-        Self.bindOptionalInt(settings?.strongsMode, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.showMorphology, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.showFootNotes, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.showFootNotesInline, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.expandXrefs, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.showXrefs, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.showRedLetters, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.showSectionTitles, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.showVerseNumbers, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.showVersePerLine, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.showBookmarks, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.showMyNotes, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.justifyText, to: statement, index: index)
-        index += 1
-        Self.bindOptionalBool(settings?.hyphenation, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.topMargin, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.fontSize, to: statement, index: index)
-        index += 1
-        Self.bindOptionalText(settings?.fontFamily, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.lineSpacing, to: statement, index: index)
-        index += 1
-        if let bookmarksHideLabels = settings?.bookmarksHideLabels {
-            let bookmarksHideLabelsJSON = try encodeUUIDArrayJSON(
-                bookmarksHideLabels,
+        let values: [RemoteSyncSQLiteValue]
+        do {
+            values = try RemoteSyncWorkspaceTextDisplaySettingsWire(
+                settings: value,
+                fidelity: fidelity
+            ).sqliteValues()
+        } catch {
+            throw RemoteSyncWorkspacePatchUploadError.jsonEncodingFailed(
                 field: "text_display_settings_bookmarksHideLabels"
             )
-            Self.bindText(bookmarksHideLabelsJSON, to: statement, index: index)
-        } else {
-            sqlite3_bind_null(statement, index)
         }
-        index += 1
-        Self.bindOptionalBool(settings?.showPageNumber, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.marginLeft, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.marginRight, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.maxWidth, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.dayTextColor, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.dayBackground, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.dayNoise, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.nightTextColor, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.nightBackground, to: statement, index: index)
-        index += 1
-        Self.bindOptionalInt(settings?.nightNoise, to: statement, index: index)
-        index += 1
+        for sqliteValue in values {
+            Self.bindSQLiteValue(sqliteValue, to: statement, index: index)
+            index += 1
+        }
     }
 
     /**
@@ -1263,6 +1979,17 @@ public final class RemoteSyncWorkspacePatchUploadService {
      */
     private static func pageManagerSort(_ lhs: RemoteSyncCurrentWorkspacePageManagerRow, _ rhs: RemoteSyncCurrentWorkspacePageManagerRow) -> Bool {
         lhs.windowID.uuidString < rhs.windowID.uuidString
+    }
+
+    /** Sorts workspace-label overrides by their complete Android composite identity. */
+    private static func labelOverrideSort(
+        _ lhs: RemoteSyncCurrentWorkspaceLabelOverrideRow,
+        _ rhs: RemoteSyncCurrentWorkspaceLabelOverrideRow
+    ) -> Bool {
+        if lhs.workspaceID == rhs.workspaceID {
+            return lhs.labelID.uuidString < rhs.labelID.uuidString
+        }
+        return lhs.workspaceID.uuidString < rhs.workspaceID.uuidString
     }
 
     /**

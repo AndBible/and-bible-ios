@@ -1,4 +1,5 @@
 {
+  "AndBibleUITests/AndBibleUITests/testSingleAppCalculatorGateAndSecuritySettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": "my-notes-single",
   "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": "bookmark-filter",
   "AndBibleUITests/AndBibleUITests/testMyDocumentsScreenOpensFromReaderMenuAndOpensPage": "my-documents-single",
@@ -14,6 +15,6 @@
   "AndBibleUITests/AndBibleUITests/testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink": "baseline",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsICloudToggleDoesNotRequireRestart": "sync-nextcloud-bookmarks-enabled",
-  "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow": "none",
+  "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow": "baseline",
   "AndBibleUITests/AndBibleUITests/testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms": "none"
 }

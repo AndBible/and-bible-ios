@@ -6,6 +6,46 @@ import SwiftData
 import SwordKit
 
 /**
+ Describes the next step after selecting a book in Android's passage chooser.
+
+ Single-chapter books bypass the redundant chapter grid. Verse-oriented flows open chapter one's
+ verse grid, while chapter-oriented flows immediately select chapter one.
+ */
+enum PassageBookSelectionDestination: Equatable, Sendable {
+    /// Continue through the normal chapter grid.
+    case chapterChooser
+
+    /// Open the verse grid for the supplied chapter.
+    case verseChooser(chapter: Int)
+
+    /// Complete selection immediately with the supplied chapter and optional verse.
+    case selection(chapter: Int, verse: Int?)
+
+    /**
+     Resolves Android's book-cell navigation shortcut.
+
+     - Parameters:
+       - book: Selected module-specific book metadata.
+       - navigateToVerse: Whether the caller requires a verse result.
+     - Returns: Direct chapter-one selection/verse routing for one-chapter books, otherwise the
+       normal chapter chooser.
+     - Side Effects: None.
+     - Failure Modes: Non-positive chapter counts are treated as single-chapter metadata so the
+       chooser never renders an empty chapter grid.
+     */
+    static func resolve(
+        book: BookInfo,
+        navigateToVerse: Bool
+    ) -> PassageBookSelectionDestination {
+        guard book.chapterCount <= 1 else { return .chapterChooser }
+        if navigateToVerse {
+            return .verseChooser(chapter: 1)
+        }
+        return .selection(chapter: 1, verse: nil)
+    }
+}
+
+/**
  Grid-based chooser for selecting a book and then drilling down to chapter or verse.
 
  The chooser uses the active module's `BookInfo` list instead of a static canon, so modules with
@@ -420,8 +460,19 @@ public struct BookChooserView: View {
                                 cellSide: metrics.cellSide
                             ) {
                                 isChooserMenuPresented = false
-                                selectedBook = book
-                                selectedChapter = nil
+                                switch PassageBookSelectionDestination.resolve(
+                                    book: book,
+                                    navigateToVerse: navigateToVerse
+                                ) {
+                                case .chapterChooser:
+                                    selectedBook = book
+                                    selectedChapter = nil
+                                case .verseChooser(let chapter):
+                                    selectedBook = book
+                                    selectedChapter = chapter
+                                case .selection(let chapter, let verse):
+                                    onSelect(book.name, chapter, verse)
+                                }
                             }
                         } else {
                             Color.clear

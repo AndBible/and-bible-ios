@@ -1,5 +1,6 @@
 // BibleReaderBookCatalog.swift -- Active Bible book and versification lookup boundary
 
+import BibleCore
 import SwordKit
 
 /**
@@ -18,19 +19,29 @@ struct BibleReaderBookCatalog {
     /// Ordered book list read from the active module's SWORD/JSword-compatible versification.
     private let moduleBookList: [BookInfo]
 
+    /// Whether a non-SWORD active module owns JSword's exact KJVA ordinal domain.
+    private let usesExactKJVAOrdinals: Bool
+
     /**
      Creates a catalog view over the current reader module state.
 
      - Parameters:
        - activeModule: Active Bible module, or `nil` when no Bible module is available.
        - moduleBookList: Book list previously read from `activeModule.getBookList()`.
+       - usesExactKJVAOrdinals: True only for an active Android-compatible SQLite Bible whose
+         source coordinates are defined by JSword KJVA.
      - Side effects: None during construction; lookup methods may query `activeModule`.
      - Failure modes: Empty active-module book lists remain empty so callers do not fall back to a
        static canon while a module is active.
      */
-    init(activeModule: SwordModule?, moduleBookList: [BookInfo]) {
+    init(
+        activeModule: SwordModule?,
+        moduleBookList: [BookInfo],
+        usesExactKJVAOrdinals: Bool = false
+    ) {
         self.activeModule = activeModule
         self.moduleBookList = moduleBookList
+        self.usesExactKJVAOrdinals = usesExactKJVAOrdinals
     }
 
     /// Active ordered books: module books when available, the static fallback only with no module.
@@ -38,7 +49,7 @@ struct BibleReaderBookCatalog {
         if !moduleBookList.isEmpty {
             return moduleBookList
         }
-        return activeModule == nil ? Self.defaultBooks : []
+        return activeModule == nil && !usesExactKJVAOrdinals ? Self.defaultBooks : []
     }
 
     /**
@@ -55,6 +66,13 @@ struct BibleReaderBookCatalog {
     func verseOrdinal(osisBookId: String, chapter: Int, verse: Int) -> Int? {
         if let activeModule {
             return activeModule.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
+        }
+        if usesExactKJVAOrdinals {
+            return JSwordKJVAVersification.verseOrdinal(
+                osisId: osisBookId,
+                chapter: chapter,
+                verse: verse
+            )
         }
         return Self.compatibilityOrdinal(chapter: chapter, verse: verse)
     }
@@ -73,6 +91,20 @@ struct BibleReaderBookCatalog {
         let osisBookId = osisBookId(for: book)
         if let activeModule {
             return activeModule.verseReference(osisBookId: osisBookId, ordinal: ordinal)
+        }
+
+        if usesExactKJVAOrdinals {
+            guard let reference = JSwordKJVAVersification.referenceIncludingIntroductions(
+                ordinal: ordinal
+            ), reference.osisId == osisBookId else {
+                return nil
+            }
+            return VerseKeyReference(
+                osisBookId: reference.osisId,
+                chapter: reference.chapter,
+                verse: reference.verse,
+                ordinal: reference.ordinal
+            )
         }
 
         let chapter = max(1, ((ordinal - 1) / 40) + 1)
@@ -107,6 +139,14 @@ struct BibleReaderBookCatalog {
                 return nil
             }
             resolvedVerseCount = moduleVerseCount
+        } else if usesExactKJVAOrdinals {
+            guard let kjvaVerseCount = JSwordKJVAVersification.verseCount(
+                osisId: osisBookId,
+                chapter: chapter
+            ) else {
+                return nil
+            }
+            resolvedVerseCount = kjvaVerseCount
         } else {
             resolvedVerseCount = Self.verseCount(for: book, chapter: chapter)
         }
@@ -128,7 +168,7 @@ struct BibleReaderBookCatalog {
         if let chapterCount = books.first(where: { $0.name == book })?.chapterCount {
             return chapterCount
         }
-        return activeModule == nil ? Self.chapterCount(for: book) : 0
+        return activeModule == nil && !usesExactKJVAOrdinals ? Self.chapterCount(for: book) : 0
     }
 
     /// Next book after `book` in the active catalog order.
@@ -154,7 +194,9 @@ struct BibleReaderBookCatalog {
         if let osisId = books.first(where: { $0.name == bookName })?.osisId {
             return osisId
         }
-        return activeModule == nil ? Self.osisBookId(for: bookName) : ""
+        return activeModule == nil && !usesExactKJVAOrdinals
+            ? Self.osisBookId(for: bookName)
+            : ""
     }
 
     /// JSword/KJVA book ordinal used by Android-compatible reading-progress persistence.
@@ -187,6 +229,15 @@ struct BibleReaderBookCatalog {
         if let activeModule {
             guard let count = activeModule.verseCount(osisBookId: osisId, chapter: chapter),
                   count > 0 else {
+                return nil
+            }
+            return count
+        }
+        if usesExactKJVAOrdinals {
+            guard let count = JSwordKJVAVersification.verseCount(
+                osisId: osisId,
+                chapter: chapter
+            ), count > 0 else {
                 return nil
             }
             return count

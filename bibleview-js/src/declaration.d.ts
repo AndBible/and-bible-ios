@@ -77,6 +77,9 @@ type TranslatedStrings = {
     ambiguousSelection: string
     cancel: string
     saveMyDocumentPageAccessibilityLabel: string
+    shareMyDocumentPageAccessibilityLabel: string
+    copyMyDocumentPageAccessibilityLabel: string
+    documentActionsAccessibilityLabel: string
     regenerateMyDocumentPageAccessibilityLabel: string
     deleteMyDocumentPageAccessibilityLabel: string
     deleteMyDocumentPageConfirmationTitle: string

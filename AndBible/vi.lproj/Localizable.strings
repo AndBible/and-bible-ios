@@ -295,7 +295,7 @@
 /* Security — Settings for the persecuted */
 "settings_security" = "Cài đặt cho những người bị bức hại";
 "discrete_mode" = "Ẩn biểu tượng tôn giáo";
-"discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "show_calculator" = "Máy tính";
 "show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
 "calculator_pin" = "Mã PIN máy tính";
@@ -303,10 +303,6 @@
 "calculator_pin_description" = "Mã PIN để vào ứng dụng khi màn hình máy tính được hiển thị.";
 "discrete_help_title" = "Đọc trước!";
 "discrete_help_summary" = "Hướng dẫn về cài đặt và thông tin về bản ẩn danh cụ thể.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 /* About */
 "settings_language" = "Ngôn ngữ";
@@ -704,7 +700,6 @@
 
 "prefs_volume_keys_scroll_title" = "Cuộn bằng nút âm lượng";
 "prefs_volume_keys_scroll_summary" = "Dùng nút tăng/giảm âm lượng để cuộn văn bản Kinh Thánh";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Tính năng thử nghiệm";
 "prefs_experimental_features_summary" = "Chọn tính năng thử nghiệm nào cần bật. Các tính năng này vẫn đang được phát triển và có thể thay đổi hoặc bị xóa";
 "experimental_feature_bookmark_edit_actions" = "Thao tác chỉnh sửa đánh dấu";
@@ -798,3 +793,389 @@
 "page_scroll_amount" = "Lượng cuộn trang";
 "ordinals" = "Ordinals";
 "error_no_content" = "Không có nội dung cho câu đã chọn";
+
+/* Android shared translations */
+"calculator_par1" = "Trước khi vào ứng dụng, màn hình máy tính được hiển thị.";
+"calculator_par2" = "Trong đó, bạn có thể thực hiện tính toán thông thường, và khi muốn vào ứng dụng, bạn chỉ cần nhập mã PIN (mặc định là 1234) rồi nhấn nút \"=\".";
+"calculator_par3" = "Bạn có thể đặt mã PIN tùy chỉnh trong cài đặt \"Mã PIN máy tính\".";
+"give_passphrase_for_module" = "Tài liệu %@ được mã hóa và cần mật khẩu để mở khóa";
+"show_unlock_info" = "Mô-đun & thông tin mở khóa";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Đang giải nén tệp Zip…";
+"install_failed_reason" = "Cài đặt module thất bại vì lý do sau: %@.";
+"install_zip_successfull" = "Mô-đun đã được cài đặt thành công";
+"module_install_phase_committing" = "Vui lòng chờ. Đang tải mô-đun từ tệp.";
+"module_install_phase_downloading" = "Tải xuống";
+"module_install_phase_queued" = "Vui lòng chờ…";
+"storage_space_warning" = "Không đủ dung lượng lưu trữ cục bộ.";
+
+/* Android shared translations */
+"error_occurred" = "Đã xảy ra lỗi";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Thuộc lòng";
+"memorize_tab_reading" = "Đọc";
+"reading_progress_active_days" = "ngày hoạt động";
+"reading_progress_bible_heatmap" = "Tổng quan Kinh Thánh";
+"reading_progress_calendar" = "Hoạt động đọc";
+"reading_progress_chapters_read" = "chương đã đọc";
+"reading_progress_cycle" = "Chu kỳ %d";
+"reading_progress_history_for" = "Tiến độ đọc cho %1$@";
+"reading_progress_history_no_entries" = "Không có mục đọc nào cho lựa chọn này.";
+"reading_progress_history_title" = "Lịch sử đọc";
+"reading_progress_history_version_unknown" = "Phiên bản không xác định";
+"reading_progress_new_cycle" = "Chu kỳ mới";
+"reading_progress_new_cycle_confirm" = "Bắt đầu chu kỳ đọc mới? Điều này sẽ bắt đầu theo dõi tiến độ của bạn từ đầu, trong khi vẫn giữ nguyên dữ liệu chu kỳ trước.";
+"reading_progress_new_testament" = "Tân Ước";
+"reading_progress_next_cycle" = "Chu kỳ tiếp theo";
+"reading_progress_old_testament" = "Cựu Ước";
+"reading_progress_overall" = "%@%% Kinh Thánh đã đọc";
+"reading_progress_percent_read_scale" = "Phần trăm\nĐã đọc";
+"reading_progress_previous_cycle" = "Chu kỳ trước";
+"reading_progress_read_count_scale" = "Số lần\nĐọc";
+"reading_progress_title" = "Tiến độ đọc/ghi nhớ";
+
+/* Android shared translations */
+"conf_change_chapter" = "Thay đổi chương";
+"conf_change_title" = "Tiêu đề";
+"conf_replace_divinename" = "Thay tên thần thánh bằng Yahweh";
+"conf_save_playback_settings_to_bookmarks" = "Lưu cài đặt phát lại vào đánh dấu";
+"conf_speak_auto_bookmark" = "Tự động đánh dấu";
+"conf_speak_footnotes" = "Chú thích cuối trang";
+"conf_speak_sleep_timer" = "Đặt hẹn giờ ngủ";
+"conf_speak_synchronize" = "Văn bản theo dõi lời đọc";
+"forward" = "Tiến tới";
+"playback_settings_title" = "Cài đặt phát lại";
+"rewind" = "Tua lại";
+"speak_bookmarks_menu_title" = "Đọc từ đánh dấu";
+"speak_next" = "Tiếp theo";
+"speak_previous" = "Trước đó";
+"speak_settings_title" = "Cài đặt đọc chung";
+
+/* Android shared translations */
+"sleep_timer_title" = "Thời gian ngủ (phút)";
+"speak_beginning_of_passage" = "Chọn đầu đoạn văn";
+"speak_ending_of_passage" = "Chọn cuối đoạn văn";
+"speak_ending_verse_must_be_later" = "Câu kết thúc phải sau câu bắt đầu";
+"speak_verse_range_to_repeat" = "Chọn phạm vi câu để lặp lại";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Ngôn ngữ không khả dụng.";
+
+/* Android shared translations */
+"description" = "Mô tả";
+"errorTitle" = "Đã xảy ra lỗi";
+"error_executing_search" = "Truy vấn tìm kiếm không hợp lệ";
+"export_something" = "Xuất %@";
+"import_items" = "Nhập %@";
+"install_zip_module" = "Cài đặt Mô-đun Kinh Thánh";
+"my_document_content_type_label" = "Loại nội dung";
+"my_document_create_title" = "Tạo tài liệu mới";
+"my_document_import_document" = "Nhập tệp làm tài liệu";
+"my_document_new_name" = "Tài liệu %d";
+"my_document_new_page_name" = "Trang %1$d";
+"my_document_rename_title" = "Đổi tên tài liệu";
+"my_document_save_changes" = "Lưu thay đổi?";
+"overwrite" = "Có";
+"package_directory" = "Thư mục gói (tệp Zip)";
+"read" = "Đọc";
+"reading_plan_set_current_day" = "Đặt làm ngày hiện tại…";
+"reading_plan_set_start_date" = "Đặt Ngày Bắt Đầu…";
+"search_all_words" = "Tất cả từ";
+"search_any_word" = "Bất kỳ từ nào";
+"search_fts_query" = "Cú pháp truy vấn thô";
+"search_phrase" = "Cụm từ";
+"search_words_group_prompt" = "Tìm câu Kinh Thánh";
+"show_notes" = "Hiển thị ghi chú";
+"speak_book_changed" = "Đã thay đổi sách.";
+"speak_chapter_changed" = "Chương";
+"success" = "Hoàn thành";
+"summary" = "Tóm tắt";
+"undo" = "Hủy";
+
+/* Android shared translations */
+"my_document_no_description" = "Không có mô tả";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Không tìm thấy trong tài liệu";
+"my_document_cannot_delete_ai_documents" = "Không thể xóa tài liệu AI khi còn chứa trang. Hãy xóa các trang trước.";
+"my_document_create_page_title" = "Trang mới";
+"my_document_import_empty_selection" = "Không có tệp nào có thể nhập được chọn";
+"system_items1" = "Thêm";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Bạn phải tải xuống một bản Kinh Thánh có số Strong's và lập chỉ mục qua Tìm kiếm";
+
+/* Android shared translations */
+"add_model" = "Thêm mô hình";
+"agent_already_running" = "Một trợ lý AI đang chạy. Vui lòng chờ hoặc dừng nó trước.";
+"agent_log_cancelled" = "Đã hủy";
+"agent_log_completed" = "Đã hoàn thành";
+"agent_log_executing" = "Đang thực thi: %@";
+"agent_log_idle" = "Trợ lý AI";
+"agent_log_iteration" = "Lần lặp %d";
+"agent_log_model_not_configured" = "Chưa cấu hình mô hình";
+"agent_log_tool_failed" = "Công cụ %@ thất bại";
+"agent_log_view_raw" = "Xem nhật ký LLM thô";
+"agent_max_iterations_title" = "Số vòng lặp tối đa của tác nhân";
+"agent_permission_mode_summary" = "Kiểm soát khi nào cần xác nhận của người dùng trước các thao tác ghi của AI";
+"agent_permission_title" = "Quyền trợ lý AI";
+"ai_add_provider" = "Thêm nhà cung cấp";
+"ai_advanced_category" = "Nâng cao";
+"ai_agent_notification_running" = "Trợ lý AI đang hoạt động…";
+"ai_behavior_category" = "Hành vi";
+"ai_connection_settings" = "Cài đặt kết nối";
+"ai_disclaimer_approach" = "AndBible chủ yếu sử dụng AI để xử lý văn bản từ các tài liệu bạn đã cài đặt — chú giải, từ điển và các mô-đun khác — thay vì dựa vào dữ liệu huấn luyện của chính mô hình.";
+"ai_disclaimer_dialog_title" = "Công cụ AI — Thông tin quan trọng";
+"ai_disclaimer_intro" = "Các công cụ AI có thể làm phong phú thêm trải nghiệm nghiên cứu Kinh Thánh của bạn và mở ra những cách mới để tiếp cận Kinh Thánh.";
+"ai_disclaimer_point1" = "AI có thể mắc sai lầm, bao gồm \"ảo giác\" (tự tin trình bày thông tin sai hoặc bịa đặt). Đừng bao giờ chấp nhận kết quả của AI một cách mù quáng.";
+"ai_disclaimer_point2" = "Phản hồi của AI có thể phản ánh sự thiên lệch từ dữ liệu huấn luyện, có thể gây hiểu nhầm có chủ ý, hoặc có thể trình bày một quan điểm thần học cụ thể như thể đó là quan điểm trung lập hoặc toàn diện.";
+"ai_disclaimer_point3" = "Bạn chịu trách nhiệm về cách sử dụng nội dung do AI tạo ra. Luôn xác minh kết quả với Kinh Thánh trước khi tin tưởng vào chúng.";
+"ai_disclaimer_point4" = "AndBible cố gắng giúp việc xác minh dễ dàng (ví dụ: trích dẫn nguồn chính xác trong chú giải), nhưng trách nhiệm cuối cùng luôn thuộc về bạn.";
+"ai_disclaimer_point5" = "\"Hãy thử nghiệm mọi sự; giữ lấy điều thiện.\" (1 Tê-sa-lô-ni-ca 5:21)";
+"ai_disclaimer_point6" = "Những công cụ này không có linh hồn và không có Đức Thánh Linh. Chúng là công cụ xử lý văn bản, không phải người hướng dẫn tâm linh. Chúng không phù hợp để trực tiếp chuẩn bị bài giảng, bài suy ngẫm, hay các nội dung tâm linh khác mà không có sự giám sát cẩn thận của con người, cầu nguyện và phân định.";
+"ai_disclaimer_point7" = "Được sử dụng khôn ngoan, chúng có thể mang lại lợi ích cho nhiều người dùng và trường hợp sử dụng. Nhưng nếu bạn không chắc về việc chấp nhận các rủi ro, việc chọn không sử dụng chúng cũng là một lựa chọn hoàn toàn hợp lệ.";
+"ai_disclaimer_point8" = "Dữ liệu của bạn được gửi đến máy chủ của nhà cung cấp AI mà bạn chọn. Bằng cách sử dụng khóa API, bạn chấp nhận các điều khoản và chính sách bảo mật của nhà cung cấp đó. Các mô hình tự lưu trữ là khả thi nhưng đòi hỏi nhiều kiến thức kỹ thuật hơn và có thể không cho kết quả tốt như các mô hình thương mại.";
+"ai_disclaimer_point9" = "Các nhà cung cấp AI tính phí sử dụng API. Ước tính chi phí hiển thị trong AndBible chỉ là xấp xỉ — hãy luôn kiểm tra hóa đơn của nhà cung cấp để biết chi phí thực tế.";
+"ai_disclaimer_responsibility" = "Tuy nhiên, đây vẫn là những công cụ mạnh mẽ — và quyền năng lớn đi kèm trách nhiệm lớn. Xin hãy ghi nhớ những điều sau.";
+"ai_disclaimer_warning_title" = "Quan trọng: Đọc trước khi sử dụng công cụ AI";
+"ai_doc_choose_page" = "Chọn trang tài liệu AI";
+"ai_document_filter_activity_title" = "Quyền truy cập tài liệu của AI";
+"ai_document_regenerate" = "Tạo lại";
+"ai_hidden_status" = "ẩn";
+"ai_hide_prompt" = "Ẩn";
+"ai_language_title" = "Ngôn ngữ phản hồi AI";
+"ai_models_category" = "Mô hình";
+"ai_models_summary_none" = "Chưa có mô hình nào được cấu hình";
+"ai_provider_api_format" = "Định dạng API";
+"ai_provider_api_key" = "Khóa API";
+"ai_provider_api_key_not_set" = "Chưa đặt khóa API";
+"ai_provider_delete_confirm" = "Xóa nhà cung cấp \"%1$@\"? Các lệnh nhắc dùng nhà cung cấp này sẽ trở về mặc định.";
+"ai_provider_edit" = "Chỉnh sửa";
+"ai_provider_endpoint" = "Điểm cuối API";
+"ai_provider_endpoint_description" = "Chỉ URL cơ sở. AndBible tự động thêm \"/chat/completions\" (định dạng OpenAI) hoặc \"/messages\" (định dạng Anthropic). Danh sách mô hình được lấy từ \"/models\".";
+"ai_provider_name" = "Tên nhà cung cấp";
+"ai_provider_saved" = "Đã lưu nhà cung cấp";
+"ai_provider_select_type" = "Chọn loại nhà cung cấp";
+"ai_providers_models_category" = "Nhà cung cấp & Mô hình";
+"ai_providers_summary_none" = "Chưa có nhà cung cấp nào được cấu hình";
+"ai_regenerate_fresh_run" = "Chạy mới (bỏ qua kết quả trước)";
+"ai_regenerate_instructions_hint" = "Hướng dẫn bổ sung (tùy chọn)";
+"ai_regenerate_keep_previous" = "Giữ phiên bản trước";
+"ai_regenerate_prompt_not_found" = "Không thể tạo lại: không tìm thấy lệnh nhắc gốc. Lệnh nhắc có thể đã bị xóa.";
+"ai_regenerate_title" = "Tạo lại";
+"ai_settings" = "Cài đặt AI";
+"ai_setup_description" = "AndBible có thể dùng AI để dịch văn bản Kinh Thánh, giải thích câu, tạo tóm tắt và nhiều hơn nữa. Để bắt đầu, hãy cấu hình kết nối tới nhà cung cấp API tương thích OpenAI.";
+"ai_setup_title" = "Cấu hình AI";
+"ai_usage_category" = "Mức sử dụng";
+"ask_model_before_run_title" = "Hỏi mô hình trước khi chạy";
+"auto_hide_agent_log_title" = "Ẩn bảng AI khi hoàn tất";
+"bookmarks_and_mynotes_title" = "Đánh Dấu & Ghi Chú Của Tôi";
+"built_in_prompt" = "Tích hợp sẵn";
+"built_in_prompt_notice" = "Đây là lệnh nhắc tích hợp sẵn và không thể chỉnh sửa. Dùng \"Sao chép để tùy chỉnh\" để tạo bản sao có thể chỉnh sửa.";
+"category_none" = "Không có danh mục";
+"commentary_max_response_no_limit" = "Không giới hạn";
+"commentary_max_response_title" = "Giới hạn kích thước phản hồi chú giải";
+"copy_to_customize" = "Sao chép để tùy chỉnh";
+"custom_agent_system_prompt_title" = "Lệnh hệ thống tác nhân";
+"custom_system_prompt_custom" = "Tùy chỉnh";
+"custom_text_transform_system_prompt_title" = "Lệnh hệ thống chuyển đổi văn bản";
+"default_prompt_ask_question" = "Đặt câu hỏi";
+"default_prompt_ask_question_desc" = "Đặt bất kỳ câu hỏi nào về đoạn văn được chọn";
+"default_prompt_bookmark_annotate" = "Đánh dấu & chú thích";
+"default_prompt_bookmark_annotate_desc" = "Tạo đánh dấu với ghi chú nghiên cứu do AI tạo ra";
+"default_prompt_compare_translations" = "So sánh các bản dịch";
+"default_prompt_compare_translations_desc" = "Hiển thị cách các bản dịch đã cài đặt khác nhau diễn đạt văn bản";
+"default_prompt_cross_references" = "Tham chiếu chéo";
+"default_prompt_cross_references_desc" = "Tìm và giải thích các đoạn Kinh Thánh liên quan";
+"default_prompt_custom" = "Lệnh tùy chỉnh";
+"default_prompt_custom_desc" = "Thực hiện tác vụ tùy chỉnh trên đoạn văn được chọn";
+"default_prompt_custom_template" = "Thực hiện theo yêu cầu của người dùng cho đoạn Kinh Thánh được chọn.";
+"default_prompt_enhance_note" = "Cải thiện ghi chú";
+"default_prompt_enhance_note_desc" = "Cải thiện ngữ pháp, sự rõ ràng và dễ đọc của ghi chú";
+"default_prompt_explain_verses" = "Giải thích các câu";
+"default_prompt_explain_verses_desc" = "Giải thích ý nghĩa và bối cảnh của các câu được chọn";
+"default_prompt_explain_verses_studypad" = "Giải thích các câu → Sổ tay nghiên cứu";
+"default_prompt_explain_verses_studypad_desc" = "Tạo Sổ tay nghiên cứu với giải thích từng câu và đánh dấu";
+"default_prompt_study_layout" = "Mở bố cục nghiên cứu";
+"default_prompt_study_layout_desc" = "Mở cửa sổ chú giải và bản dịch song song để nghiên cứu";
+"default_prompt_summary" = "Tóm tắt";
+"default_prompt_summary_desc" = "Tạo bản tóm tắt ngắn gọn của văn bản được chọn";
+"default_prompt_thematic_study" = "Nghiên cứu chủ đề";
+"default_prompt_thematic_study_desc" = "Xây dựng Sổ tay nghiên cứu với các đoạn văn và ghi chú về chủ đề trung tâm";
+"default_prompt_translate_to_language" = "Dịch sang %@";
+"default_prompt_translate_to_ui_language_desc" = "Dịch văn bản tài liệu sang ngôn ngữ giao diện ứng dụng";
+"default_prompt_word_study" = "Nghiên cứu từ ngữ";
+"default_prompt_word_study_desc" = "Phân tích các từ gốc tiếng Hê-bơ-rơ/Hy Lạp";
+"default_prompt_workspace_assistant" = "Trợ lý không gian làm việc";
+"default_prompt_workspace_assistant_desc" = "Quản lý cửa sổ: tạo, đóng, sắp xếp lại, thay đổi tài liệu";
+"delete_category" = "Xóa danh mục";
+"delete_category_and_prompts" = "Xóa danh mục và các lệnh nhắc";
+"delete_category_keep_prompts" = "Chuyển lệnh nhắc về gốc và xóa danh mục";
+"doc_type_addons" = "Tiện ích bổ sung";
+"easy_setup_enter_api_key" = "Nhập khóa API của bạn";
+"easy_setup_success" = "Kết nối thành công!";
+"easy_setup_test_connection" = "Kiểm tra kết nối";
+"easy_setup_testing" = "Đang kiểm tra…";
+"easy_setup_title" = "Cài đặt nhanh";
+"help_bookmarks_text" = "Có thể tạo đánh dấu bằng cách chọn một số văn bản và chọn \"Đánh dấu\" từ menu bật lên. Bạn có thể thêm ghi chú tùy chỉnh vào đánh dấu mới bằng cách nhấn vào văn bản được đánh dấu nổi bật trong chế độ xem Kinh Thánh. Ngoài ra còn có tài liệu đặc biệt \"Ghi chú của tôi\" trong chú giải cho phép bạn xem ghi chú của mình trong một cửa sổ riêng.";
+"help_memorize_text" = "Chế độ xem Thuộc lòng giúp bạn học thuộc các đoạn văn. Sử dụng Làm mờ từ, Xáo trộn từ, Nhập từ hoặc Sắp xếp từ để luyện tập. Các bài tập thành công sẽ tự động đánh dấu các câu là đã thuộc lòng (tính năng này có thể tắt).";
+"help_read_more_link" = "Đọc thêm trong hướng dẫn";
+"hide_category" = "Ẩn khỏi hành động AI";
+"llm_actions" = "Hành động AI";
+"llm_continue_iterations_message" = "Tác nhân AI đã đạt giới hạn %1$d vòng lặp mà chưa hoàn thành. Tiếp tục thêm %2$d vòng lặp nữa?";
+"llm_continue_iterations_title" = "Tiếp tục?";
+"llm_custom_input_price_title" = "Giá đầu vào ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Nhập ID mô hình";
+"llm_custom_output_price_title" = "Giá đầu ra ($/Mtoken)";
+"llm_error_max_iterations" = "Đã đạt số vòng lặp tối đa (%1$d) mà chưa hoàn thành";
+"llm_error_unknown" = "Lỗi không xác định";
+"llm_note_updated" = "Đã cập nhật ghi chú";
+"llm_openrouter_model" = "Mô hình";
+"llm_provider_custom" = "Tùy chỉnh (tương thích OpenAI)";
+"llm_reset_usage_confirm_message" = "Thao tác này sẽ xóa tất cả dữ liệu sử dụng tích lũy.";
+"llm_reset_usage_confirm_title" = "Đặt lại dữ liệu sử dụng?";
+"llm_reset_usage_title" = "Đặt lại dữ liệu sử dụng";
+"llm_usage_summary_default" = "Không có dữ liệu sử dụng";
+"llm_usage_summary_title" = "Mức sử dụng token";
+"manage_prompts" = "Quản lý lệnh nhắc AI";
+"manage_tool_permissions_title" = "Quyền công cụ";
+"model_pricing_summary" = "%1$@ vào / %2$@ ra mỗi Mtoken";
+"model_select_provider" = "Nhà cung cấp";
+"model_set_default" = "Đặt làm mô hình mặc định";
+"move_category_down" = "Di chuyển xuống";
+"move_category_up" = "Di chuyển lên";
+"new_category" = "Danh mục mới";
+"new_category_name" = "Tên danh mục";
+"new_prompt" = "Lệnh nhắc mới";
+"permission_allow_all" = "Cho phép tất cả";
+"permission_allow_all_session" = "Cho phép tất cả công cụ trong phiên này";
+"permission_allow_for_session" = "Cho phép trong phiên này";
+"permission_allow_once" = "Cho phép một lần";
+"permission_always_allow_confirm" = "Bạn có chắc muốn cho phép vĩnh viễn \"%1$@\" không?";
+"permission_always_allow_confirm_reset_hint" = "Bạn có thể đặt lại điều này trong Cài đặt AI.";
+"permission_always_ask" = "Luôn hỏi";
+"permission_ask_once_per_run" = "Hỏi một lần mỗi lần chạy";
+"permission_deny" = "Từ chối";
+"permission_deny_all" = "Từ chối tất cả";
+"permission_option_always_allow" = "Luôn cho phép";
+"permission_option_always_deny" = "Luôn từ chối";
+"permission_status_default" = "Hỏi (mặc định)";
+"prompt_auto_include_commentaries" = "Tự động thêm chú giải";
+"prompt_auto_include_documents" = "Tự động thêm tài liệu đã cài đặt";
+"prompt_bible_only" = "Chỉ tài liệu Kinh Thánh";
+"prompt_category" = "Danh mục";
+"prompt_category_favorites" = "Yêu thích";
+"prompt_category_general" = "Chung";
+"prompt_category_notes" = "Ghi chú";
+"prompt_category_study" = "Nghiên cứu";
+"prompt_category_uncategorized" = "Chưa phân loại";
+"prompt_context_note_editor" = "Trình chỉnh sửa ghi chú";
+"prompt_context_text_selection" = "Chọn văn bản";
+"prompt_context_verse_selection" = "Chọn câu";
+"prompt_context_window_menu" = "Menu cửa sổ";
+"prompt_context_workspace_menu" = "Menu không gian làm việc";
+"prompt_description" = "Mô tả";
+"prompt_edit_before_run" = "Chỉ định trước khi chạy";
+"prompt_is_text_transformation" = "Biến đổi văn bản";
+"prompt_max_iterations_hint" = "Để trống cho mặc định toàn cục";
+"prompt_max_iterations_unlimited" = "Không giới hạn";
+"prompt_model_default" = "Mặc định";
+"prompt_model_override" = "Mô hình";
+"prompt_name" = "Tên";
+"prompt_no_document_creation" = "Không tạo tài liệu";
+"prompt_permission_mode" = "Chế độ quyền";
+"prompt_permission_mode_description" = "Kiểm soát khi nào cần xác nhận của người dùng trước khi AI thực hiện các thao tác ghi. Cài đặt từng công cụ bên dưới có thể ghi đè điều này cho từng công cụ riêng lẻ.";
+"prompt_permission_use_default" = "Dùng mặc định";
+"prompt_show_in" = "Hiển thị trong";
+"prompt_strict_context_matching" = "Bộ nhớ đệm phụ thuộc ngữ cảnh";
+"prompt_tab_advanced" = "Nâng cao";
+"prompt_tab_permissions" = "Quyền";
+"prompt_tab_prompt" = "Lệnh nhắc";
+"prompt_template" = "Mẫu lệnh nhắc";
+"prompt_tool_permissions" = "Quyền công cụ";
+"raw_log_delete_all" = "Xóa tất cả";
+"raw_log_error_indicator" = "Lỗi";
+"raw_log_history_empty" = "Không có nhật ký đã lưu";
+"raw_log_history_title" = "Lịch sử nhật ký AI";
+"raw_log_item_tokens" = "%1$@ vào / %2$@ ra";
+"raw_log_older_1_month" = "Cũ hơn 1 tháng";
+"raw_log_older_1_week" = "Cũ hơn 1 tuần";
+"raw_log_older_3_months" = "Cũ hơn 3 tháng";
+"raw_log_retention_summary_disabled" = "Tắt (giữ tất cả)";
+"raw_log_retention_title" = "Tự động xóa nhật ký cũ";
+"reset_all_ai_settings" = "Đặt lại tất cả cài đặt AI";
+"reset_all_ai_settings_confirm_message" = "Thao tác này sẽ xóa khóa API, nhà cung cấp, điểm cuối, mô hình và đặt lại tất cả lệnh nhắc về mặc định. Tiếp tục?";
+"reset_all_ai_settings_confirm_title" = "Đặt lại tất cả cài đặt AI?";
+"reset_all_permissions" = "Đặt lại tất cả";
+"reset_to_default" = "Đặt lại về mặc định";
+"save_and_exit" = "Lưu";
+"select_llm_prompt" = "Chọn hành động AI";
+"select_model_before_run_title" = "Chọn mô hình";
+"set_default_model_for_prompt" = "Đặt làm mô hình mặc định cho lệnh nhắc này";
+"show_category" = "Hiển thị trong hành động AI";
+"specify_before_run_title" = "Chỉ định nhiệm vụ";
+"tool_add_bookmark_note" = "Thêm ghi chú đánh dấu";
+"tool_add_label_to_bookmark" = "Thêm nhãn vào đánh dấu";
+"tool_add_my_document_page" = "Thêm trang Tài liệu của tôi";
+"tool_add_study_pad_entry" = "Thêm mục vào sổ tay nghiên cứu";
+"tool_category_bible_search" = "Kinh Thánh & Tìm kiếm";
+"tool_category_bookmarks" = "Đánh dấu";
+"tool_category_general_books" = "Sách tổng hợp";
+"tool_category_labels" = "Nhãn";
+"tool_category_my_documents" = "Tài liệu của tôi";
+"tool_category_study_pads" = "Sổ tay nghiên cứu";
+"tool_category_windows" = "Cửa sổ";
+"tool_create_bookmark" = "Tạo đánh dấu";
+"tool_create_label" = "Tạo nhãn";
+"tool_create_my_document" = "Tạo Tài liệu của tôi";
+"tool_create_study_pad" = "Tạo sổ tay nghiên cứu";
+"tool_create_window" = "Tạo cửa sổ";
+"tool_delete_bookmark" = "Xóa đánh dấu";
+"tool_delete_label" = "Xóa nhãn";
+"tool_delete_my_document_page" = "Xóa trang Tài liệu của tôi";
+"tool_edit_my_document_page" = "Chỉnh sửa trang Tài liệu của tôi";
+"tool_finish_with_my_document_page" = "Mở trang Tài liệu của tôi";
+"tool_finish_with_study_pad" = "Mở sổ tay nghiên cứu";
+"tool_finish_without_document" = "Kết thúc không có tài liệu";
+"tool_get_all_labels" = "Liệt kê tất cả nhãn";
+"tool_get_bookmarks_for_verse" = "Lấy đánh dấu cho câu";
+"tool_get_bookmarks_with_label" = "Lấy đánh dấu theo nhãn";
+"tool_get_commentaries" = "Đọc chú giải";
+"tool_get_dictionary_entry" = "Tra cứu mục từ điển";
+"tool_get_genbook_content" = "Đọc nội dung sách tổng hợp";
+"tool_get_genbook_keys" = "Liệt kê khóa sách tổng hợp";
+"tool_get_installed_documents" = "Liệt kê tài liệu đã cài đặt";
+"tool_get_my_document_pages" = "Liệt kê trang Tài liệu của tôi";
+"tool_get_my_documents" = "Liệt kê Tài liệu của tôi";
+"tool_get_study_pad_content" = "Đọc nội dung sổ tay nghiên cứu";
+"tool_get_verse_content" = "Đọc nội dung câu";
+"tool_get_windows" = "Liệt kê cửa sổ";
+"tool_manage_window" = "Quản lý cửa sổ";
+"tool_remove_label_from_bookmark" = "Xóa nhãn khỏi đánh dấu";
+"tool_search_bible" = "Tìm kiếm Kinh Thánh";
+"tool_search_by_strongs" = "Tìm kiếm theo số Strong's";
+"tool_search_study_pads" = "Tìm kiếm trong sổ tay nghiên cứu";
+"tool_set_document_title" = "Đặt tiêu đề tài liệu";
+"tool_set_window_document" = "Đặt tài liệu cửa sổ";
+"tool_update_bookmark_note" = "Cập nhật ghi chú đánh dấu";
+"tool_update_studypad_text_entry" = "Cập nhật mục văn bản sổ tay nghiên cứu";
+"verse_tip" = "Để chọn một phần hoặc nhiều câu, bạn có thể nhấn giữ vào văn bản Kinh Thánh";
+"watch_tutorial_video" = "Xem video hướng dẫn (tiếng Anh)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Đang tạo lại tài liệu AI…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Tôi chấp nhận và chịu hoàn toàn trách nhiệm";
+"ai_disclaimer_accept_title" = "Chấp nhận tuyên bố từ chối trách nhiệm AI";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Cài đặt kết nối AI và lệnh nhắc";
+"prefs_features_cat" = "Tính năng";

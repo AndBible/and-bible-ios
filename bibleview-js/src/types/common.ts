@@ -42,6 +42,7 @@ export type ColorParam = Color | ColorString | ArrayLike<number> | ColorInt | { 
 export type BibleDocumentInfo = {
     bibleBookName: string,
     bookInitials: string,
+    osisRef: string,
     ordinalRange: OrdinalRange,
     originalOrdinalRange: OrdinalRange | null,
     v11n: string

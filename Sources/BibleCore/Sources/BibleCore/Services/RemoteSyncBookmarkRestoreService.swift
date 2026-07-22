@@ -211,11 +211,20 @@ public struct RemoteSyncAndroidBibleBookmark: Sendable, Equatable {
     /// Optional Android canonical custom-icon name.
     public let customIcon: String?
 
+    /// Optional AI prompt identifier that produced the bookmark.
+    public let sourcePromptId: UUID?
+
+    /// Optional AI prompt identifier that produced the detached note.
+    public let notesSourcePromptId: UUID?
+
     /// Optional bookmark note-edit automation descriptor.
     public let editAction: EditAction?
 
     /// Label rows linked to this bookmark via `BibleBookmarkToLabel`.
     public let labelLinks: [RemoteSyncAndroidBookmarkLabelLink]
+
+    /// Internal durable provenance carried by local snapshots; Android SQLite rows leave this nil.
+    public let ordinalTrustMetadata: PersistedOrdinalTrustMetadata?
 
     /**
      Creates one staged Android Bible bookmark row.
@@ -239,8 +248,12 @@ public struct RemoteSyncAndroidBibleBookmark: Sendable, Equatable {
        - wholeVerse: Whether the bookmark covers the whole verse instead of a text span.
        - type: Optional Android raw bookmark-type string.
        - customIcon: Optional Android canonical custom-icon name.
+       - sourcePromptId: Optional AI prompt identifier that produced the bookmark.
+       - notesSourcePromptId: Optional AI prompt identifier that produced the detached note.
        - editAction: Optional bookmark note-edit automation descriptor.
        - labelLinks: Label rows linked to this bookmark via `BibleBookmarkToLabel`.
+       - ordinalTrustMetadata: Internal provenance for locally projected rows. Android database
+         readers omit it so restore must validate and classify the row at the import boundary.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
@@ -263,8 +276,11 @@ public struct RemoteSyncAndroidBibleBookmark: Sendable, Equatable {
         wholeVerse: Bool,
         type: String?,
         customIcon: String?,
+        sourcePromptId: UUID? = nil,
+        notesSourcePromptId: UUID? = nil,
         editAction: EditAction?,
-        labelLinks: [RemoteSyncAndroidBookmarkLabelLink]
+        labelLinks: [RemoteSyncAndroidBookmarkLabelLink],
+        ordinalTrustMetadata: PersistedOrdinalTrustMetadata? = nil
     ) {
         self.id = id
         self.kjvOrdinalStart = kjvOrdinalStart
@@ -284,8 +300,11 @@ public struct RemoteSyncAndroidBibleBookmark: Sendable, Equatable {
         self.wholeVerse = wholeVerse
         self.type = type
         self.customIcon = customIcon
+        self.sourcePromptId = sourcePromptId
+        self.notesSourcePromptId = notesSourcePromptId
         self.editAction = editAction
         self.labelLinks = labelLinks
+        self.ordinalTrustMetadata = ordinalTrustMetadata
     }
 }
 
@@ -306,10 +325,10 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
     public let bookInitials: String
 
     /// Start ordinal within the target document.
-    public let ordinalStart: Int
+    public let ordinalStart: Int?
 
     /// End ordinal within the target document.
-    public let ordinalEnd: Int
+    public let ordinalEnd: Int?
 
     /// Optional start character offset for a partial selection.
     public let startOffset: Int?
@@ -338,6 +357,12 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
     /// Optional Android canonical custom-icon name.
     public let customIcon: String?
 
+    /// Optional AI prompt identifier that produced the bookmark.
+    public let sourcePromptId: UUID?
+
+    /// Optional AI prompt identifier that produced the detached note.
+    public let notesSourcePromptId: UUID?
+
     /// Optional bookmark note-edit automation descriptor.
     public let editAction: EditAction?
 
@@ -363,6 +388,8 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
        - wholeVerse: Whether the bookmark covers the whole keyed entry.
        - playbackSettingsJSON: Raw Android `playbackSettings` JSON payload, when present.
        - customIcon: Optional Android canonical custom-icon name.
+       - sourcePromptId: Optional AI prompt identifier that produced the bookmark.
+       - notesSourcePromptId: Optional AI prompt identifier that produced the detached note.
        - editAction: Optional bookmark note-edit automation descriptor.
        - labelLinks: Label rows linked to this bookmark via `GenericBookmarkToLabel`.
      - Side effects: none.
@@ -374,8 +401,8 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
         key: String,
         createdAt: Date,
         bookInitials: String,
-        ordinalStart: Int,
-        ordinalEnd: Int,
+        ordinalStart: Int?,
+        ordinalEnd: Int?,
         startOffset: Int?,
         endOffset: Int?,
         primaryLabelID: UUID?,
@@ -385,6 +412,8 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
         wholeVerse: Bool,
         playbackSettingsJSON: String?,
         customIcon: String?,
+        sourcePromptId: UUID? = nil,
+        notesSourcePromptId: UUID? = nil,
         editAction: EditAction?,
         labelLinks: [RemoteSyncAndroidBookmarkLabelLink]
     ) {
@@ -403,6 +432,8 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
         self.wholeVerse = wholeVerse
         self.playbackSettingsJSON = playbackSettingsJSON
         self.customIcon = customIcon
+        self.sourcePromptId = sourcePromptId
+        self.notesSourcePromptId = notesSourcePromptId
         self.editAction = editAction
         self.labelLinks = labelLinks
     }
@@ -427,8 +458,11 @@ public struct RemoteSyncAndroidStudyPadEntry: Sendable, Equatable {
     /// Optional Android `TextContentType` raw value for the detached StudyPad text payload.
     public let contentType: String?
 
-    /// Detached StudyPad text payload.
-    public let text: String
+    /// Optional AI prompt identifier that produced the StudyPad entry.
+    public let sourcePromptId: UUID?
+
+    /// Detached StudyPad text payload, or `nil` when Android has no child text row.
+    public let text: String?
 
     /**
      Creates one staged Android StudyPad entry row.
@@ -439,7 +473,8 @@ public struct RemoteSyncAndroidStudyPadEntry: Sendable, Equatable {
        - orderNumber: Display order within the label-backed StudyPad outline.
        - indentLevel: Nesting depth within the StudyPad outline.
        - contentType: Optional Android `TextContentType` raw value for the detached text payload.
-       - text: Detached StudyPad text payload.
+       - sourcePromptId: Optional AI prompt identifier that produced the StudyPad entry.
+       - text: Detached text payload, or `nil` when `StudyPadTextEntryText` has no child row.
      - Side effects: none.
      - Failure modes: This initializer cannot fail; staged SQLite readers validate non-null values
        before constructing these value types.
@@ -450,13 +485,15 @@ public struct RemoteSyncAndroidStudyPadEntry: Sendable, Equatable {
         orderNumber: Int,
         indentLevel: Int,
         contentType: String? = nil,
-        text: String
+        sourcePromptId: UUID? = nil,
+        text: String?
     ) {
         self.id = id
         self.labelID = labelID
         self.orderNumber = orderNumber
         self.indentLevel = indentLevel
         self.contentType = AppPreferenceValueNormalizer.notesContentTypeRow(contentType)
+        self.sourcePromptId = sourcePromptId
         self.text = text
     }
 }
@@ -482,6 +519,9 @@ public struct RemoteSyncAndroidBookmarkSnapshot: Sendable, Equatable {
     /// Android StudyPad rows reconstructed from entry and text tables.
     public let studyPadEntries: [RemoteSyncAndroidStudyPadEntry]
 
+    /// Android row-level mutation metadata used by import and patch conflict resolution.
+    public let logEntries: [RemoteSyncLogEntry]
+
     /**
      Creates a staged Android bookmark snapshot.
 
@@ -490,6 +530,7 @@ public struct RemoteSyncAndroidBookmarkSnapshot: Sendable, Equatable {
        - bibleBookmarks: Android Bible bookmark rows with aggregated notes and label links.
        - genericBookmarks: Android generic bookmark rows with aggregated notes and label links.
        - studyPadEntries: Android StudyPad rows reconstructed from entry and text tables.
+       - logEntries: Android row-level mutation metadata used for conflict resolution.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
@@ -497,12 +538,14 @@ public struct RemoteSyncAndroidBookmarkSnapshot: Sendable, Equatable {
         labels: [RemoteSyncAndroidLabel],
         bibleBookmarks: [RemoteSyncAndroidBibleBookmark],
         genericBookmarks: [RemoteSyncAndroidGenericBookmark],
-        studyPadEntries: [RemoteSyncAndroidStudyPadEntry]
+        studyPadEntries: [RemoteSyncAndroidStudyPadEntry],
+        logEntries: [RemoteSyncLogEntry] = []
     ) {
         self.labels = labels
         self.bibleBookmarks = bibleBookmarks
         self.genericBookmarks = genericBookmarks
         self.studyPadEntries = studyPadEntries
+        self.logEntries = logEntries
     }
 }
 
@@ -567,12 +610,12 @@ public struct RemoteSyncBookmarkRestoreReport: Sendable, Equatable {
  local bookmark graph from a staged Android backup instead of attempting piecemeal translation.
 
  Mapping notes:
- - Android's three reserved system labels use random `IdType` values, while iOS canonicalizes
-   them onto deterministic UUIDs; restore remaps those labels and preserves alias rows locally for
-   future patch translation
- - Android bookmark `playbackSettings` JSON is richer than the current iOS bookmark model; restore
-   projects the `bookId` subset into `PlaybackSettings` while preserving the raw Android JSON
-   locally through `RemoteSyncBookmarkPlaybackSettingsStore`
+ - Android v12 assigns fixed `IdType` values to reserved system labels. Historical backups can
+   still contain earlier IDs, so restore canonicalizes by name and preserves aliases for later
+   patch translation
+ - Android bookmark `playbackSettings` JSON is decoded into the complete native `PlaybackSettings`
+   model while the original JSON remains in `RemoteSyncBookmarkPlaybackSettingsStore` for exact
+   round-trip provenance
  - missing system labels are recreated with canonical iOS identifiers after restore so runtime
    bookmark flows retain their expected invariants even when the remote Android snapshot omitted
    unused system rows
@@ -585,14 +628,16 @@ public struct RemoteSyncBookmarkRestoreReport: Sendable, Equatable {
  Side effects:
  - `replaceLocalBookmarks(from:modelContext:settingsStore:)` deletes and recreates the local
    bookmark-category SwiftData graph
- - successful restores clear and repopulate local-only fidelity stores for Android playback JSON
-   and system-label aliases
+ - successful restores clear and repopulate local-only fidelity stores for Android playback JSON,
+   system-label aliases, and raw Android book-column values in the same transaction as the graph
 
  Failure modes:
  - staged snapshot parsing fails explicitly when required tables are missing or foreign-key-like
    references are inconsistent
- - restore rethrows `ModelContext.save()` failures after mutating the in-memory SwiftData graph
- - local-only fidelity stores are best-effort and inherit `SettingsStore`'s soft-fail semantics
+ - restore rejects mismatched or dirty contexts and rethrows fetch, cancellation, mutation, and
+   transaction-commit failures after rolling the complete bookmark graph and fidelity state back
+ - bookmark fidelity read or write failures invalidate the atomic publication instead of allowing
+   graph content and Android round-trip metadata to diverge
 
  Concurrency:
  - this type is not `Sendable`; callers must respect the confinement of the supplied
@@ -616,6 +661,7 @@ public final class RemoteSyncBookmarkRestoreService {
         let wholeVerse: Bool
         let type: String?
         let customIcon: String?
+        let sourcePromptId: UUID?
         let editAction: EditAction?
     }
 
@@ -624,8 +670,8 @@ public final class RemoteSyncBookmarkRestoreService {
         let key: String
         let createdAt: Date
         let bookInitials: String
-        let ordinalStart: Int
-        let ordinalEnd: Int
+        let ordinalStart: Int?
+        let ordinalEnd: Int?
         let startOffset: Int?
         let endOffset: Int?
         let primaryLabelID: UUID?
@@ -633,6 +679,7 @@ public final class RemoteSyncBookmarkRestoreService {
         let wholeVerse: Bool
         let playbackSettingsJSON: String?
         let customIcon: String?
+        let sourcePromptId: UUID?
         let editAction: EditAction?
     }
 
@@ -642,6 +689,7 @@ public final class RemoteSyncBookmarkRestoreService {
         let orderNumber: Int
         let indentLevel: Int
         let contentType: String?
+        let sourcePromptId: UUID?
     }
 
     private struct PreparedLabel {
@@ -655,6 +703,7 @@ public final class RemoteSyncBookmarkRestoreService {
         let localPrimaryLabelID: UUID?
         let localLabelLinks: [PreparedLabelLink]
         let playbackSettings: PlaybackSettings?
+        let ordinalTrustMetadata: PersistedOrdinalTrustMetadata
     }
 
     private struct PreparedGenericBookmark {
@@ -684,12 +733,11 @@ public final class RemoteSyncBookmarkRestoreService {
         let systemLabelAliases: [RemoteSyncBookmarkLabelAliasStore.Alias]
     }
 
-    private struct AndroidPlaybackSettingsProjection: Decodable {
-        let bookId: String?
-    }
-
     /// Resolver that translates Android `book` column semantics into iOS display book names.
     private let bookNameResolver: AndroidBookmarkBookNameResolving?
+
+    /// Strict projector used to preserve quarantined rows before authoritative replacement.
+    private let snapshotService: RemoteSyncBookmarkSnapshotService
 
     /**
      Creates a bookmark restore service.
@@ -705,6 +753,24 @@ public final class RemoteSyncBookmarkRestoreService {
         bookNameResolver: AndroidBookmarkBookNameResolving? = AndroidBookmarkSwordBookNameResolver()
     ) {
         self.bookNameResolver = bookNameResolver
+        snapshotService = RemoteSyncBookmarkSnapshotService()
+    }
+
+    /**
+     Creates a bookmark restore service with an injectable strict snapshot boundary for tests.
+
+     - Parameters:
+       - bookNameResolver: Boundary that normalizes Android bookmark source values for display.
+       - snapshotService: Strict projector used to retain quarantined local bookmarks.
+     - Side effects: Stores dependencies without reading SWORD, SwiftData, or settings.
+     - Failure modes: This initializer cannot fail; strict snapshot errors propagate from restore.
+     */
+    init(
+        bookNameResolver: AndroidBookmarkBookNameResolving?,
+        snapshotService: RemoteSyncBookmarkSnapshotService
+    ) {
+        self.bookNameResolver = bookNameResolver
+        self.snapshotService = snapshotService
     }
 
     /**
@@ -852,6 +918,10 @@ public final class RemoteSyncBookmarkRestoreService {
         let genericLinks = try fetchLabelLinks(from: db, tableName: "GenericBookmarkToLabel")
         let studyPadEntries = try fetchStudyPadEntries(from: db)
         let studyPadTexts = try fetchStudyPadTexts(from: db)
+        let logEntries = try RemoteSyncInitialBackupMetadataRestoreService()
+            .readSnapshot(from: databaseURL)
+            .logEntries
+            .map(AndroidBookmarkDatabaseContract.normalizedLogEntry)
 
         try validateSnapshotReferences(
             labels: labels,
@@ -898,6 +968,8 @@ public final class RemoteSyncBookmarkRestoreService {
                     wholeVerse: bookmark.wholeVerse,
                     type: bookmark.type,
                     customIcon: bookmark.customIcon,
+                    sourcePromptId: bookmark.sourcePromptId,
+                    notesSourcePromptId: bibleNotesByID[bookmark.id]?.sourcePromptId,
                     editAction: bookmark.editAction,
                     labelLinks: (bibleLinksByBookmarkID[bookmark.id] ?? []).map {
                         RemoteSyncAndroidBookmarkLabelLink(
@@ -928,6 +1000,8 @@ public final class RemoteSyncBookmarkRestoreService {
                     wholeVerse: bookmark.wholeVerse,
                     playbackSettingsJSON: bookmark.playbackSettingsJSON,
                     customIcon: bookmark.customIcon,
+                    sourcePromptId: bookmark.sourcePromptId,
+                    notesSourcePromptId: genericNotesByID[bookmark.id]?.sourcePromptId,
                     editAction: bookmark.editAction,
                     labelLinks: (genericLinksByBookmarkID[bookmark.id] ?? []).map {
                         RemoteSyncAndroidBookmarkLabelLink(
@@ -948,7 +1022,8 @@ public final class RemoteSyncBookmarkRestoreService {
                     orderNumber: entry.orderNumber,
                     indentLevel: entry.indentLevel,
                     contentType: entry.contentType,
-                    text: studyPadTextsByID[entry.id] ?? ""
+                    sourcePromptId: entry.sourcePromptId,
+                    text: studyPadTextsByID[entry.id]
                 )
             }
             .sorted {
@@ -956,7 +1031,8 @@ public final class RemoteSyncBookmarkRestoreService {
                     return $0.id.uuidString < $1.id.uuidString
                 }
                 return $0.orderNumber < $1.orderNumber
-            }
+            },
+            logEntries: logEntries
         )
 
         return snapshot
@@ -967,40 +1043,95 @@ public final class RemoteSyncBookmarkRestoreService {
 
      The restore is conservative and category-scoped. It validates label remapping, special-label
      aliasing, and all bookmark/category references before mutating local data. Once validation
-     succeeds, it clears the local bookmark graph, recreates labels/bookmarks/StudyPad entries,
-     saves the SwiftData graph, and then refreshes the local-only Android fidelity stores.
+     succeeds, it clears and recreates the local bookmark graph and refreshes the local-only Android
+     fidelity stores inside one native SwiftData transaction.
 
      - Parameters:
        - snapshot: Staged Android bookmark snapshot previously read from `readSnapshot(from:)`.
        - modelContext: SwiftData context whose bookmark-category rows should be replaced.
        - settingsStore: Local-only settings store used by Android fidelity side stores.
+       - preserveUnverifiedLocalBookmarks: Whether omitted quarantined rows must survive a remote
+         snapshot or patch replacement. Manual Android Restore/Reset callers keep the default
+         `false` because those are explicit destructive user actions.
      - Returns: Summary of restored bookmark-category rows and preserved Android-only fidelity data.
      - Side effects:
        - deletes existing local bookmark-category SwiftData rows
        - inserts replacement labels, Bible bookmarks, generic bookmarks, notes, junction rows, and StudyPad rows
-       - saves `modelContext`
        - clears and repopulates the local-only playback-settings, label-alias, and Android-book
          side stores
+       - commits graph and fidelity mutations exactly once through `SettingsStore.performAtomicBatch`
      - Failure modes:
        - throws `RemoteSyncBookmarkRestoreError.duplicateSystemLabels` when multiple staged labels
          claim the same reserved system-label name
        - throws `RemoteSyncBookmarkRestoreError.orphanReferences` when staged bookmarks or StudyPad
          rows reference label identifiers that cannot be resolved after remapping
-       - rethrows SwiftData save errors from `modelContext.save()`
+       - throws `SettingsStoreAtomicBatchError` when the settings store and graph do not share the
+         exact same clean context
+       - rethrows cancellation, strict fetch, and SwiftData transaction-commit errors after rolling
+         the complete bookmark category back
      */
     public func replaceLocalBookmarks(
         from snapshot: RemoteSyncAndroidBookmarkSnapshot,
         modelContext: ModelContext,
-        settingsStore: SettingsStore
+        settingsStore: SettingsStore,
+        preserveUnverifiedLocalBookmarks: Bool = false
     ) throws -> RemoteSyncBookmarkRestoreReport {
-        let prepared = try prepareRestore(from: snapshot)
+        try replaceLocalBookmarks(
+            from: snapshot,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            preserveUnverifiedLocalBookmarks: preserveUnverifiedLocalBookmarks,
+            mutationCheckpoint: { try Task.checkCancellation() }
+        )
+    }
+
+    /**
+     Replaces bookmark graph and Android fidelity rows through one deterministic atomic boundary.
+
+     This internal overload exposes only a mutation checkpoint so tests can interrupt after graph
+     and fidelity mutations have both been staged. Production supplies `Task.checkCancellation()`,
+     while the outer settings batch performs preservation projection, validation, the sole save, and
+     rollback. Running preservation inside that scope converts otherwise-soft fidelity fetch errors
+     into transaction failures before any replacement can become durable.
+
+     - Parameters:
+       - snapshot: Staged Android bookmark snapshot to validate and publish.
+       - modelContext: Exact clean context shared by the bookmark graph and settings store.
+       - settingsStore: Settings store bound to `modelContext` for Android-only fidelity rows.
+       - preserveUnverifiedLocalBookmarks: Whether quarantined local bookmarks omitted by the
+         incoming snapshot must survive replacement.
+       - mutationCheckpoint: Throwing callback invoked before mutation, after graph staging, and
+         after fidelity staging immediately before the transaction returns.
+     - Returns: Summary of the replacement after the single transaction commit succeeds.
+     - Side Effects: Replaces bookmark models and bookmark fidelity `Setting` rows in one native
+       SwiftData transaction.
+     - Throws: Rethrows validation, context-contract, checkpoint, strict fetch, and commit errors;
+       every error after mutation begins rolls the complete shared context back.
+     */
+    func replaceLocalBookmarks(
+        from snapshot: RemoteSyncAndroidBookmarkSnapshot,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        preserveUnverifiedLocalBookmarks: Bool = false,
+        mutationCheckpoint: () throws -> Void
+    ) throws -> RemoteSyncBookmarkRestoreReport {
+        return try settingsStore.performAtomicBatch(in: modelContext) {
+            try mutationCheckpoint()
+
+        let replacementSnapshot = preserveUnverifiedLocalBookmarks
+            ? try preservingUnverifiedLocalBookmarks(
+                in: snapshot,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            : snapshot
+        let prepared = try prepareRestore(from: replacementSnapshot)
 
         var previousDisplayBooksByID: [UUID: String] = [:]
-        if let existing = try? modelContext.fetch(FetchDescriptor<BibleBookmark>()) {
-            for bookmark in existing {
-                if let book = bookmark.book {
-                    previousDisplayBooksByID[bookmark.id] = book
-                }
+        let existingBookmarks = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
+        for bookmark in existingBookmarks {
+            if let book = bookmark.book {
+                previousDisplayBooksByID[bookmark.id] = book
             }
         }
 
@@ -1041,7 +1172,8 @@ public final class RemoteSyncBookmarkRestoreService {
                 bookInitials: normalizedSourceBookInitials(for: preparedBookmark.bookmark),
                 createdAt: preparedBookmark.bookmark.createdAt,
                 lastUpdatedOn: preparedBookmark.bookmark.lastUpdatedOn,
-                wholeVerse: preparedBookmark.bookmark.wholeVerse
+                wholeVerse: preparedBookmark.bookmark.wholeVerse,
+                ordinalTrustMetadata: preparedBookmark.ordinalTrustMetadata
             )
             let rawBook = preparedBookmark.bookmark.book
             let displayBook = normalizedDisplayBookName(
@@ -1058,6 +1190,7 @@ public final class RemoteSyncBookmarkRestoreService {
             bookmark.playbackSettings = preparedBookmark.playbackSettings
             bookmark.type = preparedBookmark.bookmark.type
             bookmark.customIcon = preparedBookmark.bookmark.customIcon
+            bookmark.sourcePromptId = preparedBookmark.bookmark.sourcePromptId
             bookmark.editAction = preparedBookmark.bookmark.editAction
             if let notes = preparedBookmark.bookmark.notes {
                 let noteEntity = BibleBookmarkNotes(
@@ -1065,6 +1198,7 @@ public final class RemoteSyncBookmarkRestoreService {
                     notes: notes,
                     contentType: preparedBookmark.bookmark.notesContentType
                 )
+                noteEntity.sourcePromptId = preparedBookmark.bookmark.notesSourcePromptId
                 noteEntity.bookmark = bookmark
                 bookmark.notes = noteEntity
                 modelContext.insert(noteEntity)
@@ -1090,6 +1224,7 @@ public final class RemoteSyncBookmarkRestoreService {
             bookmark.primaryLabelId = preparedBookmark.localPrimaryLabelID
             bookmark.playbackSettings = preparedBookmark.playbackSettings
             bookmark.customIcon = preparedBookmark.bookmark.customIcon
+            bookmark.sourcePromptId = preparedBookmark.bookmark.sourcePromptId
             bookmark.editAction = preparedBookmark.bookmark.editAction
             if let notes = preparedBookmark.bookmark.notes {
                 let noteEntity = GenericBookmarkNotes(
@@ -1097,6 +1232,7 @@ public final class RemoteSyncBookmarkRestoreService {
                     notes: notes,
                     contentType: preparedBookmark.bookmark.notesContentType
                 )
+                noteEntity.sourcePromptId = preparedBookmark.bookmark.notesSourcePromptId
                 noteEntity.bookmark = bookmark
                 bookmark.notes = noteEntity
                 modelContext.insert(noteEntity)
@@ -1143,16 +1279,19 @@ public final class RemoteSyncBookmarkRestoreService {
                 indentLevel: preparedEntry.entry.indentLevel,
                 contentType: preparedEntry.entry.contentType
             )
+            entry.sourcePromptId = preparedEntry.entry.sourcePromptId
             entry.label = label
             modelContext.insert(entry)
 
-            let textEntity = StudyPadTextEntryText(studyPadTextEntryId: preparedEntry.entry.id, text: preparedEntry.entry.text)
-            textEntity.entry = entry
-            entry.textEntry = textEntity
-            modelContext.insert(textEntity)
+            if let text = preparedEntry.entry.text {
+                let textEntity = StudyPadTextEntryText(studyPadTextEntryId: preparedEntry.entry.id, text: text)
+                textEntity.entry = entry
+                entry.textEntry = textEntity
+                modelContext.insert(textEntity)
+            }
         }
 
-        try modelContext.save()
+        try mutationCheckpoint()
 
         let playbackSettingsStore = RemoteSyncBookmarkPlaybackSettingsStore(settingsStore: settingsStore)
         let labelAliasStore = RemoteSyncBookmarkLabelAliasStore(settingsStore: settingsStore)
@@ -1187,6 +1326,8 @@ public final class RemoteSyncBookmarkRestoreService {
             labelAliasStore.setAlias(remoteLabelID: alias.remoteLabelID, localLabelID: alias.localLabelID)
         }
 
+        try mutationCheckpoint()
+
         return RemoteSyncBookmarkRestoreReport(
             restoredLabelCount: labelsByID.count,
             restoredBibleBookmarkCount: prepared.bibleBookmarks.count,
@@ -1194,6 +1335,132 @@ public final class RemoteSyncBookmarkRestoreService {
             restoredStudyPadEntryCount: prepared.studyPadEntries.count,
             preservedPlaybackSettingsCount: preservedPlaybackSettingsCount,
             preservedSystemLabelAliasCount: prepared.systemLabelAliases.count
+        )
+        }
+    }
+
+    /**
+     Adds quarantined local Bible bookmarks to a destructive incoming replacement snapshot.
+
+     Snapshot and patch restore are authoritative for verified rows, but omission is not evidence
+     that a local unresolved row should be deleted. A remote row with the same bookmark identifier
+     still wins. Referenced labels are retained, with reserved system-label references remapped to
+     the incoming row carrying the same reserved name.
+
+     - Parameters:
+       - snapshot: Incoming Android or remote replacement snapshot.
+       - modelContext: Context containing current local quarantine rows.
+       - settingsStore: Fidelity settings needed to project current local rows losslessly.
+     - Returns: Incoming snapshot augmented with non-colliding quarantined local Bible bookmarks.
+     - Side effects: Reads current SwiftData rows and bookmark fidelity settings.
+     - Failure modes: Rethrows strict SwiftData projection failures before any replacement mutation
+       begins, so unreadable quarantine state cannot be interpreted as an empty local set.
+     */
+    private func preservingUnverifiedLocalBookmarks(
+        in snapshot: RemoteSyncAndroidBookmarkSnapshot,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> RemoteSyncAndroidBookmarkSnapshot {
+        let local = try snapshotService.snapshotIncludingQuarantinedBibleBookmarks(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let incomingBookmarkIDs = Set(snapshot.bibleBookmarks.map(\.id))
+        let quarantined = local.bibleBookmarkRowsByKey.values.filter { row in
+            guard !incomingBookmarkIDs.contains(row.id),
+                  let metadata = row.ordinalTrustMetadata else {
+                return false
+            }
+            return !PersistedOrdinalTrustPolicy.isTrustedKJVARange(
+                metadata: metadata,
+                start: row.kjvOrdinalStart,
+                end: row.kjvOrdinalEnd
+            )
+        }
+        guard !quarantined.isEmpty else {
+            return snapshot
+        }
+
+        let localLabelsByID = Dictionary(uniqueKeysWithValues: local.labelRowsByKey.values.map { ($0.id, $0) })
+        var mergedLabelsByID = Dictionary(uniqueKeysWithValues: snapshot.labels.map { ($0.id, $0) })
+        var incomingSystemLabelsByName: [String: RemoteSyncAndroidLabel] = [:]
+        for label in snapshot.labels where Self.isSystemLabelName(label.name) {
+            if incomingSystemLabelsByName[label.name] == nil {
+                incomingSystemLabelsByName[label.name] = label
+            }
+        }
+
+        func mappedLabelID(_ localID: UUID) -> UUID? {
+            guard let localLabel = localLabelsByID[localID] else {
+                return nil
+            }
+            if let incomingSystemLabel = incomingSystemLabelsByName[localLabel.name] {
+                return incomingSystemLabel.id
+            }
+            if mergedLabelsByID[localID] == nil {
+                mergedLabelsByID[localID] = localLabel
+            }
+            return localID
+        }
+
+        var preservedRows: [RemoteSyncAndroidBibleBookmark] = []
+        for bookmark in quarantined {
+            let mappedPrimaryLabelID: UUID?
+            if let primaryLabelID = bookmark.primaryLabelID {
+                mappedPrimaryLabelID = mappedLabelID(primaryLabelID)
+            } else {
+                mappedPrimaryLabelID = nil
+            }
+            var mappedLinks: [RemoteSyncAndroidBookmarkLabelLink] = []
+            for link in bookmark.labelLinks {
+                guard let labelID = mappedLabelID(link.labelID) else {
+                    continue
+                }
+                mappedLinks.append(
+                    RemoteSyncAndroidBookmarkLabelLink(
+                        labelID: labelID,
+                        orderNumber: link.orderNumber,
+                        indentLevel: link.indentLevel,
+                        expandContent: link.expandContent
+                    )
+                )
+            }
+            let preserved = RemoteSyncAndroidBibleBookmark(
+                id: bookmark.id,
+                kjvOrdinalStart: bookmark.kjvOrdinalStart,
+                kjvOrdinalEnd: bookmark.kjvOrdinalEnd,
+                ordinalStart: bookmark.ordinalStart,
+                ordinalEnd: bookmark.ordinalEnd,
+                v11n: bookmark.v11n,
+                playbackSettingsJSON: bookmark.playbackSettingsJSON,
+                createdAt: bookmark.createdAt,
+                book: bookmark.book,
+                startOffset: bookmark.startOffset,
+                endOffset: bookmark.endOffset,
+                primaryLabelID: mappedPrimaryLabelID,
+                notes: bookmark.notes,
+                notesContentType: bookmark.notesContentType,
+                lastUpdatedOn: bookmark.lastUpdatedOn,
+                wholeVerse: bookmark.wholeVerse,
+                type: bookmark.type,
+                customIcon: bookmark.customIcon,
+                sourcePromptId: bookmark.sourcePromptId,
+                notesSourcePromptId: bookmark.notesSourcePromptId,
+                editAction: bookmark.editAction,
+                labelLinks: mappedLinks,
+                ordinalTrustMetadata: bookmark.ordinalTrustMetadata
+            )
+            preservedRows.append(preserved)
+        }
+
+        return RemoteSyncAndroidBookmarkSnapshot(
+            labels: mergedLabelsByID.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            bibleBookmarks: (snapshot.bibleBookmarks + preservedRows).sorted {
+                $0.id.uuidString < $1.id.uuidString
+            },
+            genericBookmarks: snapshot.genericBookmarks,
+            studyPadEntries: snapshot.studyPadEntries,
+            logEntries: snapshot.logEntries
         )
     }
 
@@ -1239,7 +1506,8 @@ public final class RemoteSyncBookmarkRestoreService {
 
         var unresolvedReferences: [String] = []
 
-        let preparedBibleBookmarks = snapshot.bibleBookmarks.map { bookmark in
+        let preparedBibleBookmarks = try snapshot.bibleBookmarks.map { bookmark in
+            let ordinalTrustMetadata = try preparedOrdinalTrustMetadata(for: bookmark)
             let localPrimaryLabelID = bookmark.primaryLabelID.flatMap { remoteID in
                 if let localID = labelIDMap[remoteID] {
                     return localID
@@ -1265,7 +1533,8 @@ public final class RemoteSyncBookmarkRestoreService {
                 bookmark: bookmark,
                 localPrimaryLabelID: localPrimaryLabelID,
                 localLabelLinks: localLabelLinks,
-                playbackSettings: projectPlaybackSettings(from: bookmark.playbackSettingsJSON)
+                playbackSettings: projectPlaybackSettings(from: bookmark.playbackSettingsJSON),
+                ordinalTrustMetadata: ordinalTrustMetadata
             )
         }
 
@@ -1331,6 +1600,63 @@ public final class RemoteSyncBookmarkRestoreService {
     }
 
     /**
+     Validates and classifies one staged Bible bookmark's persisted KJVA range.
+
+     Local snapshot rows may carry existing trust metadata so patch replay does not relabel native
+     rows as Android imports. Rows read from Android SQLite have no metadata and become authoritative
+     only after both KJVA endpoints pass bounds and ordering checks. Unknown source versification
+     names remain durable but unresolved.
+
+     - Parameter bookmark: Staged Android-shaped Bible bookmark row.
+     - Returns: Existing valid local metadata, validated Android metadata, or unresolved metadata.
+     - Side effects: Reads SWORD's supported-versification registry.
+     - Failure modes: Throws `invalidColumnValue` when an external Android row has an out-of-bounds
+       or reversed KJVA range.
+     */
+    private func preparedOrdinalTrustMetadata(
+        for bookmark: RemoteSyncAndroidBibleBookmark
+    ) throws -> PersistedOrdinalTrustMetadata {
+        if let metadata = bookmark.ordinalTrustMetadata {
+            guard metadata.state.isVerified else {
+                return metadata
+            }
+            guard PersistedOrdinalTrustPolicy.isTrustedKJVARange(
+                metadata: metadata,
+                start: bookmark.kjvOrdinalStart,
+                end: bookmark.kjvOrdinalEnd
+            ) else {
+                return PersistedOrdinalTrustMetadata(
+                    state: .legacyUnresolved,
+                    mappingVersion: 0,
+                    provenance: metadata.provenance,
+                    sourceBookInitials: metadata.sourceBookInitials,
+                    sourceVersification: metadata.sourceVersification,
+                    sourceOrdinalStart: metadata.sourceOrdinalStart,
+                    sourceOrdinalEnd: metadata.sourceOrdinalEnd
+                )
+            }
+            return metadata
+        }
+
+        guard PersistedOrdinalTrustPolicy.isValidKJVARange(
+            start: bookmark.kjvOrdinalStart,
+            end: bookmark.kjvOrdinalEnd
+        ) else {
+            throw RemoteSyncBookmarkRestoreError.invalidColumnValue(
+                table: "BibleBookmark",
+                column: "kjvOrdinalStart/kjvOrdinalEnd"
+            )
+        }
+        return PersistedOrdinalTrustPolicy.androidImportMetadata(
+            sourceVersification: bookmark.v11n,
+            sourceOrdinalStart: bookmark.ordinalStart,
+            sourceOrdinalEnd: bookmark.ordinalEnd,
+            kjvaOrdinalStart: bookmark.kjvOrdinalStart,
+            kjvaOrdinalEnd: bookmark.kjvOrdinalEnd
+        )
+    }
+
+    /**
      Deletes the entire local bookmark-category graph before restore insertion begins.
 
      The delete order removes child rows before parent rows so the implementation does not depend
@@ -1389,7 +1715,7 @@ public final class RemoteSyncBookmarkRestoreService {
        - this helper does not throw; any later persistence failure is surfaced by `modelContext.save()`
      */
     private func ensureMissingSystemLabels(in modelContext: ModelContext, labelsByID: inout [UUID: Label]) {
-        for (name, id) in Self.systemLabels {
+        for (name, id) in Self.requiredSystemLabels {
             guard labelsByID[id] == nil else {
                 continue
             }
@@ -1403,9 +1729,9 @@ public final class RemoteSyncBookmarkRestoreService {
      Verifies that the staged bookmark tables form a coherent snapshot before higher-level aggregation.
 
      The staged initial backup is read directly from SQLite rather than through Room or SwiftData,
-     so this helper reconstructs the foreign-key expectations that the restore depends on. Notes may
-     be absent because they are optional, but note rows, junction rows, primary-label references,
-     and StudyPad text rows must always point at existing parents.
+     so this helper reconstructs the foreign-key expectations that the restore depends on. Notes and
+     StudyPad text children may be absent, but present child rows, junction rows, and primary-label
+     references must always point at existing parents.
 
      - Parameters:
        - labels: Raw Android label rows.
@@ -1436,7 +1762,6 @@ public final class RemoteSyncBookmarkRestoreService {
         let bibleBookmarkIDs = Set(bibleBookmarks.map(\.id))
         let genericBookmarkIDs = Set(genericBookmarks.map(\.id))
         let studyPadEntryIDs = Set(studyPadEntries.map(\.id))
-        let studyPadTextIDs = Set(studyPadTexts.map(\.entryID))
 
         var issues: [String] = []
 
@@ -1478,10 +1803,6 @@ public final class RemoteSyncBookmarkRestoreService {
         for text in studyPadTexts where !studyPadEntryIDs.contains(text.entryID) {
             issues.append("StudyPadTextEntryText.studyPadTextEntryId=\(text.entryID.uuidString) missing StudyPadTextEntry")
         }
-        for entry in studyPadEntries where !studyPadTextIDs.contains(entry.id) {
-            issues.append("StudyPadTextEntry.id=\(entry.id.uuidString) missing StudyPadTextEntryText")
-        }
-
         if !issues.isEmpty {
             throw RemoteSyncBookmarkRestoreError.orphanReferences(Array(Set(issues)).sorted())
         }
@@ -1611,10 +1932,13 @@ public final class RemoteSyncBookmarkRestoreService {
        - throws `RemoteSyncBookmarkRestoreError.invalidIdentifierBlob` when one bookmark or label ID BLOB is malformed
      */
     private func fetchBibleBookmarks(from db: OpaquePointer) throws -> [RawBibleBookmarkRow] {
+        let sourcePromptExpression = try tableHasColumn("sourcePromptId", in: "BibleBookmark", database: db)
+            ? "sourcePromptId"
+            : "NULL AS sourcePromptId"
         let sql = """
         SELECT id, kjvOrdinalStart, kjvOrdinalEnd, ordinalStart, ordinalEnd, v11n, playbackSettings,
                createdAt, book, startOffset, endOffset, primaryLabelId, lastUpdatedOn, wholeVerse,
-               type, customIcon, editAction_mode, editAction_content
+               type, customIcon, \(sourcePromptExpression), editAction_mode, editAction_content
         FROM BibleBookmark
         ORDER BY createdAt, id
         """
@@ -1645,9 +1969,10 @@ public final class RemoteSyncBookmarkRestoreService {
                     wholeVerse: boolColumn(statement: statement, index: 13),
                     type: optionalStringColumn(statement: statement, index: 14),
                     customIcon: optionalStringColumn(statement: statement, index: 15),
+                    sourcePromptId: try optionalUUIDFromBlob(statement: statement, column: 16, table: "BibleBookmark", name: "sourcePromptId"),
                     editAction: editAction(
-                        mode: optionalStringColumn(statement: statement, index: 16),
-                        content: optionalStringColumn(statement: statement, index: 17)
+                        mode: optionalStringColumn(statement: statement, index: 17),
+                        content: optionalStringColumn(statement: statement, index: 18)
                     )
                 )
             )
@@ -1667,10 +1992,13 @@ public final class RemoteSyncBookmarkRestoreService {
        - throws `RemoteSyncBookmarkRestoreError.invalidIdentifierBlob` when one bookmark or label ID BLOB is malformed
      */
     private func fetchGenericBookmarks(from db: OpaquePointer) throws -> [RawGenericBookmarkRow] {
+        let sourcePromptExpression = try tableHasColumn("sourcePromptId", in: "GenericBookmark", database: db)
+            ? "sourcePromptId"
+            : "NULL AS sourcePromptId"
         let sql = """
         SELECT id, `key`, createdAt, bookInitials, ordinalStart, ordinalEnd, startOffset, endOffset,
                primaryLabelId, lastUpdatedOn, wholeVerse, playbackSettings, customIcon,
-               editAction_mode, editAction_content
+               \(sourcePromptExpression), editAction_mode, editAction_content
         FROM GenericBookmark
         ORDER BY createdAt, id
         """
@@ -1689,8 +2017,8 @@ public final class RemoteSyncBookmarkRestoreService {
                     key: stringColumn(statement: statement, index: 1),
                     createdAt: dateFromMillisecondsColumn(statement: statement, index: 2),
                     bookInitials: stringColumn(statement: statement, index: 3),
-                    ordinalStart: Int(sqlite3_column_int(statement, 4)),
-                    ordinalEnd: Int(sqlite3_column_int(statement, 5)),
+                    ordinalStart: optionalIntColumn(statement: statement, index: 4),
+                    ordinalEnd: optionalIntColumn(statement: statement, index: 5),
                     startOffset: optionalIntColumn(statement: statement, index: 6),
                     endOffset: optionalIntColumn(statement: statement, index: 7),
                     primaryLabelID: try optionalUUIDFromBlob(statement: statement, column: 8, table: "GenericBookmark", name: "primaryLabelId"),
@@ -1698,9 +2026,10 @@ public final class RemoteSyncBookmarkRestoreService {
                     wholeVerse: boolColumn(statement: statement, index: 10),
                     playbackSettingsJSON: optionalStringColumn(statement: statement, index: 11),
                     customIcon: optionalStringColumn(statement: statement, index: 12),
+                    sourcePromptId: try optionalUUIDFromBlob(statement: statement, column: 13, table: "GenericBookmark", name: "sourcePromptId"),
                     editAction: editAction(
-                        mode: optionalStringColumn(statement: statement, index: 13),
-                        content: optionalStringColumn(statement: statement, index: 14)
+                        mode: optionalStringColumn(statement: statement, index: 14),
+                        content: optionalStringColumn(statement: statement, index: 15)
                     )
                 )
             )
@@ -1728,9 +2057,10 @@ public final class RemoteSyncBookmarkRestoreService {
         tableName: String
     ) throws -> [RemoteSyncCurrentBookmarkNoteRow] {
         let hasContentType = try tableHasColumn("contentType", in: tableName, database: db)
-        let sql = hasContentType
-            ? "SELECT bookmarkId, notes, contentType FROM \(tableName) ORDER BY bookmarkId"
-            : "SELECT bookmarkId, notes FROM \(tableName) ORDER BY bookmarkId"
+        let hasSourcePromptId = try tableHasColumn("sourcePromptId", in: tableName, database: db)
+        let contentTypeExpression = hasContentType ? "contentType" : "NULL AS contentType"
+        let sourcePromptExpression = hasSourcePromptId ? "sourcePromptId" : "NULL AS sourcePromptId"
+        let sql = "SELECT bookmarkId, notes, \(contentTypeExpression), \(sourcePromptExpression) FROM \(tableName) ORDER BY bookmarkId"
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
 
@@ -1746,7 +2076,8 @@ public final class RemoteSyncBookmarkRestoreService {
                     notes: stringColumn(statement: statement, index: 1),
                     contentType: hasContentType
                         ? try optionalNotesContentTypeColumn(statement: statement, index: 2, table: tableName, name: "contentType")
-                        : nil
+                        : nil,
+                    sourcePromptId: try optionalUUIDFromBlob(statement: statement, column: 3, table: tableName, name: "sourcePromptId")
                 )
             )
         }
@@ -1808,9 +2139,10 @@ public final class RemoteSyncBookmarkRestoreService {
      */
     private func fetchStudyPadEntries(from db: OpaquePointer) throws -> [RawStudyPadEntryRow] {
         let hasContentType = try tableHasColumn("contentType", in: "StudyPadTextEntry", database: db)
-        let sql = hasContentType
-            ? "SELECT id, labelId, orderNumber, indentLevel, contentType FROM StudyPadTextEntry ORDER BY orderNumber, id"
-            : "SELECT id, labelId, orderNumber, indentLevel FROM StudyPadTextEntry ORDER BY orderNumber, id"
+        let hasSourcePromptId = try tableHasColumn("sourcePromptId", in: "StudyPadTextEntry", database: db)
+        let contentTypeExpression = hasContentType ? "contentType" : "NULL AS contentType"
+        let sourcePromptExpression = hasSourcePromptId ? "sourcePromptId" : "NULL AS sourcePromptId"
+        let sql = "SELECT id, labelId, orderNumber, indentLevel, \(contentTypeExpression), \(sourcePromptExpression) FROM StudyPadTextEntry ORDER BY orderNumber, id"
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
 
@@ -1828,7 +2160,8 @@ public final class RemoteSyncBookmarkRestoreService {
                     indentLevel: Int(sqlite3_column_int(statement, 3)),
                     contentType: hasContentType
                         ? try optionalNotesContentTypeColumn(statement: statement, index: 4, table: "StudyPadTextEntry", name: "contentType")
-                        : nil
+                        : nil,
+                    sourcePromptId: try optionalUUIDFromBlob(statement: statement, column: 5, table: "StudyPadTextEntry", name: "sourcePromptId")
                 )
             )
         }
@@ -2066,27 +2399,17 @@ public final class RemoteSyncBookmarkRestoreService {
     }
 
     /**
-     Projects Android bookmark playback JSON onto the subset currently modeled by iOS.
-
-     The current iOS bookmark model only persists `PlaybackSettings.bookId`. Android stores a much
-     richer JSON object containing speech preferences and optional repeat ranges. This helper pulls
-     out the `bookId` field when it can decode it and otherwise returns `nil`; the caller preserves
-     the full raw JSON separately so no Android fidelity is silently lost.
+     Decodes Android bookmark playback JSON into the complete native model.
 
      - Parameter playbackSettingsJSON: Raw Android `playbackSettings` JSON payload.
-     - Returns: Projected iOS `PlaybackSettings`, or `nil` when the payload is absent or does not expose a usable `bookId`.
+     - Returns: Complete playback settings, or `nil` when the column is null.
      - Side effects: none.
-     - Failure modes: Malformed JSON degrades to `nil` instead of throwing because the raw payload is preserved separately.
+     - Failure modes: Malformed JSON becomes Android defaults, matching `PlaybackSettings.fromJson`;
+       the original payload remains available in `RemoteSyncBookmarkPlaybackSettingsStore`.
      */
     private func projectPlaybackSettings(from playbackSettingsJSON: String?) -> PlaybackSettings? {
-        guard let playbackSettingsJSON, !playbackSettingsJSON.isEmpty,
-              let data = playbackSettingsJSON.data(using: .utf8),
-              let projection = try? JSONDecoder().decode(AndroidPlaybackSettingsProjection.self, from: data),
-              let bookID = projection.bookId,
-              !bookID.isEmpty else {
-            return nil
-        }
-        return PlaybackSettings(bookId: bookID)
+        guard let playbackSettingsJSON, !playbackSettingsJSON.isEmpty else { return nil }
+        return PlaybackSettings.fromAndroidJSON(playbackSettingsJSON)
     }
 
     /**
@@ -2117,7 +2440,7 @@ public final class RemoteSyncBookmarkRestoreService {
      Returns whether the supplied label name is one of the reserved system-label markers.
 
      - Parameter name: Label name from the staged Android snapshot.
-     - Returns: `true` for speak, unlabeled, or paragraph-break labels.
+     - Returns: `true` for Android's speak, unlabeled, paragraph-break, or AI labels.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
@@ -2141,7 +2464,11 @@ public final class RemoteSyncBookmarkRestoreService {
         (Label.speakLabelName, Label.speakLabelId),
         (Label.unlabeledName, Label.unlabeledId),
         (Label.paragraphBreakLabelName, Label.paragraphBreakLabelId),
+        ("__AI_LABEL__", AndroidBookmarkDatabaseContract.aiLabelID),
     ]
+
+    /// Runtime-required labels that iOS recreates even when an Android backup omitted them.
+    private static let requiredSystemLabels = Array(systemLabels.prefix(3))
 
     private static let systemLabelNames = Set(systemLabels.map(\.name))
 }

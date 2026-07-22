@@ -10,16 +10,16 @@ import SwordKit
 /**
  Tracks one active or failed Downloads row operation using Android's document-status shape.
 
- Android exposes `BEING_INSTALLED` with a percent and `ERROR_DOWNLOADING` as row states rather
- than a global spinner. iOS keeps the same contract locally: in-progress rows show determinate
- progress plus cancel, while failed rows remain in the list with a retry action.
+ Android exposes `BEING_INSTALLED` as a durable job and `ERROR_DOWNLOADING` as row state rather
+ than a global spinner. iOS keeps the same contract locally: active rows preserve download,
+ extraction, and commit phases with determinate or indeterminate progress, while failed rows remain
+ in the list with a retry action.
 
  Side effects:
  - none; values are immutable snapshots of row state
 
  Failure modes:
- - none; progress values are clamped to `0.0...1.0` so malformed callbacks cannot produce invalid
-   progress UI
+ - none; `ModuleInstallProgress` normalizes malformed fractions before they reach the UI
  */
 struct ModuleBrowserDownloadActivity: Equatable {
     /**
@@ -29,7 +29,7 @@ struct ModuleBrowserDownloadActivity: Equatable {
      retained failure details for `ERROR_DOWNLOADING`.
      */
     enum Phase: Equatable {
-        /// Module files are still downloading or being installed.
+        /// Module files are queued, downloading, extracting, or committing.
         case inProgress
 
         /// The latest install attempt failed and can be retried from the row.
@@ -39,8 +39,8 @@ struct ModuleBrowserDownloadActivity: Equatable {
     /// Current Android-equivalent row phase.
     let phase: Phase
 
-    /// Clamped normalized completion ratio used by the row progress bar.
-    let progressFraction: Double
+    /// Structured installer phase for active rows; absent for retained failures.
+    let installProgress: ModuleInstallProgress?
 
     /// User-visible failure detail for failed rows.
     let message: String?
@@ -55,9 +55,22 @@ struct ModuleBrowserDownloadActivity: Equatable {
      - Failure modes: none.
      */
     static func inProgress(_ progressFraction: Double) -> ModuleBrowserDownloadActivity {
+        inProgress(ModuleInstallProgress(phase: .downloading, fraction: progressFraction))
+    }
+
+    /**
+     Creates an active row from structured repository progress.
+
+     - Parameter installProgress: Current queued/download/extract/commit/complete snapshot.
+     - Returns: An activity representing Android `BEING_INSTALLED` until the owner clears it after
+       successful completion.
+     - Side effects: none.
+     - Failure modes: none; fractions were normalized by `ModuleInstallProgress`.
+     */
+    static func inProgress(_ installProgress: ModuleInstallProgress) -> ModuleBrowserDownloadActivity {
         ModuleBrowserDownloadActivity(
             phase: .inProgress,
-            progressFraction: min(max(progressFraction, 0), 1),
+            installProgress: installProgress,
             message: nil
         )
     }
@@ -73,7 +86,7 @@ struct ModuleBrowserDownloadActivity: Equatable {
     static func failed(_ message: String) -> ModuleBrowserDownloadActivity {
         ModuleBrowserDownloadActivity(
             phase: .failed,
-            progressFraction: 0,
+            installProgress: nil,
             message: message
         )
     }
@@ -85,8 +98,8 @@ struct ModuleBrowserDownloadActivity: Equatable {
      - Side effects: none.
      - Failure modes: none.
      */
-    var progressPercent: Int {
-        Int((min(max(progressFraction, 0), 1) * 100).rounded(.towardZero))
+    var progressPercent: Int? {
+        installProgress?.percent
     }
 }
 
@@ -109,7 +122,7 @@ struct ModuleBrowserDownloadSortSnapshot {
     let installedModules: [ModuleInfo]
 
     /// Row activities used to determine Android `BEING_INSTALLED`/error sort rank.
-    let downloadActivities: [String: ModuleBrowserDownloadActivity]
+    let downloadActivities: [RemoteModuleIdentity: ModuleBrowserDownloadActivity]
 }
 
 /**
@@ -185,6 +198,23 @@ private struct ModuleBrowserDownloadConfirmation: Identifiable {
 }
 
 /**
+ Local SWORD archive waiting for Android-equivalent overwrite consent.
+
+ The repository repeats inspection at install time; this value exists only to preserve the selected
+ request and present the exact conflicts found during the read-only preflight.
+ */
+private struct ModuleBrowserLocalOverwriteConfirmation: Identifiable {
+    /// Selected external document request retained across alert presentation.
+    let request: ExternalDocumentImportRequest
+
+    /// Validated archive summary and existing destination paths.
+    let inspection: LocalSwordZipInspection
+
+    /// Stable alert identity derived from the selected file URL.
+    var id: String { request.url.standardizedFileURL.path }
+}
+
+/**
  Android download-row status used by `ModuleBrowserView`.
 
  The enum mirrors Android `DocumentStatus.DocumentInstallStatus` closely enough for sorting and
@@ -194,8 +224,8 @@ private struct ModuleBrowserDownloadConfirmation: Identifiable {
  action.
  */
 enum ModuleBrowserDownloadStatus: Equatable {
-    /// The module is currently being installed with Android-style percent progress.
-    case beingInstalled(progressPercent: Int)
+    /// The module is currently queued, downloading, extracting, or committing.
+    case beingInstalled(progress: ModuleInstallProgress)
 
     /// The previous module install attempt failed and can be retried.
     case errorDownloading(message: String)
@@ -335,7 +365,7 @@ private enum ModuleBrowserPalette {
  */
 public struct ModuleBrowserView: View {
     /// Android's repository list staleness window before Downloads refreshes catalogs on open.
-    static let downloadCatalogStaleInterval: TimeInterval = 24 * 60 * 60
+    nonisolated static let downloadCatalogStaleInterval: TimeInterval = 24 * 60 * 60
 
     /// Persisted Android-style document type filter index.
     private static let selectedDocumentFilterIndexKey = "downloads.selectedDocumentFilterIndex"
@@ -398,7 +428,7 @@ public struct ModuleBrowserView: View {
     @State private var sources: [SourceConfig] = []
 
     /// Per-module row activity for Android-style progress, cancel, and retry state.
-    @State private var downloadActivities: [String: ModuleBrowserDownloadActivity] = [:]
+    @State private var downloadActivities: [RemoteModuleIdentity: ModuleBrowserDownloadActivity] = [:]
 
     /// Whether Downloads has captured Android's current filter/sort inputs for visible row order.
     @State private var didCaptureDownloadSortSnapshot = false
@@ -409,11 +439,11 @@ public struct ModuleBrowserView: View {
         downloadActivities: [:]
     )
 
-    /// Running install tasks keyed by module initials so row cancel buttons can stop work.
-    @State private var installTasks: [String: Task<Void, Never>] = [:]
+    /// Running install tasks keyed exactly like Android's repository-scoped download queue.
+    @State private var installTasks: [RemoteModuleIdentity: Task<Void, Never>] = [:]
 
     /// Monotonic task identifiers that prevent stale cancelled tasks from clearing newer retries.
-    @State private var installTaskIDs: [String: UUID] = [:]
+    @State private var installTaskIDs: [RemoteModuleIdentity: UUID] = [:]
 
     /// User-visible error text for refresh, install, or uninstall failures.
     @State private var errorMessage: String?
@@ -430,6 +460,15 @@ public struct ModuleBrowserView: View {
     /// Module details currently presented from Android's row About action.
     @State private var selectedModuleDetails: ModuleBrowserModuleDetails?
 
+    /// Installed encrypted module whose Android passphrase prompt is visible.
+    @State private var pendingUnlockModule: ModuleInfo?
+
+    /// Cipher key entered for the pending Downloads unlock action.
+    @State private var unlockCipherKey = ""
+
+    /// Rejected-key feedback retained while the passphrase prompt is presented again.
+    @State private var unlockFailureMessage: String?
+
     /// Whether the custom repository manager is pushed from the Downloads overflow menu.
     @State private var showRepositoryManager = false
 
@@ -438,6 +477,12 @@ public struct ModuleBrowserView: View {
 
     /// Whether a selected ZIP/EPUB/font import is currently installing.
     @State private var isImportingExternalDocument = false
+
+    /// Current durable phase for a local SWORD ZIP import.
+    @State private var externalDocumentImportProgress: ModuleInstallProgress?
+
+    /// Local SWORD ZIP waiting for explicit replacement consent.
+    @State private var pendingLocalModuleOverwrite: ModuleBrowserLocalOverwriteConfirmation?
 
     /// Feedback from Android's Install ZIP equivalent.
     @State private var externalDocumentImportMessage: String?
@@ -464,7 +509,7 @@ public struct ModuleBrowserView: View {
     @State private var didRequestDefaultDocuments = false
 
     /// Startup default modules whose asynchronous installs have not reached a terminal row state.
-    @State private var defaultDownloadInstallingModules: Set<String> = []
+    @State private var defaultDownloadInstallingModules: Set<RemoteModuleIdentity> = []
 
     /**
      Creates the module browser with optional Android-compatible search and default-download state.
@@ -623,7 +668,7 @@ public struct ModuleBrowserView: View {
      - Failure modes: Repository errors are rendered in the list and do not prevent the route from
        opening.
      */
-    private var androidDownloadsScreen: some View {
+    private var androidDownloadsLayout: some View {
         let visibleModules = filteredAvailableModules
         let installedModulesByName = Self.installedModuleLookup(from: installedModules)
 
@@ -633,15 +678,58 @@ public struct ModuleBrowserView: View {
                 visibleModules: visibleModules,
                 installedModulesByName: installedModulesByName
             )
-            VStack(spacing: 0) {
-                androidTopAppBar
-                androidFilterBar(visibleModuleCount: visibleModules.count)
-                androidDownloadsContent(
-                    visibleModules: visibleModules,
-                    installedModulesByName: installedModulesByName
-                )
-            }
-            if showOverflowMenu {
+            androidDownloadsListContent(
+                visibleModules: visibleModules,
+                installedModulesByName: installedModulesByName
+            )
+            androidDownloadsOverflowLayer
+        }
+        .background(ModuleBrowserPalette.background.ignoresSafeArea())
+        .onChange(of: searchText) {
+            alignFiltersWithAndroidSearchState(searchText)
+            captureDownloadListSortSnapshot()
+        }
+        .navigationBarBackButtonHidden(true)
+        #if os(iOS)
+        .toolbar(.hidden, for: .navigationBar)
+        #endif
+    }
+
+    /**
+     Builds the app bar, filters, and download rows as one stable ZStack child.
+
+     - Parameters:
+       - visibleModules: Remote modules matching the current category, language, and search filters.
+       - installedModulesByName: Installed-module lookup used to derive each row's action state.
+     - Returns: Primary Downloads content below the route-level overlays.
+     - Side effects: Child controls can change filters or invoke module actions.
+     - Failure modes: Empty module arrays render the existing empty/error content.
+     */
+    private func androidDownloadsListContent(
+        visibleModules: [RemoteModuleInfo],
+        installedModulesByName: [String: ModuleInfo]
+    ) -> some View {
+        VStack(spacing: 0) {
+            androidTopAppBar
+            androidFilterBar(visibleModuleCount: visibleModules.count)
+            androidDownloadsContent(
+                visibleModules: visibleModules,
+                installedModulesByName: installedModulesByName
+            )
+        }
+    }
+
+    /**
+     Builds the tap-dismiss layer and Android overflow menu only while that menu is visible.
+
+     - Returns: Overflow chrome, or no content when the menu is closed.
+     - Side effects: Tapping outside the menu clears `showOverflowMenu`.
+     - Failure modes: none.
+     */
+    @ViewBuilder
+    private var androidDownloadsOverflowLayer: some View {
+        if showOverflowMenu {
+            ZStack(alignment: .topTrailing) {
                 Color.black.opacity(0.001)
                     .ignoresSafeArea()
                     .accessibilityHidden(true)
@@ -654,15 +742,17 @@ public struct ModuleBrowserView: View {
                     .zIndex(1)
             }
         }
-        .background(ModuleBrowserPalette.background.ignoresSafeArea())
-        .onChange(of: searchText) {
-            alignFiltersWithAndroidSearchState(searchText)
-            captureDownloadListSortSnapshot()
-        }
-        .navigationBarBackButtonHidden(true)
-        #if os(iOS)
-        .toolbar(.hidden, for: .navigationBar)
-        #endif
+    }
+
+    /**
+     Attaches repository navigation, local-file import, and module details presentation.
+
+     - Returns: Downloads layout with non-alert document-management presenters.
+     - Side effects: Presented controls can navigate, import a file, or clear selected details.
+     - Failure modes: Import failures are retained for the later feedback-alert stage.
+     */
+    private var documentManagementPresentedDownloadsScreen: some View {
+        androidDownloadsLayout
         .navigationDestination(isPresented: $showRepositoryManager) {
             RepositoryManagerView()
             #if os(iOS)
@@ -678,6 +768,51 @@ public struct ModuleBrowserView: View {
         .moduleBrowserModuleDetailsDialog(details: selectedModuleDetails) {
             selectedModuleDetails = nil
         }
+    }
+
+    /**
+     Attaches encrypted-module unlock and accumulated download-error presentation.
+
+     - Returns: Document-management content with module-access alerts.
+     - Side effects: Actions can apply a cipher key, clear unlock state, or dismiss error history.
+     - Failure modes: Rejected keys retain retry feedback; download errors remain in their list.
+     */
+    private var moduleAccessPresentedDownloadsScreen: some View {
+        documentManagementPresentedDownloadsScreen
+        .alert(
+            pendingUnlockModule.map(ModuleUnlockActionCoordinator.promptTitle(for:)) ?? "",
+            isPresented: Binding(
+                get: { pendingUnlockModule != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        clearUnlockPrompt()
+                    }
+                }
+            ),
+            presenting: pendingUnlockModule
+        ) { module in
+            TextField(
+                String(localized: "passphrase", defaultValue: "Passphrase"),
+                text: $unlockCipherKey
+            )
+            Button(String(localized: "unlock", defaultValue: "Unlock")) {
+                attemptUnlock(module)
+            }
+            .disabled(unlockCipherKey.isEmpty)
+            if !module.aboutMetadata.unlockInfo.isEmpty {
+                Button(String(localized: "show_unlock_info", defaultValue: "Module & unlock info")) {
+                    showUnlockInformation(for: module)
+                }
+            }
+            Button(String(localized: "cancel"), role: .cancel) {
+                clearUnlockPrompt()
+            }
+        } message: { _ in
+            Text(
+                unlockFailureMessage
+                    ?? String(localized: "enter_module_passphrase", defaultValue: "Enter the module passphrase.")
+            )
+        }
         .alert(
             String(localized: "download_errors", defaultValue: "Download errors"),
             isPresented: $showDownloadErrors
@@ -685,6 +820,47 @@ public struct ModuleBrowserView: View {
             Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
         } message: {
             Text(downloadErrors.joined(separator: "\n"))
+        }
+    }
+
+    /**
+     Attaches overwrite consent and external-file import completion feedback.
+
+     - Returns: Module-access content with local import alerts.
+     - Side effects: Consent can start a replacement install; dismissals clear retained import state.
+     - Failure modes: Import failures remain visible until the feedback alert is dismissed.
+     */
+    private var importFeedbackPresentedDownloadsScreen: some View {
+        moduleAccessPresentedDownloadsScreen
+        .alert(
+            String(
+                localized: "android_module_backup_overwrite_title",
+                defaultValue: "Overwrite existing module files?"
+            ),
+            isPresented: Binding(
+                get: { pendingLocalModuleOverwrite != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingLocalModuleOverwrite = nil
+                    }
+                }
+            ),
+            presenting: pendingLocalModuleOverwrite
+        ) { confirmation in
+            Button(String(localized: "cancel"), role: .cancel) {
+                pendingLocalModuleOverwrite = nil
+            }
+            Button(String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) {
+                pendingLocalModuleOverwrite = nil
+                importExternalDocument(
+                    confirmation.request,
+                    overwritePolicy: .replaceExisting(
+                        confirmation.inspection.overwriteAuthorization
+                    )
+                )
+            }
+        } message: { confirmation in
+            Text(Self.localModuleOverwriteMessage(confirmation.inspection))
         }
         .alert(
             String(localized: "install_zip", defaultValue: "Load Documents From Files"),
@@ -701,6 +877,17 @@ public struct ModuleBrowserView: View {
         } message: {
             Text(externalDocumentImportMessage ?? "")
         }
+    }
+
+    /**
+     Attaches download confirmation and destructive installed-row action confirmation.
+
+     - Returns: Import-feedback content with all row-action alerts.
+     - Side effects: Confirmed actions can install, uninstall, or delete a search index.
+     - Failure modes: Cancelling clears only the pending confirmation and leaves module state intact.
+     */
+    private var downloadActionPresentedDownloadsScreen: some View {
+        importFeedbackPresentedDownloadsScreen
         .alert(
             pendingDownloadConfirmation?.title ?? "",
             isPresented: Binding(
@@ -753,6 +940,17 @@ public struct ModuleBrowserView: View {
         } message: { confirmation in
             Text(confirmation.message)
         }
+    }
+
+    /**
+     Attaches initial loading and repository/module change observers to the presented Downloads route.
+
+     - Returns: Fully interactive Android-style Downloads screen.
+     - Side effects: Loads initial state and refreshes sources or installed rows after notifications.
+     - Failure modes: Existing loading and refresh handlers preserve their user-visible error paths.
+     */
+    private var androidDownloadsScreen: some View {
+        downloadActionPresentedDownloadsScreen
         .task {
             await loadInitialStateIfNeeded()
         }
@@ -1200,7 +1398,7 @@ public struct ModuleBrowserView: View {
                 }
 
                 if isImportingExternalDocument {
-                    androidLoadingRow
+                    androidExternalImportProgressRow
                 }
             }
         }
@@ -1222,6 +1420,31 @@ public struct ModuleBrowserView: View {
             Text(refreshProgress ?? (isLoadingInitialState
                 ? String(localized: "loading", defaultValue: "Loading...")
                 : String(localized: "refreshing_catalog")))
+                .font(.caption)
+                .foregroundStyle(ModuleBrowserPalette.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 22)
+    }
+
+    /**
+     Renders durable local-module install phase and determinate/indeterminate progress.
+
+     - Returns: Full-width Android-dark progress row.
+     - Side effects: none.
+     - Failure modes: Missing progress before the detached task starts displays the queued phase.
+     */
+    private var androidExternalImportProgressRow: some View {
+        let progress = externalDocumentImportProgress ?? ModuleInstallProgress(phase: .queued)
+        return VStack(spacing: 8) {
+            if let fraction = progress.fraction {
+                ProgressView(value: fraction)
+                    .tint(ModuleBrowserPalette.primaryText)
+            } else {
+                ProgressView()
+                    .tint(ModuleBrowserPalette.primaryText)
+            }
+            Text(Self.installPhaseText(progress.phase, progressPercent: progress.percent))
                 .font(.caption)
                 .foregroundStyle(ModuleBrowserPalette.secondaryText)
         }
@@ -1477,23 +1700,12 @@ public struct ModuleBrowserView: View {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
-            isImportingExternalDocument = true
-            Task { @MainActor in
-                let request = ExternalDocumentImportRequest(
-                    url: url,
-                    contentTypeIdentifier: try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.identifier,
-                    suggestedFileName: url.lastPathComponent
-                )
-                let importResult = await Task.detached(priority: .userInitiated) {
-                    ExternalDocumentImportService().importDocument(request)
-                }.value
-                isImportingExternalDocument = false
-                externalDocumentImportMessage = importResult.feedbackMessage
-                if case .failed(let message) = importResult {
-                    recordDownloadError(message)
-                }
-                refreshInstalledList()
-            }
+            let request = ExternalDocumentImportRequest(
+                url: url,
+                contentTypeIdentifier: try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.identifier,
+                suggestedFileName: url.lastPathComponent
+            )
+            preflightExternalDocumentImport(request)
         case .failure(let error):
             if Self.isFileImporterCancellation(error) {
                 return
@@ -1502,6 +1714,97 @@ public struct ModuleBrowserView: View {
             externalDocumentImportMessage = message
             recordDownloadError(message)
         }
+    }
+
+    /**
+     Performs read-only import preflight and prompts when local SWORD destinations conflict.
+
+     - Parameter request: Selected external document and provider metadata.
+     - Side effects: Reads archive metadata off the main actor and updates import/prompt/error state.
+     - Failure modes: Validation failures surface through the existing install feedback alert and
+       Downloads error history; no installer writes run after a failed preflight.
+     */
+    private func preflightExternalDocumentImport(_ request: ExternalDocumentImportRequest) {
+        isImportingExternalDocument = true
+        externalDocumentImportProgress = ModuleInstallProgress(phase: .queued)
+        let service = ExternalDocumentImportService()
+        Task { @MainActor in
+            let preflight = await Task.detached(priority: .userInitiated) {
+                service.preflightDocument(request)
+            }.value
+            switch preflight {
+            case .ready:
+                importExternalDocument(request, overwritePolicy: .reject)
+            case .moduleOverwriteRequired(let inspection):
+                isImportingExternalDocument = false
+                externalDocumentImportProgress = nil
+                pendingLocalModuleOverwrite = ModuleBrowserLocalOverwriteConfirmation(
+                    request: request,
+                    inspection: inspection
+                )
+            case .failed(let message):
+                isImportingExternalDocument = false
+                externalDocumentImportProgress = nil
+                externalDocumentImportMessage = message
+                recordDownloadError(message)
+            }
+        }
+    }
+
+    /**
+     Installs one preflighted external document with an explicit SWORD overwrite policy.
+
+     - Parameters:
+       - request: Selected document request.
+       - overwritePolicy: `.reject` for conflict-free/default imports or `.replaceExisting` after
+         explicit user consent.
+     - Side effects: Runs installer I/O off the main actor, streams SWORD phase progress onto UI
+       state, records failures, and refreshes installed-module metadata.
+     - Failure modes: Installer failures are represented by `ExternalDocumentImportResult.failed`.
+     */
+    private func importExternalDocument(
+        _ request: ExternalDocumentImportRequest,
+        overwritePolicy: LocalSwordZipOverwritePolicy
+    ) {
+        isImportingExternalDocument = true
+        externalDocumentImportProgress = ModuleInstallProgress(phase: .queued)
+        let service = ExternalDocumentImportService()
+        Task { @MainActor in
+            let importResult = await Task.detached(priority: .userInitiated) {
+                service.importDocument(
+                    request,
+                    moduleOverwritePolicy: overwritePolicy,
+                    progressState: { progress in
+                        Task { @MainActor in
+                            externalDocumentImportProgress = progress
+                        }
+                    }
+                )
+            }.value
+            isImportingExternalDocument = false
+            externalDocumentImportProgress = nil
+            externalDocumentImportMessage = importResult.feedbackMessage
+            if case .failed(let message) = importResult {
+                recordDownloadError(message)
+            }
+            refreshInstalledList()
+        }
+    }
+
+    /**
+     Builds Android-style overwrite disclosure from exact conflicting local paths.
+
+     - Parameter inspection: Validated local SWORD ZIP inspection.
+     - Returns: Prompt text naming modules and every existing destination that will be replaced.
+     - Side effects: none.
+     - Failure modes: Empty module names fall back to a generic module label; conflict lists are
+       non-empty whenever this prompt is presented.
+     */
+    static func localModuleOverwriteMessage(_ inspection: LocalSwordZipInspection) -> String {
+        let modules = inspection.moduleNames.isEmpty
+            ? String(localized: "install_zip_module", defaultValue: "Bible module")
+            : inspection.moduleNames.joined(separator: ", ")
+        return "\(modules)\n\n" + inspection.conflictingPaths.joined(separator: "\n")
     }
 
     /**
@@ -1577,6 +1880,28 @@ public struct ModuleBrowserView: View {
     }
 
     /**
+     Resolves the inline failure shown after a repository refresh.
+
+     Android keeps partial repository failures behind the Download Errors menu while continuing to
+     show the usable catalog. Inline failure copy is reserved for a refresh that produced no module
+     rows at all, which prevents successful Easy Install packages from appearing to have failed.
+
+     - Parameters:
+       - availableModuleCount: Number of usable catalog rows after refreshed and cached rows merge.
+       - errors: Repository and metadata failures collected during the refresh.
+     - Returns: Aggregate failure copy only when no usable module row exists; otherwise `nil`.
+     - Side effects: none.
+     - Failure modes: Empty errors return `nil` even when the catalog is empty.
+     */
+    static func catalogRefreshInlineError(
+        availableModuleCount: Int,
+        errors: [String]
+    ) -> String? {
+        guard availableModuleCount == 0, !errors.isEmpty else { return nil }
+        return "Failed to load catalogs:\n" + errors.joined(separator: "\n")
+    }
+
+    /**
      Formats a localized module download failure for Android's Download errors surface.
 
      - Parameters:
@@ -1588,7 +1913,7 @@ public struct ModuleBrowserView: View {
        underlying failure.
      */
     static func downloadFailureMessage(moduleName: String, message: String) -> String {
-        "\(String(localized: "error_download_failed", defaultValue: "Download failed")): \(moduleName): \(message)"
+        ModuleInstallErrorPresentation.failureMessage(detail: "\(moduleName): \(message)")
     }
 
     /**
@@ -1600,7 +1925,7 @@ public struct ModuleBrowserView: View {
      - Failure modes: Empty messages are preserved so the caller can still surface a failure state.
      */
     static func downloadFailureMessage(_ message: String) -> String {
-        "\(String(localized: "error_download_failed", defaultValue: "Download failed")): \(message)"
+        ModuleInstallErrorPresentation.failureMessage(detail: message)
     }
 
     /**
@@ -1779,9 +2104,10 @@ public struct ModuleBrowserView: View {
             downloadActivities: downloadActivities
         )
         let installedModule = installedModulesByName[module.name]
-        let rowActions = ModuleDownloadRowActionPlanner.availableActions(
+        let rowActions = Self.rowActions(
             installedModule: installedModule,
-            isBeingInstalled: status.isBeingInstalled
+            isBeingInstalled: status.isBeingInstalled,
+            installedModules: installedModules
         )
         let isRecommended = recommendedDocuments?.contains(module) == true
         let badAction = badDocuments?.badDocumentAction(for: module) ?? .none
@@ -1829,7 +2155,9 @@ public struct ModuleBrowserView: View {
                             .foregroundStyle(ModuleBrowserPalette.secondaryText)
                     }
                     if case let .errorDownloading(message) = status {
-                        Text(message.isEmpty ? String(localized: "error_download_failed") : message)
+                        Text(message.isEmpty
+                            ? String(localized: "error_occurred", defaultValue: "An error has occurred")
+                            : message)
                             .font(.caption)
                             .foregroundStyle(.red)
                             .lineLimit(2)
@@ -1870,7 +2198,7 @@ public struct ModuleBrowserView: View {
         .accessibilityLabel(module.name)
         .accessibilityValue(Self.downloadStatusAccessibilityToken(status))
         .accessibilityAddTraits(Self.primaryRowTapStartsDownload(status) ? .isButton : [])
-        .accessibilityIdentifier("moduleBrowserRow::\(module.name)")
+        .accessibilityIdentifier("moduleBrowserRow::\(module.installIdentity.rawValue)")
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if rowActions.contains(.uninstall) {
                 Button(role: .destructive) {
@@ -1917,7 +2245,121 @@ public struct ModuleBrowserView: View {
                     )
                 }
             }
+            if rowActions.contains(.unlock), let installedModule {
+                Button {
+                    beginUnlock(installedModule)
+                } label: {
+                    Label(
+                        String(localized: "unlock", defaultValue: "Unlock"),
+                        systemImage: "lock.open"
+                    )
+                }
+            }
         }
+    }
+
+    /**
+     Computes Android's management actions for one Downloads row.
+
+     - Parameters:
+       - installedModule: Matching installed module, or `nil` for a remote-only row.
+       - isBeingInstalled: Whether the remote row currently has an active install task.
+       - installedModules: Complete Android-compatible installed inventory used to protect the last
+         Bible from removal.
+     - Returns: Ordered row actions, including Unlock for every installed encrypted module.
+     - Side effects: None.
+     - Failure modes: None; missing installed metadata produces only remote-row actions.
+     */
+    static func rowActions(
+        installedModule: ModuleInfo?,
+        isBeingInstalled: Bool,
+        installedModules: [ModuleInfo]
+    ) -> [ModuleDownloadRowAction] {
+        ModuleDownloadRowActionPlanner.availableActions(
+            installedModule: installedModule,
+            isBeingInstalled: isBeingInstalled,
+            installedModules: installedModules
+        )
+    }
+
+    /**
+     Presents the shared Android passphrase flow for an encrypted Downloads row.
+
+     - Parameter module: Installed encrypted module selected from the row context menu.
+     - Side effects: Clears stale input/error state and presents the module-scoped alert.
+     - Failure modes: None; manager validation happens only after the user submits a key.
+     */
+    private func beginUnlock(_ module: ModuleInfo) {
+        unlockCipherKey = ""
+        unlockFailureMessage = nil
+        pendingUnlockModule = module
+    }
+
+    /**
+     Submits a Downloads passphrase through the same manager-backed contract as the reader picker.
+
+     - Parameter module: Installed encrypted module associated with the visible prompt.
+     - Side effects: Validates and persists the key through `SwordManager`, refreshes installed rows on
+       success, or dismisses and re-presents the prompt with invalid-key feedback on rejection.
+     - Failure modes: Missing managers, empty/rejected keys, and persistence failures remain retryable
+       and do not update the installed snapshot.
+     */
+    private func attemptUnlock(_ module: ModuleInfo) {
+        let cipherKey = unlockCipherKey
+        if ModuleUnlockActionCoordinator.submit(
+            module: module,
+            cipherKey: cipherKey,
+            unlockModule: { moduleName, submittedKey in
+                swordManager?.unlockModule(
+                    named: moduleName,
+                    withCipherKey: submittedKey
+                ) ?? false
+            },
+            onAccepted: {
+                clearUnlockPrompt()
+                refreshInstalledList()
+            }
+        ) {
+            return
+        }
+
+        pendingUnlockModule = nil
+        unlockCipherKey = ""
+        let failureMessage = ModuleUnlockActionCoordinator.failureMessage
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + ModuleUnlockActionCoordinator.retryPresentationDelay
+        ) {
+            unlockFailureMessage = failureMessage
+            pendingUnlockModule = module
+        }
+    }
+
+    /**
+     Opens installed module metadata from Android's unlock-information action.
+
+     - Parameter module: Locked module whose provider instructions should be shown.
+     - Side effects: Dismisses the passphrase alert and presents the shared About dialog.
+     - Failure modes: The action is exposed only when `UnlockInfo` is non-empty.
+     */
+    private func showUnlockInformation(for module: ModuleInfo) {
+        clearUnlockPrompt()
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + ModuleUnlockActionCoordinator.retryPresentationDelay
+        ) {
+            selectedModuleDetails = ModuleBrowserModuleDetails(installedModule: module)
+        }
+    }
+
+    /**
+     Clears transient Downloads passphrase state.
+
+     - Side effects: Dismisses the alert and discards the entered key and retry message.
+     - Failure modes: None.
+     */
+    private func clearUnlockPrompt() {
+        pendingUnlockModule = nil
+        unlockCipherKey = ""
+        unlockFailureMessage = nil
     }
 
     /**
@@ -2016,22 +2458,32 @@ public struct ModuleBrowserView: View {
             Image(systemName: presentation.statusIconSystemName ?? "checkmark.circle.fill")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(ModuleBrowserPalette.installed)
-        case .progress(let progressPercent):
+        case .progress(let phase, let progressPercent):
             VStack(alignment: .trailing, spacing: 6) {
-                Text("\(progressPercent)%")
+                Text(Self.installPhaseText(phase, progressPercent: progressPercent))
                     .font(.caption)
                     .foregroundStyle(ModuleBrowserPalette.secondaryText)
-                ProgressView(value: Double(progressPercent), total: 100)
-                    .frame(width: 76)
-                    .tint(ModuleBrowserPalette.primaryText)
+                if let progressPercent {
+                    ProgressView(value: Double(progressPercent), total: 100)
+                        .frame(width: 76)
+                        .tint(ModuleBrowserPalette.primaryText)
+                } else {
+                    ProgressView()
+                        .frame(width: 76)
+                        .tint(ModuleBrowserPalette.primaryText)
+                }
+                let isCancellable = ModuleInstallProgress(phase: phase).isCancellable
                 Button {
-                    cancelInstall(module.name)
+                    cancelInstall(module.installIdentity)
                 } label: {
                     Image(systemName: "xmark.circle")
                         .font(.system(size: 22, weight: .regular))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                .disabled(!isCancellable)
+                .opacity(isCancellable ? 1 : 0)
+                .accessibilityHidden(!isCancellable)
                 .accessibilityLabel(String(localized: "cancel"))
             }
         case .retryError:
@@ -2068,6 +2520,40 @@ public struct ModuleBrowserView: View {
                 .frame(width: 24, height: 24)
                 .accessibilityHidden(true)
         }
+    }
+
+    /**
+     Builds compact phase-aware text for Android-equivalent install progress.
+
+     - Parameters:
+       - phase: Current durable installer phase.
+       - progressPercent: Optional phase-local percent; absent for indeterminate transfers.
+     - Returns: A concise phase label with percent when the phase is determinate.
+     - Side effects: Reads localized strings from the application bundle.
+     - Failure modes: Missing translations use the supplied English fallback values.
+     */
+    static func installPhaseText(_ phase: ModuleInstallPhase, progressPercent: Int?) -> String {
+        let phaseText: String
+        switch phase {
+        case .queued:
+            phaseText = String(localized: "module_install_phase_queued", defaultValue: "Please wait…")
+        case .downloading:
+            phaseText = String(localized: "module_install_phase_downloading", defaultValue: "Download")
+        case .extracting:
+            phaseText = String(localized: "extracting_zip_file", defaultValue: "Extracting Zip file now…")
+        case .committing:
+            phaseText = String(
+                localized: "module_install_phase_committing",
+                defaultValue: "Please wait. Loading modules from a file."
+            )
+        case .complete:
+            phaseText = String(
+                localized: "install_zip_successfull",
+                defaultValue: "Module was installed successfully"
+            )
+        }
+        guard let progressPercent else { return phaseText }
+        return "\(phaseText) \(progressPercent)%"
     }
 
     /**
@@ -2118,7 +2604,10 @@ public struct ModuleBrowserView: View {
         let kind: ModuleBrowserDownloadConfirmation.Kind
         if Self.shouldShowGenericBookmarkUpdateWarning(
             status: status,
-            isInstalled: installedModules.contains(where: { $0.name == module.name }),
+            isInstalled: Self.isModuleInstalledFromSelectedRepository(
+                module,
+                installedModules: installedModules
+            ),
             hasGenericBookmarks: hasGenericBookmarks(for: module)
         ) {
             kind = .genericBookmarkUpdateWarning
@@ -2153,15 +2642,15 @@ public struct ModuleBrowserView: View {
     }
 
     /**
-     De-duplicates remote modules by abbreviation while preserving source priority.
+     De-duplicates remote modules by Android repository-scoped identity while preserving priority.
 
-     Real SWORD catalog entries are passed before pseudo/unavailable metadata so an installable
-     module keeps precedence over an unavailable placeholder with the same name.
+     Same-initials rows from different repositories remain independently visible and actionable.
+     Duplicate cache/refresh rows from the same repository collapse to the first source-priority row.
      */
-    private func deduplicatedModules(from modules: [RemoteModuleInfo]) -> [RemoteModuleInfo] {
-        var seen: Set<String> = []
+    static func deduplicatedModules(from modules: [RemoteModuleInfo]) -> [RemoteModuleInfo] {
+        var seen: Set<RemoteModuleIdentity> = []
         var unique: [RemoteModuleInfo] = []
-        for module in modules where seen.insert(module.name).inserted {
+        for module in modules where seen.insert(module.installIdentity).inserted {
             unique.append(module)
         }
         return unique
@@ -2237,7 +2726,7 @@ public struct ModuleBrowserView: View {
      */
     static func downloadListSortSnapshot(
         installedModules: [ModuleInfo],
-        downloadActivities: [String: ModuleBrowserDownloadActivity]
+        downloadActivities: [RemoteModuleIdentity: ModuleBrowserDownloadActivity]
     ) -> ModuleBrowserDownloadSortSnapshot {
         ModuleBrowserDownloadSortSnapshot(
             installedModules: installedModules,
@@ -2255,7 +2744,7 @@ public struct ModuleBrowserView: View {
        - selectedLanguage: Selected language code, or empty for all languages.
        - searchText: Free-text query applied to initials, description, language, and source.
        - installedModules: Current installed modules used for status and update sorting.
-       - downloadActivities: Module initials with active progress or retained failure state.
+       - downloadActivities: Repository-scoped rows with active progress or retained failure state.
        - recommendedDocuments: Android recommended metadata used for language-specific ordering.
        - badDocuments: Android bad-document metadata used to hide or warn rows.
      - Returns: Visible modules ordered by Android status, installed/recommended/category, and
@@ -2273,7 +2762,7 @@ public struct ModuleBrowserView: View {
         selectedLanguage: String,
         searchText: String,
         installedModules: [ModuleInfo],
-        downloadActivities: [String: ModuleBrowserDownloadActivity],
+        downloadActivities: [RemoteModuleIdentity: ModuleBrowserDownloadActivity],
         recommendedDocuments: ModuleDownloadConfiguration?,
         badDocuments: ModuleDownloadConfiguration?
     ) -> [RemoteModuleInfo] {
@@ -2355,7 +2844,7 @@ public struct ModuleBrowserView: View {
      - Parameters:
        - modules: Already-filtered remote rows.
        - installedModules: Installed modules used to detect installed/update state.
-       - downloadActivities: Module initials with active progress or retained failure state.
+       - downloadActivities: Repository-scoped rows with active progress or retained failure state.
        - selectedLanguage: Current language filter; Android only prioritizes recommended rows when
          a concrete language is active.
        - recommendedDocuments: Android recommended metadata.
@@ -2371,7 +2860,7 @@ public struct ModuleBrowserView: View {
     static func sortedDownloadModules(
         _ modules: [RemoteModuleInfo],
         installedModules: [ModuleInfo],
-        downloadActivities: [String: ModuleBrowserDownloadActivity],
+        downloadActivities: [RemoteModuleIdentity: ModuleBrowserDownloadActivity],
         selectedLanguage: String,
         recommendedDocuments: ModuleDownloadConfiguration?
     ) -> [RemoteModuleInfo] {
@@ -2394,8 +2883,8 @@ public struct ModuleBrowserView: View {
                 return lhsStatusRank < rhsStatusRank
             }
 
-            let lhsInstalled = installedModulesByName[lhs.name] != nil
-            let rhsInstalled = installedModulesByName[rhs.name] != nil
+            let lhsInstalled = isInstalledStatus(lhsStatus)
+            let rhsInstalled = isInstalledStatus(rhsStatus)
             if lhsInstalled != rhsInstalled {
                 return lhsInstalled && !rhsInstalled
             }
@@ -2424,19 +2913,20 @@ public struct ModuleBrowserView: View {
      - Parameters:
        - module: Remote module row.
        - installedModules: Installed module snapshot.
-       - downloadActivities: Module initials with active progress or retained failure state.
+       - downloadActivities: Repository-scoped rows with active progress or retained failure state.
      - Returns: Status used for row affordances and sort order.
 
      Side effects:
      - none
 
      Failure modes:
-     - invalid or absent version strings fall back to non-update installed state
+     - invalid or absent same-repository version strings are treated as update-available, matching
+       Android's `DownloadControl` exception path
      */
     static func displayStatus(
         for module: RemoteModuleInfo,
         installedModules: [ModuleInfo],
-        downloadActivities: [String: ModuleBrowserDownloadActivity]
+        downloadActivities: [RemoteModuleIdentity: ModuleBrowserDownloadActivity]
     ) -> ModuleBrowserDownloadStatus {
         displayStatus(
             for: module,
@@ -2451,24 +2941,27 @@ public struct ModuleBrowserView: View {
      - Parameters:
        - module: Remote module row.
        - installedModulesByName: Installed modules keyed by initials.
-       - downloadActivities: Module initials with active progress or retained failure state.
+       - downloadActivities: Repository-scoped rows with active progress or retained failure state.
      - Returns: Status used for row affordances and sort order.
 
      Side effects:
      - none
 
      Failure modes:
-     - invalid or absent version strings fall back to non-update installed state
+     - invalid or absent same-repository version strings are treated as update-available, matching
+       Android's `DownloadControl` exception path
      */
     private static func displayStatus(
         for module: RemoteModuleInfo,
         installedModulesByName: [String: ModuleInfo],
-        downloadActivities: [String: ModuleBrowserDownloadActivity]
+        downloadActivities: [RemoteModuleIdentity: ModuleBrowserDownloadActivity]
     ) -> ModuleBrowserDownloadStatus {
-        if let activity = downloadActivities[module.name] {
+        if let activity = downloadActivities[module.installIdentity] {
             switch activity.phase {
             case .inProgress:
-                return .beingInstalled(progressPercent: activity.progressPercent)
+                return .beingInstalled(
+                    progress: activity.installProgress ?? ModuleInstallProgress(phase: .queued)
+                )
             case .failed:
                 return .errorDownloading(message: activity.message ?? "")
             }
@@ -2479,10 +2972,60 @@ public struct ModuleBrowserView: View {
         guard let installedModule = installedModulesByName[module.name] else {
             return .installable
         }
+        let installedRepository = installedModule.aboutMetadata.repository
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !installedRepository.isEmpty, installedRepository != module.sourceName {
+            return .installable
+        }
         if isRemoteVersionNewer(remoteVersion: module.version, installedVersion: installedModule.version) {
             return .updateAvailable
         }
         return .installed
+    }
+
+    /**
+     Tests whether one row status represents the installed module from that exact repository.
+
+     - Parameter status: Repository-aware row status.
+     - Returns: `true` for installed and update-available rows; other-repository duplicates remain
+       installable and return `false`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func isInstalledStatus(_ status: ModuleBrowserDownloadStatus) -> Bool {
+        switch status {
+        case .installed, .updateAvailable:
+            return true
+        case .beingInstalled, .errorDownloading, .unavailable, .installable:
+            return false
+        }
+    }
+
+    /**
+     Tests whether local storage contains the selected repository's module independently of row activity.
+
+     A retained download error temporarily replaces the row's installed/update status, but Android
+     still treats a failed update as an installed document for bookmark-warning purposes. Repository
+     metadata keeps same-initials rows from another source out of that warning path.
+
+     - Parameters:
+       - module: Selected remote repository row.
+       - installedModules: Current installed module inventory.
+     - Returns: `true` when the installed initials belong to this source, or when a legacy install has
+       no recorded source and therefore cannot be distinguished.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func isModuleInstalledFromSelectedRepository(
+        _ module: RemoteModuleInfo,
+        installedModules: [ModuleInfo]
+    ) -> Bool {
+        let repositoryStatus = displayStatus(
+            for: module,
+            installedModules: installedModules,
+            downloadActivities: [:]
+        )
+        return isInstalledStatus(repositoryStatus)
     }
 
     /**
@@ -2521,53 +3064,85 @@ public struct ModuleBrowserView: View {
      - Parameters:
        - remoteVersion: Repository version string.
        - installedVersion: Local installed version string.
-     - Returns: `true` when the remote version sorts after the installed version.
+     - Returns: `true` when the remote version sorts after the installed version, or when either
+       value cannot be parsed by Android's JSword version grammar.
 
      Side effects:
      - none
 
      Failure modes:
-     - missing versions return `false` to avoid offering a destructive reinstall as an update
+     - missing, malformed, or overflowing versions return `true`, matching Android's deliberate
+       upgrade-available fallback when `Version(...)` throws
      */
     static func isRemoteVersionNewer(remoteVersion: String, installedVersion: String) -> Bool {
-        let remote = remoteVersion.trimmingCharacters(in: .whitespacesAndNewlines)
-        let installed = installedVersion.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !remote.isEmpty, !installed.isEmpty else { return false }
+        guard let remote = parseJSwordVersion(remoteVersion),
+              let installed = parseJSwordVersion(installedVersion) else {
+            return true
+        }
         return compareVersion(remote, installed) == .orderedDescending
     }
 
     /**
-     Compares dotted version strings using numeric segments where possible.
+     Parses the version grammar used by JSword's `Version` constructor.
+
+     JSword accepts one to four numeric components and initializes omitted trailing components to
+     `-1`. Its published regular expression consumes one separator character between components;
+     this parser preserves that behavior while limiting numeric values to Java's signed 32-bit range.
+
+     - Parameter version: Unmodified repository or installed module metadata value.
+     - Returns: Four comparison components, or `nil` when JSword would throw.
+     - Side effects: None.
+     - Failure modes: Empty values, surrounding whitespace, consecutive separators, more than four
+       components, non-ASCII digits, and 32-bit overflow return `nil`.
+     */
+    private static func parseJSwordVersion(_ version: String) -> [Int]? {
+        guard !version.isEmpty else { return nil }
+
+        var parts: [Int] = []
+        var digits = ""
+        for scalar in version.unicodeScalars {
+            if scalar.value >= 48, scalar.value <= 57 {
+                digits.unicodeScalars.append(scalar)
+                continue
+            }
+
+            guard ![10, 13, 0x85, 0x2028, 0x2029].contains(scalar.value),
+                  !digits.isEmpty,
+                  parts.count < 4,
+                  let value = Int32(digits) else {
+                return nil
+            }
+            parts.append(Int(value))
+            digits = ""
+        }
+
+        guard !digits.isEmpty,
+              parts.count < 4,
+              let value = Int32(digits) else {
+            return nil
+        }
+        parts.append(Int(value))
+        parts.append(contentsOf: repeatElement(-1, count: 4 - parts.count))
+        return parts
+    }
+
+    /**
+     Compares parsed JSword version components in major/minor/micro/nano order.
 
      - Parameters:
-       - lhs: First version string.
-       - rhs: Second version string.
+       - lhs: First four-part JSword version.
+       - rhs: Second four-part JSword version.
      - Returns: Foundation comparison result.
 
      Side effects:
      - none
 
      Failure modes:
-     - non-numeric segments fall back to localized case-insensitive comparison
+     - none; `parseJSwordVersion` validates and normalizes both arrays before comparison
      */
-    private static func compareVersion(_ lhs: String, _ rhs: String) -> ComparisonResult {
-        let lhsParts = lhs.split(whereSeparator: { ".-_+".contains($0) }).map(String.init)
-        let rhsParts = rhs.split(whereSeparator: { ".-_+".contains($0) }).map(String.init)
-        let count = max(lhsParts.count, rhsParts.count)
-
-        for index in 0..<count {
-            let lhsPart = index < lhsParts.count ? lhsParts[index] : "0"
-            let rhsPart = index < rhsParts.count ? rhsParts[index] : "0"
-            if let lhsNumber = Int(lhsPart), let rhsNumber = Int(rhsPart) {
-                if lhsNumber != rhsNumber {
-                    return lhsNumber < rhsNumber ? .orderedAscending : .orderedDescending
-                }
-            } else {
-                let comparison = lhsPart.localizedCaseInsensitiveCompare(rhsPart)
-                if comparison != .orderedSame {
-                    return comparison
-                }
-            }
+    private static func compareVersion(_ lhs: [Int], _ rhs: [Int]) -> ComparisonResult {
+        for (lhsPart, rhsPart) in zip(lhs, rhs) where lhsPart != rhsPart {
+            return lhsPart < rhsPart ? .orderedAscending : .orderedDescending
         }
         return .orderedSame
     }
@@ -2842,7 +3417,7 @@ public struct ModuleBrowserView: View {
      - malformed, unreadable, or absent cache files are treated as stale so the next open can
        recover by refreshing
      */
-    static func shouldAutoRefreshCatalogs(
+    nonisolated static func shouldAutoRefreshCatalogs(
         sources: [SourceConfig],
         repository: ModuleRepository,
         staleInterval: TimeInterval = Self.downloadCatalogStaleInterval
@@ -2909,7 +3484,7 @@ public struct ModuleBrowserView: View {
         defaultDocuments = initialState.defaultDocuments
         installedModules = initialState.installedModules
         if availableModules.isEmpty && !initialState.cachedModules.isEmpty {
-            availableModules = deduplicatedModules(from: initialState.cachedModules)
+            availableModules = Self.deduplicatedModules(from: initialState.cachedModules)
         }
         applyAndroidDefaultLanguageIfNeeded()
         captureDownloadListSortSnapshot()
@@ -3031,17 +3606,52 @@ public struct ModuleBrowserView: View {
         )
         didRequestDefaultDocuments = true
 
-        let moduleNames = Set(modulesToInstall.map(\.name))
-        guard !moduleNames.isEmpty else {
+        let moduleIdentities = Set(modulesToInstall.map(\.installIdentity))
+        guard !moduleIdentities.isEmpty else {
             finishDefaultDownloadActivityIfNeeded()
             return
         }
 
-        defaultDownloadInstallingModules.formUnion(moduleNames)
+        let totalInstallBytes = Self.combinedInstallSizeBytes(for: modulesToInstall)
+        if let requirement = repository.storageRequirement(estimatedAdditionalBytes: totalInstallBytes),
+           !requirement.isSatisfied {
+            let message = ModuleInstallErrorPresentation.detail(for: ModuleRepositoryError.insufficientStorage(
+                requiredBytes: requirement.requiredBytes,
+                availableBytes: requirement.availableBytes
+            ))
+            errorMessage = message
+            recordDownloadError(message)
+            finishDefaultDownloadActivityIfNeeded()
+            return
+        }
+
+        defaultDownloadInstallingModules.formUnion(moduleIdentities)
         onDefaultDownloadActivityChanged(true)
         for module in modulesToInstall {
             installModule(module)
         }
+    }
+
+    /**
+     Sums positive catalog install sizes for an Easy Start batch without overflowing.
+
+     - Parameter modules: Remote rows selected by Android default-document metadata.
+     - Returns: Total known install bytes, `nil` when no row reports a usable size, or `Int64.max`
+       when the sum overflows so storage preflight fails closed.
+     - Side effects: none.
+     - Failure modes: Malformed and non-positive catalog sizes are ignored.
+     */
+    static func combinedInstallSizeBytes(for modules: [RemoteModuleInfo]) -> Int64? {
+        var total: Int64 = 0
+        var foundKnownSize = false
+        for module in modules {
+            guard let size = module.installSizeBytes, size > 0 else { continue }
+            foundKnownSize = true
+            let (newTotal, overflow) = total.addingReportingOverflow(size)
+            if overflow { return Int64.max }
+            total = newTotal
+        }
+        return foundKnownSize ? total : nil
     }
 
     /**
@@ -3056,12 +3666,11 @@ public struct ModuleBrowserView: View {
      - merges and de-duplicates the refreshed module set before storing it in `availableModules`
      - in startup default mode, requests selected Android default modules from the full catalog so
        source-scoped tokens can resolve alternate repository rows hidden by visible-row de-duplication
-     - records aggregate or partial-source failures in `errorMessage`
+     - records every refresh failure in Download Errors and reserves `errorMessage` for an empty catalog
 
      Failure modes:
      - if no sources are configured, sets a user-visible error and exits without attempting a fetch
-     - per-source refresh failures are accumulated and surfaced after the refresh completes rather
-       than aborting the entire operation
+     - per-source refresh failures are accumulated without aborting usable catalog results
      */
     private func refreshCatalog() {
         isRefreshing = true
@@ -3177,7 +3786,7 @@ public struct ModuleBrowserView: View {
                 }
             }
 
-            let uniqueModules = deduplicatedModules(from: allModules)
+            let uniqueModules = Self.deduplicatedModules(from: allModules)
 
             await MainActor.run {
                 availableModules = uniqueModules
@@ -3191,12 +3800,11 @@ public struct ModuleBrowserView: View {
                     defaultDocuments: resolvedDefaultDocuments
                 )
 
-                if uniqueModules.isEmpty && !errors.isEmpty {
-                    errorMessage = "Failed to load catalogs:\n" + errors.joined(separator: "\n")
-                } else if !errors.isEmpty {
-                    errorMessage = "Some sources failed: " +
-                        errors.map { $0.components(separatedBy: ":").first ?? "" }
-                              .joined(separator: ", ")
+                if let inlineError = Self.catalogRefreshInlineError(
+                    availableModuleCount: uniqueModules.count,
+                    errors: errors
+                ) {
+                    errorMessage = inlineError
                 }
             }
         }
@@ -3217,42 +3825,49 @@ public struct ModuleBrowserView: View {
 
      Failure modes:
      - if the matching source cannot be resolved, sets a user-visible error and returns
-     - task cancellation clears active row state without reporting a failure, matching Android
-       `INSTALL_CANCELLED`
+     - pre-commit cancellation clears active row state without reporting a failure, matching
+       Android `INSTALL_CANCELLED`; commit/rollback failures remain visible even if cancellation
+       was requested after the mutation boundary
      - repository installation errors are caught and reported without crashing the view
     */
     private func installModule(_ module: RemoteModuleInfo) {
+        let identity = module.installIdentity
         guard module.isInstallable else {
             let message = module.unavailableReason
                 ?? Self.moduleUnavailableForInstallationMessage(moduleName: module.name)
             errorMessage = message
             recordDownloadError(message)
-            markDefaultDownloadModuleFinishedIfNeeded(module.name)
+            markDefaultDownloadModuleFinishedIfNeeded(identity)
             return
         }
 
-        guard installTasks[module.name] == nil else {
+        guard installTasks[identity] == nil else {
             return
         }
 
-        guard let source = sources.first(where: { $0.name == module.sourceName }) ?? repository.source(for: module.name) else {
+        guard let source = sources.first(where: { $0.name == module.sourceName }) else {
             let message = Self.moduleSourceNotFoundMessage(moduleName: module.name)
             errorMessage = message
             recordDownloadError(message)
-            markDefaultDownloadModuleFinishedIfNeeded(module.name)
+            markDefaultDownloadModuleFinishedIfNeeded(identity)
             return
         }
 
         let installID = UUID()
-        downloadActivities[module.name] = .inProgress(0)
-        installTaskIDs[module.name] = installID
+        downloadActivities[identity] = .inProgress(ModuleInstallProgress(phase: .queued))
+        installTaskIDs[identity] = installID
         errorMessage = nil
 
         if UITestRuntimeConfiguration.shouldHoldDownloadInstall(for: module.name) {
-            installTasks[module.name] = Task {
+            installTasks[identity] = Task {
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 60_000_000_000)
                 }
+                guard installTaskIDs[identity] == installID else { return }
+                installTasks[identity] = nil
+                installTaskIDs[identity] = nil
+                downloadActivities[identity] = nil
+                markDefaultDownloadModuleFinishedIfNeeded(identity)
             }
             return
         }
@@ -3262,74 +3877,72 @@ public struct ModuleBrowserView: View {
             do {
                 try await repository.installModule(
                     named: module.name,
-                    from: source
-                ) { progress in
+                    from: source,
+                    progressState: { progress in
                     Task { @MainActor in
-                        guard installTaskIDs[module.name] == installID else { return }
-                        downloadActivities[module.name] = .inProgress(progress)
+                        guard installTaskIDs[identity] == installID else { return }
+                        downloadActivities[identity] = .inProgress(progress)
                     }
-                }
+                })
 
                 await MainActor.run {
-                    guard installTaskIDs[module.name] == installID else { return }
-                    installTasks[module.name] = nil
-                    installTaskIDs[module.name] = nil
-                    downloadActivities[module.name] = nil
+                    guard installTaskIDs[identity] == installID else { return }
+                    installTasks[identity] = nil
+                    installTaskIDs[identity] = nil
+                    downloadActivities[identity] = nil
                     swordManager = SwordManager()
                     refreshInstalledList()
-                    markDefaultDownloadModuleFinishedIfNeeded(module.name)
+                    markDefaultDownloadModuleFinishedIfNeeded(identity)
                 }
             } catch {
                 await MainActor.run {
-                    guard installTaskIDs[module.name] == installID else { return }
-                    installTasks[module.name] = nil
-                    installTaskIDs[module.name] = nil
-                    if error is CancellationError || Task.isCancelled {
-                        downloadActivities[module.name] = nil
+                    guard installTaskIDs[identity] == installID else { return }
+                    installTasks[identity] = nil
+                    installTaskIDs[identity] = nil
+                    if error is CancellationError
+                        || (error as? URLError)?.code == .cancelled {
+                        downloadActivities[identity] = nil
                     } else {
-                        let message = error.localizedDescription
-                        downloadActivities[module.name] = .failed(message)
-                        errorMessage = Self.downloadFailureMessage(message)
-                        recordDownloadError(Self.downloadFailureMessage(moduleName: module.name, message: message))
+                        let detail = ModuleInstallErrorPresentation.detail(for: error)
+                        let message = Self.downloadFailureMessage(detail)
+                        downloadActivities[identity] = .failed(message)
+                        errorMessage = message
+                        recordDownloadError(Self.downloadFailureMessage(moduleName: module.name, message: detail))
                     }
-                    markDefaultDownloadModuleFinishedIfNeeded(module.name)
+                    markDefaultDownloadModuleFinishedIfNeeded(identity)
                 }
             }
         }
-        installTasks[module.name] = task
+        installTasks[identity] = task
     }
 
     /**
      Cancels an active module install from its Downloads row.
 
-     - Parameter moduleName: Module initials for the active install task.
+     - Parameter identity: Repository-scoped identity for the active install task.
 
      Side effects:
-     - cancels the stored install task when present
-     - clears the row activity immediately so the row returns to its normal installed/not-installed
-       state, matching Android `INSTALL_CANCELLED`
-     - marks startup default activity complete when the cancelled module belonged to that flow
+     - requests cancellation only while the current phase remains pre-commit
+     - keeps task and row identity until the installer reports its actual terminal result
 
-     - Returns: Cancelled task that callers can await before touching module files, or `nil` when
-       no install was active.
+     - Returns: Active task that callers can await before touching module files, or `nil` when no
+       install was active. A non-cancellable commit task is returned without cancelling it.
      Failure modes:
      - missing or already-finished tasks are ignored
      */
     @discardableResult
-    private func cancelInstall(_ moduleName: String) -> Task<Void, Never>? {
-        let cancelledTask = installTasks[moduleName]
-        cancelledTask?.cancel()
-        installTasks[moduleName] = nil
-        installTaskIDs[moduleName] = nil
-        downloadActivities[moduleName] = nil
-        markDefaultDownloadModuleFinishedIfNeeded(moduleName)
-        return cancelledTask
+    private func cancelInstall(_ identity: RemoteModuleIdentity) -> Task<Void, Never>? {
+        guard let activeTask = installTasks[identity] else { return nil }
+        if downloadActivities[identity]?.installProgress?.isCancellable != false {
+            activeTask.cancel()
+        }
+        return activeTask
     }
 
     /**
      Marks one startup default module done and finishes the default flow when none remain.
 
-     - Parameter moduleName: Module initials for the completed or skipped default install.
+     - Parameter identity: Repository-scoped identity for the completed or skipped default install.
      Side effects:
      - removes the module from the active startup default install set
      - invokes `onDefaultDownloadActivityChanged(false)` once the startup default set is exhausted
@@ -3337,12 +3950,12 @@ public struct ModuleBrowserView: View {
      Failure modes:
      - ignored for normal Downloads sessions where default-download mode is disabled
      */
-    private func markDefaultDownloadModuleFinishedIfNeeded(_ moduleName: String) {
+    private func markDefaultDownloadModuleFinishedIfNeeded(_ identity: RemoteModuleIdentity) {
         guard defaultDownloadMode.shouldInstallDefaultDocuments else {
             return
         }
 
-        defaultDownloadInstallingModules.remove(moduleName)
+        defaultDownloadInstallingModules.remove(identity)
         if defaultDownloadInstallingModules.isEmpty {
             finishDefaultDownloadActivityIfNeeded()
         }
@@ -3374,6 +3987,7 @@ public struct ModuleBrowserView: View {
 
      Side effects:
      - cancels and awaits any active install task for the same module before deleting files
+     - deletes the module's generated Search index before repository file removal, matching Android
      - invokes repository-backed uninstall file I/O off the main actor
      - rebuilds the local SWORD manager and installed-module cache after a successful uninstall
      - records uninstall failures in `errorMessage`
@@ -3383,18 +3997,29 @@ public struct ModuleBrowserView: View {
      - repository uninstall errors are caught and surfaced through `errorMessage`
      */
     private func uninstallModuleAfterCancellingInstall(_ name: String) {
-        let cancelledInstallTask = cancelInstall(name)
+        let cancelledInstallTasks = installTasks.keys
+            .filter { $0.initials == name }
+            .compactMap(cancelInstall)
         let repository = repository
+        let searchIndexService = searchIndexService
 
         Task {
-            if let cancelledInstallTask {
+            for cancelledInstallTask in cancelledInstallTasks {
                 await cancelledInstallTask.value
             }
 
             do {
-                try await Task.detached(priority: .userInitiated) {
-                    try repository.uninstallModule(named: name)
-                }.value
+                try await ModuleSearchIndexUninstaller.uninstall(
+                    moduleName: name,
+                    deleteSearchIndex: { moduleName in
+                        await searchIndexService.deleteIndex(for: moduleName)
+                    },
+                    removeModule: { moduleName in
+                        try await Task.detached(priority: .userInitiated) {
+                            try repository.uninstallModule(named: moduleName)
+                        }.value
+                    }
+                )
 
                 await MainActor.run {
                     swordManager = SwordManager()

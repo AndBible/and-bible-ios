@@ -49,6 +49,7 @@
         constraint-display-height
         :text="bookmarkNotes || ''"
         :content-type="bookmark.notesContentType"
+        :note-editor-context="{ entityType: 'BOOKMARK_NOTE', entityId: bookmark.id }"
         @save="changeNote"
         show-placeholder
         :edit-directly="editDirectly"
@@ -101,6 +102,13 @@
 </template>
 
 <script lang="ts" setup>
+/**
+ * Displays and edits a normal bookmark selected from rendered reader content.
+ *
+ * @remarks The shared `bookmark_clicked` event also carries AI document markers. Those records are
+ * navigation-only and bypass modal state through the exact native document/key bridge command.
+ * Normal bookmark note edits retain the existing save-on-close behavior.
+ */
 import ModalDialog from "@/components/modals/ModalDialog.vue";
 import {setupEventBusListener} from "@/eventbus";
 import {computed, inject, nextTick, provide, ref} from "vue";
@@ -114,7 +122,7 @@ import {clickWaiter, handleAnchorNavigation} from "@/utils";
 import {sortBy} from "lodash";
 import {androidKey, globalBookmarksKey, locateTopKey} from "@/types/constants";
 import {BaseBookmark} from "@/types/client-objects";
-import {isBibleBookmark, isGenericBookmark, resolveIcon} from "@/composables/bookmarks";
+import {isAiDocMarker, isBibleBookmark, isGenericBookmark, resolveIcon} from "@/composables/bookmarks";
 
 const showBookmark = ref(false);
 const android = inject(androidKey)!;
@@ -159,6 +167,11 @@ setupEventBusListener("bookmark_clicked",
             openInfo = false,
             openNotes = false
         } = {}) => {
+        const selectedBookmark = bookmarkMap.get(bookmarkId_);
+        if (selectedBookmark && isAiDocMarker(selectedBookmark)) {
+            android.openAiDocPage(selectedBookmark.documentInitials, selectedBookmark.pageKey);
+            return;
+        }
         bookmarkId.value = bookmarkId_;
         originalNotes = bookmarkNotes.value;
         infoShown.value = !openNotes && (openInfo || !bookmarkNotes.value);

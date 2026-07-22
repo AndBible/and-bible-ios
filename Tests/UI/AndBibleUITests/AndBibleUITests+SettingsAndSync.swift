@@ -7,6 +7,132 @@ import UIKit
 
 extension AndBibleUITests {
     /**
+     Verifies the single installed AndBible app can present and leave its calculator launch gate.
+     *
+     * The workflow writes a custom PIN and enables the gate through production Settings without
+     * replacing the active Settings screen. Resume and relaunch must present the gate; seven wrong
+     * attempts must not authorize; and every resume after a valid unlock must re-arm the gate.
+     *
+     * - Side effects:
+     *   - resets and seeds the installed AndBible app container with the baseline fixture
+     *   - writes a custom PIN and enables `show_calculator` through the visible Settings controls
+     *   - backgrounds, terminates, relaunches, unlocks, and verifies post-unlock re-locking
+     *   - opens Settings after authorization
+     * - Failure modes:
+     *   - fails when AndBible is not installed on the test simulator
+     *   - fails when incorrect attempts or lifecycle transitions bypass exact PIN authorization
+     *   - fails when runtime security controls or truthful platform help disappear
+     */
+    func testSingleAppCalculatorGateAndSecuritySettings() {
+        let customPIN = "08642"
+        let app = makeApp()
+        app.launch()
+        XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 30))
+
+        openSettings(in: app)
+        let initialPinRow = requireSettingsNavigationControl("calculatorPinRow", in: app, timeout: 20)
+        let pinField = initialPinRow.elementType == .textField
+            ? initialPinRow
+            : initialPinRow.textFields.firstMatch
+        XCTAssertTrue(pinField.waitForExistence(timeout: 10), "Calculator PIN row must contain an editable field.")
+        replaceText(in: pinField, with: customPIN, placeholderHints: ["PIN"])
+        XCTAssertEqual(pinField.value as? String, customPIN)
+
+        let initialShowCalculatorToggle = requireSettingsNavigationControl(
+            "showCalculatorToggle",
+            in: app,
+            timeout: 20
+        )
+        if initialShowCalculatorToggle.value as? String != "1" {
+            toggleSwitchReliably(
+                initialShowCalculatorToggle,
+                expectedValue: "1",
+                timeout: 10
+            )
+        }
+        XCTAssertEqual(
+            requireSettingsNavigationControl("showCalculatorToggle", in: app, timeout: 10).value as? String,
+            "1",
+            "Android keeps Settings visible after enabling the gate and persists it for the next resume."
+        )
+        XCTAssertFalse(app.otherElements["calculatorGateRoot"].exists)
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(
+            app.otherElements["calculatorGateRoot"].waitForExistence(timeout: 10),
+            "The first resume after enabling show_calculator must present the calculator gate."
+        )
+
+        let equalsButton = app.buttons["="].firstMatch
+        XCTAssertTrue(equalsButton.waitForExistence(timeout: 10), "The calculator gate must expose its equals key.")
+        for _ in 0..<7 {
+            tapElementReliably(equalsButton, timeout: 10)
+        }
+        XCTAssertTrue(
+            app.otherElements["calculatorGateRoot"].exists,
+            "Repeated incorrect equals taps must not unlock AndBible."
+        )
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(
+            app.otherElements["calculatorGateRoot"].waitForExistence(timeout: 10),
+            "Backgrounding and activation must retain the calculator gate."
+        )
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(
+            app.otherElements["calculatorGateRoot"].waitForExistence(timeout: 20),
+            "Relaunch must discard calculator input without weakening PIN authorization."
+        )
+        for key in customPIN.map(String.init) + ["="] {
+            let keyButton = app.buttons[key].firstMatch
+            XCTAssertTrue(keyButton.waitForExistence(timeout: 10), "The calculator gate must expose its \(key) key.")
+            tapElementReliably(keyButton, timeout: 10)
+        }
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 30),
+            "Only the exact persisted custom PIN should unlock AndBible."
+        )
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(
+            app.otherElements["calculatorGateRoot"].waitForExistence(timeout: 10),
+            "Android re-arms the enabled calculator gate whenever an unlocked app resumes."
+        )
+        for key in customPIN.map(String.init) + ["="] {
+            let keyButton = app.buttons[key].firstMatch
+            XCTAssertTrue(keyButton.waitForExistence(timeout: 10), "The re-armed gate must expose its \(key) key.")
+            tapElementReliably(keyButton, timeout: 10)
+        }
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 30),
+            "The persisted custom PIN must unlock the re-armed gate."
+        )
+
+        openSettings(in: app)
+        let helpButton = requireSettingsNavigationControl("discreteHelpButton", in: app, timeout: 20)
+        tapElementReliably(helpButton, timeout: 10)
+        XCTAssertTrue(
+            app.otherElements["discreteModeSecurityHelp"].waitForExistence(timeout: 10)
+        )
+        let platformHelpText = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations."
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(format: "label == %@", platformHelpText)
+            ).firstMatch.exists
+        )
+        tapElementReliably(requireElement("Done", in: app, timeout: 10), timeout: 10)
+
+        XCTAssertTrue(requireSettingsNavigationControl("calculatorPinRow", in: app, timeout: 20).exists)
+        XCTAssertTrue(requireSettingsNavigationControl("discreteModeToggle", in: app, timeout: 20).exists)
+        XCTAssertTrue(requireSettingsNavigationControl("showCalculatorToggle", in: app, timeout: 20).exists)
+    }
+
+    /**
      Verifies Android BackupActivity workflow rows plus iOS database-backup destination handling.
      *
      * Package tests own the backup archive, reset, and restore persistence contracts. This UI smoke
@@ -109,6 +235,7 @@ extension AndBibleUITests {
      create-new branch.
      *
      * - Side effects:
+     *   - resets and seeds the installed AndBible app container with the baseline fixture
      *   - launches Sync Settings with deterministic NextCloud settings and a UI-test remote
      *     backend that reports one existing same-named My Documents sync folder
      *   - scrolls to and enables My Documents sync through the production category row

@@ -21,7 +21,7 @@ public final class Window {
     public var isSynchronized: Bool = true
 
     /// Keeps the window fixed in the layout when the user switches other panes or documents.
-    public var isPinMode: Bool = false
+    public var isPinMode: Bool = true
 
     /// Marks this window as the dedicated links/cross-reference destination.
     public var isLinksWindow: Bool = false
@@ -65,7 +65,7 @@ public final class Window {
     public init(
         id: UUID = UUID(),
         isSynchronized: Bool = true,
-        isPinMode: Bool = false,
+        isPinMode: Bool = true,
         isLinksWindow: Bool = false,
         orderNumber: Int = 0,
         syncGroup: Int = 0,
@@ -80,6 +80,37 @@ public final class Window {
         self.syncGroup = syncGroup
         self.layoutWeight = layoutWeight
         self.layoutState = layoutState
+    }
+
+    /**
+     Resolves the pin state Android exposes after applying workspace auto-pin behavior.
+
+     - Parameter autoPin: Current workspace auto-pin setting.
+     - Returns: `autoPin` for links windows, `true` for normal windows while auto-pin is enabled,
+       and the persisted raw pin value otherwise.
+     - Side Effects: None.
+     - Failure Modes: None.
+     - Note: `isPinMode` remains the raw persisted value so disabling auto-pin restores the user's
+       prior per-window choices.
+     */
+    public func effectivePinMode(autoPin: Bool) -> Bool {
+        if isLinksWindow {
+            return autoPin
+        }
+        return autoPin || isPinMode
+    }
+
+    /**
+     Returns the Android-compatible pin state for this window's current workspace.
+
+     - Returns: Effective pin mode derived from the owning workspace's auto-pin setting.
+     - Side Effects: None.
+     - Failure Modes: A detached window uses Android's default auto-pin value.
+     */
+    public var isEffectivelyPinned: Bool {
+        effectivePinMode(
+            autoPin: workspace?.workspaceSettings?.autoPin ?? WorkspaceSettings.defaultAutoPin
+        )
     }
 }
 

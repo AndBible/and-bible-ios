@@ -261,6 +261,28 @@ private struct ICloudRuntimeModeChange {
     let didRecoverFromCloudKitFailure: Bool
 }
 
+/**
+ External module archive waiting for Android-equivalent overwrite consent.
+
+ The service repeats validation and conflict discovery inside the restore path. This value retains
+ only the selected request and read-only inspection needed to present exact conflicts while the
+ Files-open queue remains paused.
+
+ Side effects: none; values are immutable.
+
+ Failure modes: none; malformed archives fail before this value is created.
+ */
+private struct ExternalDocumentOverwriteConfirmation: Identifiable {
+    /// Selected Files-open request retained across conflict alert presentation.
+    let request: ExternalDocumentImportRequest
+
+    /// Validated module summary and canonical existing destination paths.
+    let inspection: LocalSwordZipInspection
+
+    /// Stable alert identity derived from the security-scoped file URL.
+    var id: String { request.url.standardizedFileURL.path }
+}
+
 @main
 struct AndBibleApp: App {
     /// SwiftData model container for all persisted entities.
@@ -283,9 +305,11 @@ struct AndBibleApp: App {
     @State private var remoteSyncErrorMessage: String?
     /// External document waiting for Android-style install confirmation.
     @State private var pendingExternalDocumentImport: ExternalDocumentImportRequest?
+    /// Preflighted module archive waiting for explicit replacement consent.
+    @State private var pendingExternalModuleOverwrite: ExternalDocumentOverwriteConfirmation?
     /// Additional external documents delivered while another import prompt/result is active.
     @State private var queuedExternalDocumentImports: [ExternalDocumentImportRequest] = []
-    /// Whether an external document import task is currently mutating storage.
+    /// Whether external preflight, overwrite confirmation, or installation owns the Files-open queue.
     @State private var isImportingExternalDocument = false
     /// Pending app-level feedback for a document opened from Files, Mail, or another app.
     @State private var externalDocumentImportMessage: String?
@@ -293,6 +317,8 @@ struct AndBibleApp: App {
     @State private var externalDocumentImportToastMessage: String?
     /// Scheduled dismissal for the current external document install-success toast.
     @State private var externalDocumentImportToastWorkItem: DispatchWorkItem?
+    /// Build-owned CloudKit identity shared by SwiftData and account-status monitoring.
+    private let productCloudKitContainerIdentifier: ProductCloudKitContainerIdentifier
     private let remoteSyncNetworkMonitor: RemoteSyncNetworkMonitor
     private let remoteSyncLifecycleRuntimeReference = RemoteSyncLifecycleRuntimeReference()
     #if os(iOS)
@@ -306,14 +332,76 @@ struct AndBibleApp: App {
     @AppStorage(AppPreferenceKey.discreteMode.rawValue) private var isDiscreteMode = false
     /// When enabled, calculator gate appears on every app launch/resume.
     @AppStorage(AppPreferenceKey.showCalculator.rawValue) private var showCalculator = false
-    /// Temporary unlock for the current session — does NOT change the persisted setting.
-    @State private var isUnlocked = false
+    /// Temporary unlock until the next scene activation; never changes the persisted gate setting.
+    @State private var isUnlocked: Bool
 
     /**
      UserDefaults key for the iCloud sync toggle.
      Read from UserDefaults (not SwiftData) because we need it before the container is created.
      */
     static let iCloudSyncEnabledKey = "icloud_sync_enabled"
+
+    #if DEBUG
+    /**
+     Applies a one-shot UI-test preference seed through the app's own `UserDefaults` process.
+
+     Host-side fixture tools cannot safely replace a live simulator preference plist because
+     `cfprefsd` may retain the previous domain, and XCTest can reinstall the app after fixture
+     preparation. The UI harness therefore passes an encoded property-list dictionary in the
+     launch environment. A session marker prevents a same-test relaunch from resetting state that
+     the test intentionally changed.
+
+     - Side effects:
+       - clears the app's persistent preference domain
+       - writes every property-list value from the pending seed
+       - records the consuming UI-test session and synchronizes `UserDefaults`
+     - Failure modes:
+       - ignores normal Debug launches that lack a UI-test session or encoded seed
+       - ignores subsequent launches in the same UI-test session
+       - triggers a Debug assertion when the seed is malformed or the bundle identifier is unavailable
+     */
+    private static func applyPendingUITestPreferencesIfNeeded() {
+        let environment = ProcessInfo.processInfo.environment
+        guard let sessionIdentifier = environment["UITEST_SESSION_ID"],
+              !sessionIdentifier.isEmpty,
+              let encodedPreferences = environment["UITEST_PREFERENCE_SEED_BASE64"],
+              !encodedPreferences.isEmpty else {
+            return
+        }
+
+        let consumedSessionKey = "_uitest_consumed_preference_seed_session"
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: consumedSessionKey) != sessionIdentifier else {
+            return
+        }
+
+        do {
+            guard let data = Data(base64Encoded: encodedPreferences) else {
+                assertionFailure("UI-test preference seed was not valid base64.")
+                return
+            }
+            let propertyList = try PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+            )
+            guard let values = propertyList as? [String: Any],
+                  let bundleIdentifier = Bundle.main.bundleIdentifier else {
+                assertionFailure("UI-test preference seed did not contain a keyed dictionary.")
+                return
+            }
+
+            defaults.removePersistentDomain(forName: bundleIdentifier)
+            for (key, value) in values {
+                defaults.set(value, forKey: key)
+            }
+            defaults.set(sessionIdentifier, forKey: consumedSessionKey)
+            _ = defaults.synchronize()
+        } catch {
+            assertionFailure("UI-test preference seed failed: \(error.localizedDescription)")
+        }
+    }
+    #endif
 
     /**
      User-visible recovery message shown when CloudKit-backed SwiftData startup fails.
@@ -351,7 +439,8 @@ struct AndBibleApp: App {
             AiPageCacheEntry.self,
             ReadingPlan.self,
             ReadingPlanDay.self,
-        ]
+            ReadingPlanDefinitionPublicationState.self,
+        ] + AIModelRegistration.cloudSyncableModels
     }
 
     /// Device-local models that are intentionally excluded from CloudKit sync.
@@ -359,7 +448,7 @@ struct AndBibleApp: App {
         [
             Repository.self,
             Setting.self,
-        ]
+        ] + AIModelRegistration.localOnlyModels
     }
 
     /**
@@ -368,7 +457,9 @@ struct AndBibleApp: App {
      This is shared by app startup and live Settings changes so both paths use the same store names,
      schemas, CloudKit identifier, and startup-recovery behavior.
 
-     - Parameter requestedICloudEnabled: User-requested CloudKit mode.
+     - Parameters:
+       - requestedICloudEnabled: User-requested CloudKit mode.
+       - cloudKitContainerIdentifier: Build-owned identifier for the current installed product.
      - Returns: Loaded container plus the effective mode after CloudKit recovery, if any.
      - Side effects:
        - may clear `icloud_sync_enabled` through `ICloudModelContainerStartupRecovery` if CloudKit
@@ -376,7 +467,8 @@ struct AndBibleApp: App {
      - Failure modes: Re-throws if neither the requested nor fallback container can be created.
      */
     private static func loadModelContainer(
-        requestedICloudEnabled: Bool
+        requestedICloudEnabled: Bool,
+        cloudKitContainerIdentifier: ProductCloudKitContainerIdentifier
     ) throws -> ICloudModelContainerStartupRecovery.Result<ModelContainer> {
         let cloudModels = Self.cloudModels
         let localModels = Self.localModels
@@ -397,7 +489,7 @@ struct AndBibleApp: App {
                     "AndBible",
                     schema: Schema(cloudModels),
                     isStoredInMemoryOnly: false,
-                    cloudKitDatabase: .private("iCloud.org.andbible.ios")
+                    cloudKitDatabase: .private(cloudKitContainerIdentifier.value)
                 )
                 return try ModelContainer(for: schema, configurations: [cloudConfig, localConfig])
             },
@@ -481,7 +573,34 @@ struct AndBibleApp: App {
         bookmarkService.ensureSystemLabels()
     }
 
+    /**
+     Repairs or quarantines legacy persisted ordinals before remote synchronization can start.
+
+     - Parameter context: Context bound to an initialized app container after SWORD setup.
+     - Side effects: May update Bible bookmark trust fields and memorization JSON, then save the
+       context through `PersistedOrdinalTrustMigrationService`.
+     - Failure modes: Rethrows SwiftData fetch and save errors so the runtime cannot start sync with
+       an incomplete migration pass.
+     */
+    private static func migratePersistedOrdinalTrust(in context: ModelContext) throws {
+        let settingsStore = SettingsStore(modelContext: context)
+        _ = try PersistedOrdinalTrustMigrationService(
+            modelContext: context,
+            settingsStore: settingsStore
+        ).migrate()
+    }
+
     init() {
+        #if DEBUG
+        Self.applyPendingUITestPreferencesIfNeeded()
+        #endif
+        self._isUnlocked = State(
+            initialValue: !UserDefaults.standard.bool(forKey: AppPreferenceKey.showCalculator.rawValue)
+        )
+        let productCloudKitContainerIdentifier = ProductCloudKitContainerIdentifier.required(
+            in: .main
+        )
+        self.productCloudKitContainerIdentifier = productCloudKitContainerIdentifier
         let networkMonitor = RemoteSyncNetworkMonitor()
         self.remoteSyncNetworkMonitor = networkMonitor
 
@@ -495,11 +614,14 @@ struct AndBibleApp: App {
         SwordSetup.ensureModulesReady()
 
         // Initialize SyncService after container startup resolves the effective CloudKit mode.
-        let sync = SyncService()
+        let sync = SyncService(
+            cloudKitContainerIdentifier: productCloudKitContainerIdentifier
+        )
 
         do {
             let startupResult = try Self.loadModelContainer(
-                requestedICloudEnabled: requestedICloudEnabled
+                requestedICloudEnabled: requestedICloudEnabled,
+                cloudKitContainerIdentifier: productCloudKitContainerIdentifier
             )
             let container = startupResult.container
             sync.setInitialState(enabled: startupResult.effectiveICloudEnabled)
@@ -511,6 +633,7 @@ struct AndBibleApp: App {
 
             // Initialize services that need ModelContext
             let context = ModelContext(container)
+            try Self.migratePersistedOrdinalTrust(in: context)
             let workspaceStore = WorkspaceStore(modelContext: context)
             let windowMgr = WindowManager(workspaceStore: workspaceStore)
             self._windowManager = State(initialValue: windowMgr)
@@ -523,8 +646,12 @@ struct AndBibleApp: App {
             self._remoteSyncLifecycleService = State(initialValue: remoteSyncLifecycleService)
             self.remoteSyncLifecycleRuntimeReference.update(remoteSyncLifecycleService)
             #if os(iOS)
+            guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
+                preconditionFailure("The built app is missing CFBundleIdentifier")
+            }
             let remoteSyncBackgroundRefreshCoordinator = RemoteSyncBackgroundRefreshCoordinator(
                 modelContainer: container,
+                taskIdentifier: "\(bundleIdentifier).remote-sync-refresh",
                 synchronizeIfNeeded: { [remoteSyncLifecycleRuntimeReference] force in
                     await remoteSyncLifecycleRuntimeReference.synchronizeIfNeeded(force: force)
                 }
@@ -605,11 +732,14 @@ struct AndBibleApp: App {
      Handles scene lifecycle events that affect icons, remote sync, and background refresh.
 
      - Parameter newPhase: SwiftUI scene phase emitted by the root scene.
-     - Side effects: Starts/stops lifecycle sync, schedules background refresh, and reconciles the
-       alternate app icon when the app becomes active.
+     - Side effects: Re-arms an enabled calculator gate on activation, starts/stops lifecycle sync,
+       schedules background refresh, and reconciles the alternate app icon when the app becomes active.
      */
     private func handleScenePhaseChange(_ newPhase: ScenePhase) {
         if newPhase == .active {
+            if showCalculator {
+                isUnlocked = false
+            }
             // Reconcile icon state when app becomes active
             // (setAlternateIconName fails if called before app is fully active)
             updateAppIcon(discrete: isDiscreteMode)
@@ -645,11 +775,9 @@ struct AndBibleApp: App {
             .onChange(of: isDiscreteMode) { _, newValue in
                 updateAppIcon(discrete: newValue)
             }
-            .onChange(of: showCalculator) { _, newValue in
-                // When user turns off calculator gate, clear unlock state
-                if !newValue {
-                    isUnlocked = false
-                }
+            .onChange(of: showCalculator) { _, _ in
+                // Android applies this setting on the next resume instead of hiding Settings now.
+                isUnlocked = true
             }
             .onOpenURL { url in
                 handleExternalDocumentURL(url)
@@ -759,13 +887,47 @@ struct AndBibleApp: App {
             ) { request in
                 Button(String(localized: "ok")) {
                     pendingExternalDocumentImport = nil
-                    performExternalDocumentImport(request)
+                    preflightExternalDocumentImport(request)
                 }
                 Button(String(localized: "cancel"), role: .cancel) {
                     // The dismissal binding owns cancel queue advancement.
                 }
             } message: { request in
                 Text(externalDocumentImportConfirmationMessage(for: request))
+            }
+            .alert(
+                String(
+                    localized: "android_module_backup_overwrite_title",
+                    defaultValue: "Overwrite existing module files?"
+                ),
+                isPresented: Binding(
+                    get: { pendingExternalModuleOverwrite != nil },
+                    set: { isPresented in
+                        if !isPresented, pendingExternalModuleOverwrite != nil {
+                            pendingExternalModuleOverwrite = nil
+                            isImportingExternalDocument = false
+                            showNextPendingExternalDocumentImportIfNeeded()
+                        }
+                    }
+                ),
+                presenting: pendingExternalModuleOverwrite
+            ) { confirmation in
+                Button(String(localized: "cancel"), role: .cancel) {
+                    pendingExternalModuleOverwrite = nil
+                    isImportingExternalDocument = false
+                    showNextPendingExternalDocumentImportIfNeeded()
+                }
+                Button(String(localized: "yes", defaultValue: "Yes"), role: .destructive) {
+                    pendingExternalModuleOverwrite = nil
+                    performExternalDocumentImport(
+                        confirmation.request,
+                        overwritePolicy: .replaceExisting(
+                            confirmation.inspection.overwriteAuthorization
+                        )
+                    )
+                }
+            } message: { confirmation in
+                Text(externalDocumentOverwriteMessage(for: confirmation.inspection))
             }
             .alert(
                 String(localized: "import_from_file", defaultValue: "Import from File"),
@@ -841,9 +1003,13 @@ struct AndBibleApp: App {
      */
     @MainActor
     private func makeICloudRuntimeModeChange(_ requestedEnabled: Bool) throws -> ICloudRuntimeModeChange {
-        let startupResult = try Self.loadModelContainer(requestedICloudEnabled: requestedEnabled)
+        let startupResult = try Self.loadModelContainer(
+            requestedICloudEnabled: requestedEnabled,
+            cloudKitContainerIdentifier: productCloudKitContainerIdentifier
+        )
         let container = startupResult.container
         let context = ModelContext(container)
+        try Self.migratePersistedOrdinalTrust(in: context)
         let workspaceStore = WorkspaceStore(modelContext: context)
         let windowMgr = WindowManager(workspaceStore: workspaceStore)
         let lifecycleService = Self.makeRemoteSyncLifecycleService(
@@ -972,9 +1138,50 @@ struct AndBibleApp: App {
     }
 
     /**
+     Runs read-only archive validation after Android's initial ACTION_VIEW-style install prompt.
+
+     Conflict-free imports continue with the fail-safe reject policy. Existing module destinations
+     pause the Files-open queue and require a second Yes/Cancel decision that names every conflict.
+
+     - Parameter request: External document request already accepted by the generic install prompt.
+     - Side effects: Reads archive and destination metadata off the main actor, then updates app-level
+       confirmation or error state. No installer runs while replacement consent is pending.
+     - Failure modes: Malformed or unsafe archives become app-level error feedback before any
+       conflict confirmation or storage mutation.
+     */
+    @MainActor
+    private func preflightExternalDocumentImport(_ request: ExternalDocumentImportRequest) {
+        isImportingExternalDocument = true
+        externalDocumentImportMessage = nil
+        let service = ExternalDocumentImportService()
+        Task { @MainActor in
+            let preflight = await Task.detached(priority: .userInitiated) {
+                service.preflightDocument(request)
+            }.value
+            switch preflight {
+            case .ready:
+                performExternalDocumentImport(request, overwritePolicy: .reject)
+            case .moduleOverwriteRequired(let inspection):
+                pendingExternalModuleOverwrite = ExternalDocumentOverwriteConfirmation(
+                    request: request,
+                    inspection: inspection
+                )
+            case .failed(let message):
+                isImportingExternalDocument = false
+                externalDocumentImportMessage = ExternalDocumentImportResult
+                    .failed(message: message)
+                    .feedbackMessage
+            }
+        }
+    }
+
+    /**
      Performs a confirmed external document import.
 
-     - Parameter request: External document request previously confirmed by the user.
+     - Parameters:
+       - request: External document request previously confirmed by the user.
+       - overwritePolicy: Reject-by-default module policy, or replacement authorization produced
+         only by the conflict-specific Yes action.
      - Side effects:
        - marks the app-level import as active
        - runs the shared import service off the main actor
@@ -983,12 +1190,19 @@ struct AndBibleApp: App {
      - Failure modes: Service-level failures are surfaced as result feedback instead of thrown.
      */
     @MainActor
-    private func performExternalDocumentImport(_ request: ExternalDocumentImportRequest) {
+    private func performExternalDocumentImport(
+        _ request: ExternalDocumentImportRequest,
+        overwritePolicy: LocalSwordZipOverwritePolicy
+    ) {
         isImportingExternalDocument = true
         externalDocumentImportMessage = nil
         Task { @MainActor in
             let result = await Task.detached(priority: .userInitiated) {
-                ExternalDocumentImportService().importDocument(request)
+                ExternalDocumentImportService().importDocument(
+                    request,
+                    moduleOverwritePolicy: overwritePolicy,
+                    progressState: nil
+                )
             }.value
             isImportingExternalDocument = false
             if result.usesAndroidInstallToastFeedback {
@@ -1063,6 +1277,22 @@ struct AndBibleApp: App {
             ),
             displayName
         )
+    }
+
+    /**
+     Builds Android's overwrite disclosure from validated module names and exact local conflicts.
+
+     - Parameter inspection: Read-only module archive inspection produced before confirmation.
+     - Returns: Alert message naming the incoming modules and every destination requiring replacement.
+     - Side effects: none.
+     - Failure modes: Missing module names use a generic label; the conflict list is non-empty when
+       this message is presented.
+     */
+    private func externalDocumentOverwriteMessage(for inspection: LocalSwordZipInspection) -> String {
+        let modules = inspection.moduleNames.isEmpty
+            ? String(localized: "install_zip_module", defaultValue: "Bible module")
+            : inspection.moduleNames.joined(separator: ", ")
+        return "\(modules)\n\n" + inspection.conflictingPaths.joined(separator: "\n")
     }
 
     private func updateAppIcon(discrete: Bool, retryCount: Int = 0) {
@@ -1231,9 +1461,8 @@ struct AndBibleApp: App {
      * - Parameters:
        - error: Failure emitted by the lifecycle synchronization service.
        - category: Logical sync category that failed.
-     * - Side effects:
-       - may disable the category for incompatible remote schema failures
-       - updates the app-level error-alert message
+     * - Side effects: Updates the app-level error-alert message. Core schema policy owns category
+       enablement and incremental compatibility gates.
      * - Failure modes: This helper cannot fail.
      */
     @MainActor
@@ -1242,13 +1471,8 @@ struct AndBibleApp: App {
         case WebDAVClientError.invalidURL:
             remoteSyncErrorMessage = String(localized: "invalid_url_message")
         case RemoteSyncPatchDiscoveryError.incompatiblePatchVersion:
-            disableRemoteSync(for: category)
             remoteSyncErrorMessage = [
                 String(localized: "sync_cant_fetch"),
-                String(
-                    format: String(localized: "sync_disabling"),
-                    remoteCategoryContentDescription(for: category)
-                ),
                 String(localized: "sync_update_app"),
             ]
             .joined(separator: " ")

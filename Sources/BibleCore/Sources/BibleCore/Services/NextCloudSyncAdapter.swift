@@ -86,6 +86,7 @@ public struct RemoteSyncFile: Sendable, Equatable {
  - `verifyConnection`, `listFiles`, `get`, `download`, and `isSyncFolderKnown` perform remote DAV requests
  - `createNewFolder` and base-folder initialization issue `MKCOL` requests
  - `upload` and `makeSyncFolderKnown` upload remote file payloads with HTTP `PUT`
+ - `uploadIfAbsent` performs create-only WebDAV `PUT` plus exact readback and preserves occupied destinations
  - `delete` removes remote paths with HTTP `DELETE`
 
  Concurrency:
@@ -129,8 +130,8 @@ public actor NextCloudSyncAdapter {
             password: password,
             session: session
         )
-        self.davBasePath = Self.normalizedIdentifier(davBaseURL.path)
-        self.baseFolderPath = Self.normalizedOptionalIdentifier(configuration.folderPath)
+        self.davBasePath = try Self.normalizedIdentifier(davBaseURL.path)
+        self.baseFolderPath = try Self.normalizedOptionalIdentifier(configuration.folderPath)
         self.cachedBaseFolderID = nil
     }
 
@@ -156,20 +157,20 @@ public actor NextCloudSyncAdapter {
        - throws `WebDAVClientError.invalidResponse` when the server returns no matching resource payload
      */
     public func get(id: String) async throws -> RemoteSyncFile {
-        let normalizedID = Self.normalizedIdentifier(id)
-        let files = try await client.propfind(path: requestPath(for: normalizedID), depth: 0)
-        guard let file = files.first(where: { identifier(forServerPath: $0.path) == normalizedID }) ?? files.first else {
+        let normalizedID = try Self.normalizedIdentifier(id)
+        let files = try await client.propfind(path: try requestPath(for: normalizedID), depth: 0)
+        let mappedFiles = try files.map(remoteSyncFile(from:))
+        guard let file = mappedFiles.first(where: { $0.id == normalizedID }) else {
             throw WebDAVClientError.invalidResponse
         }
-        return remoteSyncFile(from: file)
+        return file
     }
 
     /**
      Lists files below one or more parent folders.
 
-     When `modifiedAtLeast` is provided, the adapter mirrors Android's NextCloud behavior by using
-     WebDAV `SEARCH` instead of a shallow `PROPFIND`, giving the future patch-sync engine a
-     timestamp-filtered incremental listing path.
+     When `modifiedAtLeast` is provided, the adapter uses Android's authoritative WebDAV `SEARCH`
+     result directly. Full listings continue to use a shallow `PROPFIND`.
 
      - Parameters:
        - parentIDs: Parent folder identifiers to search under. `nil` defaults to the configured base folder or DAV root.
@@ -179,7 +180,7 @@ public actor NextCloudSyncAdapter {
      - Returns: Remote files that match the requested filters.
      - Side effects:
        - may create the configured base folder path on first use
-       - performs one DAV `PROPFIND` or `SEARCH` per requested parent folder
+       - performs one DAV `PROPFIND` or one `SEARCH` per parent
      - Failure modes:
        - rethrows DAV transport failures from folder creation or listing requests
      */
@@ -191,30 +192,30 @@ public actor NextCloudSyncAdapter {
     ) async throws -> [RemoteSyncFile] {
         let parents: [String]
         if let parentIDs {
-            parents = parentIDs
+            parents = try parentIDs.map(Self.normalizedIdentifier)
         } else {
             parents = [try await defaultParentID()]
         }
         var collected: [RemoteSyncFile] = []
 
-        for parentID in parents.map(Self.normalizedIdentifier) {
+        for parentID in parents {
             let files: [WebDAVFile]
             if let modifiedAtLeast {
                 files = try await client.search(
-                    path: requestPath(for: parentID),
+                    path: try requestPath(for: parentID),
                     modifiedAfter: modifiedAtLeast
                 )
             } else {
-                files = try await client.propfind(path: requestPath(for: parentID), depth: 1)
+                files = try await client.propfind(path: try requestPath(for: parentID), depth: 1)
             }
 
-            let children = files
+            let children = try files
                 .map(remoteSyncFile(from:))
                 .filter { $0.id != parentID }
             collected.append(contentsOf: children)
         }
 
-        return collected.filter { file in
+        return Self.deduplicatedRemoteFiles(collected).filter { file in
             let nameMatches = name.map { file.name == $0 } ?? true
             let mimeMatches = mimeType.map { file.mimeType == $0 } ?? true
             return nameMatches && mimeMatches
@@ -244,7 +245,30 @@ public actor NextCloudSyncAdapter {
        - rethrows DAV transport failures from `WebDAVClient.get(path:)`
      */
     public func download(id: String) async throws -> Data {
-        try await client.get(path: requestPath(for: id))
+        try await client.get(path: try requestPath(for: id))
+    }
+
+    /**
+     Streams one remote file to a bounded local destination.
+
+     - Parameters:
+       - id: Backend-specific file identifier.
+       - destinationURL: Unique local output file.
+       - maximumByteCount: Maximum declared and observed body bytes.
+     - Returns: Exact bytes written.
+     - Side effects: Performs authenticated HTTP GET and creates `destinationURL`.
+     - Throws: DAV transport, filesystem, or bounded-download errors.
+     */
+    public func download(
+        id: String,
+        to destinationURL: URL,
+        maximumByteCount: Int
+    ) async throws -> Int64 {
+        try await client.get(
+            path: try requestPath(for: id),
+            to: destinationURL,
+            maximumByteCount: maximumByteCount
+        )
     }
 
     /**
@@ -261,17 +285,18 @@ public actor NextCloudSyncAdapter {
        - rethrows DAV transport failures except that HTTP 405 is treated as "already exists" to match Android's `createFullPath` behavior
      */
     public func createNewFolder(name: String, parentID: String? = nil) async throws -> RemoteSyncFile {
+        let validatedName = try Self.validatedSegment(name)
         let resolvedParentID: String
         if let parentID {
-            resolvedParentID = Self.normalizedIdentifier(parentID)
+            resolvedParentID = try Self.normalizedIdentifier(parentID)
         } else {
             resolvedParentID = try await defaultParentID()
         }
-        let folderID = Self.join(parent: resolvedParentID, child: name)
+        let folderID = try Self.join(parent: resolvedParentID, child: validatedName)
         try await ensureCollectionExists(id: folderID)
         return RemoteSyncFile(
             id: folderID,
-            name: name,
+            name: validatedName,
             size: 0,
             timestamp: Self.currentTimestampMilliseconds(),
             parentID: resolvedParentID,
@@ -289,11 +314,10 @@ public actor NextCloudSyncAdapter {
        - contentType: MIME type sent with the DAV `PUT`. Defaults to Android's gzip patch type.
      - Returns: Metadata for the uploaded remote file.
      - Side effects:
-       - reads the local file into memory
-       - performs an authenticated DAV `PUT`
+       - validates and streams the local regular file through an authenticated DAV `PUT`
      - Failure modes:
-       - rethrows filesystem read failures from `Data(contentsOf:)`
-       - rethrows DAV transport failures from `WebDAVClient.put(path:data:contentType:)`
+       - rejects non-regular, replaced, or oversized source files
+       - rethrows DAV transport failures from `WebDAVClient.put(path:fileURL:maximumByteCount:contentType:)`
      */
     public func upload(
         name: String,
@@ -301,18 +325,23 @@ public actor NextCloudSyncAdapter {
         parentID: String,
         contentType: String = NextCloudSyncAdapter.gzipMimeType
     ) async throws -> RemoteSyncFile {
-        let resolvedParentID = Self.normalizedIdentifier(parentID)
-        let fileData = try Data(contentsOf: fileURL, options: .mappedIfSafe)
-        let fileID = Self.join(parent: resolvedParentID, child: name)
+        let validatedName = try Self.validatedSegment(name)
+        let resolvedParentID = try Self.normalizedIdentifier(parentID)
+        let fingerprint = try RemoteSyncBoundedFileIO.fingerprintRegularFile(
+            at: fileURL,
+            maximumByteCount: RemoteSyncArchiveStagingService.maximumCompressedInitialBackupByteCount
+        )
+        let fileID = try Self.join(parent: resolvedParentID, child: validatedName)
         try await client.put(
-            path: requestPath(for: fileID),
-            data: fileData,
+            path: try requestPath(for: fileID),
+            fileURL: fileURL,
+            maximumByteCount: RemoteSyncArchiveStagingService.maximumCompressedInitialBackupByteCount,
             contentType: contentType
         )
         return RemoteSyncFile(
             id: fileID,
-            name: name,
-            size: Int64(fileData.count),
+            name: validatedName,
+            size: fingerprint.byteCount,
             timestamp: Self.currentTimestampMilliseconds(),
             parentID: resolvedParentID,
             mimeType: contentType
@@ -328,7 +357,7 @@ public actor NextCloudSyncAdapter {
        - rethrows DAV transport failures from `WebDAVClient.delete(path:)`
      */
     public func delete(id: String) async throws {
-        try await client.delete(path: requestPath(for: id))
+        try await client.delete(path: try requestPath(for: id))
     }
 
     /**
@@ -344,9 +373,9 @@ public actor NextCloudSyncAdapter {
        - rethrows all other DAV transport failures because they indicate connectivity or permission issues rather than a clean ownership miss
      */
     public func isSyncFolderKnown(syncFolderID: String, secretFileName: String) async throws -> Bool {
-        let markerID = Self.join(parent: syncFolderID, child: secretFileName)
+        let markerID = try Self.join(parent: syncFolderID, child: secretFileName)
         do {
-            _ = try await client.propfind(path: requestPath(for: markerID), depth: 0)
+            _ = try await client.propfind(path: try requestPath(for: markerID), depth: 0)
             return true
         } catch WebDAVClientError.unexpectedStatus(let statusCode) where statusCode == 404 {
             return false
@@ -365,10 +394,11 @@ public actor NextCloudSyncAdapter {
        - rethrows DAV transport failures from `WebDAVClient.put(path:data:contentType:)`
      */
     public func makeSyncFolderKnown(syncFolderID: String, deviceIdentifier: String) async throws -> String {
-        let secretFileName = "device-known-\(deviceIdentifier)-\(UUID().uuidString)"
-        let markerID = Self.join(parent: syncFolderID, child: secretFileName)
+        let validatedDeviceIdentifier = try Self.validatedSegment(deviceIdentifier)
+        let secretFileName = "device-known-\(validatedDeviceIdentifier)-\(UUID().uuidString)"
+        let markerID = try Self.join(parent: syncFolderID, child: secretFileName)
         try await client.put(
-            path: requestPath(for: markerID),
+            path: try requestPath(for: markerID),
             data: Data(),
             contentType: Self.gzipMimeType
         )
@@ -395,7 +425,7 @@ public actor NextCloudSyncAdapter {
     }
 
     private func ensureCollectionExists(id: String) async throws {
-        let normalizedID = Self.normalizedIdentifier(id)
+        let normalizedID = try Self.normalizedIdentifier(id)
         guard normalizedID != "/" else {
             return
         }
@@ -404,86 +434,234 @@ public actor NextCloudSyncAdapter {
         for component in normalizedID.split(separator: "/") {
             current += "/\(component)"
             do {
-                try await client.mkcol(path: requestPath(for: current))
+                try await client.mkcol(path: try requestPath(for: current))
             } catch WebDAVClientError.unexpectedStatus(let statusCode) where statusCode == 405 {
                 continue
             }
         }
     }
 
-    private func remoteSyncFile(from file: WebDAVFile) -> RemoteSyncFile {
-        let identifier = identifier(forServerPath: file.path)
-        let normalizedID = Self.normalizedIdentifier(identifier)
+    private func remoteSyncFile(from file: WebDAVFile) throws -> RemoteSyncFile {
+        let identifier = try identifier(forServerPath: file.path)
+        let normalizedID = try Self.normalizedIdentifier(identifier)
         let parentID = Self.parentIdentifier(for: normalizedID)
         let fallbackName = normalizedID == "/" ? "/" : normalizedID.split(separator: "/").last.map(String.init) ?? "/"
+        guard file.contentLength.map({ $0 >= 0 }) ?? true else {
+            throw WebDAVClientError.invalidResponse
+        }
+        let timestamp: Int64
+        if let lastModified = file.lastModified {
+            let milliseconds = lastModified.timeIntervalSince1970 * 1_000
+            guard milliseconds.isFinite,
+                  milliseconds >= Double(Int64.min),
+                  milliseconds <= Double(Int64.max) else {
+                throw WebDAVClientError.invalidResponse
+            }
+            timestamp = Int64(milliseconds.rounded(.towardZero))
+        } else {
+            timestamp = 0
+        }
         return RemoteSyncFile(
             id: normalizedID,
-            name: file.displayName.isEmpty ? fallbackName : file.displayName,
+            name: fallbackName,
             size: file.contentLength ?? 0,
-            timestamp: Int64((file.lastModified?.timeIntervalSince1970 ?? 0) * 1000),
+            timestamp: timestamp,
             parentID: parentID,
             mimeType: file.isDirectory ? Self.folderMimeType : (file.contentType ?? "application/octet-stream")
         )
     }
 
-    private func requestPath(for identifier: String) -> String {
-        let normalizedID = Self.normalizedIdentifier(identifier)
+    private func requestPath(for identifier: String) throws -> String {
+        let normalizedID = try Self.normalizedIdentifier(identifier)
         if normalizedID == "/" {
             return ""
         }
         return String(normalizedID.dropFirst())
     }
 
-    private func identifier(forServerPath serverPath: String) -> String {
-        let normalizedServerPath = Self.normalizedIdentifier(serverPath)
-        guard normalizedServerPath.hasPrefix(davBasePath) else {
-            return normalizedServerPath
+    private func identifier(forServerPath serverPath: String) throws -> String {
+        let normalizedServerPath = try Self.normalizedIdentifier(serverPath)
+        guard davBasePath == "/"
+                || normalizedServerPath == davBasePath
+                || normalizedServerPath.hasPrefix(davBasePath + "/") else {
+            throw WebDAVClientError.untrustedServerPath
         }
+        if davBasePath == "/" { return normalizedServerPath }
         let suffix = String(normalizedServerPath.dropFirst(davBasePath.count))
-        return suffix.isEmpty ? "/" : Self.normalizedIdentifier(suffix)
+        return suffix.isEmpty ? "/" : try Self.normalizedIdentifier(suffix)
     }
 
-    private static func normalizedOptionalIdentifier(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmed.isEmpty else {
+    private static func normalizedOptionalIdentifier(_ value: String?) throws -> String? {
+        var normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if normalized.hasPrefix("/") { normalized.removeFirst() }
+        if normalized.hasSuffix("/") { normalized.removeLast() }
+        while normalized.contains("//") {
+            normalized = normalized.replacingOccurrences(of: "//", with: "/")
+        }
+        guard !normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
-        return normalizedIdentifier(trimmed)
+        return try normalizedIdentifier(normalized)
     }
 
-    private static func normalizedIdentifier(_ value: String) -> String {
-        let components = value
-            .split(separator: "/")
-            .map(String.init)
-            .filter { !$0.isEmpty }
-        guard !components.isEmpty else {
-            return "/"
-        }
-        return "/" + components.joined(separator: "/")
+    private static func normalizedIdentifier(_ value: String) throws -> String {
+        let relativePath = try WebDAVPathValidator.canonicalRelativePath(value)
+        return relativePath.isEmpty ? "/" : "/\(relativePath)"
     }
 
     private static func parentIdentifier(for identifier: String) -> String {
-        let normalized = normalizedIdentifier(identifier)
-        guard normalized != "/" else {
+        guard identifier != "/" else {
             return "/"
         }
-        let components = normalized.split(separator: "/")
+        let components = identifier.split(separator: "/")
         guard components.count > 1 else {
             return "/"
         }
         return "/" + components.dropLast().joined(separator: "/")
     }
 
-    private static func join(parent: String, child: String) -> String {
-        let normalizedParent = normalizedIdentifier(parent)
-        let trimmedChild = child.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !trimmedChild.isEmpty else {
-            return normalizedParent
+    private static func join(parent: String, child: String) throws -> String {
+        let normalizedParent = try normalizedIdentifier(parent)
+        let validatedChild = try validatedSegment(child)
+        return normalizedParent == "/" ? "/\(validatedChild)" : "\(normalizedParent)/\(validatedChild)"
+    }
+
+    /** Validates one exact remote object name without accepting path separators. */
+    private static func validatedSegment(_ value: String) throws -> String {
+        let decoded = try WebDAVPathValidator.canonicalRelativePath(value)
+        guard !decoded.isEmpty, !decoded.contains("/") else {
+            throw WebDAVClientError.invalidPath
         }
-        return normalizedParent == "/" ? "/\(trimmedChild)" : "\(normalizedParent)/\(trimmedChild)"
+        return decoded
+    }
+
+    /** Collapses repeated DAV rows by canonical path using deterministic metadata precedence. */
+    private static func deduplicatedWebDAVFiles(_ files: [WebDAVFile]) -> [WebDAVFile] {
+        var byPath: [String: WebDAVFile] = [:]
+        for file in files {
+            if let current = byPath[file.path] {
+                byPath[file.path] = preferredWebDAVFile(current, file)
+            } else {
+                byPath[file.path] = file
+            }
+        }
+        return byPath.values.sorted { $0.path < $1.path }
+    }
+
+    /** Collapses overlapping parent/search rows by identifier with stable metadata precedence. */
+    private static func deduplicatedRemoteFiles(_ files: [RemoteSyncFile]) -> [RemoteSyncFile] {
+        var byIdentifier: [String: RemoteSyncFile] = [:]
+        for file in files {
+            if let current = byIdentifier[file.id] {
+                byIdentifier[file.id] = preferredRemoteFile(current, file)
+            } else {
+                byIdentifier[file.id] = file
+            }
+        }
+        return byIdentifier.values.sorted(by: remoteFilePrecedes)
+    }
+
+    /** Selects a stable DAV metadata row when SEARCH and PROPFIND repeat one path. */
+    private static func preferredWebDAVFile(_ lhs: WebDAVFile, _ rhs: WebDAVFile) -> WebDAVFile {
+        let lhsTimestamp = lhs.lastModified?.timeIntervalSince1970 ?? 0
+        let rhsTimestamp = rhs.lastModified?.timeIntervalSince1970 ?? 0
+        if lhsTimestamp != rhsTimestamp { return lhsTimestamp > rhsTimestamp ? lhs : rhs }
+        if lhs.contentLength != rhs.contentLength {
+            return (lhs.contentLength ?? -1) > (rhs.contentLength ?? -1) ? lhs : rhs
+        }
+        if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory ? lhs : rhs }
+        if lhs.contentType != rhs.contentType {
+            return (lhs.contentType ?? "") > (rhs.contentType ?? "") ? lhs : rhs
+        }
+        if lhs.displayName != rhs.displayName {
+            return lhs.displayName > rhs.displayName ? lhs : rhs
+        }
+        if lhs.href != rhs.href { return lhs.href > rhs.href ? lhs : rhs }
+        let lhsSource = lhs.sourceURL?.absoluteString ?? ""
+        let rhsSource = rhs.sourceURL?.absoluteString ?? ""
+        return lhsSource >= rhsSource ? lhs : rhs
+    }
+
+    /** Selects the deterministic newest metadata row for one canonical remote identifier. */
+    private static func preferredRemoteFile(_ lhs: RemoteSyncFile, _ rhs: RemoteSyncFile) -> RemoteSyncFile {
+        remoteFilePrecedes(lhs, rhs) ? rhs : lhs
+    }
+
+    /** Defines a total ordering for stable duplicate collapse and caller-visible listings. */
+    private static func remoteFilePrecedes(_ lhs: RemoteSyncFile, _ rhs: RemoteSyncFile) -> Bool {
+        if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+        if lhs.id != rhs.id { return lhs.id < rhs.id }
+        if lhs.parentID != rhs.parentID { return lhs.parentID < rhs.parentID }
+        if lhs.name != rhs.name { return lhs.name < rhs.name }
+        if lhs.size != rhs.size { return lhs.size < rhs.size }
+        return lhs.mimeType < rhs.mimeType
     }
 
     private static func currentTimestampMilliseconds() -> Int64 {
         Int64(Date().timeIntervalSince1970 * 1000)
+    }
+}
+
+/**
+ Adds atomic create-only file publication for remote patch reconciliation.
+
+ Nextcloud receives the exact validated archive file through WebDAV `PUT` with `If-None-Match: *`.
+ HTTP 412 remains a distinct occupied-destination result so callers can re-list and verify the winning
+ bytes; the adapter never retries that request as an unconditional upload.
+ */
+extension NextCloudSyncAdapter: RemoteSyncConditionalFileUploading {
+    /**
+     Creates one remote file only when its exact destination does not already exist.
+
+     - Parameters:
+       - name: Exact destination filename.
+       - fileURL: Durable validated archive file.
+       - maximumByteCount: Maximum accepted archive bytes.
+       - parentID: Remote parent folder identifier.
+       - contentType: MIME type sent with the DAV `PUT`.
+     - Returns: `.created` with synthesized remote metadata after a successful create, or
+       `.alreadyExists` when WebDAV reports HTTP 412.
+     - Side effects: Performs one authenticated WebDAV `PUT` with `If-None-Match: *`, then reads the
+       exact destination after HTTP 201 to verify the published bytes.
+     - Throws: Cancellation, URL loading, invalid-response, and unexpected-status failures from
+       `WebDAVClient.putIfAbsent(path:fileURL:maximumByteCount:contentType:)`.
+     - Important: The method never calls the adapter's unconditional `upload` API.
+     */
+    public func uploadIfAbsent(
+        name: String,
+        fileURL: URL,
+        maximumByteCount: Int,
+        parentID: String,
+        contentType: String
+    ) async throws -> RemoteSyncConditionalUploadResult {
+        try Task.checkCancellation()
+        let validatedName = try Self.validatedSegment(name)
+        let resolvedParentID = try Self.normalizedIdentifier(parentID)
+        let fileID = try Self.join(parent: resolvedParentID, child: validatedName)
+        let fingerprint = try RemoteSyncBoundedFileIO.fingerprintRegularFile(
+            at: fileURL,
+            maximumByteCount: maximumByteCount
+        )
+        let result = try await client.putIfAbsent(
+            path: try requestPath(for: fileID),
+            fileURL: fileURL,
+            maximumByteCount: maximumByteCount,
+            contentType: contentType
+        )
+        switch result {
+        case .created:
+            return .created(
+                RemoteSyncFile(
+                    id: fileID,
+                    name: validatedName,
+                    size: fingerprint.byteCount,
+                    timestamp: Self.currentTimestampMilliseconds(),
+                    parentID: resolvedParentID,
+                    mimeType: contentType
+                )
+            )
+        case .alreadyExists:
+            return .alreadyExists
+        }
     }
 }

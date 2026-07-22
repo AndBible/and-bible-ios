@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "受迫害区域的设置";
 "discrete_mode" = "隐藏宗教符号";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "关于";
 "version" = "Version";
 "export" = "Dışa aktar";
@@ -405,10 +405,6 @@
 "calculator_pin_description" = "「计算器」打开时需要输入的 PIN 码。";
 "discrete_help_title" = "先读这个！";
 "discrete_help_summary" = "如何对特殊版本进行设置以及相关信息。";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "程序行为";
 "prefs_display_customization_cat" = "外观与感觉";
@@ -479,7 +475,6 @@
 
 "prefs_volume_keys_scroll_title" = "音量键滚动";
 "prefs_volume_keys_scroll_summary" = "使用音量加/减键滚动圣经文本";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "实验性功能";
 "prefs_experimental_features_summary" = "选择要启用的实验性功能。这些功能仍在开发中，可能会更改或移除";
 "experimental_feature_bookmark_edit_actions" = "书签编辑操作";
@@ -627,3 +622,390 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "SD卡中有使用者jsword/readingplan的读经计划 它与内部读经计划名称相同，不能在此列举。 请重新命名至其他名称，并将副档名转为 *.properties";
 "error_no_content" = "选定经节没有内容";
+
+/* Android shared translations */
+"calculator_par1" = "在进入主程序之前，会显示「计算器」界面。";
+"calculator_par2" = "在这个界面，你可以进行常规计算，如果你想启动主程序，只需输入你的密码（默认值1234）然后按“=”键。";
+"calculator_par3" = "你可以通过「计算器 PIN」选项，来设置自己的密码。";
+"give_passphrase_for_module" = "%@ 文件已加密，需要密码解锁。";
+"show_unlock_info" = "模块及解锁资讯";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "正在解压缩Zip文件...";
+"install_failed_reason" = "无法安装模块，因为%@。";
+"install_zip_successfull" = "模块已成功安装";
+"module_install_phase_committing" = "正在从文件中载入模块，请稍等。";
+"module_install_phase_downloading" = "下载";
+"module_install_phase_queued" = "请稍候...";
+"storage_space_warning" = "SD卡储存空间不足";
+
+/* Android shared translations */
+"error_occurred" = "发生错误";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "记忆";
+"memorize_tab_reading" = "阅读";
+"reading_progress_active_days" = "活跃天数";
+"reading_progress_bible_heatmap" = "圣经总览";
+"reading_progress_calendar" = "阅读活动";
+"reading_progress_chapters_read" = "已读章节";
+"reading_progress_cycle" = "第 %d 轮";
+"reading_progress_history_for" = "%1$@ 的阅读进度";
+"reading_progress_history_no_entries" = "此选择无阅读记录。";
+"reading_progress_history_title" = "阅读历史";
+"reading_progress_history_version_unknown" = "未知版本";
+"reading_progress_new_cycle" = "新一轮";
+"reading_progress_new_cycle_confirm" = "开始新一轮阅读？这将从头开始记录您的进度，同时保留上一轮的数据。";
+"reading_progress_new_testament" = "新约";
+"reading_progress_next_cycle" = "下一轮";
+"reading_progress_old_testament" = "旧约";
+"reading_progress_overall" = "已读圣经的 %@%%";
+"reading_progress_percent_read_scale" = "已读\n百分比";
+"reading_progress_previous_cycle" = "上一轮";
+"reading_progress_read_count_scale" = "已读\n次数";
+"reading_progress_title" = "阅读/记忆进度";
+
+/* Android shared translations */
+"conf_change_chapter" = "章节改变";
+"conf_change_title" = "标题";
+"conf_replace_divinename" = "以Yahweh取代圣名";
+"conf_save_playback_settings_to_bookmarks" = "储存播放设定至书签";
+"conf_speak_auto_bookmark" = "自动标记书签";
+"conf_speak_footnotes" = "注脚";
+"conf_speak_sleep_timer" = "设定睡眠计时器";
+"conf_speak_synchronize" = "文字跟随语音";
+"forward" = "快进";
+"playback_settings_title" = "播放设定";
+"rewind" = "倒带";
+"speak_bookmarks_menu_title" = "朗读书签";
+"speak_next" = "下一个";
+"speak_previous" = "上一个";
+"speak_settings_title" = "一般朗读设定";
+
+/* Android shared translations */
+"sleep_timer_title" = "睡眠时间单位为分钟";
+"speak_beginning_of_passage" = "选取段落开结";
+"speak_ending_of_passage" = "选择段落结尾";
+"speak_ending_verse_must_be_later" = "结束节数必须在开始节数之后";
+"speak_verse_range_to_repeat" = "设定重复节数范围";
+
+/* Android shared translations */
+"tts_lang_not_available" = "不支持此语言";
+
+/* Android shared translations */
+"description" = "描述";
+"errorTitle" = "发生错误";
+"error_executing_search" = "无效的搜索";
+"export_something" = "%@ dışa aktar";
+"import_items" = "以%@导入";
+"install_zip_module" = "安装圣经模块";
+"my_document_content_type_label" = "内容类型";
+"my_document_create_title" = "新建文档";
+"my_document_import_document" = "将文件导入为文档";
+"my_document_new_name" = "文档 %d";
+"my_document_new_page_name" = "第 %1$d 页";
+"my_document_rename_title" = "重命名文档";
+"my_document_save_changes" = "保存更改？";
+"okay" = "确定";
+"overwrite" = "是";
+"package_directory" = "压缩包（Zip）目录";
+"read" = "读取";
+"reading_plan_set_current_day" = "设定为目前日子...";
+"reading_plan_set_start_date" = "设定开始日期...";
+"search_all_words" = "所有的词";
+"search_any_word" = "任何一词";
+"search_fts_query" = "Ham sorgu sözdizimi";
+"search_phrase" = "完整句子";
+"search_words_group_prompt" = "查找经文";
+"show_notes" = "显示笔记";
+"speak_book_changed" = "书本已更改。";
+"speak_chapter_changed" = "章节";
+"success" = "完成";
+"summary" = "摘要";
+"undo" = "取消";
+
+/* Android shared translations */
+"my_document_no_description" = "无描述";
+
+/* Android shared translations */
+"error_key_not_in_document" = "文件内没有发现";
+"my_document_cannot_delete_ai_documents" = "AI 文档包含页面时无法删除。请先删除其中的页面。";
+"my_document_create_page_title" = "新建页面";
+"my_document_import_empty_selection" = "未选择可导入的文件";
+"system_items1" = "更多";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "您需要在搜索中下载带有史特朗号码的圣经并构建索引";
+
+/* Android shared translations */
+"add_model" = "添加模型";
+"agent_already_running" = "AI代理已在运行中，请等待或先停止它。";
+"agent_log_cancelled" = "已取消";
+"agent_log_completed" = "已完成";
+"agent_log_executing" = "正在执行：%@";
+"agent_log_idle" = "AI助手";
+"agent_log_iteration" = "第%d次迭代";
+"agent_log_model_not_configured" = "未配置模型";
+"agent_log_tool_failed" = "工具%@失败";
+"agent_log_view_raw" = "查看原始 LLM 日志";
+"agent_max_iterations_title" = "最大代理迭代次数";
+"agent_permission_mode_summary" = "控制AI写操作前何时需要用户确认";
+"agent_permission_title" = "代理权限";
+"ai_add_provider" = "添加提供商";
+"ai_advanced_category" = "高级";
+"ai_agent_notification_running" = "AI代理工作中…";
+"ai_behavior_category" = "行为";
+"ai_connection_settings" = "连接设置";
+"ai_disclaimer_approach" = "AndBible主要使用AI处理您已安装文档中的文本——注释、词典及其他模块——而非依赖模型自身的训练数据。";
+"ai_disclaimer_dialog_title" = "AI工具——重要信息";
+"ai_disclaimer_intro" = "AI工具可以极大地丰富您的圣经学习体验，并开辟与圣经互动的新方式。";
+"ai_disclaimer_point1" = "AI可能出错，包括\"幻觉\"（自信地陈述虚假或捏造的信息）。切勿盲目接受其输出。";
+"ai_disclaimer_point2" = "AI的回应可能反映训练数据中的偏见、存在误导性，或将某一特定神学观点呈现为中立或完整的。";
+"ai_disclaimer_point3" = "您对如何使用AI生成的内容负有责任。在依赖这些内容之前，请始终对照圣经加以核实。";
+"ai_disclaimer_point4" = "AndBible致力于让核实变得简便（例如在注释中提供精确的来源引用），但最终责任始终在于您。";
+"ai_disclaimer_point5" = "\"要检验一切，持守那美善的。\"（帖撒罗尼迦前书5:21）";
+"ai_disclaimer_point6" = "这些工具既无灵魂，也无圣灵。它们是文字处理工具，而非属灵向导。未经仔细的人工监督、祷告与辨别，不适合直接用于准备讲道、灵修或其他属灵内容。";
+"ai_disclaimer_point7" = "善加使用，它们可以造福许多用户和使用场景。但如果您不确定是否愿意承担相关风险，选择不使用也是完全合理的。";
+"ai_disclaimer_point8" = "您的数据将发送至您所选AI提供商的服务器。使用API密钥即表示您接受该提供商的服务条款和隐私政策。自托管模型在技术上可行，但需要更多专业知识，且效果可能不如商业模型。";
+"ai_disclaimer_point9" = "AI提供商会对API使用收费。AndBible中显示的费用估算为近似值——实际费用请以您提供商的账单为准。";
+"ai_disclaimer_responsibility" = "然而，它们仍然是强大的工具——能力越大，责任越大。请牢记以下几点。";
+"ai_disclaimer_warning_title" = "重要：使用AI工具前请阅读";
+"ai_doc_choose_page" = "选择 AI 文档页面";
+"ai_document_filter_activity_title" = "AI文档访问";
+"ai_document_regenerate" = "重新生成";
+"ai_hidden_status" = "已隐藏";
+"ai_hide_prompt" = "隐藏";
+"ai_language_title" = "AI 响应语言";
+"ai_models_category" = "模型";
+"ai_models_summary_none" = "未配置模型";
+"ai_provider_api_format" = "API格式";
+"ai_provider_api_key" = "API密钥";
+"ai_provider_api_key_not_set" = "未设置API密钥";
+"ai_provider_delete_confirm" = "删除提供商\"%1$@\"？使用此提供商的提示词将恢复为默认。";
+"ai_provider_edit" = "编辑";
+"ai_provider_endpoint" = "API端点";
+"ai_provider_endpoint_description" = "仅填写基础 URL。AndBible 会自动添加 \"/chat/completions\"（OpenAI 格式）或 \"/messages\"（Anthropic 格式）。模型列表从 \"/models\" 获取。";
+"ai_provider_name" = "提供商名称";
+"ai_provider_saved" = "提供商已保存";
+"ai_provider_select_type" = "选择提供商类型";
+"ai_providers_models_category" = "提供商与模型";
+"ai_providers_summary_none" = "未配置提供商";
+"ai_regenerate_fresh_run" = "全新运行（忽略上次结果）";
+"ai_regenerate_instructions_hint" = "附加说明（可选）";
+"ai_regenerate_keep_previous" = "保留上一个版本";
+"ai_regenerate_prompt_not_found" = "无法重新生成：未找到原始提示词，可能已被删除。";
+"ai_regenerate_title" = "重新生成";
+"ai_settings" = "AI设置";
+"ai_setup_description" = "AndBible可使用AI翻译圣经文本、解释经文、创建摘要等。要开始使用，请配置与OpenAI兼容API提供商的连接。";
+"ai_setup_title" = "配置AI";
+"ai_usage_category" = "使用情况";
+"ask_model_before_run_title" = "运行前询问模型";
+"auto_hide_agent_log_title" = "完成后隐藏 AI 面板";
+"bookmarks_and_mynotes_title" = "书签及我的笔记";
+"built_in_prompt" = "内置";
+"built_in_prompt_notice" = "这是内置提示词，无法编辑。请使用\"复制以自定义\"来创建可编辑的副本。";
+"category_none" = "无分类";
+"commentary_max_response_no_limit" = "无限制";
+"commentary_max_response_title" = "注释回应大小限制";
+"copy_to_customize" = "复制以自定义";
+"custom_agent_system_prompt_title" = "代理系统提示词";
+"custom_system_prompt_custom" = "自定义";
+"custom_text_transform_system_prompt_title" = "文本转换系统提示词";
+"default_prompt_ask_question" = "提问";
+"default_prompt_ask_question_desc" = "就所选段落提出任何问题";
+"default_prompt_bookmark_annotate" = "书签与注释";
+"default_prompt_bookmark_annotate_desc" = "创建带有AI生成学习笔记的书签";
+"default_prompt_compare_translations" = "比较译本";
+"default_prompt_compare_translations_desc" = "展示不同已安装译本对文本的翻译方式";
+"default_prompt_cross_references" = "交叉参考";
+"default_prompt_cross_references_desc" = "查找并解释相关圣经段落";
+"default_prompt_custom" = "自定义提示词";
+"default_prompt_custom_desc" = "对所选段落执行自定义任务";
+"default_prompt_custom_template" = "根据用户的任务说明处理所选圣经段落。";
+"default_prompt_enhance_note" = "优化笔记";
+"default_prompt_enhance_note_desc" = "改善笔记的语法、清晰度和可读性";
+"default_prompt_explain_verses" = "解释经文";
+"default_prompt_explain_verses_desc" = "解释所选经文的含义和背景";
+"default_prompt_explain_verses_studypad" = "解释经文 → 学习笔记";
+"default_prompt_explain_verses_studypad_desc" = "创建包含逐节解释和书签的学习笔记";
+"default_prompt_study_layout" = "打开学习布局";
+"default_prompt_study_layout_desc" = "打开注释和平行译本窗口以供研读";
+"default_prompt_summary" = "摘要";
+"default_prompt_summary_desc" = "创建所选文本的简明摘要";
+"default_prompt_thematic_study" = "主题研究";
+"default_prompt_thematic_study_desc" = "构建包含相关段落和笔记的学习笔记，聚焦中心主题";
+"default_prompt_translate_to_language" = "翻译为%@";
+"default_prompt_translate_to_ui_language_desc" = "将文档文本翻译为应用界面语言";
+"default_prompt_word_study" = "词语研究";
+"default_prompt_word_study_desc" = "分析原文希伯来语/希腊语词汇";
+"default_prompt_workspace_assistant" = "工作区助手";
+"default_prompt_workspace_assistant_desc" = "管理窗口：创建、关闭、重新排列、更换文档";
+"delete_category" = "删除分类";
+"delete_category_and_prompts" = "删除分类及其提示词";
+"delete_category_keep_prompts" = "将提示词移至根目录并删除分类";
+"doc_type_addons" = "附加";
+"easy_setup_enter_api_key" = "输入您的API密钥";
+"easy_setup_success" = "连接成功！";
+"easy_setup_test_connection" = "测试连接";
+"easy_setup_testing" = "测试中…";
+"easy_setup_title" = "快速设置";
+"help_bookmarks_text" = "选取文字后可以在弹出视窗点选书签功能。你可以对书签自订笔记。「我的笔记」功能，也可让你在新视窗中开启你专属的笔记。";
+"help_memorize_text" = "记忆视图帮助您熟记经文段落。使用单词模糊、单词打乱、单词输入或单词顺序来练习。成功完成练习后，经文将自动标记为已记忆（此功能可以关闭）。";
+"help_read_more_link" = "在手册中阅读更多";
+"hide_category" = "从AI操作中隐藏";
+"llm_actions" = "AI操作";
+"llm_continue_iterations_message" = "AI助手已达到%1$d次迭代上限，尚未完成。是否继续%2$d次迭代？";
+"llm_continue_iterations_title" = "继续？";
+"llm_custom_input_price_title" = "输入价格（$/百万 token）";
+"llm_custom_model_dialog_message" = "输入模型 ID";
+"llm_custom_output_price_title" = "输出价格（$/百万 token）";
+"llm_error_max_iterations" = "已达到最大迭代次数（%1$d），未能完成";
+"llm_error_unknown" = "未知错误";
+"llm_note_updated" = "笔记已更新";
+"llm_openrouter_model" = "模型";
+"llm_provider_custom" = "自定义（兼容 OpenAI）";
+"llm_reset_usage_confirm_message" = "这将清除所有累计用量数据。";
+"llm_reset_usage_confirm_title" = "重置用量数据？";
+"llm_reset_usage_title" = "重置用量数据";
+"llm_usage_summary_default" = "暂无用量数据";
+"llm_usage_summary_title" = "Token 用量";
+"manage_prompts" = "管理AI提示词";
+"manage_tool_permissions_title" = "工具权限";
+"model_pricing_summary" = "输入%1$@ / 输出%2$@（每百万token）";
+"model_select_provider" = "提供商";
+"model_set_default" = "设为默认模型";
+"move_category_down" = "下移";
+"move_category_up" = "上移";
+"new_category" = "新建类别";
+"new_category_name" = "类别名称";
+"new_prompt" = "新建提示词";
+"permission_allow_all" = "允许全部";
+"permission_allow_all_session" = "本次会话允许所有工具";
+"permission_allow_for_session" = "本次会话允许";
+"permission_allow_once" = "允许一次";
+"permission_always_allow_confirm" = "您确定要永久允许\"%1$@\"吗？";
+"permission_always_allow_confirm_reset_hint" = "您可以在AI设置中重置此选项。";
+"permission_always_ask" = "每次询问";
+"permission_ask_once_per_run" = "每次运行询问一次";
+"permission_deny" = "拒绝";
+"permission_deny_all" = "拒绝全部";
+"permission_option_always_allow" = "始终允许";
+"permission_option_always_deny" = "始终拒绝";
+"permission_status_default" = "询问（默认）";
+"prompt_auto_include_commentaries" = "自动包含注释";
+"prompt_auto_include_documents" = "自动包含已安装文档";
+"prompt_bible_only" = "仅圣经文档";
+"prompt_category" = "分类";
+"prompt_category_favorites" = "收藏";
+"prompt_category_general" = "通用";
+"prompt_category_notes" = "笔记";
+"prompt_category_study" = "学习";
+"prompt_category_uncategorized" = "未分类";
+"prompt_context_note_editor" = "笔记编辑器";
+"prompt_context_text_selection" = "文本选择";
+"prompt_context_verse_selection" = "经文选择";
+"prompt_context_window_menu" = "窗口菜单";
+"prompt_context_workspace_menu" = "工作区菜单";
+"prompt_description" = "描述";
+"prompt_edit_before_run" = "运行前指定";
+"prompt_is_text_transformation" = "文本转换";
+"prompt_max_iterations_hint" = "留空则使用全局默认值";
+"prompt_max_iterations_unlimited" = "不限";
+"prompt_model_default" = "默认";
+"prompt_model_override" = "模型";
+"prompt_name" = "名称";
+"prompt_no_document_creation" = "不创建文档";
+"prompt_permission_mode" = "权限模式";
+"prompt_permission_mode_description" = "控制AI执行写操作前何时需要用户确认。以下各工具的单独设置可覆盖此项。";
+"prompt_permission_use_default" = "使用默认值";
+"prompt_show_in" = "显示位置";
+"prompt_strict_context_matching" = "上下文相关缓存";
+"prompt_tab_advanced" = "高级";
+"prompt_tab_permissions" = "权限";
+"prompt_tab_prompt" = "提示词";
+"prompt_template" = "提示词模板";
+"prompt_tool_permissions" = "工具权限";
+"raw_log_delete_all" = "删除全部";
+"raw_log_error_indicator" = "错误";
+"raw_log_history_empty" = "无已保存的日志";
+"raw_log_history_title" = "AI 对话日志";
+"raw_log_item_tokens" = "%1$@ 输入 / %2$@ 输出";
+"raw_log_older_1_month" = "1个月前";
+"raw_log_older_1_week" = "1周前";
+"raw_log_older_3_months" = "3个月前";
+"raw_log_retention_summary_disabled" = "已禁用（保留全部）";
+"raw_log_retention_title" = "自动删除旧日志";
+"reset_all_ai_settings" = "重置所有AI设置";
+"reset_all_ai_settings_confirm_message" = "这将清除API密钥、提供商、端点、模型，并将所有提示词重置为默认值。是否继续？";
+"reset_all_ai_settings_confirm_title" = "重置所有AI设置？";
+"reset_all_permissions" = "重置所有";
+"reset_to_default" = "重置为默认";
+"save_and_exit" = "储存";
+"select_llm_prompt" = "选择AI操作";
+"select_model_before_run_title" = "选择模型";
+"set_default_model_for_prompt" = "设为此提示词的默认模型";
+"show_category" = "在AI操作中显示";
+"specify_before_run_title" = "指定任务";
+"tool_add_bookmark_note" = "添加书签笔记";
+"tool_add_label_to_bookmark" = "为书签添加标签";
+"tool_add_my_document_page" = "添加我的文档页面";
+"tool_add_study_pad_entry" = "添加学习笔记条目";
+"tool_category_bible_search" = "圣经与搜索";
+"tool_category_bookmarks" = "书签";
+"tool_category_general_books" = "通用书";
+"tool_category_labels" = "标签";
+"tool_category_my_documents" = "我的文档";
+"tool_category_study_pads" = "学习笔记";
+"tool_category_windows" = "窗口";
+"tool_create_bookmark" = "创建书签";
+"tool_create_label" = "创建标签";
+"tool_create_my_document" = "创建我的文档";
+"tool_create_study_pad" = "创建学习笔记";
+"tool_create_window" = "创建窗口";
+"tool_delete_bookmark" = "删除书签";
+"tool_delete_label" = "删除标签";
+"tool_delete_my_document_page" = "删除我的文档页面";
+"tool_edit_my_document_page" = "编辑我的文档页面";
+"tool_finish_with_my_document_page" = "打开我的文档页面";
+"tool_finish_with_study_pad" = "打开学习笔记";
+"tool_finish_without_document" = "完成（不创建文档）";
+"tool_get_all_labels" = "列出所有标签";
+"tool_get_bookmarks_for_verse" = "获取经文的书签";
+"tool_get_bookmarks_with_label" = "获取带有标签的书签";
+"tool_get_commentaries" = "读取注释";
+"tool_get_dictionary_entry" = "查找词典条目";
+"tool_get_genbook_content" = "读取通用书内容";
+"tool_get_genbook_keys" = "列出通用书目录";
+"tool_get_installed_documents" = "列出已安装文档";
+"tool_get_my_document_pages" = "列出我的文档页面";
+"tool_get_my_documents" = "列出我的文档";
+"tool_get_study_pad_content" = "读取学习笔记内容";
+"tool_get_verse_content" = "读取经文内容";
+"tool_get_windows" = "列出窗口";
+"tool_manage_window" = "管理窗口";
+"tool_remove_label_from_bookmark" = "从书签移除标签";
+"tool_search_bible" = "搜索圣经";
+"tool_search_by_strongs" = "按斯特朗编号搜索";
+"tool_search_study_pads" = "搜索学习笔记";
+"tool_set_document_title" = "设置文档标题";
+"tool_set_window_document" = "设置窗口文档";
+"tool_update_bookmark_note" = "更新书签笔记";
+"tool_update_studypad_text_entry" = "更新学习笔记文本条目";
+"verse_tip" = "长按以选择部分或多节经文";
+"watch_tutorial_video" = "观看示范影片 (英文)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "正在重新生成AI文档…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "我接受并承担全部责任";
+"ai_disclaimer_accept_title" = "接受AI免责声明";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "AI连接和提示词设置";
+"prefs_features_cat" = "功能";

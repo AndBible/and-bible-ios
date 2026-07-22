@@ -17,35 +17,54 @@
 
 <template>
   <div class="ambiguous-button" :style="buttonStyle" @click.stop="openBookmark(false)">
-    <div class="verse-range one-liner">
-      <template v-if="customIcon">
-        <FontAwesomeIcon :icon="customIcon" size="xs" style="padding-inline-end: 5px"/>
-      </template>
-      <template v-if="isBibleBookmark(bookmark)">
+    <!-- AI markers are navigation records, not editable bookmark records. -->
+    <template v-if="isAiDocMarker(bookmark)">
+      <div class="verse-range one-liner">
+        <FontAwesomeIcon :icon="faRobot" size="xs" style="padding-inline-end: 5px"/>
         {{ bookmark.verseRangeAbbreviated }}&nbsp;
-      </template>
-      <q v-if="bookmark.text"><em>{{ bookmark.text }}</em></q>
-    </div>
-    <div v-if="bookmark.hasNote" class="note one-liner small">
-      <FontAwesomeIcon icon="edit" size="xs"/>
-      {{ htmlToString(bookmarkNotesHtml) }}
-    </div>
+        <q><em>{{ bookmark.title }}</em></q>
+      </div>
+    </template>
+    <template v-else>
+      <div class="verse-range one-liner">
+        <template v-if="customIcon">
+          <FontAwesomeIcon :icon="customIcon" size="xs" style="padding-inline-end: 5px"/>
+        </template>
+        <template v-if="isBibleBookmark(bookmark)">
+          {{ bookmark.verseRangeAbbreviated }}&nbsp;
+        </template>
+        <q v-if="bookmark.text"><em>{{ bookmark.text }}</em></q>
+      </div>
+      <div v-if="bookmark.hasNote" class="note one-liner small">
+        <FontAwesomeIcon icon="edit" size="xs"/>
+        {{ htmlToString(bookmarkNotesHtml) }}
+      </div>
 
-    <div style="overflow-x: auto" class="label-list">
-      <LabelList in-bookmark single-line :bookmark-id="bookmark.id"/>
-    </div>
+      <div style="overflow-x: auto" class="label-list">
+        <LabelList in-bookmark single-line :bookmark-id="bookmark.id"/>
+      </div>
 
-    <div style="height: 7px"/>
-    <BookmarkButtons
-        :bookmark="bookmark"
-        show-study-pad-buttons
-        @edit-clicked="editNotes"
-        @info-clicked="openBookmark(true)"
-    />
+      <div style="height: 7px"/>
+      <BookmarkButtons
+          :bookmark="bookmark"
+          show-study-pad-buttons
+          @edit-clicked="editNotes"
+          @info-clicked="openBookmark(true)"
+      />
+    </template>
   </div>
 </template>
 
 <script lang="ts" setup>
+/**
+ * Renders one bookmark-like choice in the ambiguous reader action modal.
+ *
+ * @param bookmarkId Exact global bookmark/AI marker identifier to resolve reactively.
+ * @fires selected For normal bookmark actions after the choice has emitted its modal route.
+ * @remarks AI markers bypass editable bookmark controls and navigate through the native exact
+ * document/key command. Missing marker IDs remain a provider contract violation, matching existing
+ * bookmark chooser behavior.
+ */
 import LabelList from "@/components/LabelList.vue";
 import {computed, inject} from "vue";
 import {useCommon} from "@/composables";
@@ -53,12 +72,13 @@ import {emit} from "@/eventbus";
 import Color from "color";
 import BookmarkButtons from "@/components/BookmarkButtons.vue";
 import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
-import {globalBookmarksKey, locateTopKey} from "@/types/constants";
+import {androidKey, globalBookmarksKey, locateTopKey} from "@/types/constants";
 import {BaseBookmark} from "@/types/client-objects";
-import {isBibleBookmark, resolveIcon} from "@/composables/bookmarks";
+import {isAiDocMarker, isBibleBookmark, resolveIcon} from "@/composables/bookmarks";
 import {Marked} from "marked";
 import DOMPurify from "dompurify";
 import {PURIFY_CONFIG} from "@/composables/slot-html-content";
+import {faRobot} from "@fortawesome/free-solid-svg-icons";
 
 const markdownParser = new Marked({breaks: true, gfm: true});
 
@@ -66,6 +86,7 @@ const $emit = defineEmits(["selected"]);
 const props = defineProps<{ bookmarkId: IdType }>();
 
 const {bookmarkMap, bookmarkLabels} = inject(globalBookmarksKey)!;
+const android = inject(androidKey)!;
 const {appSettings} = useCommon();
 const bookmark = computed(() => bookmarkMap.get(props.bookmarkId)! as BaseBookmark);
 const bookmarkNotes = computed(() => bookmark.value.notes!);
@@ -97,16 +118,23 @@ const buttonStyle = computed<string|undefined>(() => {
 
 const locateTop = inject(locateTopKey)!;
 
+/** Selects the normal bookmark and opens its note editor at the current modal location. */
 function editNotes() {
     $emit("selected");
     emit("bookmark_clicked", bookmark.value.id, {openNotes: true, locateTop: locateTop.value});
 }
 
+/** Routes AI markers to native navigation and normal bookmarks to the bookmark detail modal. */
 function openBookmark(openInfo = false) {
+    if (isAiDocMarker(bookmark.value)) {
+        android.openAiDocPage(bookmark.value.documentInitials, bookmark.value.pageKey);
+        return;
+    }
     $emit("selected");
     emit("bookmark_clicked", bookmark.value.id, {openInfo, locateTop: locateTop.value});
 }
 
+/** Converts already-sanitized note HTML to the plain-text preview shown in the chooser. */
 function htmlToString(html: string) {
     const ele = document.createElement("div")
     ele.innerHTML = html

@@ -82,6 +82,9 @@ jobs:
       - name: Checkout Android reference
         run: scripts/ensure_android_reference_checkout.sh
 
+      - name: Check Android workspace Room authority
+        run: python3 scripts/check_android_workspace_schema_authority.py
+
       - name: Run repo standards unit tests
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
@@ -379,7 +382,7 @@ jobs:
 
       - name: Run BibleCore package tests
         if: needs.repo-standards.outputs.required_checks_only != 'true'
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: |
           mkdir -p .artifacts
           xcodebuild test \
@@ -424,6 +427,7 @@ jobs:
     needs:
       - repo-standards
       - localization-guardrails
+      - bibleview-js
     timeout-minutes: 30
     env:
       DERIVED_DATA_PATH: .derivedData/BibleViewPackageTests
@@ -436,6 +440,21 @@ jobs:
       - name: Checkout
         if: needs.repo-standards.outputs.required_checks_only != 'true'
         uses: actions/checkout@v6
+
+      - name: Download verified BibleView debug bundle
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        uses: actions/download-artifact@v5
+        with:
+          name: bibleview-debug-bundle
+          path: ${{ runner.temp }}/bibleview-debug
+
+      - name: Install BibleView debug bundle before SwiftPM resolution
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: >-
+          python3 scripts/manage_bibleview_bundle.py sync
+          --source "${RUNNER_TEMP}/bibleview-debug"
+          --destination Sources/BibleView/Sources/BibleView/Resources/bibleview-js
+          --mode debug
 
       - name: Select Xcode version
         if: needs.repo-standards.outputs.required_checks_only != 'true'
@@ -567,6 +586,7 @@ jobs:
     needs:
       - repo-standards
       - localization-guardrails
+      - bibleview-js
     timeout-minutes: 30
     env:
       DERIVED_DATA_PATH: .derivedData/BibleUIPackageTests
@@ -579,6 +599,21 @@ jobs:
       - name: Checkout
         if: needs.repo-standards.outputs.required_checks_only != 'true'
         uses: actions/checkout@v6
+
+      - name: Download verified BibleView debug bundle
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        uses: actions/download-artifact@v5
+        with:
+          name: bibleview-debug-bundle
+          path: ${{ runner.temp }}/bibleview-debug
+
+      - name: Install BibleView debug bundle before SwiftPM resolution
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: >-
+          python3 scripts/manage_bibleview_bundle.py sync
+          --source "${RUNNER_TEMP}/bibleview-debug"
+          --destination Sources/BibleView/Sources/BibleView/Resources/bibleview-js
+          --mode debug
 
       - name: Select Xcode version
         if: needs.repo-standards.outputs.required_checks_only != 'true'
@@ -665,7 +700,7 @@ jobs:
 
       - name: Run BibleUI package tests
         if: needs.repo-standards.outputs.required_checks_only != 'true'
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: |
           mkdir -p .artifacts
           xcodebuild test \
@@ -709,12 +744,17 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - repo-standards
-    if: needs.repo-standards.outputs.required_checks_only != 'true'
     steps:
+      - name: Required-checks-only pass
+        if: needs.repo-standards.outputs.required_checks_only == 'true'
+        run: echo "Required-checks-only change set; BibleView asset builds are not required."
+
       - name: Checkout
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
         uses: actions/checkout@v6
 
       - name: Setup Node.js
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -722,16 +762,74 @@ jobs:
           cache-dependency-path: bibleview-js/package-lock.json
 
       - name: Install frontend dependencies
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
         working-directory: bibleview-js
         run: npm ci
 
       - name: Run frontend tests
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
         working-directory: bibleview-js
         run: npm run test:ci
 
-      - name: Build frontend debug bundle
+      - name: Run frontend lint and type checks
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
         working-directory: bibleview-js
+        run: |
+          npm run lint:ci
+          npm run type-check:ci
+
+      - name: Build first isolated debug bundle
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        working-directory: bibleview-js
+        env:
+          BIBLEVIEW_OUTPUT_DIR: ${{ runner.temp }}/bibleview-debug
         run: npm run build-debug
+
+      - name: Validate debug bundle safety
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: >-
+          python3 scripts/manage_bibleview_bundle.py validate
+          --bundle "${RUNNER_TEMP}/bibleview-debug"
+          --mode debug
+
+      - name: Rebuild debug bundle independently
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        working-directory: bibleview-js
+        env:
+          BIBLEVIEW_OUTPUT_DIR: ${{ runner.temp }}/bibleview-debug-repeat
+        run: npm run build-debug
+
+      - name: Require deterministic debug output
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: >-
+          python3 scripts/manage_bibleview_bundle.py compare
+          --expected "${RUNNER_TEMP}/bibleview-debug"
+          --actual "${RUNNER_TEMP}/bibleview-debug-repeat"
+          --mode debug
+
+      - name: Build isolated production bundle
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        working-directory: bibleview-js
+        env:
+          BIBLEVIEW_OUTPUT_DIR: ${{ runner.temp }}/bibleview-production
+        run: npm run build-production
+
+      - name: Require committed production bundle to match source
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: >-
+          python3 scripts/manage_bibleview_bundle.py compare
+          --expected "${RUNNER_TEMP}/bibleview-production"
+          --actual Sources/BibleView/Sources/BibleView/Resources/bibleview-js
+          --mode production
+
+      - name: Upload verified debug bundle
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: bibleview-debug-bundle
+          path: ${{ runner.temp }}/bibleview-debug
+          if-no-files-found: error
+          retention-days: 1
 
   ui-shard-plan:
     name: Plan UI Test Shards
@@ -851,6 +949,7 @@ jobs:
       - ios-biblecore-package-tests
       - ios-bibleview-package-tests
       - ios-bibleui-package-tests
+      - bibleview-js
     timeout-minutes: 60
     env:
       DERIVED_DATA_PATH: .derivedData
@@ -870,7 +969,8 @@ jobs:
             "ios-swordkit-package-tests:${{ needs.ios-swordkit-package-tests.result }}" \
             "ios-biblecore-package-tests:${{ needs.ios-biblecore-package-tests.result }}" \
             "ios-bibleview-package-tests:${{ needs.ios-bibleview-package-tests.result }}" \
-            "ios-bibleui-package-tests:${{ needs.ios-bibleui-package-tests.result }}"
+            "ios-bibleui-package-tests:${{ needs.ios-bibleui-package-tests.result }}" \
+            "bibleview-js:${{ needs.bibleview-js.result }}"
           do
             job_name="${result_pair%%:*}"
             job_result="${result_pair#*:}"
@@ -892,6 +992,21 @@ jobs:
       - name: Checkout
         if: needs.repo-standards.outputs.required_checks_only != 'true'
         uses: actions/checkout@v6
+
+      - name: Download verified BibleView debug bundle
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        uses: actions/download-artifact@v5
+        with:
+          name: bibleview-debug-bundle
+          path: ${{ runner.temp }}/bibleview-debug
+
+      - name: Install BibleView debug bundle before SwiftPM resolution
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: >-
+          python3 scripts/manage_bibleview_bundle.py sync
+          --source "${RUNNER_TEMP}/bibleview-debug"
+          --destination Sources/BibleView/Sources/BibleView/Resources/bibleview-js
+          --mode debug
 
       - name: Select Xcode version
         if: needs.repo-standards.outputs.required_checks_only != 'true'
@@ -1039,6 +1154,7 @@ jobs:
       - repo-standards
       - ui-shard-plan
       - ios-ui-foundation
+      - bibleview-js
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.ui-shard-plan.outputs.matrix) }}
@@ -1051,6 +1167,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Download verified BibleView debug bundle
+        uses: actions/download-artifact@v5
+        with:
+          name: bibleview-debug-bundle
+          path: ${{ runner.temp }}/bibleview-debug
+
+      - name: Install BibleView debug bundle before SwiftPM resolution
+        run: >-
+          python3 scripts/manage_bibleview_bundle.py sync
+          --source "${RUNNER_TEMP}/bibleview-debug"
+          --destination Sources/BibleView/Sources/BibleView/Resources/bibleview-js
+          --mode debug
 
       - name: Select Xcode version
         uses: maxim-lobanov/setup-xcode@v1.6.0

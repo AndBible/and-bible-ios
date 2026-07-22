@@ -724,10 +724,11 @@ export function sprintf(format: string, ...args: any[]) {
     return sprintfOrig(format, ...args);
 }
 
-export function formatExportLink({ref, v11n, doc}: {ref: string, v11n: string, doc?: string}) {
+export function formatExportLink({ref, v11n, doc}: {ref: string, v11n: string | null, doc?: string}) {
     const docStr = doc ? `|version=${doc}`: ""
+    const v11nStr = v11n ? `&v11n=${v11n}` : ""
     // this is parsed in MainBibleActivity::openLink(uri: Uri) function for intent parsing
-    return `https://stepbible.org/?q=reference=${ref}${docStr}&v11n=${v11n}`
+    return `https://stepbible.org/?q=reference=${ref}${docStr}${v11nStr}`
 }
 
 export function filterNotNull<T>(args: (T|null)[]): T[] {

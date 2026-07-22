@@ -1,6 +1,5 @@
 // RemoteSyncWorkspacePatchApplyService.swift — Incremental Android patch replay for workspaces
 
-import CLibSword
 import Foundation
 import SQLite3
 import SwiftData
@@ -95,10 +94,8 @@ public struct RemoteSyncWorkspacePatchApplyReport: Sendable, Equatable {
  Side effects:
  - reads the current local workspace-category SwiftData graph and local-only fidelity stores
  - creates and removes temporary decompressed SQLite files beneath the configured temporary directory
- - rewrites the local workspace-category SwiftData graph after the full batch succeeds
- - replaces local Android `LogEntry` metadata for `.workspaces`
- - appends applied-patch bookkeeping rows to `RemoteSyncPatchStatusStore`
- - refreshes the outbound workspace fingerprint baseline after accepted replay
+ - atomically rewrites the workspace graph, Android `LogEntry` metadata, applied-patch bookkeeping,
+   and outbound fingerprint baseline through one outer settings batch after accepted replay
 
  Failure modes:
  - throws `RemoteSyncArchiveStagingError.decompressionFailed` when a staged gzip archive cannot be extracted
@@ -119,6 +116,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
         var contentsText: String?
         var orderNumber: Int
         var textDisplaySettings: TextDisplaySettings?
+        var textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity
         var workspaceSettings: WorkspaceSettings
         var speakSettingsJSON: String?
         var unPinnedWeight: Float?
@@ -161,6 +159,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
         var mapAnchorOrdinal: Int?
         var currentCategoryName: String
         var textDisplaySettings: TextDisplaySettings?
+        var textDisplayFidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity
         var jsState: String?
 
         /**
@@ -192,6 +191,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
                 mapAnchorOrdinal: mapAnchorOrdinal,
                 currentCategoryName: currentCategoryName,
                 textDisplaySettings: textDisplaySettings,
+                textDisplayFidelity: textDisplayFidelity,
                 jsState: jsState
             )
         }
@@ -229,6 +229,8 @@ public final class RemoteSyncWorkspacePatchApplyService {
         var windowsByID: [UUID: WorkingWindow]
         var pageManagersByWindowID: [UUID: WorkingPageManager]
         var historyItemsByWindowID: [UUID: [WorkingHistoryItem]]
+        var labelOverridesByKey: [String: RemoteSyncCurrentWorkspaceLabelOverrideRow]
+        var globalTextDisplaySettings: RemoteSyncCurrentGlobalTextDisplaySettingsRow?
 
         /**
          Materializes the mutable working rows into the immutable snapshot shape expected by the centralized restore service.
@@ -275,6 +277,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
                         contentsText: workspace.contentsText,
                         orderNumber: workspace.orderNumber,
                         textDisplaySettings: workspace.textDisplaySettings,
+                        textDisplayFidelity: workspace.textDisplayFidelity,
                         workspaceSettings: workspace.workspaceSettings,
                         speakSettingsJSON: workspace.speakSettingsJSON,
                         unPinnedWeight: workspace.unPinnedWeight,
@@ -284,7 +287,16 @@ public final class RemoteSyncWorkspacePatchApplyService {
                         windows: windows
                     )
                 }
-            return RemoteSyncAndroidWorkspaceSnapshot(workspaces: workspaces)
+            return RemoteSyncAndroidWorkspaceSnapshot(
+                workspaces: workspaces,
+                labelOverrides: labelOverridesByKey.values.sorted {
+                    if $0.workspaceID == $1.workspaceID {
+                        return $0.labelID.uuidString < $1.labelID.uuidString
+                    }
+                    return $0.workspaceID.uuidString < $1.workspaceID.uuidString
+                },
+                globalTextDisplaySettings: globalTextDisplaySettings
+            )
         }
 
         /**
@@ -368,6 +380,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
                 mapAnchorOrdinal: nil,
                 currentCategoryName: "BIBLE",
                 textDisplaySettings: nil,
+                textDisplayFidelity: .init(),
                 jsState: nil
             )
         }
@@ -378,7 +391,18 @@ public final class RemoteSyncWorkspacePatchApplyService {
         let lastAccess: Int64
     }
 
-    private static let supportedTableNames: Set<String> = ["Workspace", "Window", "PageManager"]
+    private struct DecodedTextDisplaySettings {
+        let settings: TextDisplaySettings?
+        let fidelity: RemoteSyncWorkspaceTextDisplaySettingsFidelity
+    }
+
+    private static let supportedTableNames: Set<String> = [
+        "Workspace",
+        "Window",
+        "PageManager",
+        "WorkspaceLabelOverride",
+        "GlobalTextDisplaySettings",
+    ]
 
     private let metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService
     private let restoreService: RemoteSyncWorkspaceRestoreService
@@ -428,16 +452,16 @@ public final class RemoteSyncWorkspacePatchApplyService {
      - Returns: Summary describing how many patch archives and `LogEntry` rows were replayed.
      - Side effects:
        - creates and removes temporary decompressed SQLite files
-       - rewrites the local workspace graph after the full batch succeeds
-       - replaces local Android `LogEntry` rows for `.workspaces`
-       - appends applied-patch rows to `RemoteSyncPatchStatusStore`
-       - refreshes the outbound workspace fingerprint baseline after accepted replay
+       - atomically rewrites the local workspace graph, Android `LogEntry` rows, applied-patch rows,
+         and outbound fingerprint baseline after the full batch succeeds
      - Failure modes:
        - rethrows patch-archive decompression failures
        - rethrows malformed staged `LogEntry` metadata failures
        - throws `RemoteSyncWorkspacePatchApplyError` for invalid identifiers or missing patch rows
        - rethrows `RemoteSyncWorkspaceRestoreError` when one patch row cannot be decoded safely
        - rethrows SwiftData fetch and save failures from `modelContext`
+       - throws `SettingsStoreAtomicRecoveryError` when a failed cross-store publish cannot restore
+         the pre-replay graph or settings generation
      */
     public func applyPatchArchives(
         _ stagedArchives: [RemoteSyncStagedPatchArchive],
@@ -447,99 +471,145 @@ public final class RemoteSyncWorkspacePatchApplyService {
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
 
-        var snapshot = try currentSnapshot(from: modelContext, settingsStore: settingsStore)
-        var logEntriesByKey = Dictionary(
-            uniqueKeysWithValues: logEntryStore.entries(for: .workspaces).map {
-                (logEntryStore.key(for: .workspaces, entry: $0), $0)
-            }
-        )
+        return try settingsStore.performAtomicBatch(in: modelContext) {
+            var snapshot = try currentSnapshot(from: modelContext, settingsStore: settingsStore)
+            var logEntriesByKey = Dictionary(
+                uniqueKeysWithValues: try logEntryStore.entriesStrict(for: .workspaces).map {
+                    (logEntryStore.key(for: .workspaces, entry: $0), $0)
+                }
+            )
 
-        var appliedPatchStatuses: [RemoteSyncPatchStatus] = []
-        var appliedLogEntryCount = 0
-        var skippedLogEntryCount = 0
+            var appliedPatchStatuses: [RemoteSyncPatchStatus] = []
+            var appliedLogEntryCount = 0
+            var skippedLogEntryCount = 0
+            var cumulativeExpandedByteCount = UInt64(0)
 
-        for stagedArchive in stagedArchives {
-            try {
-                let patchDatabaseURL = temporaryDatabaseURL(prefix: "remote-sync-workspaces-patch-", suffix: ".sqlite3")
-                defer { try? fileManager.removeItem(at: patchDatabaseURL) }
+            for stagedArchive in stagedArchives {
+                try {
+                    try Task.checkCancellation()
+                    let patchDatabaseURL = temporaryDatabaseURL(
+                        prefix: "remote-sync-workspaces-patch-",
+                        suffix: ".sqlite3"
+                    )
+                    defer { try? fileManager.removeItem(at: patchDatabaseURL) }
 
-                let archiveData = try Data(contentsOf: stagedArchive.archiveFileURL)
-                let databaseData = try Self.gunzip(archiveData)
-                try databaseData.write(to: patchDatabaseURL, options: .atomic)
-
-                let metadataSnapshot = try metadataRestoreService.readSnapshot(from: patchDatabaseURL)
-                let patchLogEntries = metadataSnapshot.logEntries.filter { Self.supportedTableNames.contains($0.tableName) }
-                let filteredLogEntries = patchLogEntries.filter { entry in
-                    let key = logEntryStore.key(for: .workspaces, entry: entry)
-                    guard let localEntry = logEntriesByKey[key] else {
-                        return true
+                    let expandedByteCount = try RemoteSyncBoundedFileIO.inflateGzip(
+                        at: stagedArchive.archiveFileURL,
+                        to: patchDatabaseURL,
+                        maximumCompressedByteCount:
+                            RemoteSyncArchiveStagingService.maximumCompressedPatchByteCount,
+                        maximumExpandedByteCount:
+                            RemoteSyncArchiveStagingService.maximumExpandedPatchByteCount
+                    )
+                    let (nextCumulativeByteCount, overflow) = cumulativeExpandedByteCount
+                        .addingReportingOverflow(expandedByteCount)
+                    guard !overflow,
+                          nextCumulativeByteCount <= UInt64(
+                            RemoteSyncArchiveStagingService.maximumCumulativeExpandedPatchByteCount
+                          ) else {
+                        throw RemoteSyncBoundedFileError.expandedSizeExceeded(
+                            overflow ? UInt64.max : nextCumulativeByteCount
+                        )
                     }
-                    return entry.lastUpdated > localEntry.lastUpdated
-                }
+                    cumulativeExpandedByteCount = nextCumulativeByteCount
+                    try Task.checkCancellation()
 
-                skippedLogEntryCount += patchLogEntries.count - filteredLogEntries.count
-                if filteredLogEntries.isEmpty {
-                    return
-                }
+                    try RemoteSyncWorkspaceDatabaseMigrator.migrateAndValidateStagedDatabase(
+                        at: patchDatabaseURL,
+                        expectedSourceVersion: stagedArchive.patch.schemaVersion
+                    )
+                    let metadataSnapshot = try metadataRestoreService.readSnapshot(from: patchDatabaseURL)
+                    let patchLogEntries = metadataSnapshot.logEntries.filter {
+                        Self.supportedTableNames.contains($0.tableName)
+                    }
+                    let filteredLogEntries = patchLogEntries.filter { entry in
+                        let key = logEntryStore.key(for: .workspaces, entry: entry)
+                        guard let localEntry = logEntriesByKey[key] else {
+                            return true
+                        }
+                        return RemoteSyncLogEntryConflictOrder.isNewer(entry, than: localEntry)
+                    }
 
-                try withSQLiteDatabase(at: patchDatabaseURL) { database in
-                    try applyWorkspaceOperations(
-                        logEntries: filteredLogEntries.filter { $0.tableName == "Workspace" },
-                        database: database,
-                        snapshot: &snapshot,
-                        logEntriesByKey: &logEntriesByKey,
-                        logEntryStore: logEntryStore
-                    )
-                    try applyWindowOperations(
-                        logEntries: filteredLogEntries.filter { $0.tableName == "Window" },
-                        database: database,
-                        snapshot: &snapshot,
-                        logEntriesByKey: &logEntriesByKey,
-                        logEntryStore: logEntryStore
-                    )
-                    try applyPageManagerOperations(
-                        logEntries: filteredLogEntries.filter { $0.tableName == "PageManager" },
-                        database: database,
-                        snapshot: &snapshot,
-                        logEntriesByKey: &logEntriesByKey,
-                        logEntryStore: logEntryStore
-                    )
-                }
+                    skippedLogEntryCount += patchLogEntries.count - filteredLogEntries.count
+                    try withSQLiteDatabase(at: patchDatabaseURL) { database in
+                        try applyWorkspaceOperations(
+                            logEntries: filteredLogEntries.filter { $0.tableName == "Workspace" },
+                            database: database,
+                            snapshot: &snapshot,
+                            logEntriesByKey: &logEntriesByKey,
+                            logEntryStore: logEntryStore
+                        )
+                        try applyWindowOperations(
+                            logEntries: filteredLogEntries.filter { $0.tableName == "Window" },
+                            database: database,
+                            snapshot: &snapshot,
+                            logEntriesByKey: &logEntriesByKey,
+                            logEntryStore: logEntryStore
+                        )
+                        try applyPageManagerOperations(
+                            logEntries: filteredLogEntries.filter { $0.tableName == "PageManager" },
+                            database: database,
+                            snapshot: &snapshot,
+                            logEntriesByKey: &logEntriesByKey,
+                            logEntryStore: logEntryStore
+                        )
+                        try applyWorkspaceLabelOverrideOperations(
+                            logEntries: filteredLogEntries.filter {
+                                $0.tableName == "WorkspaceLabelOverride"
+                            },
+                            database: database,
+                            snapshot: &snapshot,
+                            logEntriesByKey: &logEntriesByKey,
+                            logEntryStore: logEntryStore
+                        )
+                        try applyGlobalTextDisplaySettingsOperations(
+                            logEntries: filteredLogEntries.filter {
+                                $0.tableName == "GlobalTextDisplaySettings"
+                            },
+                            database: database,
+                            snapshot: &snapshot,
+                            logEntriesByKey: &logEntriesByKey,
+                            logEntryStore: logEntryStore
+                        )
+                    }
+                    try Task.checkCancellation()
 
-                appliedLogEntryCount += filteredLogEntries.count
-                appliedPatchStatuses.append(
-                    RemoteSyncPatchStatus(
-                        sourceDevice: stagedArchive.patch.sourceDevice,
-                        patchNumber: stagedArchive.patch.patchNumber,
-                        sizeBytes: stagedArchive.patch.file.size,
-                        appliedDate: stagedArchive.patch.file.timestamp
+                    appliedLogEntryCount += filteredLogEntries.count
+                    appliedPatchStatuses.append(
+                        RemoteSyncPatchStatus(
+                            sourceDevice: stagedArchive.patch.sourceDevice,
+                            patchNumber: stagedArchive.patch.patchNumber,
+                            sizeBytes: stagedArchive.patch.file.size,
+                            appliedDate: stagedArchive.patch.file.timestamp
+                        )
                     )
-                )
-            }()
+                }()
+            }
+
+            try Task.checkCancellation()
+            let restoreReport = try restoreService.replaceLocalWorkspaces(
+                from: snapshot.materializedSnapshot(),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+
+            logEntryStore.replaceEntries(
+                logEntriesByKey.values.sorted(by: Self.logEntrySort),
+                for: .workspaces
+            )
+            patchStatusStore.addStatuses(appliedPatchStatuses, for: .workspaces)
+            try snapshotService.refreshBaselineFingerprintsStrict(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+
+            return RemoteSyncWorkspacePatchApplyReport(
+                appliedPatchCount: appliedPatchStatuses.count,
+                appliedLogEntryCount: appliedLogEntryCount,
+                skippedLogEntryCount: skippedLogEntryCount,
+                restoreReport: restoreReport
+            )
         }
-
-        let restoreReport = try restoreService.replaceLocalWorkspaces(
-            from: snapshot.materializedSnapshot(),
-            modelContext: modelContext,
-            settingsStore: settingsStore
-        )
-
-        logEntryStore.replaceEntries(
-            logEntriesByKey.values.sorted(by: Self.logEntrySort),
-            for: .workspaces
-        )
-        patchStatusStore.addStatuses(appliedPatchStatuses, for: .workspaces)
-        snapshotService.refreshBaselineFingerprints(
-            modelContext: modelContext,
-            settingsStore: settingsStore
-        )
-
-        return RemoteSyncWorkspacePatchApplyReport(
-            appliedPatchCount: appliedPatchStatuses.count,
-            appliedLogEntryCount: appliedLogEntryCount,
-            skippedLogEntryCount: skippedLogEntryCount,
-            restoreReport: restoreReport
-        )
     }
 
     /**
@@ -559,6 +629,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
        - reads preserved Android workspace fidelity rows from local settings
      - Failure modes:
        - rethrows SwiftData fetch failures from `modelContext.fetch`
+       - settings fetch failures invalidate the containing atomic batch
      */
     private func currentSnapshot(
         from modelContext: ModelContext,
@@ -571,9 +642,34 @@ public final class RemoteSyncWorkspacePatchApplyService {
         let pageManagerFidelityByWindowID = Dictionary(
             uniqueKeysWithValues: fidelityStore.allPageManagerEntries().map { ($0.windowID, $0) }
         )
+        let workspaceTextDisplayFidelityByID = Dictionary(
+            uniqueKeysWithValues: fidelityStore.allWorkspaceTextDisplayFidelityEntries().map {
+                ($0.ownerID, $0.fidelity)
+            }
+        )
+        let pageManagerTextDisplayFidelityByWindowID = Dictionary(
+            uniqueKeysWithValues: fidelityStore.allPageManagerTextDisplayFidelityEntries().map {
+                ($0.ownerID, $0.fidelity)
+            }
+        )
         let reverseHistoryAliases = Dictionary(
             uniqueKeysWithValues: fidelityStore.allHistoryItemAliases().map { ($0.localHistoryItemID, $0.remoteHistoryItemID) }
         )
+        let labelOverrides = fidelityStore.allLabelOverrides()
+        let globalFidelity = fidelityStore.globalTextDisplayEntry()
+        let storedGlobalSettings: TextDisplaySettings?
+        if let rawGlobalSettings = settingsStore.getString(SettingsStore.globalTextDisplaySettingsKey) {
+            guard let data = rawGlobalSettings.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode(TextDisplaySettings.self, from: data) else {
+                throw RemoteSyncWorkspaceRestoreError.malformedSerializedValue(
+                    table: "GlobalTextDisplaySettings",
+                    column: "text_display_settings"
+                )
+            }
+            storedGlobalSettings = decoded
+        } else {
+            storedGlobalSettings = nil
+        }
 
         let workspaces = try modelContext.fetch(FetchDescriptor<Workspace>())
             .sorted { lhs, rhs in
@@ -597,6 +693,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
                 contentsText: workspace.contentsText,
                 orderNumber: workspace.orderNumber,
                 textDisplaySettings: workspace.textDisplaySettings,
+                textDisplayFidelity: workspaceTextDisplayFidelityByID[workspace.id] ?? .init(),
                 workspaceSettings: workspace.workspaceSettings ?? WorkspaceSettings(),
                 speakSettingsJSON: workspaceFidelity?.speakSettingsJSON,
                 unPinnedWeight: workspace.unPinnedWeight,
@@ -650,6 +747,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
                     currentCategoryName: pageManagerFidelity?.rawCurrentCategoryName
                         ?? Self.remoteCurrentCategoryName(from: pageManager?.currentCategoryName ?? "bible"),
                     textDisplaySettings: pageManager?.textDisplaySettings,
+                    textDisplayFidelity: pageManagerTextDisplayFidelityByWindowID[window.id] ?? .init(),
                     jsState: pageManager?.jsState
                 )
 
@@ -683,7 +781,20 @@ public final class RemoteSyncWorkspacePatchApplyService {
             workspacesByID: workspacesByID,
             windowsByID: windowsByID,
             pageManagersByWindowID: pageManagersByWindowID,
-            historyItemsByWindowID: historyItemsByWindowID
+            historyItemsByWindowID: historyItemsByWindowID,
+            labelOverridesByKey: Dictionary(
+                uniqueKeysWithValues: labelOverrides.map {
+                    (Self.labelOverrideKey(workspaceID: $0.workspaceID, labelID: $0.labelID), $0)
+                }
+            ),
+            globalTextDisplaySettings: (storedGlobalSettings != nil || globalFidelity != nil)
+                ? .init(
+                    id: globalFidelity?.id
+                        ?? RemoteSyncCurrentGlobalTextDisplaySettingsRow.androidSingletonID,
+                    textDisplaySettings: storedGlobalSettings,
+                    fidelity: globalFidelity?.fidelity ?? .init()
+                )
+                : nil
         )
     }
 
@@ -815,6 +926,105 @@ public final class RemoteSyncWorkspacePatchApplyService {
     }
 
     /**
+     Applies composite-key `WorkspaceLabelOverride` operations in Android table order.
+
+     - Parameters:
+       - logEntries: Newer patch operations for workspace-label overrides.
+       - database: Open staged patch database.
+       - snapshot: Mutable category snapshot.
+       - logEntriesByKey: Mutable accepted conflict metadata.
+       - logEntryStore: Canonical local key builder.
+     - Side Effects: Mutates override rows and accepted log metadata in memory.
+     - Throws: Invalid identifier or missing-upsert-row errors, plus SQLite decoding failures.
+     */
+    private func applyWorkspaceLabelOverrideOperations(
+        logEntries: [RemoteSyncLogEntry],
+        database: OpaquePointer,
+        snapshot: inout WorkingSnapshot,
+        logEntriesByKey: inout [String: RemoteSyncLogEntry],
+        logEntryStore: RemoteSyncLogEntryStore
+    ) throws {
+        for logEntry in logEntries {
+            let workspaceID = try uuid(
+                from: logEntry.entityID1,
+                tableName: "WorkspaceLabelOverride",
+                field: "entityId1"
+            )
+            let labelID = try uuid(
+                from: logEntry.entityID2,
+                tableName: "WorkspaceLabelOverride",
+                field: "entityId2"
+            )
+            let key = Self.labelOverrideKey(workspaceID: workspaceID, labelID: labelID)
+            switch logEntry.type {
+            case .delete:
+                snapshot.labelOverridesByKey.removeValue(forKey: key)
+            case .upsert:
+                guard let row = try fetchWorkspaceLabelOverride(
+                    workspaceID: workspaceID,
+                    labelID: labelID,
+                    from: database
+                ) else {
+                    throw RemoteSyncWorkspacePatchApplyError.missingPatchRow(
+                        table: "WorkspaceLabelOverride",
+                        id: workspaceID
+                    )
+                }
+                snapshot.labelOverridesByKey[key] = row
+            }
+            logEntriesByKey[logEntryStore.key(for: .workspaces, entry: logEntry)] = logEntry
+        }
+        pruneMissingWorkspaceChildren(in: &snapshot)
+    }
+
+    /**
+     Applies Android's singleton `GlobalTextDisplaySettings` operations.
+
+     - Parameters:
+       - logEntries: Newer singleton operations in deterministic conflict order.
+       - database: Open staged patch database.
+       - snapshot: Mutable category snapshot.
+       - logEntriesByKey: Mutable accepted conflict metadata.
+       - logEntryStore: Canonical local key builder.
+     - Side Effects: Replaces or removes the in-memory global singleton and updates log metadata.
+     - Throws: Invalid/noncanonical identity, missing-upsert-row, or SQLite decoding errors.
+     */
+    private func applyGlobalTextDisplaySettingsOperations(
+        logEntries: [RemoteSyncLogEntry],
+        database: OpaquePointer,
+        snapshot: inout WorkingSnapshot,
+        logEntriesByKey: inout [String: RemoteSyncLogEntry],
+        logEntryStore: RemoteSyncLogEntryStore
+    ) throws {
+        for logEntry in logEntries {
+            let id = try uuid(
+                from: logEntry.entityID1,
+                tableName: "GlobalTextDisplaySettings",
+                field: "entityId1"
+            )
+            guard id == RemoteSyncCurrentGlobalTextDisplaySettingsRow.androidSingletonID else {
+                throw RemoteSyncWorkspacePatchApplyError.invalidLogEntryIdentifier(
+                    table: "GlobalTextDisplaySettings",
+                    field: "entityId1"
+                )
+            }
+            switch logEntry.type {
+            case .delete:
+                snapshot.globalTextDisplaySettings = nil
+            case .upsert:
+                guard let row = try fetchGlobalTextDisplaySettings(id: id, from: database) else {
+                    throw RemoteSyncWorkspacePatchApplyError.missingPatchRow(
+                        table: "GlobalTextDisplaySettings",
+                        id: id
+                    )
+                }
+                snapshot.globalTextDisplaySettings = row
+            }
+            logEntriesByKey[logEntryStore.key(for: .workspaces, entry: logEntry)] = logEntry
+        }
+    }
+
+    /**
      Removes child rows whose owning workspace was deleted or became orphaned.
 
      - Parameter snapshot: Mutable working snapshot to normalize.
@@ -832,6 +1042,9 @@ public final class RemoteSyncWorkspacePatchApplyService {
             snapshot.windowsByID.removeValue(forKey: windowID)
             snapshot.pageManagersByWindowID.removeValue(forKey: windowID)
             snapshot.historyItemsByWindowID.removeValue(forKey: windowID)
+        }
+        snapshot.labelOverridesByKey = snapshot.labelOverridesByKey.filter {
+            validWorkspaceIDs.contains($0.value.workspaceID)
         }
     }
 
@@ -882,17 +1095,19 @@ public final class RemoteSyncWorkspacePatchApplyService {
             statement: statement,
             columns: columns
         )
+        let decodedTextDisplaySettings = try decodeTextDisplaySettings(
+            table: "Workspace",
+            statement: statement,
+            columns: columns,
+            prefix: "text_display_settings_"
+        )
         return WorkingWorkspace(
             id: try requiredUUIDBlobColumn("id", table: "Workspace", statement: statement, columns: columns),
             name: try requiredTextColumn("name", table: "Workspace", statement: statement, columns: columns),
             contentsText: try optionalTextColumn("contentsText", table: "Workspace", statement: statement, columns: columns),
             orderNumber: try requiredIntColumn("orderNumber", table: "Workspace", statement: statement, columns: columns),
-            textDisplaySettings: try decodeTextDisplaySettings(
-                table: "Workspace",
-                statement: statement,
-                columns: columns,
-                prefix: "text_display_settings_"
-            ),
+            textDisplaySettings: decodedTextDisplaySettings.settings,
+            textDisplayFidelity: decodedTextDisplaySettings.fidelity,
             workspaceSettings: decodedSettings.settings,
             speakSettingsJSON: decodedSettings.speakSettingsJSON,
             unPinnedWeight: try optionalFloatColumn("unPinnedWeight", table: "Workspace", statement: statement, columns: columns),
@@ -970,6 +1185,12 @@ public final class RemoteSyncWorkspacePatchApplyService {
         }
 
         let columns = columnIndexMap(for: statement)
+        let decodedTextDisplaySettings = try decodeTextDisplaySettings(
+            table: "PageManager",
+            statement: statement,
+            columns: columns,
+            prefix: "text_display_settings_"
+        )
         return WorkingPageManager(
             windowID: try requiredUUIDBlobColumn("windowId", table: "PageManager", statement: statement, columns: columns),
             bibleDocument: try optionalTextColumn("bible_document", table: "PageManager", statement: statement, columns: columns),
@@ -990,13 +1211,83 @@ public final class RemoteSyncWorkspacePatchApplyService {
             mapKey: try optionalTextColumn("map_key", table: "PageManager", statement: statement, columns: columns),
             mapAnchorOrdinal: try optionalIntColumn("map_anchorOrdinal", table: "PageManager", statement: statement, columns: columns),
             currentCategoryName: try requiredTextColumn("currentCategoryName", table: "PageManager", statement: statement, columns: columns),
-            textDisplaySettings: try decodeTextDisplaySettings(
-                table: "PageManager",
-                statement: statement,
-                columns: columns,
-                prefix: "text_display_settings_"
-            ),
+            textDisplaySettings: decodedTextDisplaySettings.settings,
+            textDisplayFidelity: decodedTextDisplaySettings.fidelity,
             jsState: try optionalTextColumn("jsState", table: "PageManager", statement: statement, columns: columns)
+        )
+    }
+
+    /** Reads one composite-key workspace-label override from a sparse patch database. */
+    private func fetchWorkspaceLabelOverride(
+        workspaceID: UUID,
+        labelID: UUID,
+        from database: OpaquePointer
+    ) throws -> RemoteSyncCurrentWorkspaceLabelOverrideRow? {
+        let sql = "SELECT * FROM WorkspaceLabelOverride WHERE workspaceId = ? AND labelId = ? LIMIT 1"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw RemoteSyncWorkspaceRestoreError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        bindUUIDBlob(workspaceID, to: statement, index: 1)
+        bindUUIDBlob(labelID, to: statement, index: 2)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let columns = columnIndexMap(for: statement)
+        return .init(
+            workspaceID: try requiredUUIDBlobColumn(
+                "workspaceId",
+                table: "WorkspaceLabelOverride",
+                statement: statement,
+                columns: columns
+            ),
+            labelID: try requiredUUIDBlobColumn(
+                "labelId",
+                table: "WorkspaceLabelOverride",
+                statement: statement,
+                columns: columns
+            ),
+            overrideMode: try optionalIntColumn(
+                "overrideMode",
+                table: "WorkspaceLabelOverride",
+                statement: statement,
+                columns: columns
+            )
+        )
+    }
+
+    /** Reads Android's canonical global text-display singleton from a sparse patch database. */
+    private func fetchGlobalTextDisplaySettings(
+        id: UUID,
+        from database: OpaquePointer
+    ) throws -> RemoteSyncCurrentGlobalTextDisplaySettingsRow? {
+        let sql = "SELECT * FROM GlobalTextDisplaySettings WHERE id = ? LIMIT 1"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw RemoteSyncWorkspaceRestoreError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        bindUUIDBlob(id, to: statement, index: 1)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let columns = columnIndexMap(for: statement)
+        let decoded = try decodeTextDisplaySettings(
+            table: "GlobalTextDisplaySettings",
+            statement: statement,
+            columns: columns,
+            prefix: "text_display_settings_"
+        )
+        return .init(
+            id: try requiredUUIDBlobColumn(
+                "id",
+                table: "GlobalTextDisplaySettings",
+                statement: statement,
+                columns: columns
+            ),
+            textDisplaySettings: decoded.settings,
+            fidelity: decoded.fidelity
         )
     }
 
@@ -1115,6 +1406,14 @@ public final class RemoteSyncWorkspacePatchApplyService {
             statement: statement,
             columns: columns
         )
+        if let speakSettingsJSON, !speakSettingsJSON.isEmpty {
+            settings.speakSettings = try decodeJSON(
+                SpeakSettings.self,
+                from: speakSettingsJSON,
+                table: table,
+                column: "workspace_settings_speakSettings"
+            ).normalized
+        }
         let workspaceColor = try optionalIntColumn(
             "workspace_settings_workspaceColor",
             table: table,
@@ -1144,75 +1443,46 @@ public final class RemoteSyncWorkspacePatchApplyService {
         statement: OpaquePointer,
         columns: [String: Int32],
         prefix: String
-    ) throws -> TextDisplaySettings? {
-        var settings = TextDisplaySettings()
-        var hasValue = false
-
-        func assignInt(_ column: String, _ keyPath: WritableKeyPath<TextDisplaySettings, Int?>) throws {
-            if let value = try optionalIntColumn(column, table: table, statement: statement, columns: columns) {
-                settings[keyPath: keyPath] = value
-                hasValue = true
+    ) throws -> DecodedTextDisplaySettings {
+        let wire = try RemoteSyncWorkspaceTextDisplaySettingsWire.decode(
+            integer: { suffix in
+                try self.optionalIntColumn(
+                    "\(prefix)\(suffix)",
+                    table: table,
+                    statement: statement,
+                    columns: columns
+                )
+            },
+            boolean: { suffix in
+                try self.optionalBoolColumn(
+                    "\(prefix)\(suffix)",
+                    table: table,
+                    statement: statement,
+                    columns: columns
+                )
+            },
+            text: { suffix in
+                try self.optionalTextColumn(
+                    "\(prefix)\(suffix)",
+                    table: table,
+                    statement: statement,
+                    columns: columns
+                )
+            },
+            hiddenLabels: {
+                let column = "\(prefix)bookmarksHideLabels"
+                guard let rawValue = try self.optionalTextColumn(
+                    column,
+                    table: table,
+                    statement: statement,
+                    columns: columns
+                ) else {
+                    return nil
+                }
+                return try self.decodeUUIDArray(rawValue, table: table, column: column)
             }
-        }
-
-        func assignString(_ column: String, _ keyPath: WritableKeyPath<TextDisplaySettings, String?>) throws {
-            if let value = try optionalTextColumn(column, table: table, statement: statement, columns: columns) {
-                settings[keyPath: keyPath] = value
-                hasValue = true
-            }
-        }
-
-        func assignBool(_ column: String, _ keyPath: WritableKeyPath<TextDisplaySettings, Bool?>) throws {
-            if let value = try optionalBoolColumn(column, table: table, statement: statement, columns: columns) {
-                settings[keyPath: keyPath] = value
-                hasValue = true
-            }
-        }
-
-        try assignInt("\(prefix)strongsMode", \.strongsMode)
-        try assignBool("\(prefix)showMorphology", \.showMorphology)
-        try assignBool("\(prefix)showFootNotes", \.showFootNotes)
-        try assignBool("\(prefix)showFootNotesInline", \.showFootNotesInline)
-        try assignBool("\(prefix)expandXrefs", \.expandXrefs)
-        try assignBool("\(prefix)showXrefs", \.showXrefs)
-        try assignBool("\(prefix)showRedLetters", \.showRedLetters)
-        try assignBool("\(prefix)showSectionTitles", \.showSectionTitles)
-        try assignBool("\(prefix)showVerseNumbers", \.showVerseNumbers)
-        try assignBool("\(prefix)showVersePerLine", \.showVersePerLine)
-        try assignBool("\(prefix)showBookmarks", \.showBookmarks)
-        try assignBool("\(prefix)showMyNotes", \.showMyNotes)
-        try assignBool("\(prefix)justifyText", \.justifyText)
-        try assignBool("\(prefix)hyphenation", \.hyphenation)
-        try assignInt("\(prefix)topMargin", \.topMargin)
-        try assignInt("\(prefix)fontSize", \.fontSize)
-        try assignString("\(prefix)fontFamily", \.fontFamily)
-        try assignInt("\(prefix)lineSpacing", \.lineSpacing)
-        try assignBool("\(prefix)showPageNumber", \.showPageNumber)
-        try assignInt("\(prefix)margin_size_marginLeft", \.marginLeft)
-        try assignInt("\(prefix)margin_size_marginRight", \.marginRight)
-        try assignInt("\(prefix)margin_size_maxWidth", \.maxWidth)
-        try assignInt("\(prefix)colors_dayTextColor", \.dayTextColor)
-        try assignInt("\(prefix)colors_dayBackground", \.dayBackground)
-        try assignInt("\(prefix)colors_dayNoise", \.dayNoise)
-        try assignInt("\(prefix)colors_nightTextColor", \.nightTextColor)
-        try assignInt("\(prefix)colors_nightBackground", \.nightBackground)
-        try assignInt("\(prefix)colors_nightNoise", \.nightNoise)
-
-        if let bookmarksHideLabelsJSON = try optionalTextColumn(
-            "\(prefix)bookmarksHideLabels",
-            table: table,
-            statement: statement,
-            columns: columns
-        ) {
-            settings.bookmarksHideLabels = try decodeUUIDArray(
-                bookmarksHideLabelsJSON,
-                table: table,
-                column: "\(prefix)bookmarksHideLabels"
-            )
-            hasValue = true
-        }
-
-        return hasValue ? settings : nil
+        )
+        return DecodedTextDisplaySettings(settings: wire.settings, fidelity: wire.fidelity)
     }
 
     /**
@@ -1811,6 +2081,20 @@ public final class RemoteSyncWorkspacePatchApplyService {
     }
 
     /**
+     Builds the deterministic in-memory key for one workspace-label override.
+
+     - Parameters:
+       - workspaceID: Owning workspace identifier.
+       - labelID: Overridden label identifier.
+     - Returns: Lowercase composite identity used only inside one replay transaction.
+     - Side Effects: none.
+     - Failure Modes: This helper cannot fail.
+     */
+    private static func labelOverrideKey(workspaceID: UUID, labelID: UUID) -> String {
+        "\(workspaceID.uuidString.lowercased())|\(labelID.uuidString.lowercased())"
+    }
+
+    /**
      Opens one staged SQLite database, passes the handle to the supplied closure, and closes it afterward.
 
      - Parameters:
@@ -1903,40 +2187,6 @@ public final class RemoteSyncWorkspacePatchApplyService {
             let blobValue = value.blobBase64Value ?? ""
             return "4:\(blobValue)"
         }
-    }
-
-    /**
-     Decompresses one gzipped Android patch archive into raw SQLite bytes.
-
-     - Parameter data: Gzipped patch archive payload.
-     - Returns: Decompressed SQLite file bytes.
-     - Side effects:
-       - allocates and frees temporary native buffers through `CLibSword`
-     - Failure modes:
-       - throws `RemoteSyncArchiveStagingError.decompressionFailed` when the payload is not valid gzip data
-     */
-    private static func gunzip(_ data: Data) throws -> Data {
-        let result = try data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) -> Data in
-            guard let baseAddress = bytes.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
-
-            var outputLength: UInt = 0
-            guard let outputPointer = gunzip_data(
-                baseAddress,
-                UInt(data.count),
-                &outputLength
-            ) else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
-
-            defer { gunzip_free(outputPointer) }
-            return Data(bytes: outputPointer, count: Int(outputLength))
-        }
-        guard !result.isEmpty else {
-            throw RemoteSyncArchiveStagingError.decompressionFailed
-        }
-        return result
     }
 
     /**

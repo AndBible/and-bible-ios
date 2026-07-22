@@ -12,6 +12,7 @@ import BibleCore
 
  Data dependencies:
  - `windowManager` provides the active workspace and performs active-workspace switching
+ - `speakService` owns the speech session and selected workspace's structured speech settings
  - `modelContext` is used by `WorkspaceStore` for create/update/delete/reorder operations
  - `WorkspaceSelectionService` keeps active workspace state persisted for launch restore
  - `workspaces` is a live SwiftData query ordered by persisted workspace order
@@ -22,6 +23,9 @@ import BibleCore
  - swipe deletion, context-menu deletion, and move actions mutate persisted workspace state
  */
 public struct WorkspaceSelectorView: View {
+    /// Live speech runtime stopped and rebound atomically when a workspace is selected.
+    private let speakService: SpeakService?
+
     /// Shared window manager used to switch the active workspace.
     @Environment(WindowManager.self) private var windowManager
 
@@ -44,11 +48,16 @@ public struct WorkspaceSelectorView: View {
     @Query(sort: \Workspace.orderNumber) private var workspaces: [Workspace]
 
     /**
-     Creates the workspace selector screen.
+     Creates the workspace selector screen with an optional live speech runtime.
 
-     - Note: This initializer has no inputs and performs no side effects.
+     - Parameter speakService: Reader-owned speech service to stop and reconfigure on activation.
+     - Side effects: none during construction.
+     - Failure modes: Passing `nil` preserves standalone previews and headless callers; workspace
+       activation then changes only window and persistence state.
      */
-    public init() {}
+    public init(speakService: SpeakService? = nil) {
+        self.speakService = speakService
+    }
 
     private var dialogBackground: Color {
         AndroidDialogSurfacePalette.background(for: colorScheme)
@@ -74,7 +83,8 @@ public struct WorkspaceSelectorView: View {
         WorkspaceSelectionService(
             workspaceStore: workspaceStore,
             settingsStore: SettingsStore(modelContext: modelContext),
-            windowManager: windowManager
+            windowManager: windowManager,
+            speakService: speakService
         )
     }
 
@@ -132,7 +142,9 @@ public struct WorkspaceSelectorView: View {
                         .accessibilityIdentifier("workspaceSelectorDoneButton")
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
+                    #if os(iOS)
                     EditButton()
+                    #endif
                     Button(String(localized: "add"), systemImage: "plus") {
                         prepareCreate()
                     }
@@ -553,8 +565,10 @@ private struct WorkspaceNamePromptView: View {
                     .foregroundStyle(dialogSecondaryText)
 
                 TextField(String(localized: "name"), text: $name)
+                    #if os(iOS)
                     .textInputAutocapitalization(.words)
                     .submitLabel(.done)
+                    #endif
                     .focused($isNameFieldFocused)
                     .foregroundStyle(dialogPrimaryText)
                     .tint(dialogAccent)

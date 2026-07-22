@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Instellings vir die vervolgde";
 "discrete_mode" = "Versteek godsdienstige simbole";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "Betreffende";
 "version" = "Version";
 "export" = "Uitvoer";
@@ -440,10 +440,6 @@
 "calculator_pin_description" = "PIN-kode om die toep oop te maak wanneer die sakrekenaar gewys word.";
 "discrete_help_title" = "Lees dit eers!";
 "discrete_help_summary" = "Instruksies vir die instellings en inligting oor spesifieke diskrete bou.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Toepassings gedrag";
 "prefs_display_customization_cat" = "Aanskou & voel";
@@ -514,7 +510,6 @@
 
 "prefs_volume_keys_scroll_title" = "Volume-knoppies blaai";
 "prefs_volume_keys_scroll_summary" = "Gebruik volume op/af om Bybelteks te blaai";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Eksperimentele funksies";
 "prefs_experimental_features_summary" = "Kies watter eksperimentele funksies om te aktiveer. Hierdie funksies is nog in ontwikkeling en kan verander of verwyder word";
 "experimental_feature_bookmark_edit_actions" = "Boekmerk wysig-aksies";
@@ -643,3 +638,389 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Daar is 'n gebruikers leesplan in sdcard jsword / leesplan met dieselfde naam as 'n interne plan. Dit kan nie hier gelys word nie. Herbenoem die lêer na iets anders, en laat die lêer uitbreiding as. eienskappe";
 "error_no_content" = "Geen inhoud vir geselekteerde vers";
+
+/* Android shared translations */
+"calculator_par1" = "Voordat u die toep binnegaan, word die sakrekenaarskerm vertoon.";
+"calculator_par2" = "Daarin kan jy standaard rekene doen, en wanneer jy die toepassing wil betree, moet jy tik net jou PIN-kode (verstek is 1234) en druk dan '=' knoppie";
+"calculator_par3" = "Jy kan 'n pasgemaakte PIN-kode opstel deur 'Sakrekenaar-PIN'-instelling.";
+"give_passphrase_for_module" = "Dokument %@ is geïnkripteer en moet met wagfrase ontsluit wor";
+"show_unlock_info" = "Module & ontsluit inligting";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Haal uit inligting van zip lêer nou...";
+"install_failed_reason" = "Die installeringsmodule het om die volgende rede misluk: %@.";
+"install_zip_successfull" = "Module is suksesvol geïnstalleer";
+"module_install_phase_committing" = "Wag asseblief. Laai modules van uit 'n lêer.";
+"module_install_phase_downloading" = "Laai af";
+"module_install_phase_queued" = "Wag Asseblief...";
+"storage_space_warning" = "Onvoldoende lokale stoorplek.";
+
+/* Android shared translations */
+"error_occurred" = "'n Fout het ontstaan";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Memorisering";
+"memorize_tab_reading" = "Lees";
+"reading_progress_active_days" = "aktiewe dae";
+"reading_progress_bible_heatmap" = "Bybel-oorsig";
+"reading_progress_calendar" = "Leesaktiwiteit";
+"reading_progress_chapters_read" = "hoofstukke gelees";
+"reading_progress_cycle" = "Siklus %d";
+"reading_progress_history_for" = "Leesvorderig vir %1$@";
+"reading_progress_history_no_entries" = "Geen leesentries vir hierdie keuse nie.";
+"reading_progress_history_title" = "Leesreeks";
+"reading_progress_history_version_unknown" = "Onbekende weergawe";
+"reading_progress_new_cycle" = "Nuwe Siklus";
+"reading_progress_new_cycle_confirm" = "Begin 'n nuwe leessiklus? Dit sal jou vordering van voor af begin volg, terwyl jou vorige siklus se data behoue bly.";
+"reading_progress_new_testament" = "Nuwe Testament";
+"reading_progress_next_cycle" = "Volgende siklus";
+"reading_progress_old_testament" = "Ou Testament";
+"reading_progress_overall" = "%@%% van Bybel gelees";
+"reading_progress_percent_read_scale" = "Persent\nGelees";
+"reading_progress_previous_cycle" = "Vorige siklus";
+"reading_progress_read_count_scale" = "Gelees\nTelling";
+"reading_progress_title" = "Lees/Geheuevoortgang";
+
+/* Android shared translations */
+"conf_change_chapter" = "Hoofstuk veranderings-";
+"conf_change_title" = "Titels";
+"conf_replace_divinename" = "Vervang goddelike naam met Yahweh";
+"conf_save_playback_settings_to_bookmarks" = "Stoor speel instellings na boekmerke";
+"conf_speak_auto_bookmark" = "Outomatiese boekmerke";
+"conf_speak_footnotes" = "Voet Notas";
+"conf_speak_sleep_timer" = "Stel slaap tydhouer";
+"conf_speak_synchronize" = "Teks volg spraak";
+"forward" = "Vorentoe";
+"playback_settings_title" = "Speel instellings";
+"rewind" = "Terugwen";
+"speak_bookmarks_menu_title" = "Praat uit boekmerk instellings";
+"speak_next" = "Volgende";
+"speak_previous" = "Vorige";
+"speak_settings_title" = "Algemene Spreek Instellings";
+
+/* Android shared translations */
+"sleep_timer_title" = "Slaap tydhouer in minute";
+"speak_beginning_of_passage" = "Kies begin van inlaiding";
+"speak_ending_of_passage" = "Kies einde van inleiding";
+"speak_ending_verse_must_be_later" = "Die einde van die vers moet later wees as die begin van die vers";
+"speak_verse_range_to_repeat" = "Kies vers omvang om te herhaal";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Taal is nie beskikbaar nie.";
+
+/* Android shared translations */
+"ai_unknown_prompt" = "KI";
+"description" = "Beskrywing";
+"errorTitle" = "'n Fout het ontstaan";
+"error_executing_search" = "Ongeldige soektog";
+"export_something" = "Uitvoer %@";
+"import_items" = "Invoer %@";
+"install_zip_module" = "Installeer Bybel Module";
+"my_document_content_type_label" = "Inhoudstipe";
+"my_document_create_title" = "Skep nuwe dokument";
+"my_document_import_document" = "Voer lêers as dokument in";
+"my_document_new_name" = "Dokument %d";
+"my_document_new_page_name" = "Bladsy %1$d";
+"my_document_rename_title" = "Hernoem dokument";
+"my_document_save_changes" = "Wysigings bêre?";
+"okay" = "Goed";
+"overwrite" = "Ja";
+"package_directory" = "Pakketgids (zip-lêers)";
+"read" = "Lees";
+"reading_plan_set_current_day" = "Stel as huidige dag...";
+"reading_plan_set_start_date" = "Stel die begin datum ...";
+"search_all_words" = "Alle woorde";
+"search_any_word" = "Enige woord";
+"search_fts_query" = "Rou navraag sintaks";
+"search_phrase" = "Frase";
+"search_words_group_prompt" = "Vind verse";
+"show_notes" = "Wys notas";
+"speak_book_changed" = "Boek het verander";
+"speak_chapter_changed" = "Hoofstuk";
+"success" = "Klaar";
+"summary" = "Opsomming";
+"undo" = "Kanselleer";
+
+/* Android shared translations */
+"my_document_no_description" = "Geen beskrywing";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Nie gevind in dokument";
+"my_document_cannot_delete_ai_documents" = "KI-dokumente kan nie verwyder word terwyl dit bladsye bevat nie. Verwyder eers die bladsye.";
+"my_document_create_page_title" = "Nuwe bladsy";
+"my_document_import_empty_selection" = "Geen invoerbare lêers gekies nie";
+"system_items1" = "Meer";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "U moet 'n Bybel aflaai wat Strong se getalle bevat en die indeks daarvan bou via Soek";
+
+/* Android shared translations */
+"add_model" = "Voeg model by";
+"agent_already_running" = "'n KI-agent loop reeds. Wag asseblief of stop dit eers.";
+"agent_log_cancelled" = "Gekanselleer";
+"agent_log_completed" = "Voltooi";
+"agent_log_executing" = "Uitvoer: %@";
+"agent_log_idle" = "KI-assistent";
+"agent_log_iteration" = "Iterasie %d";
+"agent_log_model_not_configured" = "Geen model gekonfigureer nie";
+"agent_log_tool_failed" = "Gereedskap %@ het misluk";
+"agent_log_view_raw" = "Bekyk rou KI-logboek";
+"agent_max_iterations_title" = "Maks. agent-herhalings";
+"agent_permission_mode_summary" = "Beheer wanneer gebruikersbevestiging vereis word voor KI-skryfbewerkings";
+"agent_permission_title" = "Agent-toestemming";
+"ai_add_provider" = "Voeg verskaffer by";
+"ai_advanced_category" = "Gevorderd";
+"ai_agent_notification_running" = "KI-agent werk…";
+"ai_behavior_category" = "Gedrag";
+"ai_connection_settings" = "Verbindingsinstellings";
+"ai_disclaimer_approach" = "AndBible gebruik KI hoofsaaklik om teks te verwerk uit die dokumente wat jy geïnstalleer het — kommentare, woordeboeke en ander modules — eerder as om op die model se eie opleidingsdata staat te maak.";
+"ai_disclaimer_dialog_title" = "KI-nutsmiddels — Belangrike inligting";
+"ai_disclaimer_intro" = "KI-nutsmiddels kan jou Bybelstudieervaring grootliks verryk en nuwe maniere om met die Skrif om te gaan, oopmaak.";
+"ai_disclaimer_point1" = "KI kan foute maak, insluitend \"hallusinasies\" (met vertroue vals of verdigte inligting meedeel). Aanvaar nooit sy uitset blindelings nie.";
+"ai_disclaimer_point2" = "KI-reaksies kan vooroordele uit hul opleidingsdata weerspieël, opsetlik misleidend wees, of 'n bepaalde teologiese perspektief as neutraal of volledig voorstel.";
+"ai_disclaimer_point3" = "Jy is verantwoordelik vir hoe jy KI-gegenereerde inhoud gebruik. Verifieer altyd die resultate aan die hand van die Skrif voordat jy daarop staatmaak.";
+"ai_disclaimer_point4" = "AndBible streef daarna om verifikasie maklik te maak (bv. presiese bronverwysings in kommentare), maar die uiteindelike verantwoordelikheid lê altyd by jou.";
+"ai_disclaimer_point5" = "\"Beproef alle dinge; behou die goeie.\" (1 Tessalonisense 5:21)";
+"ai_disclaimer_point6" = "Hierdie nutsmiddels het geen siel en geen Heilige Gees nie. Hulle is teksverwerkeningsnuutsmiddels, nie geestelike gidse nie. Hulle is nie geskik vir die direkte voorbereiding van preke, andagte of ander geestelike inhoud sonder noukeurige menslike toesig, gebed en onderskeiding nie.";
+"ai_disclaimer_point7" = "Verstandig gebruik, kan hulle baie gebruikers en gebruiksgevalle bevoordeel. Maar as jy onseker is oor die aanvaarding van die risiko's, is dit ook 'n volkome geldige keuse om dit nie te gebruik nie.";
+"ai_disclaimer_point8" = "Jou data word na die bedieners van jou gekose KI-verskaffer gestuur. Deur 'n API-sleutel te gebruik, aanvaar jy daardie verskaffer se gebruiksvoorwaardes en privaatbeleid. Self-gehoste modelle is moontlik maar vereis meer tegniese kundigheid, en lewer moontlik nie resultate so goed soos kommersiële modelle nie.";
+"ai_disclaimer_point9" = "KI-verskaffers hef koste vir API-gebruik. Kosraming wat in AndBible gewys word, is by benadering — kontroleer altyd jou verskaffer se fakturering vir werklike koste.";
+"ai_disclaimer_responsibility" = "Tog is dit steeds kragtige nutsmiddels — en met groot mag kom groot verantwoordelikheid. Hou die volgende in gedagte.";
+"ai_disclaimer_warning_title" = "Belangrik: Lees dit voor gebruik van KI-nutsmiddels";
+"ai_doc_choose_page" = "Kies KI-dokumentbladsy";
+"ai_document_filter_activity_title" = "KI-dokumenttoegang";
+"ai_document_regenerate" = "Hergenereer";
+"ai_hidden_status" = "verberg";
+"ai_hide_prompt" = "Verberg";
+"ai_language_title" = "KI-antwoordtaal";
+"ai_models_category" = "Modelle";
+"ai_models_summary_none" = "Geen modelle opgestel nie";
+"ai_provider_api_format" = "API-formaat";
+"ai_provider_api_key" = "API-sleutel";
+"ai_provider_api_key_not_set" = "API-sleutel nie gestel nie";
+"ai_provider_delete_confirm" = "Skrap verskaffer \"%1$@\"? Opdragte wat hierdie verskaffer gebruik, sal na die verstek terugkeer.";
+"ai_provider_edit" = "Wysig";
+"ai_provider_endpoint" = "API-eindpunt";
+"ai_provider_endpoint_description" = "Slegs basis-URL. AndBible voeg \"/chat/completions\" (OpenAI-formaat) of \"/messages\" (Anthropic-formaat) outomaties by. Modellystes word van \"/models\" af gehaal.";
+"ai_provider_name" = "Verskaffer-naam";
+"ai_provider_saved" = "Verskaffer gebêre";
+"ai_provider_select_type" = "Kies verskaffer-tipe";
+"ai_providers_models_category" = "Verskaffers en modelle";
+"ai_providers_summary_none" = "Geen verskaffers opgestel nie";
+"ai_regenerate_fresh_run" = "Vars uitvoer (ignoreer vorige resultaat)";
+"ai_regenerate_instructions_hint" = "Bykomende instruksies (opsioneel)";
+"ai_regenerate_keep_previous" = "Behou vorige weergawe";
+"ai_regenerate_prompt_not_found" = "Kan nie hergenereer nie: die oorspronklike aanwysing is nie gevind nie. Dit mag moontlik geskrap wees.";
+"ai_regenerate_title" = "Hergenereer";
+"ai_settings" = "KI-instellings";
+"ai_setup_description" = "AndBible kan KI gebruik om Bybelteks te vertaal, verse te verduidelik, opsommings te skep, en meer. Om te begin, stel 'n verbinding in met 'n OpenAI-versoenbare API-verskaffer.";
+"ai_setup_title" = "Stel KI op";
+"ai_usage_category" = "Gebruik";
+"ask_model_before_run_title" = "Vra model voor uitvoering";
+"auto_hide_agent_log_title" = "Versteek KI-paneel wanneer klaar";
+"bookmarks_and_mynotes_title" = "Boekmerke & My Notas";
+"built_in_prompt" = "Ingebou";
+"built_in_prompt_notice" = "Dit is 'n ingeboude aanwysing en kan nie gewysig word nie. Gebruik \"Kopieer om aan te pas\" om 'n wysigbare kopie te skep.";
+"category_none" = "Geen kategorie";
+"commentary_max_response_no_limit" = "Geen limiet";
+"commentary_max_response_title" = "Kommentaar-reaksiegroottlimiet";
+"copy_to_customize" = "Kopieer om aan te pas";
+"custom_agent_system_prompt_title" = "Agent-stelselopdrag";
+"custom_system_prompt_custom" = "Gepasmaak";
+"custom_text_transform_system_prompt_title" = "Teksomsettingstelselopdrag";
+"default_prompt_ask_question" = "Stel 'n vraag";
+"default_prompt_ask_question_desc" = "Vra enige vraag oor die geselekteerde gedeelte";
+"default_prompt_bookmark_annotate" = "Boekmerk & annoteer";
+"default_prompt_bookmark_annotate_desc" = "Skep 'n boekmerk met 'n KI-gegenereerde studienota";
+"default_prompt_compare_translations" = "Vergelyk vertalings";
+"default_prompt_compare_translations_desc" = "Wys hoe verskillende geïnstalleerde vertalings die teks weergee";
+"default_prompt_cross_references" = "Kruisverwysings";
+"default_prompt_cross_references_desc" = "Vind en verduidelik verwante Bybelgedeeltes";
+"default_prompt_custom" = "Persoonlike aanwysing";
+"default_prompt_custom_desc" = "Voer 'n persoonlike taak uit op die geselekteerde gedeelte";
+"default_prompt_custom_template" = "Volg die gebruiker se taakopdrag vir die geselekteerde Bybelgedeelte.";
+"default_prompt_enhance_note" = "Verbeter nota";
+"default_prompt_enhance_note_desc" = "Verbeter grammatika, duidelikheid en leesbaarheid van jou nota";
+"default_prompt_explain_verses" = "Verduidelik verse";
+"default_prompt_explain_verses_desc" = "Verduidelik die betekenis en konteks van geselekteerde verse";
+"default_prompt_explain_verses_studypad" = "Verduidelik verse → Studieblok";
+"default_prompt_explain_verses_studypad_desc" = "Skep 'n studieblok met vers-vir-vers-verduideliking en boekmerke";
+"default_prompt_study_layout" = "Open studie-uitleg";
+"default_prompt_study_layout_desc" = "Open kommentaar- en parallelle vertaalvensters vir studie";
+"default_prompt_summary" = "Opsomming";
+"default_prompt_summary_desc" = "Skep 'n bondige opsomming van die geselekteerde teks";
+"default_prompt_thematic_study" = "Tematiese studie";
+"default_prompt_thematic_study_desc" = "Bou 'n studieblok met gedeeltes en notas oor die sentrale tema";
+"default_prompt_translate_to_language" = "Vertaal na %@";
+"default_prompt_translate_to_ui_language_desc" = "Vertaal dokumentteks na die app-koppelvlaktaal";
+"default_prompt_word_study" = "Woordstudie";
+"default_prompt_word_study_desc" = "Analiseer oorspronklike Hebreeus/Grieks woorde";
+"default_prompt_workspace_assistant" = "Werkspasie-assistent";
+"default_prompt_workspace_assistant_desc" = "Bestuur vensters: skep, sluit, herrangskik, verander dokumente";
+"delete_category" = "Skrap kategorie";
+"delete_category_and_prompts" = "Skrap kategorie en sy opdragte";
+"delete_category_keep_prompts" = "Skuif opdragte na wortel en skrap kategorie";
+"doc_type_addons" = "Byvoegsels";
+"easy_setup_enter_api_key" = "Voer jou API-sleutel in";
+"easy_setup_success" = "Verbinding suksesvol!";
+"easy_setup_test_connection" = "Toets verbinding";
+"easy_setup_testing" = "Toets…";
+"easy_setup_title" = "Vinnige opstelling";
+"help_bookmarks_text" = "Boekmerke kan geskep word deur sommige teks te kies \"boekmerk\" vanaf die opspring kieslys. Jy kan jou persoonlike notas by die nuwe boekmerk voeg deur die nou te tik Uitgeligte teks in die Bybel beskouing. Daar is ook 'n spesiale dokument 'My Notes' in kommentare wat u toelaat Om u notas in 'n aparte venster te sien.";
+"help_memorize_text" = "Die Memoriseer-aansig help jou om gedeeltes uit jou kop te leer. Gebruik Woordvervaging, Woordmengsel, Woordtik of Woordvolgorde om te oefen. Suksesvolle oefeninge merk verse outomaties as gememoriseer (dit kan gedeaktiveer word).";
+"help_read_more_link" = "Lees meer in die handleiding";
+"hide_category" = "Verberg uit KI-aksies";
+"llm_actions" = "KI-aksies";
+"llm_continue_iterations_message" = "Die KI-agent het sy limiet van %1$d herhalings bereik sonder om te voltooi. Gaan voort vir %2$d meer herhalings?";
+"llm_continue_iterations_title" = "Gaan voort?";
+"llm_custom_input_price_title" = "Invoerprys ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Voer die model-ID in";
+"llm_custom_output_price_title" = "Uitvoerprys ($/Mtoken)";
+"llm_error_max_iterations" = "Maksimum herhalings (%1$d) bereik sonder voltooiing";
+"llm_error_unknown" = "Onbekende fout";
+"llm_note_updated" = "Nota opgedateer";
+"llm_provider_custom" = "Pasgemaak (OpenAI versoenbaar)";
+"llm_reset_usage_confirm_message" = "Dit sal alle kumulatiewe gebruiksdata uitvee.";
+"llm_reset_usage_confirm_title" = "Herstel gebruiksdata?";
+"llm_reset_usage_title" = "Herstel gebruiksdata";
+"llm_usage_summary_default" = "Geen gebruiksdata nie";
+"llm_usage_summary_title" = "Token-gebruik";
+"manage_prompts" = "Bestuur KI-opdragte";
+"manage_tool_permissions_title" = "Gereedskap-toestemmings";
+"model_pricing_summary" = "%1$@ in / %2$@ uit per Mtoken";
+"model_select_provider" = "Verskaffer";
+"model_set_default" = "Stel as verstekmodel in";
+"move_category_down" = "Skuif af";
+"move_category_up" = "Skuif op";
+"new_category" = "Nuwe kategorie";
+"new_category_name" = "Kategorienaam";
+"new_prompt" = "Nuwe aanwysing";
+"permission_allow_all" = "Laat alles toe";
+"permission_allow_all_session" = "Laat alle gereedskap toe hierdie sessie";
+"permission_allow_for_session" = "Laat toe vir hierdie sessie";
+"permission_allow_once" = "Laat een keer toe";
+"permission_always_allow_confirm" = "Is jy seker jy wil \"%1$@\" permanent toelaat?";
+"permission_always_allow_confirm_reset_hint" = "Jy kan dit herstel in KI-instellings.";
+"permission_always_ask" = "Vra altyd";
+"permission_ask_once_per_run" = "Vra eenmalig per sessie";
+"permission_deny" = "Weier";
+"permission_deny_all" = "Weier alles";
+"permission_option_always_allow" = "Laat altyd toe";
+"permission_option_always_deny" = "Weier altyd";
+"permission_status_default" = "Vra (verstek)";
+"prompt_auto_include_commentaries" = "Sluit kommentare outomaties in";
+"prompt_auto_include_documents" = "Sluit geïnstalleerde dokumente outomaties in";
+"prompt_bible_only" = "Slegs Bybeldokumente";
+"prompt_category" = "Kategorie";
+"prompt_category_favorites" = "Gunsteling";
+"prompt_category_general" = "Algemeen";
+"prompt_category_notes" = "Notas";
+"prompt_category_study" = "Studie";
+"prompt_category_uncategorized" = "Ongekategoriseer";
+"prompt_context_note_editor" = "Nootwysiging";
+"prompt_context_text_selection" = "Tekskeuse";
+"prompt_context_verse_selection" = "Verskeuse";
+"prompt_context_window_menu" = "Vensterkieslys";
+"prompt_context_workspace_menu" = "Werkspasiekieslys";
+"prompt_description" = "Beskrywing";
+"prompt_edit_before_run" = "Spesifiseer voor uitvoer";
+"prompt_is_text_transformation" = "Tekstransformasie";
+"prompt_max_iterations_hint" = "Laat leeg vir globale verstek";
+"prompt_max_iterations_unlimited" = "Onbeperk";
+"prompt_model_default" = "Verstek";
+"prompt_name" = "Naam";
+"prompt_no_document_creation" = "Geen dokument skep nie";
+"prompt_permission_mode" = "Toestemmingmodus";
+"prompt_permission_mode_description" = "Beheer wanneer gebruikersbevestiging vereis word voordat die KI skryfbewerkings uitvoer. Die per-nutsmiddel-instellings hieronder kan dit vir individuele nutsmiddels oorskryf.";
+"prompt_permission_use_default" = "Gebruik verstek";
+"prompt_show_in" = "Wys in";
+"prompt_strict_context_matching" = "Konteksafhanklike kas";
+"prompt_tab_advanced" = "Gevorderd";
+"prompt_tab_permissions" = "Toestemmings";
+"prompt_tab_prompt" = "Opdrag";
+"prompt_template" = "Opdragsjabloon";
+"prompt_tool_permissions" = "Gereedskap-toestemmings";
+"raw_log_delete_all" = "Verwyder alles";
+"raw_log_error_indicator" = "Fout";
+"raw_log_history_empty" = "Geen gestoorde logboeke nie";
+"raw_log_history_title" = "KI-logboekgeskiedenis";
+"raw_log_item_tokens" = "%1$@ in / %2$@ uit";
+"raw_log_older_1_month" = "Ouer as 1 maand";
+"raw_log_older_1_week" = "Ouer as 1 week";
+"raw_log_older_3_months" = "Ouer as 3 maande";
+"raw_log_retention_summary_disabled" = "Gedeaktiveer (behou alles)";
+"raw_log_retention_title" = "Outomaties ou logboeke verwyder";
+"reset_all_ai_settings" = "Herstel alle KI-instellings";
+"reset_all_ai_settings_confirm_message" = "Dit sal die API-sleutel, verskaffer, eindpunt, model uitvee en alle aanwysings na verstekwaardes herstel. Gaan voort?";
+"reset_all_ai_settings_confirm_title" = "Herstel alle KI-instellings?";
+"reset_all_permissions" = "Herstel alles";
+"reset_to_default" = "Herstel na verstek";
+"save_and_exit" = "Bêre";
+"select_llm_prompt" = "Kies KI-aksie";
+"select_model_before_run_title" = "Kies model";
+"set_default_model_for_prompt" = "Stel as verstek model vir hierdie opdrag";
+"show_category" = "Wys in KI-aksies";
+"specify_before_run_title" = "Spesifiseer taak";
+"tool_add_bookmark_note" = "Voeg boekmerknota by";
+"tool_add_label_to_bookmark" = "Voeg etiket by boekmerk";
+"tool_add_my_document_page" = "Voeg My Dokumentbladsy by";
+"tool_add_study_pad_entry" = "Voeg studieblok-inskrywing by";
+"tool_category_bible_search" = "Bybel & Soek";
+"tool_category_bookmarks" = "Boekmerke";
+"tool_category_general_books" = "Algemene Boeke";
+"tool_category_labels" = "Etikette";
+"tool_category_my_documents" = "My dokumente";
+"tool_category_study_pads" = "Studieblokkies";
+"tool_category_windows" = "Vensters";
+"tool_create_bookmark" = "Skep boekmerk";
+"tool_create_label" = "Skep etiket";
+"tool_create_my_document" = "Skep My Dokument";
+"tool_create_study_pad" = "Skep studieblok";
+"tool_create_window" = "Skep venster";
+"tool_delete_bookmark" = "Verwyder boekmerk";
+"tool_delete_label" = "Verwyder etiket";
+"tool_delete_my_document_page" = "Verwyder My Dokumentbladsy";
+"tool_edit_my_document_page" = "Wysig My Dokumentbladsy";
+"tool_finish_with_my_document_page" = "Open My Dokumentbladsy";
+"tool_finish_with_study_pad" = "Open studieblok";
+"tool_finish_without_document" = "Voltooi sonder dokument";
+"tool_get_all_labels" = "Lys alle etikette";
+"tool_get_bookmarks_for_verse" = "Haal boekmerke vir vers op";
+"tool_get_bookmarks_with_label" = "Haal boekmerke met etiket op";
+"tool_get_commentaries" = "Lees kommentare";
+"tool_get_dictionary_entry" = "Soek woordeboekinskrywing op";
+"tool_get_genbook_content" = "Lees algemene boekinhoud";
+"tool_get_genbook_keys" = "Lys algemene boeksleutels";
+"tool_get_installed_documents" = "Lys geïnstalleerde dokumente";
+"tool_get_my_document_pages" = "Lys My Dokumentbladsye";
+"tool_get_my_documents" = "Lys My Dokumente";
+"tool_get_study_pad_content" = "Lees studieblok-inhoud";
+"tool_get_verse_content" = "Lees versinhoud";
+"tool_get_windows" = "Lys vensters";
+"tool_manage_window" = "Bestuur venster";
+"tool_remove_label_from_bookmark" = "Verwyder etiket van boekmerk";
+"tool_search_bible" = "Soek Bybel";
+"tool_search_by_strongs" = "Soek volgens Strong se nommer";
+"tool_search_study_pads" = "Soek studieblokkies";
+"tool_set_document_title" = "Stel dokumenttitel in";
+"tool_set_window_document" = "Stel vensterdokument in";
+"tool_update_bookmark_note" = "Dateer boekmerknota op";
+"tool_update_studypad_text_entry" = "Dateer studieblok-teksinskrywing op";
+"verse_tip" = "Om gedeeltelike of baie verse te kies, kan jy Bybel teks lank druk";
+"watch_tutorial_video" = "Kyk tutoriaal video (Engels)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "KI-dokument word hergenereer…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Ek aanvaar en neem volle verantwoordelikheid";
+"ai_disclaimer_accept_title" = "Aanvaar KI-vrywaring";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "KI-verbinding en opdraginstellings";
+"prefs_features_cat" = "Funksies";

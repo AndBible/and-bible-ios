@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Inställningar för förföljda";
 "discrete_mode" = "Dölj religiösa symboler";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "Om";
 "version" = "Version";
 "export" = "Exportera";
@@ -405,10 +405,6 @@
 "calculator_pin_description" = "PIN-kod för att komma in i appen när kalkylatorn visas.";
 "discrete_help_title" = "Läs det här först!";
 "discrete_help_summary" = "Instruktioner om inställningarna och information om den specifika diskreta apputgåvan.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Appbeteende";
 "prefs_display_customization_cat" = "Utseende & känsla";
@@ -479,7 +475,6 @@
 
 "prefs_volume_keys_scroll_title" = "Volymknappar scrollar";
 "prefs_volume_keys_scroll_summary" = "Använd volym upp/ned för att scrolla bibeltext";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Experimentella funktioner";
 "prefs_experimental_features_summary" = "Välj vilka experimentella funktioner du vill aktivera. Dessa funktioner utvecklas fortfarande och kan komma att ändras eller tas bort.";
 "experimental_feature_bookmark_edit_actions" = "Åtgärder vid bokmärkesredigering";
@@ -625,3 +620,386 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Det finns en användarplanering i SD-kortet jsword/readningplan med samma namn som en som finns internt. Den kan inte listas här. Var god byt namn på filen och lämna filtypen som .properties";
 "error_no_content" = "Innehåll saknas för den markerade versen";
+
+/* Android shared translations */
+"calculator_par1" = "Innan du kommer in i appen visas skärmen med kalkylatorn.";
+"calculator_par2" = "Du kan göra normala beräkningar i den, och när du vill komma in i appen behöver du bara ange din PIN-kod (standard är 1234) och sedan trycka på \"=\"-knappen.";
+"calculator_par3" = "Du kan ange en anpassad PIN-kod i inställningen \"Kalkylator-PIN\".";
+"give_passphrase_for_module" = "Dokumentet %@ är krypterat och behöver en lösenordsfras för att låsas upp";
+"show_unlock_info" = "Modul & upplåsningsinfo";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Packar upp Zip filen...";
+"install_failed_reason" = "Installation av modulen misslyckades av följande orsak: %@";
+"install_zip_successfull" = "Modulen installerades utan problem";
+"module_install_phase_committing" = "Vänta medan moduler läses in från en fil.";
+"module_install_phase_downloading" = "Ladda ner";
+"module_install_phase_queued" = "Vänta...";
+"storage_space_warning" = "Minnet på enheten är för litet.";
+
+/* Android shared translations */
+"error_occurred" = "Det har skett ett fel";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Memorering";
+"memorize_tab_reading" = "Läsning";
+"reading_progress_active_days" = "aktiva dagar";
+"reading_progress_bible_heatmap" = "Bibelöversikt";
+"reading_progress_calendar" = "Läsaktivitet";
+"reading_progress_chapters_read" = "kapitel lästa";
+"reading_progress_cycle" = "Cykel %d";
+"reading_progress_history_for" = "Läsningsframsteg för %1$@";
+"reading_progress_history_no_entries" = "Inga läsposter för detta urval.";
+"reading_progress_history_title" = "Läshistorik";
+"reading_progress_history_version_unknown" = "Okänd version";
+"reading_progress_new_cycle" = "Ny cykel";
+"reading_progress_new_cycle_confirm" = "Starta en ny läscykel? Detta börjar spåra dina framsteg från början, men bevarar data från din tidigare cykel.";
+"reading_progress_new_testament" = "Nya Testamentet";
+"reading_progress_next_cycle" = "Nästa cykel";
+"reading_progress_old_testament" = "Gamla Testamentet";
+"reading_progress_overall" = "%@%% av Bibeln läst";
+"reading_progress_percent_read_scale" = "Procent\nläst";
+"reading_progress_previous_cycle" = "Föregående cykel";
+"reading_progress_read_count_scale" = "Antal\nlästa";
+"reading_progress_title" = "Läs-/minnesframsteg";
+
+/* Android shared translations */
+"conf_change_chapter" = "Kapitelbyten";
+"conf_change_title" = "Titel";
+"conf_replace_divinename" = "Byt ut det gudomliga namnet mot Jahve";
+"conf_save_playback_settings_to_bookmarks" = "Spara uppspelningsinställningarna till bokmärken";
+"conf_speak_auto_bookmark" = "Automatisk bokmärkning";
+"conf_speak_footnotes" = "Fotnoter";
+"conf_speak_sleep_timer" = "Ställ in sovtimer";
+"conf_speak_synchronize" = "Text följer tal";
+"forward" = "Framåt";
+"playback_settings_title" = "Uppspelningsinställningar";
+"rewind" = "Tillbaka";
+"speak_bookmarks_menu_title" = "Tal från bokmärke";
+"speak_next" = "Nästa";
+"speak_previous" = "Föregående";
+"speak_settings_title" = "Generella Talinställningar";
+
+/* Android shared translations */
+"sleep_timer_title" = "Sovtimer i minuter";
+"speak_beginning_of_passage" = "Välj avsnittets början";
+"speak_ending_of_passage" = "Välj avsnittets slut";
+"speak_ending_verse_must_be_later" = "Den sista versen måste vara senare än den första versen";
+"speak_verse_range_to_repeat" = "Välj versomfång att upprepa";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Språket är inte tillgängligt.";
+
+/* Android shared translations */
+"description" = "Beskrivning";
+"errorTitle" = "Det har skett ett fel";
+"error_executing_search" = "Ogiltig sökterm";
+"export_something" = "Exportera %@";
+"import_items" = "Importera %@";
+"install_zip_module" = "Installera Bibelmodul";
+"my_document_content_type_label" = "Innehållstyp";
+"my_document_create_title" = "Skapa nytt dokument";
+"my_document_import_document" = "Importera filer som dokument";
+"my_document_new_name" = "Dokument %d";
+"my_document_new_page_name" = "Sida %1$d";
+"my_document_rename_title" = "Byt namn på dokument";
+"my_document_save_changes" = "Spara ändringar?";
+"overwrite" = "Ja";
+"package_directory" = "Paketkatalog (zip-filer)";
+"read" = "Läs";
+"reading_plan_set_current_day" = "Välj dagens datum...";
+"reading_plan_set_start_date" = "Välj startdatum...";
+"search_all_words" = "Alla ord";
+"search_any_word" = "Något av orden";
+"search_phrase" = "Fras";
+"search_words_group_prompt" = "Hitta verser";
+"show_notes" = "Visa anteckningar";
+"speak_book_changed" = "Bok ändrad.";
+"speak_chapter_changed" = "Kapitel";
+"success" = "Färdig";
+"summary" = "Sammanfattning";
+"undo" = "Avbryt";
+
+/* Android shared translations */
+"my_document_no_description" = "Ingen beskrivning";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Hittades inte i dokument";
+"my_document_cannot_delete_ai_documents" = "AI-dokument kan inte tas bort medan det innehåller sidor. Ta bort sidorna först.";
+"my_document_create_page_title" = "Ny sida";
+"my_document_import_empty_selection" = "Inga importerbara filer valda";
+"system_items1" = "Mer";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Du måste ladda ned en bibel som innehåller Strongs nummer och bygga upp dess sökindex med sökfunktionen";
+
+/* Android shared translations */
+"add_model" = "Lägg till modell";
+"agent_already_running" = "En AI-assistent körs redan. Vänta eller stoppa den först.";
+"agent_log_cancelled" = "Avbruten";
+"agent_log_completed" = "Klar";
+"agent_log_executing" = "Kör: %@";
+"agent_log_idle" = "AI-assistent";
+"agent_log_model_not_configured" = "Ingen modell konfigurerad";
+"agent_log_tool_failed" = "Verktyget %@ misslyckades";
+"agent_log_view_raw" = "Visa rå LLM-logg";
+"agent_max_iterations_title" = "Max iterationer för AI";
+"agent_permission_mode_summary" = "Styr när användarbekräftelse krävs innan AI utför skrivoperationer";
+"agent_permission_title" = "AI-behörighet";
+"ai_add_provider" = "Lägg till leverantör";
+"ai_advanced_category" = "Avancerat";
+"ai_agent_notification_running" = "AI-assistent arbetar…";
+"ai_behavior_category" = "Beteende";
+"ai_connection_settings" = "Anslutningsinställningar";
+"ai_disclaimer_approach" = "AndBible använder i första hand AI för att bearbeta text från de dokument du har installerat — kommentarer, lexikon och andra moduler — snarare än att förlita sig på modellens egna träningsdata.";
+"ai_disclaimer_dialog_title" = "AI-verktyg — viktig information";
+"ai_disclaimer_intro" = "AI-verktyg kan berika din bibelstudieupplevelse avsevärt och öppna nya sätt att engagera sig med Skriften.";
+"ai_disclaimer_point1" = "AI kan göra misstag, inklusive \"hallucinationer\" (att med säkerhet ange falsk eller fabricerad information). Acceptera aldrig resultaten utan granskning.";
+"ai_disclaimer_point2" = "AI-svar kan återspegla fördomar från träningsdata, vara avsiktligt vilseledande eller presentera ett visst teologiskt perspektiv som om det vore neutralt eller fullständigt.";
+"ai_disclaimer_point3" = "Du ansvarar för hur du använder AI-genererat innehåll. Verifiera alltid resultaten mot Skriften innan du förlitar dig på dem.";
+"ai_disclaimer_point4" = "AndBible strävar efter att göra verifiering enkel (t.ex. precisa källhänvisningar i kommentarer), men det slutliga ansvaret ligger alltid hos dig.";
+"ai_disclaimer_point5" = "\"Pröva allt, behåll det goda.\" (1 Thessalonikerbrevet 5:21)";
+"ai_disclaimer_point6" = "Dessa verktyg har ingen själ och ingen Helig Ande. De är textbearbetningsverktyg, inte andliga vägledare. De lämpar sig inte för att direkt förbereda predikningar, andakter eller annat andligt innehåll utan noggrant mänskligt omdöme, bön och urskillning.";
+"ai_disclaimer_point7" = "Används de klokt kan de vara till nytta för många användare och användningsområden. Men om du är osäker på om du kan acceptera riskerna är det också ett helt giltigt val att inte använda dem.";
+"ai_disclaimer_point8" = "Dina data skickas till din valda AI-leverantörs servrar. Genom att använda en API-nyckel accepterar du den leverantörens villkor och integritetspolicy. Självhostade modeller är möjliga men kräver mer teknisk kunskap och kanske inte ger lika goda resultat som kommersiella modeller.";
+"ai_disclaimer_point9" = "AI-leverantörer tar betalt för API-användning. Kostnadsuppskattningar i AndBible är ungefärliga — kontrollera alltid din leverantörs fakturering för faktiska kostnader.";
+"ai_disclaimer_responsibility" = "De är dock fortfarande kraftfulla verktyg — och med stor makt följer stort ansvar. Ha följande i åtanke.";
+"ai_disclaimer_warning_title" = "Viktigt: Läs innan du använder AI-verktyg";
+"ai_doc_choose_page" = "Välj AI-dokumentsida";
+"ai_document_filter_activity_title" = "AI-dokumentåtkomst";
+"ai_document_regenerate" = "Generera om";
+"ai_hidden_status" = "dold";
+"ai_hide_prompt" = "Dölj";
+"ai_language_title" = "AI-svarsspråk";
+"ai_models_category" = "Modeller";
+"ai_models_summary_none" = "Inga modeller konfigurerade";
+"ai_provider_api_format" = "API-format";
+"ai_provider_api_key" = "API-nyckel";
+"ai_provider_api_key_not_set" = "API-nyckel ej angiven";
+"ai_provider_delete_confirm" = "Radera leverantören \"%1$@\"? Promptar som använder denna leverantör återgår till standardvärdet.";
+"ai_provider_edit" = "Redigera";
+"ai_provider_endpoint" = "API-slutpunkt";
+"ai_provider_endpoint_description" = "Endast bas-URL. AndBible lägger automatiskt till \"/chat/completions\" (OpenAI-format) eller \"/messages\" (Anthropic-format). Modellistor hämtas från \"/models\".";
+"ai_provider_name" = "Leverantörsnamn";
+"ai_provider_saved" = "Leverantör sparad";
+"ai_provider_select_type" = "Välj leverantörstyp";
+"ai_providers_models_category" = "Leverantörer & Modeller";
+"ai_providers_summary_none" = "Inga leverantörer konfigurerade";
+"ai_regenerate_fresh_run" = "Ny körning (ignorera tidigare resultat)";
+"ai_regenerate_instructions_hint" = "Ytterligare instruktioner (valfritt)";
+"ai_regenerate_keep_previous" = "Behåll tidigare version";
+"ai_regenerate_prompt_not_found" = "Kan inte återskapa: den ursprungliga prompten hittades inte. Den kan ha raderats.";
+"ai_regenerate_title" = "Återskapa";
+"ai_settings" = "AI-inställningar";
+"ai_setup_description" = "AndBible kan använda AI för att översätta bibeltext, förklara verser, skapa sammanfattningar och mer. Kom igång genom att konfigurera en anslutning till en OpenAI-kompatibel API-leverantör.";
+"ai_setup_title" = "Konfigurera AI";
+"ai_usage_category" = "Användning";
+"ask_model_before_run_title" = "Fråga om modell innan körning";
+"auto_hide_agent_log_title" = "Dölj AI-panelen när klart";
+"bookmarks_and_mynotes_title" = "Bokmärken & egna anteckningar";
+"built_in_prompt" = "Inbyggd";
+"built_in_prompt_notice" = "Det här är en inbyggd prompt och kan inte redigeras. Använd \"Kopiera för att anpassa\" för att skapa en redigerbar kopia.";
+"category_none" = "Ingen kategori";
+"commentary_max_response_no_limit" = "Ingen gräns";
+"commentary_max_response_title" = "Storleksgräns för kommentarssvar";
+"copy_to_customize" = "Kopiera för att anpassa";
+"custom_agent_system_prompt_title" = "Agentens systemprompt";
+"custom_system_prompt_custom" = "Anpassad";
+"custom_text_transform_system_prompt_title" = "Systemprompt för textomvandling";
+"default_prompt_ask_question" = "Ställ en fråga";
+"default_prompt_ask_question_desc" = "Ställ valfri fråga om det valda stycket";
+"default_prompt_bookmark_annotate" = "Bokmärk & kommentera";
+"default_prompt_bookmark_annotate_desc" = "Skapar ett bokmärke med en AI-genererad studieanteckning";
+"default_prompt_compare_translations" = "Jämför översättningar";
+"default_prompt_compare_translations_desc" = "Visar hur olika installerade översättningar återger texten";
+"default_prompt_cross_references" = "Parallellhänvisningar";
+"default_prompt_cross_references_desc" = "Hittar och förklarar relaterade bibelställen";
+"default_prompt_custom" = "Anpassad prompt";
+"default_prompt_custom_desc" = "Kör en anpassad uppgift på det valda stycket";
+"default_prompt_custom_template" = "Följ användarens uppgiftsspecifikation för det valda bibelstycket.";
+"default_prompt_enhance_note" = "Förbättra anteckning";
+"default_prompt_enhance_note_desc" = "Förbättrar grammatik, tydlighet och läsbarhet i din anteckning";
+"default_prompt_explain_verses" = "Förklara verser";
+"default_prompt_explain_verses_desc" = "Förklarar innebörden och sammanhanget för valda verser";
+"default_prompt_explain_verses_studypad" = "Förklara verser → Studieblock";
+"default_prompt_explain_verses_studypad_desc" = "Skapa ett studieblock med versvis förklaring och bokmärken";
+"default_prompt_study_layout" = "Öppna studielayout";
+"default_prompt_study_layout_desc" = "Öppnar kommentar- och parallellöversättningsfönster för studier";
+"default_prompt_summary" = "Sammanfattning";
+"default_prompt_summary_desc" = "Skapar en kortfattad sammanfattning av den valda texten";
+"default_prompt_thematic_study" = "Tematisk studie";
+"default_prompt_thematic_study_desc" = "Bygger ett studieblock med stycken och anteckningar om det centrala temat";
+"default_prompt_translate_to_language" = "Översätt till %@";
+"default_prompt_translate_to_ui_language_desc" = "Översätter dokumenttext till appens gränssnittsspråk";
+"default_prompt_word_study" = "Ordstudie";
+"default_prompt_word_study_desc" = "Analyserar ursprungliga hebreiska/grekiska ord";
+"default_prompt_workspace_assistant" = "Arbetsyteassistent";
+"default_prompt_workspace_assistant_desc" = "Hantera fönster: skapa, stäng, arrangera om, byt dokument";
+"delete_category" = "Radera kategori";
+"delete_category_and_prompts" = "Radera kategori och dess prompter";
+"delete_category_keep_prompts" = "Flytta prompter till rot och radera kategori";
+"doc_type_addons" = "Tillägg";
+"easy_setup_enter_api_key" = "Ange din API-nyckel";
+"easy_setup_success" = "Anslutningen lyckades!";
+"easy_setup_test_connection" = "Testa anslutning";
+"easy_setup_testing" = "Testar…";
+"easy_setup_title" = "Snabbinstallation";
+"help_bookmarks_text" = "Du kan skapa bokmärken genom att markera text och välja \"Bokmärke\" i menyn som visas. Du kan göra egna anteckningar i bokmärket genom att trycka på den nu markerade texten i bibelvyn. Det finns också ett specialdokument bland bibelkommentarerna som låter dig se dina anteckningar i ett separat fönster.";
+"help_memorize_text" = "Memorera-vyn hjälper dig att lära dig textavsnitt utantill. Använd Ordoskärpa, Ordsortering, Ordtyp eller Ordordning för att öva. Lyckade övningar markerar automatiskt verser som memorerade (detta kan inaktiveras).";
+"help_read_more_link" = "Läs mer i manualen";
+"hide_category" = "Dölj från AI-åtgärder";
+"llm_actions" = "AI-åtgärder";
+"llm_continue_iterations_message" = "AI-agenten har nått sin gräns på %1$d iterationer utan att slutföra. Fortsätta i %2$d iterationer till?";
+"llm_continue_iterations_title" = "Fortsätta?";
+"llm_custom_input_price_title" = "Inmatningspris ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Ange modell-ID";
+"llm_custom_output_price_title" = "Utmatningspris ($/Mtoken)";
+"llm_error_max_iterations" = "Maximalt antal iterationer (%1$d) uppnått utan slutförande";
+"llm_error_unknown" = "Okänt fel";
+"llm_note_updated" = "Anteckning uppdaterad";
+"llm_openrouter_model" = "Modell";
+"llm_provider_custom" = "Anpassad (OpenAI-kompatibel)";
+"llm_reset_usage_confirm_message" = "Detta rensar all ackumulerad användningsdata.";
+"llm_reset_usage_confirm_title" = "Återställa användningsdata?";
+"llm_reset_usage_title" = "Återställ användningsdata";
+"llm_usage_summary_default" = "Ingen användningsdata";
+"llm_usage_summary_title" = "Tokenanvändning";
+"manage_prompts" = "Hantera AI-prompter";
+"manage_tool_permissions_title" = "Verktygsbehörigheter";
+"model_pricing_summary" = "%1$@ in / %2$@ ut per Mtoken";
+"model_select_provider" = "Leverantör";
+"model_set_default" = "Ange som standardmodell";
+"move_category_down" = "Flytta ned";
+"move_category_up" = "Flytta upp";
+"new_category" = "Ny kategori";
+"new_category_name" = "Kategorinamn";
+"new_prompt" = "Ny prompt";
+"permission_allow_all" = "Tillåt alla";
+"permission_allow_all_session" = "Tillåt alla verktyg denna session";
+"permission_allow_for_session" = "Tillåt för denna session";
+"permission_allow_once" = "Tillåt en gång";
+"permission_always_allow_confirm" = "Är du säker på att du permanent vill tillåta \"%1$@\"?";
+"permission_always_allow_confirm_reset_hint" = "Du kan återställa detta i AI-inställningar.";
+"permission_always_ask" = "Fråga alltid";
+"permission_ask_once_per_run" = "Fråga en gång per körning";
+"permission_deny" = "Neka";
+"permission_deny_all" = "Neka alla";
+"permission_option_always_allow" = "Tillåt alltid";
+"permission_option_always_deny" = "Neka alltid";
+"permission_status_default" = "Fråga (standard)";
+"prompt_auto_include_commentaries" = "Inkludera kommentarer automatiskt";
+"prompt_auto_include_documents" = "Inkludera installerade dokument automatiskt";
+"prompt_bible_only" = "Endast bibeldokument";
+"prompt_category" = "Kategori";
+"prompt_category_favorites" = "Favoriter";
+"prompt_category_general" = "Allmänt";
+"prompt_category_notes" = "Anteckningar";
+"prompt_category_study" = "Studium";
+"prompt_category_uncategorized" = "Okategoriserad";
+"prompt_context_note_editor" = "Anteckningseditor";
+"prompt_context_text_selection" = "Textval";
+"prompt_context_verse_selection" = "Versval";
+"prompt_context_window_menu" = "Fönstermeny";
+"prompt_context_workspace_menu" = "Arbetsytemeny";
+"prompt_description" = "Beskrivning";
+"prompt_edit_before_run" = "Specificera innan körning";
+"prompt_is_text_transformation" = "Texttransformation";
+"prompt_max_iterations_hint" = "Lämna tomt för globalt standard";
+"prompt_max_iterations_unlimited" = "Obegränsat";
+"prompt_model_default" = "Standard";
+"prompt_model_override" = "Modell";
+"prompt_name" = "Namn";
+"prompt_no_document_creation" = "Ingen dokumentskapning";
+"prompt_permission_mode" = "Behörighetsläge";
+"prompt_permission_mode_description" = "Styr när användarbekräftelse krävs innan AI:n utför skrivoperationer. Inställningarna per verktyg nedan kan åsidosätta detta för enskilda verktyg.";
+"prompt_permission_use_default" = "Använd standard";
+"prompt_show_in" = "Visa i";
+"prompt_strict_context_matching" = "Kontextberoende cache";
+"prompt_tab_advanced" = "Avancerat";
+"prompt_tab_permissions" = "Behörigheter";
+"prompt_template" = "Promptmall";
+"prompt_tool_permissions" = "Verktygsbehörigheter";
+"raw_log_delete_all" = "Radera alla";
+"raw_log_error_indicator" = "Fel";
+"raw_log_history_empty" = "Inga sparade loggar";
+"raw_log_history_title" = "AI-logghistorik";
+"raw_log_item_tokens" = "%1$@ in / %2$@ ut";
+"raw_log_older_1_month" = "Äldre än 1 månad";
+"raw_log_older_1_week" = "Äldre än 1 vecka";
+"raw_log_older_3_months" = "Äldre än 3 månader";
+"raw_log_retention_summary_disabled" = "Inaktiverat (behåll alla)";
+"raw_log_retention_title" = "Ta bort gamla loggar automatiskt";
+"reset_all_ai_settings" = "Återställ alla AI-inställningar";
+"reset_all_ai_settings_confirm_message" = "Detta raderar API-nyckeln, leverantören, slutpunkten, modellen och återställer alla promptar till standardvärden. Fortsätta?";
+"reset_all_ai_settings_confirm_title" = "Återställ alla AI-inställningar?";
+"reset_all_permissions" = "Återställ alla";
+"reset_to_default" = "Återställ till standard";
+"save_and_exit" = "Spara";
+"select_llm_prompt" = "Välj AI-åtgärd";
+"select_model_before_run_title" = "Välj modell";
+"set_default_model_for_prompt" = "Ange som standardmodell för denna prompt";
+"show_category" = "Visa i AI-åtgärder";
+"specify_before_run_title" = "Specificera uppgift";
+"tool_add_bookmark_note" = "Lägg till bokmärkesanteckning";
+"tool_add_label_to_bookmark" = "Lägg till etikett på bokmärke";
+"tool_add_my_document_page" = "Lägg till sida i Mitt dokument";
+"tool_add_study_pad_entry" = "Lägg till studieblockpost";
+"tool_category_bible_search" = "Bibel & Sökning";
+"tool_category_bookmarks" = "Bokmärken";
+"tool_category_general_books" = "Allmänna böcker";
+"tool_category_labels" = "Etiketter";
+"tool_category_my_documents" = "Mina dokument";
+"tool_category_study_pads" = "Studieblock";
+"tool_category_windows" = "Fönster";
+"tool_create_bookmark" = "Skapa bokmärke";
+"tool_create_label" = "Skapa etikett";
+"tool_create_my_document" = "Skapa Mitt dokument";
+"tool_create_study_pad" = "Skapa studieblock";
+"tool_create_window" = "Skapa fönster";
+"tool_delete_bookmark" = "Ta bort bokmärke";
+"tool_delete_label" = "Ta bort etikett";
+"tool_delete_my_document_page" = "Ta bort sida från Mitt dokument";
+"tool_edit_my_document_page" = "Redigera sida i Mitt dokument";
+"tool_finish_with_my_document_page" = "Öppna sida i Mitt dokument";
+"tool_finish_with_study_pad" = "Öppna studieblock";
+"tool_finish_without_document" = "Avsluta utan dokument";
+"tool_get_all_labels" = "Lista alla etiketter";
+"tool_get_bookmarks_for_verse" = "Hämta bokmärken för vers";
+"tool_get_bookmarks_with_label" = "Hämta bokmärken med etikett";
+"tool_get_commentaries" = "Läs kommentarer";
+"tool_get_dictionary_entry" = "Slå upp ordlistepost";
+"tool_get_genbook_content" = "Läs allmänt bokinnehåll";
+"tool_get_genbook_keys" = "Lista allmänna boknycklar";
+"tool_get_installed_documents" = "Lista installerade dokument";
+"tool_get_my_document_pages" = "Lista sidor i Mitt dokument";
+"tool_get_my_documents" = "Lista Mina dokument";
+"tool_get_study_pad_content" = "Läs studieblockinnehåll";
+"tool_get_verse_content" = "Läs versinnehåll";
+"tool_get_windows" = "Lista fönster";
+"tool_manage_window" = "Hantera fönster";
+"tool_remove_label_from_bookmark" = "Ta bort etikett från bokmärke";
+"tool_search_bible" = "Sök i Bibeln";
+"tool_search_by_strongs" = "Sök med Strongs nummer";
+"tool_search_study_pads" = "Sök i studieblock";
+"tool_set_document_title" = "Ange dokumenttitel";
+"tool_set_window_document" = "Ange fönsterdokument";
+"tool_update_bookmark_note" = "Uppdatera bokmärkesanteckning";
+"tool_update_studypad_text_entry" = "Uppdatera studieblockets textpost";
+"verse_tip" = "För att markera en del av en vers eller flera verser kan du långtrycka på bibeltexten.";
+"watch_tutorial_video" = "Se instruktionsvideo (på engelska)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Genererar om AI-dokument…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Jag accepterar och tar fullt ansvar";
+"ai_disclaimer_accept_title" = "Godkänn AI-ansvarsfriskrivning";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "AI-anslutning och promptinställningar";
+"prefs_features_cat" = "Funktioner";

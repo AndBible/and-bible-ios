@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Nastavení pro pronásledované";
 "discrete_mode" = "Skrýt náboženské symboly";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "O dokumentu";
 "version" = "Version";
 "export" = "Export";
@@ -440,10 +440,6 @@
 "calculator_pin_description" = "PIN kód pro vstup do aplikace z režimu Kalkulačka.";
 "discrete_help_title" = "Nejdříve čtěte následující!";
 "discrete_help_summary" = "Instrukce pro nastavení a používání diskrétní verze aplikace.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Nastavení aplikace";
 "prefs_display_customization_cat" = "Vzhled aplikace";
@@ -514,7 +510,6 @@
 
 "prefs_volume_keys_scroll_title" = "Tlačítka hlasitosti pro posouvání";
 "prefs_volume_keys_scroll_summary" = "Použít tlačítka zvýšení/snížení hlasitosti pro posouvání textu Bible";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Experimentální funkce";
 "prefs_experimental_features_summary" = "Vyberte, které experimentální funkce chcete povolit. Tyto funkce jsou stále ve vývoji a mohou být změněny nebo odstraněny.";
 "experimental_feature_bookmark_edit_actions" = "Akce úpravy záložek";
@@ -642,3 +637,385 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Na SD kartě je uživatelský plán čtení jsword/readingplan se stejným jménem jako interní plán. Nelze ho zde zobrazit. Prosím přejmenujte soubor na něco jiného a příponu souboru ponechte .properties";
 "error_no_content" = "Žádný obsah pro vybraný verš";
+
+/* Android shared translations */
+"calculator_par1" = "Před vstupem do samotné aplikace se zobrazí kalkulačka.";
+"calculator_par2" = "V ní je možné provádět běžné výpočty a pokud chcete pokračovat do aplikace, zadejte Váš PIN kód (přednastaven je 1234) a stiskněte \"=\".";
+"calculator_par3" = "Můžete si nastavit vlastní PIN kód v nastavení \"PIN pro kalkulátor\".";
+"give_passphrase_for_module" = "Dokument %@ je šifrován a k jeho otevření je třeba heslo";
+"show_unlock_info" = "Informace o modulu a zabezpečení";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Rozbaluji ZIP soubor…";
+"install_failed_reason" = "Instalace modulu selhala; důvod: %@.";
+"install_zip_successfull" = "Modul byl úspěšně nainstalován";
+"module_install_phase_committing" = "Čekejte prosím. Načítám moduly ze souboru.";
+"module_install_phase_downloading" = "Stáhnout";
+"module_install_phase_queued" = "Čekejte prosím...";
+"storage_space_warning" = "Nedostatek místa k uložení dat.";
+
+/* Android shared translations */
+"error_occurred" = "Vznikla chyba";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Memorování";
+"memorize_tab_reading" = "Čtení";
+"reading_progress_active_days" = "aktivní dny";
+"reading_progress_bible_heatmap" = "Přehled Bible";
+"reading_progress_calendar" = "Aktivita čtení";
+"reading_progress_chapters_read" = "přečtené kapitoly";
+"reading_progress_cycle" = "Cyklus %d";
+"reading_progress_history_for" = "Průběh čtení pro %1$@";
+"reading_progress_history_no_entries" = "Žádné záznamy čtení pro tento výběr.";
+"reading_progress_history_title" = "Historie čtení";
+"reading_progress_history_version_unknown" = "Neznámá verze";
+"reading_progress_new_cycle" = "Nový cyklus";
+"reading_progress_new_cycle_confirm" = "Zahájit nový cyklus čtení? Sledování vašeho pokroku začne znovu od začátku, přičemž data předchozího cyklu budou zachována.";
+"reading_progress_new_testament" = "Nový zákon";
+"reading_progress_next_cycle" = "Další cyklus";
+"reading_progress_old_testament" = "Starý zákon";
+"reading_progress_overall" = "%@%% Bible přečteno";
+"reading_progress_percent_read_scale" = "Procento\npřečtení";
+"reading_progress_previous_cycle" = "Předchozí cyklus";
+"reading_progress_read_count_scale" = "Počet\npřečtení";
+"reading_progress_title" = "Průběh čtení / zapamatování";
+
+/* Android shared translations */
+"conf_change_chapter" = "Změny kapitol";
+"conf_change_title" = "Nadpisy";
+"conf_replace_divinename" = "Nahradit božské jméno slovem Jahve (Yahweh)";
+"conf_save_playback_settings_to_bookmarks" = "Uložit nastavení předčítání do záložek";
+"conf_speak_auto_bookmark" = "Automatické vytváření záložek";
+"conf_speak_footnotes" = "Poznámky pod čarou";
+"conf_speak_sleep_timer" = "Nastavit čas uspání";
+"conf_speak_synchronize" = "Synchronizovat předčítaný text";
+"forward" = "Dopředu";
+"playback_settings_title" = "Nastavení předčítání";
+"rewind" = "Přetočit";
+"speak_bookmarks_menu_title" = "Předčítání podle záložek";
+"speak_next" = "Další";
+"speak_previous" = "Předchozí";
+"speak_settings_title" = "Obecné nastavení předčítání";
+
+/* Android shared translations */
+"sleep_timer_title" = "Čas uspání v minutách";
+"speak_beginning_of_passage" = "Vybrat začátek pasáže";
+"speak_ending_of_passage" = "Vybrat konec pasáže";
+"speak_ending_verse_must_be_later" = "Poslední verš musí být dále než první verš";
+"speak_verse_range_to_repeat" = "Vybrat rozsah veršů k zopakování";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Jazyk není dostupný.";
+
+/* Android shared translations */
+"description" = "Popis";
+"errorTitle" = "Vznikla chyba";
+"error_executing_search" = "Neplatný dotaz";
+"import_items" = "Importovat %@";
+"install_zip_module" = "Instalace modulu Bible";
+"my_document_content_type_label" = "Typ obsahu";
+"my_document_create_title" = "Vytvořit nový dokument";
+"my_document_import_document" = "Importovat soubory jako dokument";
+"my_document_new_name" = "Dokument %d";
+"my_document_new_page_name" = "Stránka %1$d";
+"my_document_rename_title" = "Přejmenovat dokument";
+"my_document_save_changes" = "Uložit změny?";
+"overwrite" = "Ano";
+"package_directory" = "Adresář balíků (Zip soubory)";
+"read" = "Číst";
+"reading_plan_set_current_day" = "Nastavit aktuální den…";
+"reading_plan_set_start_date" = "Nastavit datum začátku...";
+"search_all_words" = "Všechna slova";
+"search_any_word" = "Jakékoli slovo";
+"search_fts_query" = "Surová syntaxe dotazu";
+"search_phrase" = "Fráze";
+"search_words_group_prompt" = "Hledat verše";
+"show_notes" = "Zobrazit poznámky";
+"speak_book_changed" = "Kniha změněna.";
+"speak_chapter_changed" = "Kapitola";
+"success" = "Hotovo";
+"summary" = "Shrnutí";
+"undo" = "Zrušit";
+
+/* Android shared translations */
+"my_document_no_description" = "Bez popisu";
+
+/* Android shared translations */
+"error_key_not_in_document" = "V dokumentu nenalezeno";
+"my_document_cannot_delete_ai_documents" = "Dokumenty AI nelze smazat, pokud obsahují stránky. Nejprve smažte stránky.";
+"my_document_create_page_title" = "Nová stránka";
+"my_document_import_empty_selection" = "Nebyly vybrány žádné importovatelné soubory";
+"system_items1" = "Více";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Je potřeba stáhnout Bibli, obsahující Strongova čísla a také vytvořit k této Bibli index přes Hledat";
+
+/* Android shared translations */
+"add_model" = "Přidat model";
+"agent_already_running" = "Agent AI již běží. Počkejte nebo ho nejprve zastavte.";
+"agent_log_cancelled" = "Zrušeno";
+"agent_log_completed" = "Dokončeno";
+"agent_log_executing" = "Provádění: %@";
+"agent_log_idle" = "Asistent AI";
+"agent_log_iteration" = "Iterace %d";
+"agent_log_model_not_configured" = "Žádný model není nastaven";
+"agent_log_tool_failed" = "Nástroj %@ selhal";
+"agent_log_view_raw" = "Zobrazit nezpracovaný protokol LLM";
+"agent_max_iterations_title" = "Maximální počet iterací agenta";
+"agent_permission_mode_summary" = "Určuje, kdy je vyžadováno potvrzení uživatele před operacemi zápisu AI";
+"agent_permission_title" = "Oprávnění agenta";
+"ai_add_provider" = "Přidat poskytovatele";
+"ai_advanced_category" = "Pokročilé";
+"ai_agent_notification_running" = "Agent AI pracuje…";
+"ai_behavior_category" = "Chování";
+"ai_connection_settings" = "Nastavení připojení";
+"ai_disclaimer_approach" = "AndBible primárně používá AI ke zpracování textu z dokumentů, které máte nainstalované — komentářů, slovníků a dalších modulů — místo aby se spoléhalo na vlastní trénovací data modelu.";
+"ai_disclaimer_dialog_title" = "Nástroje AI — důležité informace";
+"ai_disclaimer_intro" = "Nástroje AI mohou výrazně obohatit vaše studium Bible a otevřít nové způsoby, jak se zapojit do Písma.";
+"ai_disclaimer_point1" = "AI může dělat chyby, včetně \"halucinací\" (sebejistě uvádět nepravdivé nebo vymyšlené informace). Nikdy slepě nepřijímejte její výstup.";
+"ai_disclaimer_point2" = "Odpovědi AI mohou odrážet předsudky z trénovacích dat, být záměrně zavádějící nebo prezentovat určitý teologický pohled, jako by byl neutrální nebo úplný.";
+"ai_disclaimer_point3" = "Jste zodpovědní za to, jak používáte obsah generovaný AI. Vždy ověřte výsledky podle Písma, než se na ně spoléháte.";
+"ai_disclaimer_point4" = "AndBible se snaží usnadnit ověření (např. přesné citace zdrojů v komentářích), ale konečná odpovědnost vždy leží na vás.";
+"ai_disclaimer_point5" = "\"Všechno zkoumejte; dobrého se držte.\" (1. Tesalonickým 5:21)";
+"ai_disclaimer_point6" = "Tyto nástroje nemají duši ani Ducha svatého. Jsou to nástroje pro zpracování textu, nikoli duchovní průvodci. Nejsou vhodné pro přímou přípravu kázání, pobožností ani jiného duchovního obsahu bez pečlivého lidského dohledu, modlitby a rozlišování.";
+"ai_disclaimer_point7" = "Při moudrém použití mohou prospět mnoha uživatelům a případům použití. Pokud si však nejste jisti, zda přijmout tato rizika, je také naprosto platnou volbou je nepoužívat.";
+"ai_disclaimer_point8" = "Vaše data jsou odesílána na servery vámi zvoleného poskytovatele AI. Použitím API klíče přijímáte podmínky a zásady ochrany soukromí tohoto poskytovatele. Lokálně hostované modely jsou možné, ale vyžadují větší technické znalosti a nemusí dosahovat tak dobrých výsledků jako komerční modely.";
+"ai_disclaimer_point9" = "Poskytovatelé AI účtují poplatky za používání API. Odhady nákladů zobrazené v AndBible jsou přibližné — vždy zkontrolujte fakturaci u svého poskytovatele pro skutečné poplatky.";
+"ai_disclaimer_responsibility" = "Jsou to však stále mocné nástroje — a s velkou mocí přichází velká odpovědnost. Mějte prosím na paměti následující.";
+"ai_disclaimer_warning_title" = "Důležité: Přečtěte před použitím nástrojů AI";
+"ai_doc_choose_page" = "Vybrat stránku dokumentu AI";
+"ai_document_filter_activity_title" = "Přístup AI k dokumentům";
+"ai_document_regenerate" = "Obnovit";
+"ai_hidden_status" = "skryto";
+"ai_hide_prompt" = "Skrýt";
+"ai_language_title" = "Jazyk odpovědí AI";
+"ai_models_category" = "Modely";
+"ai_models_summary_none" = "Žádné modely nejsou nakonfigurovány";
+"ai_provider_api_format" = "Formát API";
+"ai_provider_api_key" = "API klíč";
+"ai_provider_api_key_not_set" = "API klíč není nastaven";
+"ai_provider_delete_confirm" = "Smazat poskytovatele \"%1$@\"? Výzvy používající tohoto poskytovatele se vrátí na výchozí hodnotu.";
+"ai_provider_edit" = "Upravit";
+"ai_provider_endpoint" = "Koncový bod API";
+"ai_provider_endpoint_description" = "Pouze základní URL. AndBible automaticky přidá \"/chat/completions\" (formát OpenAI) nebo \"/messages\" (formát Anthropic). Seznamy modelů jsou načítány z \"/models\".";
+"ai_provider_name" = "Název poskytovatele";
+"ai_provider_saved" = "Poskytovatel uložen";
+"ai_provider_select_type" = "Vybrat typ poskytovatele";
+"ai_providers_models_category" = "Poskytovatelé a modely";
+"ai_providers_summary_none" = "Žádní poskytovatelé nejsou nakonfigurováni";
+"ai_regenerate_fresh_run" = "Nové spuštění (ignorovat předchozí výsledek)";
+"ai_regenerate_instructions_hint" = "Další pokyny (volitelné)";
+"ai_regenerate_keep_previous" = "Zachovat předchozí verzi";
+"ai_regenerate_prompt_not_found" = "Nelze obnovit: původní výzva nebyla nalezena. Možná byla smazána.";
+"ai_regenerate_title" = "Obnovit";
+"ai_settings" = "Nastavení AI";
+"ai_setup_description" = "AndBible může pomocí AI překládat text Bible, vysvětlovat verše, vytvářet souhrny a mnoho dalšího. Chcete-li začít, nakonfigurujte připojení k poskytovateli API kompatibilnímu s OpenAI.";
+"ai_setup_title" = "Konfigurovat AI";
+"ai_usage_category" = "Využití";
+"ask_model_before_run_title" = "Dotázat se na model před spuštěním";
+"auto_hide_agent_log_title" = "Po dokončení skrýt panel AI";
+"bookmarks_and_mynotes_title" = "Záložky a poznámky";
+"built_in_prompt" = "Vestavěný";
+"built_in_prompt_notice" = "Toto je vestavěný prompt a nelze ho upravovat. Použijte \"Kopírovat pro přizpůsobení\" a vytvořte upravitelnou kopii.";
+"category_none" = "Bez kategorie";
+"commentary_max_response_no_limit" = "Bez limitu";
+"commentary_max_response_title" = "Limit velikosti odpovědi komentáře";
+"copy_to_customize" = "Kopírovat pro přizpůsobení";
+"custom_agent_system_prompt_title" = "Systémový prompt agenta";
+"custom_system_prompt_custom" = "Vlastní";
+"custom_text_transform_system_prompt_title" = "Systémový prompt transformace textu";
+"default_prompt_ask_question" = "Položit otázku";
+"default_prompt_ask_question_desc" = "Zeptejte se na cokoli týkajícího se vybrané pasáže";
+"default_prompt_bookmark_annotate" = "Záložka s anotací";
+"default_prompt_bookmark_annotate_desc" = "Vytvoří záložku s poznámkou ke studiu vygenerovanou AI";
+"default_prompt_compare_translations" = "Porovnat překlady";
+"default_prompt_compare_translations_desc" = "Ukáže, jak různé nainstalované překlady vykreslují text";
+"default_prompt_cross_references" = "Křížové odkazy";
+"default_prompt_cross_references_desc" = "Vyhledá a vysvětlí související biblické pasáže";
+"default_prompt_custom" = "Vlastní výzva";
+"default_prompt_custom_desc" = "Spustí vlastní výzvu na vybrané pasáži";
+"default_prompt_custom_template" = "Proveďte uživatelovo zadání úkolu pro vybranou biblickou pasáž.";
+"default_prompt_enhance_note" = "Vylepšit poznámku";
+"default_prompt_enhance_note_desc" = "Zlepší gramatiku, srozumitelnost a čitelnost vaší poznámky";
+"default_prompt_explain_verses" = "Vysvětlit verše";
+"default_prompt_explain_verses_desc" = "Vysvětlí význam a kontext vybraných veršů";
+"default_prompt_explain_verses_studypad" = "Vysvětlit verše → Studijní složka";
+"default_prompt_explain_verses_studypad_desc" = "Vytvoří studijní složku s vysvětlením verš po verši a záložkami";
+"default_prompt_study_layout" = "Otevřít rozvržení pro studium";
+"default_prompt_study_layout_desc" = "Otevře okna komentáře a paralelního překladu pro studium";
+"default_prompt_summary" = "Shrnutí";
+"default_prompt_summary_desc" = "Vytvoří stručné shrnutí vybraného textu";
+"default_prompt_thematic_study" = "Tematická studie";
+"default_prompt_thematic_study_desc" = "Vytvoří studijní složku s pasážemi a poznámkami k ústřednímu tématu";
+"default_prompt_translate_to_language" = "Přeložit do %@";
+"default_prompt_translate_to_ui_language_desc" = "Přeloží text dokumentu do jazyka rozhraní aplikace";
+"default_prompt_word_study" = "Studium slov";
+"default_prompt_word_study_desc" = "Analyzuje původní hebrejská/řecká slova";
+"default_prompt_workspace_assistant" = "Asistent pracovní plochy";
+"default_prompt_workspace_assistant_desc" = "Správa oken: vytvářet, zavírat, přeuspořádat, měnit dokumenty";
+"delete_category" = "Smazat kategorii";
+"delete_category_and_prompts" = "Smazat kategorii a její prompty";
+"delete_category_keep_prompts" = "Přesunout prompty do kořene a smazat kategorii";
+"doc_type_addons" = "Doplňky";
+"easy_setup_enter_api_key" = "Zadejte svůj API klíč";
+"easy_setup_success" = "Připojení úspěšné!";
+"easy_setup_test_connection" = "Otestovat připojení";
+"easy_setup_testing" = "Testování…";
+"easy_setup_title" = "Rychlé nastavení";
+"help_bookmarks_text" = "Záložky vytvoříte označením části textu a klepnete na „Záložka\" ve vyskakovacím menu. Můžete si k nové záložce přidat vlastní poznámky tak, že klepnete na aktuálně zvýrazněný text v zobrazení Bible. V komentářích je také zvláštní dokument „Moje poznámky\", který vám umožní si prohlédnout poznámky ve zvláštním okně.";
+"help_memorize_text" = "Zobrazení Memorovat vám pomáhá naučit se pasáže nazpaměť. K procvičování použijte Rozmazání slov, Přeskupení slov, Psaní slov nebo Pořadí slov. Úspěšná cvičení automaticky označují verše jako zapamatované (toto lze zakázat).";
+"help_read_more_link" = "Přečtěte si více v příručce";
+"hide_category" = "Skrýt z akcí AI";
+"llm_actions" = "Akce AI";
+"llm_continue_iterations_message" = "Agent AI dosáhl svého limitu %1$d iterací bez dokončení. Pokračovat o dalších %2$d iterací?";
+"llm_continue_iterations_title" = "Pokračovat?";
+"llm_custom_input_price_title" = "Cena vstupu ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Zadejte ID modelu";
+"llm_custom_output_price_title" = "Cena výstupu ($/Mtoken)";
+"llm_error_max_iterations" = "Bylo dosaženo maximálního počtu iterací (%1$d) bez dokončení";
+"llm_error_unknown" = "Neznámá chyba";
+"llm_note_updated" = "Poznámka aktualizována";
+"llm_provider_custom" = "Vlastní (kompatibilní s OpenAI)";
+"llm_reset_usage_confirm_message" = "Tím se vymažou všechna kumulativní data o využití.";
+"llm_reset_usage_confirm_title" = "Resetovat data o využití?";
+"llm_reset_usage_title" = "Resetovat data o využití";
+"llm_usage_summary_default" = "Žádná data o využití";
+"llm_usage_summary_title" = "Využití tokenů";
+"manage_prompts" = "Správa výzev AI";
+"manage_tool_permissions_title" = "Oprávnění nástrojů";
+"model_pricing_summary" = "%1$@ vstup / %2$@ výstup za Mtoken";
+"model_select_provider" = "Poskytovatel";
+"model_set_default" = "Nastavit jako výchozí model";
+"move_category_down" = "Přesunout dolů";
+"move_category_up" = "Přesunout nahoru";
+"new_category" = "Nová kategorie";
+"new_category_name" = "Název kategorie";
+"new_prompt" = "Nový prompt";
+"permission_allow_all" = "Povolit vše";
+"permission_allow_all_session" = "Povolit všechny nástroje v této relaci";
+"permission_allow_for_session" = "Povolit pro tuto relaci";
+"permission_allow_once" = "Povolit jednou";
+"permission_always_allow_confirm" = "Opravdu chcete trvale povolit \"%1$@\"?";
+"permission_always_allow_confirm_reset_hint" = "Toto můžete resetovat v nastavení AI.";
+"permission_always_ask" = "Vždy se ptát";
+"permission_ask_once_per_run" = "Zeptat se jednou za spuštění";
+"permission_deny" = "Zamítnout";
+"permission_deny_all" = "Zamítnout vše";
+"permission_option_always_allow" = "Vždy povolit";
+"permission_option_always_deny" = "Vždy zamítnout";
+"permission_status_default" = "Zeptat se (výchozí)";
+"prompt_auto_include_commentaries" = "Automaticky zahrnout komentáře";
+"prompt_auto_include_documents" = "Automaticky zahrnout nainstalované dokumenty";
+"prompt_bible_only" = "Pouze biblické dokumenty";
+"prompt_category" = "Kategorie";
+"prompt_category_favorites" = "Oblíbené";
+"prompt_category_general" = "Obecné";
+"prompt_category_notes" = "Poznámky";
+"prompt_category_study" = "Studium";
+"prompt_category_uncategorized" = "Bez kategorie";
+"prompt_context_note_editor" = "Editor poznámek";
+"prompt_context_text_selection" = "Výběr textu";
+"prompt_context_verse_selection" = "Výběr verše";
+"prompt_context_window_menu" = "Nabídka okna";
+"prompt_context_workspace_menu" = "Nabídka pracovní plochy";
+"prompt_description" = "Popis";
+"prompt_edit_before_run" = "Upřesnit před spuštěním";
+"prompt_is_text_transformation" = "Transformace textu";
+"prompt_max_iterations_hint" = "Ponechte prázdné pro globální výchozí hodnotu";
+"prompt_max_iterations_unlimited" = "Neomezeno";
+"prompt_model_default" = "Výchozí";
+"prompt_name" = "Název";
+"prompt_no_document_creation" = "Bez vytváření dokumentů";
+"prompt_permission_mode" = "Režim oprávnění";
+"prompt_permission_mode_description" = "Určuje, kdy je vyžadováno potvrzení uživatele před tím, než AI provede operace zápisu. Nastavení jednotlivých nástrojů níže mohou toto přepsat pro konkrétní nástroje.";
+"prompt_permission_use_default" = "Použít výchozí";
+"prompt_show_in" = "Zobrazit v";
+"prompt_strict_context_matching" = "Mezipaměť závislá na kontextu";
+"prompt_tab_advanced" = "Pokročilé";
+"prompt_tab_permissions" = "Oprávnění";
+"prompt_template" = "Šablona promptu";
+"prompt_tool_permissions" = "Oprávnění nástrojů";
+"raw_log_delete_all" = "Smazat vše";
+"raw_log_error_indicator" = "Chyba";
+"raw_log_history_empty" = "Žádné uložené protokoly";
+"raw_log_history_title" = "Historie protokolu AI";
+"raw_log_item_tokens" = "%1$@ vstup / %2$@ výstup";
+"raw_log_older_1_month" = "Starší než 1 měsíc";
+"raw_log_older_1_week" = "Starší než 1 týden";
+"raw_log_older_3_months" = "Starší než 3 měsíce";
+"raw_log_retention_summary_disabled" = "Zakázáno (ponechat vše)";
+"raw_log_retention_title" = "Automatické mazání starých protokolů";
+"reset_all_ai_settings" = "Resetovat všechna nastavení AI";
+"reset_all_ai_settings_confirm_message" = "Tím se vymaže API klíč, poskytovatel, koncový bod, model a resetují se všechny prompty na výchozí hodnoty. Pokračovat?";
+"reset_all_ai_settings_confirm_title" = "Resetovat všechna nastavení AI?";
+"reset_all_permissions" = "Resetovat vše";
+"reset_to_default" = "Resetovat na výchozí";
+"save_and_exit" = "Uložit";
+"select_llm_prompt" = "Vybrat akci AI";
+"select_model_before_run_title" = "Vybrat model";
+"set_default_model_for_prompt" = "Nastavit jako výchozí model pro tento prompt";
+"show_category" = "Zobrazit v akcích AI";
+"specify_before_run_title" = "Zadejte úkol";
+"tool_add_bookmark_note" = "Přidat poznámku k záložce";
+"tool_add_label_to_bookmark" = "Přidat štítek k záložce";
+"tool_add_my_document_page" = "Přidat stránku do Mé dokumenty";
+"tool_add_study_pad_entry" = "Přidat položku do studijní složky";
+"tool_category_bible_search" = "Bible a vyhledávání";
+"tool_category_bookmarks" = "Záložky";
+"tool_category_general_books" = "Obecné knihy";
+"tool_category_labels" = "Štítky";
+"tool_category_my_documents" = "Moje dokumenty";
+"tool_category_study_pads" = "Studijní složky";
+"tool_category_windows" = "Okna";
+"tool_create_bookmark" = "Vytvořit záložku";
+"tool_create_label" = "Vytvořit štítek";
+"tool_create_my_document" = "Vytvořit Můj dokument";
+"tool_create_study_pad" = "Vytvořit studijní složku";
+"tool_create_window" = "Vytvořit okno";
+"tool_delete_bookmark" = "Smazat záložku";
+"tool_delete_label" = "Smazat štítek";
+"tool_delete_my_document_page" = "Smazat stránku Mé dokumenty";
+"tool_edit_my_document_page" = "Upravit stránku Mé dokumenty";
+"tool_finish_with_my_document_page" = "Otevřít stránku Mé dokumenty";
+"tool_finish_with_study_pad" = "Otevřít studijní složku";
+"tool_finish_without_document" = "Dokončit bez dokumentu";
+"tool_get_all_labels" = "Zobrazit všechny štítky";
+"tool_get_bookmarks_for_verse" = "Získat záložky pro verš";
+"tool_get_bookmarks_with_label" = "Získat záložky se štítkem";
+"tool_get_commentaries" = "Číst komentáře";
+"tool_get_dictionary_entry" = "Vyhledat položku ve slovníku";
+"tool_get_genbook_content" = "Číst obsah obecné knihy";
+"tool_get_genbook_keys" = "Zobrazit klíče obecné knihy";
+"tool_get_installed_documents" = "Zobrazit nainstalované dokumenty";
+"tool_get_my_document_pages" = "Zobrazit stránky Mé dokumenty";
+"tool_get_my_documents" = "Zobrazit Mé dokumenty";
+"tool_get_study_pad_content" = "Číst obsah studijní složky";
+"tool_get_verse_content" = "Číst obsah verše";
+"tool_get_windows" = "Zobrazit okna";
+"tool_manage_window" = "Spravovat okno";
+"tool_remove_label_from_bookmark" = "Odebrat štítek ze záložky";
+"tool_search_bible" = "Hledat v bibli";
+"tool_search_by_strongs" = "Hledat podle Strongova čísla";
+"tool_search_study_pads" = "Hledat ve studijních složkách";
+"tool_set_document_title" = "Nastavit název dokumentu";
+"tool_set_window_document" = "Nastavit dokument okna";
+"tool_update_bookmark_note" = "Aktualizovat poznámku záložky";
+"tool_update_studypad_text_entry" = "Aktualizovat textovou položku studijní složky";
+"verse_tip" = "Pasáž textu označíte přidržením textu na delší dobu.";
+"watch_tutorial_video" = "Instruktážní video (Angličtina)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Obnovování dokumentu AI…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Přijímám a přebírám plnou odpovědnost";
+"ai_disclaimer_accept_title" = "Přijmout prohlášení o AI";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Nastavení připojení AI a výzev";
+"prefs_features_cat" = "Funkce";

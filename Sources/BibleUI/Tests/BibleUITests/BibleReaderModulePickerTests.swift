@@ -196,11 +196,11 @@ final class BibleReaderModulePickerTests: XCTestCase {
     }
 
     /**
-     Verifies the picker exposes Android document management actions without inventing unlock.
+     Verifies the picker exposes Android document management actions including functional unlock.
 
      Android shows About, Delete, and Delete Index for installed documents. iOS must reuse the real
-     module management services for those actions, while continuing to hide Unlock until there is a
-     cipher-key coordinator that can actually persist and apply encrypted module keys.
+     module management services for those actions and expose Unlock only for encrypted rows now that
+     the picker routes cipher keys through `SwordManager`.
      */
     func testBibleReaderModulePickerRowActionsUseAndroidDocumentManagementContract() {
         let plainModule = ModuleInfo(
@@ -219,12 +219,44 @@ final class BibleReaderModulePickerTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            BibleReaderModulePicker.rowActions(for: plainModule),
+            BibleReaderModulePicker.rowActions(
+                for: plainModule,
+                installedModules: [plainModule, lockedModule]
+            ),
             [.about, .uninstall, .deleteIndex]
         )
         XCTAssertEqual(
-            BibleReaderModulePicker.rowActions(for: lockedModule),
-            [.about, .uninstall, .deleteIndex]
+            BibleReaderModulePicker.rowActions(
+                for: lockedModule,
+                installedModules: [plainModule, lockedModule]
+            ),
+            [.about, .uninstall, .deleteIndex, .unlock]
+        )
+    }
+
+    /**
+     Verifies the installed-document picker hides removal for the final Bible.
+
+     - Setup: Supplies one Bible as the selected row and the complete installed inventory.
+     - Expected result: The picker retains About and Delete Index without exposing Uninstall.
+     - Failure meaning: The picker can present a destructive action that Android and the shared
+       repository invariant intentionally suppress.
+     - Side effects: None.
+     */
+    func testBibleReaderModulePickerHidesUninstallForFinalInstalledBible() {
+        let onlyBible = ModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en"
+        )
+
+        XCTAssertEqual(
+            BibleReaderModulePicker.rowActions(
+                for: onlyBible,
+                installedModules: [onlyBible]
+            ),
+            [.about, .deleteIndex]
         )
     }
 
@@ -265,7 +297,10 @@ final class BibleReaderModulePickerTests: XCTestCase {
         let source = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
         )
-        let selectionSource = try BibleUITestSourceLocator.extractFunction(named: "select", from: source)
+        let selectionSource = try BibleUITestSourceLocator.extractFunction(
+            named: "selectUnlockedModule",
+            from: source
+        )
 
         XCTAssertTrue(selectionSource.contains("case .map:"))
         XCTAssertTrue(selectionSource.contains("controller.switchMapDocument(to: module.name)"))
@@ -365,6 +400,88 @@ final class BibleReaderModulePickerTests: XCTestCase {
         XCTAssertFalse(pickerSource.contains(".sheet(item: $selectedModuleDetails)"))
         XCTAssertFalse(pickerSource.contains("NavigationStack {\n                ModuleBrowserModuleDetailsView"))
         XCTAssertFalse(pickerSource.contains("sourceName: String(localized: \"installed\""))
+    }
+
+    /**
+     Verifies locked-row selection is gated by real manager-level cipher verification.
+
+     A failure means a locked document can be selected without a key, or the picker has regressed to
+     the obsolete module-level setter that is not authoritative in libsword.
+     */
+    func testBibleReaderModulePickerGatesLockedSelectionThroughSwordManager() throws {
+        let locked = ModuleInfo(
+            name: "LOCKED",
+            description: "Locked Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: false
+        )
+        let unlocked = ModuleInfo(
+            name: "OPEN",
+            description: "Open Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: true
+        )
+
+        XCTAssertTrue(BibleReaderModulePicker.requiresUnlock(locked))
+        XCTAssertFalse(BibleReaderModulePicker.requiresUnlock(unlocked))
+
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
+        )
+        let selectionSource = try BibleUITestSourceLocator.extractFunction(named: "select", from: source)
+        let unlockSource = try BibleUITestSourceLocator.extractFunction(named: "attemptUnlock", from: source)
+
+        XCTAssertTrue(selectionSource.contains("Self.requiresUnlock(module)"))
+        XCTAssertTrue(selectionSource.contains("beginUnlock(module)"))
+        XCTAssertTrue(unlockSource.contains("controller.swordManager?.unlockModule"))
+        XCTAssertTrue(unlockSource.contains("controller.refreshInstalledModules()"))
+        XCTAssertFalse(unlockSource.contains("setCipherKey"))
+    }
+
+    /**
+     Verifies chooser backup candidates use Android's language-first deterministic order.
+
+     A failure means the backup sheet can reorder between presentations or diverge from Android's
+     installed-document selection list.
+     */
+    func testBibleReaderModulePickerSortsBackupCandidatesLikeAndroid() {
+        let modules = [
+            ModuleInfo(name: "ZZZ", description: "Beta", category: .bible, language: "fr"),
+            ModuleInfo(name: "BBB", description: "Alpha", category: .bible, language: "en"),
+            ModuleInfo(name: "AAA", description: "Alpha", category: .commentary, language: "en"),
+        ]
+
+        XCTAssertEqual(
+            BibleReaderModulePicker.sortedBackupModules(modules).map(\.name),
+            ["AAA", "BBB", "ZZZ"]
+        )
+    }
+
+    /**
+     Guards the chooser's Android backup and local-file installation routes end to end.
+
+     Private SwiftUI presentation state is source-guarded here: both overflow rows must exist, module
+     backup must use the shared `.abmd.zip` service, and local files must pass preflight before the
+     policy-aware importer refreshes controller inventory.
+     */
+    func testBibleReaderModulePickerExposesBackupAndInstallZipWorkflows() throws {
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
+        )
+
+        XCTAssertTrue(source.contains("modulePickerBackupDocumentsButton"))
+        XCTAssertTrue(source.contains("modulePickerInstallZipButton"))
+        XCTAssertTrue(source.contains("AndroidModuleBackupExportSheet("))
+        XCTAssertTrue(source.contains("AndroidModuleBackupService().exportArchive"))
+        XCTAssertTrue(source.contains(".fileExporter("))
+        XCTAssertTrue(source.contains(".fileImporter("))
+        XCTAssertTrue(source.contains("service.preflightDocument(request)"))
+        XCTAssertTrue(source.contains("moduleOverwritePolicy: overwritePolicy"))
+        XCTAssertTrue(source.contains("controller.refreshInstalledModules()"))
     }
 
 }

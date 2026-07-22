@@ -7,22 +7,28 @@ import UIKit
 
 extension AndBibleUITests {
     /**
-     Verifies reader menu About still opens and Settings routes Android shortcut rows.
+     Verifies reader administration actions and Settings route Android shortcut rows.
      *
      * Package tests own the full Application Preferences row catalog. This UI smoke keeps the live
-     * route contract: About and Label Settings remain reachable from the reader menu, Settings is
-     * pushed from the reader action surface, and the Global text options row opens root-scoped Text
-     * Display settings rather than workspace/window options.
+     * route contract: About, Label Settings, and AI Settings remain reachable from the reader menu;
+     * AI setup is blocked by Android's explicit disclaimer acceptance; Application Preferences
+     * opens the same AI screen; and Global text options opens root-scoped Text Display settings.
      *
      * - Side effects:
      *   - launches the app with deterministic in-memory persistence
      *   - opens and dismisses About from the reader menu
      *   - opens and dismisses Label Manager from the reader menu's Label Settings action
+     *   - opens AI Settings directly from the reader drawer and cancels both protected entry points
+     *   - explicitly accepts once, then verifies Quick Setup resumes and both actions bypass the gate
      *   - pushes Settings from the reader action surface
+     *   - opens the shared AI Settings destination from Application Preferences
      *   - activates the production Global text options row
      * - Failure modes:
      *   - fails if About no longer opens from the reader menu or cannot return to the reader shell
      *   - fails if Label Settings cannot reach `LabelManagerView` readiness exports
+     *   - fails if AI Settings is absent from the drawer or cancellation counts as acceptance
+     *   - fails if explicit acceptance does not resume and persist for the protected action
+     *   - fails if disclaimer copy renders localization identifiers instead of Android's text
      *   - fails if Settings still presents as a sheet instead of a reader destination
      *   - fails if the Android shortcut rows disappear from the Settings state
      *   - fails if Global text options opens any scope other than `global`
@@ -60,14 +66,101 @@ extension AndBibleUITests {
             "Expected Label Manager dismissal to return to the reader shell."
         )
 
+        tapReaderAction("readerOpenAISettingsAction", in: app, timeout: 20)
+        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 20).exists)
+        waitForReaderRenderedContentState(containing: "readerDestination=aiSettings", in: app, timeout: 10)
+        tapElementReliably(requireElement("aiQuickSetupButton", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(requireElement("aiDisclaimerScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiDisclaimerAcceptButton", in: app, timeout: 10).exists)
+        let localizedDisclaimerPoint = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "AI can make mistakes")
+        ).firstMatch
+        XCTAssertTrue(
+            localizedDisclaimerPoint.waitForExistence(timeout: 10),
+            "Expected Android's localized disclaimer point instead of a raw resource key."
+        )
+        XCTAssertFalse(app.staticTexts["ai_disclaimer_point1"].exists)
+        tapElementReliably(requireElement("aiDisclaimerCancelButton", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 10).exists)
+
+        tapElementReliably(requireElement("aiAddProviderLink", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(
+            requireElement("aiDisclaimerScreen", in: app, timeout: 10).exists,
+            "Add Provider must use Android's same explicit disclaimer gate."
+        )
+        tapElementReliably(requireElement("aiDisclaimerCancelButton", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 10).exists)
+
+        tapElementReliably(requireElement("aiQuickSetupButton", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(
+            requireElement("aiDisclaimerScreen", in: app, timeout: 10).exists,
+            "Cancelling the disclaimer must not count as acceptance."
+        )
+        let disclaimerScreen = requireElement("aiDisclaimerScreen", in: app, timeout: 10)
+        let disclaimerAcceptButton = requireElement("aiDisclaimerAcceptButton", in: app, timeout: 10)
+        for _ in 0..<8 where !disclaimerAcceptButton.isHittable {
+            disclaimerScreen.swipeUp()
+        }
+        XCTAssertTrue(
+            disclaimerAcceptButton.isHittable,
+            "Expected the full Android disclaimer to scroll to its explicit acceptance action."
+        )
+        tapElementReliably(disclaimerAcceptButton, timeout: 10)
+        XCTAssertTrue(
+            requireElement("aiQuickSetupSaveButton", in: app, timeout: 10).exists,
+            "Explicit acceptance must resume the exact Quick Setup action."
+        )
+        tapElementReliably(requireElement("aiQuickSetupCancelButton", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 10).exists)
+
+        tapElementReliably(requireElement("aiQuickSetupButton", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(
+            requireElement("aiQuickSetupSaveButton", in: app, timeout: 10).exists,
+            "Persisted acceptance must bypass the disclaimer on later protected actions."
+        )
+        XCTAssertFalse(unresolvedElement("aiDisclaimerScreen", in: app).exists)
+        tapElementReliably(requireElement("aiQuickSetupCancelButton", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 10).exists)
+
+        tapElementReliably(requireElement("aiAddProviderLink", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(
+            requireElement("aiProviderSaveButton", in: app, timeout: 10).exists,
+            "Persisted acceptance must resume Add Provider without another disclaimer."
+        )
+        XCTAssertFalse(unresolvedElement("aiDisclaimerScreen", in: app).exists)
+        tapElementReliably(requireElement("aiProviderCloseButton", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 10).exists)
+
+        let aiSettingsBackButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(
+            aiSettingsBackButton.waitForExistence(timeout: 10),
+            "Expected direct AI Settings to expose reader-stack back navigation."
+        )
+        tapElementReliably(aiSettingsBackButton, timeout: 10)
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected AI Settings back navigation to return to the reader shell."
+        )
+
         openSettings(in: app)
         XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
         waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=settings", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsGlobalTextOptionsLink", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsSyncLink", in: app, timeout: 10)
+        waitForSettingsState(containing: "settingsAISettingsLink", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsReadingProgressLink", in: app, timeout: 10)
         waitForSettingsState(containing: "adminFlows=readerActions", in: app, timeout: 10)
+
+        tapSettingsElement("settingsAISettingsLink", in: app, timeout: 20)
+        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 20).exists)
+        let nestedAISettingsBackButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(
+            nestedAISettingsBackButton.waitForExistence(timeout: 10),
+            "Expected nested AI Settings to return to Application Preferences."
+        )
+        tapElementReliably(nestedAISettingsBackButton, timeout: 10)
+        XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
 
         tapSettingsElement("settingsGlobalTextOptionsLink", in: app, timeout: 20)
         XCTAssertTrue(requireElement("textDisplaySettingsScreen", in: app, timeout: 20).exists)
@@ -453,7 +546,9 @@ extension AndBibleUITests {
      * rerender the seeded result list after each option change. The same live Search route then
      * enters a deterministic fixture query, verifies the live translation picker Cancel,
      * outside-dismiss, and empty-OK paths, commits a second translation through the live picker,
-     * verifies grouped totals, and selects a result so reader-navigation handoff remains covered
+     * verifies grouped unique-verse and translation-hit totals plus both visible module rows, and
+     * selects the secondary translation result so the
+     * reader-navigation handoff remains covered
      * without a second cold app launch.
      *
      * - Side effects:
@@ -462,8 +557,8 @@ extension AndBibleUITests {
      *   - switches Search scope between NT and OT
      *   - switches Search word mode from all words to phrase and then to any word
      *   - enters a deterministic fixture query, exercises negative Search translation-picker
-     *     dialog paths, commits the seeded two-module translation selection, and taps a grouped
-     *     result row
+     *     dialog paths, commits the seeded two-module translation selection, and taps its visible
+     *     AATESTWEB result row
      * - Failure modes:
      *   - fails if Search regresses to sheet/modal presentation or drops the launch-seeded query
      *   - fails if visible Search option controls are not accessible
@@ -472,7 +567,8 @@ extension AndBibleUITests {
      *   - fails if live translation-picker Cancel, outside-dismiss, or empty OK commits draft
      *     changes instead of preserving the previous selection
      *   - fails if the translation picker cannot commit a second module with KJV first
-     *   - fails if grouped totals collapse to single-translation results
+     *   - fails if matching translations are not grouped into one Android-compatible unique verse
+     *     while retaining accessible result rows for both translation hits
      *   - fails if selecting the final result row does not navigate the reader to the selected
      *     passage
      */
@@ -579,15 +675,18 @@ extension AndBibleUITests {
             app.staticTexts["KJV, AATESTWEB"].waitForExistence(timeout: 5),
             "Expected the Search translation button to show Android's selected abbreviation list."
         )
-        waitForSearchState(containing: "groupedTotal=2", in: app, timeout: 20)
+        waitForSearchState(containing: "groupedTotal=1", in: app, timeout: 20)
+        waitForSearchState(containing: "groupedHitTotal=2", in: app, timeout: 20)
         waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
         waitForSearchState(containing: "AATESTWEB:1", in: app, timeout: 20)
-        waitForSearchResultCount(atLeast: 2, in: app, timeout: 20)
+        waitForSearchResultCount(atLeast: 1, in: app, timeout: 20)
 
         let groupedResultIdentifier = "searchResultRow::Genesis_1_2"
+        let secondaryModuleResultIdentifier = "searchResultModuleRow::Genesis_1_2::AATESTWEB"
         waitForSearchResultRow(groupedResultIdentifier, in: app, shouldExist: true, timeout: 20)
+        waitForSearchResultRow(secondaryModuleResultIdentifier, in: app, shouldExist: true, timeout: 20)
         let updatedReference = tapSearchResultRowAndWaitForReaderReferenceChange(
-            groupedResultIdentifier,
+            secondaryModuleResultIdentifier,
             from: initialReference,
             in: app,
             timeout: 20

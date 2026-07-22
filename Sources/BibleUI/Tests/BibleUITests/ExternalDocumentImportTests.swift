@@ -1,6 +1,7 @@
 import XCTest
 import BibleCore
 @testable import BibleUI
+import SwordKit
 import UniformTypeIdentifiers
 
 /**
@@ -93,8 +94,7 @@ private final class ExternalDocumentImportProbe: @unchecked Sendable {
         lock.unlock()
         return AndroidModuleBackupRestoreReport(
             installedModuleNames: ["ESV2001", "ESV2011"],
-            installedEntryCount: 14,
-            skippedUnsupportedEntryPaths: []
+            installedEntryCount: 14
         )
     }
 
@@ -155,6 +155,157 @@ private final class ExternalDocumentImportProbe: @unchecked Sendable {
             androidModuleBackupDetectionURLs,
             epubArchiveDetectionCount
         )
+    }
+}
+
+/** Thread-safe recorder for Android raw-family external document routes. */
+private final class ExternalAndroidFamilyImportProbe: @unchecked Sendable {
+    /// One recorded raw-family installer invocation.
+    struct Call: Equatable {
+        /// Source URL selected by the importer.
+        let url: URL
+
+        /// Provider-visible basename forwarded to transactional restore.
+        let displayName: String
+
+        /// Android registrar selected by the routing matrix.
+        let family: AndroidModuleBackupExternalFileFamily
+
+        /// Explicit overwrite authorization supplied by the caller.
+        let overwritePolicy: LocalSwordZipOverwritePolicy
+    }
+
+    /// Lock protecting the call log across `@Sendable` installer closures.
+    private let lock = NSLock()
+
+    /// Ordered raw-family installer calls.
+    private var calls: [Call] = []
+
+    /**
+     Records one raw-family installation and returns deterministic initials.
+
+     - Parameters:
+       - url: Routed source URL.
+       - displayName: Sanitized provider basename.
+       - family: Selected Android family.
+       - overwritePolicy: Caller-authorized conflict behavior.
+     - Returns: Stable initials used by result assertions.
+     - Side effects: Appends one call under `lock`.
+     - Failure modes: This test double does not throw.
+     */
+    func install(
+        _ url: URL,
+        displayName: String,
+        family: AndroidModuleBackupExternalFileFamily,
+        overwritePolicy: LocalSwordZipOverwritePolicy
+    ) throws -> String {
+        lock.lock()
+        calls.append(Call(
+            url: url,
+            displayName: displayName,
+            family: family,
+            overwritePolicy: overwritePolicy
+        ))
+        lock.unlock()
+        return displayName
+    }
+
+    /** Returns an ordered snapshot of every recorded raw-family call. */
+    func snapshot() -> [Call] {
+        lock.lock()
+        defer { lock.unlock() }
+        return calls
+    }
+}
+
+/**
+ Thread-safe probe for ordinary SWORD ZIP preflight and policy-aware installation.
+
+ The shared import service invokes these closures from `@Sendable` contexts. This probe records the
+ read-only inspection and subsequent explicit overwrite authorization without relying on mutable
+ closure captures.
+ */
+private final class ExternalDocumentModulePolicyProbe: @unchecked Sendable {
+    /// Lock protecting all recorded calls and progress values.
+    private let lock = NSLock()
+
+    /// Inspection returned for every candidate archive.
+    private let inspection: LocalSwordZipInspection
+
+    /// URLs inspected before installation.
+    private var inspectedURLs: [URL] = []
+
+    /// Policy-aware installer calls.
+    private var installCalls: [(url: URL, policy: LocalSwordZipOverwritePolicy)] = []
+
+    /// Structured progress values sent through the installer callback.
+    private var emittedProgress: [ModuleInstallProgress] = []
+
+    /**
+     Creates a probe with a deterministic inspection result.
+
+     - Parameter inspection: Read-only result returned by `inspect(_:)`.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    init(inspection: LocalSwordZipInspection) {
+        self.inspection = inspection
+    }
+
+    /** Records one read-only archive inspection. */
+    func inspect(_ url: URL) throws -> LocalSwordZipInspection {
+        lock.lock()
+        inspectedURLs.append(url)
+        lock.unlock()
+        return inspection
+    }
+
+    /**
+     Records explicit overwrite authorization and emits representative durable phases.
+
+     - Parameters:
+       - url: Archive URL passed by the shared import service.
+       - policy: Explicit overwrite policy selected by the caller.
+       - progressState: Optional phase observer forwarded by the caller.
+     - Returns: Stable module initials for result assertions.
+     - Side effects: Records the call and synchronously emits extraction through completion.
+     - Failure modes: This test double does not throw.
+     */
+    func install(
+        _ url: URL,
+        policy: LocalSwordZipOverwritePolicy,
+        progressState: (@Sendable (ModuleInstallProgress) -> Void)?
+    ) throws -> String {
+        lock.lock()
+        installCalls.append((url, policy))
+        lock.unlock()
+        let phases = [
+            ModuleInstallProgress(phase: .extracting, fraction: 0.5),
+            ModuleInstallProgress(phase: .committing),
+            ModuleInstallProgress(phase: .complete, fraction: 1),
+        ]
+        for progress in phases {
+            progressState?(progress)
+        }
+        return "FinRK"
+    }
+
+    /** Records one progress event received by the caller. */
+    func recordProgress(_ progress: ModuleInstallProgress) {
+        lock.lock()
+        emittedProgress.append(progress)
+        lock.unlock()
+    }
+
+    /** Returns coherent snapshots of all recorded inspection, install, and progress calls. */
+    func snapshot() -> (
+        inspectedURLs: [URL],
+        installCalls: [(url: URL, policy: LocalSwordZipOverwritePolicy)],
+        emittedProgress: [ModuleInstallProgress]
+    ) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (inspectedURLs, installCalls, emittedProgress)
     }
 }
 
@@ -238,35 +389,100 @@ final class ExternalDocumentImportTests: XCTestCase {
     }
 
     /**
-     Android module backups opened from Files use the Android backup restore path, not generic ZIP.
+     Ordinary SWORD ZIP preflight reports exact conflicts without invoking the installer.
 
-     Android's install activity accepts document/module backup ZIPs through the same external-open
-     surface as SWORD ZIPs, but the backup payload contains `AndBibleBackupManifest.json` and should
-     be restored through the Android module-backup service so manifest validation, unsupported
-     Android-only entries, cache invalidation, and overwrite handling remain centralized. Android's
-     success surface is the generic InstallZip success toast, so feedback must not enumerate every
-     module from a large backup.
-
-     Failure means `.abmd.zip` files can be routed into the plain SWORD ZIP installer, producing
-     misleading decompression errors and bypassing Android backup semantics, or iOS has drifted back
-     to a blocking module-list presentation that Android does not show.
+     Failure means a Files or Settings import can overwrite module data before the user sees the
+     same destination list Android presents for confirmation.
      */
-    func testExternalDocumentImportAndroidModuleBackupUsesBackupInstaller() {
+    func testExternalDocumentImportPreflightRequiresConfirmationForExactModuleConflicts() {
+        let inspection = LocalSwordZipInspection(
+            moduleNames: ["FinRK"],
+            conflictingPaths: [
+                "mods.d/finrk.conf",
+                "modules/texts/ztext/finrk/nt.bzs",
+            ],
+            installableEntryCount: 4,
+            estimatedExpandedBytes: 12_345,
+            archiveSHA256: String(repeating: "a", count: 64)
+        )
+        let probe = ExternalDocumentModulePolicyProbe(inspection: inspection)
+        let service = ExternalDocumentImportService(
+            moduleInspector: { try probe.inspect($0) },
+            moduleInstallerWithPolicy: { url, policy, progressState in
+                try probe.install(url, policy: policy, progressState: progressState)
+            },
+            androidModuleBackupDetector: { _ in false },
+            epubArchiveDetector: { _ in false }
+        )
+        let request = ExternalDocumentImportRequest(url: URL(fileURLWithPath: "/tmp/FinRK.zip"))
+
+        XCTAssertEqual(service.preflightDocument(request), .moduleOverwriteRequired(inspection))
+        let snapshot = probe.snapshot()
+        XCTAssertEqual(snapshot.inspectedURLs, [request.url])
+        XCTAssertTrue(snapshot.installCalls.isEmpty)
+    }
+
+    /**
+     Confirmed local replacement forwards explicit authorization and structured progress.
+
+     Failure means the UI confirmation can be discarded before reaching storage or durable phases
+     can be lost between the repository and the importing surface.
+     */
+    func testExternalDocumentImportConfirmedReplacementForwardsPolicyAndProgress() {
+        let inspection = LocalSwordZipInspection(
+            moduleNames: ["FinRK"],
+            conflictingPaths: ["mods.d/finrk.conf"],
+            installableEntryCount: 2,
+            estimatedExpandedBytes: 512,
+            archiveSHA256: String(repeating: "b", count: 64)
+        )
+        let probe = ExternalDocumentModulePolicyProbe(inspection: inspection)
+        let service = ExternalDocumentImportService(
+            moduleInspector: { try probe.inspect($0) },
+            moduleInstallerWithPolicy: { url, policy, progressState in
+                try probe.install(url, policy: policy, progressState: progressState)
+            },
+            androidModuleBackupDetector: { _ in false },
+            epubArchiveDetector: { _ in false }
+        )
+        let request = ExternalDocumentImportRequest(url: URL(fileURLWithPath: "/tmp/FinRK.zip"))
+
+        let result = service.importDocument(
+            request,
+            moduleOverwritePolicy: .replaceExisting(inspection.overwriteAuthorization),
+            progressState: { probe.recordProgress($0) }
+        )
+
+        XCTAssertEqual(result, .installedModule(name: "FinRK"))
+        let snapshot = probe.snapshot()
+        XCTAssertEqual(snapshot.installCalls.count, 1)
+        XCTAssertEqual(snapshot.installCalls.first?.url, request.url)
+        XCTAssertEqual(
+            snapshot.installCalls.first?.policy,
+            .replaceExisting(inspection.overwriteAuthorization)
+        )
+        XCTAssertEqual(snapshot.emittedProgress.map(\.phase), [.extracting, .committing, .complete])
+    }
+
+    /**
+     An Android backup filename cannot replace structural archive recognition.
+
+     The unreadable fixture has the conventional `.abmd.zip` suffix but no recognized module
+     structure. Android routes by opened ZIP content, so the generic archive installer must retain
+     ownership and the backup installer must remain untouched.
+     */
+    func testExternalDocumentImportBackupSuffixCannotReplaceArchiveRecognition() {
         let probe = ExternalDocumentImportProbe()
         let service = makeExternalDocumentImportService(probe: probe)
         let url = URL(fileURLWithPath: "/tmp/ESV.abmd.zip")
 
         let result = service.importDocument(at: url)
 
-        XCTAssertEqual(
-            result,
-            .installedAndroidModuleBackup(moduleNames: ["ESV2001", "ESV2011"], installedEntryCount: 14)
-        )
+        XCTAssertEqual(result, .installedModule(name: "FinRK"))
         XCTAssertEqual(result.feedbackMessage, "Module was installed successfully")
         XCTAssertTrue(result.usesAndroidInstallToastFeedback)
-        XCTAssertFalse(result.feedbackMessage.contains("ESV2001"))
-        XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [url])
-        XCTAssertEqual(probe.snapshot().moduleURLs, [])
+        XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [])
+        XCTAssertEqual(probe.snapshot().moduleURLs, [url])
         XCTAssertEqual(probe.snapshot().epubURLs, [])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
     }
@@ -275,9 +491,9 @@ final class ExternalDocumentImportTests: XCTestCase {
      Android module-backup success presentation follows InstallZip instead of listing modules.
 
      Android's `InstallZip` posts the generic `install_zip_successfull` toast after a successful
-     module or document backup install. The iOS restore report can contain many module names and
-     skipped Android-only entries, but the completion copy must remain generic so large Android
-     backups do not produce a blocking, scroll-sized module list.
+     module or document backup install. The iOS restore report can contain many module names, but
+     the completion copy must remain generic so large Android backups do not produce a blocking,
+     scroll-sized module list.
 
      Failure means the Settings restore path can drift from Android's visible behavior even when
      the underlying restore report is correct.
@@ -285,28 +501,22 @@ final class ExternalDocumentImportTests: XCTestCase {
     func testAndroidModuleBackupPresentationUsesGenericInstallSuccessCopy() {
         let report = AndroidModuleBackupRestoreReport(
             installedModuleNames: ["BDBT", "HebrewGreek", "StrongsHebrew"],
-            installedEntryCount: 124,
-            skippedUnsupportedEntryPaths: ["mybible/example.SQLite3"]
+            installedEntryCount: 124
         )
 
         let message = AndroidModuleBackupPresentation.localizedRestoreSuccessMessage(for: report)
 
         XCTAssertEqual(message, "Module was installed successfully")
         XCTAssertFalse(message.contains("BDBT"))
-        XCTAssertFalse(message.contains("mybible"))
     }
 
     /**
-     Provider display names keep Android module-backup routing when URLs have generic ZIP names.
+     Provider display names cannot promote an arbitrary ZIP into Android backup restore.
 
-     Some document providers hand iOS a temporary URL while preserving the real filename separately.
-     The importer must use the same normalized display name shown in the confirmation prompt when
-     deciding whether a file is Android's `.abmd.zip` module backup.
-
-     Failure means Files/Mail providers can show `ESV.abmd.zip` to the user but still route the
-     confirmed import into the generic ZIP installer.
+     Some providers preserve an `.abmd.zip` display name beside an unreadable or unrelated temporary
+     URL. The name remains presentation metadata; only archive structure may select backup restore.
      */
-    func testExternalDocumentImportAndroidModuleBackupUsesProviderDisplayName() {
+    func testExternalDocumentImportProviderBackupSuffixCannotReplaceArchiveRecognition() {
         let probe = ExternalDocumentImportProbe()
         let service = makeExternalDocumentImportService(probe: probe)
         let url = URL(fileURLWithPath: "/tmp/provider-temporary.zip")
@@ -317,12 +527,9 @@ final class ExternalDocumentImportTests: XCTestCase {
 
         let result = service.importDocument(request)
 
-        XCTAssertEqual(
-            result,
-            .installedAndroidModuleBackup(moduleNames: ["ESV2001", "ESV2011"], installedEntryCount: 14)
-        )
-        XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [url])
-        XCTAssertEqual(probe.snapshot().moduleURLs, [])
+        XCTAssertEqual(result, .installedModule(name: "FinRK"))
+        XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [])
+        XCTAssertEqual(probe.snapshot().moduleURLs, [url])
     }
 
     /**
@@ -353,6 +560,73 @@ final class ExternalDocumentImportTests: XCTestCase {
         XCTAssertEqual(probe.snapshot().androidModuleBackupDetectionURLs, [url])
         XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [url])
         XCTAssertEqual(probe.snapshot().moduleURLs, [])
+    }
+
+    /**
+     A ZIP with Android's database manifest stays on the generic archive path.
+
+     The generic `.zip` filename and otherwise installable SWORD entries make the fallback branch
+     observable: Android's first-manifest parser abandons typed module-backup routing for
+     `DB_BACKUP`, then continues generic ZIP installation. The external classifier must not call the
+     module-backup service merely because the remaining entries form a valid SWORD archive.
+
+     The test writes only to UUID-scoped temporary directories and removes them on exit.
+     */
+    func testExternalDocumentImportDatabaseBackupManifestFallsThroughGenericZipRoute() throws {
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let moduleDirectory = tempDirectory.appendingPathComponent("sword", isDirectory: true)
+        let stagingDirectory = tempDirectory.appendingPathComponent("staging", isDirectory: true)
+        let archiveURL = tempDirectory.appendingPathComponent("provider-copy.zip")
+        try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let configuration = Data(
+            """
+            [ROUTING]
+            Description=Routing fixture
+            Category=Biblical Texts
+            ModDrv=RawText
+            DataPath=./modules/texts/rawtext/routing/
+            Versification=KJV
+
+            """.utf8
+        )
+        let archiveData = try ZipArchiveWriter.storedArchive(entries: [
+            ZipArchiveWriterEntry(
+                name: "AndBibleBackupManifest.json",
+                data: Data(#"{"backupType":"DB_BACKUP","manifestVersion":1}"#.utf8)
+            ),
+            ZipArchiveWriterEntry(name: "mods.d/routing.conf", data: configuration),
+            ZipArchiveWriterEntry(
+                name: "modules/texts/rawtext/routing/ot",
+                data: Data("would-install-as-sword".utf8)
+            ),
+        ])
+        try archiveData.write(to: archiveURL)
+
+        let probe = ExternalDocumentImportProbe()
+        let service = ExternalDocumentImportService(
+            moduleInstaller: { url in try probe.installModule(from: url) },
+            androidModuleBackupInstaller: { url in
+                _ = try probe.installAndroidModuleBackup(from: url)
+                return try AndroidModuleBackupService(
+                    moduleDirectory: moduleDirectory,
+                    temporaryDirectory: stagingDirectory
+                ).restoreArchive(fromArchiveAt: url)
+            },
+            epubArchiveDetector: { _ in false }
+        )
+
+        let result = service.importDocument(at: archiveURL)
+
+        XCTAssertEqual(result, .installedModule(name: "FinRK"))
+        XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [])
+        XCTAssertEqual(probe.snapshot().moduleURLs, [archiveURL])
+        XCTAssertFalse(fileManager.fileExists(
+            atPath: moduleDirectory.appendingPathComponent("mods.d/routing.conf").path
+        ))
     }
 
     /**
@@ -422,6 +696,95 @@ final class ExternalDocumentImportTests: XCTestCase {
         XCTAssertEqual(request.displayFileName, "Gentium.ttf")
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [url])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.displayName), ["Gentium.ttf"])
+    }
+
+    /**
+     Verifies Android's complete non-archive external-file matrix reaches the matching registrar.
+
+     Images and CSV files route by provider-visible extension or specific UTType. SQLite families
+     additionally require the SQLite 3 header before `.SQLite3`, `.mybible`, `.bblx`, or `.bbli`
+     selects its Android database reader. Every route forwards the normalized basename and fail-safe
+     overwrite policy to the transactional installer.
+
+     - Side effects: Creates and removes UUID-scoped fixture files; records installer calls.
+     - Failure modes: File I/O is thrown; a missing, swapped, or extension-only database route fails
+       the ordered call assertions.
+     */
+    func testExternalDocumentImportRoutesEveryAndroidRawFileFamily() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("external-android-family-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let probe = ExternalAndroidFamilyImportProbe()
+        let service = ExternalDocumentImportService(
+            moduleInstaller: { _ in "unexpected-module" },
+            epubInstaller: { _ in "unexpected-epub" },
+            fontInstaller: { _, _ in "unexpected-font" },
+            androidFamilyFileInstaller: { url, displayName, family, policy in
+                try probe.install(
+                    url,
+                    displayName: displayName,
+                    family: family,
+                    overwritePolicy: policy
+                )
+            }
+        )
+        let sqliteData = Data("SQLite format 3\0fixture".utf8)
+        let csvType = try XCTUnwrap(UTType(filenameExtension: "csv"))
+        let fixtures: [(String, Data, String?, String?, AndroidModuleBackupExternalFileFamily)] = [
+            ("wallpaper.png", Data("png".utf8), nil, nil, .background),
+            ("wallpaper.jpg", Data("jpg".utf8), nil, nil, .background),
+            ("wallpaper.jpeg", Data("jpeg".utf8), nil, nil, .background),
+            ("wallpaper.webp", Data("webp".utf8), nil, nil, .background),
+            (
+                "provider-image.data",
+                Data("image".utf8),
+                UTType.png.identifier,
+                "cover.png",
+                .background
+            ),
+            ("prompts.csv", Data("name;promptTemplate".utf8), nil, nil, .prompts),
+            (
+                "provider-prompts.data",
+                Data("name;promptTemplate".utf8),
+                csvType.identifier,
+                "provider-prompts.csv",
+                .prompts
+            ),
+            ("reader.SQLite3", sqliteData, nil, nil, .myBible),
+            ("reader.mybible", sqliteData, nil, nil, .mySword),
+            ("reader.bblx", sqliteData, nil, nil, .eSword),
+            ("reader.bbli", sqliteData, nil, nil, .eSword),
+        ]
+
+        for (fileName, data, contentType, suggestedName, _) in fixtures {
+            let url = root.appendingPathComponent(fileName)
+            try data.write(to: url)
+            let result = service.importDocument(ExternalDocumentImportRequest(
+                url: url,
+                contentTypeIdentifier: contentType,
+                suggestedFileName: suggestedName
+            ))
+            XCTAssertEqual(result, .installedModule(name: suggestedName ?? fileName), fileName)
+        }
+
+        XCTAssertEqual(
+            probe.snapshot().map(\.displayName),
+            fixtures.map { $0.3 ?? $0.0 }
+        )
+        XCTAssertEqual(probe.snapshot().map(\.family), fixtures.map(\.4))
+        XCTAssertEqual(
+            probe.snapshot().map(\.overwritePolicy),
+            Array(repeating: .reject, count: fixtures.count)
+        )
+
+        let fakeDatabaseURL = root.appendingPathComponent("not-a-database.SQLite3")
+        try Data("not sqlite".utf8).write(to: fakeDatabaseURL)
+        XCTAssertEqual(
+            service.importDocument(at: fakeDatabaseURL),
+            .unsupportedFormat(fileExtension: "sqlite3")
+        )
+        XCTAssertEqual(probe.snapshot().count, fixtures.count)
     }
 
     /**
@@ -545,6 +908,109 @@ final class ExternalDocumentImportTests: XCTestCase {
         XCTAssertEqual(probe.snapshot().moduleURLs, [])
         XCTAssertEqual(probe.snapshot().epubURLs, [url])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
+    }
+
+    /**
+     Verifies the production ZIP router uses Android's exact EPUB fallback and bounded backup gate.
+
+     The matrix combines valid SWORD ownership with exact, backslash, lowercase, dot-prefixed, and
+     mimetype-only EPUB markers. Only Android's exact normalized container path may preempt module
+     backup detection. A valid SWORD archive routes to backup restore, while arbitrary and
+     resource-only `.abmd.zip` files remain generic ZIP installs.
+
+     - Side effects: Writes and removes deterministic stored ZIP fixtures; records installer calls.
+     - Failure modes: ZIP I/O is thrown; marker broadening, suffix-only backup detection, or reversed
+       EPUB/backup precedence fails the per-archive result assertions.
+     */
+    func testExternalDocumentImportUsesExactEpubFallbackBeforeBackupRecognition() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("external-zip-routing-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let probe = ExternalDocumentImportProbe()
+        let service = makeExternalDocumentImportService(probe: probe)
+        let configuration = Data(
+            """
+            [ROUTING]
+            Description=Routing fixture
+            Category=Biblical Texts
+            ModDrv=RawText
+            DataPath=./modules/texts/rawtext/routing/
+            Versification=KJV
+
+            """.utf8
+        )
+        let swordEntries = [
+            ZipArchiveWriterEntry(name: "mods.d/routing.conf", data: configuration),
+            ZipArchiveWriterEntry(
+                name: "modules/texts/rawtext/routing/ot",
+                data: Data("routing payload".utf8)
+            ),
+        ]
+        let markerCases: [(String, String, ExternalDocumentImportResult)] = [
+            (
+                "exact",
+                "META-INF/container.xml",
+                .installedEpub(title: "Study Notes")
+            ),
+            (
+                "backslash",
+                "META-INF\\container.xml",
+                .installedEpub(title: "Study Notes")
+            ),
+            (
+                "lowercase",
+                "meta-inf/container.xml",
+                .installedModule(name: "FinRK")
+            ),
+            (
+                "dot-prefix",
+                "./META-INF/container.xml",
+                .installedModule(name: "FinRK")
+            ),
+            (
+                "mimetype-only",
+                "mimetype",
+                .installedModule(name: "FinRK")
+            ),
+        ]
+
+        for (name, marker, expectedResult) in markerCases {
+            let url = root.appendingPathComponent("\(name).zip")
+            let data = try ZipArchiveWriter.storedArchive(entries: swordEntries + [
+                ZipArchiveWriterEntry(name: marker, data: Data("marker".utf8)),
+            ])
+            try data.write(to: url)
+            XCTAssertEqual(service.importDocument(at: url), expectedResult, name)
+        }
+
+        let validBackupURL = root.appendingPathComponent("valid.abmd.zip")
+        try ZipArchiveWriter.storedArchive(entries: swordEntries).write(to: validBackupURL)
+        XCTAssertEqual(
+            service.importDocument(at: validBackupURL),
+            .installedAndroidModuleBackup(
+                moduleNames: ["ESV2001", "ESV2011"],
+                installedEntryCount: 14
+            )
+        )
+
+        let arbitraryURL = root.appendingPathComponent("arbitrary.abmd.zip")
+        try ZipArchiveWriter.storedArchive(entries: [
+            ZipArchiveWriterEntry(name: "documents/readme.txt", data: Data("notes".utf8)),
+        ]).write(to: arbitraryURL)
+        XCTAssertEqual(
+            service.importDocument(at: arbitraryURL),
+            .installedModule(name: "FinRK")
+        )
+
+        let resourceOnlyURL = root.appendingPathComponent("resource-only.abmd.zip")
+        try ZipArchiveWriter.storedArchive(entries: [
+            ZipArchiveWriterEntry(name: "background/theme.png", data: Data("image".utf8)),
+        ]).write(to: resourceOnlyURL)
+        XCTAssertEqual(
+            service.importDocument(at: resourceOnlyURL),
+            .installedModule(name: "FinRK")
+        )
     }
 
     /**

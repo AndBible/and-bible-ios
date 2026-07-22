@@ -59,12 +59,17 @@ const verse = computed(() => {
 
 const fromBibleDocument = computed(() => !!bibleDocumentInfo?.ordinalRange);
 
-const highlighted = computed(() => isHighlighted(ordinal.value));
+const highlightBookInitials = bibleDocumentInfo?.bookInitials;
+const highlightOsisRef = bibleDocumentInfo?.osisRef;
+const highlighted = computed(() =>
+    isHighlighted(ordinal.value, highlightBookInitials, highlightOsisRef) ||
+    isHighlighted(ordinal.value)
+);
 
 if (bibleDocumentInfo?.originalOrdinalRange &&
     ordinal.value <= bibleDocumentInfo.originalOrdinalRange[1] &&
     ordinal.value >= bibleDocumentInfo.originalOrdinalRange[0]) {
-    highlightOrdinal(ordinal.value)
+    highlightOrdinal(ordinal.value, highlightBookInitials, highlightOsisRef)
 }
 
 function verseClicked(event: Event) {

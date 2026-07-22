@@ -66,6 +66,38 @@ public final class WindowManager {
         return workspaceStore.windows(workspaceId: workspace.id)
     }
 
+    /**
+     Resolves Android's effective pin state for a window.
+
+     - Parameter window: Window whose raw pin state should be combined with workspace auto-pin.
+     - Returns: Effective pin mode used by visibility, ordering, and layout-weight behavior.
+     - Side Effects: None.
+     - Failure Modes: Detached windows fall back to their own workspace relationship and then to
+       Android's enabled auto-pin default.
+     */
+    public func isEffectivelyPinned(_ window: Window) -> Bool {
+        let autoPin = window.workspace?.workspaceSettings?.autoPin
+            ?? activeWorkspace?.workspaceSettings?.autoPin
+            ?? WorkspaceSettings.defaultAutoPin
+        return window.effectivePinMode(autoPin: autoPin)
+    }
+
+    /**
+     Returns the weight Android uses to render a window.
+
+     - Parameter window: Window whose effective split weight is needed.
+     - Returns: The raw window weight for effectively pinned windows, or the workspace's shared
+       unpinned weight for effectively unpinned windows. Invalid values are clamped to `0.1`.
+     - Side Effects: None.
+     - Failure Modes: A missing shared unpinned weight falls back to the window's raw weight.
+     */
+    public func effectiveLayoutWeight(for window: Window) -> Float {
+        let rawWeight = sanitizedLayoutWeight(window.layoutWeight)
+        guard !isEffectivelyPinned(window) else { return rawWeight }
+        let workspace = window.workspace ?? activeWorkspace
+        return sanitizedLayoutWeight(workspace?.unPinnedWeight ?? rawWeight)
+    }
+
     /// ID of the currently maximized window, if any.
     public var maximizedWindowId: UUID? {
         get { activeWorkspace?.maximizedWindowId }
@@ -170,7 +202,11 @@ public final class WindowManager {
             controllerPendingWindowIds = []
             return
         }
-        allWindows = displayOrderedWindows(workspaceStore.windows(workspaceId: workspace.id))
+        let persistedWindows = workspaceStore.windows(workspaceId: workspace.id)
+        if normalizeWindowVisibility(persistedWindows) {
+            workspaceStore.persistChanges()
+        }
+        allWindows = displayOrderedWindows(persistedWindows)
 
         // If a window is maximized, only show that one
         if let maxId = workspace.maximizedWindowId,
@@ -184,6 +220,23 @@ public final class WindowManager {
             activeWindow = visibleWindows.first
         }
         reconcileControllerReadiness()
+    }
+
+    /**
+     Focuses a window through the manager-owned lifecycle path.
+
+     - Parameter window: Workspace window that should receive focus.
+     - Side Effects: Restores a minimized target through `restoreWindow`; otherwise updates
+       `activeWindow` when the target belongs to the active workspace.
+     - Failure Modes: Windows outside the active workspace are ignored.
+     */
+    public func activateWindow(_ window: Window) {
+        guard allWindows.contains(where: { $0.id == window.id }) else { return }
+        if window.layoutState == "minimized" {
+            restoreWindow(window)
+        } else {
+            activeWindow = window
+        }
     }
 
     // MARK: - Window Lifecycle
@@ -235,80 +288,146 @@ public final class WindowManager {
         }
 
         if linksWindow.layoutState == "minimized" {
-            linksWindow.layoutState = "split"
-            activeWindow = linksWindow
+            restoreWindow(linksWindow)
         } else if createdLinksWindow, let previousActiveWindow {
             activeWindow = previousActiveWindow
         }
 
+        workspaceStore.persistChanges()
         refreshWindows()
         return linksWindow
     }
 
-    /// Minimize a window (hides it from the visible list).
+    /**
+     Minimizes one visible window without allowing the workspace to become empty.
+
+     - Parameter window: Visible active-workspace window to hide.
+     - Side Effects: Persists the minimized layout state, repairs focus when needed, and refreshes
+       observable window lists.
+     - Failure Modes: Hidden windows, foreign windows, and the final visible window are ignored.
+     */
     public func minimizeWindow(_ window: Window) {
+        guard visibleWindows.contains(where: { $0.id == window.id }), visibleWindows.count > 1 else {
+            return
+        }
         window.layoutState = "minimized"
         if activeWindow?.id == window.id {
             activeWindow = visibleWindows.first(where: { $0.id != window.id })
         }
+        workspaceStore.persistChanges()
         refreshWindows()
     }
 
-    /// Restore a minimized window — adds it back to the split view alongside existing windows.
+    /**
+     Restores and focuses a minimized window while enforcing Android's unpinned-pane invariant.
+
+     - Parameter window: Active-workspace window to reveal.
+     - Side Effects: If the target is an effectively unpinned normal window, minimizes every peer
+       in that category; then persists the target as visible, refreshes lists, and focuses it.
+     - Failure Modes: Windows outside the active workspace are ignored.
+     */
     public func restoreWindow(_ window: Window) {
+        guard windowsInPersistedOrder.contains(where: { $0.id == window.id }) else { return }
+        if !isEffectivelyPinned(window), !window.isLinksWindow {
+            minimizeUnpinnedNormalPeers(except: window)
+        }
         window.layoutState = "split"
-        refreshWindows()
         activeWindow = window
+        workspaceStore.persistChanges()
+        refreshWindows()
     }
 
     /**
      Adds a new window to the active workspace, optionally copying state from an existing window.
      - Parameters:
-       - document: Explicit document/module to open. When `nil`, the source window's Bible document is reused.
-       - category: Category to use when no eligible source category is inherited.
-       - sourceWindow: Existing window whose sync state, layout weight, and reading position should be cloned.
+       - document: Optional Bible-module override. A clone otherwise preserves the source's Bible
+         slot together with every other category slot.
+       - category: Initial category for a fresh window. Clones preserve the source category exactly.
+       - sourceWindow: Existing window whose raw pin state, sync state, links role, layout weight,
+         and complete reader state should be cloned.
      - Returns: The newly created window, or `nil` when no workspace is active.
      - Side Effects: Inserts a window, exits maximized layout so the new active pane can render,
        refreshes display ordering, focuses the new window, and marks visible windows without
        registered controllers as pending.
-     - Note: Non-Bible categories such as dictionary or EPUB are intentionally not inherited; new windows fall back to Bible/commentary semantics.
+     - Note: A source without a page manager fails instead of creating a misleading Bible clone.
      */
     @discardableResult
     public func addWindow(document: String? = nil, category: String = "bible", from sourceWindow: Window? = nil) -> Window? {
+        createManagedWindow(
+            document: document,
+            category: category,
+            from: sourceWindow,
+            asLinksWindow: sourceWindow?.isLinksWindow ?? false,
+            focusesNewWindow: true
+        )
+    }
+
+    /**
+     Creates and publishes one manager-owned window with its final window kind known up front.
+
+     - Parameters:
+       - document: Explicit Bible-slot override, or `nil` to inherit the source Bible document.
+       - category: Initial category used only when creating a fresh window without a source.
+       - sourceWindow: Optional window whose persisted reader and raw pane state should be cloned.
+       - asLinksWindow: Whether the new window is an auxiliary links target.
+       - focusesNewWindow: Whether this user-facing creation should focus the result. Internal links
+         targets leave this false so link routing does not steal focus from the source pane.
+     - Returns: The inserted window, or `nil` when there is no active workspace.
+     - Side Effects: Inserts and persists the window graph, exits maximized layout, normalizes
+       effectively unpinned normal panes, refreshes manager collections, and focuses ordinary
+       windows. Links windows preserve the current focus.
+     - Failure Modes: Missing active workspace or a source page manager returns `nil` without
+       inserting a fallback pane.
+     */
+    private func createManagedWindow(
+        document: String?,
+        category: String,
+        from sourceWindow: Window?,
+        asLinksWindow: Bool,
+        focusesNewWindow: Bool = false
+    ) -> Window? {
         guard let workspace = activeWorkspace else { return nil }
-        let doc = document ?? sourceWindow?.pageManager?.bibleDocument
-        // Don't inherit non-Bible categories (epub, dictionary, etc.) — new windows start as Bible
-        let sourceCat = sourceWindow?.pageManager?.currentCategoryName
-        let cat = (sourceCat == "bible" || sourceCat == "commentary") ? (sourceCat ?? category) : category
-        let window = workspaceStore.addWindow(to: workspace, document: doc, category: cat)
-
-        // Copy properties from source window
+        let window: Window
         if let source = sourceWindow {
-            window.isSynchronized = source.isSynchronized
-            window.syncGroup = source.syncGroup
-            window.layoutWeight = source.layoutWeight
-
-            // Copy position
-            if let pm = window.pageManager, let spm = source.pageManager {
-                pm.bibleBibleBook = spm.bibleBibleBook
-                pm.bibleChapterNo = spm.bibleChapterNo
-                pm.bibleVerseNo = spm.bibleVerseNo
-                pm.commentaryDocument = spm.commentaryDocument
+            guard let clonedWindow = workspaceStore.addWindow(
+                to: workspace,
+                cloning: source,
+                asLinksWindow: asLinksWindow
+            ) else {
+                return nil
+            }
+            window = clonedWindow
+            if let document {
+                window.pageManager?.bibleDocument = document
             }
 
-            // Insert after source in order
-            window.orderNumber = source.orderNumber + 1
-            // Shift subsequent windows
-            for w in allWindows where w.orderNumber >= window.orderNumber && w.id != window.id {
-                w.orderNumber += 1
+            // Android appends clones of links panes; ordinary clones are inserted after the source.
+            if !source.isLinksWindow {
+                window.orderNumber = source.orderNumber + 1
+                for w in allWindows where w.orderNumber >= window.orderNumber && w.id != window.id {
+                    w.orderNumber += 1
+                }
             }
+        } else {
+            window = workspaceStore.addWindow(to: workspace, document: document, category: category)
+            window.isLinksWindow = asLinksWindow
         }
 
         if workspace.maximizedWindowId != nil {
             workspace.maximizedWindowId = nil
         }
 
-        activeWindow = window
+        if !isEffectivelyPinned(window) {
+            initializeUnpinnedWeightIfNeeded(from: window)
+            if !window.isLinksWindow {
+                minimizeUnpinnedNormalPeers(except: window)
+            }
+        }
+        window.layoutState = "split"
+        if focusesNewWindow {
+            activeWindow = window
+        }
+        workspaceStore.persistChanges()
         refreshWindows()
         return window
     }
@@ -340,8 +459,26 @@ public final class WindowManager {
      `PageManager` during the close transaction.
      */
     public func removeWindow(_ window: Window) {
+        let persistedWindows = windowsInPersistedOrder
+        guard persistedWindows.count > 1,
+              let removedIndex = persistedWindows.firstIndex(where: { $0.id == window.id }) else {
+            return
+        }
+
         let removedWindowId = window.id
-        let nextActiveWindow = visibleWindows.first { $0.id != removedWindowId }
+        let remainingWindows = persistedWindows.filter { $0.id != removedWindowId }
+        let nearestWindow = remainingWindows[min(removedIndex, remainingWindows.count - 1)]
+        let remainingVisibleWindows = visibleWindows.filter { $0.id != removedWindowId }
+        let nextActiveWindow: Window
+        if remainingVisibleWindows.isEmpty {
+            nearestWindow.layoutState = "split"
+            if !isEffectivelyPinned(nearestWindow), !nearestWindow.isLinksWindow {
+                minimizeUnpinnedNormalPeers(except: nearestWindow, in: remainingWindows)
+            }
+            nextActiveWindow = nearestWindow
+        } else {
+            nextActiveWindow = remainingVisibleWindows.first ?? nearestWindow
+        }
 
         unregisterController(for: removedWindowId)
         if activeWorkspace?.maximizedWindowId == removedWindowId {
@@ -350,15 +487,29 @@ public final class WindowManager {
         visibleWindows.removeAll { $0.id == removedWindowId }
         allWindows.removeAll { $0.id == removedWindowId }
         if activeWindow?.id == removedWindowId {
-            activeWindow = nextActiveWindow ?? visibleWindows.first
+            activeWindow = nextActiveWindow
         }
         workspaceStore.delete(window)
         refreshWindows()
+
+        if visibleWindows.count == 1, let onlyWindow = visibleWindows.first {
+            setLayoutWeight(1.0, for: onlyWindow)
+            workspaceStore.persistChanges()
+        }
     }
 
-    /// Maximize a window (hide others).
+    /**
+     Maximizes one active-workspace window and persists the workspace layout selection.
+
+     - Parameter window: Window to display as the sole maximized pane.
+     - Side Effects: Stores the maximized identifier, focuses the target, saves, and refreshes.
+     - Failure Modes: Foreign windows are ignored.
+     */
     public func maximizeWindow(_ window: Window) {
+        guard allWindows.contains(where: { $0.id == window.id }) else { return }
         activeWorkspace?.maximizedWindowId = window.id
+        activeWindow = window
+        workspaceStore.persistChanges()
         refreshWindows()
     }
 
@@ -387,9 +538,10 @@ public final class WindowManager {
     public func moveWindow(_ window: Window, toPosition position: Int) {
         guard let workspace = activeWorkspace else { return }
         let workspaceWindows = workspaceStore.windows(workspaceId: workspace.id)
-        var pinnedWindows = workspaceWindows.filter(\.isPinMode)
-        var unpinnedWindows = workspaceWindows.filter { !$0.isPinMode }
-        var targetBucket = window.isPinMode ? pinnedWindows : unpinnedWindows
+        var pinnedWindows = workspaceWindows.filter(isEffectivelyPinned)
+        var unpinnedWindows = workspaceWindows.filter { !isEffectivelyPinned($0) }
+        let targetIsPinned = isEffectivelyPinned(window)
+        var targetBucket = targetIsPinned ? pinnedWindows : unpinnedWindows
 
         guard let originalIndex = targetBucket.firstIndex(where: { $0.id == window.id }),
               position >= 0,
@@ -400,7 +552,7 @@ public final class WindowManager {
         let movedWindow = targetBucket.remove(at: originalIndex)
         targetBucket.insert(movedWindow, at: position)
 
-        if window.isPinMode {
+        if targetIsPinned {
             pinnedWindows = targetBucket
         } else {
             unpinnedWindows = targetBucket
@@ -427,11 +579,16 @@ public final class WindowManager {
     @discardableResult
     public func changeLinksWindowToNormal(_ window: Window) -> Window? {
         guard window.isLinksWindow,
-              let newWindow = addWindow(from: window) else {
+              let newWindow = createManagedWindow(
+                  document: nil,
+                  category: "bible",
+                  from: window,
+                  asLinksWindow: false,
+                  focusesNewWindow: true
+              ) else {
             return nil
         }
 
-        newWindow.isLinksWindow = false
         removeWindow(window)
         activeWindow = newWindow
         refreshWindows()
@@ -448,31 +605,118 @@ public final class WindowManager {
      - Parameters:
        - window: Window whose pin state should change.
        - value: New pin-mode value.
-     - Side Effects: Mutates pin/layout state and refreshes observable window lists.
-     - Failure Modes: None.
+     - Side Effects: Persists raw pin/layout state and refreshes observable window lists.
+     - Failure Modes: Links windows and foreign windows are ignored.
      */
     public func setPinMode(_ window: Window, value: Bool) {
+        guard !window.isLinksWindow,
+              windowsInPersistedOrder.contains(where: { $0.id == window.id }) else {
+            return
+        }
         guard window.isPinMode != value else { return }
         window.isPinMode = value
 
-        if value && window.layoutState == "minimized" {
+        if isEffectivelyPinned(window), window.layoutState == "minimized" {
             restoreWindow(window)
             return
         }
 
-        if !value,
+        if !isEffectivelyPinned(window),
            window.layoutState != "minimized",
-           visibleWindows.filter({ !$0.isPinMode && !$0.isLinksWindow }).count > 1 {
-            minimizeWindow(window)
+           visibleWindows.filter({ !isEffectivelyPinned($0) && !$0.isLinksWindow }).count > 1 {
+            initializeUnpinnedWeightIfNeeded(from: window)
+            window.layoutState = "minimized"
+            if activeWindow?.id == window.id {
+                activeWindow = visibleWindows.first(where: { $0.id != window.id })
+            }
+            workspaceStore.persistChanges()
+            refreshWindows()
             return
         }
 
+        if !isEffectivelyPinned(window) {
+            initializeUnpinnedWeightIfNeeded(from: window)
+        }
+        workspaceStore.persistChanges()
         refreshWindows()
     }
 
-    /// Restore all windows from maximized state.
+    /**
+     Applies the workspace auto-pin setting through Android's normalization path.
+
+     - Parameter value: New workspace auto-pin value.
+     - Side Effects: Persists workspace settings and, when auto-pin is disabled, minimizes every
+       effectively unpinned normal window after the first persisted one.
+     - Failure Modes: No active workspace is a no-op.
+     - Note: Raw per-window pin values are preserved so they become effective again when auto-pin is
+       later disabled.
+     */
+    public func setAutoPinEnabled(_ value: Bool) {
+        guard let workspace = activeWorkspace else { return }
+        var settings = workspace.workspaceSettings ?? WorkspaceSettings()
+        settings.autoPin = value
+        settings.normalizeAutoAssignPrimaryLabel()
+        workspace.workspaceSettings = settings
+
+        let windows = workspaceStore.windows(workspaceId: workspace.id)
+        if !value {
+            let unpinnedNormalWindows = windows.filter {
+                !$0.isLinksWindow && !isEffectivelyPinned($0)
+            }
+            if let first = unpinnedNormalWindows.first {
+                initializeUnpinnedWeightIfNeeded(from: first)
+                for window in unpinnedNormalWindows.dropFirst() {
+                    window.layoutState = "minimized"
+                }
+            }
+        }
+
+        workspaceStore.persistChanges()
+        refreshWindows()
+    }
+
+    /**
+     Updates adjacent pane weights and optionally commits the drag result.
+
+     - Parameters:
+       - firstWindow: Leading or upper pane.
+       - firstWeight: New effective weight for `firstWindow`.
+       - secondWindow: Trailing or lower pane.
+       - secondWeight: New effective weight for `secondWindow`.
+       - persist: Whether this update completes the gesture and should be saved.
+     - Side Effects: Updates raw pinned weights or the workspace's shared unpinned weight. Saves only
+       when `persist` is `true`.
+     - Failure Modes: Foreign windows are ignored; non-finite or undersized weights clamp to `0.1`.
+     */
+    public func resizeWindows(
+        _ firstWindow: Window,
+        firstWeight: Float,
+        _ secondWindow: Window,
+        secondWeight: Float,
+        persist: Bool
+    ) {
+        let activeWindowIds = Set(windowsInPersistedOrder.map(\.id))
+        guard activeWindowIds.contains(firstWindow.id), activeWindowIds.contains(secondWindow.id) else {
+            return
+        }
+        setLayoutWeight(firstWeight, for: firstWindow)
+        setLayoutWeight(secondWeight, for: secondWindow)
+        if persist {
+            workspaceStore.persistChanges()
+        }
+    }
+
+    /**
+     Restores the active workspace from maximized layout.
+
+     - Side Effects: Clears the maximized identifier, normalizes visible unpinned panes, persists,
+       and refreshes observable window lists.
+     - Failure Modes: No active workspace is a no-op.
+     */
     public func unmaximize() {
+        guard activeWorkspace != nil else { return }
         activeWorkspace?.maximizedWindowId = nil
+        workspaceStore.persistChanges()
         refreshWindows()
     }
 
@@ -496,27 +740,62 @@ public final class WindowManager {
     public func setSynchronized(_ window: Window, value: Bool) {
         guard window.isSynchronized != value else { return }
         window.isSynchronized = value
+        workspaceStore.persistChanges()
         refreshWindows()
     }
 
     /**
-     Mirrors Android's `WindowControl.changeSyncGroup` selection behavior.
+     Mirrors Android's `WindowControl.changeSyncGroup` selection and realignment behavior.
 
-     Selecting a sync group also enables synchronization for the window. Actual verse realignment is
-     handled by existing scroll/navigation sync paths after state changes propagate.
+     Selecting a sync group enables synchronization, chooses Android's first visible synchronized
+     verse-key peer in that group, and synchronously forwards the peer's source-local position through
+     the existing reader callback. The callback resolves a stable source reference before each target
+     converts it into its own ordinal space, preserving feedback suppression and versification safety.
 
      - Parameters:
        - window: Window whose synchronization group should be selected.
        - groupNumber: Zero-based group identifier matching Android's internal storage.
-     - Side Effects: Enables synchronization, updates `syncGroup`, and refreshes observable window
-       state.
-     - Failure Modes: Out-of-range groups are ignored.
+     - Side Effects: Enables synchronization, updates `syncGroup`, may synchronously realign grouped
+       panes through `onSyncVerseChanged`, persists the workspace, and refreshes observable state.
+     - Failure Modes: Out-of-range groups are ignored. Missing controllers, non-verse peers, and
+       unresolved source positions preserve the group change without issuing a sync callback.
+     - Note: The callback runs after the new group flags are set and before persistence/refresh,
+       matching Android's synchronize-before-`WindowChangedEvent` ordering.
      */
     public func changeSyncGroup(_ window: Window, groupNumber: Int) {
         guard (0..<6).contains(groupNumber) else { return }
         window.isSynchronized = true
         window.syncGroup = groupNumber
+        synchronizeImmediatelyFromPeer(joining: window)
+        workspaceStore.persistChanges()
         refreshWindows()
+    }
+
+    /**
+     Emits the first eligible peer's current position through the established synchronization path.
+
+     - Parameter window: Newly synchronized window joining its selected stored group.
+     - Side Effects: Calls `onSyncVerseChanged` synchronously when a visible registered peer can
+       provide a valid source-local position. The callback may update other grouped panes.
+     - Failure Modes: Returns without callback when no matching peer/controller/position exists.
+     - Note: Peer ordering follows `visibleWindows`, matching Android's `firstOrNull` selection.
+     */
+    private func synchronizeImmediatelyFromPeer(joining window: Window) {
+        guard let peer = visibleWindows.first(where: { candidate in
+            guard candidate.id != window.id,
+                  candidate.isSynchronized,
+                  candidate.syncGroup == window.syncGroup,
+                  let source = controllers[candidate.id] as? any WindowSynchronizationSource else {
+                return false
+            }
+            return source.canProvideWindowSynchronizationPosition
+        }),
+        let source = controllers[peer.id] as? any WindowSynchronizationSource,
+        let position = source.currentWindowSynchronizationPosition() else {
+            return
+        }
+
+        onSyncVerseChanged?(peer, position.ordinal, position.key)
     }
 
     /// Get windows in the same sync group as the given window.
@@ -606,7 +885,126 @@ public final class WindowManager {
      */
     private func displayOrderGroup(for window: Window) -> Int {
         if window.isLinksWindow { return 2 }
-        return window.isPinMode ? 0 : 1
+        return isEffectivelyPinned(window) ? 0 : 1
+    }
+
+    /**
+     Repairs impossible visible-window state before publishing manager collections.
+
+     - Parameters:
+       - windows: Active workspace windows in persisted order.
+       - preferredWindow: Optional unpinned normal window that should remain visible.
+     - Returns: `true` when persisted layout or maximized metadata changed.
+     - Side Effects: Clears stale maximized identifiers, restores an empty workspace to one visible
+       window, and minimizes surplus visible effectively unpinned normal windows.
+     - Failure Modes: An empty workspace remains empty.
+     */
+    private func normalizeWindowVisibility(
+        _ windows: [Window],
+        preferredWindow: Window? = nil
+    ) -> Bool {
+        guard !windows.isEmpty else { return false }
+        var changed = false
+
+        if let maximizedWindowId = activeWorkspace?.maximizedWindowId {
+            if windows.contains(where: { $0.id == maximizedWindowId }) {
+                return false
+            }
+            activeWorkspace?.maximizedWindowId = nil
+            changed = true
+        }
+
+        var visible = windows.filter { $0.layoutState != "minimized" }
+        if visible.isEmpty {
+            let fallback = preferredWindow.flatMap { preferred in
+                windows.first(where: { $0.id == preferred.id })
+            } ?? windows[0]
+            fallback.layoutState = "split"
+            visible = [fallback]
+            changed = true
+        }
+
+        let visibleUnpinnedNormalWindows = visible.filter {
+            !$0.isLinksWindow && !isEffectivelyPinned($0)
+        }
+        guard visibleUnpinnedNormalWindows.count > 1 else { return changed }
+
+        let retainedWindow = preferredWindow.flatMap { preferred in
+            visibleUnpinnedNormalWindows.first(where: { $0.id == preferred.id })
+        } ?? visibleUnpinnedNormalWindows[0]
+        initializeUnpinnedWeightIfNeeded(from: retainedWindow)
+        for window in visibleUnpinnedNormalWindows where window.id != retainedWindow.id {
+            window.layoutState = "minimized"
+            changed = true
+        }
+        return changed
+    }
+
+    /**
+     Minimizes all effectively unpinned normal peers of a target window.
+
+     - Parameters:
+       - retainedWindow: Window that should remain available.
+       - windows: Candidate workspace windows, defaulting to current persisted order.
+     - Side Effects: Mutates peer layout states to `minimized`.
+     - Failure Modes: Pinned and links windows are never changed.
+     */
+    private func minimizeUnpinnedNormalPeers(
+        except retainedWindow: Window,
+        in windows: [Window]? = nil
+    ) {
+        for window in windows ?? windowsInPersistedOrder
+        where window.id != retainedWindow.id
+            && !window.isLinksWindow
+            && !isEffectivelyPinned(window) {
+            window.layoutState = "minimized"
+        }
+    }
+
+    /**
+     Initializes Android's shared unpinned weight when a workspace first exposes an unpinned pane.
+
+     - Parameter window: Window whose raw layout weight seeds the workspace value.
+     - Side Effects: Writes `Workspace.unPinnedWeight` only when it is currently absent.
+     - Failure Modes: Detached windows use the active workspace when available; otherwise no change.
+     */
+    private func initializeUnpinnedWeightIfNeeded(from window: Window) {
+        guard let workspace = window.workspace ?? activeWorkspace,
+              workspace.unPinnedWeight == nil else {
+            return
+        }
+        workspace.unPinnedWeight = sanitizedLayoutWeight(window.layoutWeight)
+    }
+
+    /**
+     Stores one effective pane weight using Android's pinned/shared-unpinned rule.
+
+     - Parameters:
+       - value: Requested effective weight.
+       - window: Window receiving the weight.
+     - Side Effects: Mutates either `Window.layoutWeight` or `Workspace.unPinnedWeight`.
+     - Failure Modes: Detached unpinned windows without an active workspace are ignored.
+     */
+    private func setLayoutWeight(_ value: Float, for window: Window) {
+        let sanitizedValue = sanitizedLayoutWeight(value)
+        if isEffectivelyPinned(window) {
+            window.layoutWeight = sanitizedValue
+        } else {
+            (window.workspace ?? activeWorkspace)?.unPinnedWeight = sanitizedValue
+        }
+    }
+
+    /**
+     Clamps a persisted pane weight to a finite positive layout value.
+
+     - Parameter value: Raw weight loaded from persistence or a drag gesture.
+     - Returns: `value` clamped to at least `0.1`, or `0.1` when non-finite.
+     - Side Effects: None.
+     - Failure Modes: None.
+     */
+    private func sanitizedLayoutWeight(_ value: Float) -> Float {
+        guard value.isFinite else { return 0.1 }
+        return max(0.1, value)
     }
 
     /**
@@ -648,14 +1046,19 @@ public final class WindowManager {
 
      - Parameter sourceWindow: Window whose reading position and layout weight seed the new target.
      - Returns: Newly created links window, or `nil` when `addWindow` fails.
-     - Side Effects: Inserts a window through `WorkspaceStore`, copies the source position via
-       `addWindow`, then marks the result as a non-synchronized pinned links window.
+     - Side Effects: Inserts a window through `WorkspaceStore`, copies the source position and raw
+       pin state via `addWindow`, then marks the result as a non-synchronized links window.
      - Failure Modes: Returns `nil` if there is no active workspace.
      */
     private func createLinksWindow(from sourceWindow: Window) -> Window? {
-        guard let newWindow = addWindow(from: sourceWindow) else { return nil }
-        newWindow.isLinksWindow = true
-        newWindow.isPinMode = true
+        guard let newWindow = createManagedWindow(
+            document: nil,
+            category: "bible",
+            from: sourceWindow,
+            asLinksWindow: true
+        ) else {
+            return nil
+        }
         newWindow.isSynchronized = false
         return newWindow
     }

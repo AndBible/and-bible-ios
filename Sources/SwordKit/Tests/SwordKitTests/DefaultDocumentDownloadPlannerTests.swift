@@ -182,7 +182,12 @@ final class DefaultDocumentDownloadPlannerTests: XCTestCase {
  in-memory `ModuleInfo` fixtures.
  */
 final class ModuleDownloadRowActionPlannerTests: XCTestCase {
-    /// Installable remote-only rows should only expose the about action.
+    /**
+     Verifies a remote-only row exposes About without installed-module management actions.
+
+     The test uses no installed inventory or filesystem state. A failure means an installable row
+     can offer uninstall/index/unlock operations for a module that is not locally present.
+     */
     func testInstallableRemoteRowsExposeAboutOnly() {
         let actions = ModuleDownloadRowActionPlanner.availableActions(
             installedModule: nil,
@@ -192,51 +197,91 @@ final class ModuleDownloadRowActionPlannerTests: XCTestCase {
         XCTAssertEqual(actions, [.about])
     }
 
-    /// Installed rows should expose the Android management actions: about, uninstall, and delete index.
+    /**
+     Verifies an installed Bible remains removable when a second Bible is present.
+
+     The in-memory inventory models Android's `SwordDocumentFacade.bibles` count. A failure means the
+     planner either hides a legal Android delete action or omits ordinary index management.
+     */
     func testInstalledRowsExposeAndroidManagementActions() {
+        let kjv = installedModule("KJV", category: .bible)
         let actions = ModuleDownloadRowActionPlanner.availableActions(
-            installedModule: installedModule("KJV", category: .bible),
-            isBeingInstalled: false
+            installedModule: kjv,
+            isBeingInstalled: false,
+            installedModules: [kjv, installedModule("NASB", category: .bible)]
         )
 
         XCTAssertEqual(actions, [.about, .uninstall, .deleteIndex])
     }
 
-    /// Encrypted installed rows include unlock only when a cipher coordinator exists.
-    func testEncryptedInstalledRowsIncludeUnlockWhenCipherCoordinatorIsSupported() {
+    /**
+     Verifies an encrypted installed row includes Android's shared manager-backed Unlock action.
+
+     Two Bible fixtures keep uninstall legal so the assertion covers the complete ordered action
+     set. A failure means encrypted modules cannot request a key or actions drift from Android order.
+     */
+    func testEncryptedInstalledRowsIncludeUnlock() {
+        let kjv = installedModule("KJV", category: .bible, isEncrypted: true)
         let actions = ModuleDownloadRowActionPlanner.availableActions(
-            installedModule: installedModule("KJV", category: .bible, isEncrypted: true),
+            installedModule: kjv,
             isBeingInstalled: false,
-            supportsUnlock: true
+            installedModules: [kjv, installedModule("NASB", category: .bible)]
         )
 
         XCTAssertEqual(actions, [.about, .uninstall, .deleteIndex, .unlock])
     }
 
     /**
-     Documents the current iOS unlock gap so encrypted rows do not expose a dead unlock command.
+     Verifies active installs hide About while retaining legal installed-module management actions.
 
-     Android supports unlock through its cipher flow. Until iOS has an
-     equivalent coordinator, the default action list must stay limited to
-     actions that actually work.
+     The deterministic in-memory state contains two Bibles and touches no shared resources. A
+     failure means transient install state changes Android's delete/index policy unexpectedly.
      */
-    func testEncryptedInstalledRowsDocumentIOSUnlockGapByDefault() {
-        let actions = ModuleDownloadRowActionPlanner.availableActions(
-            installedModule: installedModule("KJV", category: .bible, isEncrypted: true),
-            isBeingInstalled: false
-        )
-
-        XCTAssertEqual(actions, [.about, .uninstall, .deleteIndex])
-    }
-
-    /// Active install rows hide inline about while retaining installed-module management parity.
     func testBeingInstalledRowsHideInlineAboutButKeepInstalledManagementParity() {
+        let kjv = installedModule("KJV", category: .bible)
         let actions = ModuleDownloadRowActionPlanner.availableActions(
-            installedModule: installedModule("KJV", category: .bible),
-            isBeingInstalled: true
+            installedModule: kjv,
+            isBeingInstalled: true,
+            installedModules: [kjv, installedModule("NASB", category: .bible)]
         )
 
         XCTAssertEqual(actions, [.uninstall, .deleteIndex])
+    }
+
+    /**
+     Verifies the only installed Bible cannot expose uninstall while index and unlock remain usable.
+
+     The one-Bible inventory directly models Android's `Book.canDelete` guard. A failure means the UI
+     can invite removal that the authoritative service must reject, or hides unrelated management.
+     */
+    func testOnlyInstalledBibleHidesUninstallAction() {
+        let kjv = installedModule("KJV", category: .bible, isEncrypted: true)
+
+        let actions = ModuleDownloadRowActionPlanner.availableActions(
+            installedModule: kjv,
+            isBeingInstalled: false,
+            installedModules: [kjv]
+        )
+
+        XCTAssertEqual(actions, [.about, .deleteIndex, .unlock])
+    }
+
+    /**
+     Verifies Bible retention does not prevent uninstalling an installed non-Bible module.
+
+     The inventory contains one Bible and one dictionary. A failure means the planner applies the
+     last-Bible policy globally instead of matching Android's category-scoped `Book.canDelete` rule.
+     */
+    func testNonBibleUninstallRemainsAvailableWithOneInstalledBible() {
+        let dictionary = installedModule("STRONGS", category: .dictionary)
+
+        let actions = ModuleDownloadRowActionPlanner.availableActions(
+            installedModule: dictionary,
+            isBeingInstalled: false,
+            installedModules: [installedModule("KJV", category: .bible), dictionary]
+        )
+
+        XCTAssertEqual(actions, [.about, .uninstall, .deleteIndex])
     }
 
     /**

@@ -21,6 +21,8 @@
       <MarkdownTextEditor
           v-if="isMarkdown"
           :text="editText || ''"
+          :note-editor-context="noteEditorContext"
+          content-type-name="MARKDOWN"
           :content-accessibility-label="editorAccessibilityLabel"
           @save="textChanged"
           @close="editMode = false"
@@ -28,6 +30,8 @@
       <TextEditor
           v-else
           :text="editText || ''"
+          :note-editor-context="noteEditorContext"
+          content-type-name="HTML"
           :content-accessibility-label="editorAccessibilityLabel"
           @save="textChanged"
           @close="editMode = false"
@@ -58,6 +62,12 @@
 </template>
 
 <script lang="ts">
+/** Stable native identity required for conflict-safe AI note transformation writeback. */
+export interface NoteEditorContext {
+    entityType: "BOOKMARK_NOTE" | "STUDYPAD_TEXT" | "MY_DOCUMENT_PAGE"
+    entityId: string
+}
+
 let cancelOpen = () => {}
 </script>
 
@@ -67,6 +77,7 @@ let cancelOpen = () => {}
  *
  * @param text - Stored note text, either HTML or Markdown source depending on `contentType`.
  * @param contentType - Optional Android `TextContentType`; nil falls back to global settings.
+ * @param noteEditorContext - Exact owning entity identity; nil suppresses the AI editor action.
  * @fires save - Emitted with the stored source text after editor saves.
  * @fires opened - Emitted when editing starts.
  * @fires closed - Emitted when editing closes, with the current source text.
@@ -97,13 +108,15 @@ const props = withDefaults(defineProps<{
     displayAccessibilityLabel?: string
     editorAccessibilityLabel?: string
     contentType?: Nullable<TextContentType>
+    noteEditorContext?: NoteEditorContext | null
 }>(), {
     editDirectly: false,
     showPlaceholder: false,
     text: null,
     maxEditorHeight: "inherit",
     constraintDisplayHeight: false,
-    disableClickToEdit: false
+    disableClickToEdit: false,
+    noteEditorContext: null
 })
 
 const editMode = ref<boolean>(props.editDirectly);

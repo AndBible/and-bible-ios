@@ -10,6 +10,36 @@ import os.log
 private let logger = Logger(subsystem: "org.andbible", category: "BibleWindowPane")
 
 /**
+ Applies a complete Android Bible-link reference inside a destination pane controller.
+
+ `BibleWindowPane` uses this boundary for current-pane navigation, links-window navigation, and
+ delayed-controller fallback. Keeping the source passage intact through this call prevents pane
+ orchestration from reducing a `BookAndKey`-equivalent range to book/chapter coordinates.
+ */
+enum BibleWindowPaneReferenceRouter {
+    /**
+     Strictly maps and opens one source-owned Bible reference in `controller`.
+
+     - Parameters:
+       - reference: Complete source passage, source versification, and optional forced target
+         document supplied by the emitting controller.
+       - controller: Existing or newly registered destination pane controller.
+     - Returns: `true` when the destination accepted and navigated the exact mapped passage.
+     - Side effects: May switch the destination Bible document/category, persist pane state, record
+       history, and emit reader content.
+     - Failure modes: Returns `false` without navigation when the destination has no active Bible or
+       strict source-to-target mapping fails.
+     */
+    @discardableResult
+    static func navigate(
+        _ reference: OsisRef,
+        in controller: BibleReaderController
+    ) -> Bool {
+        controller.navigateToBibleLink(reference)
+    }
+}
+
+/**
  Hosts one fully independent reading pane inside the multi-window reader.
 
  Each pane uses the `BibleBridge` and `BibleReaderController` registered for its `Window`, while
@@ -34,7 +64,7 @@ private let logger = Logger(subsystem: "org.andbible", category: "BibleWindowPan
  */
 struct BibleWindowPane: View {
     /// Window model that owns this pane's persisted position, layout, and history state.
-    let window: Window
+    let window: BibleCore.Window
 
     /// Fully resolved text-display settings pushed into the pane's controller and web view.
     let displaySettings: TextDisplaySettings
@@ -63,6 +93,12 @@ struct BibleWindowPane: View {
     /// Whether the custom Android-style pane hamburger menu is visible.
     @State private var isWindowMenuPresented = false
 
+  /// Native help content requested by this pane's bundled BibleView bridge.
+  @State private var readerHelpPresentation: AIReaderHelpPresentation?
+
+  /// Pane-scoped Android-compatible AI chooser, execution, and permission coordinator.
+  @State private var aiRunCoordinator: AIReaderRunCoordinator?
+
     /// Shared workspace/window coordinator used for controller registration and layout actions.
     @Environment(WindowManager.self) private var windowManager
 
@@ -71,6 +107,9 @@ struct BibleWindowPane: View {
 
     /// SwiftData context used to build stores and persist pane-driven mutations.
     @Environment(\.modelContext) private var modelContext
+
+  /// Shared search index used by Android-compatible AI search tools.
+  @Environment(SearchIndexService.self) private var searchIndexService
 
     /// Bridge that should back the current `BibleWebView` render pass.
     private var webBridge: BibleBridge {
@@ -146,6 +185,9 @@ struct BibleWindowPane: View {
     /// Forwards shareable plain-text content to the parent share presenter.
     var onShareText: ((String) -> Void)?
 
+    /// Forwards My Documents content with Android's separate native subject and body values.
+    var onShareMyDocument: ((MyDocumentSharePayload) -> Void)?
+
     /// Forwards cross-reference payloads for parent-managed presentation.
     var onShowCrossReferences: (([CrossReference]) -> Void)?
 
@@ -213,13 +255,26 @@ struct BibleWindowPane: View {
                 windowMenuOverlay
             }
         }
+    .sheet(item: $readerHelpPresentation) { presentation in
+      AIReaderHelpDialog(presentation: presentation)
+    }
+    .overlay {
+      if let aiRunCoordinator {
+        AIReaderCoordinatorHost(
+          coordinator: aiRunCoordinator,
+          swordManager: controller?.swordManager
+        )
+      }
+    }
         .onAppear {
             if controller == nil {
                 initializeController()
             } else {
                 let workspaceStore = WorkspaceStore(modelContext: modelContext)
                 let settingsStore = SettingsStore(modelContext: modelContext)
-                configureController(controller!, workspaceStore: workspaceStore, settingsStore: settingsStore)
+        configureController(
+          controller!, workspaceStore: workspaceStore, settingsStore: settingsStore)
+        configureAICoordinator(for: controller!)
                 registerController(controller!)
             }
         }
@@ -335,7 +390,7 @@ struct BibleWindowPane: View {
      */
     private func performPaneWindowButtonAction(_ action: AndroidPaneWindowButtonGestureAction) {
         guard action != .none else { return }
-        windowManager.activeWindow = window
+        windowManager.activateWindow(window)
         switch action {
         case .openMenu:
             withAnimation(.easeOut(duration: 0.12)) {
@@ -404,7 +459,7 @@ struct BibleWindowPane: View {
         return BibleWindowPaneMenuSnapshot(
             windowID: window.id,
             isLinksWindow: window.isLinksWindow,
-            isPinned: window.isPinMode,
+            isPinned: windowManager.isEffectivelyPinned(window),
             isSynchronized: window.isSynchronized,
             syncGroup: window.syncGroup,
             isVisible: window.layoutState != "minimized",
@@ -413,16 +468,19 @@ struct BibleWindowPane: View {
             canClose: windowManager.allWindows.count > 1,
             canSync: capabilities.canSyncWindow,
             canCopyLink: currentCopyLinkURL != nil,
-            autoPinEnabled: windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false,
+            autoPinEnabled: windowManager.activeWorkspace?.workspaceSettings?.autoPin
+                ?? WorkspaceSettings.defaultAutoPin,
             moduleHasStrongs: controller?.hasStrongs ?? false,
             sectionTitlesEnabled: resolvedSettings.showSectionTitles ?? true,
             verseNumbersEnabled: resolvedSettings.showVerseNumbers ?? true,
+      isAIConfigured: isAIConfigured,
             allWindowsInPersistedOrder: windowSummaries(windowManager.windowsInPersistedOrder),
             visibleWindows: windowSummaries(windowManager.visibleWindows)
         )
     }
 
-    private func windowSummaries(_ windows: [Window]) -> [BibleWindowPaneMenuWindowSummary] {
+  private func windowSummaries(_ windows: [BibleCore.Window]) -> [BibleWindowPaneMenuWindowSummary]
+  {
         windows.enumerated().map { index, candidate in
             let candidateController = windowManager.controllers[candidate.id] as? BibleReaderController
             return BibleWindowPaneMenuWindowSummary(
@@ -430,12 +488,15 @@ struct BibleWindowPane: View {
                 position: index,
                 documentAbbreviation: documentAbbreviation(for: candidate, controller: candidateController),
                 referenceName: referenceName(for: candidate, controller: candidateController),
-                isPinned: candidate.isPinMode
+                isPinned: windowManager.isEffectivelyPinned(candidate)
             )
         }
     }
 
-    private func documentAbbreviation(for window: Window, controller: BibleReaderController?) -> String? {
+    private func documentAbbreviation(
+        for window: BibleCore.Window,
+        controller: BibleReaderController?
+    ) -> String? {
         if let controller {
             return controller.activeModuleName(for: controller.currentCategory)
         }
@@ -458,7 +519,10 @@ struct BibleWindowPane: View {
         }
     }
 
-    private func referenceName(for window: Window, controller: BibleReaderController?) -> String? {
+    private func referenceName(
+        for window: BibleCore.Window,
+        controller: BibleReaderController?
+    ) -> String? {
         if let controller {
             switch controller.currentCategory {
             case .bible, .commentary:
@@ -496,7 +560,7 @@ struct BibleWindowPane: View {
     }
 
     private func performWindowMenuAction(_ action: BibleWindowPaneMenuAction) {
-        windowManager.activeWindow = window
+        windowManager.activateWindow(window)
         switch action {
         case .newWindow:
             windowManager.addWindow(from: window)
@@ -530,6 +594,8 @@ struct BibleWindowPane: View {
             onCopyWindowSettingsToWorkspace?()
         case .copySettingsToGlobal:
             onCopyWindowSettingsToGlobal?()
+    case .openAIActions:
+      presentWindowAIActions()
         case .copyLink:
             copyReference()
         case .close:
@@ -547,7 +613,9 @@ struct BibleWindowPane: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url, forType: .string)
         #endif
-        onShowToast?(localizedDrawerString("reference_copied_to_clipboard", default: "Reference copied to clipboard"))
+    onShowToast?(
+      localizedDrawerString(
+        "reference_copied_to_clipboard", default: "Reference copied to clipboard"))
     }
 
     private var currentCopyLinkURL: String? {
@@ -556,7 +624,8 @@ struct BibleWindowPane: View {
         guard ctrl.currentCategory == .bible || ctrl.currentCategory == .commentary else { return nil }
 
         let documentInitials: String
-        if ctrl.currentCategory == .commentary, let commentaryInitials = ctrl.activeCommentaryModuleName {
+    if ctrl.currentCategory == .commentary, let commentaryInitials = ctrl.activeCommentaryModuleName
+    {
             documentInitials = commentaryInitials
         } else {
             documentInitials = ctrl.activeModuleName
@@ -597,6 +666,7 @@ struct BibleWindowPane: View {
             bridge = existingController.bridge
             controller = existingController
             configureController(existingController, workspaceStore: workspaceStore, settingsStore: store)
+      configureAICoordinator(for: existingController)
             registerController(existingController)
             return
         }
@@ -615,10 +685,14 @@ struct BibleWindowPane: View {
         if !sharedControllers.isEmpty {
             let didCopyModuleState = sharedControllers.contains { ctrl.copyModuleState(from: $0) }
             if !didCopyModuleState {
-                logger.warning("Unable to copy SWORD state from registered controllers; initializing pane controller independently")
+        logger.warning(
+          "Unable to copy SWORD state from registered controllers; initializing pane controller independently"
+        )
                 ctrl.initializeSwordIfNeeded()
             }
         }
+
+    configureAICoordinator(for: ctrl)
 
         ctrl.restoreSavedPosition()
 
@@ -641,6 +715,14 @@ struct BibleWindowPane: View {
         ctrl.myDocumentStore = MyDocumentStore(modelContext: modelContext)
 
         ctrl.onShareVerseText = { text in onShareText?(text) }
+        ctrl.onShareMyDocumentContent = { payload in onShareMyDocument?(payload) }
+    ctrl.onDeleteActiveMyDocumentPage = { [weak windowManager] in
+      guard let windowManager else { return .showBible }
+      return MyDocumentPageDeletionWindowLifecycle.resolve(
+        window: window,
+        windowManager: windowManager
+      )
+    }
         ctrl.onRequestOpenDownloads = { initialSearchText in onShowDownloads?(initialSearchText) }
         ctrl.onShowStrongsSearch = { strongsNum in onSearchForStrongs?(strongsNum) }
         ctrl.onShowCrossReferences = { refs in onShowCrossReferences?(refs) }
@@ -653,11 +735,16 @@ struct BibleWindowPane: View {
         }
         ctrl.onPersistState = { try? modelContext.save() }
         ctrl.onShowToast = { text in onShowToast?(text) }
+    ctrl.onShowReaderHelp = { presentation in
+      readerHelpPresentation = presentation
+    }
         ctrl.onShareHtml = { html in
             #if os(iOS)
-            guard let windowScene = UIApplication.shared.connectedScenes
+        guard
+          let windowScene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene }).first,
-                  let rootVC = windowScene.windows.first?.rootViewController else { return }
+          let rootVC = windowScene.windows.first?.rootViewController
+        else { return }
             var topVC = rootVC
             while let presented = topVC.presentedViewController { topVC = presented }
             let activityVC = UIActivityViewController(activityItems: [html], applicationActivities: nil)
@@ -678,7 +765,7 @@ struct BibleWindowPane: View {
         let focusHandler: () -> Void = { [weak windowManager] in
             guard let wm = windowManager else { return }
             if wm.activeWindow?.id != window.id {
-                wm.activeWindow = window
+                wm.activateWindow(window)
                 // Notify all controllers to update their active state in Vue.js
                 for (_, controllerObj) in wm.controllers {
                     if let controller = controllerObj as? BibleReaderController {
@@ -719,7 +806,7 @@ struct BibleWindowPane: View {
            chained target for a source links window, and refreshes visible windows.
          - Failure modes: returns `nil` when window creation is refused by the manager.
          */
-        func prepareLinksWindow(using wm: WindowManager) -> Window? {
+        func prepareLinksWindow(using wm: WindowManager) -> BibleCore.Window? {
             wm.linksWindow(for: window)
         }
 
@@ -740,7 +827,7 @@ struct BibleWindowPane: View {
          - Failure modes: Runs `fallback` after the retry budget is exhausted.
          */
         func withLinksController(
-            for linksWindow: Window,
+            for linksWindow: BibleCore.Window,
             using wm: WindowManager,
             attempt: Int = 0,
             fallback: @escaping () -> Void,
@@ -766,28 +853,64 @@ struct BibleWindowPane: View {
             }
         }
 
-        // Links window support: single OSIS references open in a links window
-        ctrl.onOpenInLinksWindow = { [weak ctrl, weak windowManager] book, chapter in
+    // Links window support: single contiguous OSIS passages open in a links window.
+    ctrl.onOpenInLinksWindow = { [weak ctrl, weak windowManager] reference in
+      guard let ctrl else { return }
+      let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+      guard useLinksWindow else {
+        BibleWindowPaneReferenceRouter.navigate(reference, in: ctrl)
+        return
+      }
+
+      guard let wm = windowManager,
+        let linksWindow = prepareLinksWindow(using: wm)
+      else { return }
+
+      withLinksController(
+        for: linksWindow,
+        using: wm,
+        fallback: {
+          BibleWindowPaneReferenceRouter.navigate(reference, in: ctrl)
+        }
+      ) { targetController in
+        BibleWindowPaneReferenceRouter.navigate(reference, in: targetController)
+      }
+    }
+
+    ctrl.onOpenAIDocumentPageInLinksWindow = { [weak ctrl, weak windowManager] request in
             guard let ctrl else { return }
             let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
             guard useLinksWindow else {
-                ctrl.navigateTo(book: book, chapter: chapter)
+        ctrl.loadMyDocumentPage(
+          bookInitials: request.documentInitials,
+          pageKey: request.pageKey
+        )
                 return
             }
 
             guard let wm = windowManager,
-                  let linksWindow = prepareLinksWindow(using: wm) else { return }
+        let linksWindow = prepareLinksWindow(using: wm)
+      else { return }
 
             withLinksController(
                 for: linksWindow,
                 using: wm,
-                fallback: { ctrl.navigateTo(book: book, chapter: chapter) }
+        fallback: {
+          ctrl.loadMyDocumentPage(
+            bookInitials: request.documentInitials,
+            pageKey: request.pageKey
+          )
+        }
             ) { targetController in
-                targetController.navigateTo(book: book, chapter: chapter)
+        targetController.loadMyDocumentPage(
+          bookInitials: request.documentInitials,
+          pageKey: request.pageKey
+        )
             }
         }
 
-        ctrl.onOpenMultiReferenceDocumentInLinksWindow = { [weak ctrl, weak windowManager] documentJSON in
+    ctrl.onOpenMultiReferenceDocumentInLinksWindow = {
+      [weak ctrl, weak windowManager] documentJSON in
             guard let ctrl else { return }
             let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
             guard useLinksWindow else {
@@ -796,7 +919,8 @@ struct BibleWindowPane: View {
             }
 
             guard let wm = windowManager,
-                  let linksWindow = prepareLinksWindow(using: wm) else { return }
+        let linksWindow = prepareLinksWindow(using: wm)
+      else { return }
 
             withLinksController(
                 for: linksWindow,
@@ -816,7 +940,8 @@ struct BibleWindowPane: View {
             }
 
             guard let wm = windowManager,
-                  let linksWindow = prepareLinksWindow(using: wm) else { return }
+        let linksWindow = prepareLinksWindow(using: wm)
+      else { return }
 
             withLinksController(
                 for: linksWindow,
@@ -841,7 +966,8 @@ struct BibleWindowPane: View {
             }
 
             guard let wm = windowManager,
-                  let linksWindow = prepareLinksWindow(using: wm) else { return }
+        let linksWindow = prepareLinksWindow(using: wm)
+      else { return }
 
             withLinksController(
                 for: linksWindow,
@@ -862,6 +988,366 @@ struct BibleWindowPane: View {
             }
         }
     }
+
+  /** Whether Android's AI action rows should be visible for this installation. */
+  private var isAIConfigured: Bool {
+    guard let providers = try? AISettingsStore(modelContext: modelContext).providers() else {
+      return false
+    }
+    return !providers.isEmpty
+  }
+
+  /**
+   Builds the pane-scoped AI domain and wires every reader and menu entry point.
+
+   - Parameter ctrl: Live controller whose SWORD registry and persistence services are ready.
+   - Side effects: Creates one coordinator, discovers Android SQLite documents, and installs
+     bridge/menu callbacks. No provider request occurs.
+   - Failure modes: Returns without wiring until SWORD, bookmark, and My Documents services are
+     available; the next controller configuration retries.
+   */
+  private func configureAICoordinator(for ctrl: BibleReaderController) {
+    let aiSettingsStore = AISettingsStore(modelContext: modelContext)
+    ctrl.isAIProviderConfigured = {
+      guard let providers = try? aiSettingsStore.providers() else { return false }
+      return !providers.isEmpty
+    }
+    if let aiRunCoordinator {
+      wireAIEntryPoints(ctrl, coordinator: aiRunCoordinator)
+      return
+    }
+    guard let swordManager = ctrl.swordManager,
+      let bookmarkService = ctrl.bookmarkService,
+      let myDocumentStore = ctrl.myDocumentStore
+    else {
+      return
+    }
+
+    let sqliteLibrary = SQLiteDocumentModuleLibrary(
+      moduleRootURL: URL(fileURLWithPath: swordManager.modulePath, isDirectory: true)
+    )
+    let appSettingsStore = SettingsStore(modelContext: modelContext)
+    let documentAccessPolicy = BibleUIAgentSettingsDocumentAccessPolicy(
+      settingsStore: aiSettingsStore
+    )
+    let windowRouter = AIReaderWindowDocumentRouter(
+      windowManager: windowManager,
+      myDocumentStore: myDocumentStore
+    )
+    let domain = BibleUIAgentDomainAdapter(
+      swordManager: swordManager,
+      sqliteLibrary: sqliteLibrary,
+      searchIndexService: searchIndexService,
+      bookmarkService: bookmarkService,
+      myDocumentLibraryStore: MyDocumentLibraryStore(modelContext: modelContext),
+      myDocumentStore: myDocumentStore,
+      windowManager: windowManager,
+      documentAccessPolicy: documentAccessPolicy,
+      windowDocumentRouter: windowRouter
+    )
+    let textBacking = BibleUIAITextTargetBacking(
+      bookmarkService: bookmarkService,
+      myDocumentStore: myDocumentStore
+    )
+    let coordinator = AIReaderRunCoordinator(
+      modelContext: modelContext,
+      swordManager: swordManager,
+      domain: domain,
+      myDocumentStore: myDocumentStore,
+      textTargetBacking: textBacking,
+      referenceEnvironmentProvider: {
+        AIReaderReferenceEnvironmentResolver.resolve(
+          swordManager: swordManager,
+          sqliteLibrary: sqliteLibrary,
+          searchIndexService: searchIndexService,
+          settingsStore: appSettingsStore,
+          aiSettingsStore: aiSettingsStore
+        )
+      },
+      isInstalledBible: { initials in
+        if let module = swordManager.module(named: initials) {
+          return module.info.category == .bible
+        }
+        return sqliteLibrary.module(named: initials)?.info.category == .bible
+      },
+      openMyDocument: { [weak ctrl] initials, pageKey in
+        _ = ctrl?.loadMyDocumentPage(bookInitials: initials, pageKey: pageKey)
+      },
+      openStudyPad: { [weak ctrl] labelID, entryID in
+        ctrl?.loadStudyPadDocument(labelId: labelID, bookmarkId: entryID)
+      },
+      showTransientDocument: { [weak ctrl] document in
+        ctrl?.loadTransientAIDocument(document)
+      },
+      showToast: { text in
+        onShowToast?(text)
+      }
+    )
+    aiRunCoordinator = coordinator
+    wireAIEntryPoints(ctrl, coordinator: coordinator)
+  }
+
+  /** Installs exact bridge, generated-page, prompt-editor, and workspace callbacks. */
+  private func wireAIEntryPoints(
+    _ ctrl: BibleReaderController,
+    coordinator: AIReaderRunCoordinator
+  ) {
+    ctrl.onRequestAIAction = { [weak ctrl, weak coordinator] request in
+      guard let ctrl, let coordinator else { return }
+      let isBible = request.osisRef == nil
+      let sourceBounds = isBible
+        ? AIReaderSourceRange.bibleBounds(
+          start: request.startOrdinal,
+          end: request.endOrdinal
+        )
+        : AIReaderSourceRange.genericBounds(
+          start: request.startOrdinal,
+          end: request.endOrdinal
+        )
+      guard let sourceBounds else {
+        onShowToast?(
+          String(
+            localized: "error_no_content",
+            defaultValue: "No content is available for this selection."))
+        return
+      }
+      let verifiedRange =
+        isBible
+        ? ctrl.aiVerifiedKJVARange(
+          bookInitials: request.bookInitials,
+          startOrdinal: request.startOrdinal,
+          endOrdinal: request.endOrdinal
+        )
+        : nil
+      let sourceContext: AIReaderSourceContext?
+      if isBible {
+        sourceContext = ctrl.aiSourceContext(
+          expectedDocumentInitials: request.bookInitials,
+          selectionOrdinalStart: sourceBounds.start,
+          selectionOrdinalEnd: sourceBounds.end
+        )
+      } else {
+        sourceContext = ctrl.aiSourceContext(
+          expectedDocumentInitials: request.bookInitials,
+          requestedSourceKey: request.osisRef
+        )
+      }
+      guard let sourceContext else {
+        onShowToast?(
+          String(
+            localized: "error_no_content",
+            defaultValue: "No content is available for this selection."))
+        return
+      }
+      let pane = aiPaneSnapshot(
+        controller: ctrl,
+        sourceContext: sourceContext,
+        verifiedKJVARange: verifiedRange
+      )
+      guard
+        let action = AIReaderBridgeActionResolver.selection(
+          request,
+          pane: pane,
+          verifiedKJVARange: verifiedRange
+        )
+      else {
+        onShowToast?(
+          String(
+            localized: "error_no_content",
+            defaultValue: "No content is available for this selection."))
+        return
+      }
+      coordinator.presentActions(for: action)
+    }
+    ctrl.onRequestNoteEditorAIAction = { [weak ctrl, weak coordinator] request in
+      guard let ctrl, let coordinator else { return }
+      presentNoteEditorAIActions(request, controller: ctrl, coordinator: coordinator)
+    }
+    ctrl.onRegenerateMyDocumentPage = { [weak coordinator] context in
+      coordinator?.presentRegeneration(
+        context,
+        workspaceID: windowManager.activeWorkspace?.id,
+        windowID: window.id
+      )
+    }
+    ctrl.onChooseAIDocumentPage = { [weak coordinator] markers in
+      coordinator?.presentDocumentMarkers(markers)
+    }
+    ctrl.onOpenAIPromptEditor = { [weak coordinator] promptID in
+      coordinator?.presentPromptEditor(promptID)
+    }
+    ctrl.onRequestWorkspaceAIAction = { [weak coordinator] in
+      guard let coordinator else { return }
+      coordinator.presentActions(for: workspaceAIActionRequest())
+    }
+  }
+
+  /** Resolves an editor bridge request to an existing typed writeback target. */
+  private func presentNoteEditorAIActions(
+    _ request: AINoteEditorActionRequest,
+    controller ctrl: BibleReaderController,
+    coordinator: AIReaderRunCoordinator
+  ) {
+    guard let id = UUID(uuidString: request.entityId),
+      let entityType = NoteEditorEntityType(rawValue: request.entityType)
+    else {
+      onShowToast?(String(localized: "error_occurred", defaultValue: "An error has occurred."))
+      return
+    }
+
+    let target: AITextTarget
+    var bibleContext: AIReaderBibleBookmarkContext?
+    switch entityType {
+    case .bookmarkNote:
+      guard let bookmarkService = ctrl.bookmarkService else { return }
+      if let bookmark = bookmarkService.bibleBookmark(id: id) {
+        guard let sourceContext = ctrl.aiBibleSourceContext(
+          bookInitials: bookmark.bookInitials,
+          startOrdinal: bookmark.ordinalStart,
+          endOrdinal: bookmark.ordinalEnd
+        ), let sourceRange = sourceContext.sourceOrdinalRange,
+          let sourceOSISRange = sourceContext.sourceOSISRange
+        else {
+          return
+        }
+        let kjvaRange = AIReaderSourceRange.bibleBounds(
+          start: bookmark.kjvOrdinalStart,
+          end: bookmark.kjvOrdinalEnd
+        )?.closedRange
+        target = .bibleBookmarkNote(id)
+        bibleContext = AIReaderBibleBookmarkContext(
+          bookInitials: sourceContext.sourceDocumentInitials,
+          sourceBookKey: sourceContext.sourceBookKey,
+          sourceOSISRange: sourceOSISRange,
+          sourceOrdinalRange: sourceRange,
+          kjvaOrdinalRange: kjvaRange,
+          selectedContent: sourceContext.selectedContent,
+          selectedText: sourceContext.selectedText
+        )
+      } else if bookmarkService.genericBookmark(id: id) != nil {
+        target = .genericBookmarkNote(id)
+      } else {
+        return
+      }
+    case .studyPadText:
+      guard let bookmarkService = ctrl.bookmarkService else { return }
+      guard bookmarkService.studyPadEntry(id: id) != nil else { return }
+      target = .studyPadText(id)
+    case .myDocumentPage:
+      guard let myDocumentStore = ctrl.myDocumentStore else { return }
+      guard myDocumentStore.page(pageId: id) != nil else { return }
+      target = .myDocumentPage(id)
+    }
+
+    let pane = aiPaneSnapshot(controller: ctrl, sourceContext: nil)
+    guard
+      let action = AIReaderBridgeActionResolver.noteEditor(
+        request,
+        target: target,
+        pane: pane,
+        bibleBookmark: bibleContext
+      )
+    else {
+      return
+    }
+    coordinator.presentActions(for: action)
+  }
+
+  /** Presents Android's whole-window AI context from the pane's exact current document/key. */
+  private func presentWindowAIActions() {
+    guard let controller, let aiRunCoordinator else { return }
+    guard let sourceContext = controller.aiSourceContext() else {
+      onShowToast?(
+        String(
+          localized: "error_no_content", defaultValue: "No content is available for this selection."
+        ))
+      return
+    }
+    let pane = aiPaneSnapshot(controller: controller, sourceContext: sourceContext)
+    guard let action = AIReaderBridgeActionResolver.window(pane) else { return }
+    aiRunCoordinator.presentActions(for: action)
+  }
+
+  /** Captures immutable pane identity without allowing later focus changes to retarget a run. */
+  private func aiPaneSnapshot(
+    controller ctrl: BibleReaderController,
+    sourceContext: AIReaderSourceContext?,
+    verifiedKJVARange: ClosedRange<Int>? = nil
+  ) -> AIReaderPaneSnapshot {
+    let sourceOrdinalRange = sourceContext?.sourceOrdinalRange
+    let sourceCategory: DocumentCategory? = sourceContext.map { context in
+      context.sourceOrdinalRange == nil ? ctrl.currentCategory : .bible
+    }
+    let resolvedKJVARange: ClosedRange<Int>? =
+      verifiedKJVARange
+      ?? {
+        guard sourceCategory == .bible,
+          let sourceOrdinalRange,
+          let initials = sourceContext?.sourceDocumentInitials
+        else {
+          return nil
+        }
+        return ctrl.aiVerifiedKJVARange(
+          bookInitials: initials,
+          startOrdinal: sourceOrdinalRange.lowerBound,
+          endOrdinal: sourceOrdinalRange.upperBound
+        )
+      }()
+    return AIReaderPaneSnapshot(
+      workspaceID: windowManager.activeWorkspace?.id,
+      windowID: window.id,
+      documentCategory: sourceCategory,
+      activeDocumentInitials: sourceContext?.sourceDocumentInitials,
+      sourceBookKey: sourceContext?.sourceBookKey,
+      sourceOSISRange: sourceContext?.sourceOSISRange,
+      selectedContent: sourceContext?.selectedContent,
+      selectedText: sourceContext?.selectedText,
+      sourceOrdinalRange: sourceOrdinalRange,
+      kjvaOrdinalRange: resolvedKJVARange
+    )
+  }
+
+  /** Builds Android's visible/minimised workspace summary for workspace-level prompts. */
+  private func workspaceAIActionRequest() -> AIReaderActionRequest {
+    let workspace = windowManager.activeWorkspace
+    let windows = windowManager.allWindows.filter { $0.layoutState != "closed" }
+    let visible = windows.filter { $0.layoutState != "minimized" }
+    let minimised = windows.filter { $0.layoutState == "minimized" }
+    var summary = "Workspace: \(workspace?.name ?? "")\n"
+    summary +=
+      "Windows: \(windows.count) total (\(visible.count) visible, \(minimised.count) minimised)\n\n"
+
+    func append(_ candidates: [BibleCore.Window], title: String) {
+      guard !candidates.isEmpty else { return }
+      summary += "\(title):\n"
+      for candidate in candidates {
+        let candidateController = windowManager.controllers[candidate.id] as? BibleReaderController
+        let initials =
+          documentAbbreviation(for: candidate, controller: candidateController) ?? "unknown"
+        let name =
+          candidateController.flatMap {
+            $0.installedModules(for: $0.currentCategory)
+              .first(where: { $0.name == initials })?.description
+          } ?? "unknown"
+        summary += "- \(initials) (\(name))"
+        if let key = referenceName(for: candidate, controller: candidateController) {
+          summary += " at \(key)"
+        }
+        if candidate.id == windowManager.activeWindow?.id {
+          summary += " [ACTIVE]"
+        }
+        summary += "\n"
+      }
+    }
+    append(visible, title: "Visible windows")
+    if !visible.isEmpty, !minimised.isEmpty { summary += "\n" }
+    append(minimised, title: "Minimised windows")
+    return AIReaderBridgeActionResolver.workspace(
+      workspaceID: workspace?.id,
+      activeWindowID: windowManager.activeWindow?.id,
+      summary: summary
+    )
+  }
 
     /// Registers the pane controller and nudges SwiftUI to re-evaluate registry-backed UI.
     private func registerController(_ ctrl: BibleReaderController) {
@@ -902,38 +1388,50 @@ struct BibleWindowPane: View {
         HStack(spacing: 20) {
             if controller?.canUseBibleReferenceActions == true {
                 if disableTwoStepBookmarking {
-                    Button { controller?.bookmarkSelection(wholeVerse: false) } label: {
+          Button {
+            controller?.bookmarkSelection(wholeVerse: false)
+          } label: {
                         VStack(spacing: 2) {
                             Image(systemName: "bookmark")
-                            Text(String(
+              Text(
+                String(
                                 localized: "add_bookmark3",
                                 defaultValue: "Selection"
-                            ))
+                )
+              )
                             .font(.caption2)
                         }
                     }
-                    Button { controller?.bookmarkSelection(wholeVerse: true) } label: {
+          Button {
+            controller?.bookmarkSelection(wholeVerse: true)
+          } label: {
                         VStack(spacing: 2) {
                             Image(systemName: "bookmark.fill")
-                            Text(String(
+              Text(
+                String(
                                 localized: "add_bookmark_whole_verse1",
                                 defaultValue: "Verses"
-                            ))
+                )
+              )
                             .font(.caption2)
                         }
                     }
                 } else {
                     Menu {
-                        Button(String(
+            Button(
+              String(
                             localized: "add_bookmark3",
                             defaultValue: "Selection"
-                        )) {
+              )
+            ) {
                             controller?.bookmarkSelection(wholeVerse: false)
                         }
-                        Button(String(
+            Button(
+              String(
                             localized: "add_bookmark_whole_verse1",
                             defaultValue: "Verses"
-                        )) {
+              )
+            ) {
                             controller?.bookmarkSelection(wholeVerse: true)
                         }
                     } label: {
@@ -944,47 +1442,61 @@ struct BibleWindowPane: View {
                     }
                 }
             } else {
-                Button { controller?.bookmarkSelection(wholeVerse: true) } label: {
+        Button {
+          controller?.bookmarkSelection(wholeVerse: true)
+        } label: {
                     VStack(spacing: 2) {
                         Image(systemName: "bookmark")
                         Text(String(localized: "bookmark")).font(.caption2)
                     }
                 }
             }
-            Button { controller?.copySelection() } label: {
+      Button {
+        controller?.copySelection()
+      } label: {
                 VStack(spacing: 2) {
                     Image(systemName: "doc.on.doc")
                     Text(String(localized: "copy")).font(.caption2)
                 }
             }
             if controller?.canUseBibleReferenceActions == true {
-                Button { controller?.shareSelection() } label: {
+        Button {
+          controller?.shareSelection()
+        } label: {
                     VStack(spacing: 2) {
                         Image(systemName: "square.and.arrow.up")
                         Text(String(localized: "share")).font(.caption2)
                     }
                 }
-                Button { controller?.compareSelection() } label: {
+        Button {
+          controller?.compareSelection()
+        } label: {
                     VStack(spacing: 2) {
                         Image(systemName: "text.justify.left")
                         Text(String(localized: "compare")).font(.caption2)
                     }
                 }
             }
-            Button { controller?.speakSelection() } label: {
+      Button {
+        controller?.speakSelection()
+      } label: {
                 VStack(spacing: 2) {
                     Image(systemName: "speaker.wave.2")
                     Text(String(localized: "speak")).font(.caption2)
                 }
             }
-            Button { controller?.webSearchSelection() } label: {
+      Button {
+        controller?.webSearchSelection()
+      } label: {
                 VStack(spacing: 2) {
                     Image(systemName: "magnifyingglass")
                     Text(String(localized: "search_web")).font(.caption2)
                 }
             }
             if controller?.hasWordLookupDictionaries == true {
-                Button { controller?.lookupSelectionInDictionaries() } label: {
+        Button {
+          controller?.lookupSelectionInDictionaries()
+        } label: {
                     VStack(spacing: 2) {
                         Image(systemName: "book.closed")
                         Text(String(localized: "dictionary")).font(.caption2)

@@ -172,7 +172,7 @@
 "dictionaries" = "Kamus";
 "category_books" = "Books";
 "maps" = "Maps";
-"doc_type_addons" = "Add-ons";
+"doc_type_addons" = "Add-on";
 "document_filter_results %lld" = "Documents (%lld)";
 "install" = "Install";
 "install_module" = "Install";
@@ -264,7 +264,7 @@
 /* Security — Settings for the persecuted */
 "settings_security" = "Tetapan untuk mereka yang dianiaya";
 "discrete_mode" = "Sembunyikan simbol agama";
-"discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "show_calculator" = "Kalkulator";
 "show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
 "calculator_pin" = "PIN Kalkulator";
@@ -272,10 +272,6 @@
 "calculator_pin_description" = "Kod PIN untuk memasuki aplikasi apabila kalkulator ditunjukkan.";
 "discrete_help_title" = "Baca ini dahulu!";
 "discrete_help_summary" = "Arahan untuk tetapan dan maklumat tentang binaan diskrit tertentu.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 /* About */
 "settings_language" = "Bahasa";
@@ -628,7 +624,6 @@
 
 "prefs_volume_keys_scroll_title" = "Butang kelantangan tatal";
 "prefs_volume_keys_scroll_summary" = "Gunakan kelantangan naik/turun untuk menatal teks Alkitab";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Ciri eksperimental";
 "prefs_experimental_features_summary" = "Pilih ciri eksperimental mana yang hendak diaktifkan. Ciri-ciri ini masih dalam pembangunan dan mungkin berubah atau dibuang";
 "experimental_feature_bookmark_edit_actions" = "Tindakan edit penanda buku";
@@ -761,3 +756,383 @@
 "help_workspaces" = "Ruang Kerja";
 "skip" = "Langkau";
 "error_no_content" = "Tiada kandungan untuk ayat yang dipilih";
+
+/* Android shared translations */
+"calculator_par1" = "Sebelum memasuki aplikasi, skrin kalkulator dipaparkan.";
+"calculator_par2" = "Di dalamnya, anda boleh melakukan kalkulus standard, dan apabila anda ingin memasuki aplikasi, anda hanya taip kod PIN anda (lalai adalah 1234) kemudian tekan butang \"=\".";
+"calculator_par3" = "Anda boleh menetapkan kod PIN tersuai melalui tetapan \"PIN Kalkulator\".";
+"give_passphrase_for_module" = "Dokumen %@ disulitkan dan memerlukan kata laluan untuk dibuka";
+"show_unlock_info" = "Modul & maklumat pembukaan kunci";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Mengekstrak fail Zip sekarang…";
+"install_failed_reason" = "Pemasangan modul gagal kerana sebab berikut: %@.";
+"install_zip_successfull" = "Modul telah berjaya dipasang";
+"module_install_phase_committing" = "Sila tunggu. Memuatkan modul dari fail.";
+"module_install_phase_downloading" = "Muat turun";
+"module_install_phase_queued" = "Sila tunggu…";
+"storage_space_warning" = "Ruang storan tempatan tidak mencukupi.";
+
+/* Android shared translations */
+"error_occurred" = "Ralat telah berlaku";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Hafalan";
+"memorize_tab_reading" = "Bacaan";
+"reading_progress_active_days" = "hari aktif";
+"reading_progress_bible_heatmap" = "Gambaran Keseluruhan Alkitab";
+"reading_progress_calendar" = "Aktiviti Bacaan";
+"reading_progress_chapters_read" = "bab dibaca";
+"reading_progress_cycle" = "Kitaran %d";
+"reading_progress_history_for" = "Kemajuan bacaan untuk %1$@";
+"reading_progress_history_no_entries" = "Tiada rekod bacaan untuk pilihan ini.";
+"reading_progress_history_title" = "Sejarah Bacaan";
+"reading_progress_history_version_unknown" = "Versi tidak diketahui";
+"reading_progress_new_cycle" = "Kitaran Baharu";
+"reading_progress_new_cycle_confirm" = "Mulakan kitaran bacaan baharu? Ini akan mula menjejaki kemajuan anda dari awal, sambil mengekalkan data kitaran sebelumnya.";
+"reading_progress_new_testament" = "Perjanjian Baharu";
+"reading_progress_next_cycle" = "Kitaran seterusnya";
+"reading_progress_old_testament" = "Perjanjian Lama";
+"reading_progress_overall" = "%@%% Alkitab dibaca";
+"reading_progress_percent_read_scale" = "Peratus\nDibaca";
+"reading_progress_previous_cycle" = "Kitaran sebelumnya";
+"reading_progress_read_count_scale" = "Bilangan\nBacaan";
+"reading_progress_title" = "Kemajuan Baca/Hafal";
+
+/* Android shared translations */
+"conf_change_chapter" = "Perubahan bab";
+"conf_change_title" = "Tajuk";
+"conf_replace_divinename" = "Gantikan nama ilahi dengan Yahweh";
+"conf_save_playback_settings_to_bookmarks" = "Simpan tetapan main balik ke penanda buku";
+"conf_speak_auto_bookmark" = "Penanda buku automatik";
+"conf_speak_footnotes" = "Nota kaki";
+"conf_speak_sleep_timer" = "Tetapkan pemasa tidur";
+"conf_speak_synchronize" = "Teks mengikut percakapan";
+"forward" = "Maju ke hadapan";
+"playback_settings_title" = "Tetapan Main Balik";
+"rewind" = "Gulung balik";
+"speak_bookmarks_menu_title" = "Baca dari penanda buku";
+"speak_next" = "Seterusnya";
+"speak_previous" = "Sebelumnya";
+"speak_settings_title" = "Tetapan Baca Umum";
+
+/* Android shared translations */
+"sleep_timer_title" = "Masa tidur dalam minit";
+"speak_beginning_of_passage" = "Pilih permulaan petikan";
+"speak_ending_of_passage" = "Pilih penghujung petikan";
+"speak_ending_verse_must_be_later" = "Ayat penghujung mesti lebih lewat daripada ayat permulaan";
+"speak_verse_range_to_repeat" = "Pilih julat ayat untuk diulang";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Bahasa tidak tersedia.";
+
+/* Android shared translations */
+"description" = "Penerangan";
+"errorTitle" = "Ralat telah berlaku";
+"error_executing_search" = "Pertanyaan carian tidak sah";
+"export_something" = "Eksport %@";
+"install_zip_module" = "Pasang Modul Alkitab";
+"my_document_content_type_label" = "Jenis kandungan";
+"my_document_create_title" = "Buat dokumen baharu";
+"my_document_import_document" = "Import fail sebagai dokumen";
+"my_document_new_name" = "Dokumen %d";
+"my_document_new_page_name" = "Halaman %1$d";
+"my_document_rename_title" = "Namakan semula dokumen";
+"my_document_save_changes" = "Simpan perubahan?";
+"overwrite" = "Ya";
+"package_directory" = "Direktori pakej (fail Zip)";
+"read" = "Baca";
+"reading_plan_set_current_day" = "Tetapkan sebagai hari semasa…";
+"reading_plan_set_start_date" = "Tetapkan Tarikh Mula…";
+"search_all_words" = "Semua perkataan";
+"search_any_word" = "Mana-mana perkataan";
+"search_fts_query" = "Sintaks pertanyaan mentah";
+"search_phrase" = "Frasa";
+"search_words_group_prompt" = "Cari ayat";
+"show_notes" = "Tunjukkan nota";
+"speak_book_changed" = "Buku berubah.";
+"speak_chapter_changed" = "Bab";
+"success" = "Selesai";
+"summary" = "Ringkasan";
+"undo" = "Batal";
+
+/* Android shared translations */
+"my_document_no_description" = "Tiada penerangan";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Tidak ditemui dalam dokumen";
+"my_document_cannot_delete_ai_documents" = "Dokumen AI tidak boleh dipadamkan semasa ia mengandungi halaman. Padamkan halaman dahulu.";
+"my_document_create_page_title" = "Halaman baharu";
+"my_document_import_empty_selection" = "Tiada fail yang boleh diimport dipilih";
+"system_items1" = "Lagi";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Anda perlu memuat turun Alkitab yang mengandungi nombor Strong's dan membina indeksnya melalui Carian";
+
+/* Android shared translations */
+"add_model" = "Tambah model";
+"agent_already_running" = "Ejen AI sudah berjalan. Sila tunggu atau hentikannya dahulu.";
+"agent_log_cancelled" = "Dibatalkan";
+"agent_log_completed" = "Selesai";
+"agent_log_executing" = "Melaksanakan: %@";
+"agent_log_idle" = "Pembantu AI";
+"agent_log_iteration" = "Lelaran %d";
+"agent_log_model_not_configured" = "Tiada model dikonfigurasi";
+"agent_log_tool_failed" = "Alat %@ gagal";
+"agent_log_view_raw" = "Lihat log LLM mentah";
+"agent_max_iterations_title" = "Lelaran ejen maksimum";
+"agent_permission_mode_summary" = "Mengawal bila pengesahan pengguna diperlukan sebelum operasi tulis AI";
+"agent_permission_title" = "Kebenaran Ejen";
+"ai_add_provider" = "Tambah penyedia";
+"ai_advanced_category" = "Lanjutan";
+"ai_agent_notification_running" = "Ejen AI sedang bekerja…";
+"ai_behavior_category" = "Gelagat";
+"ai_connection_settings" = "Tetapan sambungan";
+"ai_disclaimer_approach" = "AndBible terutamanya menggunakan AI untuk memproses teks dari dokumen yang anda pasang — ulasan, kamus, dan modul lain — dan bukannya bergantung pada data latihan model sendiri.";
+"ai_disclaimer_dialog_title" = "Alat AI — Maklumat Penting";
+"ai_disclaimer_intro" = "Alat AI boleh sangat memperkayakan pengalaman kajian Alkitab anda dan membuka cara baharu untuk berinteraksi dengan Kitab Suci.";
+"ai_disclaimer_point1" = "AI boleh membuat kesilapan, termasuk \"halusinasi\" (menyatakan maklumat palsu atau direka dengan yakin). Jangan menerima outputnya secara buta.";
+"ai_disclaimer_point2" = "Respons AI boleh mencerminkan kecenderungan dari data latihan mereka, mungkin mengelirukan dengan sengaja, atau mungkin membentangkan perspektif teologi tertentu seolah-olah ia neutral atau lengkap.";
+"ai_disclaimer_point3" = "Anda bertanggungjawab atas cara anda menggunakan kandungan yang dijana AI. Sentiasa sahkan hasilnya terhadap Kitab Suci sebelum bergantung padanya.";
+"ai_disclaimer_point4" = "AndBible berusaha untuk memudahkan pengesahan (cth. petikan sumber yang tepat dalam ulasan), tetapi tanggungjawab muktamad sentiasa terletak pada anda.";
+"ai_disclaimer_point5" = "\"Ujilah segala-galanya; peganglah yang baik.\" (1 Tesalonika 5:21)";
+"ai_disclaimer_point6" = "Alat-alat ini tidak mempunyai jiwa dan tidak ada Roh Kudus. Ia adalah alat pemprosesan teks, bukan panduan rohani. Ia tidak sesuai untuk menyediakan khotbah, renungan, atau kandungan rohani lain secara langsung tanpa pengawasan manusia yang teliti, doa, dan kebijaksanaan.";
+"ai_disclaimer_point7" = "Digunakan dengan bijak, ia boleh memberi manfaat kepada ramai pengguna dan kes penggunaan. Tetapi jika anda tidak pasti tentang menerima risiko, memilih untuk tidak menggunakannya juga merupakan pilihan yang sah sepenuhnya.";
+"ai_disclaimer_point8" = "Data anda dihantar ke pelayan penyedia AI yang anda pilih. Dengan menggunakan kunci API, anda menerima syarat dan dasar privasi penyedia tersebut. Model yang di-hos sendiri adalah mungkin tetapi memerlukan kepakaran teknikal yang lebih, dan mungkin tidak menghasilkan keputusan sebaik model komersial.";
+"ai_disclaimer_point9" = "Penyedia AI mengenakan bayaran untuk penggunaan API. Anggaran kos yang ditunjukkan dalam AndBible adalah anggaran — sentiasa semak pengebilan penyedia anda untuk caj sebenar.";
+"ai_disclaimer_responsibility" = "Walau bagaimanapun, ia masih merupakan alat yang berkuasa — dan dengan kuasa yang besar datang tanggungjawab yang besar. Sila ingat perkara berikut.";
+"ai_disclaimer_warning_title" = "Penting: Baca sebelum menggunakan alat AI";
+"ai_doc_choose_page" = "Pilih halaman dokumen AI";
+"ai_document_filter_activity_title" = "Akses dokumen AI";
+"ai_document_regenerate" = "Jana semula";
+"ai_hidden_status" = "tersembunyi";
+"ai_hide_prompt" = "Sembunyikan";
+"ai_language_title" = "Bahasa respons AI";
+"ai_models_category" = "Model";
+"ai_models_summary_none" = "Tiada model dikonfigurasi";
+"ai_provider_api_format" = "Format API";
+"ai_provider_api_key" = "Kunci API";
+"ai_provider_api_key_not_set" = "Kunci API tidak ditetapkan";
+"ai_provider_delete_confirm" = "Padamkan penyedia \"%1$@\"? Prompt yang menggunakan penyedia ini akan kembali ke lalai.";
+"ai_provider_endpoint" = "Titik akhir API";
+"ai_provider_endpoint_description" = "URL asas sahaja. AndBible menambah \"/chat/completions\" (format OpenAI) atau \"/messages\" (format Anthropic) secara automatik. Senarai model diambil dari \"/models\".";
+"ai_provider_name" = "Nama penyedia";
+"ai_provider_saved" = "Penyedia disimpan";
+"ai_provider_select_type" = "Pilih jenis penyedia";
+"ai_providers_models_category" = "Penyedia & Model";
+"ai_providers_summary_none" = "Tiada penyedia dikonfigurasi";
+"ai_regenerate_fresh_run" = "Jalankan baharu (abaikan keputusan sebelumnya)";
+"ai_regenerate_instructions_hint" = "Arahan tambahan (opsional)";
+"ai_regenerate_keep_previous" = "Simpan versi sebelumnya";
+"ai_regenerate_prompt_not_found" = "Tidak dapat menjana semula: prompt asal tidak ditemui. Ia mungkin telah dipadamkan.";
+"ai_regenerate_title" = "Jana semula";
+"ai_settings" = "Tetapan AI";
+"ai_setup_description" = "AndBible boleh menggunakan AI untuk menterjemah teks Alkitab, menerangkan ayat, membuat ringkasan, dan banyak lagi. Untuk bermula, konfigurasikan sambungan ke penyedia API yang serasi dengan OpenAI.";
+"ai_setup_title" = "Konfigurasi AI";
+"ai_usage_category" = "Penggunaan";
+"ask_model_before_run_title" = "Tanya model sebelum jalankan";
+"auto_hide_agent_log_title" = "Sembunyikan panel AI apabila selesai";
+"bookmarks_and_mynotes_title" = "Penanda Buku & Nota Saya";
+"built_in_prompt" = "Terbina dalam";
+"built_in_prompt_notice" = "Ini adalah prompt terbina dalam dan tidak boleh diedit. Gunakan \"Salin untuk disesuaikan\" untuk membuat salinan yang boleh diedit.";
+"category_none" = "Tiada kategori";
+"commentary_max_response_no_limit" = "Tiada had";
+"commentary_max_response_title" = "Had saiz respons ulasan";
+"copy_to_customize" = "Salin untuk disesuaikan";
+"custom_agent_system_prompt_title" = "Prompt sistem ejen";
+"custom_system_prompt_custom" = "Tersuai";
+"custom_text_transform_system_prompt_title" = "Prompt sistem transformasi teks";
+"default_prompt_ask_question" = "Tanya soalan";
+"default_prompt_ask_question_desc" = "Tanya sebarang soalan tentang petikan yang dipilih";
+"default_prompt_bookmark_annotate" = "Tandai & anotasi";
+"default_prompt_bookmark_annotate_desc" = "Mencipta penanda buku dengan nota kajian yang dijana AI";
+"default_prompt_compare_translations" = "Bandingkan terjemahan";
+"default_prompt_compare_translations_desc" = "Menunjukkan bagaimana terjemahan yang dipasang berbeza-beza dalam memaparkan teks";
+"default_prompt_cross_references" = "Rujukan silang";
+"default_prompt_cross_references_desc" = "Mencari dan menerangkan petikan Alkitab berkaitan";
+"default_prompt_custom" = "Prompt tersuai";
+"default_prompt_custom_desc" = "Jalankan tugasan tersuai pada petikan yang dipilih";
+"default_prompt_custom_template" = "Ikut spesifikasi tugasan pengguna untuk petikan Alkitab yang dipilih.";
+"default_prompt_enhance_note" = "Perkukuhkan nota";
+"default_prompt_enhance_note_desc" = "Memperbaiki tatabahasa, kejelasan, dan kebolehbacaan nota anda";
+"default_prompt_explain_verses" = "Terangkan ayat";
+"default_prompt_explain_verses_desc" = "Menerangkan maksud dan konteks ayat yang dipilih";
+"default_prompt_explain_verses_studypad" = "Terangkan ayat → Pad Kajian";
+"default_prompt_explain_verses_studypad_desc" = "Cipta Pad Kajian dengan penerangan ayat demi ayat dan penanda buku";
+"default_prompt_study_layout" = "Buka tataletak kajian";
+"default_prompt_study_layout_desc" = "Membuka tetingkap ulasan dan terjemahan selari untuk kajian";
+"default_prompt_summary" = "Ringkasan";
+"default_prompt_summary_desc" = "Mencipta ringkasan padat teks yang dipilih";
+"default_prompt_thematic_study" = "Kajian tematik";
+"default_prompt_thematic_study_desc" = "Membina Pad Kajian dengan petikan dan nota tentang tema utama";
+"default_prompt_translate_to_language" = "Terjemahkan ke %@";
+"default_prompt_translate_to_ui_language_desc" = "Terjemahkan teks dokumen ke bahasa antara muka aplikasi";
+"default_prompt_word_study" = "Kajian perkataan";
+"default_prompt_word_study_desc" = "Menganalisis perkataan asal Ibrani/Greek";
+"default_prompt_workspace_assistant" = "Pembantu ruang kerja";
+"default_prompt_workspace_assistant_desc" = "Urus tetingkap: buat, tutup, susun semula, tukar dokumen";
+"delete_category" = "Padamkan kategori";
+"delete_category_and_prompts" = "Padamkan kategori dan promptnya";
+"delete_category_keep_prompts" = "Pindahkan prompt ke akar dan padamkan kategori";
+"easy_setup_enter_api_key" = "Masukkan kunci API anda";
+"easy_setup_success" = "Sambungan berjaya!";
+"easy_setup_test_connection" = "Uji sambungan";
+"easy_setup_testing" = "Menguji…";
+"easy_setup_title" = "Persediaan Pantas";
+"help_bookmarks_text" = "Penanda buku boleh dibuat dengan memilih beberapa teks dan memilih \"Tandai\" dari menu pop timbul. Anda boleh menambah nota tersuai ke penanda buku baharu dengan mengetuk teks yang kini diserlahkan dalam paparan Alkitab. Terdapat juga dokumen khas \"Nota Saya\" dalam ulasan yang membolehkan anda melihat nota anda dalam tetingkap berasingan.";
+"help_memorize_text" = "Paparan Hafal membantu anda menghafal petikan di luar kepala. Gunakan Kabur Perkataan, Kacaukan Perkataan, Taip Perkataan atau Susun Perkataan untuk berlatih. Latihan yang berjaya secara automatik menandakan ayat sebagai dihafal (ini boleh dilumpuhkan).";
+"help_read_more_link" = "Baca lebih lanjut dalam manual";
+"hide_category" = "Sembunyikan dari tindakan AI";
+"llm_actions" = "Tindakan AI";
+"llm_continue_iterations_message" = "Ejen AI telah mencapai had %1$d lelaran tanpa menyiapkan. Teruskan untuk %2$d lelaran lagi?";
+"llm_continue_iterations_title" = "Teruskan?";
+"llm_custom_input_price_title" = "Harga input ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Masukkan ID model";
+"llm_custom_output_price_title" = "Harga output ($/Mtoken)";
+"llm_error_max_iterations" = "Lelaran maksimum (%1$d) dicapai tanpa penyiapan";
+"llm_error_unknown" = "Ralat tidak diketahui";
+"llm_note_updated" = "Nota dikemas kini";
+"llm_provider_custom" = "Tersuai (serasi OpenAI)";
+"llm_reset_usage_confirm_message" = "Ini akan mengosongkan semua data penggunaan kumulatif.";
+"llm_reset_usage_confirm_title" = "Set semula data penggunaan?";
+"llm_reset_usage_title" = "Set semula data penggunaan";
+"llm_usage_summary_default" = "Tiada data penggunaan";
+"llm_usage_summary_title" = "Penggunaan token";
+"manage_prompts" = "Urus Prompt AI";
+"manage_tool_permissions_title" = "Kebenaran alat";
+"model_pricing_summary" = "%1$@ masuk / %2$@ keluar per Mtoken";
+"model_select_provider" = "Penyedia";
+"model_set_default" = "Tetapkan sebagai model lalai";
+"move_category_down" = "Pindah ke bawah";
+"move_category_up" = "Pindah ke atas";
+"new_category" = "Kategori baharu";
+"new_category_name" = "Nama kategori";
+"new_prompt" = "Prompt baharu";
+"permission_allow_all" = "Benarkan semua";
+"permission_allow_all_session" = "Benarkan semua alat sesi ini";
+"permission_allow_for_session" = "Benarkan untuk sesi ini";
+"permission_allow_once" = "Benarkan sekali";
+"permission_always_allow_confirm" = "Adakah anda pasti ingin sentiasa membenarkan \"%1$@\" secara kekal?";
+"permission_always_allow_confirm_reset_hint" = "Anda boleh menetapkan semula ini dalam Tetapan AI.";
+"permission_always_ask" = "Tanya sentiasa";
+"permission_ask_once_per_run" = "Tanya sekali per jalankan";
+"permission_deny" = "Tolak";
+"permission_deny_all" = "Tolak semua";
+"permission_option_always_allow" = "Sentiasa benarkan";
+"permission_option_always_deny" = "Sentiasa tolak";
+"permission_status_default" = "Tanya (lalai)";
+"prompt_auto_include_commentaries" = "Auto-sertakan ulasan";
+"prompt_auto_include_documents" = "Auto-sertakan dokumen yang dipasang";
+"prompt_bible_only" = "Dokumen Alkitab sahaja";
+"prompt_category" = "Kategori";
+"prompt_category_favorites" = "Kegemaran";
+"prompt_category_general" = "Umum";
+"prompt_category_notes" = "Nota";
+"prompt_category_study" = "Kajian";
+"prompt_category_uncategorized" = "Tanpa kategori";
+"prompt_context_note_editor" = "Editor nota";
+"prompt_context_text_selection" = "Pemilihan teks";
+"prompt_context_verse_selection" = "Pemilihan ayat";
+"prompt_context_window_menu" = "Menu tetingkap";
+"prompt_context_workspace_menu" = "Menu ruang kerja";
+"prompt_description" = "Penerangan";
+"prompt_edit_before_run" = "Tentukan sebelum jalankan";
+"prompt_is_text_transformation" = "Transformasi teks";
+"prompt_max_iterations_hint" = "Biarkan kosong untuk lalai global";
+"prompt_max_iterations_unlimited" = "Tanpa had";
+"prompt_model_default" = "Lalai";
+"prompt_name" = "Nama";
+"prompt_no_document_creation" = "Tiada penciptaan dokumen";
+"prompt_permission_mode" = "Mod kebenaran";
+"prompt_permission_mode_description" = "Mengawal bila pengesahan pengguna diperlukan sebelum AI melakukan operasi tulis. Tetapan setiap alat di bawah boleh mengatasi ini untuk alat individu.";
+"prompt_permission_use_default" = "Gunakan lalai";
+"prompt_show_in" = "Tunjukkan dalam";
+"prompt_strict_context_matching" = "Cache bergantung konteks";
+"prompt_tab_advanced" = "Lanjutan";
+"prompt_tab_permissions" = "Kebenaran";
+"prompt_template" = "Templat prompt";
+"prompt_tool_permissions" = "Kebenaran alat";
+"raw_log_delete_all" = "Padamkan semua";
+"raw_log_error_indicator" = "Ralat";
+"raw_log_history_empty" = "Tiada log yang disimpan";
+"raw_log_history_title" = "Sejarah Log AI";
+"raw_log_item_tokens" = "%1$@ masuk / %2$@ keluar";
+"raw_log_older_1_month" = "Lebih lama daripada 1 bulan";
+"raw_log_older_1_week" = "Lebih lama daripada 1 minggu";
+"raw_log_older_3_months" = "Lebih lama daripada 3 bulan";
+"raw_log_retention_summary_disabled" = "Dinyahdayakan (simpan semua)";
+"raw_log_retention_title" = "Padam log lama secara automatik";
+"reset_all_ai_settings" = "Set semula semua tetapan AI";
+"reset_all_ai_settings_confirm_message" = "Ini akan mengosongkan kunci API, penyedia, titik akhir, model, dan menetapkan semula semua prompt ke lalai. Teruskan?";
+"reset_all_ai_settings_confirm_title" = "Set semula semua tetapan AI?";
+"reset_all_permissions" = "Set semula semua";
+"reset_to_default" = "Set semula ke lalai";
+"save_and_exit" = "Simpan";
+"select_llm_prompt" = "Pilih Tindakan AI";
+"select_model_before_run_title" = "Pilih model";
+"set_default_model_for_prompt" = "Tetapkan sebagai model lalai untuk prompt ini";
+"show_category" = "Tunjukkan dalam tindakan AI";
+"specify_before_run_title" = "Tentukan tugasan";
+"tool_add_bookmark_note" = "Tambah nota penanda buku";
+"tool_add_label_to_bookmark" = "Tambah label ke penanda buku";
+"tool_add_my_document_page" = "Tambah halaman Dokumen Saya";
+"tool_add_study_pad_entry" = "Tambah entri pad kajian";
+"tool_category_bible_search" = "Alkitab & Carian";
+"tool_category_bookmarks" = "Penanda Buku";
+"tool_category_general_books" = "Buku Umum";
+"tool_category_labels" = "Label";
+"tool_category_my_documents" = "Dokumen Saya";
+"tool_category_study_pads" = "Pad Kajian";
+"tool_category_windows" = "Tetingkap";
+"tool_create_bookmark" = "Buat penanda buku";
+"tool_create_label" = "Buat label";
+"tool_create_my_document" = "Buat Dokumen Saya";
+"tool_create_study_pad" = "Buat pad kajian";
+"tool_create_window" = "Buat tetingkap";
+"tool_delete_bookmark" = "Padamkan penanda buku";
+"tool_delete_label" = "Padamkan label";
+"tool_delete_my_document_page" = "Padamkan halaman Dokumen Saya";
+"tool_edit_my_document_page" = "Edit halaman Dokumen Saya";
+"tool_finish_with_my_document_page" = "Buka halaman Dokumen Saya";
+"tool_finish_with_study_pad" = "Buka pad kajian";
+"tool_finish_without_document" = "Selesai tanpa dokumen";
+"tool_get_all_labels" = "Senaraikan semua label";
+"tool_get_bookmarks_for_verse" = "Dapatkan penanda buku untuk ayat";
+"tool_get_bookmarks_with_label" = "Dapatkan penanda buku dengan label";
+"tool_get_commentaries" = "Baca ulasan";
+"tool_get_dictionary_entry" = "Cari entri kamus";
+"tool_get_genbook_content" = "Baca kandungan buku umum";
+"tool_get_genbook_keys" = "Senaraikan kunci buku umum";
+"tool_get_installed_documents" = "Senaraikan dokumen yang dipasang";
+"tool_get_my_document_pages" = "Senaraikan halaman Dokumen Saya";
+"tool_get_my_documents" = "Senaraikan Dokumen Saya";
+"tool_get_study_pad_content" = "Baca kandungan pad kajian";
+"tool_get_verse_content" = "Baca kandungan ayat";
+"tool_get_windows" = "Senaraikan tetingkap";
+"tool_manage_window" = "Urus tetingkap";
+"tool_remove_label_from_bookmark" = "Buang label dari penanda buku";
+"tool_search_bible" = "Cari Alkitab";
+"tool_search_by_strongs" = "Cari mengikut nombor Strong's";
+"tool_search_study_pads" = "Cari pad kajian";
+"tool_set_document_title" = "Tetapkan tajuk dokumen";
+"tool_set_window_document" = "Tetapkan dokumen tetingkap";
+"tool_update_bookmark_note" = "Kemas kini nota penanda buku";
+"tool_update_studypad_text_entry" = "Kemas kini entri teks pad kajian";
+"verse_tip" = "Untuk memilih sebahagian atau banyak ayat, anda boleh menekan lama teks Alkitab";
+"watch_tutorial_video" = "Tonton video tutorial (Bahasa Inggeris)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Menjana semula dokumen AI…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Saya menerima dan mengambil tanggungjawab penuh";
+"ai_disclaimer_accept_title" = "Terima Penafian AI";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Tetapan sambungan AI dan prompt";
+"prefs_features_cat" = "Ciri-ciri";

@@ -29,6 +29,9 @@ yes: "Yes"
 ambiguousSelection: Which action do you wish to take?
 cancel: Cancel
 saveMyDocumentPageAccessibilityLabel: Save My Document page
+shareMyDocumentPageAccessibilityLabel: Share My Document page
+copyMyDocumentPageAccessibilityLabel: Copy My Document page
+documentActionsAccessibilityLabel: Document actions
 regenerateMyDocumentPageAccessibilityLabel: Regenerate My Document page
 deleteMyDocumentPageAccessibilityLabel: Delete My Document page
 deleteMyDocumentPageConfirmationTitle: Delete AI-generated page?

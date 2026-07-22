@@ -7,6 +7,64 @@ import SwordKit
 import UniformTypeIdentifiers
 
 /**
+ Streams a provider-owned Android module backup into an app-owned staging file.
+
+ The copier keeps memory bounded, checks cooperative cancellation before every read and write, and
+ removes partial output before returning an error. Callers remain responsible for security-scoped
+ access and for choosing a unique destination.
+ */
+enum AndroidModuleBackupArchiveFileStager {
+    /**
+     Copies one archive without loading it into memory.
+
+     - Parameters:
+       - sourceURL: Readable provider or local archive URL.
+       - destinationURL: Unique app-owned staging destination.
+     - Side effects: Creates or replaces `destinationURL` and writes the source bytes to it.
+     - Failure modes: Rethrows cancellation and file-system failures after removing partial output.
+     */
+    static func copy(from sourceURL: URL, to destinationURL: URL) throws {
+        try Task.checkCancellation()
+        let input = try FileHandle(forReadingFrom: sourceURL)
+        defer { try? input.close() }
+        do {
+            try Data().write(to: destinationURL, options: .atomic)
+            let output = try FileHandle(forWritingTo: destinationURL)
+            defer { try? output.close() }
+            while true {
+                try Task.checkCancellation()
+                let chunk = try input.read(upToCount: 64 * 1_024) ?? Data()
+                if chunk.isEmpty { break }
+                try Task.checkCancellation()
+                try output.write(contentsOf: chunk)
+            }
+            try Task.checkCancellation()
+            try output.synchronize()
+        } catch {
+            try? FileManager.default.removeItem(at: destinationURL)
+            throw error
+        }
+    }
+}
+
+/**
+ Local SWORD document waiting for explicit overwrite consent in Backup & Restore.
+
+ The selected request and read-only inspection are retained only for alert presentation. The
+ repository repeats conflict and layout validation before publishing any files.
+ */
+private struct ImportExportLocalModuleOverwriteConfirmation: Identifiable {
+    /// Selected file and provider metadata.
+    let request: ExternalDocumentImportRequest
+
+    /// Validated archive summary with exact existing destinations.
+    let inspection: LocalSwordZipInspection
+
+    /// Stable identity for SwiftUI alert presentation.
+    var id: String { request.url.standardizedFileURL.path }
+}
+
+/**
  Android-aligned Backup & Restore settings screen.
 
  The user-facing workflow follows Android's `BackupActivity` where the capability is implementable
@@ -62,6 +120,9 @@ public struct ImportExportView: View {
     /// Startup setup target that should open its picker as soon as this route appears.
     private let startupRestoreImportTarget: RestoreWorkflowTarget?
 
+    /// Reader-owned runtime that must observe restored Android speech preferences immediately.
+    private let speakService: SpeakService?
+
     /// Prevents a startup-triggered restore/import picker from reopening after dismissal.
     @State private var didPresentStartupRestoreImportPicker = false
 
@@ -100,6 +161,12 @@ public struct ImportExportView: View {
     /// Whether a ZIP, EPUB, or TTF document installation is currently in progress.
     @State private var isInstallingDocument = false
 
+    /// Durable local SWORD install phase shown while document installation is active.
+    @State private var documentInstallProgress: ModuleInstallProgress?
+
+    /// Ordinary SWORD ZIP waiting for explicit replacement consent.
+    @State private var pendingLocalModuleOverwrite: ImportExportLocalModuleOverwriteConfirmation?
+
     /// Whether an Android module backup restore is currently in progress.
     @State private var isRestoringAndroidModuleBackup = false
 
@@ -109,14 +176,26 @@ public struct ImportExportView: View {
     /// Controls presentation of Android module backup export module selection.
     @State private var showAndroidModuleBackupExportSheet = false
 
-    /// Installed SWORD modules shown in the Android module backup export selection sheet.
-    @State private var androidModuleBackupExportModules: [ModuleInfo] = []
+    /// Canonical all-family rows shown in the Android module backup export selection sheet.
+    @State private var androidModuleBackupExportModules: [AndroidModuleBackupInstalledContent] = []
+
+    /// Retained discovery/export task so cancel and view teardown stop archive work cooperatively.
+    @State private var androidModuleBackupExportTask: Task<Void, Never>?
+
+    /// Identity of the export task currently permitted to finish the shared UI operation state.
+    @State private var androidModuleBackupExportOperationID: UUID?
+
+    /// Retained inspection/restore task so view teardown stops pre-commit archive work.
+    @State private var androidModuleBackupRestoreTask: Task<Void, Never>?
+
+    /// Identity of the restore task currently permitted to finish the shared UI operation state.
+    @State private var androidModuleBackupRestoreOperationID: UUID?
 
     /// Temporary Android module backup archive retained while overwrite confirmation is visible.
     @State private var pendingAndroidModuleBackupURL: URL?
 
-    /// Existing module file paths reported for the pending Android module backup confirmation.
-    @State private var pendingAndroidModuleBackupExistingFiles: [String] = []
+    /// Archive-bound consent waiting for the Android module backup confirmation action.
+    @State private var pendingAndroidModuleBackupAuthorization: LocalSwordZipOverwriteAuthorization?
 
     /// Controls the Android module backup overwrite confirmation prompt.
     @State private var showAndroidModuleBackupOverwriteAlert = false
@@ -157,10 +236,13 @@ public struct ImportExportView: View {
     /**
      Creates the import/export screen.
 
-     - Note: This initializer has no inputs and performs no side effects.
+     - Parameter speakService: Optional live speech runtime to refresh after settings restore.
+     - Side effects: none; the service is used only after a successful restore selection.
+     - Failure modes: Omitting the service preserves standalone settings previews and tests.
      */
-    public init() {
+    public init(speakService: SpeakService? = nil) {
         self.startupRestoreImportTarget = nil
+        self.speakService = speakService
     }
 
     /**
@@ -171,11 +253,19 @@ public struct ImportExportView: View {
      initializer preserves that entry-point intent while reusing the same picker handlers as the
      normal Backup & Restore screen.
 
-     - Parameter startupRestoreImportTarget: Optional restore/import target to present once after
-       the route appears.
+     - Parameters:
+       - startupRestoreImportTarget: Optional restore/import target to present once after the route
+         appears.
+       - speakService: Optional live speech runtime to refresh after settings restore.
+     - Side effects: none; restore behavior starts only after user selection.
+     - Failure modes: Omitting the service preserves startup routing without live speech state.
      */
-    init(startupRestoreImportTarget: RestoreWorkflowTarget?) {
+    init(
+        startupRestoreImportTarget: RestoreWorkflowTarget?,
+        speakService: SpeakService? = nil
+    ) {
         self.startupRestoreImportTarget = startupRestoreImportTarget
+        self.speakService = speakService
     }
 
     /**
@@ -359,6 +449,26 @@ public struct ImportExportView: View {
                 .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("backupWorkflowRestoreButton")
                 .disabled(isBackupWorkflowBusy)
+
+                if isInstallingDocument {
+                    let progress = documentInstallProgress ?? ModuleInstallProgress(phase: .queued)
+                    HStack(spacing: 12) {
+                        Text(ModuleBrowserView.installPhaseText(
+                            progress.phase,
+                            progressPercent: progress.percent
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        Spacer()
+                        if let fraction = progress.fraction {
+                            ProgressView(value: fraction)
+                                .frame(width: 84)
+                        } else {
+                            ProgressView()
+                        }
+                    }
+                    .accessibilityIdentifier("documentInstallProgress")
+                }
             } header: {
                 Text(String(localized: "backup_restore2", defaultValue: "Restore or Import"))
             }
@@ -447,7 +557,14 @@ public struct ImportExportView: View {
         ) { result in
             handleRestoreImportPickerResult(result)
         }
-        .sheet(isPresented: $showAndroidModuleBackupExportSheet) {
+        .sheet(
+            isPresented: $showAndroidModuleBackupExportSheet,
+            onDismiss: {
+                if !isExportingAndroidModuleBackup {
+                    dismissAndroidModuleBackupExportSelection()
+                }
+            }
+        ) {
             AndroidModuleBackupExportSheet(
                 modules: androidModuleBackupExportModules,
                 isExporting: isExportingAndroidModuleBackup,
@@ -470,6 +587,36 @@ public struct ImportExportView: View {
                 },
                 secondaryButton: .cancel(Text(String(localized: "cancel")))
             )
+        }
+        .alert(
+            String(
+                localized: "android_module_backup_overwrite_title",
+                defaultValue: "Overwrite existing module files?"
+            ),
+            isPresented: Binding(
+                get: { pendingLocalModuleOverwrite != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingLocalModuleOverwrite = nil
+                    }
+                }
+            ),
+            presenting: pendingLocalModuleOverwrite
+        ) { confirmation in
+            Button(String(localized: "cancel"), role: .cancel) {
+                pendingLocalModuleOverwrite = nil
+            }
+            Button(String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) {
+                pendingLocalModuleOverwrite = nil
+                performSupportedDocumentInstall(
+                    confirmation.request,
+                    overwritePolicy: .replaceExisting(
+                        confirmation.inspection.overwriteAuthorization
+                    )
+                )
+            }
+        } message: { confirmation in
+            Text(ModuleBrowserView.localModuleOverwriteMessage(confirmation.inspection))
         }
         .alert(
             String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"),
@@ -497,6 +644,16 @@ public struct ImportExportView: View {
             }
         } message: {
             Text(statusMessage ?? "")
+        }
+        .onDisappear {
+            androidModuleBackupExportOperationID = nil
+            androidModuleBackupExportTask?.cancel()
+            androidModuleBackupExportTask = nil
+            isExportingAndroidModuleBackup = false
+            androidModuleBackupRestoreOperationID = nil
+            androidModuleBackupRestoreTask?.cancel()
+            androidModuleBackupRestoreTask = nil
+            isRestoringAndroidModuleBackup = false
         }
     }
 
@@ -988,11 +1145,16 @@ public struct ImportExportView: View {
             await Task.yield()
             let feedbackMessage: String
             do {
+                let settingsStore = SettingsStore(modelContext: modelContext)
                 let report = try androidBackupService.apply(
                     archive: archive,
                     selections: selections,
                     modelContext: modelContext,
-                    settingsStore: SettingsStore(modelContext: modelContext)
+                    settingsStore: settingsStore
+                )
+                reloadSpeechRuntimeAfterBackupIfNeeded(
+                    selections: selections,
+                    settingsStore: settingsStore
                 )
                 feedbackMessage = androidBackupStatusMessage(for: report)
             } catch {
@@ -1003,6 +1165,33 @@ public struct ImportExportView: View {
             await Task.yield()
             statusMessage = feedbackMessage
         }
+    }
+
+    /**
+     Applies restored Android settings to the live speech runtime before reporting success.
+
+     - Parameters:
+       - selections: Successfully applied backup sections.
+       - settingsStore: Store containing the restored Android preference values.
+     - Side effects: Rebinds and reloads `SpeakService` when settings or workspaces were restored.
+     - Failure modes: Missing services, active workspace identifiers, or workspace rows fall back to
+       global restored settings without failing the completed backup operation.
+     */
+    private func reloadSpeechRuntimeAfterBackupIfNeeded(
+        selections: [AndroidDatabaseBackupSelection],
+        settingsStore: SettingsStore
+    ) {
+        AndroidBackupSpeechRuntimeReloader.reloadIfNeeded(
+            selections: selections,
+            settingsStore: settingsStore,
+            activeWorkspaceSettings: settingsStore.activeWorkspaceId.flatMap {
+                WorkspaceStore(modelContext: modelContext)
+                    .workspace(id: $0)?
+                    .workspaceSettings?
+                    .speakSettings
+            },
+            speakService: speakService
+        )
     }
 
     /**
@@ -1133,15 +1322,70 @@ public struct ImportExportView: View {
      */
     private func installSupportedDocument(from url: URL) {
         isInstallingDocument = true
+        documentInstallProgress = ModuleInstallProgress(phase: .queued)
         statusMessage = nil
+        let request = ExternalDocumentImportRequest(
+            url: url,
+            contentTypeIdentifier: try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.identifier,
+            suggestedFileName: url.lastPathComponent
+        )
+        let service = ExternalDocumentImportService()
         Task { @MainActor in
-            defer {
+            let preflight = await Task.detached(priority: .userInitiated) {
+                service.preflightDocument(request)
+            }.value
+            switch preflight {
+            case .ready:
+                performSupportedDocumentInstall(request, overwritePolicy: .reject)
+            case .moduleOverwriteRequired(let inspection):
                 isInstallingDocument = false
+                documentInstallProgress = nil
+                pendingLocalModuleOverwrite = ImportExportLocalModuleOverwriteConfirmation(
+                    request: request,
+                    inspection: inspection
+                )
+            case .failed(let message):
+                isInstallingDocument = false
+                documentInstallProgress = nil
+                statusMessage = ExternalDocumentImportResult.failed(message: message).feedbackMessage
             }
+        }
+    }
+
+    /**
+     Installs one preflighted external document without blocking the Settings UI.
+
+     - Parameters:
+       - request: Selected ZIP, EPUB, or TTF request.
+       - overwritePolicy: Explicit SWORD conflict policy; replacement is used only after consent.
+     - Side effects: Runs installer I/O off the main actor, publishes durable SWORD phases, then
+       presents Android toast or error feedback.
+     - Failure modes: Installer failures are returned as structured feedback and leave the view
+       available for retry.
+     */
+    private func performSupportedDocumentInstall(
+        _ request: ExternalDocumentImportRequest,
+        overwritePolicy: LocalSwordZipOverwritePolicy
+    ) {
+        isInstallingDocument = true
+        documentInstallProgress = ModuleInstallProgress(phase: .queued)
+        statusMessage = nil
+        let service = ExternalDocumentImportService()
+        Task { @MainActor in
             await Task.yield()
             let result = await Task.detached(priority: .userInitiated) {
-                ExternalDocumentImportService().importDocument(at: url)
+                service.importDocument(
+                    request,
+                    moduleOverwritePolicy: overwritePolicy,
+                    progressState: { progress in
+                        Task { @MainActor in
+                            documentInstallProgress = progress
+                        }
+                    }
+                )
             }.value
+            isInstallingDocument = false
+            documentInstallProgress = nil
             if result.usesAndroidInstallToastFeedback {
                 showTransientStatusMessage(result.feedbackMessage)
             } else {
@@ -1151,41 +1395,61 @@ public struct ImportExportView: View {
     }
 
     /**
-     Presents installed SWORD modules for Android-compatible backup export selection.
+     Presents every installed family accepted by Android-compatible backup export.
 
      Android asks the user which installed documents/modules to include before writing
-     `AndBibleModulesBackup.abmd.zip`. iOS mirrors that behavior for SWORD-backed modules by
-     collecting the current installed-module list from `SwordManager`, sorting it in Android's
-     language-first order, and presenting a multiselect sheet before export.
+     `AndBibleModulesBackup.abmd.zip`. iOS reads the exporter's canonical installed-content catalog,
+     then applies Android's stable language ordering before presenting the multiselect sheet.
 
      Side effects:
-     - reads installed modules through `SwordManager`
+     - discovers and validates all exportable families off the main actor
      - updates `androidModuleBackupExportModules`
      - presents the export selection sheet or surfaces a no-modules error
      */
     private func presentAndroidModuleBackupExportSelection() {
         statusMessage = nil
-        guard let manager = SwordManager() else {
-            statusMessage = localizedErrorMessage(AndroidModuleBackupError.noExportableModules)
-            return
-        }
-        let modules = manager.installedModules().sorted { lhs, rhs in
-            let languageOrder = lhs.language.localizedCaseInsensitiveCompare(rhs.language)
-            if languageOrder != .orderedSame {
-                return languageOrder == .orderedAscending
+        androidModuleBackupExportTask?.cancel()
+        let operationID = UUID()
+        androidModuleBackupExportOperationID = operationID
+        isExportingAndroidModuleBackup = true
+        androidModuleBackupExportTask = Task { @MainActor in
+            defer {
+                if androidModuleBackupExportOperationID == operationID {
+                    isExportingAndroidModuleBackup = false
+                    androidModuleBackupExportTask = nil
+                    androidModuleBackupExportOperationID = nil
+                }
             }
-            let descriptionOrder = lhs.description.localizedCaseInsensitiveCompare(rhs.description)
-            if descriptionOrder != .orderedSame {
-                return descriptionOrder == .orderedAscending
+            do {
+                let worker = Task.detached(priority: .userInitiated) {
+                    try AndroidModuleBackupService().installedContentCatalog()
+                }
+                let discovered = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+                try Task.checkCancellation()
+                guard androidModuleBackupExportOperationID == operationID else { return }
+                let modules = discovered.enumerated().sorted { lhs, rhs in
+                    let order = lhs.element.language.localizedCaseInsensitiveCompare(
+                        rhs.element.language
+                    )
+                    return order == .orderedSame ? lhs.offset < rhs.offset : order == .orderedAscending
+                }.map(\.element)
+                guard !modules.isEmpty else {
+                    throw AndroidModuleBackupError.noExportableModules
+                }
+                androidModuleBackupExportModules = modules
+                showAndroidModuleBackupExportSheet = true
+            } catch is CancellationError {
+                return
+            } catch {
+                if androidModuleBackupExportOperationID == operationID {
+                    statusMessage = localizedErrorMessage(error)
+                }
             }
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
-        guard !modules.isEmpty else {
-            statusMessage = localizedErrorMessage(AndroidModuleBackupError.noExportableModules)
-            return
-        }
-        androidModuleBackupExportModules = modules
-        showAndroidModuleBackupExportSheet = true
     }
 
     /**
@@ -1196,18 +1460,21 @@ public struct ImportExportView: View {
      - dismisses the export selection sheet
      */
     private func dismissAndroidModuleBackupExportSelection() {
+        androidModuleBackupExportOperationID = nil
+        androidModuleBackupExportTask?.cancel()
+        androidModuleBackupExportTask = nil
         showAndroidModuleBackupExportSheet = false
         androidModuleBackupExportModules = []
         isExportingAndroidModuleBackup = false
     }
 
     /**
-     Exports selected SWORD modules as Android's `.abmd.zip` module backup archive.
+     Exports selected installed content as Android's `.abmd.zip` module backup archive.
 
      - Parameter moduleNames: Selected module initials emitted by the export selection sheet.
      - Side effects:
        - marks the module export as active before scheduling work so SwiftUI can disable the sheet
-       - reads local SWORD module config and data files off the main actor
+       - discovers, pins, compresses, and verifies selected family files off the main actor
        - dismisses the selection sheet and schedules Android's backup destination choice after
          SwiftUI processes dismissal, avoiding two active sheet presentations at once
        - presents feedback with export failure details after dismissing the selection sheet
@@ -1220,34 +1487,65 @@ public struct ImportExportView: View {
         isExportingAndroidModuleBackup = true
         statusMessage = nil
 
-        let selectedModuleNames = Set(moduleNames)
-        Task { @MainActor in
+        androidModuleBackupExportTask?.cancel()
+        let operationID = UUID()
+        androidModuleBackupExportOperationID = operationID
+        androidModuleBackupExportTask = Task { @MainActor in
             await Task.yield()
+            var generatedArchiveURL: URL?
             defer {
-                isExportingAndroidModuleBackup = false
+                if let generatedArchiveURL {
+                    try? FileManager.default.removeItem(at: generatedArchiveURL)
+                }
+                if androidModuleBackupExportOperationID == operationID {
+                    isExportingAndroidModuleBackup = false
+                    androidModuleBackupExportTask = nil
+                    androidModuleBackupExportOperationID = nil
+                }
             }
 
             do {
-                let export = try await Task.detached(priority: .userInitiated) {
-                    try AndroidModuleBackupService().exportArchive(moduleNames: selectedModuleNames)
-                }.value
+                let worker = Task.detached(priority: .userInitiated) {
+                    try AndroidModuleBackupService().exportArchiveFile(
+                        orderedModuleNames: moduleNames
+                    )
+                }
+                let export = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+                generatedArchiveURL = export.fileURL
+                try Task.checkCancellation()
+                guard androidModuleBackupExportOperationID == operationID else { return }
                 showAndroidModuleBackupExportSheet = false
                 androidModuleBackupExportModules = []
+                await Task.yield()
+                try Task.checkCancellation()
+                guard androidModuleBackupExportOperationID == operationID else { return }
+                let exportURL = try moveExportFileToShareDirectory(
+                    fileURL: export.fileURL,
+                    fileName: export.fileName
+                )
+                generatedArchiveURL = nil
                 let payload = BackupExportPayload(
-                    data: export.data,
+                    temporaryFileURL: exportURL,
                     fileName: export.fileName,
                     statusMessage: String(
                         localized: "android_module_backup_exported_summary",
                         defaultValue: "Exported Android module backup: \(export.moduleNames.joined(separator: ", "))"
                     )
                 )
-                await Task.yield()
                 presentBackupDestination(payload)
+            } catch is CancellationError {
+                return
             } catch {
-                showAndroidModuleBackupExportSheet = false
-                androidModuleBackupExportModules = []
-                await Task.yield()
-                statusMessage = localizedErrorMessage(error)
+                if androidModuleBackupExportOperationID == operationID {
+                    showAndroidModuleBackupExportSheet = false
+                    androidModuleBackupExportModules = []
+                    await Task.yield()
+                    statusMessage = localizedErrorMessage(error)
+                }
             }
         }
     }
@@ -1264,11 +1562,20 @@ public struct ImportExportView: View {
      - Failure modes: Catches service errors and surfaces them to the settings screen.
      */
     private func prepareAndroidModuleBackupRestore(from url: URL) {
-        Task { @MainActor in
+        androidModuleBackupRestoreTask?.cancel()
+        let operationID = UUID()
+        androidModuleBackupRestoreOperationID = operationID
+        androidModuleBackupRestoreTask = Task { @MainActor in
             await Task.yield()
             var temporaryArchiveURL: URL?
+            defer {
+                if androidModuleBackupRestoreOperationID == operationID {
+                    androidModuleBackupRestoreTask = nil
+                    androidModuleBackupRestoreOperationID = nil
+                }
+            }
             do {
-                let prepared = try await Task.detached(priority: .userInitiated) {
+                let inspectionWorker = Task.detached(priority: .userInitiated) {
                     let accessing = url.startAccessingSecurityScopedResource()
                     defer {
                         if accessing {
@@ -1283,34 +1590,61 @@ public struct ImportExportView: View {
                         try? FileManager.default.removeItem(at: archiveURL)
                         throw error
                     }
-                }.value
+                }
+                let prepared = try await withTaskCancellationHandler {
+                    try await inspectionWorker.value
+                } onCancel: {
+                    inspectionWorker.cancel()
+                }
                 temporaryArchiveURL = prepared.0
+                try Task.checkCancellation()
+                guard androidModuleBackupRestoreOperationID == operationID else {
+                    throw CancellationError()
+                }
 
                 guard prepared.1.existingEntryPaths.isEmpty else {
                     pendingAndroidModuleBackupURL = prepared.0
-                    pendingAndroidModuleBackupExistingFiles = prepared.1.existingEntryPaths
+                    pendingAndroidModuleBackupAuthorization = prepared.1.overwriteAuthorization
                     showAndroidModuleBackupOverwriteAlert = true
                     isRestoringAndroidModuleBackup = false
                     temporaryArchiveURL = nil
                     return
                 }
 
-                let report = try await Task.detached(priority: .userInitiated) {
+                let restoreWorker = Task.detached(priority: .userInitiated) {
                     try AndroidModuleBackupService().restoreArchive(
                         fromArchiveAt: prepared.0,
-                        allowOverwritingExistingFiles: true
+                        overwritePolicy: .reject
                     )
-                }.value
+                }
+                let report = try await withTaskCancellationHandler {
+                    try await restoreWorker.value
+                } onCancel: {
+                    restoreWorker.cancel()
+                }
+                try Task.checkCancellation()
+                guard androidModuleBackupRestoreOperationID == operationID else {
+                    throw CancellationError()
+                }
                 showTransientStatusMessage(androidModuleBackupRestoreStatusMessage(for: report))
                 isRestoringAndroidModuleBackup = false
                 try? FileManager.default.removeItem(at: prepared.0)
                 temporaryArchiveURL = nil
+            } catch is CancellationError {
+                if let temporaryArchiveURL {
+                    try? FileManager.default.removeItem(at: temporaryArchiveURL)
+                }
+                if androidModuleBackupRestoreOperationID == operationID {
+                    isRestoringAndroidModuleBackup = false
+                }
             } catch {
                 if let temporaryArchiveURL {
                     try? FileManager.default.removeItem(at: temporaryArchiveURL)
                 }
-                statusMessage = localizedErrorMessage(error)
-                isRestoringAndroidModuleBackup = false
+                if androidModuleBackupRestoreOperationID == operationID {
+                    statusMessage = localizedErrorMessage(error)
+                    isRestoringAndroidModuleBackup = false
+                }
             }
         }
     }
@@ -1325,30 +1659,52 @@ public struct ImportExportView: View {
      - surfaces service errors through the feedback alert
      */
     private func restorePendingAndroidModuleBackup() {
-        guard let archiveURL = pendingAndroidModuleBackupURL else {
+        guard let archiveURL = pendingAndroidModuleBackupURL,
+              let authorization = pendingAndroidModuleBackupAuthorization else {
             clearPendingAndroidModuleBackup()
             return
         }
         pendingAndroidModuleBackupURL = nil
-        pendingAndroidModuleBackupExistingFiles = []
+        pendingAndroidModuleBackupAuthorization = nil
         showAndroidModuleBackupOverwriteAlert = false
         isRestoringAndroidModuleBackup = true
 
-        Task { @MainActor in
+        androidModuleBackupRestoreTask?.cancel()
+        let operationID = UUID()
+        androidModuleBackupRestoreOperationID = operationID
+        androidModuleBackupRestoreTask = Task { @MainActor in
             await Task.yield()
+            defer {
+                try? FileManager.default.removeItem(at: archiveURL)
+                if androidModuleBackupRestoreOperationID == operationID {
+                    isRestoringAndroidModuleBackup = false
+                    androidModuleBackupRestoreTask = nil
+                    androidModuleBackupRestoreOperationID = nil
+                }
+            }
             do {
-                let report = try await Task.detached(priority: .userInitiated) {
+                let worker = Task.detached(priority: .userInitiated) {
                     try AndroidModuleBackupService().restoreArchive(
                         fromArchiveAt: archiveURL,
-                        allowOverwritingExistingFiles: true
+                        overwritePolicy: .replaceExisting(authorization)
                     )
-                }.value
-                showTransientStatusMessage(androidModuleBackupRestoreStatusMessage(for: report))
+                }
+                let report = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+                try Task.checkCancellation()
+                if androidModuleBackupRestoreOperationID == operationID {
+                    showTransientStatusMessage(androidModuleBackupRestoreStatusMessage(for: report))
+                }
+            } catch is CancellationError {
+                // View teardown and replacement stop only pre-commit work; the service owns commit.
             } catch {
-                statusMessage = localizedErrorMessage(error)
+                if androidModuleBackupRestoreOperationID == operationID {
+                    statusMessage = localizedErrorMessage(error)
+                }
             }
-            try? FileManager.default.removeItem(at: archiveURL)
-            isRestoringAndroidModuleBackup = false
         }
     }
 
@@ -1384,11 +1740,14 @@ public struct ImportExportView: View {
      Clears retained Android module backup confirmation state without mutating user files.
      */
     private func clearPendingAndroidModuleBackup() {
+        androidModuleBackupRestoreOperationID = nil
+        androidModuleBackupRestoreTask?.cancel()
+        androidModuleBackupRestoreTask = nil
         if let pendingAndroidModuleBackupURL {
             try? FileManager.default.removeItem(at: pendingAndroidModuleBackupURL)
         }
         pendingAndroidModuleBackupURL = nil
-        pendingAndroidModuleBackupExistingFiles = []
+        pendingAndroidModuleBackupAuthorization = nil
         showAndroidModuleBackupOverwriteAlert = false
         isRestoringAndroidModuleBackup = false
     }
@@ -1398,13 +1757,14 @@ public struct ImportExportView: View {
 
      - Parameter url: Security-scoped document URL selected by the user.
      - Returns: Temporary `.abmd.zip` archive URL owned by this app.
-     - Side effects: Creates one temporary file by copying `url`.
-     - Failure modes: Rethrows file-system copy failures.
+     - Side effects: Creates one temporary file and streams the selected archive into it.
+     - Failure modes: Rethrows cancellation and file-system read/write failures; partial output is
+       removed before an error escapes.
      */
-    private static func copyAndroidModuleBackupArchiveToTemporaryFile(from url: URL) throws -> URL {
+    nonisolated private static func copyAndroidModuleBackupArchiveToTemporaryFile(from url: URL) throws -> URL {
         let destinationURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("android-module-backup-\(UUID().uuidString).abmd.zip")
-        try FileManager.default.copyItem(at: url, to: destinationURL)
+        try AndroidModuleBackupArchiveFileStager.copy(from: url, to: destinationURL)
         return destinationURL
     }
 
@@ -1416,13 +1776,14 @@ public struct ImportExportView: View {
      - Failure modes: Empty pending state returns a generic overwrite warning.
      */
     private func androidModuleBackupOverwriteMessage() -> String {
-        guard !pendingAndroidModuleBackupExistingFiles.isEmpty else {
+        guard let authorization = pendingAndroidModuleBackupAuthorization,
+              !authorization.conflictingPaths.isEmpty else {
             return String(
                 localized: "android_module_backup_overwrite_generic",
                 defaultValue: "This backup will replace existing module files."
             )
         }
-        let preview = pendingAndroidModuleBackupExistingFiles.prefix(5).joined(separator: "\n")
+        let preview = authorization.conflictingPaths.prefix(5).joined(separator: "\n")
         return String(
             localized: "android_module_backup_overwrite_message",
             defaultValue: "This backup will replace existing module files:\n\(preview)"
@@ -1497,19 +1858,33 @@ public struct ImportExportView: View {
        generated archive cannot be moved after attempting to clean up the source archive.
      */
     private func moveExportFileToShareDirectory(_ export: AndroidDatabaseBackupFileExport) throws -> URL {
+        try moveExportFileToShareDirectory(fileURL: export.fileURL, fileName: export.fileName)
+    }
+
+    /**
+     Moves one file-backed backup export to its canonical Android destination filename.
+
+     - Parameters:
+       - fileURL: Unique generated archive owned by the export workflow.
+       - fileName: Canonical Android backup filename presented to Files and Share.
+     - Returns: Temporary canonical URL retained until destination completion.
+     - Side effects: Replaces an older temporary export and moves the generated archive.
+     - Throws: Filesystem failures after attempting to remove the generated source on error.
+     */
+    private func moveExportFileToShareDirectory(fileURL sourceURL: URL, fileName: String) throws -> URL {
         let fileManager = FileManager.default
-        let fileURL = fileManager.temporaryDirectory.appendingPathComponent(export.fileName)
-        if fileURL == export.fileURL {
-            return fileURL
+        let destinationURL = fileManager.temporaryDirectory.appendingPathComponent(fileName)
+        if destinationURL == sourceURL {
+            return destinationURL
         }
         do {
-            if fileManager.fileExists(atPath: fileURL.path) {
-                try fileManager.removeItem(at: fileURL)
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
             }
-            try fileManager.moveItem(at: export.fileURL, to: fileURL)
-            return fileURL
+            try fileManager.moveItem(at: sourceURL, to: destinationURL)
+            return destinationURL
         } catch {
-            try? fileManager.removeItem(at: export.fileURL)
+            try? fileManager.removeItem(at: sourceURL)
             throw error
         }
     }

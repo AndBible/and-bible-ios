@@ -1,6 +1,5 @@
 // RemoteSyncMyDocumentPatchApplyService.swift -- Incremental Android patch replay for My Documents
 
-import CLibSword
 import Foundation
 import SwiftData
 
@@ -262,36 +261,93 @@ public final class RemoteSyncMyDocumentPatchApplyService {
      - Returns: Patch replay counts and the final normalized My Documents row counts.
      - Side effects:
        - reads and extracts staged patch archives into temporary SQLite files
-       - may rewrite the local My Documents graph through the centralized restore service when
-         at least one log entry is accepted
-       - updates local `LogEntry`, patch-status, and fingerprint stores for `.myDocuments`
+       - atomically rewrites the My Documents graph, `LogEntry`, patch-status, and fingerprint
+         stores when replay accepts rows
      - Failure modes:
        - throws archive decompression, staged metadata decode, row identifier, missing-row, and
          SwiftData restore errors from the lower-level helpers
+       - throws `SettingsStoreAtomicBatchError` for mismatched or dirty contexts
+       - rethrows cancellation and transaction failures after rolling graph and bookkeeping back
      */
     public func applyPatchArchives(
         _ stagedArchives: [RemoteSyncStagedPatchArchive],
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> RemoteSyncMyDocumentPatchApplyReport {
+        try applyPatchArchives(
+            stagedArchives,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            publishCheckpoint: { try Task.checkCancellation() }
+        )
+    }
+
+    /**
+     Replays My Documents patches with a deterministic checkpoint in the atomic publish phase.
+
+     Archive rows are staged in memory, then the document graph, log metadata, applied-patch state,
+     and fingerprint baseline publish through one settings-backed SwiftData transaction.
+
+     - Parameters:
+       - stagedArchives: Downloaded patches in Android replay order.
+       - modelContext: Exact clean context shared by document and settings models.
+       - settingsStore: Settings store bound to `modelContext`.
+       - publishCheckpoint: Throwing callback before replay reads and after final durable mutations.
+     - Returns: Replay counts after the atomic publish commits.
+     - Side Effects: Reads temporary patch databases and atomically updates document sync state.
+     - Throws: Rethrows replay, context-contract, checkpoint, fetch, and commit errors; final publish
+       failure rolls graph and bookkeeping back together.
+     */
+    func applyPatchArchives(
+        _ stagedArchives: [RemoteSyncStagedPatchArchive],
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        publishCheckpoint: () throws -> Void
+    ) throws -> RemoteSyncMyDocumentPatchApplyReport {
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
 
-        var snapshot = try currentSnapshot(from: modelContext, settingsStore: settingsStore)
-        var logEntriesByKey = seededLogEntriesByKey(logEntryStore: logEntryStore)
+        let initialState = try settingsStore.performAtomicBatch(in: modelContext) {
+            try publishCheckpoint()
+            return (
+                try currentSnapshot(from: modelContext, settingsStore: settingsStore),
+                try seededLogEntriesByKey(logEntryStore: logEntryStore)
+            )
+        }
+        var snapshot = initialState.0
+        var logEntriesByKey = initialState.1
 
         var appliedPatchStatuses: [RemoteSyncPatchStatus] = []
         var appliedLogEntryCount = 0
         var skippedLogEntryCount = 0
+        var cumulativeExpandedByteCount = UInt64(0)
 
         for stagedArchive in stagedArchives {
             try {
+                try Task.checkCancellation()
                 let patchDatabaseURL = temporaryDatabaseURL(prefix: "remote-sync-mydocuments-patch-", suffix: ".sqlite3")
                 defer { try? fileManager.removeItem(at: patchDatabaseURL) }
 
-                let archiveData = try Data(contentsOf: stagedArchive.archiveFileURL)
-                let databaseData = try Self.gunzip(archiveData)
-                try databaseData.write(to: patchDatabaseURL, options: .atomic)
+                let expandedByteCount = try RemoteSyncBoundedFileIO.inflateGzip(
+                    at: stagedArchive.archiveFileURL,
+                    to: patchDatabaseURL,
+                    maximumCompressedByteCount:
+                        RemoteSyncArchiveStagingService.maximumCompressedPatchByteCount,
+                    maximumExpandedByteCount:
+                        RemoteSyncArchiveStagingService.maximumExpandedPatchByteCount
+                )
+                let (nextCumulativeByteCount, overflow) = cumulativeExpandedByteCount
+                    .addingReportingOverflow(expandedByteCount)
+                guard !overflow,
+                      nextCumulativeByteCount <= UInt64(
+                        RemoteSyncArchiveStagingService.maximumCumulativeExpandedPatchByteCount
+                      ) else {
+                    throw RemoteSyncBoundedFileError.expandedSizeExceeded(
+                        overflow ? UInt64.max : nextCumulativeByteCount
+                    )
+                }
+                cumulativeExpandedByteCount = nextCumulativeByteCount
+                try Task.checkCancellation()
 
                 let metadataSnapshot = try metadataRestoreService.readSnapshot(from: patchDatabaseURL)
                 let patchSnapshot = try restoreService.readSnapshot(from: patchDatabaseURL)
@@ -302,7 +358,7 @@ public final class RemoteSyncMyDocumentPatchApplyService {
                     guard let localEntry = logEntriesByKey[key] else {
                         return true
                     }
-                    return entry.lastUpdated > localEntry.lastUpdated
+                    return RemoteSyncLogEntryConflictOrder.isNewer(entry, than: localEntry)
                 }
 
                 skippedLogEntryCount += patchLogEntries.count - filteredLogEntries.count
@@ -334,6 +390,7 @@ public final class RemoteSyncMyDocumentPatchApplyService {
                     logEntriesByKey: &logEntriesByKey,
                     logEntryStore: logEntryStore
                 )
+                try Task.checkCancellation()
 
                 appliedLogEntryCount += filteredLogEntries.count
                 appliedPatchStatuses.append(
@@ -347,25 +404,31 @@ public final class RemoteSyncMyDocumentPatchApplyService {
             }()
         }
 
+        try Task.checkCancellation()
         let materializedSnapshot = snapshot.materializedSnapshot()
-        let restoreReport: RemoteSyncMyDocumentRestoreReport
-        if appliedLogEntryCount > 0 {
-            restoreReport = try restoreService.replaceLocalMyDocuments(
-                from: materializedSnapshot,
-                modelContext: modelContext
+        let restoreReport = try settingsStore.performAtomicBatch(in: modelContext) {
+            let report: RemoteSyncMyDocumentRestoreReport
+            if appliedLogEntryCount > 0 {
+                report = try restoreService.replaceLocalMyDocuments(
+                    from: materializedSnapshot,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore
+                )
+            } else {
+                report = Self.restoreReport(from: materializedSnapshot)
+            }
+            logEntryStore.replaceEntries(
+                logEntriesByKey.values.sorted(by: Self.logEntrySort),
+                for: .myDocuments
             )
-        } else {
-            restoreReport = Self.restoreReport(from: materializedSnapshot)
+            patchStatusStore.addStatuses(appliedPatchStatuses, for: .myDocuments)
+            try snapshotService.refreshBaselineFingerprintsThrowing(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            try publishCheckpoint()
+            return report
         }
-        logEntryStore.replaceEntries(
-            logEntriesByKey.values.sorted(by: Self.logEntrySort),
-            for: .myDocuments
-        )
-        patchStatusStore.addStatuses(appliedPatchStatuses, for: .myDocuments)
-        snapshotService.refreshBaselineFingerprints(
-            modelContext: modelContext,
-            settingsStore: settingsStore
-        )
 
         return RemoteSyncMyDocumentPatchApplyReport(
             appliedPatchCount: appliedPatchStatuses.count,
@@ -389,9 +452,11 @@ public final class RemoteSyncMyDocumentPatchApplyService {
      - Failure modes: Malformed local supported-table identifiers are retained under their raw key
        rather than failing replay.
      */
-    private func seededLogEntriesByKey(logEntryStore: RemoteSyncLogEntryStore) -> [String: RemoteSyncLogEntry] {
+    private func seededLogEntriesByKey(
+        logEntryStore: RemoteSyncLogEntryStore
+    ) throws -> [String: RemoteSyncLogEntry] {
         var entriesByKey: [String: RemoteSyncLogEntry] = [:]
-        for entry in logEntryStore.entries(for: .myDocuments) {
+        for entry in try logEntryStore.entriesStrict(for: .myDocuments) {
             let keyedEntry = (try? canonicalLogEntry(entry)) ?? entry
             let key = logEntryStore.key(for: .myDocuments, entry: keyedEntry)
             guard let existingEntry = entriesByKey[key] else {
@@ -762,34 +827,6 @@ public final class RemoteSyncMyDocumentPatchApplyService {
      */
     private func temporaryDatabaseURL(prefix: String, suffix: String) -> URL {
         temporaryDirectory.appendingPathComponent("\(prefix)\(UUID().uuidString)\(suffix)")
-    }
-
-    /**
-     Extracts one gzip payload using the shared CLibSword compression bridge.
-
-     - Parameter data: Gzip-compressed patch archive bytes.
-     - Returns: Decompressed SQLite database bytes.
-     - Side effects: allocates and frees native memory through the compression bridge.
-     - Failure modes: Throws `RemoteSyncArchiveStagingError.decompressionFailed` for invalid gzip data.
-     */
-    private static func gunzip(_ data: Data) throws -> Data {
-        try data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Data in
-            guard let baseAddress = ptr.baseAddress else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
-
-            var outputLength: UInt = 0
-            guard let output = gunzip_data(
-                baseAddress.assumingMemoryBound(to: UInt8.self),
-                UInt(data.count),
-                &outputLength
-            ) else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
-
-            defer { gunzip_free(output) }
-            return Data(bytes: output, count: Int(outputLength))
-        }
     }
 
     /**

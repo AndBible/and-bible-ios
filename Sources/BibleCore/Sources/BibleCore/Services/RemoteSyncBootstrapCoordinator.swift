@@ -2,6 +2,12 @@
 
 import Foundation
 
+/** Errors raised when a remote body exceeds a caller-owned streaming limit. */
+public enum RemoteSyncBoundedDownloadError: Error, Equatable {
+    /// Declared or observed response bytes exceed the accepted ceiling.
+    case payloadTooLarge(Int64)
+}
+
 /**
  Abstraction for remote-sync backends that support Android-style folder bootstrap operations.
 
@@ -51,6 +57,23 @@ public protocol RemoteSyncAdapting: Sendable {
      - Throws: Backend-specific transport errors.
      */
     func download(id: String) async throws -> Data
+
+    /**
+     Streams one remote payload into a bounded local file.
+
+     - Parameters:
+       - id: Backend-specific file identifier.
+       - destinationURL: Unique local destination file.
+       - maximumByteCount: Maximum accepted response bytes.
+     - Returns: Exact bytes written.
+     - Side effects: Performs remote I/O and creates `destinationURL`.
+     - Throws: Transport, filesystem, or `payloadTooLarge` failures; partial files are removed.
+     */
+    func download(
+        id: String,
+        to destinationURL: URL,
+        maximumByteCount: Int
+    ) async throws -> Int64
 
     /**
      Uploads one local file into a remote folder.
@@ -103,6 +126,40 @@ public protocol RemoteSyncAdapting: Sendable {
      - Throws: Backend-specific transport errors.
      */
     func makeSyncFolderKnown(syncFolderID: String, deviceIdentifier: String) async throws -> String
+}
+
+public extension RemoteSyncAdapting {
+    /**
+     Compatibility implementation for deterministic adapters that expose only in-memory payloads.
+
+     Production WebDAV overrides this method with response-byte streaming. The default validates
+     the complete mock payload before its first filesystem write and removes partial destinations.
+
+     - Parameters:
+       - id: Backend-specific file identifier.
+       - destinationURL: Unique local destination file.
+       - maximumByteCount: Maximum accepted payload bytes.
+     - Returns: Exact bytes written.
+     - Side effects: Downloads through `download(id:)` and writes one local file.
+     - Throws: Existing adapter errors, filesystem errors, or `payloadTooLarge`.
+     */
+    func download(
+        id: String,
+        to destinationURL: URL,
+        maximumByteCount: Int
+    ) async throws -> Int64 {
+        let data = try await download(id: id)
+        guard data.count <= maximumByteCount else {
+            throw RemoteSyncBoundedDownloadError.payloadTooLarge(Int64(data.count))
+        }
+        do {
+            try data.write(to: destinationURL, options: [.atomic])
+            return Int64(data.count)
+        } catch {
+            try? FileManager.default.removeItem(at: destinationURL)
+            throw error
+        }
+    }
 }
 
 extension NextCloudSyncAdapter: RemoteSyncAdapting {}
@@ -167,10 +224,18 @@ public struct RemoteSyncBootstrapCreation: Sendable, Equatable {
 }
 
 /**
+ Errors raised when persisted bootstrap lifecycle metadata cannot be interpreted safely.
+ */
+public enum RemoteSyncBootstrapError: Error, Equatable {
+    /// A newer or corrupted persisted phase cannot be treated as ready by this build.
+    case unsupportedPersistedPhase(String)
+}
+
+/**
  Result of inspecting one category's remote-sync bootstrap state.
 
- `ready` means the category has a valid known sync folder and a local device folder. The other
- cases map directly to Android's initial bootstrap branches:
+ `ready` means the category has a valid known sync folder, a local device folder, and a completed
+ initial baseline exchange. The other cases map directly to Android's initial bootstrap branches:
  - `requiresRemoteAdoption`: a same-named remote folder exists and the caller must decide whether
    to adopt it
  - `requiresRemoteCreation`: no reusable remote folder exists, so the caller can create a fresh
@@ -179,6 +244,12 @@ public struct RemoteSyncBootstrapCreation: Sendable, Equatable {
 public enum RemoteSyncBootstrapStatus: Sendable, Equatable {
     /// Category bootstrap is complete and local state is ready for future patch sync.
     case ready(RemoteSyncBootstrapState)
+
+    /// Remote setup exists, but the adopted folder's initial backup still needs local restoration.
+    case requiresInitialRestore(RemoteSyncBootstrapState)
+
+    /// Remote setup exists, but this device's local baseline still needs its initial upload.
+    case requiresInitialUpload(RemoteSyncBootstrapState)
 
     /// A matching remote folder exists but is not yet owned locally.
     case requiresRemoteAdoption(RemoteSyncBootstrapCandidate)
@@ -202,13 +273,13 @@ public enum RemoteSyncBootstrapStatus: Sendable, Equatable {
 
  Side effects:
  - inspection may clear stale bootstrap keys in `RemoteSyncStateStore`
- - adoption and creation upload secret markers, create remote device folders, and persist state
+ - adoption and creation upload secret markers, create remote device folders, and persist a pending
+   initial-baseline phase
  - create-with-replacement can delete a previously discovered remote folder before recreating it
 
  Failure modes:
  - rethrows backend transport errors from the adapter
- - local state writes are best-effort because `RemoteSyncStateStore` is backed by `SettingsStore`
-   which swallows persistence failures
+ - bootstrap-state transaction failures are rethrown after rollback
 
  Concurrency:
  - this type is intentionally not `Sendable`; callers must respect the thread/actor confinement of
@@ -247,28 +318,37 @@ public final class RemoteSyncBootstrapCoordinator {
      Inspects one category and returns the next bootstrap action Android would require.
 
      The coordinator first validates any locally stored sync folder and secret marker. If that
-     ownership proof is still valid, the category is ready immediately and any missing device
-     folder is repaired automatically. Otherwise the stale bootstrap keys are cleared, the backend
-     is queried for a same-named remote folder, and the result becomes either an adopt decision or
-     a fresh-create path.
+     ownership proof is still valid, the persisted initial-baseline phase determines whether the
+     category is ready or must resume a restore/upload. Any missing device folder is repaired while
+     retaining that phase. Otherwise stale bootstrap keys are cleared, the backend is queried for a
+     same-named remote folder, and the result becomes either an adopt decision or fresh-create path.
 
      - Parameter category: Logical sync category to inspect.
-     - Returns: Ready state, remote-adoption candidate, or remote-creation requirement.
+     - Returns: Ready state, resumable initial transfer, remote-adoption candidate, or remote-creation requirement.
      - Side effects:
        - may clear stale bootstrap keys
        - may create and persist a replacement device folder when the sync folder is still owned
          but the local `deviceFolderID` is missing
        - performs remote marker validation and remote folder discovery requests
      - Failure modes:
-       - rethrows backend errors from secret-marker validation, remote listing, or device-folder
-         repair
+       - rethrows backend errors from secret-marker validation, remote listing, or device-folder repair
+       - throws `RemoteSyncBootstrapError.unsupportedPersistedPhase` for unknown lifecycle metadata
      */
     public func inspect(_ category: RemoteSyncCategory) async throws -> RemoteSyncBootstrapStatus {
         let syncFolderName = category.syncFolderName(bundleIdentifier: bundleIdentifier)
         let bootstrapState = stateStore.bootstrapState(for: category)
 
         if let knownState = try await validatedStateIfKnown(bootstrapState, category: category) {
-            return .ready(knownState)
+            switch knownState.phase {
+            case .ready:
+                return .ready(knownState)
+            case .awaitingRemoteInitialRestore:
+                return .requiresInitialRestore(knownState)
+            case .awaitingLocalInitialUpload:
+                return .requiresInitialUpload(knownState)
+            case .unsupported(let value):
+                throw RemoteSyncBootstrapError.unsupportedPersistedPhase(value)
+            }
         }
 
         let discoveredRemoteFolder = try await adapter.listFiles(
@@ -297,16 +377,19 @@ public final class RemoteSyncBootstrapCoordinator {
     }
 
     /**
-     Marks a discovered remote folder as owned and creates this device's subfolder beneath it.
+     Marks a discovered remote folder as owned and records that its initial backup awaits restore.
 
      - Parameters:
        - category: Logical sync category being adopted.
        - remoteFolderID: Remote identifier of the existing category folder to adopt.
-     - Returns: Persisted bootstrap state that is ready for future patch-sync work.
+     Existing pending adoption state for the same valid folder is reused so retries do not create a
+     second marker or device folder.
+
+     - Returns: Persisted bootstrap state whose initial restore remains pending.
      - Side effects:
        - uploads a new secret marker file into the remote folder
        - creates the per-device patch folder beneath the adopted sync folder
-       - persists the resulting bootstrap identifiers locally
+       - atomically persists the resulting identifiers and pending-restore phase locally
      - Failure modes:
        - rethrows backend errors from secret-marker upload or device-folder creation
      */
@@ -314,22 +397,35 @@ public final class RemoteSyncBootstrapCoordinator {
         for category: RemoteSyncCategory,
         remoteFolderID: String
     ) async throws -> RemoteSyncBootstrapState {
-        try await persistBootstrapState(category: category, syncFolderID: remoteFolderID)
+        let existingState = stateStore.bootstrapState(for: category)
+        if existingState.syncFolderID == remoteFolderID,
+           existingState.phase == .awaitingRemoteInitialRestore,
+           let reusableState = try await validatedStateIfKnown(existingState, category: category) {
+            return reusableState
+        }
+        return try await persistBootstrapState(
+            category: category,
+            syncFolderID: remoteFolderID,
+            phase: .awaitingRemoteInitialRestore
+        )
     }
 
     /**
-     Creates a brand-new remote category folder and this device's subfolder beneath it.
+     Creates a remote category folder and records that its local initial baseline awaits upload.
+
+     Existing pending local-upload state is reused so a retry after upload failure does not create
+     or delete another remote folder tree.
 
      - Parameters:
        - category: Logical sync category being created.
        - replacingRemoteFolderID: Optional previously discovered remote folder to delete first,
          matching Android's "copy this device to the cloud" replacement path.
-     - Returns: Persisted bootstrap state that is ready for future patch-sync work.
+     - Returns: Persisted bootstrap state whose local initial upload remains pending.
      - Side effects:
        - may delete a previously discovered remote folder tree
        - creates a new top-level category folder and a per-device patch folder
        - uploads a new secret marker file into the created category folder
-       - persists the resulting bootstrap identifiers locally
+       - atomically persists the resulting identifiers and pending-upload phase locally
      - Failure modes:
        - rethrows backend errors from delete, folder creation, or marker upload operations
      */
@@ -337,13 +433,23 @@ public final class RemoteSyncBootstrapCoordinator {
         for category: RemoteSyncCategory,
         replacingRemoteFolderID: String? = nil
     ) async throws -> RemoteSyncBootstrapState {
+        let existingState = stateStore.bootstrapState(for: category)
+        if existingState.phase == .awaitingLocalInitialUpload,
+           let reusableState = try await validatedStateIfKnown(existingState, category: category) {
+            return reusableState
+        }
+
         if let replacingRemoteFolderID {
             try await adapter.delete(id: replacingRemoteFolderID)
         }
 
         let syncFolderName = category.syncFolderName(bundleIdentifier: bundleIdentifier)
         let syncFolder = try await adapter.createNewFolder(name: syncFolderName, parentID: nil)
-        return try await persistBootstrapState(category: category, syncFolderID: syncFolder.id)
+        return try await persistBootstrapState(
+            category: category,
+            syncFolderID: syncFolder.id,
+            phase: .awaitingLocalInitialUpload
+        )
     }
 
     /**
@@ -352,7 +458,7 @@ public final class RemoteSyncBootstrapCoordinator {
      - Parameters:
        - bootstrapState: Locally persisted bootstrap state to validate.
        - category: Logical sync category being inspected.
-     - Returns: Ready bootstrap state when ownership is still valid; otherwise `nil`.
+     - Returns: Valid bootstrap state with its original lifecycle phase; otherwise `nil`.
      - Side effects:
        - may clear stale bootstrap state when the stored sync folder cannot be proven as owned
        - may create and persist a missing device folder when the sync folder remains valid
@@ -368,8 +474,11 @@ public final class RemoteSyncBootstrapCoordinator {
               !syncFolderID.isEmpty,
               let secretFileName = bootstrapState.secretFileName,
               !secretFileName.isEmpty else {
-            if bootstrapState.syncFolderID != nil || bootstrapState.deviceFolderID != nil || bootstrapState.secretFileName != nil {
-                stateStore.setBootstrapState(RemoteSyncBootstrapState(), for: category)
+            if bootstrapState.syncFolderID != nil
+                || bootstrapState.deviceFolderID != nil
+                || bootstrapState.secretFileName != nil
+                || bootstrapState.phase != .ready {
+                try stateStore.setBootstrapStateAtomically(RemoteSyncBootstrapState(), for: category)
             }
             return nil
         }
@@ -379,7 +488,7 @@ public final class RemoteSyncBootstrapCoordinator {
             secretFileName: secretFileName
         )
         guard isKnown else {
-            stateStore.setBootstrapState(RemoteSyncBootstrapState(), for: category)
+            try stateStore.setBootstrapStateAtomically(RemoteSyncBootstrapState(), for: category)
             return nil
         }
 
@@ -390,7 +499,8 @@ public final class RemoteSyncBootstrapCoordinator {
         return try await persistBootstrapState(
             category: category,
             syncFolderID: syncFolderID,
-            secretFileName: secretFileName
+            secretFileName: secretFileName,
+            phase: bootstrapState.phase
         )
     }
 
@@ -400,20 +510,21 @@ public final class RemoteSyncBootstrapCoordinator {
      - Parameters:
        - category: Logical sync category being updated.
        - syncFolderID: Remote identifier for the category's global sync folder.
-       - secretFileName: Optional existing secret marker filename. When absent, a fresh marker is
-         uploaded and the generated name is persisted.
-     - Returns: Ready bootstrap state containing sync folder, device folder, and secret marker IDs.
+       - secretFileName: Optional existing secret marker filename. When absent, a fresh marker is uploaded.
+       - phase: Initial-baseline lifecycle phase to persist with the remote identifiers.
+     - Returns: Bootstrap state containing sync folder, device folder, marker, and lifecycle phase.
      - Side effects:
        - may upload a new secret marker file
        - creates the per-device patch folder beneath the sync folder
-       - persists the resulting bootstrap identifiers locally
+       - atomically persists the resulting bootstrap identifiers and phase locally
      - Failure modes:
        - rethrows backend errors from marker upload or device-folder creation
      */
     private func persistBootstrapState(
         category: RemoteSyncCategory,
         syncFolderID: String,
-        secretFileName: String? = nil
+        secretFileName: String? = nil,
+        phase: RemoteSyncBootstrapPhase
     ) async throws -> RemoteSyncBootstrapState {
         let resolvedSecretFileName: String
         if let secretFileName, !secretFileName.isEmpty {
@@ -432,9 +543,10 @@ public final class RemoteSyncBootstrapCoordinator {
         let state = RemoteSyncBootstrapState(
             syncFolderID: syncFolderID,
             deviceFolderID: deviceFolder.id,
-            secretFileName: resolvedSecretFileName
+            secretFileName: resolvedSecretFileName,
+            phase: phase
         )
-        stateStore.setBootstrapState(state, for: category)
+        try stateStore.setBootstrapStateForNewDestinationAtomically(state, for: category)
         return state
     }
 }

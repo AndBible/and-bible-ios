@@ -166,19 +166,6 @@ enum PassageBookScriptureScope: Equatable, Sendable {
     /// Android `isScriptureRequired = false`, surfaced as the deuterocanonical toggle.
     case deuterocanonical
 
-    /// JSword KJV scripture books used by Android `Scripture.isScripture`.
-    private static let androidScriptureOsisIds: Set<String> = [
-        "Gen", "Exod", "Lev", "Num", "Deut", "Josh", "Judg", "Ruth",
-        "1Sam", "2Sam", "1Kgs", "2Kgs", "1Chr", "2Chr", "Ezra", "Neh",
-        "Esth", "Job", "Ps", "Prov", "Eccl", "Song", "Isa", "Jer",
-        "Lam", "Ezek", "Dan", "Hos", "Joel", "Amos", "Obad", "Jonah",
-        "Mic", "Nah", "Hab", "Zeph", "Hag", "Zech", "Mal", "Matt",
-        "Mark", "Luke", "John", "Acts", "Rom", "1Cor", "2Cor", "Gal",
-        "Eph", "Phil", "Col", "1Thess", "2Thess", "1Tim", "2Tim",
-        "Titus", "Phlm", "Heb", "Jas", "1Pet", "2Pet", "1John",
-        "2John", "3John", "Jude", "Rev",
-    ]
-
     /**
      Filters an active-module book list with Android's scripture/non-scripture predicate.
 
@@ -252,7 +239,7 @@ enum PassageBookScriptureScope: Equatable, Sendable {
      - Failure modes: Unknown ids return `false`.
      */
     private static func isScripture(_ book: BookInfo) -> Bool {
-        androidScriptureOsisIds.contains(book.osisId)
+        AndroidScriptureBookScope.isScripture(osisBookId: book.osisId)
     }
 }
 

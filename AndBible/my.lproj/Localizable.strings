@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Security";
 "discrete_mode" = "Discrete Mode";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "အကြောင်း";
 "version" = "Version";
 "export" = "Export";
@@ -440,10 +440,6 @@
 "calculator_pin_description" = "PIN code to enter the app when the calculator is shown.";
 "discrete_help_title" = "Read this first!";
 "discrete_help_summary" = "Instructions for the settings and information about specific discrete build.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "အက်ပ်ပလီကေးရှင်း အပြုအမူ";
 "prefs_display_customization_cat" = "& ကြည့်ပါ; ခံစားကြည့်ပါ";
@@ -514,7 +510,6 @@
 
 "prefs_volume_keys_scroll_title" = "Volume buttons scroll";
 "prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Experimental features";
 "prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
@@ -608,3 +603,84 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Internal plan နှင့် အမည်တူသည့် sdcard Jsword/readingplan ထဲတွင် အသုံးပြုသူ ဖတ်စာအစီအစဉ်တစ်ခုရှိသည်။ ၎င်းစာရင်းကို ဤနေရာတွင် မဖော်ပြနိုင်ပါ။ ကျေးဇူးပြုပြီး အခြားအမည်ဖြင့် ဖိုင်အမည် ထပ်ပေးပြီး တိုးချဲ့ဖိုင်များအား properties အဖြစ်ထားရှိပါ။";
 "error_no_content" = "ရွေးထားသည့် အခန်းငယ်အတွက် မည်သည့်အကြောင်းအရာမှ မရှိပါ";
+
+/* Android shared translations */
+"give_passphrase_for_module" = "မှတ်တမ်း %@ကို စကားဝှက် ခံထားသည့်အတွက် သော့ဖွင့်ရန် စကားဝှက်လိုအပ်ပါသည်။";
+"show_unlock_info" = "& သင်ခန်းစာ; သော့ဖွင့်ခြင်း သတင်းအချက်အလက်";
+
+/* Android shared translations */
+"calculator_par1" = "Before entering the app, calculator screen is displayed.";
+"calculator_par2" = "In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press \"=\" button.";
+"calculator_par3" = "You can set up a custom PIN code by \"Calculator PIN\" setting.";
+
+/* Android shared translations */
+"extracting_zip_file" = "Zip ဖိုင်ကို ယခုထုတ်ယူပါ...";
+"install_failed_reason" = "Installing module failed for the following reason: %@.";
+"install_zip_successfull" = "Module အား အောင်မြင်စွာ ထည့်သွင်းပြီးပါပြီ";
+"module_install_phase_committing" = "Please wait. Loading modules from a file.";
+"module_install_phase_downloading" = "ဒေါင်းလုပ်ဆွဲပါ";
+"module_install_phase_queued" = "ကျေးဇူးပြု၍ စောင့်ပါ...";
+"storage_space_warning" = "သင်၏ သိုလှောင်နေရာ မလုံလောက်ပါ";
+
+/* Android shared translations */
+"error_occurred" = "မှားယွင်းမှုတစ်ခု ဖြစ်ပေါ်သည်";
+
+/* Android shared translations */
+"conf_change_chapter" = "အခန်းကြီး အပြောင်းအလဲများ";
+"conf_change_title" = "ခေါင်းစဉ်များ";
+"conf_replace_divinename" = "ဘုရား၏အမည်များကို Yahweh ဖြင့်အစားထိုးပါ";
+"conf_save_playback_settings_to_bookmarks" = "Playback ဆက်တင်များကို စာညှပ်များတွင် သိမ်းထားပါ";
+"conf_speak_auto_bookmark" = "အလိုအလျောက် စာညှပ်ခြင်း";
+"conf_speak_footnotes" = "အောက်ခြေမှတ်စု";
+"conf_speak_sleep_timer" = "အိပ်ချိန်သတ်မှတ်ချက်ကို ထားပါ";
+"conf_speak_synchronize" = "စကားပြောနောက်တွင် စာသားပါလာမည်";
+"forward" = "ရှေ့သို့သွားပါ";
+"playback_settings_title" = "Playback ဆက်တင်များ";
+"rewind" = "နောက်ပြန်လှည့်ပါ";
+"speak_bookmarks_menu_title" = "စာညှပ်မှအသံဖြင့်ပြောပါ";
+"speak_next" = "နောက်တစ်ခု";
+"speak_previous" = "ယခင်";
+"speak_settings_title" = "အထွေထွေ စကားပြော ဆက်တင်များ";
+
+/* Android shared translations */
+"sleep_timer_title" = "မိနစ်အနည်းငယ်အတွင်း အိပ်ချိန် သတ်မှတ်ခြင်း";
+"speak_beginning_of_passage" = "စာကြောင်းအစကို ရွေးချယ်ပါ";
+"speak_ending_of_passage" = "စာကြောင်းအဆုံးကို ရွေးချယ်ပါ";
+"speak_ending_verse_must_be_later" = "အဆုံးသတ်အခန်းငယ်သည် အစပြုအခန်းငယ်ထက် နောက်ကျနေရမည်";
+"speak_verse_range_to_repeat" = "ထပ်ရွတ်ရန် အခန်းငယ်၏နှုန်းကို ရွေးချယ်ပါ";
+
+/* Android shared translations */
+"tts_lang_not_available" = "ဤဘာသာစကား မရနိုင်သေးပါ";
+
+/* Android shared translations */
+"errorTitle" = "မှားယွင်းမှုတစ်ခု ဖြစ်ပေါ်သည်";
+"error_executing_search" = "စုံစမ်းရှာဖွေမှု မမှန်ကန်ပါ";
+"import_items" = "%@သွင်းပါ";
+"install_zip_module" = "Bible Module ကို ထည့်သွင်းအသုံးပြုပါ";
+"okay" = "အိုကေ";
+"overwrite" = "ဟုတ်တယ်";
+"reading_plan_set_current_day" = "ယနေ့ကို သတ်မှတ်ပါ";
+"reading_plan_set_start_date" = "အစပြုနေ့ရက် သတ်မှတ်ပါ";
+"search_all_words" = "စကားလုံးများ အားလုံး";
+"search_any_word" = "မည်သည့်စကားလုံး မဆို";
+"search_phrase" = "စကားစု";
+"search_words_group_prompt" = "အခန်းငယ်များကို ရှာဖွေပါ";
+"show_notes" = "မှတ်စုများကို ပြပါ";
+"speak_book_changed" = "စာအုပ်ပြောင်းလဲပြီး";
+"speak_chapter_changed" = "အခန်းကြီး";
+"success" = "ပြီးပါပြီ";
+"undo" = "ပယ်ဖျက်ပါ";
+
+/* Android shared translations */
+"error_key_not_in_document" = "မှတ်တမ်းတွင် ရှာမတွေ့ပါ";
+"system_items1" = "နောက်ထပ်";
+
+/* Android shared translations */
+"bookmarks_and_mynotes_title" = "စာညှပ် & ကိုယ်ပိုင်မှတ်စုများ";
+"help_bookmarks_text" = "စာသားအချို့ကိုမှတ်သားပြီး၊ popup မီနူးမှ \"စာညှပ်\"ကိုရွေးချယ်ခြင်းဖြင့် စာညှပ်များကို ဖန်တီးနိုင်သည်။ ကျမ်းစာမြင်ကွင်းတွင် ဟိုက်လိုက်လုပ်ထားသည့်စာသားကို နှိပ်ခြင်းဖြင့် စာညှပ်အသစ်တွင် စိတ်ကြိုက်မှတ်စာ များကို ပေါင်းထည့်နိုင်သည်။ အနက်ဖွင့်ကျမ်းများတွင်လည်း သင်၏မှတ်စုများကို သီးသန့်ဝင်းဒိုးတစ်ခုတွင် ကြည့်ရှုနိုင်ရန် ခွင့်ပြုထားပါသည်။";
+"save_and_exit" = "သိမ်းဆည်းပါ";
+"verse_tip" = "အခန်းငယ် များစွာ သို့မဟုတ် တစ်စိတ်တစ်ပိုင်းကို မှတ်သားလိုလျှင် ကျမ်းစာစာသားအား ကြာကြာဖိထားရပါမည်";
+"watch_tutorial_video" = "လမ်းညွှန် ဗီဒီယိုကိုကြည့်ပါ (အင်္ဂလိပ်)";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";

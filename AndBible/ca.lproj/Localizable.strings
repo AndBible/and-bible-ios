@@ -295,7 +295,7 @@
 /* Security — Settings for the persecuted */
 "settings_security" = "Configuració per a perseguits";
 "discrete_mode" = "Amaga els símbols religiosos";
-"discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "show_calculator" = "Calculadora";
 "show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
 "calculator_pin" = "PIN de la calculadora";
@@ -303,10 +303,6 @@
 "calculator_pin_description" = "Codi PIN per entrar a l'aplicació quan es mostra la calculadora.";
 "discrete_help_title" = "Llegeix-ho primer!";
 "discrete_help_summary" = "Instruccions per a la configuració i informació sobre la versió discreta específica.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 /* About */
 "settings_language" = "Idioma";
@@ -704,7 +700,6 @@
 
 "prefs_volume_keys_scroll_title" = "Els botons de volum desplacen";
 "prefs_volume_keys_scroll_summary" = "Fes servir pujar/baixar volum per desplaçar el text de la Bíblia";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Funcions experimentals";
 "prefs_experimental_features_summary" = "Selecciona quines funcions experimentals vols activar. Aquestes funcions encara estan en desenvolupament i poden canviar o eliminar-se";
 "experimental_feature_bookmark_edit_actions" = "Accions d'edició de marcadors";
@@ -798,3 +793,384 @@
 "page_scroll_amount" = "Quantitat de desplaçament de pàgina";
 "ordinals" = "Ordinals";
 "error_no_content" = "No hi ha contingut per al verset seleccionat";
+
+/* Android shared translations */
+"calculator_par1" = "Abans d'entrar a l'aplicació, es mostra la pantalla de la calculadora.";
+"calculator_par2" = "En ella, pots fer càlculs estàndard, i quan vulguis entrar a l'aplicació, simplement escriu el teu codi PIN (el valor predeterminat és 1234) i prem el botó «=».";
+"calculator_par3" = "Pots establir un codi PIN personalitzat a la configuració «PIN de la calculadora».";
+"give_passphrase_for_module" = "El document %@ està xifrat i necessita una contrasenya per desbloquejar-lo";
+"show_unlock_info" = "Mòdul i informació de desbloqueig";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "S'està extraient el fitxer zip…";
+"install_failed_reason" = "La instal·lació del mòdul ha fallat pel motiu següent: %@.";
+"install_zip_successfull" = "El mòdul s'ha instal·lat correctament";
+"module_install_phase_committing" = "Espereu. S'estan carregant mòduls des d'un fitxer.";
+"module_install_phase_downloading" = "Baixa";
+"module_install_phase_queued" = "Espera…";
+"storage_space_warning" = "No hi ha prou espai d'emmagatzematge local.";
+
+/* Android shared translations */
+"error_occurred" = "S'ha produït un error";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Memorització";
+"memorize_tab_reading" = "Lectura";
+"reading_progress_active_days" = "dies actius";
+"reading_progress_bible_heatmap" = "Visió general de la Bíblia";
+"reading_progress_calendar" = "Activitat de lectura";
+"reading_progress_chapters_read" = "capítols llegits";
+"reading_progress_cycle" = "Cicle %d";
+"reading_progress_history_for" = "Progrés de lectura per a %1$@";
+"reading_progress_history_no_entries" = "No hi ha entrades de lectura per a aquesta selecció.";
+"reading_progress_history_title" = "Historial de lectura";
+"reading_progress_history_version_unknown" = "Versió desconeguda";
+"reading_progress_new_cycle" = "Nou cicle";
+"reading_progress_new_cycle_confirm" = "Vols iniciar un nou cicle de lectura? Això començarà a fer un seguiment del teu progrés des de zero, conservant les dades del cicle anterior.";
+"reading_progress_new_testament" = "Nou Testament";
+"reading_progress_next_cycle" = "Cicle següent";
+"reading_progress_old_testament" = "Antic Testament";
+"reading_progress_overall" = "%@%% de la Bíblia llegida";
+"reading_progress_percent_read_scale" = "Percentatge\nlllegit";
+"reading_progress_previous_cycle" = "Cicle anterior";
+"reading_progress_read_count_scale" = "Recompte\nde lectura";
+"reading_progress_title" = "Progrés de lectura/memorització";
+
+/* Android shared translations */
+"conf_change_chapter" = "Canvis de capítol";
+"conf_change_title" = "Títols";
+"conf_replace_divinename" = "Substitueix el nom diví per Yahweh";
+"conf_save_playback_settings_to_bookmarks" = "Desa la configuració de reproducció als marcadors";
+"conf_speak_auto_bookmark" = "Marcador automàtic";
+"conf_speak_footnotes" = "Notes al peu";
+"conf_speak_sleep_timer" = "Configura el temporitzador de son";
+"conf_speak_synchronize" = "El text segueix la parla";
+"forward" = "Avança";
+"playback_settings_title" = "Configuració de reproducció";
+"rewind" = "Retrocedeix";
+"speak_bookmarks_menu_title" = "Parla des del marcador";
+"speak_next" = "Següent";
+"speak_previous" = "Anterior";
+"speak_settings_title" = "Configuració general de parla";
+
+/* Android shared translations */
+"sleep_timer_title" = "Temps de son en minuts";
+"speak_beginning_of_passage" = "Tria el principi del passatge";
+"speak_ending_of_passage" = "Tria el final del passatge";
+"speak_ending_verse_must_be_later" = "El verset final ha de ser posterior al verset inicial";
+"speak_verse_range_to_repeat" = "Tria el rang de versets a repetir";
+
+/* Android shared translations */
+"tts_lang_not_available" = "L'idioma no està disponible.";
+
+/* Android shared translations */
+"ai_unknown_prompt" = "IA";
+"description" = "Descripció";
+"errorTitle" = "S'ha produït un error";
+"error_executing_search" = "Consulta de cerca no vàlida";
+"export_something" = "Exporta %@";
+"import_items" = "Importa %@";
+"install_zip_module" = "Instal·la mòdul de Bíblia";
+"my_document_content_type_label" = "Tipus de contingut";
+"my_document_create_title" = "Crea un document nou";
+"my_document_import_document" = "Importa fitxers com a document";
+"my_document_new_page_name" = "Pàgina %1$d";
+"my_document_rename_title" = "Reanomena el document";
+"my_document_save_changes" = "Desa els canvis?";
+"okay" = "D'acord";
+"overwrite" = "Sí";
+"package_directory" = "Directori de paquets (fitxers Zip)";
+"read" = "Lectura";
+"reading_plan_set_current_day" = "Estableix com a dia actual…";
+"reading_plan_set_start_date" = "Estableix la data d'inici…";
+"search_all_words" = "Totes les paraules";
+"search_any_word" = "Qualsevol paraula";
+"search_fts_query" = "Sintaxi de consulta bruta";
+"search_phrase" = "Frase";
+"search_words_group_prompt" = "Cerca versets";
+"show_notes" = "Mostra les notes";
+"speak_book_changed" = "Llibre canviat.";
+"speak_chapter_changed" = "Capítol";
+"success" = "Fet";
+"summary" = "Resum";
+"undo" = "Cancel·la";
+
+/* Android shared translations */
+"my_document_no_description" = "Sense descripció";
+
+/* Android shared translations */
+"error_key_not_in_document" = "No s'ha trobat al document";
+"my_document_cannot_delete_ai_documents" = "Els documents de la IA no es poden suprimir mentre contenen pàgines. Suprimeix primer les pàgines.";
+"my_document_create_page_title" = "Pàgina nova";
+"my_document_import_empty_selection" = "No s'han seleccionat fitxers importables";
+"system_items1" = "Més";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Has de descarregar una Bíblia que contingui els números de Strong i crear-ne l'índex a través de Cerca";
+
+/* Android shared translations */
+"add_model" = "Afegeix un model";
+"agent_already_running" = "Ja hi ha un agent de IA en execució. Espera o atura'l primer.";
+"agent_log_cancelled" = "Cancel·lat";
+"agent_log_completed" = "Completat";
+"agent_log_executing" = "Executant: %@";
+"agent_log_idle" = "Assistent de IA";
+"agent_log_iteration" = "Iteració %d";
+"agent_log_model_not_configured" = "Cap model configurat";
+"agent_log_tool_failed" = "L'eina %@ ha fallat";
+"agent_log_view_raw" = "Mostra el registre LLM en brut";
+"agent_max_iterations_title" = "Màxim d'iteracions de l'agent";
+"agent_permission_mode_summary" = "Controla quan cal la confirmació de l'usuari abans d'operacions d'escriptura de la IA";
+"agent_permission_title" = "Permís de l'agent";
+"ai_add_provider" = "Afegeix un proveïdor";
+"ai_advanced_category" = "Avançat";
+"ai_agent_notification_running" = "Agent de IA treballant…";
+"ai_behavior_category" = "Comportament";
+"ai_connection_settings" = "Configuració de la connexió";
+"ai_disclaimer_approach" = "AndBible utilitza principalment la IA per processar text dels documents que tens instal·lats —comentaris, diccionaris i altres mòduls— en lloc de basar-se en les dades d'entrenament del model.";
+"ai_disclaimer_dialog_title" = "Eines d'IA — Informació important";
+"ai_disclaimer_intro" = "Les eines d'IA poden enriquir molt la teva experiència d'estudi bíblic i obrir noves maneres d'apropar-te a les Escriptures.";
+"ai_disclaimer_point1" = "La IA pot cometre errors, incloent «al·lucinacions» (afirmar amb seguretat informació falsa o fabricada). No acceptis mai els seus resultats sense pensar.";
+"ai_disclaimer_point2" = "Les respostes de la IA poden reflectir biaixos de les seves dades d'entrenament, ser deliberadament enganyoses o presentar una perspectiva teològica concreta com si fos neutral o completa.";
+"ai_disclaimer_point3" = "Ets responsable de com uses el contingut generat per la IA. Verifica sempre els resultats amb les Escriptures abans de fiar-te'n.";
+"ai_disclaimer_point4" = "AndBible s'esforça per facilitar la verificació (p. ex. citacions de fonts precises als comentaris), però la responsabilitat final sempre recau en tu.";
+"ai_disclaimer_point5" = "«Examineu-ho tot; reteniu el que és bo.» (1 Tessalonicencs 5:21)";
+"ai_disclaimer_point6" = "Aquestes eines no tenen ànima ni Esperit Sant. Són eines de processament de text, no guies espirituals. No són adequades per preparar directament sermons, devocionals o altre contingut espiritual sense una supervisió humana acurada, oració i discerniment.";
+"ai_disclaimer_point7" = "Usades amb seny, poden beneficiar molts usuaris i casos d'ús. Però si no estàs segur d'acceptar els riscos, no usar-les també és una opció completament vàlida.";
+"ai_disclaimer_point8" = "Les teves dades s'envien als servidors del proveïdor d'IA que hagis triat. En usar una clau d'API, acceptes els termes i la política de privadesa d'aquell proveïdor. Els models allotjats localment són possibles però requereixen més coneixements tècnics i poden no donar resultats tan bons com els models comercials.";
+"ai_disclaimer_point9" = "Els proveïdors d'IA cobren per l'ús de l'API. Les estimacions de cost que es mostren a AndBible són aproximades; comprova sempre la facturació del teu proveïdor per als càrrecs reals.";
+"ai_disclaimer_responsibility" = "Tot i això, segueixen sent eines potents, i una gran potència comporta una gran responsabilitat. Tingues en compte el següent.";
+"ai_disclaimer_warning_title" = "Important: llegeix abans d'usar les eines d'IA";
+"ai_doc_choose_page" = "Tria la pàgina del document de la IA";
+"ai_document_filter_activity_title" = "Accés als documents de la IA";
+"ai_document_regenerate" = "Regenera";
+"ai_hidden_status" = "amagat";
+"ai_hide_prompt" = "Amaga";
+"ai_language_title" = "Idioma de resposta de la IA";
+"ai_models_summary_none" = "Cap model configurat";
+"ai_provider_api_format" = "Format de l'API";
+"ai_provider_api_key" = "Clau d'API";
+"ai_provider_api_key_not_set" = "Clau d'API no establerta";
+"ai_provider_delete_confirm" = "Vols suprimir el proveïdor «%1$@»? Els missatges que utilitzen aquest proveïdor tornaran al valor predeterminat.";
+"ai_provider_edit" = "Edita";
+"ai_provider_endpoint" = "Extrem de l'API";
+"ai_provider_endpoint_description" = "Només l'URL base. AndBible afegeix \"/chat/completions\" (format OpenAI) o \"/messages\" (format Anthropic) automàticament. Les llistes de models es recuperen de \"/models\".";
+"ai_provider_name" = "Nom del proveïdor";
+"ai_provider_saved" = "Proveïdor desat";
+"ai_provider_select_type" = "Selecciona el tipus de proveïdor";
+"ai_providers_models_category" = "Proveïdors i models";
+"ai_providers_summary_none" = "Cap proveïdor configurat";
+"ai_regenerate_fresh_run" = "Execució nova (ignora el resultat anterior)";
+"ai_regenerate_instructions_hint" = "Instruccions addicionals (opcional)";
+"ai_regenerate_keep_previous" = "Conserva la versió anterior";
+"ai_regenerate_prompt_not_found" = "No es pot regenerar: no s'ha trobat la pregunta original. Pot ser que s'hagi suprimit.";
+"ai_regenerate_title" = "Regenera";
+"ai_settings" = "Configuració de la IA";
+"ai_setup_description" = "AndBible pot utilitzar la IA per traduir text bíblic, explicar versets, crear resums i molt més. Per començar, configura una connexió a un proveïdor d'API compatible amb OpenAI.";
+"ai_setup_title" = "Configura la IA";
+"ai_usage_category" = "Ús";
+"ask_model_before_run_title" = "Demana el model abans d'executar";
+"auto_hide_agent_log_title" = "Amaga el tauler d'IA en acabar";
+"bookmarks_and_mynotes_title" = "Marcadors i les meves notes";
+"built_in_prompt" = "Integrat";
+"built_in_prompt_notice" = "Aquesta és una pregunta integrada i no es pot editar. Usa «Copia per personalitzar» per crear una còpia editable.";
+"category_none" = "Sense categoria";
+"commentary_max_response_no_limit" = "Sense límit";
+"commentary_max_response_title" = "Límit de mida de resposta dels comentaris";
+"copy_to_customize" = "Copia per personalitzar";
+"custom_agent_system_prompt_title" = "Missatge del sistema de l'agent";
+"custom_system_prompt_custom" = "Personalitzat";
+"custom_text_transform_system_prompt_title" = "Missatge del sistema de transformació de text";
+"default_prompt_ask_question" = "Fes una pregunta";
+"default_prompt_ask_question_desc" = "Fes qualsevol pregunta sobre el passatge seleccionat";
+"default_prompt_bookmark_annotate" = "Marcador i anotació";
+"default_prompt_bookmark_annotate_desc" = "Crea un marcador amb una nota d'estudi generada per IA";
+"default_prompt_compare_translations" = "Compara traduccions";
+"default_prompt_compare_translations_desc" = "Mostra com les diverses traduccions instal·lades representen el text";
+"default_prompt_cross_references" = "Referències creuades";
+"default_prompt_cross_references_desc" = "Cerca i explica passatges bíblics relacionats";
+"default_prompt_custom" = "Indicació personalitzada";
+"default_prompt_custom_desc" = "Executa una tasca personalitzada sobre el passatge seleccionat";
+"default_prompt_custom_template" = "Segueix l'especificació de tasca de l'usuari per al passatge bíblic seleccionat.";
+"default_prompt_enhance_note" = "Millora la nota";
+"default_prompt_enhance_note_desc" = "Millora la gramàtica, la claredat i la llegibilitat de la teva nota";
+"default_prompt_explain_verses" = "Explica els versets";
+"default_prompt_explain_verses_desc" = "Explica el significat i el context dels versets seleccionats";
+"default_prompt_explain_verses_studypad" = "Explica els versets → Bloc d'estudi";
+"default_prompt_explain_verses_studypad_desc" = "Crea un bloc d'estudi amb explicació verset per verset i marcadors";
+"default_prompt_study_layout" = "Obre el disseny d'estudi";
+"default_prompt_study_layout_desc" = "Obre els comentaris i les finestres de traducció paral·lela per a l'estudi";
+"default_prompt_summary" = "Resum";
+"default_prompt_summary_desc" = "Crea un resum concís del text seleccionat";
+"default_prompt_thematic_study" = "Estudi temàtic";
+"default_prompt_thematic_study_desc" = "Construeix un bloc d'estudi amb passatges i notes sobre el tema central";
+"default_prompt_translate_to_language" = "Tradueix al %@";
+"default_prompt_translate_to_ui_language_desc" = "Tradueix el text del document a l'idioma de la interfície de l'aplicació";
+"default_prompt_word_study" = "Estudi de paraules";
+"default_prompt_word_study_desc" = "Analitza les paraules originals en hebreu/grec";
+"default_prompt_workspace_assistant" = "Assistent d'espai de treball";
+"default_prompt_workspace_assistant_desc" = "Gestiona les finestres: crea, tanca, reorganitza i canvia documents";
+"delete_category" = "Suprimeix la categoria";
+"delete_category_and_prompts" = "Suprimeix la categoria i les seves preguntes";
+"delete_category_keep_prompts" = "Mou les preguntes a l'arrel i suprimeix la categoria";
+"doc_type_addons" = "Complements";
+"easy_setup_enter_api_key" = "Introdueix la teva clau d'API";
+"easy_setup_success" = "Connexió correcta!";
+"easy_setup_test_connection" = "Prova la connexió";
+"easy_setup_testing" = "Provant…";
+"easy_setup_title" = "Configuració ràpida";
+"help_bookmarks_text" = "Es poden crear marcadors seleccionant text i triant \"Marcador\" al menú emergent. Pots afegir notes personalitzades al nou marcador tocant el text ressaltat a la vista de la Bíblia. També hi ha un document especial \"Les meves notes\" als comentaris que permet veure les notes en una finestra separada.";
+"help_memorize_text" = "La vista de memorització us ajuda a aprendre passatges de memòria. Utilitzeu Difuminat de paraules, Paraules barrejades, Escriu la paraula o Ordre de paraules per practicar. Els exercicis reeixits marquen automàticament els versets com a memoritzats (això es pot desactivar).";
+"help_read_more_link" = "Llegiu-ne més al manual";
+"hide_category" = "Amaga de les accions d'IA";
+"llm_actions" = "Accions de la IA";
+"llm_continue_iterations_message" = "L'agent d'IA ha assolit el límit de %1$d iteracions sense completar. Vols continuar durant %2$d iteracions més?";
+"llm_continue_iterations_title" = "Vols continuar?";
+"llm_custom_input_price_title" = "Preu d'entrada ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Introdueix l'ID del model";
+"llm_custom_output_price_title" = "Preu de sortida ($/Mtoken)";
+"llm_error_max_iterations" = "S'ha assolit el màxim d'iteracions (%1$d) sense completar";
+"llm_error_unknown" = "Error desconegut";
+"llm_note_updated" = "Nota actualitzada";
+"llm_provider_custom" = "Personalitzat (compatible amb OpenAI)";
+"llm_reset_usage_confirm_message" = "Això esborrarà totes les dades d'ús acumulades.";
+"llm_reset_usage_confirm_title" = "Vols restablir les dades d'ús?";
+"llm_reset_usage_title" = "Restableix les dades d'ús";
+"llm_usage_summary_default" = "Sense dades d'ús";
+"llm_usage_summary_title" = "Ús de tokens";
+"manage_prompts" = "Gestiona els missatges de la IA";
+"manage_tool_permissions_title" = "Permisos d'eines";
+"model_pricing_summary" = "%1$@ entrada / %2$@ sortida per Mtoken";
+"model_select_provider" = "Proveïdor";
+"model_set_default" = "Estableix com a model predeterminat";
+"move_category_down" = "Mou avall";
+"move_category_up" = "Mou amunt";
+"new_category" = "Nova categoria";
+"new_category_name" = "Nom de la categoria";
+"new_prompt" = "Nova pregunta";
+"permission_allow_all" = "Permet-ho tot";
+"permission_allow_all_session" = "Permet totes les eines en aquesta sessió";
+"permission_allow_for_session" = "Permet per a aquesta sessió";
+"permission_allow_once" = "Permet una vegada";
+"permission_always_allow_confirm" = "Segur que vols permetre permanentment \"%1$@\"?";
+"permission_always_allow_confirm_reset_hint" = "Pots restablir-ho a la configuració de la IA.";
+"permission_always_ask" = "Pregunta sempre";
+"permission_ask_once_per_run" = "Pregunta una vegada per execució";
+"permission_deny" = "Denega";
+"permission_deny_all" = "Denega-ho tot";
+"permission_option_always_allow" = "Permetre sempre";
+"permission_option_always_deny" = "Denegar sempre";
+"permission_status_default" = "Preguntar (per defecte)";
+"prompt_auto_include_commentaries" = "Inclou automàticament els comentaris";
+"prompt_auto_include_documents" = "Inclou automàticament els documents instal·lats";
+"prompt_bible_only" = "Només documents bíblics";
+"prompt_category" = "Categoria";
+"prompt_category_favorites" = "Preferits";
+"prompt_category_study" = "Estudi";
+"prompt_category_uncategorized" = "Sense categoria";
+"prompt_context_note_editor" = "Editor de notes";
+"prompt_context_text_selection" = "Selecció de text";
+"prompt_context_verse_selection" = "Selecció de verset";
+"prompt_context_window_menu" = "Menú de finestra";
+"prompt_context_workspace_menu" = "Menú d'espai de treball";
+"prompt_description" = "Descripció";
+"prompt_edit_before_run" = "Especifica abans d'executar";
+"prompt_is_text_transformation" = "Transformació de text";
+"prompt_max_iterations_hint" = "Deixa-ho buit per al valor predeterminat global";
+"prompt_max_iterations_unlimited" = "Il·limitat";
+"prompt_model_default" = "Per defecte";
+"prompt_name" = "Nom";
+"prompt_no_document_creation" = "Sense creació de documents";
+"prompt_permission_mode" = "Mode de permisos";
+"prompt_permission_mode_description" = "Controla quan cal la confirmació de l'usuari abans que la IA realitzi operacions d'escriptura. La configuració per eina que hi ha a continuació pot substituir-la per a eines individuals.";
+"prompt_permission_use_default" = "Usa el valor predeterminat";
+"prompt_show_in" = "Mostra a";
+"prompt_strict_context_matching" = "Memòria cau dependent del context";
+"prompt_tab_advanced" = "Avançat";
+"prompt_tab_permissions" = "Permisos";
+"prompt_tab_prompt" = "Pregunta";
+"prompt_template" = "Plantilla de pregunta";
+"prompt_tool_permissions" = "Permisos d'eines";
+"raw_log_delete_all" = "Suprimeix-ho tot";
+"raw_log_history_empty" = "Cap registre desat";
+"raw_log_history_title" = "Historial de registres de la IA";
+"raw_log_item_tokens" = "%1$@ entrada / %2$@ sortida";
+"raw_log_older_1_month" = "Més antics d'1 mes";
+"raw_log_older_1_week" = "Més antics d'1 setmana";
+"raw_log_older_3_months" = "Més antics de 3 mesos";
+"raw_log_retention_summary_disabled" = "Desactivat (conserva tots)";
+"raw_log_retention_title" = "Supressió automàtica de registres antics";
+"reset_all_ai_settings" = "Restableix tota la configuració d'IA";
+"reset_all_ai_settings_confirm_message" = "S'esborrarà la clau d'API, el proveïdor, el punt final, el model i es restabliran totes les preguntes als valors predeterminats. Continues?";
+"reset_all_ai_settings_confirm_title" = "Vols restablir tota la configuració d'IA?";
+"reset_all_permissions" = "Restableix tots";
+"reset_to_default" = "Restableix els valors predeterminats";
+"save_and_exit" = "Desa";
+"select_llm_prompt" = "Selecciona l'acció de la IA";
+"select_model_before_run_title" = "Selecciona el model";
+"set_default_model_for_prompt" = "Estableix com a model predeterminat per a aquest missatge";
+"show_category" = "Mostra a les accions d'IA";
+"specify_before_run_title" = "Especifica la tasca";
+"tool_add_bookmark_note" = "Afegeix una nota al marcador";
+"tool_add_label_to_bookmark" = "Afegeix una etiqueta al marcador";
+"tool_add_my_document_page" = "Afegeix una pàgina al meu document";
+"tool_add_study_pad_entry" = "Afegeix una entrada al bloc d'estudi";
+"tool_category_bible_search" = "Bíblia i cerca";
+"tool_category_bookmarks" = "Marcadors";
+"tool_category_general_books" = "Llibres generals";
+"tool_category_labels" = "Etiquetes";
+"tool_category_my_documents" = "Els meus documents";
+"tool_category_study_pads" = "Blocs d'estudi";
+"tool_category_windows" = "Finestres";
+"tool_create_bookmark" = "Crea un marcador";
+"tool_create_label" = "Crea una etiqueta";
+"tool_create_my_document" = "Crea el meu document";
+"tool_create_study_pad" = "Crea un bloc d'estudi";
+"tool_create_window" = "Crea una finestra";
+"tool_delete_bookmark" = "Suprimeix el marcador";
+"tool_delete_label" = "Suprimeix l'etiqueta";
+"tool_delete_my_document_page" = "Suprimeix la pàgina del meu document";
+"tool_edit_my_document_page" = "Edita la pàgina del meu document";
+"tool_finish_with_my_document_page" = "Obre la pàgina del meu document";
+"tool_finish_with_study_pad" = "Obre el bloc d'estudi";
+"tool_finish_without_document" = "Finalitza sense document";
+"tool_get_all_labels" = "Llista totes les etiquetes";
+"tool_get_bookmarks_for_verse" = "Obté els marcadors del verset";
+"tool_get_bookmarks_with_label" = "Obté els marcadors amb etiqueta";
+"tool_get_commentaries" = "Llegeix els comentaris";
+"tool_get_dictionary_entry" = "Cerca l'entrada del diccionari";
+"tool_get_genbook_content" = "Llegeix el contingut del llibre general";
+"tool_get_genbook_keys" = "Llista les claus del llibre general";
+"tool_get_installed_documents" = "Llista els documents instal·lats";
+"tool_get_my_document_pages" = "Llista les pàgines del meu document";
+"tool_get_my_documents" = "Llista els meus documents";
+"tool_get_study_pad_content" = "Llegeix el contingut del bloc d'estudi";
+"tool_get_verse_content" = "Llegeix el contingut del verset";
+"tool_get_windows" = "Llista les finestres";
+"tool_manage_window" = "Gestiona la finestra";
+"tool_remove_label_from_bookmark" = "Elimina l'etiqueta del marcador";
+"tool_search_bible" = "Cerca a la Bíblia";
+"tool_search_by_strongs" = "Cerca pel número de Strong";
+"tool_search_study_pads" = "Cerca als blocs d'estudi";
+"tool_set_document_title" = "Estableix el títol del document";
+"tool_set_window_document" = "Estableix el document de la finestra";
+"tool_update_bookmark_note" = "Actualitza la nota del marcador";
+"tool_update_studypad_text_entry" = "Actualitza l'entrada de text del bloc d'estudi";
+"verse_tip" = "Per seleccionar versets parcials o múltiples, pots fer una pulsació llarga al text de la Bíblia";
+"watch_tutorial_video" = "Mira el vídeo tutorial (en anglès)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Regenerant el document d'IA…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Accepto i assumeixo tota la responsabilitat";
+"ai_disclaimer_accept_title" = "Accepta l'avís legal de la IA";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Configuració de connexió i missatges de la IA";
+"prefs_features_cat" = "Funcions";

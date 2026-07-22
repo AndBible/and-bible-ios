@@ -6,16 +6,18 @@ import BibleCore
 /**
  Renders the draggable divider between two visible Bible panes.
 
- The separator mutates `layoutWeight` on the two adjacent `Window` models using the same
- proportional drag logic as Android's `Separator.kt`: the drag distance is normalized by the
- average pane size, then applied as a weight delta with a hard minimum clamp.
+ The separator routes effective-weight changes through `WindowManager` using the same proportional
+ drag logic as Android's `Separator.kt`: the drag distance is normalized by the average pane size,
+ applied as a clamped weight delta, and persisted when the gesture ends.
  */
 struct WindowSeparator: View {
+    @Environment(WindowManager.self) private var windowManager
+
     /// Leading or upper window whose layout weight grows when dragged toward it.
-    let window1: Window
+    let window1: BibleCore.Window
 
     /// Trailing or lower window whose layout weight shrinks when dragged toward `window1`.
-    let window2: Window
+    let window2: BibleCore.Window
 
     /// `true` for a horizontal separator between vertically stacked panes.
     let isVertical: Bool
@@ -26,24 +28,23 @@ struct WindowSeparator: View {
     /// Total available width or height of the parent container, depending on orientation.
     let parentSize: CGFloat
 
-    /// Tracks whether the current drag gesture is actively resizing panes.
-    @State private var isDragging = false
-
-    /// Snapshot of `window1.layoutWeight` captured at the start of a drag.
-    @State private var startWeight1: Float = 1.0
-
-    /// Snapshot of `window2.layoutWeight` captured at the start of a drag.
-    @State private var startWeight2: Float = 1.0
+    /// Stateful production resize seam shared by gesture updates and completion.
+    @State private var dragSession = WindowSeparatorDragSession()
 
     /// Visual thickness of the separator bar itself.
-    private let separatorThickness: CGFloat = 4
+    private let separatorThickness = BibleReaderSplitLayout.separatorThickness
 
-    /// Minimum allowed layout weight for either pane during resizing.
-    private let minWeight: Float = 0.1
+    /**
+     Renders the draggable separator and persists the final adjacent-pane weights.
 
+     - Returns: Separator rectangle with an expanded drag target.
+     - Side Effects: Updates effective pane weights during dragging and saves them on gesture end.
+     - Failure Modes: Zero-sized parent geometry suppresses weight updates; invalid weights are
+       clamped by `WindowManager`.
+     */
     var body: some View {
         Rectangle()
-            .fill(isDragging ? Color.accentColor : Color.gray.opacity(0.5))
+            .fill(dragSession.isDragging ? Color.accentColor : Color.gray.opacity(0.5))
             .frame(
                 width: isVertical ? nil : separatorThickness,
                 height: isVertical ? separatorThickness : nil
@@ -52,23 +53,22 @@ struct WindowSeparator: View {
             .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { value in
-                        if !isDragging {
-                            isDragging = true
-                            startWeight1 = window1.layoutWeight
-                            startWeight2 = window2.layoutWeight
-                        }
-
-                        let aveScreenSize = parentSize / CGFloat(totalPaneCount)
-                        guard aveScreenSize > 0 else { return }
-
                         let translation = isVertical ? value.translation.height : value.translation.width
-                        let variationPercent = Float(translation / aveScreenSize)
-
-                        window1.layoutWeight = max(minWeight, startWeight1 + variationPercent)
-                        window2.layoutWeight = max(minWeight, startWeight2 - variationPercent)
+                        dragSession.update(
+                            translation: translation,
+                            parentSize: parentSize,
+                            totalPaneCount: totalPaneCount,
+                            firstWindow: window1,
+                            secondWindow: window2,
+                            target: windowManager
+                        )
                     }
                     .onEnded { _ in
-                        isDragging = false
+                        dragSession.finish(
+                            firstWindow: window1,
+                            secondWindow: window2,
+                            target: windowManager
+                        )
                     }
             )
             .onHover { hovering in

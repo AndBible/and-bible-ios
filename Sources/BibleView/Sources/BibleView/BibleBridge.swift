@@ -121,6 +121,81 @@ private struct BibleBridgeMessageArguments {
     }
 }
 
+/** Exact source selection supplied by Android's two AI action bridge methods. */
+public struct AISelectionActionRequest: Equatable, Sendable {
+    /// Exact rendered document initials.
+    public let bookInitials: String
+    /// Exact generic-book key, or `nil` for a Bible selection.
+    public let osisRef: String?
+    /// Inclusive rendered start ordinal.
+    public let startOrdinal: Int
+    /// Inclusive rendered end ordinal after Android's negative sentinel is normalized.
+    public let endOrdinal: Int
+    /// Exact selected text, including an intentionally empty selection.
+    public let text: String
+
+    /** Creates a validated immutable selection payload without reading reader state. */
+    public init(
+        bookInitials: String,
+        osisRef: String? = nil,
+        startOrdinal: Int,
+        endOrdinal: Int,
+        text: String
+    ) {
+        self.bookInitials = bookInitials
+        self.osisRef = osisRef
+        self.startOrdinal = startOrdinal
+        self.endOrdinal = endOrdinal
+        self.text = text
+    }
+}
+
+/** Exact note-editor destination supplied by Vue's serialized AI action payload. */
+public struct AINoteEditorActionRequest: Codable, Equatable, Sendable {
+    /// Android `NoteEditorEntityType` raw value.
+    public let entityType: String
+    /// Canonical bookmark, StudyPad entry, or My Documents page identity.
+    public let entityId: String
+    /// Editor content captured before the chooser opens.
+    public let currentText: String
+    /// Android content-type raw value associated with the editor.
+    public let contentType: String
+
+    /** Creates one immutable note-editor payload. */
+    public init(entityType: String, entityId: String, currentText: String, contentType: String) {
+        self.entityType = entityType
+        self.entityId = entityId
+        self.currentText = currentText
+        self.contentType = contentType
+    }
+}
+
+/** One exact AI document marker offered by Android's page chooser bridge method. */
+public struct AIDocumentPageMarker: Codable, Equatable, Identifiable, Sendable {
+    /// User-visible generated page title.
+    public let title: String
+    /// Exact My Documents initials.
+    public let documentInitials: String
+    /// Exact page key inside the document.
+    public let pageKey: String
+
+    /// Stable chooser identity that preserves duplicate titles.
+    public var id: String { "\(documentInitials)\u{0}\(pageKey)" }
+
+    /** Creates one immutable marker reference. */
+    public init(title: String, documentInitials: String, pageKey: String) {
+        self.title = title
+        self.documentInitials = documentInitials
+        self.pageKey = pageKey
+    }
+}
+
+/** Closed set of native help scopes exposed to web content. */
+public enum BibleBridgeHelpScope: String, Equatable, Sendable {
+    /// Memorization help backed by Android's localized content and fixed documentation path.
+    case memorize
+}
+
 /// Protocol for handling bridge events from the Vue.js WebView.
 public protocol BibleBridgeDelegate: AnyObject {
     // MARK: - Navigation & Scroll
@@ -159,6 +234,20 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, addBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool)
     /// Creates or edits a bookmark for non-Bible content such as dictionaries or general books.
     func bridge(_ bridge: BibleBridge, addGenericBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool)
+    /**
+     Creates a selection-free generic bookmark covering one exact rendered source page.
+
+     The delegate must preserve both request fields, persist nil ordinals/offsets, and set
+     `wholeVerse=true`. Implementations may reject an unavailable source, but must not substitute the
+     active document or silently create a verse bookmark.
+
+     - Parameters:
+       - bridge: Bridge receiving the Vue command.
+       - request: Validated exact source and key payload.
+     - Important: This requirement has no default implementation; hosts must explicitly persist or
+       surface their failure behavior.
+     */
+    func bridge(_ bridge: BibleBridge, createGenericWholePageBookmark request: GenericWholePageBookmarkRequest)
     /// Creates a Bible paragraph-break bookmark using the shared Android-style bridge surface.
     func bridge(_ bridge: BibleBridge, addParagraphBreakBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int)
     /// Creates a non-Bible paragraph-break bookmark using the shared Android-style bridge surface.
@@ -193,6 +282,8 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, compareVerses bookInitials: String, startOrdinal: Int, endOrdinal: Int)
     /// Starts text-to-speech playback for the selected verse range and versification.
     func bridge(_ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int)
+    /// Starts Android's generic provider from an exact module, key, and optional ordinal bound.
+    func bridge(_ bridge: BibleBridge, speakGeneric bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int)
     /// Starts repeated text-to-speech playback for the selected memorization range and versification.
     func bridge(_ bridge: BibleBridge, speakMemorizationLoop bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int)
     /// Opens the memorization workflow for the selected verse range.
@@ -237,6 +328,17 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, openStudyPad labelId: String, bookmarkId: String)
     /// Opens the "My Notes" view for the current versification and verse ordinal.
     func bridge(_ bridge: BibleBridge, openMyNotes v11n: String, ordinal: Int)
+    /**
+     Opens the exact AI-generated document page referenced by a rendered marker.
+
+     - Parameters:
+       - bridge: Bridge receiving the Vue navigation command.
+       - request: Exact AI document initials and page key; neither field may fall back to current
+         reader state.
+     - Important: This requirement has no default implementation. The host owns source lookup,
+       missing-key handling, and navigation presentation on the main thread.
+     */
+    func bridge(_ bridge: BibleBridge, openAIDocumentPage request: AIDocumentPageRequest)
     /// Handles an app-internal or external hyperlink tapped in the web content.
     func bridge(_ bridge: BibleBridge, openExternalLink link: String)
     /// Opens the downloads/module management UI.
@@ -249,6 +351,20 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, parseRef callId: Int, text: String)
     /// Shows help content generated by the web client in a native dialog.
     func bridge(_ bridge: BibleBridge, helpDialog content: String, title: String?)
+    /// Shows localized bookmark help assembled by the native host.
+    func bridgeDidRequestBookmarkHelp(_ bridge: BibleBridge)
+    /// Shows one allowlisted native help scope.
+    func bridge(_ bridge: BibleBridge, showHelp scope: BibleBridgeHelpScope)
+
+    // MARK: - AI Actions
+    /// Opens the prompt chooser for an exact Bible or generic document selection.
+    func bridge(_ bridge: BibleBridge, requestAIAction request: AISelectionActionRequest)
+    /// Opens the prompt chooser for an exact note-editor destination.
+    func bridge(_ bridge: BibleBridge, requestNoteEditorAIAction request: AINoteEditorActionRequest)
+    /// Opens one marker directly or presents a native chooser for multiple markers.
+    func bridge(_ bridge: BibleBridge, chooseAIDocumentPage markers: [AIDocumentPageMarker])
+    /// Opens the exact source prompt in the native prompt editor.
+    func bridge(_ bridge: BibleBridge, openPromptEditor promptID: UUID)
 
     // MARK: - Selection
     /// Reports the plain-text value of the current DOM selection.
@@ -308,6 +424,9 @@ public protocol BibleBridgeDelegate: AnyObject {
 }
 
 public extension BibleBridgeDelegate {
+    /// Default no-op for clients that do not host generic document speech.
+    func bridge(_ bridge: BibleBridge, speakGeneric bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int) {}
+
     /// Default no-op to preserve source compatibility for clients that do not handle TTS loops.
     func bridge(_ bridge: BibleBridge, speakMemorizationLoop bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int) {}
 
@@ -461,6 +580,123 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         dispatchMessage(method: method, args: args)
     }
 
+    /**
+     Parses the whole-page bookmark bridge payload without normalizing source content.
+
+     - Parameter args: Exactly two JavaScript string values: source initials and source key.
+     - Returns: An immutable exact request, or `nil` after logging when count or types are malformed.
+     - Note: Parsing is deterministic and performs no delegate callback, source lookup, or mutation.
+     */
+    func genericWholePageBookmarkRequest(args: [Any]) -> GenericWholePageBookmarkRequest? {
+        let arguments = BibleBridgeMessageArguments(method: "createWholePageBookmark", values: args)
+        guard args.count == 2 else {
+            arguments.logMalformed("expected exactly 2 args")
+            return nil
+        }
+        guard let sourceInitials = arguments.string(0),
+              let sourceKey = arguments.string(1) else { return nil }
+        return GenericWholePageBookmarkRequest(
+            sourceInitials: sourceInitials,
+            sourceKey: sourceKey
+        )
+    }
+
+    /**
+     Parses an AI document marker navigation payload as an exact document/key pair.
+
+     - Parameter args: Exactly two JavaScript string values: document initials and page key.
+     - Returns: An immutable navigation request, or `nil` after logging malformed count or types.
+     - Note: Parsing has no navigation side effect and never substitutes current reader identity.
+     */
+    func aiDocumentPageRequest(args: [Any]) -> AIDocumentPageRequest? {
+        let arguments = BibleBridgeMessageArguments(method: "openAiDocPage", values: args)
+        guard args.count == 2 else {
+            arguments.logMalformed("expected exactly 2 args")
+            return nil
+        }
+        guard let documentInitials = arguments.string(0),
+              let pageKey = arguments.string(1) else { return nil }
+        return AIDocumentPageRequest(documentInitials: documentInitials, pageKey: pageKey)
+    }
+
+    /** Parses either Android AI selection method without consulting active reader state. */
+    func aiSelectionActionRequest(method: String, args: [Any]) -> AISelectionActionRequest? {
+        let arguments = BibleBridgeMessageArguments(method: method, values: args)
+        switch method {
+        case "llmAction":
+            guard args.count == 4,
+                  let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let end = arguments.int(2),
+                  let selectedText = arguments.string(3) else { return nil }
+            return AISelectionActionRequest(
+                bookInitials: initials,
+                startOrdinal: start,
+                endOrdinal: end < 0 ? start : end,
+                text: selectedText
+            )
+        case "llmActionGeneric":
+            guard args.count == 5,
+                  let initials = arguments.string(0),
+                  let osisRef = arguments.string(1),
+                  let start = arguments.int(2),
+                  let end = arguments.int(3),
+                  let selectedText = arguments.string(4) else { return nil }
+            return AISelectionActionRequest(
+                bookInitials: initials,
+                osisRef: osisRef,
+                startOrdinal: start,
+                endOrdinal: end < 0 ? start : end,
+                text: selectedText
+            )
+        default:
+            return nil
+        }
+    }
+
+    /** Decodes Vue's one-string note-editor JSON payload and rejects unknown destination types. */
+    func aiNoteEditorActionRequest(args: [Any]) -> AINoteEditorActionRequest? {
+        let arguments = BibleBridgeMessageArguments(method: "noteEditorLlmAction", values: args)
+        guard args.count == 1,
+              let json = arguments.string(0),
+              let data = json.data(using: .utf8),
+              let request = try? JSONDecoder().decode(AINoteEditorActionRequest.self, from: data),
+              ["BOOKMARK_NOTE", "STUDYPAD_TEXT", "MY_DOCUMENT_PAGE"].contains(request.entityType),
+              !request.entityId.isEmpty else {
+            return nil
+        }
+        return request
+    }
+
+    /** Decodes the exact marker array passed to Android's native AI document chooser. */
+    func aiDocumentPageMarkers(args: [Any]) -> [AIDocumentPageMarker]? {
+        let arguments = BibleBridgeMessageArguments(method: "openAiDocPageChooser", values: args)
+        guard args.count == 1,
+              let json = arguments.string(0),
+              let data = json.data(using: .utf8),
+              let markers = try? JSONDecoder().decode([AIDocumentPageMarker].self, from: data),
+              markers.allSatisfy({ !$0.documentInitials.isEmpty && !$0.pageKey.isEmpty }) else {
+            return nil
+        }
+        return markers
+    }
+
+    /** Resolves only allowlisted scoped-help payloads; unknown values fail closed. */
+    func scopedHelpRequest(args: [Any]) -> BibleBridgeHelpScope? {
+        let arguments = BibleBridgeMessageArguments(method: "showHelpDialog", values: args)
+        guard args.count == 1,
+              let rawValue = arguments.string(0) else { return nil }
+        return BibleBridgeHelpScope(rawValue: rawValue)
+    }
+
+    /** Parses one canonical UUID for source-prompt navigation. */
+    func promptEditorRequest(args: [Any]) -> UUID? {
+        let arguments = BibleBridgeMessageArguments(method: "openPromptEditor", values: args)
+        guard args.count == 1,
+              let value = arguments.string(0) else { return nil }
+        return UUID(uuidString: value)
+    }
+
     @discardableResult
     func dispatchMessage(method: String, args: [Any]) -> BibleBridgeMessageDispatchResult {
         let arguments = BibleBridgeMessageArguments(method: method, values: args)
@@ -569,6 +805,10 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                   let addNote = arguments.bool(4) else { return .malformed }
             delegate?.bridge(self, addGenericBookmark: initials, osisRef: osisRef, startOrdinal: start, endOrdinal: end < 0 ? start : end, addNote: addNote)
             return .handled
+        case "createWholePageBookmark":
+            guard let request = genericWholePageBookmarkRequest(args: args) else { return .malformed }
+            delegate?.bridge(self, createGenericWholePageBookmark: request)
+            return .handled
         case "removeBookmark":
             guard let id = arguments.string(0) else { return .malformed }
             delegate?.bridge(self, removeBookmark: id)
@@ -636,6 +876,16 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                   let end = arguments.int(2) else { return .malformed }
             delegate?.bridge(self, copyVerse: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
             return .handled
+        case "llmAction", "llmActionGeneric":
+            guard let request = aiSelectionActionRequest(method: method, args: args) else {
+                return .malformed
+            }
+            delegate?.bridge(self, requestAIAction: request)
+            return .handled
+        case "noteEditorLlmAction":
+            guard let request = aiNoteEditorActionRequest(args: args) else { return .malformed }
+            delegate?.bridge(self, requestNoteEditorAIAction: request)
+            return .handled
         case "copyMyDocumentContent":
             guard let initials = arguments.string(0),
                   let pageKey = arguments.string(1) else { return .malformed }
@@ -675,12 +925,25 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                   let end = arguments.int(2) else { return .malformed }
             delegate?.bridge(self, compareVerses: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
             return .handled
-        case "speak", "speakGeneric":
+        case "speak":
             guard let initials = arguments.string(0),
                   let v11n = arguments.string(1),
                   let start = arguments.int(2),
                   let end = arguments.int(3) else { return .malformed }
             delegate?.bridge(self, speak: initials, v11n: v11n, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
+        case "speakGeneric":
+            guard let initials = arguments.string(0),
+                  let osisRef = arguments.string(1),
+                  let start = arguments.int(2),
+                  let end = arguments.int(3) else { return .malformed }
+            delegate?.bridge(
+                self,
+                speakGeneric: initials,
+                osisRef: osisRef,
+                startOrdinal: start,
+                endOrdinal: end
+            )
             return .handled
         case "speakMemorizationLoop":
             guard let initials = arguments.string(0),
@@ -789,6 +1052,20 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                   let ordinal = arguments.int(1) else { return .malformed }
             delegate?.bridge(self, openMyNotes: v11n, ordinal: ordinal)
             return .handled
+        case "openAiDocPage":
+            guard let request = aiDocumentPageRequest(args: args) else { return .malformed }
+            delegate?.bridge(self, openAIDocumentPage: request)
+            return .handled
+        case "openAiDocPageChooser":
+            guard let markers = aiDocumentPageMarkers(args: args) else { return .malformed }
+            if !markers.isEmpty {
+                delegate?.bridge(self, chooseAIDocumentPage: markers)
+            }
+            return .handled
+        case "openPromptEditor":
+            guard let promptID = promptEditorRequest(args: args) else { return .malformed }
+            delegate?.bridge(self, openPromptEditor: promptID)
+            return .handled
         case "deleteStudyPadEntry":
             guard let id = arguments.string(0) else { return .malformed }
             delegate?.bridge(self, deleteStudyPadEntry: id)
@@ -859,7 +1136,12 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             delegate?.bridge(self, helpDialog: content, title: title)
             return .handled
         case "helpBookmarks":
-            delegate?.bridge(self, helpDialog: "Bookmarks Help", title: "Bookmarks")
+            guard args.isEmpty else { return .malformed }
+            delegate?.bridgeDidRequestBookmarkHelp(self)
+            return .handled
+        case "showHelpDialog":
+            guard let scope = scopedHelpRequest(args: args) else { return .malformed }
+            delegate?.bridge(self, showHelp: scope)
             return .handled
         case "shareHtml":
             guard let html = arguments.string(0) else { return .malformed }

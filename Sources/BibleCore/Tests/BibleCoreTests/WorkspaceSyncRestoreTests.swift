@@ -10,25 +10,60 @@ private let workspaceSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_
 /**
  Regression coverage for Android workspace restore and patch replay.
 
- The suite exercises three boundaries:
+ The suite exercises four boundaries:
  - snapshot parsing from Android-shaped SQLite databases
  - destructive replacement of the local SwiftData workspace graph
  - preservation of Android-only fidelity payloads that do not map directly onto iOS models
  - incremental patch replay against the preserved Android `LogEntry` baseline
 
  Test dependencies:
- - in-memory SwiftData containers are created per test
+ - isolated in-memory SwiftData containers are created for ordinary behavior tests
+ - file-backed graph/settings stores are used for durable rollback assertions
  - temporary SQLite fixture databases are created under `FileManager.default.temporaryDirectory`
 
  Side effects:
- - tests create and delete temporary SQLite files
- - restore tests mutate in-memory SwiftData graphs and local-only `SettingsStore` rows
+ - tests create and delete temporary SQLite/SwiftData files
+ - restore tests mutate isolated SwiftData graphs and local-only `SettingsStore` rows
 
  Failure modes:
  - helper fixture builders fail the test immediately when they cannot create valid Android-shaped
    SQLite databases
  */
 final class WorkspaceSyncRestoreTests: XCTestCase {
+    /**
+     Persistent-store side that should reject the workspace restore's sole final save.
+
+     Running the rollback contract against both cases pins cross-store atomicity independently of
+     SwiftData's internal persistent-store commit order.
+     */
+    private enum RejectedWorkspaceRestoreStore: CaseIterable {
+        /// Cloud-shaped store containing the workspace relationship graph.
+        case graph
+
+        /// Local store containing fidelity aliases and active-workspace settings.
+        case settings
+
+        /// Human-readable store name included in XCTest activity diagnostics.
+        var displayName: String {
+            switch self {
+            case .graph:
+                return "workspace graph store"
+            case .settings:
+                return "local settings store"
+            }
+        }
+
+        /// Stable fixture-directory component used to isolate each commit-order direction.
+        var fixtureDirectoryName: String {
+            switch self {
+            case .graph:
+                return "graph-rejected"
+            case .settings:
+                return "settings-rejected"
+            }
+        }
+    }
+
     /**
      Verifies that preserved Android `LogEntry` rows can be queried and cleared per category.
      */
@@ -404,6 +439,20 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertFalse(canonicalComponents.contains(Substring(orphanPrimaryLabelID.uuidString.lowercased())))
     }
 
+    /**
+     Verifies a successful Android workspace restore publishes the complete graph and fidelity state
+     through exactly one durable model-context save.
+
+     The fixture includes two windows, page managers, history aliases, raw Android fidelity fields,
+     and active-workspace metadata. A `ModelContext.didSave` expectation rejects the former sequence
+     of graph deletion, graph insertion, and per-setting commits, while post-save values prove the one
+     accepted save contains every required relationship and metadata value.
+
+     - Side effects: Mutates an isolated in-memory SwiftData container and installs a scoped save
+       notification observer that is removed when the test returns.
+     - Failure meaning: A failure indicates workspace restore can expose an incomplete graph or
+       metadata generation instead of Android's category-wide replacement behavior.
+     */
     func testRemoteSyncWorkspaceRestoreReplacesLocalWorkspacesAndPreservesAndroidFidelity() throws {
         let container = try makeWorkspaceRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -557,11 +606,24 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: databaseURL) }
 
         let snapshot = try service.readSnapshot(from: databaseURL)
+        let saveExpectation = expectation(description: "Workspace restore performs one durable save")
+        saveExpectation.expectedFulfillmentCount = 1
+        saveExpectation.assertForOverFulfill = true
+        let saveObserver = NotificationCenter.default.addObserver(
+            forName: ModelContext.didSave,
+            object: modelContext,
+            queue: nil
+        ) { _ in
+            saveExpectation.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(saveObserver) }
+
         let report = try service.replaceLocalWorkspaces(
             from: snapshot,
             modelContext: modelContext,
             settingsStore: settingsStore
         )
+        wait(for: [saveExpectation], timeout: 1)
 
         XCTAssertEqual(
             report,
@@ -648,6 +710,330 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(historyAliases.map(\.remoteHistoryItemID), [101, 102])
         XCTAssertEqual(Set(historyAliases.map(\.localHistoryItemID)), Set(historyItems.map(\.id)))
         XCTAssertEqual(settingsStore.activeWorkspaceId, restoredWorkspaceID)
+    }
+
+    /**
+     Verifies a failed final workspace publish preserves the complete previously durable generation.
+
+     The test seeds a file-backed workspace/window/page-manager/history graph plus fidelity and active
+     workspace settings, then independently rejects writes in the graph store and the local settings
+     store. Each restore can read and stage its replacement, but its sole final save must fail.
+     Reopening both stores after each direction must reveal only the old graph and old metadata,
+     matching Android's graph-level database replacement guarantee.
+
+     - Side effects: Creates two temporary SwiftData SQLite stores, reopens each target configuration
+       read-only in turn, observes each attempted final save, and deletes the fixture afterward.
+     - Determinism: SwiftData's `allowsSave: false` configuration rejects the selected persistent
+       store without locks or schema mutation, while `willSave` proves final persistence was attempted.
+     - Failure meaning: A failure indicates restore can durably publish a partial replacement or lose
+       the user's prior workspace generation when persistence fails.
+     */
+    func testRemoteSyncWorkspaceRestorePreservesOldGenerationWhenFinalSaveFails() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WorkspaceAtomicRestore-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let seedDirectory = temporaryDirectory.appendingPathComponent("seed", isDirectory: true)
+        try FileManager.default.createDirectory(at: seedDirectory, withIntermediateDirectories: true)
+
+        let oldWorkspaceID = UUID(uuidString: "c3100000-0000-0000-0000-000000000001")!
+        let oldWindowID = UUID(uuidString: "c3100000-0000-0000-0000-000000000002")!
+        let oldHistoryID = UUID(uuidString: "c3100000-0000-0000-0000-000000000003")!
+        try autoreleasepool {
+            let persistentStore = try makePersistentWorkspaceRestoreModelContainer(in: seedDirectory)
+            let modelContext = ModelContext(persistentStore.container)
+            modelContext.autosaveEnabled = false
+            let settingsStore = SettingsStore(modelContext: modelContext)
+            let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+
+            let oldWorkspace = Workspace(id: oldWorkspaceID, name: "Durable Workspace", orderNumber: 0)
+            oldWorkspace.contentsText = "Keep this graph"
+            oldWorkspace.workspaceSettings = WorkspaceSettings(enableTiltToScroll: true)
+            let oldWindow = Window(
+                id: oldWindowID,
+                isSynchronized: true,
+                isPinMode: true,
+                isLinksWindow: false,
+                orderNumber: 0,
+                syncGroup: 7,
+                layoutWeight: 1,
+                layoutState: "split"
+            )
+            oldWindow.workspace = oldWorkspace
+            let oldPageManager = PageManager(id: oldWindowID, currentCategoryName: "commentary")
+            oldPageManager.window = oldWindow
+            oldPageManager.commentaryDocument = "MHC"
+            oldPageManager.commentaryAnchorOrdinal = 123
+            let oldHistory = HistoryItem(
+                id: oldHistoryID,
+                createdAt: Date(timeIntervalSince1970: 1_735_689_600),
+                document: "KJV",
+                key: "Gen.1.1"
+            )
+            oldHistory.window = oldWindow
+            oldHistory.anchorOrdinal = 4
+            modelContext.insert(oldWorkspace)
+            modelContext.insert(oldWindow)
+            modelContext.insert(oldPageManager)
+            modelContext.insert(oldHistory)
+            try modelContext.save()
+
+            settingsStore.activeWorkspaceId = oldWorkspaceID
+            fidelityStore.setSpeakSettingsJSON(#"{"sleepTimer":15}"#, for: oldWorkspaceID)
+            fidelityStore.setPageManagerEntry(
+                .init(
+                    windowID: oldWindowID,
+                    rawCurrentCategoryName: "COMMENTARY",
+                    commentarySourceBookAndKey: "GEN.1.1",
+                    dictionaryAnchorOrdinal: 11,
+                    generalBookAnchorOrdinal: 12,
+                    mapAnchorOrdinal: 13
+                )
+            )
+            fidelityStore.setHistoryItemAlias(remoteHistoryItemID: 41, localHistoryItemID: oldHistoryID)
+            XCTAssertFalse(modelContext.hasChanges)
+        }
+
+        let replacementWorkspaceID = UUID(uuidString: "c3100000-0000-0000-0000-000000000010")!
+        let replacementWindowID = UUID(uuidString: "c3100000-0000-0000-0000-000000000011")!
+        let replacementPageManager = RemoteSyncAndroidWorkspacePageManager(
+            windowID: replacementWindowID,
+            bibleDocument: "ESV",
+            bibleVersification: "KJVA",
+            bibleBook: 0,
+            bibleChapterNo: 2,
+            bibleVerseNo: 3,
+            commentaryDocument: nil,
+            commentaryAnchorOrdinal: nil,
+            commentarySourceBookAndKey: nil,
+            dictionaryDocument: nil,
+            dictionaryKey: nil,
+            dictionaryAnchorOrdinal: nil,
+            generalBookDocument: nil,
+            generalBookKey: nil,
+            generalBookAnchorOrdinal: nil,
+            mapDocument: nil,
+            mapKey: nil,
+            mapAnchorOrdinal: nil,
+            currentCategoryName: "BIBLE",
+            textDisplaySettings: nil,
+            jsState: #"{"scroll":75}"#
+        )
+        let replacementHistory = RemoteSyncAndroidWorkspaceHistoryItem(
+            remoteID: 99,
+            windowID: replacementWindowID,
+            createdAt: Date(timeIntervalSince1970: 1_735_689_700),
+            document: "ESV",
+            key: "Exod.2.3",
+            anchorOrdinal: 205
+        )
+        let replacementSnapshot = RemoteSyncAndroidWorkspaceSnapshot(
+            workspaces: [
+                RemoteSyncAndroidWorkspace(
+                    id: replacementWorkspaceID,
+                    name: "Replacement Workspace",
+                    contentsText: "Must not publish partially",
+                    orderNumber: 0,
+                    textDisplaySettings: nil,
+                    workspaceSettings: WorkspaceSettings(autoPin: true),
+                    speakSettingsJSON: #"{"sleepTimer":30}"#,
+                    unPinnedWeight: 0.5,
+                    maximizedWindowID: replacementWindowID,
+                    primaryTargetLinksWindowID: nil,
+                    workspaceColor: Workspace.defaultWorkspaceColor,
+                    windows: [
+                        RemoteSyncAndroidWorkspaceWindow(
+                            id: replacementWindowID,
+                            workspaceID: replacementWorkspaceID,
+                            isSynchronized: false,
+                            isPinMode: false,
+                            isLinksWindow: false,
+                            orderNumber: 0,
+                            targetLinksWindowID: nil,
+                            syncGroup: 2,
+                            layoutState: "maximized",
+                            layoutWeight: 0.5,
+                            pageManager: replacementPageManager,
+                            historyItems: [replacementHistory]
+                        )
+                    ]
+                )
+            ]
+        )
+
+        for rejectedStore in RejectedWorkspaceRestoreStore.allCases {
+            try XCTContext.runActivity(named: "Reject \(rejectedStore.displayName) writes") { _ in
+                let caseDirectory = temporaryDirectory.appendingPathComponent(
+                    rejectedStore.fixtureDirectoryName,
+                    isDirectory: true
+                )
+                try FileManager.default.copyItem(at: seedDirectory, to: caseDirectory)
+                try assertWorkspaceRestoreRollback(
+                    whenRejecting: rejectedStore,
+                    temporaryDirectory: caseDirectory,
+                    replacementSnapshot: replacementSnapshot,
+                    oldWorkspaceID: oldWorkspaceID,
+                    oldWindowID: oldWindowID,
+                    oldHistoryID: oldHistoryID,
+                    replacementWorkspaceID: replacementWorkspaceID,
+                    replacementWindowID: replacementWindowID
+                )
+            }
+        }
+    }
+
+    /**
+     Verifies patch replay publishes graph, conflict metadata, status, and fingerprints atomically.
+
+     The test seeds a complete old workspace graph and old replay bookkeeping, then reopens each
+     physical store read-only while applying a newer Android workspace patch. Reopening both stores
+     writable after each rejected save must reveal the old graph and old metadata only.
+
+     - Side effects: Creates two temporary SwiftData stores and one staged gzip patch archive, attempts
+       replay once per rejected store, then reopens both stores for durable assertions.
+     - Failure modes: Rethrows fixture setup or fetch failures. Assertions fail when patch replay does
+       not reach one final save, leaves pending context changes, or publishes any mixed generation.
+     */
+    func testRemoteSyncWorkspacePatchPublishPreservesOldGenerationWhenEitherStoreRejectsSave() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WorkspaceAtomicPatch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let seedDirectory = temporaryDirectory.appendingPathComponent("seed", isDirectory: true)
+        try FileManager.default.createDirectory(at: seedDirectory, withIntermediateDirectories: true)
+
+        let workspaceID = UUID(uuidString: "c3200000-0000-0000-0000-000000000001")!
+        let windowID = UUID(uuidString: "c3200000-0000-0000-0000-000000000002")!
+        let historyID = UUID(uuidString: "c3200000-0000-0000-0000-000000000003")!
+        let oldLogEntry = RemoteSyncLogEntry(
+            tableName: "Workspace",
+            entityID1: .blob(uuidBlob(workspaceID)),
+            entityID2: .text(""),
+            type: .upsert,
+            lastUpdated: 100,
+            sourceDevice: "ios-local"
+        )
+        let oldPatchStatus = RemoteSyncPatchStatus(
+            sourceDevice: "pixel",
+            patchNumber: 1,
+            sizeBytes: 512,
+            appliedDate: 90
+        )
+
+        try autoreleasepool {
+            let persistentStore = try makePersistentWorkspaceRestoreModelContainer(in: seedDirectory)
+            let modelContext = ModelContext(persistentStore.container)
+            modelContext.autosaveEnabled = false
+            let settingsStore = SettingsStore(modelContext: modelContext)
+
+            let workspace = Workspace(id: workspaceID, name: "Durable Patch Workspace", orderNumber: 0)
+            workspace.contentsText = "Keep patch generation"
+            let window = Window(
+                id: windowID,
+                isSynchronized: true,
+                isPinMode: false,
+                isLinksWindow: false,
+                orderNumber: 0,
+                syncGroup: 3,
+                layoutWeight: 1,
+                layoutState: "split"
+            )
+            window.workspace = workspace
+            let pageManager = PageManager(id: windowID, currentCategoryName: "bible")
+            pageManager.window = window
+            pageManager.bibleDocument = "KJV"
+            pageManager.bibleVersification = "KJVA"
+            pageManager.bibleChapterNo = 1
+            pageManager.bibleVerseNo = 1
+            let history = HistoryItem(
+                id: historyID,
+                createdAt: Date(timeIntervalSince1970: 1_735_689_600),
+                document: "KJV",
+                key: "Gen.1.1"
+            )
+            history.window = window
+            history.anchorOrdinal = 4
+            modelContext.insert(workspace)
+            modelContext.insert(window)
+            modelContext.insert(pageManager)
+            modelContext.insert(history)
+            try modelContext.save()
+
+            settingsStore.activeWorkspaceId = workspaceID
+            RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+                .setSpeakSettingsJSON(#"{"sleepTimer":15}"#, for: workspaceID)
+            RemoteSyncLogEntryStore(settingsStore: settingsStore)
+                .replaceEntries([oldLogEntry], for: .workspaces)
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+                .addStatus(oldPatchStatus, for: .workspaces)
+            RemoteSyncRowFingerprintStore(settingsStore: settingsStore).setFingerprint(
+                "durable-workspace-fingerprint",
+                for: .workspaces,
+                tableName: "Workspace",
+                entityID1: .blob(uuidBlob(workspaceID)),
+                entityID2: .text("")
+            )
+            XCTAssertFalse(modelContext.hasChanges)
+        }
+
+        let patchDatabaseURL = try makeAndroidWorkspacesDatabase(
+            workspaces: [
+                .init(
+                    id: workspaceID,
+                    name: "Rejected Remote Workspace",
+                    contentsText: "Must not publish",
+                    orderNumber: 2,
+                    workspaceSettings: .init(speakSettingsJSON: #"{"sleepTimer":30}"#)
+                )
+            ],
+            windows: [],
+            pageManagers: [],
+            historyItems: [],
+            logEntries: [
+                .init(
+                    tableName: "Workspace",
+                    entityID1: .blob(uuidBlob(workspaceID)),
+                    entityID2: .text(""),
+                    type: "UPSERT",
+                    lastUpdated: 200,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: patchDatabaseURL) }
+        let stagedArchive = try makeWorkspacePatchArchive(
+            patchDatabaseURL: patchDatabaseURL,
+            sourceDevice: "pixel",
+            patchNumber: 2,
+            fileTimestamp: 210
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        for rejectedStore in RejectedWorkspaceRestoreStore.allCases {
+            try XCTContext.runActivity(named: "Reject patch publish to \(rejectedStore.displayName)") { _ in
+                let caseDirectory = temporaryDirectory.appendingPathComponent(
+                    rejectedStore.fixtureDirectoryName,
+                    isDirectory: true
+                )
+                try FileManager.default.copyItem(at: seedDirectory, to: caseDirectory)
+                try assertWorkspacePatchPublishRollback(
+                    whenRejecting: rejectedStore,
+                    temporaryDirectory: caseDirectory,
+                    stagedArchive: stagedArchive,
+                    workspaceID: workspaceID,
+                    windowID: windowID,
+                    historyID: historyID,
+                    oldLogEntry: oldLogEntry,
+                    oldPatchStatus: oldPatchStatus
+                )
+            }
+        }
     }
 
     /**
@@ -826,6 +1212,11 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(workspaces.map(\.name), ["Legacy"])
     }
 
+    /**
+     Verifies a v24-declared initial workspace backup is migrated, decoded, and published with its
+     Android metadata. Failure indicates the archive generation is no longer forwarded to the
+     shared workspace schema validator. The temporary SQLite fixture is removed on exit.
+     */
     func testRemoteSyncInitialBackupRestoreDispatchesWorkspaceBackups() throws {
         let container = try makeWorkspaceRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -902,7 +1293,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 mimeType: "application/gzip"
             ),
             databaseFileURL: databaseURL,
-            schemaVersion: 8
+            schemaVersion: RemoteSyncCategory.workspaces.currentSchemaVersion
         )
 
         let report = try service.restoreInitialBackup(
@@ -963,7 +1354,15 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
     }
 
     /**
-     Verifies that newer Android workspace patch rows replay through the centralized restore path while preserving local history rows and Android-only fidelity payloads.
+     Verifies newer Android workspace patches publish graph and replay bookkeeping with one save.
+
+     The replay updates workspace/window/page-manager rows, preserves local history, replaces conflict
+     log entries, records patch status, and refreshes fingerprints. One `didSave` notification pins the
+     outer atomic boundary across the nested centralized workspace restore and all metadata writes.
+
+     - Side effects: Builds temporary Android SQLite fixtures and mutates an isolated in-memory store.
+     - Failure modes: Rethrows fixture, archive, restore, or fetch errors. Assertions describe replay
+       fidelity, bookkeeping drift, or more than one durable publish.
      */
     func testRemoteSyncWorkspacePatchApplyReplaysNewerRowsAndPreservesHistoryAndFidelity() throws {
         let container = try makeWorkspaceRestoreModelContainer()
@@ -1196,11 +1595,24 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
 
+        let saveExpectation = expectation(description: "Workspace patch publishes graph and bookkeeping once")
+        saveExpectation.expectedFulfillmentCount = 1
+        saveExpectation.assertForOverFulfill = true
+        let saveObserver = NotificationCenter.default.addObserver(
+            forName: ModelContext.didSave,
+            object: modelContext,
+            queue: nil
+        ) { _ in
+            saveExpectation.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(saveObserver) }
+
         let report = try patchService.applyPatchArchives(
             [stagedArchive],
             modelContext: modelContext,
             settingsStore: settingsStore
         )
+        wait(for: [saveExpectation], timeout: 1)
 
         XCTAssertEqual(report.appliedPatchCount, 1)
         XCTAssertEqual(report.appliedLogEntryCount, 5)
@@ -1288,6 +1700,17 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             )?.lastUpdated,
             2_400
         )
+        let currentSnapshot = RemoteSyncWorkspaceSnapshotService().snapshotCurrentState(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+        for (logKey, expectedFingerprint) in currentSnapshot.fingerprintsByKey {
+            XCTAssertEqual(
+                fingerprintStore.fingerprint(forLogKey: logKey, category: .workspaces),
+                expectedFingerprint
+            )
+        }
     }
 
     /**
@@ -1371,7 +1794,8 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
     }
 
     /**
-     Verifies that older Android workspace patch rows are skipped without mutating local workspace state or recording applied-patch bookkeeping.
+     Verifies that older Android workspace rows do not mutate local state while their validated patch
+     is recorded as consumed for deterministic discovery deduplication.
      */
     func testRemoteSyncWorkspacePatchApplySkipsOlderRows() throws {
         let container = try makeWorkspaceRestoreModelContainer()
@@ -1439,14 +1863,22 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             settingsStore: settingsStore
         )
 
-        XCTAssertEqual(report.appliedPatchCount, 0)
+        XCTAssertEqual(report.appliedPatchCount, 1)
         XCTAssertEqual(report.appliedLogEntryCount, 0)
         XCTAssertEqual(report.skippedLogEntryCount, 1)
 
         let workspaces = try modelContext.fetch(FetchDescriptor<Workspace>())
         XCTAssertEqual(workspaces.count, 1)
         XCTAssertEqual(workspaces[0].name, "Local")
-        XCTAssertNil(patchStatusStore.status(for: .workspaces, sourceDevice: "pixel", patchNumber: 9))
+        XCTAssertEqual(
+            patchStatusStore.status(for: .workspaces, sourceDevice: "pixel", patchNumber: 9),
+            RemoteSyncPatchStatus(
+                sourceDevice: "pixel",
+                patchNumber: 9,
+                sizeBytes: stagedArchive.patch.file.size,
+                appliedDate: 4_500
+            )
+        )
         XCTAssertEqual(
             logEntryStore.entry(
                 for: .workspaces,
@@ -1611,13 +2043,68 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 mimeType: "application/gzip"
             ),
             databaseFileURL: initialDatabaseURL,
-            schemaVersion: 1
+            schemaVersion: 24
         )
         _ = try restoreDispatcher.restoreInitialBackup(
             stagedBackup,
             category: .workspaces,
             modelContext: modelContext,
             settingsStore: settingsStore
+        )
+
+        let hiddenLabelID = UUID(uuidString: "c6300000-0000-0000-0000-000000000003")!
+        settingsStore.setString("remote_sync_device_identifier", value: "ios-device")
+        let workspaceDisplaySettings = completeTextDisplaySettings(
+            seed: 10,
+            hiddenLabelID: hiddenLabelID
+        )
+        let pageDisplaySettings = completeTextDisplaySettings(
+            seed: 30,
+            hiddenLabelID: hiddenLabelID
+        )
+        let globalDisplaySettings = completeTextDisplaySettings(
+            seed: 50,
+            hiddenLabelID: hiddenLabelID
+        )
+        let roomFidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+        try roomFidelityStore.setGlobalTextDisplayEntry(
+            id: RemoteSyncCurrentGlobalTextDisplaySettingsRow.androidSingletonID,
+            fidelity: .init(
+                autoTrackReading: true,
+                scrollHelperLines: true,
+                scrollHelperLineStyle: 5,
+                showPageButtons: false
+            )
+        )
+        let localWorkspace = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<Workspace>()).first)
+        localWorkspace.textDisplaySettings = workspaceDisplaySettings
+        let localPageManager = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<PageManager>()).first)
+        localPageManager.textDisplaySettings = pageDisplaySettings
+        try roomFidelityStore.setTextDisplayFidelity(
+            .init(
+                autoTrackReading: false,
+                scrollHelperLines: true,
+                scrollHelperLineStyle: 6,
+                showPageButtons: true
+            ),
+            forWorkspaceID: workspaceID
+        )
+        try roomFidelityStore.setTextDisplayFidelity(
+            .init(
+                autoTrackReading: true,
+                scrollHelperLines: false,
+                scrollHelperLineStyle: 7,
+                showPageButtons: true
+            ),
+            forPageManagerWindowID: windowID
+        )
+        try roomFidelityStore.setLabelOverride(
+            .init(workspaceID: workspaceID, labelID: hiddenLabelID, overrideMode: 2)
+        )
+        let globalDisplayData = try JSONEncoder().encode(globalDisplaySettings)
+        settingsStore.setString(
+            SettingsStore.globalTextDisplaySettingsKey,
+            value: String(decoding: globalDisplayData, as: UTF8.self)
         )
 
         let syncFolderID = "/org.andbible.ios-sync-workspaces"
@@ -1657,12 +2144,21 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 )
             ]
         )
-        XCTAssertEqual(stateStore.progressState(for: .workspaces).lastPatchWritten, 1_900)
+        let initialWriteTimestamp = try XCTUnwrap(
+            stateStore.progressState(for: .workspaces).lastPatchWritten
+        )
+        XCTAssertGreaterThan(initialWriteTimestamp, 1_900)
         XCTAssertNil(stateStore.progressState(for: .workspaces).lastSynchronized)
         XCTAssertEqual(fidelityStore.allHistoryItemAliases().map(\.remoteHistoryItemID), [77])
 
         let events = await adapter.eventsSnapshot()
         XCTAssertEqual(events, [
+            .listFiles(
+                parentIDs: [syncFolderID],
+                name: "initial.sqlite3.gz",
+                mimeType: nil,
+                modifiedAtLeast: nil
+            ),
             .upload(
                 name: "initial.sqlite3.gz",
                 parentID: syncFolderID,
@@ -1690,10 +2186,47 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         let snapshot = try restoreService.readSnapshot(from: databaseURL)
         XCTAssertEqual(snapshot.workspaces.count, 1)
         XCTAssertEqual(snapshot.workspaces[0].name, "Travel")
+        XCTAssertEqual(snapshot.workspaces[0].textDisplaySettings, workspaceDisplaySettings)
+        XCTAssertEqual(
+            snapshot.workspaces[0].textDisplayFidelity,
+            .init(
+                autoTrackReading: false,
+                scrollHelperLines: true,
+                scrollHelperLineStyle: 6,
+                showPageButtons: true
+            )
+        )
         XCTAssertEqual(snapshot.workspaces[0].windows.count, 1)
         XCTAssertEqual(snapshot.workspaces[0].windows[0].pageManager.currentCategoryName, "BIBLE")
+        XCTAssertEqual(
+            snapshot.workspaces[0].windows[0].pageManager.textDisplaySettings,
+            pageDisplaySettings
+        )
+        XCTAssertEqual(
+            snapshot.workspaces[0].windows[0].pageManager.textDisplayFidelity,
+            .init(
+                autoTrackReading: true,
+                scrollHelperLines: false,
+                scrollHelperLineStyle: 7,
+                showPageButtons: true
+            )
+        )
         XCTAssertEqual(snapshot.workspaces[0].windows[0].historyItems.count, 1)
         XCTAssertEqual(snapshot.workspaces[0].windows[0].historyItems[0].remoteID, 77)
+        XCTAssertEqual(
+            snapshot.labelOverrides,
+            [.init(workspaceID: workspaceID, labelID: hiddenLabelID, overrideMode: 2)]
+        )
+        XCTAssertEqual(snapshot.globalTextDisplaySettings?.textDisplaySettings, globalDisplaySettings)
+        XCTAssertEqual(
+            snapshot.globalTextDisplaySettings?.fidelity,
+            .init(
+                autoTrackReading: true,
+                scrollHelperLines: true,
+                scrollHelperLineStyle: 5,
+                showPageButtons: false
+            )
+        )
     }
 
     /**
@@ -1785,17 +2318,96 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             settingsStore: settingsStore
         )
 
+        let hiddenLabelID = UUID(uuidString: "c6400000-0000-0000-0000-000000000003")!
+        settingsStore.setString("remote_sync_device_identifier", value: "ios-device")
+        let workspaceDisplaySettings = completeTextDisplaySettings(
+            seed: 20,
+            hiddenLabelID: hiddenLabelID
+        )
+        let pageDisplaySettings = completeTextDisplaySettings(
+            seed: 40,
+            hiddenLabelID: hiddenLabelID
+        )
+        let globalDisplaySettings = completeTextDisplaySettings(
+            seed: 60,
+            hiddenLabelID: hiddenLabelID
+        )
+        let workspaceDisplayFidelity = RemoteSyncWorkspaceTextDisplaySettingsFidelity(
+            autoTrackReading: true,
+            scrollHelperLines: false,
+            scrollHelperLineStyle: 2,
+            showPageButtons: true
+        )
+        let pageDisplayFidelity = RemoteSyncWorkspaceTextDisplaySettingsFidelity(
+            autoTrackReading: false,
+            scrollHelperLines: true,
+            scrollHelperLineStyle: 3,
+            showPageButtons: false
+        )
+        let globalDisplayFidelity = RemoteSyncWorkspaceTextDisplaySettingsFidelity(
+            autoTrackReading: true,
+            scrollHelperLines: true,
+            scrollHelperLineStyle: 4,
+            showPageButtons: true
+        )
+        let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+        try fidelityStore.setGlobalTextDisplayEntry(
+            id: RemoteSyncCurrentGlobalTextDisplaySettingsRow.androidSingletonID,
+            fidelity: globalDisplayFidelity
+        )
+
         let workspace = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<Workspace>()).first)
         workspace.name = "Travel Updated"
+        workspace.textDisplaySettings = workspaceDisplaySettings
         let pageManager = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<PageManager>()).first)
         pageManager.jsState = #"{"scrollY":240}"#
-        try modelContext.save()
+        pageManager.textDisplaySettings = pageDisplaySettings
+        try fidelityStore.setTextDisplayFidelity(
+            workspaceDisplayFidelity,
+            forWorkspaceID: workspaceID
+        )
+        try fidelityStore.setTextDisplayFidelity(
+            pageDisplayFidelity,
+            forPageManagerWindowID: windowID
+        )
+        try fidelityStore.setLabelOverride(
+            RemoteSyncCurrentWorkspaceLabelOverrideRow(
+                workspaceID: workspaceID,
+                labelID: hiddenLabelID,
+                overrideMode: 3
+            )
+        )
+        let globalDisplayData = try JSONEncoder().encode(globalDisplaySettings)
+        let mutationJournal = RemoteSyncMutationJournalService(nowProvider: { 2_000 })
+        try settingsStore.performJournaledSave {
+            settingsStore.setString(
+                SettingsStore.globalTextDisplaySettingsKey,
+                value: String(decoding: globalDisplayData, as: UTF8.self)
+            )
+            try mutationJournal.recordLocalChanges(
+                for: .workspaces,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
+
+        let currentSnapshot = try snapshotService.snapshotCurrentStateStrict(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertEqual(currentSnapshot.labelOverrideRowsByKey.count, 1)
+        XCTAssertEqual(currentSnapshot.globalTextDisplayRowsByKey.count, 1)
+        XCTAssertEqual(
+            Set(try mutationJournal.pendingMutations(for: .workspaces, settingsStore: settingsStore)
+                .values.map(\.entry.tableName)),
+            ["Workspace", "PageManager", "WorkspaceLabelOverride", "GlobalTextDisplaySettings"]
+        )
 
         let adapter = WorkspaceMockRemoteSyncAdapter()
         await adapter.enqueueUploadResult(
             RemoteSyncFile(
-                id: "/org.andbible.ios-sync-workspaces/ios-device/1.1.sqlite3.gz",
-                name: "1.1.sqlite3.gz",
+                id: "/org.andbible.ios-sync-workspaces/ios-device/1.24.sqlite3.gz",
+                name: "1.24.sqlite3.gz",
                 size: 0,
                 timestamp: 2_000,
                 parentID: "/org.andbible.ios-sync-workspaces/ios-device",
@@ -1818,14 +2430,28 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(unwrappedReport.upsertedWorkspaceCount, 1)
         XCTAssertEqual(unwrappedReport.upsertedWindowCount, 0)
         XCTAssertEqual(unwrappedReport.upsertedPageManagerCount, 1)
+        XCTAssertEqual(unwrappedReport.upsertedLabelOverrideCount, 1)
+        XCTAssertEqual(unwrappedReport.upsertedGlobalTextDisplaySettingsCount, 1)
         XCTAssertEqual(unwrappedReport.deletedRowCount, 0)
-        XCTAssertEqual(unwrappedReport.logEntryCount, 2)
-        XCTAssertEqual(unwrappedReport.lastUpdated, 2_000)
+        XCTAssertEqual(unwrappedReport.logEntryCount, 4)
+        XCTAssertGreaterThan(unwrappedReport.lastUpdated, 2_000)
 
         let events = await adapter.eventsSnapshot()
         XCTAssertEqual(events, [
+            .listFiles(
+                parentIDs: ["/org.andbible.ios-sync-workspaces/ios-device"],
+                name: nil,
+                mimeType: nil,
+                modifiedAtLeast: nil
+            ),
+            .listFiles(
+                parentIDs: ["/org.andbible.ios-sync-workspaces/ios-device"],
+                name: "1.24.sqlite3.gz",
+                mimeType: nil,
+                modifiedAtLeast: nil
+            ),
             .upload(
-                name: "1.1.sqlite3.gz",
+                name: "1.24.sqlite3.gz",
                 parentID: "/org.andbible.ios-sync-workspaces/ios-device",
                 contentType: NextCloudSyncAdapter.gzipMimeType
             )
@@ -1845,8 +2471,11 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         try patchDatabaseData.write(to: databaseURL, options: .atomic)
 
         let metadataSnapshot = try metadataRestoreService.readSnapshot(from: databaseURL)
-        XCTAssertEqual(metadataSnapshot.logEntries.count, 2)
-        XCTAssertEqual(Set(metadataSnapshot.logEntries.map(\.tableName)), ["Workspace", "PageManager"])
+        XCTAssertEqual(metadataSnapshot.logEntries.count, 4)
+        XCTAssertEqual(
+            Set(metadataSnapshot.logEntries.map(\.tableName)),
+            ["Workspace", "PageManager", "WorkspaceLabelOverride", "GlobalTextDisplaySettings"]
+        )
         XCTAssertEqual(Set(metadataSnapshot.logEntries.map(\.sourceDevice)), ["ios-device"])
 
         let secondContainer = try makeWorkspaceRestoreModelContainer()
@@ -1864,10 +2493,10 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             patch: RemoteSyncDiscoveredPatch(
                 sourceDevice: "ios-device",
                 patchNumber: 1,
-                schemaVersion: 1,
+                schemaVersion: 24,
                 file: RemoteSyncFile(
-                    id: "/org.andbible.ios-sync-workspaces/ios-device/1.1.sqlite3.gz",
-                    name: "1.1.sqlite3.gz",
+                    id: "/org.andbible.ios-sync-workspaces/ios-device/1.24.sqlite3.gz",
+                    name: "1.24.sqlite3.gz",
                     size: Int64(uploadedArchive.data.count),
                     timestamp: 2_000,
                     parentID: "/org.andbible.ios-sync-workspaces/ios-device",
@@ -1883,13 +2512,39 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             settingsStore: secondSettingsStore
         )
         XCTAssertEqual(replayReport.appliedPatchCount, 1)
-        XCTAssertEqual(replayReport.appliedLogEntryCount, 2)
+        XCTAssertEqual(replayReport.appliedLogEntryCount, 4)
         XCTAssertEqual(replayReport.skippedLogEntryCount, 0)
 
         let replayedWorkspace = try XCTUnwrap(try secondModelContext.fetch(FetchDescriptor<Workspace>()).first)
         XCTAssertEqual(replayedWorkspace.name, "Travel Updated")
+        XCTAssertEqual(replayedWorkspace.textDisplaySettings, workspaceDisplaySettings)
         let replayedPageManager = try XCTUnwrap(try secondModelContext.fetch(FetchDescriptor<PageManager>()).first)
         XCTAssertEqual(replayedPageManager.jsState, #"{"scrollY":240}"#)
+        XCTAssertEqual(replayedPageManager.textDisplaySettings, pageDisplaySettings)
+        let replayedFidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: secondSettingsStore)
+        XCTAssertEqual(
+            replayedFidelityStore.textDisplayFidelity(forWorkspaceID: workspaceID),
+            workspaceDisplayFidelity
+        )
+        XCTAssertEqual(
+            replayedFidelityStore.textDisplayFidelity(forPageManagerWindowID: windowID),
+            pageDisplayFidelity
+        )
+        XCTAssertEqual(
+            replayedFidelityStore.allLabelOverrides(),
+            [
+                RemoteSyncCurrentWorkspaceLabelOverrideRow(
+                    workspaceID: workspaceID,
+                    labelID: hiddenLabelID,
+                    overrideMode: 3
+                )
+            ]
+        )
+        XCTAssertEqual(secondSettingsStore.storedGlobalTextDisplaySettings(), globalDisplaySettings)
+        XCTAssertEqual(
+            replayedFidelityStore.globalTextDisplayEntry()?.fidelity,
+            globalDisplayFidelity
+        )
 
         XCTAssertEqual(
             patchStatusStore.statuses(for: .workspaces),
@@ -1902,8 +2557,11 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 )
             ]
         )
-        XCTAssertEqual(stateStore.progressState(for: .workspaces).lastPatchWritten, 2_000)
-        XCTAssertEqual(logEntryStore.entries(for: .workspaces).count, 3)
+        XCTAssertEqual(
+            stateStore.progressState(for: .workspaces).lastPatchWritten,
+            unwrappedReport.lastUpdated
+        )
+        XCTAssertEqual(logEntryStore.entries(for: .workspaces).count, 5)
 
         let secondReport = try await service.uploadPendingPatch(
             bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-workspaces/ios-device"),
@@ -1933,16 +2591,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             windows: [],
             pageManagers: [],
             historyItems: [],
-            logEntries: [
-                .init(
-                    tableName: "Workspace",
-                    entityID1: .blob(uuidBlob(workspaceID)),
-                    entityID2: .text(""),
-                    type: "UPSERT",
-                    lastUpdated: 1_500,
-                    sourceDevice: "pixel"
-                )
-            ]
+            logEntries: []
         )
         defer { try? FileManager.default.removeItem(at: databaseURL) }
 
@@ -1956,7 +2605,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 mimeType: "application/gzip"
             ),
             databaseFileURL: databaseURL,
-            schemaVersion: 1
+            schemaVersion: 24
         )
 
         _ = try restoreDispatcher.restoreInitialBackup(
@@ -1967,14 +2616,36 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         )
 
         let restoredWorkspace = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<Workspace>()).first)
+        XCTAssertTrue(
+            RemoteSyncLogEntryStore(settingsStore: settingsStore)
+                .entries(for: .workspaces).isEmpty
+        )
+        let acceptedBaseline = try XCTUnwrap(
+            RemoteSyncWorkspaceSnapshotService().storedAcceptedBaseline(
+                settingsStore: settingsStore
+            )
+        )
+        XCTAssertEqual(acceptedBaseline.generation.rowsByKey.count, 1)
+        settingsStore.setString("remote_sync_device_identifier", value: "ios-device")
         modelContext.delete(restoredWorkspace)
-        try modelContext.save()
+        try RemoteSyncMutationJournalService.savePendingGraphChanges(
+            for: .workspaces,
+            modelContext: modelContext
+        )
+        let pendingDeletion = try XCTUnwrap(
+            RemoteSyncMutationJournalService()
+                .pendingMutations(for: .workspaces, settingsStore: settingsStore)
+                .values.first
+        )
+        XCTAssertEqual(pendingDeletion.entry.tableName, "Workspace")
+        XCTAssertEqual(pendingDeletion.entry.type, .delete)
+        XCTAssertNil(pendingDeletion.stateFingerprint)
 
         let adapter = WorkspaceMockRemoteSyncAdapter()
         await adapter.enqueueUploadResult(
             RemoteSyncFile(
-                id: "/org.andbible.ios-sync-workspaces/ios-device/1.1.sqlite3.gz",
-                name: "1.1.sqlite3.gz",
+                id: "/org.andbible.ios-sync-workspaces/ios-device/1.24.sqlite3.gz",
+                name: "1.24.sqlite3.gz",
                 size: 0,
                 timestamp: 2_000,
                 parentID: "/org.andbible.ios-sync-workspaces/ios-device",
@@ -2021,7 +2692,8 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
     }
 
     /**
-     Verifies that a ready workspace category uploads one sparse local patch when no newer remote patches exist.
+     Verifies that a ready workspace category uploads one sparse local patch before discovering that
+     no newer remote patches exist.
      */
     func testRemoteSyncSynchronizationServiceUploadsLocalWorkspaceChangesWhenNoRemotePatchesExist() async throws {
         let container = try makeWorkspaceRestoreModelContainer()
@@ -2128,17 +2800,18 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             forSyncFolderID: syncFolderID,
             secretFileName: "device-known-ios-device-secret"
         )
-        await adapter.enqueueListFilesResult([
-            RemoteSyncFile(
-                id: deviceFolderID,
-                name: "ios-device",
-                size: 0,
-                timestamp: 1_735_689_700_000,
-                parentID: syncFolderID,
-                mimeType: NextCloudSyncAdapter.folderMimeType
-            )
-        ])
         await adapter.enqueueListFilesResult([])
+        await adapter.enqueueListFilesResult([])
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "\(deviceFolderID)/1.24.sqlite3.gz",
+                name: "1.24.sqlite3.gz",
+                size: 0,
+                timestamp: 4_000_000,
+                parentID: deviceFolderID,
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
 
         let service = RemoteSyncSynchronizationService(
             adapter: adapter,
@@ -2161,7 +2834,6 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertNil(report.initialRestoreReport)
         XCTAssertNil(report.patchReplayReport)
         XCTAssertEqual(report.discoveredPatchCount, 0)
-        XCTAssertEqual(report.lastPatchWritten, 4_000_000)
         XCTAssertEqual(report.lastSynchronized, 4_000_000)
 
         guard case .workspaces(let uploadReport)? = report.patchUploadReport else {
@@ -2174,8 +2846,9 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(uploadReport.upsertedPageManagerCount, 1)
         XCTAssertEqual(uploadReport.deletedRowCount, 0)
         XCTAssertEqual(uploadReport.logEntryCount, 2)
-        XCTAssertEqual(uploadReport.lastUpdated, 4_000_000)
-        XCTAssertEqual(uploadReport.uploadedFile.name, "1.1.sqlite3.gz")
+        XCTAssertGreaterThan(uploadReport.lastUpdated, 4_000_000)
+        XCTAssertEqual(report.lastPatchWritten, uploadReport.lastUpdated)
+        XCTAssertEqual(uploadReport.uploadedFile.name, "1.24.sqlite3.gz")
         XCTAssertEqual(uploadReport.uploadedFile.parentID, deviceFolderID)
 
         XCTAssertEqual(
@@ -2189,7 +2862,10 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 )
             ]
         )
-        XCTAssertEqual(stateStore.progressState(for: .workspaces).lastPatchWritten, 4_000_000)
+        XCTAssertEqual(
+            stateStore.progressState(for: .workspaces).lastPatchWritten,
+            uploadReport.lastUpdated
+        )
         XCTAssertEqual(stateStore.progressState(for: .workspaces).lastSynchronized, 4_000_000)
 
         let events = await adapter.eventsSnapshot()
@@ -2199,23 +2875,455 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 secretFileName: "device-known-ios-device-secret"
             ),
             .listFiles(
-                parentIDs: [syncFolderID],
-                name: nil,
-                mimeType: NextCloudSyncAdapter.folderMimeType,
-                modifiedAtLeast: nil
-            ),
-            .listFiles(
                 parentIDs: [deviceFolderID],
                 name: nil,
                 mimeType: nil,
                 modifiedAtLeast: nil
             ),
+            .listFiles(
+                parentIDs: [deviceFolderID],
+                name: "1.24.sqlite3.gz",
+                mimeType: nil,
+                modifiedAtLeast: nil
+            ),
             .upload(
-                name: "1.1.sqlite3.gz",
+                name: "1.24.sqlite3.gz",
                 parentID: deviceFolderID,
                 contentType: NextCloudSyncAdapter.gzipMimeType
             ),
+            .listFiles(
+                parentIDs: [syncFolderID],
+                name: nil,
+                mimeType: NextCloudSyncAdapter.folderMimeType,
+                modifiedAtLeast: nil
+            ),
         ])
+    }
+
+    /**
+     Verifies a workspace edit made while remote publication is suspended remains pending.
+
+     Acceptance publishes the immutable uploaded fingerprint rather than re-reading the live graph.
+     A second patch containing the newer workspace name proves the concurrent edit was retained.
+     */
+    func testWorkspaceUploadKeepsInFlightEditDirtyForNextPatch() async throws {
+        let container = try makeWorkspaceRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let snapshotService = RemoteSyncWorkspaceSnapshotService()
+        let workspace = Workspace(name: "Accepted", orderNumber: 0)
+        modelContext.insert(workspace)
+        try modelContext.save()
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        workspace.name = "Uploaded generation"
+        try modelContext.save()
+        let uploadedSnapshot = try snapshotService.snapshotCurrentStateStrict(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let workspaceKey = try XCTUnwrap(uploadedSnapshot.workspaceRowsByKey.first?.key)
+        let adapter = RemoteSyncDurableOutboxTestAdapter(
+            uploadMetadata: [
+                .init(timestamp: 28_000),
+                .init(timestamp: 29_000),
+            ]
+        )
+        await adapter.suspendNextUpload()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("workspace-inflight-edit-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = RemoteSyncWorkspacePatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true),
+            nowProvider: { 27_000 }
+        )
+
+        let uploadTask = Task {
+            try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/workspaces/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
+        await adapter.waitUntilUploadStarts()
+        workspace.name = "Newer local generation"
+        try modelContext.save()
+        await adapter.resumeUpload()
+
+        let firstResult = try await uploadTask.value
+        XCTAssertEqual(try XCTUnwrap(firstResult).patchNumber, 1)
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: settingsStore).fingerprint(
+                forLogKey: workspaceKey,
+                category: .workspaces
+            ),
+            uploadedSnapshot.fingerprintsByKey[workspaceKey]
+        )
+        let currentSnapshot = try snapshotService.snapshotCurrentStateStrict(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertNotEqual(
+            currentSnapshot.fingerprintsByKey[workspaceKey],
+            uploadedSnapshot.fingerprintsByKey[workspaceKey]
+        )
+
+        let secondResult = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/workspaces/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertEqual(try XCTUnwrap(secondResult).patchNumber, 2)
+        let uploads = await adapter.uploads()
+        XCTAssertEqual(
+            uploads.map(\.name),
+            ["1.24.sqlite3.gz", "2.24.sqlite3.gz"]
+        )
+    }
+
+    /**
+     Verifies remote success followed by local failure resumes the exact durable workspace generation.
+
+     A new service instance reconciles existing bytes and accepts without another create. Sync status
+     uses server size/time, while `lastPatchWritten` preserves the original generation watermark.
+     */
+    func testWorkspaceUploadAcceptanceFailureResumesExactOutboxGeneration() async throws {
+        let container = try makeWorkspaceRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let snapshotService = RemoteSyncWorkspaceSnapshotService()
+        let workspace = Workspace(name: "Accepted", orderNumber: 0)
+        modelContext.insert(workspace)
+        try modelContext.save()
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let acceptedSnapshot = try snapshotService.snapshotCurrentStateStrict(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let workspaceKey = try XCTUnwrap(acceptedSnapshot.workspaceRowsByKey.first?.key)
+        workspace.name = "Pending upload"
+        try modelContext.save()
+
+        let adapter = RemoteSyncDurableOutboxTestAdapter(
+            uploadMetadata: [.init(timestamp: 32_000, size: 76_543)]
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("workspace-acceptance-retry-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let outboxDirectory = directory.appendingPathComponent("outbox", isDirectory: true)
+        let failingService = RemoteSyncWorkspacePatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: { 30_000 },
+            finalAcceptanceCheckpoint: {
+                throw NSError(domain: "WorkspaceUploadAcceptance", code: 81)
+            }
+        )
+
+        do {
+            _ = try await failingService.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/workspaces/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected workspace acceptance failure")
+        } catch {
+            XCTAssertEqual((error as NSError).domain, "WorkspaceUploadAcceptance")
+        }
+
+        XCTAssertNotNil(settingsStore.getString(RemoteSyncWorkspacePatchUploadService.pendingUploadKey))
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: settingsStore).fingerprint(
+                forLogKey: workspaceKey,
+                category: .workspaces
+            ),
+            acceptedSnapshot.fingerprintsByKey[workspaceKey]
+        )
+        XCTAssertTrue(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .workspaces).isEmpty
+        )
+        XCTAssertNil(
+            RemoteSyncStateStore(settingsStore: settingsStore)
+                .progressState(for: .workspaces).lastPatchWritten
+        )
+
+        let retryService = RemoteSyncWorkspacePatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: { 99_000 }
+        )
+        let retryResult = try await retryService.resumePendingUploadIfPresent(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/workspaces/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let retryReport = try XCTUnwrap(retryResult)
+        XCTAssertEqual(retryReport.patchNumber, 1)
+        let retryUploads = await adapter.uploads()
+        XCTAssertEqual(retryUploads.count, 1)
+        XCTAssertNil(settingsStore.getString(RemoteSyncWorkspacePatchUploadService.pendingUploadKey))
+        XCTAssertEqual(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .workspaces),
+            [
+                RemoteSyncPatchStatus(
+                    sourceDevice: "ios-device",
+                    patchNumber: 1,
+                    sizeBytes: 76_543,
+                    appliedDate: 32_000
+                )
+            ]
+        )
+        XCTAssertEqual(
+            RemoteSyncStateStore(settingsStore: settingsStore)
+                .progressState(for: .workspaces).lastPatchWritten,
+            retryReport.lastUpdated
+        )
+        XCTAssertGreaterThan(retryReport.lastUpdated, 30_000)
+    }
+
+    /**
+     Verifies cancellation after a workspace archive becomes durable retains retryable outbox state.
+
+     Cancellation after conditional create must leave acceptance metadata untouched. Resume-only then
+     reconciles the same bytes and accepts patch one without creating a replacement generation.
+     */
+    func testWorkspaceUploadCancellationRetainsDurableGenerationForResume() async throws {
+        let container = try makeWorkspaceRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let snapshotService = RemoteSyncWorkspaceSnapshotService()
+        let workspace = Workspace(name: "Accepted", orderNumber: 0)
+        modelContext.insert(workspace)
+        try modelContext.save()
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        workspace.name = "Pending"
+        try modelContext.save()
+
+        let adapter = RemoteSyncDurableOutboxTestAdapter(
+            uploadMetadata: [.init(timestamp: 35_000)]
+        )
+        await adapter.suspendNextUpload()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("workspace-cancel-retry-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = RemoteSyncWorkspacePatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true),
+            nowProvider: { 34_000 }
+        )
+        let uploadTask = Task {
+            try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/workspaces/ios-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
+        await adapter.waitUntilUploadStarts()
+        uploadTask.cancel()
+        await adapter.resumeUpload()
+
+        do {
+            _ = try await uploadTask.value
+            XCTFail("Expected workspace upload cancellation")
+        } catch is CancellationError {
+            // Expected: pending metadata remains durable for the next lifecycle pass.
+        }
+        XCTAssertNotNil(settingsStore.getString(RemoteSyncWorkspacePatchUploadService.pendingUploadKey))
+        XCTAssertTrue(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .workspaces).isEmpty
+        )
+        let resumed = try await service.resumePendingUploadIfPresent(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/workspaces/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertEqual(try XCTUnwrap(resumed).patchNumber, 1)
+        let resumedUploads = await adapter.uploads()
+        XCTAssertEqual(resumedUploads.count, 1)
+    }
+
+    /**
+     Verifies absent local status allocates after remote workspace history and corruption fails closed.
+
+     Remote patch seven must yield patch eight. Malformed accepted metadata on the next pass must abort
+     before another create rather than resetting the local sequence to zero.
+     */
+    func testWorkspaceUploadUsesRemoteNumberingAndRejectsCorruptLocalStatus() async throws {
+        let container = try makeWorkspaceRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let snapshotService = RemoteSyncWorkspaceSnapshotService()
+        let workspace = Workspace(name: "Accepted", orderNumber: 0)
+        modelContext.insert(workspace)
+        try modelContext.save()
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        workspace.name = "Dirty"
+        try modelContext.save()
+
+        let deviceFolderID = "/workspaces/ios-device"
+        let adapter = RemoteSyncDurableOutboxTestAdapter(
+            uploadMetadata: [.init(timestamp: 38_000)]
+        )
+        await adapter.seedRemoteFile(
+            name: "7.1.sqlite3.gz",
+            parentID: deviceFolderID,
+            data: Data("accepted workspace history".utf8),
+            timestamp: 37_000
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("workspace-remote-numbering-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = RemoteSyncWorkspacePatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: directory.appendingPathComponent("outbox", isDirectory: true),
+            nowProvider: { 37_500 }
+        )
+
+        let firstResult = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: deviceFolderID),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertEqual(try XCTUnwrap(firstResult).patchNumber, 8)
+        let numberedUploads = await adapter.uploads()
+        XCTAssertEqual(numberedUploads.map(\.name), ["8.24.sqlite3.gz"])
+
+        workspace.name = "Dirty again"
+        try modelContext.save()
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let corruptKey = patchStatusStore.key(
+            for: .workspaces,
+            sourceDevice: "ios-device",
+            patchNumber: 9
+        )
+        settingsStore.setString(corruptKey, value: "{not-json")
+        do {
+            _ = try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: deviceFolderID),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected corrupt workspace patch status to fail closed")
+        } catch let error as RemoteSyncPatchStatusStoreError {
+            XCTAssertEqual(error, .invalidStoredStatus(corruptKey))
+        }
+        let uploadsAfterCorruption = await adapter.uploads()
+        XCTAssertEqual(uploadsAfterCorruption.count, 1)
+    }
+
+    /**
+     Verifies a workspace outbox cannot cross destinations without explicit lifecycle cleanup.
+
+     A failed old-folder acceptance must block a new destination. Explicit discard retains the old
+     baseline, allowing the current workspace graph to rebuild as patch one in the replacement folder.
+     */
+    func testWorkspaceDestinationReplacementRequiresExplicitPendingCleanup() async throws {
+        let container = try makeWorkspaceRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let snapshotService = RemoteSyncWorkspaceSnapshotService()
+        let workspace = Workspace(name: "Accepted", orderNumber: 0)
+        modelContext.insert(workspace)
+        try modelContext.save()
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        workspace.name = "Dirty"
+        try modelContext.save()
+
+        let adapter = RemoteSyncDurableOutboxTestAdapter(
+            uploadMetadata: [
+                .init(timestamp: 41_000),
+                .init(timestamp: 42_000),
+            ]
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("workspace-destination-replacement-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let outboxDirectory = directory.appendingPathComponent("outbox", isDirectory: true)
+        let failingService = RemoteSyncWorkspacePatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: { 40_000 },
+            finalAcceptanceCheckpoint: {
+                throw NSError(domain: "WorkspaceDestination", code: 91)
+            }
+        )
+        do {
+            _ = try await failingService.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/workspaces/old-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected workspace acceptance failure")
+        } catch {
+            XCTAssertEqual((error as NSError).domain, "WorkspaceDestination")
+        }
+
+        let replacementService = RemoteSyncWorkspacePatchUploadService(
+            adapter: adapter,
+            snapshotService: snapshotService,
+            temporaryDirectory: directory,
+            outboxDirectory: outboxDirectory,
+            nowProvider: { 40_500 }
+        )
+        do {
+            _ = try await replacementService.resumePendingUploadIfPresent(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/workspaces/new-device"),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected mismatched workspace outbox to fail closed")
+        } catch let error as RemoteSyncWorkspacePatchUploadError {
+            XCTAssertEqual(
+                error,
+                .pendingUploadDestinationMismatch(
+                    stored: "/workspaces/old-device",
+                    requested: "/workspaces/new-device"
+                )
+            )
+        }
+
+        try replacementService.discardPendingUploadForDestinationReplacement(
+            settingsStore: settingsStore
+        )
+        let replacementResult = try await replacementService.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/workspaces/new-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertEqual(try XCTUnwrap(replacementResult).patchNumber, 1)
+        let destinationUploads = await adapter.uploads()
+        XCTAssertEqual(
+            destinationUploads.map(\.parentID),
+            ["/workspaces/old-device", "/workspaces/new-device"]
+        )
     }
 
     /**
@@ -2476,6 +3584,301 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
     }
 
     /**
+     Runs one rejected-store direction of the workspace patch publication rollback contract.
+
+     - Parameters:
+       - rejectedStore: Graph or settings configuration that must reject the final transaction save.
+       - temporaryDirectory: Directory containing the previously seeded graph and settings stores.
+       - stagedArchive: Newer Android workspace patch whose effects must not become durable.
+       - workspaceID: Existing workspace identifier modified by the patch.
+       - windowID: Existing window/page-manager identifier that must remain related to the workspace.
+       - historyID: Existing local history identifier that must survive unchanged.
+       - oldLogEntry: Durable conflict baseline that must remain after rejected replay.
+       - oldPatchStatus: Durable applied-patch status that must remain after rejected replay.
+     - Side effects: Opens the target store read-only, attempts replay, observes the sole save, then
+       reopens both stores writable for graph and bookkeeping assertions.
+     - Failure modes: Rethrows container or fetch failures. XCTest assertions describe any partial
+       graph, fidelity, conflict-log, patch-status, or fingerprint publication.
+     */
+    private func assertWorkspacePatchPublishRollback(
+        whenRejecting rejectedStore: RejectedWorkspaceRestoreStore,
+        temporaryDirectory: URL,
+        stagedArchive: RemoteSyncStagedPatchArchive,
+        workspaceID: UUID,
+        windowID: UUID,
+        historyID: UUID,
+        oldLogEntry: RemoteSyncLogEntry,
+        oldPatchStatus: RemoteSyncPatchStatus
+    ) throws {
+        try autoreleasepool {
+            let rejectingStore = try makePersistentWorkspaceRestoreModelContainer(
+                in: temporaryDirectory,
+                graphAllowsSave: rejectedStore != .graph,
+                settingsAllowsSave: rejectedStore != .settings
+            )
+            let modelContext = ModelContext(rejectingStore.container)
+            modelContext.autosaveEnabled = false
+            let settingsStore = SettingsStore(modelContext: modelContext)
+
+            let finalSaveExpectation = expectation(
+                description: "Workspace patch reaches final save with rejected \(rejectedStore.displayName)"
+            )
+            finalSaveExpectation.expectedFulfillmentCount = 1
+            finalSaveExpectation.assertForOverFulfill = true
+            let saveObserver = NotificationCenter.default.addObserver(
+                forName: ModelContext.willSave,
+                object: modelContext,
+                queue: nil
+            ) { _ in
+                finalSaveExpectation.fulfill()
+            }
+            defer { NotificationCenter.default.removeObserver(saveObserver) }
+
+            XCTAssertThrowsError(
+                try RemoteSyncWorkspacePatchApplyService().applyPatchArchives(
+                    [stagedArchive],
+                    modelContext: modelContext,
+                    settingsStore: settingsStore
+                )
+            ) { error in
+                let cocoaError = error as NSError
+                XCTAssertEqual(cocoaError.domain, NSCocoaErrorDomain)
+                XCTAssertEqual(cocoaError.code, NSFileWriteNoPermissionError)
+            }
+            wait(for: [finalSaveExpectation], timeout: 1)
+            XCTAssertFalse(modelContext.hasChanges)
+        }
+
+        let reopenedStore = try makePersistentWorkspaceRestoreModelContainer(in: temporaryDirectory)
+        let reopenedContext = ModelContext(reopenedStore.container)
+        reopenedContext.autosaveEnabled = false
+        let reopenedSettings = SettingsStore(modelContext: reopenedContext)
+
+        let workspaces = try reopenedContext.fetch(FetchDescriptor<Workspace>())
+        XCTAssertEqual(workspaces.map(\.id), [workspaceID])
+        XCTAssertEqual(workspaces.first?.name, "Durable Patch Workspace")
+        XCTAssertEqual(workspaces.first?.contentsText, "Keep patch generation")
+        XCTAssertEqual(workspaces.first?.orderNumber, 0)
+
+        let windows = try reopenedContext.fetch(FetchDescriptor<Window>())
+        XCTAssertEqual(windows.map(\.id), [windowID])
+        XCTAssertEqual(windows.first?.workspace?.id, workspaceID)
+        XCTAssertEqual(windows.first?.syncGroup, 3)
+
+        let pageManagers = try reopenedContext.fetch(FetchDescriptor<PageManager>())
+        XCTAssertEqual(pageManagers.map(\.id), [windowID])
+        XCTAssertEqual(pageManagers.first?.window?.id, windowID)
+        XCTAssertEqual(pageManagers.first?.bibleDocument, "KJV")
+
+        let historyItems = try reopenedContext.fetch(FetchDescriptor<HistoryItem>())
+        XCTAssertEqual(historyItems.map(\.id), [historyID])
+        XCTAssertEqual(historyItems.first?.window?.id, windowID)
+        XCTAssertEqual(historyItems.first?.key, "Gen.1.1")
+
+        XCTAssertEqual(reopenedSettings.activeWorkspaceId, workspaceID)
+        XCTAssertEqual(
+            RemoteSyncWorkspaceFidelityStore(settingsStore: reopenedSettings)
+                .speakSettingsJSON(for: workspaceID),
+            #"{"sleepTimer":15}"#
+        )
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: reopenedSettings)
+        XCTAssertEqual(
+            logEntryStore.entry(
+                for: .workspaces,
+                tableName: "Workspace",
+                entityID1: .blob(uuidBlob(workspaceID)),
+                entityID2: .text("")
+            ),
+            oldLogEntry
+        )
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: reopenedSettings)
+        XCTAssertEqual(
+            patchStatusStore.status(for: .workspaces, sourceDevice: "pixel", patchNumber: 1),
+            oldPatchStatus
+        )
+        XCTAssertNil(
+            patchStatusStore.status(for: .workspaces, sourceDevice: "pixel", patchNumber: 2)
+        )
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: reopenedSettings).fingerprint(
+                for: .workspaces,
+                tableName: "Workspace",
+                entityID1: .blob(uuidBlob(workspaceID)),
+                entityID2: .text("")
+            ),
+            "durable-workspace-fingerprint"
+        )
+    }
+
+    /**
+     Runs one direction of the cross-store workspace rollback contract and verifies durable old state.
+
+     - Parameters:
+       - rejectedStore: Persistent store whose entity writes must reject the final save.
+       - temporaryDirectory: Directory used to reopen the same stores after the failed save.
+       - replacementSnapshot: Complete new Android workspace generation to stage.
+       - oldWorkspaceID: Durable workspace identifier that must survive.
+       - oldWindowID: Durable window/page-manager identifier that must survive.
+       - oldHistoryID: Durable local history identifier that must survive.
+       - replacementWorkspaceID: New workspace identifier that must not become durable.
+       - replacementWindowID: New window/page-manager identifier that must not become durable.
+     - Side effects: Opens the selected configuration read-only, attempts one restore, observes its
+       final save, then reopens both configurations writable for durable assertions.
+     - Failure modes: Rethrows fixture setup, SwiftData reopen, or fetch failures. XCTest assertions
+       fail when restore does not throw, does not roll back its context, or persists any mixed generation.
+     */
+    private func assertWorkspaceRestoreRollback(
+        whenRejecting rejectedStore: RejectedWorkspaceRestoreStore,
+        temporaryDirectory: URL,
+        replacementSnapshot: RemoteSyncAndroidWorkspaceSnapshot,
+        oldWorkspaceID: UUID,
+        oldWindowID: UUID,
+        oldHistoryID: UUID,
+        replacementWorkspaceID: UUID,
+        replacementWindowID: UUID
+    ) throws {
+        try autoreleasepool {
+            let rejectingStore = try makePersistentWorkspaceRestoreModelContainer(
+                in: temporaryDirectory,
+                graphAllowsSave: rejectedStore != .graph,
+                settingsAllowsSave: rejectedStore != .settings
+            )
+            let modelContext = ModelContext(rejectingStore.container)
+            modelContext.autosaveEnabled = false
+            let settingsStore = SettingsStore(modelContext: modelContext)
+
+            let finalSaveExpectation = expectation(
+                description: "Workspace replacement reaches final save with rejected \(rejectedStore.displayName)"
+            )
+            finalSaveExpectation.expectedFulfillmentCount = 1
+            finalSaveExpectation.assertForOverFulfill = true
+            let saveObserver = NotificationCenter.default.addObserver(
+                forName: ModelContext.willSave,
+                object: modelContext,
+                queue: nil
+            ) { _ in
+                finalSaveExpectation.fulfill()
+            }
+            defer { NotificationCenter.default.removeObserver(saveObserver) }
+
+            XCTAssertThrowsError(
+                try RemoteSyncWorkspaceRestoreService().replaceLocalWorkspaces(
+                    from: replacementSnapshot,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore
+                )
+            ) { error in
+                let cocoaError = error as NSError
+                XCTAssertEqual(cocoaError.domain, NSCocoaErrorDomain)
+                XCTAssertEqual(cocoaError.code, NSFileWriteNoPermissionError)
+            }
+            wait(for: [finalSaveExpectation], timeout: 1)
+            XCTAssertFalse(modelContext.hasChanges)
+        }
+
+        let reopenedStore = try makePersistentWorkspaceRestoreModelContainer(in: temporaryDirectory)
+        let reopenedContext = ModelContext(reopenedStore.container)
+        reopenedContext.autosaveEnabled = false
+        let reopenedSettings = SettingsStore(modelContext: reopenedContext)
+        let reopenedFidelity = RemoteSyncWorkspaceFidelityStore(settingsStore: reopenedSettings)
+
+        let reopenedWorkspaces = try reopenedContext.fetch(FetchDescriptor<Workspace>())
+        XCTAssertEqual(reopenedWorkspaces.map(\.id), [oldWorkspaceID])
+        XCTAssertEqual(reopenedWorkspaces.first?.name, "Durable Workspace")
+        XCTAssertEqual(reopenedWorkspaces.first?.contentsText, "Keep this graph")
+
+        let reopenedWindows = try reopenedContext.fetch(FetchDescriptor<Window>())
+        XCTAssertEqual(reopenedWindows.map(\.id), [oldWindowID])
+        XCTAssertEqual(reopenedWindows.first?.workspace?.id, oldWorkspaceID)
+        XCTAssertEqual(reopenedWindows.first?.syncGroup, 7)
+
+        let reopenedPageManagers = try reopenedContext.fetch(FetchDescriptor<PageManager>())
+        XCTAssertEqual(reopenedPageManagers.map(\.id), [oldWindowID])
+        XCTAssertEqual(reopenedPageManagers.first?.window?.id, oldWindowID)
+        XCTAssertEqual(reopenedPageManagers.first?.commentaryDocument, "MHC")
+        XCTAssertEqual(reopenedPageManagers.first?.commentaryAnchorOrdinal, 123)
+
+        let reopenedHistoryItems = try reopenedContext.fetch(FetchDescriptor<HistoryItem>())
+        XCTAssertEqual(reopenedHistoryItems.map(\.id), [oldHistoryID])
+        XCTAssertEqual(reopenedHistoryItems.first?.window?.id, oldWindowID)
+        XCTAssertEqual(reopenedHistoryItems.first?.key, "Gen.1.1")
+        XCTAssertEqual(reopenedHistoryItems.first?.anchorOrdinal, 4)
+
+        XCTAssertEqual(reopenedSettings.activeWorkspaceId, oldWorkspaceID)
+        XCTAssertEqual(reopenedFidelity.speakSettingsJSON(for: oldWorkspaceID), #"{"sleepTimer":15}"#)
+        XCTAssertNil(reopenedFidelity.speakSettingsJSON(for: replacementWorkspaceID))
+        XCTAssertEqual(
+            reopenedFidelity.pageManagerEntry(for: oldWindowID),
+            .init(
+                windowID: oldWindowID,
+                rawCurrentCategoryName: "COMMENTARY",
+                commentarySourceBookAndKey: "GEN.1.1",
+                dictionaryAnchorOrdinal: 11,
+                generalBookAnchorOrdinal: 12,
+                mapAnchorOrdinal: 13
+            )
+        )
+        XCTAssertNil(reopenedFidelity.pageManagerEntry(for: replacementWindowID))
+        XCTAssertEqual(reopenedFidelity.localHistoryItemID(for: 41), oldHistoryID)
+        XCTAssertNil(reopenedFidelity.localHistoryItemID(for: 99))
+    }
+
+    /**
+     Builds a fully populated native text-display value for Room workspace round-trip tests.
+
+     - Parameters:
+       - seed: Distinguishes workspace, page-manager, and global values.
+       - hiddenLabelID: Bookmark label carried by Android's JSON-backed hidden-label column.
+     - Returns: A value with every native field represented in Android workspace Room populated.
+     - Side effects: none.
+     - Failure modes: This deterministic fixture builder cannot fail.
+     */
+    private func completeTextDisplaySettings(
+        seed: Int,
+        hiddenLabelID: UUID
+    ) -> TextDisplaySettings {
+        var settings = TextDisplaySettings()
+        settings.fontSize = seed + 1
+        settings.fontFamily = "font-\(seed)"
+        settings.lineSpacing = seed + 2
+        settings.marginLeft = seed + 3
+        settings.marginRight = seed + 4
+        settings.maxWidth = seed + 5
+        settings.topMargin = seed + 6
+        settings.strongsMode = seed + 7
+        settings.showMorphology = true
+        settings.showFootNotes = false
+        settings.showFootNotesInline = true
+        settings.expandXrefs = false
+        settings.showXrefs = true
+        settings.showRedLetters = false
+        settings.showSectionTitles = true
+        settings.showVerseNumbers = false
+        settings.showVersePerLine = true
+        settings.showBookmarks = false
+        settings.showMyNotes = true
+        settings.justifyText = false
+        settings.hyphenation = true
+        settings.showPageNumber = false
+        settings.infiniteScroll = true
+        settings.nonStrongsWordItalic = false
+        settings.showMarkAsReadButton = true
+        settings.showTitleScrollButton = false
+        settings.showMemorizationIndicators = true
+        settings.showAiDocMarkers = false
+        settings.pageScrollAmount = TextDisplaySettings.pageScrollAmountValues[seed % 6]
+        settings.showOrdinals = true
+        settings.dayTextColor = seed + 8
+        settings.dayBackground = seed + 9
+        settings.dayNoise = seed + 10
+        settings.nightTextColor = seed + 11
+        settings.nightBackground = seed + 12
+        settings.nightNoise = seed + 13
+        settings.bookmarksHideLabels = [hiddenLabelID]
+        return settings
+    }
+
+    /**
      Creates an in-memory SwiftData container containing only the models needed for workspace restore tests.
 
      - Returns: Isolated in-memory model container for workspace restore assertions.
@@ -2493,6 +3896,58 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    /**
+     Creates production-shaped file-backed stores for durable workspace restore assertions.
+
+     Workspace graph models and local `Setting` rows use separate configurations, matching the app's
+     Cloud/local store boundary while omitting CloudKit itself. Calling this helper again with the
+     same directory reopens the same two SQLite stores.
+
+     - Parameters:
+       - directoryURL: Existing temporary directory that owns both store files.
+       - graphAllowsSave: Whether the workspace graph configuration accepts persistence writes.
+       - settingsAllowsSave: Whether the local settings configuration accepts persistence writes.
+     - Returns: Loaded model container plus graph/settings store URLs used by failure fixtures.
+     - Side effects: Creates or opens `WorkspaceGraph.store` and `WorkspaceSettings.store` beneath
+       `directoryURL`.
+     - Failure modes: Rethrows SwiftData container/configuration errors.
+     */
+    private func makePersistentWorkspaceRestoreModelContainer(
+        in directoryURL: URL,
+        graphAllowsSave: Bool = true,
+        settingsAllowsSave: Bool = true
+    ) throws -> (container: ModelContainer, graphStoreURL: URL, localStoreURL: URL) {
+        let graphModels: [any PersistentModel.Type] = [
+            Workspace.self,
+            Window.self,
+            PageManager.self,
+            HistoryItem.self,
+        ]
+        let localModels: [any PersistentModel.Type] = [Setting.self]
+        let schema = Schema(graphModels + localModels)
+        let graphStoreURL = directoryURL.appendingPathComponent("WorkspaceGraph.store")
+        let localStoreURL = directoryURL.appendingPathComponent("WorkspaceSettings.store")
+        let graphConfiguration = ModelConfiguration(
+            "WorkspaceRestoreGraph",
+            schema: Schema(graphModels),
+            url: graphStoreURL,
+            allowsSave: graphAllowsSave,
+            cloudKitDatabase: .none
+        )
+        let localConfiguration = ModelConfiguration(
+            "WorkspaceRestoreSettings",
+            schema: Schema(localModels),
+            url: localStoreURL,
+            allowsSave: settingsAllowsSave,
+            cloudKitDatabase: .none
+        )
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [graphConfiguration, localConfiguration]
+        )
+        return (container, graphStoreURL, localStoreURL)
     }
 
     /**
@@ -2517,6 +3972,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         patchNumber: Int64,
         fileTimestamp: Int64
     ) throws -> RemoteSyncStagedPatchArchive {
+        let schemaVersion = RemoteSyncAndroidDatabaseContract.schemaVersion(for: .workspaces)
         let archiveData = try RemoteSyncArchiveStagingService.gzip(Data(contentsOf: patchDatabaseURL))
         let archiveURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("android-workspaces-patch-\(UUID().uuidString).sqlite3.gz")
@@ -2526,10 +3982,10 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             patch: RemoteSyncDiscoveredPatch(
                 sourceDevice: sourceDevice,
                 patchNumber: patchNumber,
-                schemaVersion: 1,
+                schemaVersion: schemaVersion,
                 file: RemoteSyncFile(
-                    id: "/org.andbible.ios-sync-workspaces/\(sourceDevice)/\(patchNumber).sqlite3.gz",
-                    name: "\(patchNumber).sqlite3.gz",
+                    id: "/org.andbible.ios-sync-workspaces/\(sourceDevice)/\(patchNumber).\(schemaVersion).sqlite3.gz",
+                    name: "\(patchNumber).\(schemaVersion).sqlite3.gz",
                     size: Int64(archiveData.count),
                     timestamp: fileTimestamp,
                     parentID: "/org.andbible.ios-sync-workspaces/\(sourceDevice)",
@@ -2580,175 +4036,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         }
         defer { XCTAssertEqual(sqlite3_close(db), SQLITE_OK) }
 
-        let schemaStatements = [
-            #"""
-                CREATE TABLE "Workspace" (
-                    name TEXT NOT NULL,
-                    contentsText TEXT,
-                    id BLOB NOT NULL PRIMARY KEY,
-                    orderNumber INTEGER NOT NULL DEFAULT 0,
-                    unPinnedWeight REAL DEFAULT NULL,
-                    maximizedWindowId BLOB,
-                    primaryTargetLinksWindowId BLOB DEFAULT NULL,
-                    text_display_settings_strongsMode INTEGER DEFAULT NULL,
-                    text_display_settings_showMorphology INTEGER DEFAULT NULL,
-                    text_display_settings_showFootNotes INTEGER DEFAULT NULL,
-                    text_display_settings_showFootNotesInline INTEGER DEFAULT NULL,
-                    text_display_settings_expandXrefs INTEGER DEFAULT NULL,
-                    text_display_settings_showXrefs INTEGER DEFAULT NULL,
-                    text_display_settings_showRedLetters INTEGER DEFAULT NULL,
-                    text_display_settings_showSectionTitles INTEGER DEFAULT NULL,
-                    text_display_settings_showVerseNumbers INTEGER DEFAULT NULL,
-                    text_display_settings_showVersePerLine INTEGER DEFAULT NULL,
-                    text_display_settings_showBookmarks INTEGER DEFAULT NULL,
-                    text_display_settings_showMyNotes INTEGER DEFAULT NULL,
-                    text_display_settings_justifyText INTEGER DEFAULT NULL,
-                    text_display_settings_hyphenation INTEGER DEFAULT NULL,
-                    text_display_settings_topMargin INTEGER DEFAULT NULL,
-                    text_display_settings_fontSize INTEGER DEFAULT NULL,
-                    text_display_settings_fontFamily TEXT DEFAULT NULL,
-                    text_display_settings_lineSpacing INTEGER DEFAULT NULL,
-                    text_display_settings_bookmarksHideLabels TEXT DEFAULT NULL,
-                    text_display_settings_showPageNumber INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_marginLeft INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_marginRight INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_maxWidth INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayTextColor INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayBackground INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayNoise INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightTextColor INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightBackground INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightNoise INTEGER DEFAULT NULL,
-                    workspace_settings_enableTiltToScroll INTEGER DEFAULT 0,
-                    workspace_settings_enableReverseSplitMode INTEGER DEFAULT 0,
-                    workspace_settings_autoPin INTEGER DEFAULT 1,
-                    workspace_settings_restoreButtonsVisible INTEGER DEFAULT 1,
-                    workspace_settings_speakSettings TEXT DEFAULT NULL,
-                    workspace_settings_recentLabels TEXT DEFAULT NULL,
-                    workspace_settings_autoAssignLabels TEXT DEFAULT NULL,
-                    workspace_settings_autoAssignPrimaryLabel BLOB DEFAULT NULL,
-                    workspace_settings_studyPadCursors TEXT DEFAULT NULL,
-                    workspace_settings_hideCompareDocuments TEXT DEFAULT NULL,
-                    workspace_settings_limitAmbiguousModalSize INTEGER DEFAULT 0,
-                    workspace_settings_workspaceColor INTEGER DEFAULT NULL
-                )
-            """#,
-            #"""
-                CREATE TABLE "Window" (
-                    workspaceId BLOB NOT NULL,
-                    isSynchronized INTEGER NOT NULL,
-                    isPinMode INTEGER NOT NULL,
-                    isLinksWindow INTEGER NOT NULL,
-                    id BLOB NOT NULL PRIMARY KEY,
-                    orderNumber INTEGER NOT NULL,
-                    targetLinksWindowId BLOB DEFAULT NULL,
-                    syncGroup INTEGER NOT NULL DEFAULT 0,
-                    window_layout_state TEXT NOT NULL,
-                    window_layout_weight REAL NOT NULL,
-                    FOREIGN KEY(workspaceId) REFERENCES "Workspace"(id) ON DELETE CASCADE
-                )
-            """#,
-            #"""
-                CREATE TABLE "HistoryItem" (
-                    windowId BLOB NOT NULL,
-                    createdAt INTEGER NOT NULL,
-                    document TEXT NOT NULL,
-                    key TEXT NOT NULL,
-                    anchorOrdinal INTEGER DEFAULT NULL,
-                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                    FOREIGN KEY(windowId) REFERENCES "Window"(id) ON DELETE CASCADE
-                )
-            """#,
-            #"""
-                CREATE TABLE "PageManager" (
-                    windowId BLOB NOT NULL PRIMARY KEY,
-                    currentCategoryName TEXT NOT NULL,
-                    jsState TEXT,
-                    bible_document TEXT,
-                    bible_verse_versification TEXT NOT NULL,
-                    bible_verse_bibleBook INTEGER NOT NULL,
-                    bible_verse_chapterNo INTEGER NOT NULL,
-                    bible_verse_verseNo INTEGER NOT NULL,
-                    commentary_document TEXT,
-                    commentary_anchorOrdinal INTEGER DEFAULT NULL,
-                    commentary_sourceBookAndKey TEXT DEFAULT NULL,
-                    dictionary_document TEXT,
-                    dictionary_key TEXT,
-                    dictionary_anchorOrdinal INTEGER DEFAULT NULL,
-                    general_book_document TEXT,
-                    general_book_key TEXT,
-                    general_book_anchorOrdinal INTEGER DEFAULT NULL,
-                    map_document TEXT,
-                    map_key TEXT,
-                    map_anchorOrdinal INTEGER DEFAULT NULL,
-                    text_display_settings_strongsMode INTEGER DEFAULT NULL,
-                    text_display_settings_showMorphology INTEGER DEFAULT NULL,
-                    text_display_settings_showFootNotes INTEGER DEFAULT NULL,
-                    text_display_settings_showFootNotesInline INTEGER DEFAULT NULL,
-                    text_display_settings_expandXrefs INTEGER DEFAULT NULL,
-                    text_display_settings_showXrefs INTEGER DEFAULT NULL,
-                    text_display_settings_showRedLetters INTEGER DEFAULT NULL,
-                    text_display_settings_showSectionTitles INTEGER DEFAULT NULL,
-                    text_display_settings_showVerseNumbers INTEGER DEFAULT NULL,
-                    text_display_settings_showVersePerLine INTEGER DEFAULT NULL,
-                    text_display_settings_showBookmarks INTEGER DEFAULT NULL,
-                    text_display_settings_showMyNotes INTEGER DEFAULT NULL,
-                    text_display_settings_justifyText INTEGER DEFAULT NULL,
-                    text_display_settings_hyphenation INTEGER DEFAULT NULL,
-                    text_display_settings_topMargin INTEGER DEFAULT NULL,
-                    text_display_settings_fontSize INTEGER DEFAULT NULL,
-                    text_display_settings_fontFamily TEXT DEFAULT NULL,
-                    text_display_settings_lineSpacing INTEGER DEFAULT NULL,
-                    text_display_settings_bookmarksHideLabels TEXT DEFAULT NULL,
-                    text_display_settings_showPageNumber INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_marginLeft INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_marginRight INTEGER DEFAULT NULL,
-                    text_display_settings_margin_size_maxWidth INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayTextColor INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayBackground INTEGER DEFAULT NULL,
-                    text_display_settings_colors_dayNoise INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightTextColor INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightBackground INTEGER DEFAULT NULL,
-                    text_display_settings_colors_nightNoise INTEGER DEFAULT NULL,
-                    FOREIGN KEY(windowId) REFERENCES "Window"(id) ON DELETE CASCADE
-                )
-            """#,
-        ]
-        var allSchemaStatements = schemaStatements
-        if !logEntries.isEmpty {
-            allSchemaStatements.append(
-                #"""
-                    CREATE TABLE "LogEntry" (
-                        tableName TEXT NOT NULL,
-                        entityId1 BLOB NOT NULL,
-                        entityId2 BLOB NOT NULL DEFAULT '',
-                        type TEXT NOT NULL,
-                        lastUpdated INTEGER NOT NULL,
-                        sourceDevice TEXT NOT NULL,
-                        PRIMARY KEY(tableName, entityId1, entityId2)
-                    )
-                """#
-            )
-            allSchemaStatements.append(
-                #"CREATE INDEX "index_LogEntry_tableName_entityId1" ON "LogEntry" (tableName, entityId1)"#
-            )
-            allSchemaStatements.append(
-                #"CREATE INDEX "index_LogEntry_lastUpdated" ON "LogEntry" (lastUpdated)"#
-            )
-        }
-        if !syncStatuses.isEmpty {
-            allSchemaStatements.append(
-                #"""
-                    CREATE TABLE "SyncStatus" (
-                        sourceDevice TEXT NOT NULL,
-                        patchNumber INTEGER NOT NULL,
-                        sizeBytes INTEGER NOT NULL,
-                        appliedDate INTEGER NOT NULL,
-                        PRIMARY KEY(sourceDevice, patchNumber)
-                    )
-                """#
-            )
-        }
+        let allSchemaStatements = [RemoteSyncAndroidDatabaseContract.createSchemaSQL(for: .workspaces)]
 
         for statement in allSchemaStatements {
             XCTAssertEqual(
@@ -3321,7 +4609,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
  inspection, and lets each test queue deterministic list/upload responses without touching the
  network.
  */
-private actor WorkspaceMockRemoteSyncAdapter: RemoteSyncAdapting {
+private actor WorkspaceMockRemoteSyncAdapter: RemoteSyncAdapting, RemoteSyncConditionalFileUploading {
     private var fallbackListFilesResult: [RemoteSyncFile] = []
     private var listFilesResultsQueue: [[RemoteSyncFile]] = []
     private var uploadResults: [RemoteSyncFile] = []
@@ -3436,6 +4724,31 @@ private actor WorkspaceMockRemoteSyncAdapter: RemoteSyncAdapting {
             parentID: parentID,
             mimeType: contentType
         )
+    }
+
+    /**
+     Records create-only workspace patch bytes through the mock's established upload queue.
+
+     The fake never models a competing writer; exact-name conflict behavior is covered by the shared
+     reconciler tests and `RemoteSyncDurableOutboxTestAdapter`.
+     */
+    func uploadIfAbsent(
+        name: String,
+        fileURL: URL,
+        maximumByteCount: Int,
+        parentID: String,
+        contentType: String
+    ) async throws -> RemoteSyncConditionalUploadResult {
+        _ = try RemoteSyncBoundedFileIO.fingerprintRegularFile(
+            at: fileURL,
+            maximumByteCount: maximumByteCount
+        )
+        return .created(try await upload(
+            name: name,
+            fileURL: fileURL,
+            parentID: parentID,
+            contentType: contentType
+        ))
     }
 
     func delete(id: String) async throws {

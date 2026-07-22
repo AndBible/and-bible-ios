@@ -55,6 +55,33 @@ final class BridgeTypesTests: XCTestCase {
     }
 
     /**
+     Protects the nullable versification contract for generic non-verse-key source fragments.
+
+     The fixture represents a general-book key with no SWORD verse domain or ordinal range. The
+     encoded JSON must contain explicit `null` values rather than omitting either key, matching the
+     Vue nullable model and Android wire shape. A failure would make generic documents appear to
+     have a usable versification or produce a structurally different bridge payload. Encoding is
+     synchronous and touches no files, persistence, or shared state.
+     */
+    func testGenericNonVerseFragmentEncodesNullVersificationAndOrdinalRange() throws {
+        let fragment = OsisFragment(
+            xml: "<div>Preface</div>",
+            key: "preface",
+            keyName: "Preface",
+            v11n: nil,
+            bookCategory: "GENERAL_BOOK",
+            bookInitials: "GENBOOK",
+            osisRef: "preface",
+            ordinalRange: nil
+        )
+
+        let object = try bridgeJSONObject(fragment)
+
+        XCTAssertTrue(object["v11n"] is NSNull)
+        XCTAssertTrue(object["ordinalRange"] is NSNull)
+    }
+
+    /**
      Protects the package-level `OsisFragment` payload contract consumed by the Vue reader.
 
      The expected key set tracks `bibleview-js/src/types/client-objects.ts`; a failure means

@@ -50,6 +50,18 @@ export interface MultiFragmentDocument extends BaseDocument {
     state?: StrongsDocumentState
 }
 
+/**
+ * Describes the Bible range covered by one rendered commentary block.
+ *
+ * The display name is source-derived and must be rendered verbatim above commentary content;
+ * the OSIS bounds remain available to native and web consumers for exact navigation identity.
+ */
+export interface CommentaryRange {
+    startOsisRef: string
+    endOsisRef: string
+    name: string
+}
+
 
 interface BaseOsisDocument extends BaseDocument {
     osisFragment: OsisFragment
@@ -58,11 +70,11 @@ interface BaseOsisDocument extends BaseDocument {
     bookAbbreviation: string
     bookName: string
     key: string
-    v11n: string
+    v11n: Nullable<string>
     osisRef: string
     annotateRef: string
     genericBookmarks: GenericBookmark[]
-    ordinalRange: OrdinalRange
+    ordinalRange: Nullable<OrdinalRange>
     isNativeHtml: boolean
 }
 
@@ -76,6 +88,7 @@ export interface OsisDocument extends BaseOsisDocument {
     sourcePromptName?: Nullable<string>
     sourceModelName?: Nullable<string>
     aiDocMarkers?: AiDocMarker[]
+    commentaryRange?: Nullable<CommentaryRange>
 }
 
 export interface ErrorDocument extends BaseDocument {
@@ -86,6 +99,8 @@ export interface ErrorDocument extends BaseDocument {
 
 export interface BibleDocumentType extends BaseOsisDocument {
     type: "bible"
+    v11n: string
+    ordinalRange: OrdinalRange
     bookmarks: BibleBookmark[]
     aiDocMarkers?: AiDocMarker[]
     bibleBookName: string

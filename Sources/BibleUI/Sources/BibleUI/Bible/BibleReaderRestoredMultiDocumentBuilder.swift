@@ -41,8 +41,8 @@ struct BibleReaderRestoredMultiDocumentRequest {
  iOS equivalent so `BibleReaderController` no longer needs to know how Bible, dictionary, Strong's,
  and morphology children are rehydrated into Vue fragments.
 
- - Side effects: Reads SWORD module content and may temporarily move module cursors through
-   `SwordModule` inspection helpers that restore previous cursor state.
+ - Side effects: Reads exact installed SWORD or SQLite content. SWORD cursor helpers restore prior
+   state; SQLite readers use operation-owned read-only connections.
  - Failure modes: Returns `nil` when the persisted key is absent, malformed, references no
    installed source documents, or cannot be encoded. Individual bad children are dropped, matching
    Android's restored-child filtering behavior.
@@ -51,16 +51,10 @@ struct BibleReaderRestoredMultiDocumentRequest {
  */
 struct BibleReaderRestoredMultiDocumentBuilder {
     /// Resolves source modules named in Android `BookAndKey` children.
-    private let swordManager: SwordManager?
+    private let moduleResolver: BibleReaderInstalledModuleResolver
 
-    /// Active Bible module used for Android `null:` current-Bible children.
-    private let activeModule: SwordModule?
-
-    /// Active-versification-aware OSIS id to display-name lookup supplied by the controller.
-    private let bookNameForOsisId: (String) -> String?
-
-    /// Active-versification-aware testament classifier supplied by the controller.
-    private let isNewTestament: (String) -> Bool
+    /// Active Bible identity used for Android `null:` current-Bible children.
+    private let activeModuleName: String?
 
     /**
      Creates a restored-document builder for one reader pane.
@@ -68,21 +62,27 @@ struct BibleReaderRestoredMultiDocumentBuilder {
      - Parameters:
        - swordManager: SWORD manager containing installed source modules.
        - activeModule: Active Bible module used by Android `null:` current-Bible references.
-       - bookNameForOsisId: Closure that maps OSIS ids through the pane's active versification.
-       - isNewTestament: Closure that classifies display book names through the same catalog.
      - Side effects: None during construction.
      - Failure modes: Missing SWORD state is handled by returning `nil` from `build(pageKey:)`.
      */
     init(
         swordManager: SwordManager?,
-        activeModule: SwordModule?,
-        bookNameForOsisId: @escaping (String) -> String?,
-        isNewTestament: @escaping (String) -> Bool
+        activeModule: SwordModule?
     ) {
-        self.swordManager = swordManager
-        self.activeModule = activeModule
-        self.bookNameForOsisId = bookNameForOsisId
-        self.isNewTestament = isNewTestament
+        self.moduleResolver = BibleReaderInstalledModuleResolver(
+            swordManager: swordManager,
+            sqliteModules: []
+        )
+        self.activeModuleName = activeModule?.info.name
+    }
+
+    /** Creates a restored-document builder from the pane's shared global module resolver. */
+    init(
+        moduleResolver: BibleReaderInstalledModuleResolver,
+        activeModuleName: String?
+    ) {
+        self.moduleResolver = moduleResolver
+        self.activeModuleName = activeModuleName
     }
 
     /**
@@ -148,102 +148,62 @@ struct BibleReaderRestoredMultiDocumentBuilder {
     private func restoredFragment(
         for reference: AndroidSpecialDocumentIdentity.BookAndKeyReference
     ) -> (fragment: OsisFragment, usesStrongsContentType: Bool)? {
-        let sourceModule: SwordModule?
+        let installedSource: BibleReaderInstalledModuleSource?
         if let documentInitials = reference.documentInitials {
-            sourceModule = swordManager?.module(named: documentInitials)
+            installedSource = moduleResolver.module(named: documentInitials)
         } else {
-            sourceModule = activeModule
+            installedSource = activeModuleName.flatMap(moduleResolver.module(named:))
         }
 
-        if sourceModule?.info.category == .bible,
-           let osisReference = parseOsisRef(reference.key) {
+        if let scripture = installedSource?.scripture {
             return restoredBibleFragment(
-                for: osisReference,
-                sourceModule: sourceModule,
-                sourceDocumentInitials: reference.documentInitials
+                for: reference.key,
+                source: scripture
             ).map { ($0, false) }
         }
 
-        guard let sourceModule else { return nil }
-        switch sourceModule.info.category {
-        case .dictionary, .glossary:
-            return restoredDictionaryFragment(
-                for: reference.key,
-                sourceModule: sourceModule
-            )
-        default:
-            return nil
-        }
-    }
-
-    /**
-     Parses a persisted OSIS key into the shared reader reference value.
-
-     - Parameter osis: OSIS verse key saved in one Android `BookAndKey` child.
-     - Returns: Parsed reference coordinates, or `nil` if the key is not a single verse.
-     - Side effects: None.
-     - Failure modes: Malformed keys or unknown OSIS book ids return `nil` so restore can drop only
-       the bad child.
-     */
-    private func parseOsisRef(_ osis: String) -> OsisRef? {
-        let parts = osis.split(separator: ".").map(String.init)
-        guard parts.count >= 3,
-              let chapter = Int(parts[1]),
-              let verse = Int(parts[2]) else {
-            return nil
-        }
-
-        let osisId = parts[0]
-        guard let book = bookNameForOsisId(osisId) else { return nil }
-        return OsisRef(book: book, chapter: chapter, verse: verse, osisId: osisId)
+        guard let dictionary = installedSource?.dictionary else { return nil }
+        return restoredDictionaryFragment(
+            for: reference.key,
+            source: dictionary
+        )
     }
 
     /**
      Builds one restored Bible fragment for Android `Multi` document restore.
 
      - Parameters:
-       - ref: Parsed OSIS verse reference from the saved child key.
+       - persistedKey: Source passage saved in the Android `BookAndKey` child.
        - sourceModule: SWORD Bible module that owns the child key.
-       - sourceDocumentInitials: Persisted source initials. `nil` means Android's `null:` current
-         Bible marker, so the active Bible module identity is used.
-     - Returns: A Vue OSIS fragment, or `nil` if the source Bible cannot resolve the verse.
-     - Side effects: Reads the SWORD verse and restores the source module cursor afterward.
-     - Failure modes: Missing source module or missing verse ordinal returns `nil`.
+     - Returns: A Vue OSIS fragment preserving every source-canon verse and range in order, or
+       `nil` if the source Bible cannot resolve the complete passage.
+     - Side effects: Parses and reads the source passage while restoring the module cursor after
+       exact-entry inspection.
+     - Failure modes: Empty/malformed passages and partial source content return `nil` atomically.
      */
     private func restoredBibleFragment(
-        for ref: OsisRef,
-        sourceModule: SwordModule?,
-        sourceDocumentInitials: String?
+        for persistedKey: String,
+        source: BibleReaderInstalledScriptureSource
     ) -> OsisFragment? {
-        guard let sourceModule else { return nil }
-        let moduleName = sourceDocumentInitials ?? sourceModule.info.name
-        guard let ordinal = sourceModule.verseOrdinal(
-            osisBookId: ref.osisId,
-            chapter: ref.chapter,
-            verse: ref.verse
-        ) else {
-            return nil
+        let parsedKeys: [String]
+        switch source {
+        case .sword(let module):
+            parsedKeys = module.parseKeyList(persistedKey)
+        case .sqlite:
+            parsedKeys = persistedKey
+                .split(whereSeparator: { $0 == "," || $0 == ";" })
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
         }
-        let osisRef = "\(ref.osisId).\(ref.chapter).\(ref.verse)"
-        return OsisFragment(
-            xml: BibleReaderMultiReferenceDocumentBuilder.buildBibleMultiReferenceXML(
-                ref: ref,
-                module: sourceModule,
-                ordinal: ordinal
-            ),
-            key: "\(moduleName)--\(osisRef)",
-            keyName: ref.displayName,
-            v11n: "KJVA",
-            bookCategory: DocumentCategory.bible.rawValue,
-            bookInitials: moduleName,
-            bookAbbreviation: ref.osisId,
-            osisRef: osisRef,
-            isNewTestament: isNewTestament(ref.book),
-            features: OsisFeatures(),
-            hasStrongs: sourceModule.info.features.contains(.strongsNumbers),
-            ordinalRange: [ordinal, ordinal],
-            language: sourceModule.info.language.isEmpty ? "en" : sourceModule.info.language,
-            direction: sourceModule.info.isRightToLeft ? "rtl" : "ltr"
+        guard let references = BibleReaderMultiReferenceDocumentBuilder.concreteReferences(
+            parsedKeys: parsedKeys,
+            source: source
+        ) else { return nil }
+        return BibleReaderInstalledScriptureFragmentBuilder.build(
+            source: source,
+            references: references,
+            persistedOsisRef: persistedKey,
+            requiresCompleteContent: true
         )
     }
 
@@ -261,16 +221,16 @@ struct BibleReaderRestoredMultiDocumentBuilder {
      */
     private func restoredDictionaryFragment(
         for key: String,
-        sourceModule: SwordModule
+        source: BibleReaderInstalledDictionarySource
     ) -> (fragment: OsisFragment, usesStrongsContentType: Bool)? {
-        let keyOptions = restoredDictionaryLookupKeys(for: key, sourceModule: sourceModule)
-        guard let lookup = BibleReaderStrongsDocumentBuilder.lookupInModule(sourceModule, keyOptions: keyOptions) else {
+        let keyOptions = restoredDictionaryLookupKeys(for: key, source: source)
+        guard let lookup = source.lookup(keyOptions: keyOptions) else {
             return nil
         }
-        let isStrongsDefinition = sourceModule.info.features.contains(.hebrewDef)
-            || sourceModule.info.features.contains(.greekDef)
-        let isMorphologyDefinition = sourceModule.info.features.contains(.hebrewParse)
-            || sourceModule.info.features.contains(.greekParse)
+        let isStrongsDefinition = source.info.features.contains(.hebrewDef)
+            || source.info.features.contains(.greekDef)
+        let isMorphologyDefinition = source.info.features.contains(.hebrewParse)
+            || source.info.features.contains(.greekParse)
         let keyName = isStrongsDefinition
             ? BibleReaderStrongsDocumentBuilder.canonicalStrongsKeyName(
                 requested: key,
@@ -278,8 +238,8 @@ struct BibleReaderRestoredMultiDocumentBuilder {
                 rawEntry: lookup.rawEntry
             )
             : lookup.actualKey
-        let features = restoredDictionaryFeatures(for: sourceModule, keyName: keyName)
-        let strongsLinkPrefix = BibleReaderStrongsDocumentBuilder.strongsLinkPrefix(forModuleName: sourceModule.info.name)
+        let features = restoredDictionaryFeatures(for: source, keyName: keyName)
+        let strongsLinkPrefix = BibleReaderStrongsDocumentBuilder.strongsLinkPrefix(forModuleName: source.info.name)
             ?? BibleReaderStrongsDocumentBuilder.strongsLinkPrefix(for: key)
         let xml = lookup.isNativeHtml
             ? BibleReaderStrongsDocumentBuilder.buildDictionaryEntryHTML(
@@ -294,19 +254,19 @@ struct BibleReaderRestoredMultiDocumentBuilder {
             )
         let fragment = OsisFragment(
             xml: xml,
-            key: "\(sourceModule.info.name)--\(keyName)",
+            key: "\(source.info.name)--\(keyName)",
             keyName: keyName,
-            v11n: "KJVA",
+            v11n: source.versificationName,
             bookCategory: DocumentCategory.dictionary.rawValue,
-            bookInitials: sourceModule.info.name,
-            bookAbbreviation: BibleReaderStrongsDocumentBuilder.moduleDisplayLabel(sourceModule),
+            bookInitials: source.info.name,
+            bookAbbreviation: source.abbreviation,
             osisRef: keyName,
             isNewTestament: false,
             features: features,
             hasStrongs: features.type != nil,
-            ordinalRange: [0, 0],
-            language: sourceModule.info.language.isEmpty ? "en" : sourceModule.info.language,
-            direction: sourceModule.info.isRightToLeft ? "rtl" : "ltr",
+            ordinalRange: nil,
+            language: source.info.language.isEmpty ? "en" : source.info.language,
+            direction: source.info.isRightToLeft ? "rtl" : "ltr",
             isNativeHtml: lookup.isNativeHtml
         )
         return (fragment, isStrongsDefinition || isMorphologyDefinition)
@@ -327,9 +287,12 @@ struct BibleReaderRestoredMultiDocumentBuilder {
      - Side effects: None.
      - Failure modes: None; lookup failure is handled by the caller.
      */
-    private func restoredDictionaryLookupKeys(for key: String, sourceModule: SwordModule) -> [String] {
-        if sourceModule.info.features.contains(.hebrewDef)
-            || sourceModule.info.features.contains(.greekDef) {
+    private func restoredDictionaryLookupKeys(
+        for key: String,
+        source: BibleReaderInstalledDictionarySource
+    ) -> [String] {
+        if source.info.features.contains(.hebrewDef)
+            || source.info.features.contains(.greekDef) {
             return BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: key)
         }
         return [key]
@@ -346,11 +309,14 @@ struct BibleReaderRestoredMultiDocumentBuilder {
      - Side effects: None.
      - Failure modes: None.
      */
-    private func restoredDictionaryFeatures(for sourceModule: SwordModule, keyName: String) -> OsisFeatures {
-        if sourceModule.info.features.contains(.hebrewDef) {
+    private func restoredDictionaryFeatures(
+        for source: BibleReaderInstalledDictionarySource,
+        keyName: String
+    ) -> OsisFeatures {
+        if source.info.features.contains(.hebrewDef) {
             return OsisFeatures(type: "hebrew", keyName: keyName)
         }
-        if sourceModule.info.features.contains(.greekDef) {
+        if source.info.features.contains(.greekDef) {
             return OsisFeatures(type: "greek", keyName: keyName)
         }
         return OsisFeatures()

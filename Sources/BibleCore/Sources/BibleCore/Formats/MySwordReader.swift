@@ -1,222 +1,505 @@
-// MySwordReader.swift -- MySword SQLite database reader
+// MySwordReader.swift -- Android-compatible MySword SQLite database reader
 
 import Foundation
-import SQLite3
-
-/// SQLite destructor marker that copies Swift string buffers before `sqlite3_step` reads them.
-private let mySwordReaderSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 /**
- Reads MySword SQLite modules used by the Android ecosystem.
+ Reads MySword Bible, commentary, dictionary, and OTHER modules using Android's SQLite loader.
 
- The reader supports the three MySword file types:
- - `.bbl`: Bible text in a `Bible` table with `Scripture` rows keyed by book/chapter/verse
- - `.cmt`: commentary text in a `Commentary` table with the same positional keys
- - `.dct`: dictionary entries in a `Dictionary` table keyed by topic
-
- Shared module metadata is read from the `Details` table. The reader is intentionally
- read-only and does not mutate the source database.
-
- - Important: `MySwordReader` is marked `@unchecked Sendable` so higher-level import and module
-   management flows can store and pass reader instances across actor boundaries. The class does
-   not synchronize access to the underlying SQLite handle, so callers must confine each
-   instance's use to one actor, queue, or thread at a time and avoid overlapping method calls.
+ Android discovers every recursive `.mybible` candidate. The case-sensitive token before that
+ extension selects a known schema; every other token remains installed as JSword `OTHER` with no
+ content backend. `Details` supplies first-row metadata, and category-specific content schema remains
+ lazy until access. Each operation owns an independent read-only connection and statement lifecycle.
  */
-public final class MySwordReader: @unchecked Sendable {
-    /// Open SQLite handle for the source MySword database.
-    private var db: OpaquePointer?
-
-    /// Filesystem path to the opened MySword database file.
-    private let filePath: String
-
-    /**
-     Describes the supported MySword module families.
-
-     The raw values mirror the expected filename extensions used to detect the backing schema.
-     */
-    public enum FileType: String {
+public final class MySwordReader: SQLiteDocumentReading {
+    /** Filename token that selects an Android MySword schema or the visible OTHER fallback. */
+    public enum FileType: String, CaseIterable, Equatable, Sendable {
+        /// `*.bbl.mybible` Bible module.
         case bible = "bbl"
+
+        /// `*.cmt.mybible` commentary module.
         case commentary = "cmt"
+
+        /// `*.dct.mybible` dictionary module.
         case dictionary = "dct"
+
+        /// Any unrecognized case-sensitive token; Android registers it as `BookCategory.OTHER`.
+        case other = "other"
+
+        /// High-level document category corresponding to this filename token.
+        var category: DocumentCategory {
+            switch self {
+            case .bible: return .bible
+            case .commentary: return .commentary
+            case .dictionary: return .dictionary
+            case .other: return .generalBook
+            }
+        }
+
+        /** Resolves Android's category token or OTHER beneath a case-insensitive outer suffix. */
+        static func resolve(fileName: String) -> Self? {
+            guard fileName.lowercased().hasSuffix(".mybible") else { return nil }
+            let stem = (fileName as NSString).deletingPathExtension
+            return Self(rawValue: (stem as NSString).pathExtension) ?? .other
+        }
     }
 
-    /// Detected module type derived from the MySword filename extension.
+    /// Open validated MySword database.
+    private let database: SQLiteDocumentDatabase
+
+    /// Detected module family derived from the compound filename suffix.
     public let fileType: FileType
 
-    /// User-visible module description loaded from the `Details` table.
-    public private(set) var moduleDescription: String = ""
+    /// Validated immutable metadata suitable for later backend catalog integration.
+    public let metadata: SQLiteDocumentMetadata
 
-    /// Module language code loaded from the `Details` table.
-    public private(set) var language: String = "en"
+    /// Filename-selected MySword content category.
+    public var category: DocumentCategory { metadata.category }
+
+    /// User-visible module description retained for existing callers.
+    public var moduleDescription: String { metadata.description }
+
+    /// Module language retained for existing callers.
+    public var language: String { metadata.language }
 
     /**
-     Opens a MySword module in read-only mode.
+     Opens one Android-visible MySword database and reads its first metadata row.
 
-     - Parameter filePath: Filesystem path to a `.bbl`, `.cmt`, or `.dct` file.
-     - Note: Initialization fails when the extension does not match a supported MySword type or
-       when SQLite cannot open the database read-only.
+     - Parameter fileURL: Readable file ending in `.mybible`. Android matches the outer suffix
+       case-insensitively, requires exact lowercase known category tokens, and maps every other token
+       to an installed OTHER book.
+     - Side effects: Opens and closes one read-only SQLite handle to validate metadata.
+     - Throws: `SQLiteDocumentReaderError` for a missing outer suffix, invalid SQLite, or an
+       absent/unreadable first `Details` row. Content schema failures remain lazy.
      */
-    public init?(filePath: String) {
-        self.filePath = filePath
-
-        // Detect file type from extension
-        let ext = (filePath as NSString).pathExtension.lowercased()
-        switch ext {
-        case "bbl": self.fileType = .bible
-        case "cmt": self.fileType = .commentary
-        case "dct": self.fileType = .dictionary
-        default: return nil
+    public init(fileURL: URL) throws {
+        guard let fileType = FileType.resolve(fileName: fileURL.lastPathComponent) else {
+            throw SQLiteDocumentReaderError.unsupportedFileName(
+                format: .mySword,
+                fileName: fileURL.lastPathComponent
+            )
         }
 
-        // Open database
-        guard sqlite3_open_v2(filePath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            return nil
-        }
+        let database = try SQLiteDocumentDatabase(url: fileURL)
+        let details = try database.firstDetailsRow(format: .mySword)
 
-        loadMetadata()
-    }
-
-    deinit {
-        sqlite3_close(db)
+        self.database = database
+        self.fileType = fileType
+        self.metadata = Self.metadata(
+            details: details,
+            databaseURL: database.url,
+            fileType: fileType
+        )
     }
 
     /**
-     Returns one verse from a MySword Bible module.
+     Preserves the original failable path initializer for current callers.
+
+     - Parameter filePath: Filesystem path to an Android-named MySword database.
+     - Side effects: Opens a read-only SQLite handle on success.
+     - Failure modes: Returns `nil` for every structured initialization error; catalog code should
+       use `init(fileURL:)` when diagnostics are needed.
+     */
+    public convenience init?(filePath: String) {
+        try? self.init(fileURL: URL(fileURLWithPath: filePath))
+    }
+
+    /**
+     Recursively discovers every filename Android passes to the MySword loader.
+
+     - Parameter directoryURL: MySword module directory.
+     - Returns: Readable regular descendants ending in `.mybible`, including generic and
+       uppercase-category candidates that Android installs as OTHER books.
+     - Side effects: Traverses the filesystem but does not open candidate databases.
+     - Failure modes: Missing or unreadable directories return an empty array.
+     */
+    public static func discover(in directoryURL: URL) -> [URL] {
+        SQLiteDocumentDiscovery.recursiveFiles(in: directoryURL) {
+            $0.lowercased().hasSuffix(".mybible")
+        }
+    }
+
+    /**
+     Returns deterministic keys from the selected Android MySword content table.
+
+     Commentary rows expose their start verse because range coverage is evaluated during lookup.
+
+     - Returns: Typed keys ordered by coordinate or dictionary word.
+     - Side effects: Reads the open SQLite database.
+     - Throws: `SQLiteDocumentReaderError.queryFailed` on SQLite failure.
+     */
+    public func keys() throws -> [SQLiteDocumentKey] {
+        switch fileType {
+        case .bible:
+            return try database.rows(
+                "SELECT Book, Chapter, Verse FROM Bible ORDER BY Book, Chapter, Verse"
+            ) { statement in
+                .verse(
+                    book: try database.integer(statement, column: 0),
+                    chapter: try database.integer(statement, column: 1),
+                    verse: try database.integer(statement, column: 2)
+                )
+            }
+        case .commentary:
+            return try database.rows(
+                """
+                SELECT DISTINCT Book, Chapter, FromVerse
+                FROM Commentary
+                ORDER BY Book, Chapter, FromVerse
+                """
+            ) { statement in
+                .verse(
+                    book: try database.integer(statement, column: 0),
+                    chapter: try database.integer(statement, column: 1),
+                    verse: try database.integer(statement, column: 2)
+                )
+            }
+        case .dictionary:
+            return try database.rows("SELECT Word FROM Dictionary") { statement in
+                .dictionary(try database.text(statement, column: 0))
+            }
+        case .other:
+            return []
+        }
+    }
+
+    /**
+     Streams distinct MySword Bible chapters with constant transient row memory.
+
+     - Parameter body: Consumer receiving source book and chapter values in numeric order.
+     - Side effects: Executes one read-only `Bible` query on an operation-owned connection.
+     - Throws: Shared query, cancellation, coercion, CursorWindow, or consumer failures.
+     */
+    public func forEachBibleChapter(_ body: (Int, Int) throws -> Bool) throws {
+        guard fileType == .bible else { return }
+        do {
+            try database.consumeRows(
+                """
+                SELECT DISTINCT Book, Chapter
+                FROM Bible
+                ORDER BY Book, Chapter
+                """,
+                transform: { statement in
+                    (
+                        try database.integer(statement, column: 0),
+                        try database.integer(statement, column: 1)
+                    )
+                },
+                consume: {
+                    guard try body($0.0, $0.1) else {
+                        throw SQLiteDocumentChapterIterationStop.requested
+                    }
+                }
+            )
+        } catch SQLiteDocumentChapterIterationStop.requested {
+            return
+        }
+    }
+
+    /**
+     Streams books satisfying Android's `DocumentBibleBooks` 1:1-or-1:2 containment probe.
+
+     Commentary predicates mirror `MySwordBook.indexOfCommentary`; dictionary and OTHER books have
+     no Bible navigation entries.
+
+     - Parameter body: Consumer receiving each matching one-based MySword book number.
+     - Side effects: Executes at most one read-only query and may emit duplicate book numbers.
+     - Throws: Shared query, cancellation, coercion, CursorWindow, or consumer failures.
+     */
+    public func forEachNavigationBookNumber(_ body: (Int) throws -> Void) throws {
+        switch fileType {
+        case .bible:
+            try database.consumeRows(
+                "SELECT Book FROM Bible WHERE Chapter = 1 AND (Verse = 1 OR Verse = 2)",
+                transform: { try database.integer($0, column: 0) },
+                consume: body
+            )
+        case .commentary:
+            try database.consumeRows(
+                """
+                SELECT Book FROM Commentary WHERE
+                    (Chapter = 1 AND FromVerse <= 1 AND ToVerse >= 1) OR
+                    (Chapter = 1 AND FromVerse = 1 AND (ToVerse IS NULL OR ToVerse = 0)) OR
+                    (Chapter = 1 AND FromVerse <= 2 AND ToVerse >= 2) OR
+                    (Chapter = 1 AND FromVerse = 2 AND (ToVerse IS NULL OR ToVerse = 0))
+                """,
+                transform: { try database.integer($0, column: 0) },
+                consume: body
+            )
+        case .dictionary, .other:
+            return
+        }
+    }
+
+    /**
+     Resolves one key using Android's MySword content columns and range predicates.
+
+     All returned text passes through Android's MySword tag transformer, including dictionary and
+     commentary data. Missing or category-incompatible keys return `nil`.
+
+     - Parameter key: Typed verse or dictionary key.
+     - Returns: Resolved transformed content, or `nil` when no matching row exists.
+     - Side effects: Reads the open SQLite database.
+     - Throws: `SQLiteDocumentReaderError.queryFailed` on SQLite failure.
+     */
+    public func content(for key: SQLiteDocumentKey) throws -> SQLiteDocumentContent? {
+        let rawText: String?
+        switch (fileType, key) {
+        case (.bible, .verse(let book, let chapter, let verse)):
+            rawText = try database.firstText(
+                "SELECT Scripture FROM Bible WHERE Book = ? AND Chapter = ? AND Verse = ?",
+                bindings: [.coordinate(book), .coordinate(chapter), .coordinate(verse)]
+            )
+        case (.commentary, .verse(let book, let chapter, let verse)):
+            rawText = try commentaryText(book: book, chapter: chapter, verse: verse)
+        case (.dictionary, .dictionary(let word)):
+            rawText = try database.firstText(
+                "SELECT Data FROM Dictionary WHERE Word = ?",
+                bindings: [.text(word)]
+            )
+        default:
+            rawText = nil
+        }
+        return rawText.map {
+            SQLiteDocumentContent(key: key, text: Self.transformMySwordTags($0))
+        }
+    }
+
+    /**
+     Returns one MySword Bible verse through the original nonthrowing API.
 
      - Parameters:
-       - book: One-based book number as stored by the MySword `Bible` table.
+       - book: One-based MySword book number.
        - chapter: One-based chapter number.
        - verse: One-based verse number.
-     - Returns: Verse content as stored in the `Scripture` column, or `nil` when absent.
+     - Returns: Android-transformed Scripture content, or `nil` when absent/error.
+     - Side effects: Reads the open SQLite database.
+     - Failure modes: SQLite errors are collapsed to `nil` for legacy compatibility.
      */
     public func getVerse(book: Int, chapter: Int, verse: Int) -> String? {
         guard fileType == .bible else { return nil }
-
-        let query = "SELECT Scripture FROM Bible WHERE Book = ? AND Chapter = ? AND Verse = ?"
-        return executeTextQuery(query, params: [book, chapter, verse])
+        return (try? content(for: .verse(book: book, chapter: chapter, verse: verse)))?.text
     }
 
     /**
-     Returns a full chapter from a MySword Bible module.
+     Returns a full MySword Bible chapter through the original tuple API.
 
      - Parameters:
-       - book: One-based book number as stored by the MySword `Bible` table.
+       - book: One-based MySword book number.
        - chapter: One-based chapter number.
-     - Returns: Verse-number/text tuples ordered by verse.
+     - Returns: Verse/text tuples ordered by verse.
+     - Side effects: Reads the open SQLite database.
+     - Failure modes: Wrong categories or SQLite failures return an empty array.
      */
     public func getChapter(book: Int, chapter: Int) -> [(verse: Int, text: String)] {
-        guard fileType == .bible else { return [] }
-
-        let query = "SELECT Verse, Scripture FROM Bible WHERE Book = ? AND Chapter = ? ORDER BY Verse"
-        var results: [(Int, String)] = []
-
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_int(stmt, 1, Int32(book))
-        sqlite3_bind_int(stmt, 2, Int32(chapter))
-
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let verseNum = Int(sqlite3_column_int(stmt, 0))
-            let text = String(cString: sqlite3_column_text(stmt, 1))
-            results.append((verseNum, text))
-        }
-
-        return results
+        (try? chapterContent(book: book, chapter: chapter)) ?? []
     }
 
     /**
-     Returns commentary text for one verse-position key.
+     Reads a MySword Bible chapter in one query without duplicate-coordinate rescans.
 
      - Parameters:
-       - book: One-based book number as stored by the `Commentary` table.
+       - book: One-based source book number bound as Android text.
+       - chapter: One-based chapter number bound as Android text.
+     - Returns: First database row per distinct verse, transformed and sorted by verse number.
+     - Side effects: Executes one read-only query on an operation-owned connection.
+     - Throws: Shared query, cancellation, coercion, or CursorWindow errors.
+     */
+    public func chapterContent(book: Int, chapter: Int) throws -> [(verse: Int, text: String)] {
+        guard fileType == .bible else { return [] }
+        var firstTextByVerse: [Int: String] = [:]
+        try database.consumeRows(
+            "SELECT Verse, Scripture FROM Bible WHERE Book = ? AND Chapter = ?",
+            bindings: [.coordinate(book), .coordinate(chapter)],
+            transform: { statement in
+                (
+                    verse: try database.integer(statement, column: 0),
+                    text: try database.text(statement, column: 1)
+                )
+            },
+            consume: { row in
+                guard firstTextByVerse[row.verse] == nil else { return }
+                firstTextByVerse[row.verse] = Self.transformMySwordTags(row.text)
+            }
+        )
+        return firstTextByVerse.keys.sorted().map { verse in
+            (verse, firstTextByVerse[verse] ?? "")
+        }
+    }
+
+    /**
+     Returns MySword commentary covering one verse through the original API.
+
+     - Parameters:
+       - book: One-based MySword book number.
        - chapter: One-based chapter number.
        - verse: One-based verse number.
-     - Returns: Commentary HTML/text, or `nil` when no row exists.
+     - Returns: Android-joined and tag-transformed commentary, or `nil` when absent/error.
+     - Side effects: Reads the open SQLite database.
+     - Failure modes: Wrong categories or SQLite failures return `nil`.
      */
     public func getCommentary(book: Int, chapter: Int, verse: Int) -> String? {
         guard fileType == .commentary else { return nil }
-        let query = "SELECT Commentary FROM Commentary WHERE Book = ? AND Chapter = ? AND Verse = ?"
-        return executeTextQuery(query, params: [book, chapter, verse])
+        return (try? content(for: .verse(book: book, chapter: chapter, verse: verse)))?.text
     }
 
     /**
-     Returns a dictionary entry by topic key from a MySword dictionary module.
+     Returns a MySword dictionary definition by exact `Dictionary.Word` value.
 
-     - Parameter key: Topic string stored in the `Dictionary.Topic` column.
-     - Returns: Definition text, or `nil` when the topic is not present.
+     - Parameter key: Exact dictionary word.
+     - Returns: Android tag-transformed `Dictionary.Data`, or `nil` when absent/error.
+     - Side effects: Reads the open SQLite database.
+     - Failure modes: Wrong categories or SQLite failures return `nil`.
      */
     public func getDictionaryEntry(key: String) -> String? {
         guard fileType == .dictionary else { return nil }
-        let query = "SELECT Definition FROM Dictionary WHERE Topic = ?"
-
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, key, -1, mySwordReaderSQLiteTransient)
-
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        return String(cString: sqlite3_column_text(stmt, 0))
+        return (try? content(for: .dictionary(key)))?.text
     }
 
     /**
-     Lists all topic keys from a MySword dictionary module.
+     Returns all exact MySword dictionary words in deterministic order.
 
-     - Returns: Topic strings ordered alphabetically by the SQLite query.
+     - Returns: `Dictionary.Word` values, or an empty array for other categories/SQLite failure.
+     - Side effects: Reads the open SQLite database.
+     - Failure modes: SQLite errors are collapsed to an empty array.
      */
     public func dictionaryKeys() -> [String] {
-        guard fileType == .dictionary else { return [] }
-        let query = "SELECT Topic FROM Dictionary ORDER BY Topic"
-        var keys: [String] = []
-
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(stmt) }
-
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            keys.append(String(cString: sqlite3_column_text(stmt, 0)))
-        }
-
-        return keys
-    }
-
-    // MARK: - Private
-
-    /// Loads common module metadata from the MySword `Details` table.
-    private func loadMetadata() {
-        if let desc = getDetailValue("Description") {
-            moduleDescription = desc
-        }
-        if let lang = getDetailValue("Language") {
-            language = lang
+        guard fileType == .dictionary, let keys = try? keys() else { return [] }
+        return keys.compactMap { key in
+            guard case .dictionary(let word) = key else { return nil }
+            return word
         }
     }
 
-    /// Reads one key from the MySword `Details` table.
-    private func getDetailValue(_ key: String) -> String? {
-        let query = "SELECT Value FROM Details WHERE Name = ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, key, -1, mySwordReaderSQLiteTransient)
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        return String(cString: sqlite3_column_text(stmt, 0))
+    /** Projects Android's one-row `Details` metadata and filename-derived identity. */
+    private static func metadata(
+        details: [String: String],
+        databaseURL: URL,
+        fileType: FileType
+    ) -> SQLiteDocumentMetadata {
+        let baseName = databaseURL.deletingPathExtension().lastPathComponent
+        let initials = "MySword-" + SQLiteDocumentIdentity.sanitizedModuleName(baseName)
+        let description = details["description"] ?? ""
+        let abbreviation = details["abbreviation"] ?? initials
+        let strong = Int(details["strong"] ?? "0") == 1
+        return SQLiteDocumentMetadata(
+            sourceURL: databaseURL,
+            format: .mySword,
+            initials: initials,
+            abbreviation: abbreviation,
+            title: details["title"] ?? "",
+            description: description,
+            language: details["language"] ?? "eng",
+            version: "0.0",
+            category: fileType.category,
+            direction: .ltr,
+            hasStrongs: fileType == .bible && strong,
+            isStrongsDictionary: fileType == .dictionary && strong,
+            hasWordsOfChrist: false
+        )
     }
 
-    /// Executes a positional text query against the open MySword database.
-    private func executeTextQuery(_ query: String, params: [Int]) -> String? {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_finalize(stmt) }
+    /** Reads all MySword commentary rows Android considers to cover one verse. */
+    private func commentaryText(book: Int, chapter: Int, verse: Int) throws -> String? {
+        let fromVerse = chapter == 1 && verse == 1 ? 0 : verse
+        var result = ""
+        var hasRow = false
+        try database.consumeRows(
+            """
+            SELECT Data FROM Commentary
+            WHERE Book = ? AND (
+                (Chapter = ? AND FromVerse <= ? AND ToVerse >= ?) OR
+                (Chapter = ? AND FromVerse = ? AND (ToVerse IS NULL OR ToVerse = 0))
+            )
+            """,
+            bindings: [
+                .coordinate(book),
+                .coordinate(chapter),
+                .coordinate(verse),
+                .coordinate(fromVerse),
+                .coordinate(chapter),
+                .coordinate(verse),
+            ],
+            transform: { try database.text($0, column: 0) },
+            consume: { text in
+                if hasRow { result += ", " }
+                result += "<div>\(text)</div>"
+                hasRow = true
+            }
+        )
+        return result
+    }
 
-        for (index, param) in params.enumerated() {
-            sqlite3_bind_int(stmt, Int32(index + 1), Int32(param))
+    /**
+     Applies Android's MySword pseudo-tag conversions to raw module text.
+
+     The ordered replacements preserve Strong's lemmas, morphology, paired closing tags, and
+     Android's known self-closing marker set. Unknown text remains unchanged.
+
+     - Parameter text: Raw `Scripture` or `Data` column text.
+     - Returns: Android-compatible OSIS-like text.
+     - Side effects: None.
+     - Failure modes: None; regex patterns are fixed compile-time constants.
+     */
+    private static func transformMySwordTags(_ text: String) -> String {
+        var result = replacingMatches(
+            in: text,
+            pattern: #"([A-Za-z0-9_]+)<W([GH])([0-9]+)><WT([a-zA-Z0-9\-]+)( l="([^"]+)")?>"#
+        ) { groups in
+            let word = groups[1] ?? ""
+            let language = groups[2] ?? ""
+            let number = groups[3] ?? ""
+            let morphology = groups[4] ?? ""
+            return "<w lemma=\"strong:\(language)\(number)\" morph=\"strongMorph:\(morphology)\">\(word)</w>"
         }
+        result = replacingMatches(
+            in: result,
+            pattern: #"([A-Za-z0-9_]+)<W([GH][0-9]+)>(<W([GH][0-9]+)>)?(<W([GH][0-9]+)>)?"#
+        ) { groups in
+            let lemmas = [groups[2], groups[4], groups[6]]
+                .compactMap { $0 }
+                .map { "strong:\($0)" }
+                .joined(separator: " ")
+            return "<w lemma=\"\(lemmas)\">\(groups[1] ?? "")</w>"
+        }
+        result = replacingMatches(
+            in: result,
+            pattern: #"<WT([a-zA-Z0-9\-]+)( l="([^"]+)")?>"#
+        ) { groups in
+            let morphology = groups[1] ?? ""
+            return "<w morph=\"strongMorph:\(morphology)\">\(morphology)</w>"
+        }
+        result = replacingMatches(in: result, pattern: #"<(Ts|Fi|Fo|q|e|t|x|h|g)>"#) { groups in
+            "</\((groups[1] ?? "").uppercased())>"
+        }
+        return replacingMatches(
+            in: result,
+            pattern: #"<(CM|CL|PF[0-9]|Pl[0-9]|Cl|D|wh|wg|wt|br)>"#
+        ) { groups in
+            "<\(groups[1] ?? "")/>"
+        }
+    }
 
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        return String(cString: sqlite3_column_text(stmt, 0))
+    /** Replaces regex matches from the end so capture ranges remain stable during mutation. */
+    private static func replacingMatches(
+        in input: String,
+        pattern: String,
+        replacement: ([String?]) -> String
+    ) -> String {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return input }
+        let source = input as NSString
+        let matches = expression.matches(
+            in: input,
+            range: NSRange(location: 0, length: source.length)
+        )
+        var output = input
+        for match in matches.reversed() {
+            let groups = (0..<match.numberOfRanges).map { index -> String? in
+                let range = match.range(at: index)
+                return range.location == NSNotFound ? nil : source.substring(with: range)
+            }
+            guard let range = Range(match.range, in: output) else { continue }
+            output.replaceSubrange(range, with: replacement(groups))
+        }
+        return output
     }
 }

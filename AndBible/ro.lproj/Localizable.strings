@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Reglări pentru cei prigoniți";
 "discrete_mode" = "Ascunde simbolurile religioase";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "Despre";
 "version" = "Version";
 "export" = "Exportă";
@@ -440,10 +440,6 @@
 "calculator_pin_description" = "Codul PIN pentru a intra în aplicație cînd este afișat calculatorul.";
 "discrete_help_title" = "Citește asta înainte!";
 "discrete_help_summary" = "Instrucțiuni și informații despre versiunile discrete ale aplicației.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Comportamentul aplicației";
 "prefs_display_customization_cat" = "Aspectul aplicației";
@@ -514,7 +510,6 @@
 
 "prefs_volume_keys_scroll_title" = "Butoanele de volum răsfoiesc";
 "prefs_volume_keys_scroll_summary" = "Folosește butoanele sus / jos ale volumului sunetului pentru a răsfoi textul biblic";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Caracteristici experimentale";
 "prefs_experimental_features_summary" = "Alege caracteristicile experimentale pe care vrei să le activezi. Aceste caracteristici sunt încă în dezvoltare și pot fi modificate sau eliminate";
 "experimental_feature_bookmark_edit_actions" = "Modifică Semne de carte";
@@ -641,3 +636,385 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Există un plan de citire jsword/readingplan în cardul sd cu același nume ca un plan intern. Acesta nu poate fi inclus aici. Dă alt nume fișierului, lăsînd extensia fișierului ca .properties.";
 "error_no_content" = "Niciun conținut pentru versetul ales";
+
+/* Android shared translations */
+"calculator_par1" = "Înainte de a intra în aplicație, apare pe ecran calculatorul.";
+"calculator_par2" = "În el se pot face calcule standard, și dacă vrei să intri în aplicație, trebuie să introduci codul PIN (prestabilit este 1234) și apoi să apeși butonul „=”.";
+"calculator_par3" = "Poți crea un cod PIN personalizat prin opțiunea „PIN Calculator”.";
+"give_passphrase_for_module" = "Documentul %@ este cifrat și are nevoie de parolă pentru a fi deblocat";
+"show_unlock_info" = "Informații despre fișier și descifrare";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Se extrage fișierul din Zip…";
+"install_failed_reason" = "Instalarea modulului a eșuat din următorul motiv: %@.";
+"install_zip_successfull" = "Documentul a fost instalat cu succes";
+"module_install_phase_committing" = "Așteaptă. Se încarcă modulele din fișier.";
+"module_install_phase_downloading" = "Descarcă";
+"module_install_phase_queued" = "Așteaptă…";
+"storage_space_warning" = "Spațiu de stocare insuficient.";
+
+/* Android shared translations */
+"error_occurred" = "A apărut o eroare";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Memorare";
+"memorize_tab_reading" = "Citire";
+"reading_progress_active_days" = "zile active";
+"reading_progress_bible_heatmap" = "Prezentare generală a Bibliei";
+"reading_progress_calendar" = "Activitate de citire";
+"reading_progress_chapters_read" = "capitole citite";
+"reading_progress_cycle" = "Ciclul %d";
+"reading_progress_history_for" = "Progres citire pentru %1$@";
+"reading_progress_history_no_entries" = "Nu există intrări de citire pentru această selecție.";
+"reading_progress_history_title" = "Istoric citire";
+"reading_progress_history_version_unknown" = "Versiune necunoscută";
+"reading_progress_new_cycle" = "Ciclu nou";
+"reading_progress_new_cycle_confirm" = "Începi un nou ciclu de citire? Aceasta va porni urmărirea progresului de la zero, păstrând datele ciclului anterior.";
+"reading_progress_new_testament" = "Noul Testament";
+"reading_progress_next_cycle" = "Ciclul următor";
+"reading_progress_old_testament" = "Vechiul Testament";
+"reading_progress_overall" = "%@%% din Biblie citit";
+"reading_progress_percent_read_scale" = "Procent\nCitit";
+"reading_progress_previous_cycle" = "Ciclul anterior";
+"reading_progress_read_count_scale" = "Număr\nCitit";
+"reading_progress_title" = "Progres citire/memorare";
+
+/* Android shared translations */
+"conf_change_chapter" = "Schimbări de capitol";
+"conf_change_title" = "Titluri";
+"conf_replace_divinename" = "Înlocuiește numele divin cu Yahweh";
+"conf_save_playback_settings_to_bookmarks" = "Salvează reglările audio în semnele de carte";
+"conf_speak_auto_bookmark" = "Semn de carte automat";
+"conf_speak_footnotes" = "Note de subsol";
+"conf_speak_sleep_timer" = "Pune contorul de timp";
+"conf_speak_synchronize" = "Textul se mișcă cu vorbirea";
+"forward" = "Înainte";
+"playback_settings_title" = "Reglări audio";
+"rewind" = "Înapoi";
+"speak_bookmarks_menu_title" = "Ascultă de la un semn de carte";
+"speak_next" = "Înainte";
+"speak_previous" = "Înapoi";
+"speak_settings_title" = "Reglări generale audio";
+
+/* Android shared translations */
+"sleep_timer_title" = "Contor de timp în minute";
+"speak_beginning_of_passage" = "Alege începutul pasajului";
+"speak_ending_of_passage" = "Alege sfîrșitul pasajului";
+"speak_ending_verse_must_be_later" = "Versetul final trebuie să fie după versetul inițial";
+"speak_verse_range_to_repeat" = "Alege intervalul versetelor de repetat";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Limba nu e disponibilă.";
+
+/* Android shared translations */
+"description" = "Descriere";
+"errorTitle" = "A apărut o eroare";
+"error_executing_search" = "Căutare greșită";
+"export_something" = "Exportă %@";
+"import_items" = "Importă %@";
+"install_zip_module" = "Instalează documentul";
+"my_document_content_type_label" = "Tip de conținut";
+"my_document_create_title" = "Creează document nou";
+"my_document_import_document" = "Importă fișiere ca document";
+"my_document_new_page_name" = "Pagina %1$d";
+"my_document_rename_title" = "Redenumește documentul";
+"my_document_save_changes" = "Salvați modificările?";
+"okay" = "Aprobă";
+"overwrite" = "Da";
+"package_directory" = "Dosarul pachetelor (fișiere Zip)";
+"read" = "Citire";
+"reading_plan_set_current_day" = "Stabilește ca zi actuală…";
+"reading_plan_set_start_date" = "Alege data de începere…";
+"search_all_words" = "Toate cuvintele";
+"search_any_word" = "Fiecare cuvînt";
+"search_fts_query" = "Sintaxa brută a căutărilor";
+"search_phrase" = "Frază";
+"search_words_group_prompt" = "Caută versete";
+"show_notes" = "Arată notițele";
+"speak_book_changed" = "Carte modificată.";
+"speak_chapter_changed" = "Capitol";
+"success" = "Gata";
+"summary" = "Rezumat";
+"undo" = "Renunță";
+
+/* Android shared translations */
+"my_document_no_description" = "Fără descriere";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Nu s-a găsit în document";
+"my_document_cannot_delete_ai_documents" = "Documentele AI nu pot fi șterse cât timp conțin pagini. Ștergeți mai întâi paginile.";
+"my_document_create_page_title" = "Pagină nouă";
+"my_document_import_empty_selection" = "Niciun fișier importabil selectat";
+"system_items1" = "Mai mult";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Trebuie descărcată o Biblie care să conțină numerele Strong și să construiești indexul acesteia prin opțiunea „Caută”";
+
+/* Android shared translations */
+"add_model" = "Adaugă model";
+"agent_already_running" = "Un agent AI rulează deja. Așteptați sau opriți-l mai întâi.";
+"agent_log_cancelled" = "Anulat";
+"agent_log_completed" = "Finalizat";
+"agent_log_executing" = "Se execută: %@";
+"agent_log_idle" = "Asistent AI";
+"agent_log_iteration" = "Iterația %d";
+"agent_log_model_not_configured" = "Niciun model stabilit";
+"agent_log_tool_failed" = "Instrumentul %@ a eșuat";
+"agent_log_view_raw" = "Vizualizează jurnalul LLM brut";
+"agent_max_iterations_title" = "Număr maxim de iterații agent";
+"agent_permission_mode_summary" = "Controlează când este necesară confirmarea utilizatorului înainte de operațiile de scriere AI";
+"agent_permission_title" = "Permisiune agent";
+"ai_add_provider" = "Adaugă furnizor";
+"ai_advanced_category" = "Avansat";
+"ai_agent_notification_running" = "Agentul AI lucrează…";
+"ai_behavior_category" = "Comportament";
+"ai_connection_settings" = "Reglări conexiune";
+"ai_disclaimer_approach" = "AndBible folosește în principal AI pentru a procesa text din documentele pe care le-ai instalat — comentarii, dicționare și alte module — în loc să se bazeze pe datele de antrenament proprii ale modelului.";
+"ai_disclaimer_dialog_title" = "Instrumente AI — Informații importante";
+"ai_disclaimer_intro" = "Instrumentele AI pot îmbogăți considerabil experiența ta de studiu biblic și pot deschide noi modalități de a te angaja cu Scriptura.";
+"ai_disclaimer_point1" = "AI poate face greșeli, inclusiv „halucinații\" (afirmând cu încredere informații false sau fabricate). Nu accepta niciodată orb rezultatele sale.";
+"ai_disclaimer_point2" = "Răspunsurile AI pot reflecta prejudecăți din datele de antrenament, pot fi intenționat înșelătoare sau pot prezenta o perspectivă teologică particulară ca și cum ar fi neutră sau completă.";
+"ai_disclaimer_point3" = "Ești responsabil pentru modul în care folosești conținutul generat de AI. Verifică întotdeauna rezultatele față de Scriptură înainte de a te baza pe ele.";
+"ai_disclaimer_point4" = "AndBible se străduiește să facă verificarea ușoară (de ex. citate precise din surse în comentarii), dar responsabilitatea finală îți aparține întotdeauna ție.";
+"ai_disclaimer_point5" = "„Cercetați toate lucrurile și păstrați ce este bun.\" (1 Tesaloniceni 5:21)";
+"ai_disclaimer_point6" = "Aceste instrumente nu au suflet și nu au Duhul Sfânt. Sunt instrumente de procesare a textului, nu ghizi spirituali. Nu sunt potrivite pentru pregătirea directă a predicilor, devotionalelor sau a altor conținuturi spirituale fără o supraveghere umană atentă, rugăciune și discernământ.";
+"ai_disclaimer_point7" = "Folosite cu înțelepciune, pot beneficia mulți utilizatori și cazuri de utilizare. Dar dacă nu ești sigur că accepți riscurile, a alege să nu le folosești este de asemenea o alegere perfect valabilă.";
+"ai_disclaimer_point8" = "Datele tale sunt trimise la serverele providerului AI ales. Folosind o cheie API, accepți termenii și politica de confidențialitate a acelui provider. Modelele găzduite local sunt posibile, dar necesită mai multă expertiză tehnică și pot să nu producă rezultate la fel de bune ca modelele comerciale.";
+"ai_disclaimer_point9" = "Providerii AI percep taxe pentru utilizarea API. Estimările de cost afișate în AndBible sunt aproximative — verifică întotdeauna facturarea providerului tău pentru taxele reale.";
+"ai_disclaimer_responsibility" = "Totuși, acestea sunt instrumente puternice — iar o putere mare implică o mare responsabilitate. Te rugăm să ai în vedere cele de mai jos.";
+"ai_disclaimer_warning_title" = "Important: Citește înainte de a folosi instrumentele AI";
+"ai_doc_choose_page" = "Alege pagina documentului AI";
+"ai_document_filter_activity_title" = "Acces AI la documente";
+"ai_document_regenerate" = "Regenerează";
+"ai_hidden_status" = "ascuns";
+"ai_hide_prompt" = "Ascunde";
+"ai_language_title" = "Limba răspunsurilor AI";
+"ai_models_category" = "Modele";
+"ai_models_summary_none" = "Niciun model configurat";
+"ai_provider_api_format" = "Format API";
+"ai_provider_api_key" = "Cheie API";
+"ai_provider_api_key_not_set" = "Cheia API nu este setată";
+"ai_provider_delete_confirm" = "Ștergi furnizorul \"%1$@\"? Prompturile care folosesc acest furnizor vor reveni la cel implicit.";
+"ai_provider_edit" = "Modifică";
+"ai_provider_endpoint" = "Punct final API";
+"ai_provider_endpoint_description" = "Doar URL-ul de bază. AndBible adaugă automat \"/chat/completions\" (format OpenAI) sau \"/messages\" (format Anthropic). Listele de modele sunt preluate din \"/models\".";
+"ai_provider_name" = "Numele furnizorului";
+"ai_provider_saved" = "Furnizor salvat";
+"ai_provider_select_type" = "Selectează tipul furnizorului";
+"ai_providers_models_category" = "Furnizori și modele";
+"ai_providers_summary_none" = "Niciun furnizor configurat";
+"ai_regenerate_fresh_run" = "Rulare nouă (ignoră rezultatul anterior)";
+"ai_regenerate_instructions_hint" = "Instrucțiuni suplimentare (opțional)";
+"ai_regenerate_keep_previous" = "Păstrează versiunea anterioară";
+"ai_regenerate_prompt_not_found" = "Nu se poate regenera: comanda originală nu a fost găsită. Este posibil să fi fost ștearsă.";
+"ai_regenerate_title" = "Regenerează";
+"ai_settings" = "Reglări AI";
+"ai_setup_description" = "AndBible poate folosi AI pentru a traduce texte biblice, explica versete, crea rezumate și altele. Pentru a începe, configurați o conexiune la un furnizor de API compatibil OpenAI.";
+"ai_setup_title" = "Configurează AI";
+"ai_usage_category" = "Utilizare";
+"ask_model_before_run_title" = "Întreabă modelul înainte de rulare";
+"auto_hide_agent_log_title" = "Ascunde panoul AI la finalizare";
+"bookmarks_and_mynotes_title" = "Semne de carte și notițe";
+"built_in_prompt" = "Integrat";
+"built_in_prompt_notice" = "Aceasta este o comandă integrată și nu poate fi modificată. Folosește „Copiază pentru personalizare\" pentru a crea o copie editabilă.";
+"category_none" = "Fără categorie";
+"commentary_max_response_no_limit" = "Fără limită";
+"commentary_max_response_title" = "Limita dimensiunii răspunsului pentru comentariu";
+"copy_to_customize" = "Copiază pentru personalizare";
+"custom_agent_system_prompt_title" = "Prompt de sistem al agentului";
+"custom_system_prompt_custom" = "Personalizat";
+"custom_text_transform_system_prompt_title" = "Prompt de sistem pentru transformarea textului";
+"default_prompt_ask_question" = "Pune o întrebare";
+"default_prompt_ask_question_desc" = "Pune orice întrebare despre pasajul selectat";
+"default_prompt_bookmark_annotate" = "Semn de carte și adnotare";
+"default_prompt_bookmark_annotate_desc" = "Creează un semn de carte cu o notă de studiu generată de AI";
+"default_prompt_compare_translations" = "Compară traducerile";
+"default_prompt_compare_translations_desc" = "Arată cum redau textul diferitele traduceri instalate";
+"default_prompt_cross_references" = "Trimiteri";
+"default_prompt_cross_references_desc" = "Găsește și explică pasaje biblice înrudite";
+"default_prompt_custom" = "Comandă personalizată";
+"default_prompt_custom_desc" = "Execută o sarcină personalizată pe pasajul selectat";
+"default_prompt_custom_template" = "Urmează specificațiile de sarcină ale utilizatorului pentru pasajul biblic selectat.";
+"default_prompt_enhance_note" = "Îmbunătățește nota";
+"default_prompt_enhance_note_desc" = "Îmbunătățește gramatica, claritatea și lizibilitatea notei tale";
+"default_prompt_explain_verses" = "Explică versetele";
+"default_prompt_explain_verses_desc" = "Explică semnificația și contextul versetelor selectate";
+"default_prompt_explain_verses_studypad" = "Explică versetele → Notiță de studiu";
+"default_prompt_explain_verses_studypad_desc" = "Creează o notiță de studiu cu explicații verset cu verset și semne de carte";
+"default_prompt_study_layout" = "Deschide aspectul de studiu";
+"default_prompt_study_layout_desc" = "Deschide ferestre de comentariu și traducere paralelă pentru studiu";
+"default_prompt_summary" = "Rezumat";
+"default_prompt_summary_desc" = "Creează un rezumat concis al textului selectat";
+"default_prompt_thematic_study" = "Studiu tematic";
+"default_prompt_thematic_study_desc" = "Construiește o notițe de studiu cu pasaje și note pe tema centrală";
+"default_prompt_translate_to_language" = "Traduce în %@";
+"default_prompt_translate_to_ui_language_desc" = "Traduce textul documentului în limba interfeței aplicației";
+"default_prompt_word_study" = "Studiu de cuvânt";
+"default_prompt_word_study_desc" = "Analizează cuvintele originale ebraice/grecești";
+"default_prompt_workspace_assistant" = "Asistent spațiu de studiu";
+"default_prompt_workspace_assistant_desc" = "Gestionează ferestrele: creează, închide, rearanjează, schimbă documente";
+"delete_category" = "Șterge categoria";
+"delete_category_and_prompts" = "Șterge categoria și comenzile sale";
+"delete_category_keep_prompts" = "Mută comenzile la rădăcină și șterge categoria";
+"doc_type_addons" = "Extensii";
+"easy_setup_enter_api_key" = "Introdu cheia API";
+"easy_setup_success" = "Conexiune reușită!";
+"easy_setup_test_connection" = "Testează conexiunea";
+"easy_setup_testing" = "Se testează…";
+"easy_setup_title" = "Configurare rapidă";
+"help_bookmarks_text" = "Semnele de carte pot fi create prin alegerea unui text și apoi apăsînd „Semne de carte” din opțiunile care apar. Poți adăuga notițele tale la noul semn de carte atingînd textul din Biblie care acum este evidențiat. Există, de asemenea, un document special „Notițele mele” în comentarii care îți permite să vezi notițele tale într-o fereastră separată.";
+"help_memorize_text" = "Vizualizarea Memorare te ajută să înveți pasaje pe de rost. Folosește Estompare cuvinte, Amestecare cuvinte, Tastare cuvinte sau Ordonare cuvinte pentru a exersa. Exercițiile reușite marchează automat versetele ca memorate (aceasta poate fi dezactivat).";
+"help_read_more_link" = "Citește mai mult în manual";
+"hide_category" = "Ascunde din acțiunile AI";
+"llm_actions" = "Acțiuni AI";
+"llm_continue_iterations_message" = "Agentul AI a atins limita de %1$d iterații fără a finaliza. Continui cu încă %2$d iterații?";
+"llm_continue_iterations_title" = "Continui?";
+"llm_custom_input_price_title" = "Prețul intrării ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Introduceți ID-ul modelului";
+"llm_custom_output_price_title" = "Prețul ieșirii ($/Mtoken)";
+"llm_error_max_iterations" = "Numărul maxim de iterații (%1$d) atins fără finalizare";
+"llm_error_unknown" = "Eroare necunoscută";
+"llm_note_updated" = "Notiță actualizată";
+"llm_provider_custom" = "Personalizat (compatibil OpenAI)";
+"llm_reset_usage_confirm_message" = "Aceasta va șterge toate datele cumulative de utilizare.";
+"llm_reset_usage_confirm_title" = "Restabilești datele de utilizare?";
+"llm_reset_usage_title" = "Restabilește datele de utilizare";
+"llm_usage_summary_default" = "Fără date de utilizare";
+"llm_usage_summary_title" = "Utilizare tokeni";
+"manage_prompts" = "Gestionează prompturile AI";
+"manage_tool_permissions_title" = "Permisiuni instrumente";
+"model_pricing_summary" = "%1$@ intrare / %2$@ ieșire per Mtoken";
+"model_set_default" = "Setează ca model implicit";
+"move_category_down" = "Mută în jos";
+"move_category_up" = "Mută în sus";
+"new_category" = "Categorie nouă";
+"new_category_name" = "Numele categoriei";
+"new_prompt" = "Comandă nouă";
+"permission_allow_all" = "Permite tot";
+"permission_allow_all_session" = "Permite toate instrumentele în această sesiune";
+"permission_allow_for_session" = "Permite pentru această sesiune";
+"permission_allow_once" = "Permite o dată";
+"permission_always_allow_confirm" = "Ești sigur că vrei să permiți permanent \"%1$@\"?";
+"permission_always_allow_confirm_reset_hint" = "Poți restabili aceasta în Reglările AI.";
+"permission_always_ask" = "Întotdeauna întreabă";
+"permission_ask_once_per_run" = "Întreabă o dată per rulare";
+"permission_deny" = "Refuză";
+"permission_deny_all" = "Refuză tot";
+"permission_option_always_allow" = "Permite întotdeauna";
+"permission_option_always_deny" = "Refuză întotdeauna";
+"permission_status_default" = "Întreabă (implicit)";
+"prompt_auto_include_commentaries" = "Include automat comentariile";
+"prompt_auto_include_documents" = "Include automat documentele instalate";
+"prompt_bible_only" = "Numai documente biblice";
+"prompt_category" = "Categorie";
+"prompt_category_favorites" = "Favorite";
+"prompt_category_notes" = "Notițe";
+"prompt_category_study" = "Studiu";
+"prompt_category_uncategorized" = "Necategorizat";
+"prompt_context_note_editor" = "Editor de notițe";
+"prompt_context_text_selection" = "Selecție text";
+"prompt_context_verse_selection" = "Selecție verset";
+"prompt_context_window_menu" = "Meniul ferestrei";
+"prompt_context_workspace_menu" = "Meniul spațiului de studiu";
+"prompt_description" = "Descriere";
+"prompt_edit_before_run" = "Specifică înainte de rulare";
+"prompt_is_text_transformation" = "Transformare de text";
+"prompt_max_iterations_hint" = "Lasă gol pentru valoarea globală implicită";
+"prompt_max_iterations_unlimited" = "Nelimitat";
+"prompt_model_default" = "Implicit";
+"prompt_name" = "Nume";
+"prompt_no_document_creation" = "Fără creare de document";
+"prompt_permission_mode" = "Mod de permisiuni";
+"prompt_permission_mode_description" = "Controlează când este necesară confirmarea utilizatorului înainte ca AI să efectueze operații de scriere. Reglările per-instrument de mai jos pot suprascrie aceasta pentru instrumente individuale.";
+"prompt_permission_use_default" = "Folosește implicit";
+"prompt_show_in" = "Afișează în";
+"prompt_strict_context_matching" = "Cache dependent de context";
+"prompt_tab_advanced" = "Avansat";
+"prompt_tab_permissions" = "Permisiuni";
+"prompt_tab_prompt" = "Comandă";
+"prompt_template" = "Șablon de comandă";
+"prompt_tool_permissions" = "Permisiuni instrumente";
+"raw_log_delete_all" = "Șterge tot";
+"raw_log_error_indicator" = "Eroare";
+"raw_log_history_empty" = "Niciun jurnal salvat";
+"raw_log_history_title" = "Istoric jurnal AI";
+"raw_log_item_tokens" = "%1$@ intrare / %2$@ ieșire";
+"raw_log_older_1_month" = "Mai vechi de 1 lună";
+"raw_log_older_1_week" = "Mai vechi de 1 săptămână";
+"raw_log_older_3_months" = "Mai vechi de 3 luni";
+"raw_log_retention_summary_disabled" = "Dezactivat (păstrează tot)";
+"raw_log_retention_title" = "Ștergere automată jurnale vechi";
+"reset_all_ai_settings" = "Restabilește toate reglările AI";
+"reset_all_ai_settings_confirm_message" = "Aceasta va șterge cheia API, providerul, endpoint-ul, modelul și va restabili toate comenzile la implicit. Continui?";
+"reset_all_ai_settings_confirm_title" = "Restabilești toate reglările AI?";
+"reset_all_permissions" = "Restabilește toate";
+"reset_to_default" = "Resetează la implicit";
+"save_and_exit" = "Salvează";
+"select_llm_prompt" = "Selectează acțiunea AI";
+"select_model_before_run_title" = "Selectează modelul";
+"set_default_model_for_prompt" = "Setează ca model implicit pentru acest prompt";
+"show_category" = "Afișează în acțiunile AI";
+"specify_before_run_title" = "Specifică sarcina";
+"tool_add_bookmark_note" = "Adaugă notă la semn de carte";
+"tool_add_label_to_bookmark" = "Adaugă etichetă la semn de carte";
+"tool_add_my_document_page" = "Adaugă pagină în Documentul meu";
+"tool_add_study_pad_entry" = "Adaugă intrare în notița de studiu";
+"tool_category_bible_search" = "Biblie și căutare";
+"tool_category_bookmarks" = "Semne de carte";
+"tool_category_general_books" = "Cărți generale";
+"tool_category_labels" = "Etichete";
+"tool_category_my_documents" = "Documentele mele";
+"tool_category_study_pads" = "Notițe de studiu";
+"tool_category_windows" = "Ferestre";
+"tool_create_bookmark" = "Creează semn de carte";
+"tool_create_label" = "Creează etichetă";
+"tool_create_my_document" = "Creează Documentul meu";
+"tool_create_study_pad" = "Creează notiță de studiu";
+"tool_create_window" = "Creează fereastră";
+"tool_delete_bookmark" = "Șterge semn de carte";
+"tool_delete_label" = "Șterge etichetă";
+"tool_delete_my_document_page" = "Șterge pagina Documentului meu";
+"tool_edit_my_document_page" = "Modifică pagina Documentului meu";
+"tool_finish_with_my_document_page" = "Deschide pagina Documentul meu";
+"tool_finish_with_study_pad" = "Deschide notița de studiu";
+"tool_finish_without_document" = "Finalizează fără document";
+"tool_get_all_labels" = "Listează toate etichetele";
+"tool_get_bookmarks_for_verse" = "Obține semnele de carte pentru verset";
+"tool_get_bookmarks_with_label" = "Obține semnele de carte cu eticheta";
+"tool_get_commentaries" = "Citește comentarii";
+"tool_get_dictionary_entry" = "Caută intrare în dicționar";
+"tool_get_genbook_content" = "Citește conținutul cărții generale";
+"tool_get_genbook_keys" = "Listează cheile cărților generale";
+"tool_get_installed_documents" = "Listează documentele instalate";
+"tool_get_my_document_pages" = "Listează paginile Documentului meu";
+"tool_get_my_documents" = "Listează Documentele mele";
+"tool_get_study_pad_content" = "Citește conținutul notița de studiu";
+"tool_get_verse_content" = "Citește conținutul versetului";
+"tool_get_windows" = "Listează ferestrele";
+"tool_manage_window" = "Gestionează fereastra";
+"tool_remove_label_from_bookmark" = "Elimină eticheta din semnul de carte";
+"tool_search_bible" = "Caută în Biblie";
+"tool_search_by_strongs" = "Caută după numărul Strong";
+"tool_search_study_pads" = "Caută în notițele de studiu";
+"tool_set_document_title" = "Setează titlul documentului";
+"tool_set_window_document" = "Setează documentul ferestrei";
+"tool_update_bookmark_note" = "Actualizează nota semnului de carte";
+"tool_update_studypad_text_entry" = "Actualizează intrarea text din notița de studiu";
+"verse_tip" = "Pentru a alege un text din Biblie, ține degetul apăsat pe el";
+"watch_tutorial_video" = "Vezi instrucțiunile video (engleză)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Se regenerează documentul AI…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Accept și îmi asum întreaga responsabilitate";
+"ai_disclaimer_accept_title" = "Acceptă disclaimerul AI";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Reglări conexiune AI și prompturi";
+"prefs_features_cat" = "Caracteristici";

@@ -43,23 +43,38 @@
 </template>
 
 <script lang="ts" setup>
+/**
+ * Edits HTML note source and routes typed AI transformations through the native bridge.
+ *
+ * @param text - Current HTML source.
+ * @param noteEditorContext - Exact bookmark, StudyPad, or My Documents owner; nil hides AI.
+ * @param contentTypeName - Durable source representation sent to native writeback.
+ * @fires save - Emitted after debounced edits and before AI or close actions.
+ * @fires close - Emitted after the user exits or hands the value to native AI.
+ */
 import {computed, inject, onBeforeUnmount, onMounted, onUnmounted, ref, shallowRef, watch} from "vue";
 import {useCommon} from "@/composables";
 import {exec, init, queryCommandState} from "@/lib/pell/pell";
 import InputText from "@/components/modals/InputText.vue";
 import {useStrings} from "@/composables/strings";
 import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
-import {faBible, faIndent, faListOl, faListUl, faOutdent, faTimes,} from "@fortawesome/free-solid-svg-icons";
+import {faBible, faIndent, faListOl, faListUl, faOutdent, faRobot, faTimes,} from "@fortawesome/free-solid-svg-icons";
 import {icon} from "@fortawesome/fontawesome-svg-core";
 import {debounce} from "lodash";
 import ModalDialog from "@/components/modals/ModalDialog.vue";
 import {setupElementEventListener} from "@/utils";
 import {androidKey, customFeaturesKey, keyboardKey} from "@/types/constants";
+import type {NoteEditorContext} from "@/components/EditableText.vue";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     text: string
     contentAccessibilityLabel?: string
-}>();
+    noteEditorContext?: NoteEditorContext | null
+    contentTypeName?: string
+}>(), {
+    noteEditorContext: null,
+    contentTypeName: "HTML",
+});
 const emit = defineEmits(["save", "close"]);
 
 const android = inject(androidKey)!;
@@ -168,6 +183,23 @@ function save() {
 
 watch(editText, debounce(save, 2000))
 
+/** Saves current HTML, starts native AI transformation, and closes this editor. */
+const aiAction = {
+    icon: icon(faRobot).html,
+    title: "AI",
+    result: () => {
+        if (!props.noteEditorContext) return;
+        save();
+        android.noteEditorLlmAction(
+            props.noteEditorContext.entityType,
+            props.noteEditorContext.entityId,
+            editText.value,
+            props.contentTypeName,
+        );
+        emit("close");
+    },
+};
+
 const divider = {divider: true};
 
 function openDownloads() {
@@ -188,7 +220,8 @@ onMounted(() => {
         },
         contentAccessibilityLabel: props.contentAccessibilityLabel,
         actions: [
-            'bold', 'italic', 'underline', divider, oList, uList, divider, outdent, indent, divider, bibleLink, divider, close
+            'bold', 'italic', 'underline', divider, oList, uList, divider, outdent, indent,
+            divider, bibleLink, divider, ...(props.noteEditorContext ? [aiAction] : []), close
         ],
     });
     editor.value!.content.innerHTML = editText.value;

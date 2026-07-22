@@ -295,7 +295,7 @@
 /* Security — Settings for the persecuted */
 "settings_security" = "مظلوموں کے لیے ترتیبات";
 "discrete_mode" = "مذہبی علامات چھپائیں";
-"discrete_mode_description" = "Show a different icon in the launcher. On iOS, the app name cannot be changed at runtime.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "show_calculator" = "کیلکولیٹر";
 "show_calculator_description" = "Before entering the app, calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press = button. You can set up a custom PIN code by Calculator PIN setting.";
 "calculator_pin" = "کیلکولیٹر PIN";
@@ -303,10 +303,6 @@
 "calculator_pin_description" = "کیلکولیٹر دکھائے جانے پر ایپ میں داخل ہونے کے لیے PIN کوڈ۔";
 "discrete_help_title" = "پہلے یہ پڑھیں!";
 "discrete_help_summary" = "ترتیبات کے لیے ہدایات اور مخصوص خفیہ بلڈ کے بارے میں معلومات۔";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 /* About */
 "settings_language" = "زبان";
@@ -704,7 +700,6 @@
 
 "prefs_volume_keys_scroll_title" = "والیوم بٹن اسکرول";
 "prefs_volume_keys_scroll_summary" = "بائبل متن اسکرول کرنے کے لیے والیوم اوپر/نیچے استعمال کریں";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "تجرباتی خصوصیات";
 "prefs_experimental_features_summary" = "کون سی تجرباتی خصوصیات فعال کرنی ہیں منتخب کریں۔ یہ خصوصیات ابھی زیر تیاری ہیں اور تبدیل یا ہٹائی جا سکتی ہیں";
 "experimental_feature_bookmark_edit_actions" = "بک مارک ترمیم اعمال";
@@ -798,3 +793,390 @@
 "page_scroll_amount" = "صفحہ اسکرول مقدار";
 "ordinals" = "Ordinals";
 "error_no_content" = "منتخب آیت کے لیے کوئی مواد نہیں";
+
+/* Android shared translations */
+"calculator_par1" = "ایپ میں داخل ہونے سے پہلے کیلکولیٹر اسکرین دکھائی جاتی ہے۔";
+"calculator_par2" = "اس میں آپ معیاری حساب کر سکتے ہیں، اور جب ایپ میں داخل ہونا چاہیں تو اپنا PIN کوڈ (ڈیفالٹ 1234) ٹائپ کریں اور \"=\" بٹن دبائیں۔";
+"calculator_par3" = "آپ \"کیلکولیٹر PIN\" ترتیب سے کسٹم PIN کوڈ سیٹ کر سکتے ہیں۔";
+"give_passphrase_for_module" = "دستاویز %@ انکرپٹڈ ہے اور کھولنے کے لیے پاس فریز درکار ہے";
+"show_unlock_info" = "ماڈیول اور کھولنے کی معلومات";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "زپ فائل نکالی جا رہی ہے…";
+"install_failed_reason" = "ماڈیول انسٹال مندرجہ ذیل وجہ سے ناکام ہوئی: %@۔";
+"install_zip_successfull" = "ماڈیول کامیابی سے انسٹال ہو گیا";
+"module_install_phase_committing" = "براہ کرم انتظار کریں۔ فائل سے ماڈیول لوڈ ہو رہے ہیں۔";
+"module_install_phase_downloading" = "ڈاؤنلوڈ کریں";
+"module_install_phase_queued" = "براہ کرم انتظار کریں…";
+"storage_space_warning" = "مقامی اسٹوریج ناکافی ہے۔";
+
+/* Android shared translations */
+"error_occurred" = "ایک خرابی پیش آئی";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "حفظ";
+"memorize_tab_reading" = "پڑھنا";
+"reading_progress_active_days" = "سرگرم دن";
+"reading_progress_bible_heatmap" = "بائبل جائزہ";
+"reading_progress_calendar" = "پڑھنے کی سرگرمی";
+"reading_progress_chapters_read" = "ابواب پڑھے";
+"reading_progress_cycle" = "چکر %d";
+"reading_progress_history_for" = "%1$@ کے لیے پڑھنے کی پیشرفت";
+"reading_progress_history_no_entries" = "اس انتخاب کے لیے کوئی پڑھنے کا اندراج نہیں۔";
+"reading_progress_history_title" = "پڑھنے کی تاریخ";
+"reading_progress_history_version_unknown" = "نامعلوم ورژن";
+"reading_progress_new_cycle" = "نیا چکر";
+"reading_progress_new_cycle_confirm" = "نیا پڑھنے کا چکر شروع کریں؟ یہ آپ کی پیشرفت از سر نو ٹریک کرنا شروع کرے گا، جبکہ پچھلے چکر کا ڈیٹا محفوظ رہے گا۔";
+"reading_progress_new_testament" = "نیا عہدنامہ";
+"reading_progress_next_cycle" = "اگلا چکر";
+"reading_progress_old_testament" = "پرانا عہدنامہ";
+"reading_progress_overall" = "بائبل کا %@%% پڑھا گیا";
+"reading_progress_percent_read_scale" = "فیصد\nپڑھا";
+"reading_progress_previous_cycle" = "پچھلا چکر";
+"reading_progress_read_count_scale" = "پڑھنے\nکی تعداد";
+"reading_progress_title" = "پڑھنے/حفظ کی پیشرفت";
+
+/* Android shared translations */
+"conf_change_chapter" = "باب کی تبدیلیاں";
+"conf_change_title" = "عنوانات";
+"conf_replace_divinename" = "الہی نام کو Yahweh سے تبدیل کریں";
+"conf_save_playback_settings_to_bookmarks" = "پلے بیک ترتیبات بک مارکس میں محفوظ کریں";
+"conf_speak_auto_bookmark" = "خودکار بک مارکنگ";
+"conf_speak_footnotes" = "حاشیے";
+"conf_speak_sleep_timer" = "نیند ٹائمر سیٹ کریں";
+"conf_speak_synchronize" = "متن تقریر کے ساتھ چلتا ہے";
+"forward" = "آگے کریں";
+"playback_settings_title" = "پلے بیک ترتیبات";
+"rewind" = "پیچھے کریں";
+"speak_bookmarks_menu_title" = "بک مارک سے بولیں";
+"speak_next" = "اگلا";
+"speak_previous" = "پچھلا";
+"speak_settings_title" = "عمومی بولنے کی ترتیبات";
+
+/* Android shared translations */
+"sleep_timer_title" = "منٹوں میں نیند کا وقت";
+"speak_beginning_of_passage" = "اقتباس کا آغاز منتخب کریں";
+"speak_ending_of_passage" = "اقتباس کا اختتام منتخب کریں";
+"speak_ending_verse_must_be_later" = "اختتامی آیت شروع کی آیت سے بعد کی ہونی چاہیے";
+"speak_verse_range_to_repeat" = "دہرانے کے لیے آیت کی حد منتخب کریں";
+
+/* Android shared translations */
+"tts_lang_not_available" = "زبان دستیاب نہیں ہے۔";
+
+/* Android shared translations */
+"description" = "تفصیل";
+"errorTitle" = "ایک خرابی پیش آئی";
+"error_executing_search" = "غلط تلاش سوال";
+"export_something" = "%@ برآمد کریں";
+"import_items" = "%@ درآمد کریں";
+"install_zip_module" = "بائبل ماڈیول انسٹال کریں";
+"my_document_content_type_label" = "مواد کی قسم";
+"my_document_create_title" = "نئی دستاویز بنائیں";
+"my_document_import_document" = "فائلوں کو دستاویز کے طور پر درآمد کریں";
+"my_document_new_name" = "دستاویز %d";
+"my_document_new_page_name" = "صفحہ %1$d";
+"my_document_rename_title" = "دستاویز کا نام بدلیں";
+"my_document_save_changes" = "تبدیلیاں محفوظ کریں؟";
+"okay" = "ٹھیک ہے";
+"overwrite" = "ہاں";
+"package_directory" = "پیکیجز ڈائریکٹری (زپ فائلیں)";
+"read" = "پڑھیں";
+"reading_plan_set_current_day" = "موجودہ دن کے طور پر سیٹ کریں…";
+"reading_plan_set_start_date" = "شروع کی تاریخ سیٹ کریں…";
+"search_all_words" = "تمام الفاظ";
+"search_any_word" = "کوئی بھی لفظ";
+"search_fts_query" = "خام سوال نحو";
+"search_phrase" = "جملہ";
+"search_words_group_prompt" = "آیات تلاش کریں";
+"show_notes" = "نوٹس دکھائیں";
+"speak_book_changed" = "کتاب بدل گئی۔";
+"speak_chapter_changed" = "باب";
+"success" = "مکمل";
+"summary" = "خلاصہ";
+"undo" = "منسوخ کریں";
+
+/* Android shared translations */
+"my_document_no_description" = "کوئی تفصیل نہیں";
+
+/* Android shared translations */
+"error_key_not_in_document" = "دستاویز میں نہیں ملا";
+"my_document_cannot_delete_ai_documents" = "AI دستاویزات کو حذف نہیں کیا جا سکتا جب تک صفحات موجود ہوں۔ پہلے صفحات حذف کریں۔";
+"my_document_create_page_title" = "نیا صفحہ";
+"my_document_import_empty_selection" = "کوئی درآمد کرنے کے قابل فائل منتخب نہیں";
+"system_items1" = "مزید";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "آپ کو Strong's نمبروں پر مشتمل بائبل ڈاؤنلوڈ کرنا ہوگی اور تلاش کے ذریعے اس کا انڈیکس بنانا ہوگا";
+
+/* Android shared translations */
+"add_model" = "ماڈل شامل کریں";
+"agent_already_running" = "ایک AI ایجنٹ پہلے سے چل رہا ہے۔ براہ کرم انتظار کریں یا پہلے روکیں۔";
+"agent_log_cancelled" = "منسوخ";
+"agent_log_completed" = "مکمل";
+"agent_log_executing" = "چل رہا ہے: %@";
+"agent_log_idle" = "AI معاون";
+"agent_log_iteration" = "تکرار %d";
+"agent_log_model_not_configured" = "کوئی ماڈل ترتیب نہیں دیا گیا";
+"agent_log_tool_failed" = "ٹول %@ ناکام";
+"agent_log_view_raw" = "خام LLM لاگ دیکھیں";
+"agent_max_iterations_title" = "ایجنٹ کی زیادہ سے زیادہ تکرار";
+"agent_permission_mode_summary" = "کنٹرول کرتا ہے کہ AI لکھنے والے کام سے پہلے صارف کی تصدیق کب درکار ہے";
+"agent_permission_title" = "ایجنٹ اجازت";
+"ai_add_provider" = "فراہم کنندہ شامل کریں";
+"ai_advanced_category" = "جدید";
+"ai_agent_notification_running" = "AI ایجنٹ کام کر رہا ہے…";
+"ai_behavior_category" = "رویہ";
+"ai_connection_settings" = "کنکشن ترتیبات";
+"ai_disclaimer_approach" = "AndBible بنیادی طور پر AI کو آپ کی نصب شدہ دستاویزات — تفسیروں، لغات، اور دیگر ماڈیولز — کے متن کو پروسیس کرنے کے لیے استعمال کرتا ہے، بجائے ماڈل کے اپنے تربیتی ڈیٹا پر انحصار کرنے کے۔";
+"ai_disclaimer_dialog_title" = "AI ٹولز — اہم معلومات";
+"ai_disclaimer_intro" = "AI ٹولز آپ کے بائبل مطالعہ کے تجربے کو بہت بہتر بنا سکتے ہیں اور کلام پاک کے ساتھ مشغول ہونے کے نئے طریقے کھول سکتے ہیں۔";
+"ai_disclaimer_point1" = "AI غلطیاں کر سکتا ہے، بشمول \"ہیلوسینیشن\" (اعتماد کے ساتھ جھوٹی یا من گھڑت معلومات بیان کرنا)۔ اس کی پیداوار کو کبھی آنکھ بند کر کے قبول نہ کریں۔";
+"ai_disclaimer_point2" = "AI کے جوابات ان کے تربیتی ڈیٹا سے تعصبات کی عکاسی کر سکتے ہیں، جان بوجھ کر گمراہ کن ہو سکتے ہیں، یا کسی مخصوص الہیاتی نقطہ نظر کو غیر جانب دار یا مکمل کے طور پر پیش کر سکتے ہیں۔";
+"ai_disclaimer_point3" = "آپ AI سے تیار مواد استعمال کرنے کے ذمہ دار ہیں۔ ان پر انحصار کرنے سے پہلے ہمیشہ نتائج کو کلام پاک کے خلاف جانچیں۔";
+"ai_disclaimer_point4" = "AndBible تصدیق کو آسان بنانے کی کوشش کرتا ہے (مثلاً تفسیروں میں درست ذریعہ حوالہ جات)، لیکن آخری ذمہ داری ہمیشہ آپ پر ہے۔";
+"ai_disclaimer_point5" = "\"سب کچھ جانچو؛ جو اچھا ہو اسے تھامے رہو۔\" (1 تھسلنیکیوں 5:21)";
+"ai_disclaimer_point6" = "ان ٹولز کی کوئی روح نہیں اور روح القدس نہیں۔ وہ متن پروسیسنگ ٹولز ہیں، روحانی رہنما نہیں۔ وہ احتیاطی انسانی نگرانی، دعا اور فراست کے بغیر براہ راست خطبے، عقیدتی مواد، یا دیگر روحانی مواد تیار کرنے کے لیے موزوں نہیں ہیں۔";
+"ai_disclaimer_point7" = "عقلمندی سے استعمال کیے جائیں تو یہ بہت سے صارفین اور استعمالات کو فائدہ دے سکتے ہیں۔ لیکن اگر آپ خطرات قبول کرنے کے بارے میں غیر یقینی ہیں تو انہیں استعمال نہ کرنا بھی بالکل درست انتخاب ہے۔";
+"ai_disclaimer_point8" = "آپ کا ڈیٹا آپ کے منتخب AI فراہم کنندہ کے سرورز پر بھیجا جاتا ہے۔ API کلید استعمال کر کے آپ اس فراہم کنندہ کی شرائط اور رازداری پالیسی سے متفق ہوتے ہیں۔ خود میزبان ماڈل ممکن ہیں لیکن زیادہ تکنیکی مہارت درکار ہے اور تجارتی ماڈلز جتنے اچھے نتائج نہیں دے سکتے۔";
+"ai_disclaimer_point9" = "AI فراہم کنندگان API استعمال کا معاوضہ لیتے ہیں۔ AndBible میں دکھائے گئے لاگت کے تخمینے تقریبی ہیں — اصل معاوضوں کے لیے اپنے فراہم کنندہ کی بلنگ چیک کریں۔";
+"ai_disclaimer_responsibility" = "تاہم، وہ اب بھی طاقتور ٹولز ہیں — اور بڑی طاقت کے ساتھ بڑی ذمہ داری آتی ہے۔ براہ کرم مندرجہ ذیل باتیں ذہن میں رکھیں۔";
+"ai_disclaimer_warning_title" = "اہم: AI ٹولز استعمال کرنے سے پہلے پڑھیں";
+"ai_doc_choose_page" = "AI دستاویز صفحہ منتخب کریں";
+"ai_document_filter_activity_title" = "AI دستاویز رسائی";
+"ai_document_regenerate" = "دوبارہ بنائیں";
+"ai_hidden_status" = "پوشیدہ";
+"ai_hide_prompt" = "چھپائیں";
+"ai_language_title" = "AI جواب کی زبان";
+"ai_models_category" = "ماڈل";
+"ai_models_summary_none" = "کوئی ماڈل ترتیب نہیں دیا گیا";
+"ai_provider_api_format" = "API شکل";
+"ai_provider_api_key" = "API کلید";
+"ai_provider_api_key_not_set" = "API کلید سیٹ نہیں";
+"ai_provider_delete_confirm" = "فراہم کنندہ \"%1$@\" حذف کریں؟ اس فراہم کنندہ کو استعمال کرنے والے پرامپٹس ڈیفالٹ پر واپس آ جائیں گے۔";
+"ai_provider_edit" = "ترمیم کریں";
+"ai_provider_endpoint" = "API اینڈ پوائنٹ";
+"ai_provider_endpoint_description" = "صرف بنیادی URL۔ AndBible خودکار طور پر \"/chat/completions\" (OpenAI فارمیٹ) یا \"/messages\" (Anthropic فارمیٹ) شامل کرتا ہے۔ ماڈل کی فہرستیں \"/models\" سے حاصل کی جاتی ہیں۔";
+"ai_provider_name" = "فراہم کنندہ کا نام";
+"ai_provider_saved" = "فراہم کنندہ محفوظ ہو گیا";
+"ai_provider_select_type" = "فراہم کنندہ کی قسم منتخب کریں";
+"ai_providers_models_category" = "فراہم کنندگان اور ماڈل";
+"ai_providers_summary_none" = "کوئی فراہم کنندہ ترتیب نہیں دیا گیا";
+"ai_regenerate_fresh_run" = "نئی شروعات (پچھلا نتیجہ نظر انداز کریں)";
+"ai_regenerate_instructions_hint" = "اضافی ہدایات (اختیاری)";
+"ai_regenerate_keep_previous" = "پچھلا ورژن رکھیں";
+"ai_regenerate_prompt_not_found" = "دوبارہ نہیں بنا سکتے: اصل پرامپٹ نہیں ملا۔ شاید یہ حذف ہو گیا ہو۔";
+"ai_regenerate_title" = "دوبارہ بنائیں";
+"ai_settings" = "AI ترتیبات";
+"ai_setup_description" = "AndBible AI کو بائبل متن ترجمہ کرنے، آیات سمجھانے، خلاصے بنانے اور مزید کے لیے استعمال کر سکتا ہے۔ شروع کرنے کے لیے OpenAI سے مطابق API فراہم کنندہ سے کنکشن ترتیب دیں۔";
+"ai_setup_title" = "AI ترتیب دیں";
+"ai_usage_category" = "استعمال";
+"ask_model_before_run_title" = "چلانے سے پہلے ماڈل پوچھیں";
+"auto_hide_agent_log_title" = "مکمل ہونے پر AI پینل چھپائیں";
+"bookmarks_and_mynotes_title" = "بک مارکس اور میرے نوٹس";
+"built_in_prompt" = "بلٹ ان";
+"built_in_prompt_notice" = "یہ ایک بلٹ ان پرامپٹ ہے اور ترمیم نہیں کیا جا سکتا۔ قابل ترمیم کاپی بنانے کے لیے \"کسٹمائز کرنے کے لیے کاپی کریں\" استعمال کریں۔";
+"category_none" = "کوئی زمرہ نہیں";
+"commentary_max_response_no_limit" = "کوئی حد نہیں";
+"commentary_max_response_title" = "تفسیر جواب کا سائز حد";
+"copy_to_customize" = "کسٹمائز کرنے کے لیے کاپی کریں";
+"custom_agent_system_prompt_title" = "ایجنٹ سسٹم پرامپٹ";
+"custom_system_prompt_custom" = "کسٹم";
+"custom_text_transform_system_prompt_title" = "متن تبدیلی سسٹم پرامپٹ";
+"default_prompt_ask_question" = "سوال پوچھیں";
+"default_prompt_ask_question_desc" = "منتخب اقتباس کے بارے میں کوئی بھی سوال پوچھیں";
+"default_prompt_bookmark_annotate" = "بک مارک اور تشریح";
+"default_prompt_bookmark_annotate_desc" = "AI سے بنائے مطالعہ نوٹ کے ساتھ بک مارک بناتا ہے";
+"default_prompt_compare_translations" = "تراجم کا موازنہ کریں";
+"default_prompt_compare_translations_desc" = "مختلف نصب شدہ تراجم متن کیسے پیش کرتے ہیں دکھاتا ہے";
+"default_prompt_cross_references" = "کراس حوالہ جات";
+"default_prompt_cross_references_desc" = "متعلقہ بائبل اقتباسات ڈھونڈتا اور سمجھاتا ہے";
+"default_prompt_custom" = "کسٹم پرامپٹ";
+"default_prompt_custom_desc" = "منتخب اقتباس پر کسٹم کام چلائیں";
+"default_prompt_custom_template" = "منتخب بائبل اقتباس کے لیے صارف کی کام کی تصریح پر عمل کریں۔";
+"default_prompt_enhance_note" = "نوٹ بہتر کریں";
+"default_prompt_enhance_note_desc" = "آپ کے نوٹ کی گرامر، وضاحت اور پڑھنے کی سہولت بہتر کرتا ہے";
+"default_prompt_explain_verses" = "آیات سمجھائیں";
+"default_prompt_explain_verses_desc" = "منتخب آیات کا معنی اور سیاق و سباق سمجھاتا ہے";
+"default_prompt_explain_verses_studypad" = "آیات سمجھائیں ← مطالعہ پیڈ";
+"default_prompt_explain_verses_studypad_desc" = "آیت بہ آیت وضاحت اور بک مارکس کے ساتھ مطالعہ پیڈ بناتا ہے";
+"default_prompt_study_layout" = "مطالعہ لے آؤٹ کھولیں";
+"default_prompt_study_layout_desc" = "مطالعہ کے لیے تفسیر اور متوازی ترجمہ ونڈوز کھولتا ہے";
+"default_prompt_summary" = "خلاصہ";
+"default_prompt_summary_desc" = "منتخب متن کا مختصر خلاصہ بناتا ہے";
+"default_prompt_thematic_study" = "موضوعاتی مطالعہ";
+"default_prompt_thematic_study_desc" = "مرکزی موضوع پر اقتباسات اور نوٹس کے ساتھ مطالعہ پیڈ بناتا ہے";
+"default_prompt_translate_to_language" = "%@ میں ترجمہ کریں";
+"default_prompt_translate_to_ui_language_desc" = "دستاویز متن کو ایپ انٹرفیس کی زبان میں ترجمہ کرتا ہے";
+"default_prompt_word_study" = "لفظی مطالعہ";
+"default_prompt_word_study_desc" = "اصل عبرانی/یونانی الفاظ کا تجزیہ کرتا ہے";
+"default_prompt_workspace_assistant" = "ورک اسپیس معاون";
+"default_prompt_workspace_assistant_desc" = "ونڈوز منظم کریں: بنائیں، بند کریں، دوبارہ ترتیب دیں، دستاویزات تبدیل کریں";
+"delete_category" = "زمرہ حذف کریں";
+"delete_category_and_prompts" = "زمرہ اور اس کے پرامپٹس حذف کریں";
+"delete_category_keep_prompts" = "پرامپٹس روٹ میں منتقل کریں اور زمرہ حذف کریں";
+"doc_type_addons" = "ایڈ-آنز";
+"easy_setup_enter_api_key" = "اپنی API کلید داخل کریں";
+"easy_setup_success" = "کنکشن کامیاب!";
+"easy_setup_test_connection" = "کنکشن جانچیں";
+"easy_setup_testing" = "جانچ ہو رہی ہے…";
+"easy_setup_title" = "فوری ترتیب";
+"help_bookmarks_text" = "بک مارکس کچھ متن منتخب کر کے اور پاپ اپ مینو سے \"بک مارک\" منتخب کر کے بنائے جا سکتے ہیں۔ آپ بائبل ویو میں نشان زد متن ٹیپ کر کے نئے بک مارک میں اپنے کسٹم نوٹس شامل کر سکتے ہیں۔ تفسیروں میں ایک \"میرے نوٹس\" خصوصی دستاویز بھی ہے جو آپ کو اپنے نوٹس علیحدہ ونڈو میں دیکھنے دیتی ہے۔";
+"help_memorize_text" = "حفظ کا نظریہ آپ کو اقتباسات ازبر کرنے میں مدد کرتا ہے۔ مشق کے لیے Word Blur، Word Scramble، Word Type یا Word Order استعمال کریں۔ کامیاب مشقیں خودبخود آیات کو حفظ شدہ نشان لگاتی ہیں (یہ غیر فعال کیا جا سکتا ہے)۔";
+"help_read_more_link" = "دستی کتاب میں مزید پڑھیں";
+"hide_category" = "AI اعمال سے چھپائیں";
+"llm_actions" = "AI اعمال";
+"llm_continue_iterations_message" = "AI ایجنٹ مکمل کیے بغیر %1$d تکرار کی حد تک پہنچ گیا۔ %2$d مزید تکرار کے لیے جاری رکھیں؟";
+"llm_continue_iterations_title" = "جاری رکھیں؟";
+"llm_custom_input_price_title" = "ان پٹ قیمت ($/Mtoken)";
+"llm_custom_model_dialog_message" = "ماڈل ID داخل کریں";
+"llm_custom_output_price_title" = "آؤٹ پٹ قیمت ($/Mtoken)";
+"llm_error_max_iterations" = "زیادہ سے زیادہ تکرار (%1$d) مکمل ہونے کے بغیر پہنچ گئی";
+"llm_error_unknown" = "نامعلوم خرابی";
+"llm_note_updated" = "نوٹ اپ ڈیٹ ہو گیا";
+"llm_openrouter_model" = "ماڈل";
+"llm_provider_custom" = "کسٹم (OpenAI سے مطابق)";
+"llm_reset_usage_confirm_message" = "یہ تمام مجموعی استعمال ڈیٹا صاف کر دے گا۔";
+"llm_reset_usage_confirm_title" = "استعمال ڈیٹا ری سیٹ کریں؟";
+"llm_reset_usage_title" = "استعمال ڈیٹا ری سیٹ کریں";
+"llm_usage_summary_default" = "کوئی استعمال ڈیٹا نہیں";
+"llm_usage_summary_title" = "ٹوکن استعمال";
+"manage_prompts" = "AI پرامپٹس منظم کریں";
+"manage_tool_permissions_title" = "ٹول اجازتیں";
+"model_pricing_summary" = "%1$@ ان / %2$@ آؤٹ فی Mtoken";
+"model_select_provider" = "فراہم کنندہ";
+"model_set_default" = "ڈیفالٹ ماڈل بنائیں";
+"move_category_down" = "نیچے منتقل کریں";
+"move_category_up" = "اوپر منتقل کریں";
+"new_category" = "نیا زمرہ";
+"new_category_name" = "زمرے کا نام";
+"new_prompt" = "نیا پرامپٹ";
+"permission_allow_all" = "سب اجازت دیں";
+"permission_allow_all_session" = "اس سیشن میں تمام ٹولز کو اجازت دیں";
+"permission_allow_for_session" = "اس سیشن کے لیے اجازت دیں";
+"permission_allow_once" = "ایک بار اجازت دیں";
+"permission_always_allow_confirm" = "کیا آپ واقعی \"%1$@\" کو مستقل اجازت دینا چاہتے ہیں؟";
+"permission_always_allow_confirm_reset_hint" = "آپ اسے AI ترتیبات میں ری سیٹ کر سکتے ہیں۔";
+"permission_always_ask" = "ہمیشہ پوچھیں";
+"permission_ask_once_per_run" = "فی چلانے میں ایک بار پوچھیں";
+"permission_deny" = "انکار کریں";
+"permission_deny_all" = "سب انکار کریں";
+"permission_option_always_allow" = "ہمیشہ اجازت دیں";
+"permission_option_always_deny" = "ہمیشہ انکار کریں";
+"permission_status_default" = "پوچھیں (ڈیفالٹ)";
+"prompt_auto_include_commentaries" = "تفسیریں خودبخود شامل کریں";
+"prompt_auto_include_documents" = "نصب شدہ دستاویزات خودبخود شامل کریں";
+"prompt_bible_only" = "صرف بائبل دستاویزات";
+"prompt_category" = "زمرہ";
+"prompt_category_favorites" = "پسندیدہ";
+"prompt_category_general" = "عمومی";
+"prompt_category_notes" = "نوٹس";
+"prompt_category_study" = "مطالعہ";
+"prompt_category_uncategorized" = "غیر زمرہ بند";
+"prompt_context_note_editor" = "نوٹ ایڈیٹر";
+"prompt_context_text_selection" = "متن انتخاب";
+"prompt_context_verse_selection" = "آیت انتخاب";
+"prompt_context_window_menu" = "ونڈو مینو";
+"prompt_context_workspace_menu" = "ورک اسپیس مینو";
+"prompt_description" = "تفصیل";
+"prompt_edit_before_run" = "چلانے سے پہلے بتائیں";
+"prompt_is_text_transformation" = "متن تبدیلی";
+"prompt_max_iterations_hint" = "عالمی ڈیفالٹ کے لیے خالی چھوڑیں";
+"prompt_max_iterations_unlimited" = "لامحدود";
+"prompt_model_default" = "ڈیفالٹ";
+"prompt_model_override" = "ماڈل";
+"prompt_name" = "نام";
+"prompt_no_document_creation" = "دستاویز نہ بنائیں";
+"prompt_permission_mode" = "اجازت موڈ";
+"prompt_permission_mode_description" = "کنٹرول کرتا ہے کہ AI کے لکھنے والے کام انجام دینے سے پہلے صارف کی تصدیق کب درکار ہے۔ نیچے دی گئی فی ٹول ترتیبات انفرادی ٹولز کے لیے اسے اوور رائڈ کر سکتی ہیں۔";
+"prompt_permission_use_default" = "ڈیفالٹ استعمال کریں";
+"prompt_show_in" = "میں دکھائیں";
+"prompt_strict_context_matching" = "سیاق و سباق پر منحصر کیش";
+"prompt_tab_advanced" = "جدید";
+"prompt_tab_permissions" = "اجازتیں";
+"prompt_tab_prompt" = "پرامپٹ";
+"prompt_template" = "پرامپٹ ٹیمپلیٹ";
+"prompt_tool_permissions" = "ٹول اجازتیں";
+"raw_log_delete_all" = "سب حذف کریں";
+"raw_log_error_indicator" = "خرابی";
+"raw_log_history_empty" = "کوئی محفوظ لاگز نہیں";
+"raw_log_history_title" = "AI لاگ تاریخ";
+"raw_log_item_tokens" = "%1$@ ان / %2$@ آؤٹ";
+"raw_log_older_1_month" = "1 مہینے سے پرانے";
+"raw_log_older_1_week" = "1 ہفتے سے پرانے";
+"raw_log_older_3_months" = "3 مہینوں سے پرانے";
+"raw_log_retention_summary_disabled" = "غیر فعال (سب رکھیں)";
+"raw_log_retention_title" = "پرانے لاگز خودبخود حذف کریں";
+"reset_all_ai_settings" = "تمام AI ترتیبات ری سیٹ کریں";
+"reset_all_ai_settings_confirm_message" = "یہ API کلید، فراہم کنندہ، اینڈ پوائنٹ، ماڈل صاف کر دے گا اور تمام پرامپٹس ڈیفالٹ پر ری سیٹ کر دے گا۔ جاری رکھیں؟";
+"reset_all_ai_settings_confirm_title" = "تمام AI ترتیبات ری سیٹ کریں؟";
+"reset_all_permissions" = "سب ری سیٹ کریں";
+"reset_to_default" = "ڈیفالٹ پر ری سیٹ کریں";
+"save_and_exit" = "محفوظ کریں";
+"select_llm_prompt" = "AI عمل منتخب کریں";
+"select_model_before_run_title" = "ماڈل منتخب کریں";
+"set_default_model_for_prompt" = "اس پرامپٹ کے لیے ڈیفالٹ ماڈل بنائیں";
+"show_category" = "AI اعمال میں دکھائیں";
+"specify_before_run_title" = "کام بتائیں";
+"tool_add_bookmark_note" = "بک مارک نوٹ شامل کریں";
+"tool_add_label_to_bookmark" = "بک مارک کو لیبل شامل کریں";
+"tool_add_my_document_page" = "میری دستاویز میں صفحہ شامل کریں";
+"tool_add_study_pad_entry" = "مطالعہ پیڈ اندراج شامل کریں";
+"tool_category_bible_search" = "بائبل اور تلاش";
+"tool_category_bookmarks" = "بک مارکس";
+"tool_category_general_books" = "عمومی کتابیں";
+"tool_category_labels" = "لیبل";
+"tool_category_my_documents" = "میری دستاویزات";
+"tool_category_study_pads" = "مطالعہ پیڈز";
+"tool_category_windows" = "ونڈوز";
+"tool_create_bookmark" = "بک مارک بنائیں";
+"tool_create_label" = "لیبل بنائیں";
+"tool_create_my_document" = "میری دستاویز بنائیں";
+"tool_create_study_pad" = "مطالعہ پیڈ بنائیں";
+"tool_create_window" = "ونڈو بنائیں";
+"tool_delete_bookmark" = "بک مارک حذف کریں";
+"tool_delete_label" = "لیبل حذف کریں";
+"tool_delete_my_document_page" = "میری دستاویز صفحہ حذف کریں";
+"tool_edit_my_document_page" = "میری دستاویز صفحہ ترمیم کریں";
+"tool_finish_with_my_document_page" = "میری دستاویز صفحہ کھولیں";
+"tool_finish_with_study_pad" = "مطالعہ پیڈ کھولیں";
+"tool_finish_without_document" = "دستاویز کے بغیر ختم کریں";
+"tool_get_all_labels" = "تمام لیبلز کی فہرست";
+"tool_get_bookmarks_for_verse" = "آیت کے بک مارکس حاصل کریں";
+"tool_get_bookmarks_with_label" = "لیبل والے بک مارکس حاصل کریں";
+"tool_get_commentaries" = "تفسیریں پڑھیں";
+"tool_get_dictionary_entry" = "لغت اندراج تلاش کریں";
+"tool_get_genbook_content" = "عمومی کتاب مواد پڑھیں";
+"tool_get_genbook_keys" = "عمومی کتاب کی چابیاں کی فہرست";
+"tool_get_installed_documents" = "نصب شدہ دستاویزات کی فہرست";
+"tool_get_my_document_pages" = "میری دستاویز کے صفحات کی فہرست";
+"tool_get_my_documents" = "میری دستاویزات کی فہرست";
+"tool_get_study_pad_content" = "مطالعہ پیڈ مواد پڑھیں";
+"tool_get_verse_content" = "آیت مواد پڑھیں";
+"tool_get_windows" = "ونڈوز کی فہرست";
+"tool_manage_window" = "ونڈو منظم کریں";
+"tool_remove_label_from_bookmark" = "بک مارک سے لیبل ہٹائیں";
+"tool_search_bible" = "بائبل تلاش کریں";
+"tool_search_by_strongs" = "Strong's نمبر سے تلاش کریں";
+"tool_search_study_pads" = "مطالعہ پیڈز تلاش کریں";
+"tool_set_document_title" = "دستاویز عنوان سیٹ کریں";
+"tool_set_window_document" = "ونڈو دستاویز سیٹ کریں";
+"tool_update_bookmark_note" = "بک مارک نوٹ اپ ڈیٹ کریں";
+"tool_update_studypad_text_entry" = "مطالعہ پیڈ متن اندراج اپ ڈیٹ کریں";
+"verse_tip" = "جزوی یا متعدد آیات منتخب کرنے کے لیے بائبل متن طویل دبائیں";
+"watch_tutorial_video" = "ٹیوٹوریل ویڈیو دیکھیں (انگریزی)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "AI دستاویز دوبارہ بنائی جا رہی ہے…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "میں قبول کرتا ہوں اور مکمل ذمہ داری لیتا ہوں";
+"ai_disclaimer_accept_title" = "AI دستبرداری قبول کریں";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "AI کنکشن اور پرامپٹ ترتیبات";
+"prefs_features_cat" = "خصوصیات";

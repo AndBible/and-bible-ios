@@ -111,6 +111,42 @@ final class ReaderPassageChooserSourceGuardTests: XCTestCase {
     }
 
     /**
+     Verifies the web-modal chooser returns JSword short verse names and generation-bound dismissal.
+
+     Android's `refChooserDialog` always enables verse navigation and always responds, including
+     cancellation. The production SwiftUI wiring must therefore request a verse, format Android's
+     exact short `Verse.name`, and bind explicit and interactive dismissal to the presented request
+     generation.
+     */
+    func testBridgeReferenceChooserReturnsExactVerseAndCompletesDismissal() throws {
+        let source = try bibleUISource(named: "BibleReaderView.swift")
+        let chooserStart = try XCTUnwrap(source.range(of: "private func refChooserSheetContent("))
+        let chooserEnd = try XCTUnwrap(
+            source.range(
+                of: "private var keyboardShortcutSurface",
+                range: chooserStart.upperBound..<source.endIndex
+            )
+        )
+        let chooserSource = source[chooserStart.lowerBound..<chooserEnd.lowerBound]
+
+        XCTAssertTrue(chooserSource.contains("navigateToVerse: true"))
+        XCTAssertTrue(chooserSource.contains("completeReferenceChooser(with: nil, for: generation)"))
+        XCTAssertTrue(chooserSource.contains("{ book, chapter, verse in"))
+        XCTAssertTrue(
+            chooserSource.contains(
+                "BibleReaderReferenceChooserResultFormatter.verseName("
+            )
+        )
+        XCTAssertTrue(chooserSource.contains("completeReferenceChooser(with: verseName, for: generation)"))
+        XCTAssertFalse(chooserSource.contains("\"\\(osisId).\\(chapter).\\(verse)\""))
+        XCTAssertTrue(source.contains(".sheet(item: $refChooserPresentation) { generation in"))
+        XCTAssertTrue(source.contains("handleReferenceChooserDismissal(for: generation)"))
+        XCTAssertTrue(
+            source.contains("refChooserPresentation = refChooserRequest.replace(with: completion)")
+        )
+    }
+
+    /**
      Loads a Bible reader UI source file for package-level passage chooser source guards.
 
      The shared locator keeps these tests independent from the app-host bundle and avoids

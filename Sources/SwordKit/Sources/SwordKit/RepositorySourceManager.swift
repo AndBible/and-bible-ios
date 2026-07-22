@@ -84,6 +84,9 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
     /// The manifest describes a repository family iOS cannot consume through Downloads.
     case unsupportedRepositoryType(String)
 
+    /// The package-directory override is not a safe repository path or targets a non-SWORD source.
+    case invalidPackageDirectory(String)
+
     /// The resolved repository name already exists in default, beta, or custom source configuration.
     case duplicateSourceName(String)
 
@@ -112,6 +115,8 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
             return "The repository manifest is not valid for iOS Downloads: \(value)"
         case .unsupportedRepositoryType(let value):
             return "Repository type \(value) is not supported on iOS yet."
+        case .invalidPackageDirectory(let value):
+            return "Invalid SWORD package directory: \(value)"
         case .duplicateSourceName(let value):
             return "A repository named \(value) already exists."
         case .protectedDefaultSource(let value):
@@ -127,6 +132,60 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
 }
 
 /**
+ Atomic file-replacement dependency used by repository-source transactions.
+
+ The live implementation delegates to `Data.write(options: .atomic)`. Package tests may replace
+ exactly one write with a deterministic error so rollback and retained-journal recovery are tested
+ through the same production transaction code.
+ */
+struct RepositorySourcePersistence {
+    /// Atomically replaces the destination bytes or throws before the transaction may commit.
+    let write: (_ data: Data, _ destination: URL) throws -> Void
+    /// Removes one existing destination or throws before the transaction may commit.
+    let remove: (_ destination: URL) throws -> Void
+
+    /** Creates the live atomic writer. */
+    init(fileManager: FileManager) {
+        write = { data, destination in
+            try data.write(to: destination, options: .atomic)
+        }
+        remove = { destination in
+            try fileManager.removeItem(at: destination)
+        }
+    }
+
+    /** Creates an injected writer for deterministic persistence tests. */
+    init(
+        write: @escaping (_ data: Data, _ destination: URL) throws -> Void,
+        remove: @escaping (_ destination: URL) throws -> Void = { destination in
+            try FileManager.default.removeItem(at: destination)
+        }
+    ) {
+        self.write = write
+        self.remove = remove
+    }
+}
+
+/// File-system shape retained for one repository persistence target.
+private enum RepositorySourceFileKind: String, Codable {
+    case missing
+    case regularFile
+    case directory
+}
+
+/// Durable preimage for one repository persistence target.
+private struct RepositorySourceFileSnapshot: Codable {
+    let kind: RepositorySourceFileKind
+    let data: Data?
+}
+
+/// Pre-commit journal that restores both repository stores as one logical transaction.
+private struct RepositorySourcePersistenceJournal: Codable {
+    let config: RepositorySourceFileSnapshot
+    let customRepositories: RepositorySourceFileSnapshot
+}
+
+/**
  Owns custom repository validation and source persistence for the Downloads source UI.
 
  The manager intentionally follows Android's `CustomRepositoryEditor` sequence: require HTTPS,
@@ -136,9 +195,9 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
  MyBible sources are persisted in `CustomRepositories.json` because they are not SWORD sources
  but still need stable edit/delete metadata and Downloads catalog refresh support.
 
- - Important: This type is `@unchecked Sendable` because it stores `URLSession` and
-   `FileManager`; callers should treat it as a small service object and serialize UI-driven
-   mutations from the main actor.
+ - Important: This type is `@unchecked Sendable` because it stores `URLSession` and `FileManager`.
+   Persisted reads and mutations are serialized by a process-wide recursive lock; network
+   validation remains independent and may run concurrently.
  */
 public final class RepositorySourceManager: @unchecked Sendable {
     /// Posted after add, replace, delete, or reset actions successfully rewrite source configuration.
@@ -149,6 +208,10 @@ public final class RepositorySourceManager: @unchecked Sendable {
     private let basePath: String
     private let session: URLSession
     private let fileManager: FileManager
+    private let persistence: RepositorySourcePersistence
+
+    /// Serializes config/sidecar recovery and mutation across every manager instance in-process.
+    private static let persistenceLock = NSRecursiveLock()
 
     private var configURL: URL {
         URL(fileURLWithPath: basePath, isDirectory: true)
@@ -158,6 +221,11 @@ public final class RepositorySourceManager: @unchecked Sendable {
     private var customRepositoriesURL: URL {
         URL(fileURLWithPath: basePath, isDirectory: true)
             .appendingPathComponent("CustomRepositories.json")
+    }
+
+    private var persistenceJournalURL: URL {
+        URL(fileURLWithPath: basePath, isDirectory: true)
+            .appendingPathComponent("RepositorySources.transaction.json")
     }
 
     /**
@@ -171,7 +239,41 @@ public final class RepositorySourceManager: @unchecked Sendable {
      Side effects:
      - none during initialization; config files are created lazily by load or mutation methods.
      */
-    public init(basePath: String? = nil, session: URLSession? = nil, fileManager: FileManager = .default) {
+    public convenience init(
+        basePath: String? = nil,
+        session: URLSession? = nil,
+        fileManager: FileManager = .default
+    ) {
+        self.init(
+            basePath: basePath,
+            session: session,
+            fileManager: fileManager,
+            persistence: RepositorySourcePersistence(fileManager: fileManager)
+        )
+    }
+
+    /**
+     Creates a source manager with an injectable atomic file writer for persistence-failure tests.
+
+     Production callers use the public convenience initializer. Package tests inject a writer that
+     fails one selected commit step, which verifies byte-for-byte rollback without weakening the
+     production transaction path.
+
+     - Parameters:
+       - basePath: Directory containing the two repository stores.
+       - session: URL session used for repository validation.
+       - fileManager: File-system dependency used for reads, removal, and directory creation.
+       - persistence: Atomic data writer used for journals and committed file replacements.
+     - Side effects: None during initialization; interrupted transactions recover before the first
+       load or mutation.
+     - Failure modes: None during initialization.
+     */
+    init(
+        basePath: String? = nil,
+        session: URLSession? = nil,
+        fileManager: FileManager = .default,
+        persistence: RepositorySourcePersistence
+    ) {
         self.basePath = basePath ?? InstallManager.defaultBasePath()
         if let session {
             self.session = session
@@ -182,6 +284,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
             self.session = URLSession(configuration: configuration)
         }
         self.fileManager = fileManager
+        self.persistence = persistence
     }
 
     /**
@@ -209,6 +312,13 @@ public final class RepositorySourceManager: @unchecked Sendable {
        preserving the unreadable file for possible recovery
      */
     public func loadSources() -> [SourceConfig] {
+        Self.persistenceLock.lock()
+        defer { Self.persistenceLock.unlock() }
+        do {
+            try recoverInterruptedPersistenceIfNeeded()
+        } catch {
+            return []
+        }
         InstallManager.ensureDefaultConfigPublic(at: basePath)
         let customRecordLoad = loadCustomRepositoryRecordStore()
         var customRecords = customRecordLoad.records
@@ -227,7 +337,9 @@ public final class RepositorySourceManager: @unchecked Sendable {
         if !backfilledRecords.isEmpty {
             customRecords.append(contentsOf: backfilledRecords)
             if customRecordLoad.canPersistBackfilledRecords {
-                try? writeCustomRepositoryRecords(customRecords)
+                try? performJournaledPersistence {
+                    try writeCustomRepositoryRecordsUnjournaled(customRecords)
+                }
             }
         }
         let recordsByName = Dictionary(customRecords.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
@@ -368,7 +480,10 @@ public final class RepositorySourceManager: @unchecked Sendable {
     /**
      Validates and appends one custom HTTPS repository source.
 
-     - Parameter rawURL: User-entered manifest URL or direct SWORD catalog URL.
+     - Parameters:
+       - rawURL: User-entered manifest URL or direct SWORD catalog URL.
+       - packageDirectory: Optional user-edited SWORD package directory. Blank values preserve the
+         manifest/default/direct-catalog directory discovered during validation.
      - Returns: Resolved repository registration that was persisted.
 
      Side effects:
@@ -379,8 +494,15 @@ public final class RepositorySourceManager: @unchecked Sendable {
      - Throws: `RepositorySourceManagementError` for validation, duplicate, or persistence failures.
      */
     @discardableResult
-    public func addCustomSource(from rawURL: String) async throws -> RepositorySourceRegistration {
-        let registration = try await resolveCustomSource(from: rawURL)
+    public func addCustomSource(
+        from rawURL: String,
+        packageDirectory: String? = nil
+    ) async throws -> RepositorySourceRegistration {
+        let resolvedRegistration = try await resolveCustomSource(from: rawURL)
+        let registration = try Self.registration(
+            byApplyingPackageDirectory: packageDirectory,
+            to: resolvedRegistration
+        )
         try writeCustomRegistration(registration, replacing: nil)
         NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
         return registration
@@ -392,6 +514,8 @@ public final class RepositorySourceManager: @unchecked Sendable {
      - Parameters:
        - originalName: Current custom source name in `InstallMgr.conf`.
        - rawURL: Replacement manifest URL or direct SWORD catalog URL.
+       - packageDirectory: Optional user-edited SWORD package directory. Blank values preserve the
+         directory discovered during validation.
      - Returns: Resolved replacement registration that was persisted.
 
      Side effects:
@@ -405,7 +529,8 @@ public final class RepositorySourceManager: @unchecked Sendable {
     @discardableResult
     public func replaceCustomSource(
         named originalName: String,
-        with rawURL: String
+        with rawURL: String,
+        packageDirectory: String? = nil
     ) async throws -> RepositorySourceRegistration {
         guard !InstallManager.isDefaultSourceName(originalName) else {
             throw RepositorySourceManagementError.protectedDefaultSource(originalName)
@@ -415,7 +540,11 @@ public final class RepositorySourceManager: @unchecked Sendable {
             throw RepositorySourceManagementError.sourceNotFound(originalName)
         }
 
-        let registration = try await resolveCustomSource(from: rawURL)
+        let resolvedRegistration = try await resolveCustomSource(from: rawURL)
+        let registration = try Self.registration(
+            byApplyingPackageDirectory: packageDirectory,
+            to: resolvedRegistration
+        )
         try writeCustomRegistration(registration, replacing: originalName)
         NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
         return registration
@@ -440,15 +569,27 @@ public final class RepositorySourceManager: @unchecked Sendable {
             throw RepositorySourceManagementError.protectedDefaultSource(name)
         }
 
+        Self.persistenceLock.lock()
+        defer { Self.persistenceLock.unlock() }
+        try recoverInterruptedPersistenceIfNeeded()
+
         let customRecords = loadCustomRepositoryRecords()
         let matchingRecord = customRecords.first { $0.name == name }
+        let updatedConfig: String?
         do {
             let content = try currentConfigContent()
-            try writeConfig(Self.configContent(content, removing: name))
+            updatedConfig = Self.configContent(content, removing: name)
         } catch RepositorySourceManagementError.configReadFailed
             where matchingRecord?.type == SourceConfig.myBibleHTTPSRepositoryType {
+            updatedConfig = nil
         }
-        try removeCustomRepositoryRecord(named: name)
+        let updatedRecords = customRecords.filter { $0.name != name }
+        try performJournaledPersistence {
+            if let updatedConfig {
+                try writeConfigUnjournaled(updatedConfig)
+            }
+            try writeCustomRepositoryRecordsUnjournaled(updatedRecords)
+        }
         NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
     }
 
@@ -482,6 +623,10 @@ public final class RepositorySourceManager: @unchecked Sendable {
             }
         }
 
+        Self.persistenceLock.lock()
+        defer { Self.persistenceLock.unlock() }
+        try recoverInterruptedPersistenceIfNeeded()
+
         var content = try Self.configContentRemovingCustomSourceLines(currentConfigContent())
         for registration in registrations where !registration.source.isMyBibleRepository {
             content = Self.configContent(
@@ -490,8 +635,12 @@ public final class RepositorySourceManager: @unchecked Sendable {
                 replacing: nil
             )
         }
-        try writeConfig(content)
-        try writeCustomRepositoryRecords(registrations.map(CustomRepositoryRecord.init))
+        try performJournaledPersistence {
+            try writeConfigUnjournaled(content)
+            try writeCustomRepositoryRecordsUnjournaled(
+                registrations.map(CustomRepositoryRecord.init)
+            )
+        }
         NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
     }
 
@@ -508,27 +657,47 @@ public final class RepositorySourceManager: @unchecked Sendable {
        or recreated.
      */
     public func resetToDefaults() throws {
-        if fileManager.fileExists(atPath: configURL.path) {
-            do {
-                try fileManager.removeItem(at: configURL)
-            } catch {
-                throw RepositorySourceManagementError.configWriteFailed(error.localizedDescription)
-            }
-        }
-        if fileManager.fileExists(atPath: customRepositoriesURL.path) {
-            do {
-                try fileManager.removeItem(at: customRepositoriesURL)
-            } catch {
-                throw RepositorySourceManagementError.configWriteFailed(error.localizedDescription)
-            }
-        }
-
-        InstallManager.ensureDefaultConfigPublic(at: basePath)
-        guard fileManager.fileExists(atPath: configURL.path) else {
-            throw RepositorySourceManagementError.configWriteFailed("default configuration was not recreated")
+        let defaultConfig = try generatedDefaultConfigContent()
+        try performJournaledPersistence {
+            try writeConfigUnjournaled(defaultConfig)
+            try removePersistenceFileIfPresent(at: customRepositoriesURL)
         }
 
         NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
+    }
+
+    /**
+     Builds Android-parity default repository config away from the live persistence directory.
+
+     - Returns: Validated default `InstallMgr.conf` text generated by `InstallManager`.
+     - Side effects: Creates and removes one temporary directory.
+     - Throws: `configWriteFailed` when defaults cannot be generated or read. Live repository files
+       remain untouched.
+     */
+    private func generatedDefaultConfigContent() throws -> String {
+        let temporaryBaseURL = fileManager.temporaryDirectory
+            .appendingPathComponent("RepositoryDefaults-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: temporaryBaseURL, withIntermediateDirectories: true)
+        } catch {
+            throw RepositorySourceManagementError.configWriteFailed(
+                "could not prepare default repository configuration: \(error.localizedDescription)"
+            )
+        }
+        defer {
+            if fileManager.fileExists(atPath: temporaryBaseURL.path) {
+                try? fileManager.removeItem(at: temporaryBaseURL)
+            }
+        }
+        InstallManager.ensureDefaultConfigPublic(at: temporaryBaseURL.path)
+        let generatedURL = temporaryBaseURL.appendingPathComponent("InstallMgr.conf")
+        do {
+            return try String(contentsOf: generatedURL, encoding: .utf8)
+        } catch {
+            throw RepositorySourceManagementError.configWriteFailed(
+                "default configuration was not recreated: \(error.localizedDescription)"
+            )
+        }
     }
 
     /**
@@ -571,6 +740,80 @@ public final class RepositorySourceManager: @unchecked Sendable {
         }
 
         return try directSwordRegistration(for: url, originalURLString: trimmedURL)
+    }
+
+    /**
+     Applies an explicit package-directory field after repository URL validation.
+
+     Android's editor resolves repository metadata first and then lets the user edit
+     `CustomRepository.packageDirectory`. Blank input retains the validated manifest/default value;
+     a nonblank value replaces it for SWORD repositories and is rejected for MyBible manifests.
+
+     - Parameters:
+       - rawPackageDirectory: Optional editor field value.
+       - registration: Validated repository registration.
+     - Returns: Registration containing the normalized explicit package directory when supplied.
+     - Side effects: none.
+     - Throws: `RepositorySourceManagementError.invalidPackageDirectory` for URL-like, traversal,
+       malformed, or non-SWORD overrides.
+     */
+    private static func registration(
+        byApplyingPackageDirectory rawPackageDirectory: String?,
+        to registration: RepositorySourceRegistration
+    ) throws -> RepositorySourceRegistration {
+        guard let rawPackageDirectory else { return registration }
+        let trimmed = rawPackageDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return registration }
+        guard registration.type == SourceConfig.swordHTTPSRepositoryType else {
+            throw RepositorySourceManagementError.invalidPackageDirectory(trimmed)
+        }
+        let packageDirectory = try validatedPackageDirectory(trimmed)
+        let source = SourceConfig(
+            name: registration.source.name,
+            type: registration.source.type,
+            host: registration.source.host,
+            catalogPath: registration.source.catalogPath,
+            repositoryType: registration.source.repositoryType,
+            description: registration.source.description,
+            packageDirectory: packageDirectory,
+            manifestURL: registration.source.manifestURL,
+            sourceURL: registration.source.sourceURL
+        )
+        return RepositorySourceRegistration(
+            source: source,
+            description: registration.description,
+            packageDirectory: packageDirectory,
+            manifestURL: registration.manifestURL,
+            sourceURL: registration.sourceURL,
+            type: registration.type
+        )
+    }
+
+    /**
+     Validates and normalizes an editor-supplied SWORD package directory.
+
+     - Parameter rawPath: Nonblank package directory field.
+     - Returns: Absolute repository path with one leading slash.
+     - Side effects: none.
+     - Throws: `RepositorySourceManagementError.invalidPackageDirectory` when the value is a URL,
+       contains query/fragment/config syntax, traversal components, or no usable path components.
+     */
+    private static func validatedPackageDirectory(_ rawPath: String) throws -> String {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.contains("://"),
+              !trimmed.contains("?"),
+              !trimmed.contains("#"),
+              !trimmed.contains("|"),
+              !trimmed.contains("\\") else {
+            throw RepositorySourceManagementError.invalidPackageDirectory(rawPath)
+        }
+        let components = trimmed.split(separator: "/", omittingEmptySubsequences: true)
+        guard !components.isEmpty,
+              !components.contains(where: { $0 == "." || $0 == ".." }) else {
+            throw RepositorySourceManagementError.invalidPackageDirectory(rawPath)
+        }
+        return "/" + components.joined(separator: "/")
     }
 
     private struct ParsedSourceLine {
@@ -748,7 +991,13 @@ public final class RepositorySourceManager: @unchecked Sendable {
      - Throws: `RepositorySourceManagementError.configWriteFailed` for encoding or file-system
        failures.
      */
-    private func writeCustomRepositoryRecords(_ records: [CustomRepositoryRecord]) throws {
+    private func writeCustomRepositoryRecordsUnjournaled(
+        _ records: [CustomRepositoryRecord]
+    ) throws {
+        if records.isEmpty {
+            try removePersistenceFileIfPresent(at: customRepositoriesURL)
+            return
+        }
         let store = CustomRepositoryStore(version: 1, repositories: records)
         do {
             try fileManager.createDirectory(
@@ -756,33 +1005,9 @@ public final class RepositorySourceManager: @unchecked Sendable {
                 withIntermediateDirectories: true
             )
             let data = try JSONEncoder().encode(store)
-            try data.write(to: customRepositoriesURL, options: .atomic)
+            try persistence.write(data, customRepositoriesURL)
         } catch {
             throw RepositorySourceManagementError.configWriteFailed(error.localizedDescription)
-        }
-    }
-
-    /**
-     Removes one custom repository sidecar record.
-
-     - Parameter name: Repository name to remove.
-     - Side effects: rewrites or deletes `CustomRepositories.json`.
-     - Throws: `RepositorySourceManagementError.configWriteFailed` when the sidecar cannot be
-       updated.
-     */
-    private func removeCustomRepositoryRecord(named name: String) throws {
-        let records = loadCustomRepositoryRecords()
-        let updatedRecords = records.filter { $0.name != name }
-        if updatedRecords.isEmpty {
-            if fileManager.fileExists(atPath: customRepositoriesURL.path) {
-                do {
-                    try fileManager.removeItem(at: customRepositoriesURL)
-                } catch {
-                    throw RepositorySourceManagementError.configWriteFailed(error.localizedDescription)
-                }
-            }
-        } else if updatedRecords.count != records.count {
-            try writeCustomRepositoryRecords(updatedRecords)
         }
     }
 
@@ -806,6 +1031,10 @@ public final class RepositorySourceManager: @unchecked Sendable {
         _ registration: RepositorySourceRegistration,
         replacing originalName: String?
     ) throws {
+        Self.persistenceLock.lock()
+        defer { Self.persistenceLock.unlock() }
+        try recoverInterruptedPersistenceIfNeeded()
+
         let source = registration.source
         let customRecords = loadCustomRepositoryRecords()
         let content: String?
@@ -842,23 +1071,28 @@ public final class RepositorySourceManager: @unchecked Sendable {
             throw RepositorySourceManagementError.duplicateSourceName(source.name)
         }
 
+        let updatedConfig: String?
         if let content {
-            let updated: String
             if source.isMyBibleRepository {
-                updated = Self.configContent(content, removing: originalName)
+                updatedConfig = Self.configContent(content, removing: originalName)
             } else if let originalName,
                       sourceLines.contains(where: { $0.source.name == originalName }) {
                 let sourceLine = Self.sourceLine(for: source)
-                updated = Self.configContent(content, inserting: sourceLine, replacing: originalName)
+                updatedConfig = Self.configContent(
+                    content,
+                    inserting: sourceLine,
+                    replacing: originalName
+                )
             } else {
                 let sourceLine = Self.sourceLine(for: source)
-                updated = Self.configContent(
+                updatedConfig = Self.configContent(
                     Self.configContent(content, removing: originalName),
                     inserting: sourceLine,
                     replacing: nil
                 )
             }
-            try writeConfig(updated)
+        } else {
+            updatedConfig = nil
         }
 
         let replacementRecord = CustomRepositoryRecord(registration: registration)
@@ -882,17 +1116,168 @@ public final class RepositorySourceManager: @unchecked Sendable {
         if !didReplaceRecord {
             updatedRecords.append(replacementRecord)
         }
-        try writeCustomRepositoryRecords(updatedRecords)
+        try performJournaledPersistence {
+            if let updatedConfig {
+                try writeConfigUnjournaled(updatedConfig)
+            }
+            try writeCustomRepositoryRecordsUnjournaled(updatedRecords)
+        }
     }
 
-    private func writeConfig(_ content: String) throws {
+    private func writeConfigUnjournaled(_ content: String) throws {
         var normalized = content
         if !normalized.hasSuffix("\n") {
             normalized += "\n"
         }
 
         do {
-            try normalized.write(to: configURL, atomically: true, encoding: .utf8)
+            try fileManager.createDirectory(
+                at: configURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try persistence.write(Data(normalized.utf8), configURL)
+        } catch {
+            throw RepositorySourceManagementError.configWriteFailed(error.localizedDescription)
+        }
+    }
+
+    /**
+     Commits repository config and sidecar mutations behind one durable rollback journal.
+
+     The journal contains byte-exact preimages for both files and is atomically durable before the
+     first destination write. Any synchronous failure restores both preimages. A process death leaves
+     the journal in place, and the next load or mutation restores the same preimages before exposing
+     repository state.
+
+     - Parameter mutation: Writes/removals that together form one logical repository transaction.
+     - Side effects: Creates and removes `RepositorySources.transaction.json`, serializes mutations
+       across manager instances, and may restore both persistence files after failure.
+     - Throws: The original repository error after successful rollback, or `configWriteFailed` when
+       journaling or rollback itself cannot complete. A failed rollback deliberately retains the
+       journal for the next recovery attempt.
+     */
+    private func performJournaledPersistence(_ mutation: () throws -> Void) throws {
+        Self.persistenceLock.lock()
+        defer { Self.persistenceLock.unlock() }
+
+        try recoverInterruptedPersistenceIfNeeded()
+        let journal = RepositorySourcePersistenceJournal(
+            config: try snapshot(of: configURL),
+            customRepositories: try snapshot(of: customRepositoriesURL)
+        )
+        do {
+            try fileManager.createDirectory(
+                at: persistenceJournalURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try persistence.write(try JSONEncoder().encode(journal), persistenceJournalURL)
+        } catch {
+            throw RepositorySourceManagementError.configWriteFailed(error.localizedDescription)
+        }
+
+        do {
+            try mutation()
+            try removePersistenceFileIfPresent(at: persistenceJournalURL)
+        } catch {
+            let originalError = error
+            do {
+                try restore(journal.config, to: configURL)
+                try restore(journal.customRepositories, to: customRepositoriesURL)
+                try removePersistenceFileIfPresent(at: persistenceJournalURL)
+            } catch {
+                throw RepositorySourceManagementError.configWriteFailed(
+                    "\(originalError.localizedDescription); rollback failed: \(error.localizedDescription)"
+                )
+            }
+            if let repositoryError = originalError as? RepositorySourceManagementError {
+                throw repositoryError
+            }
+            throw RepositorySourceManagementError.configWriteFailed(
+                originalError.localizedDescription
+            )
+        }
+    }
+
+    /**
+     Restores an interrupted repository transaction before any persisted state is read or changed.
+
+     - Side effects: Replaces both repository files with journaled preimages and removes the journal
+       only after both restores succeed.
+     - Throws: `configWriteFailed` for unreadable journals or failed restores. The journal is retained
+       after failure so a later attempt can retry recovery.
+     */
+    private func recoverInterruptedPersistenceIfNeeded() throws {
+        guard fileManager.fileExists(atPath: persistenceJournalURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: persistenceJournalURL)
+            let journal = try JSONDecoder().decode(
+                RepositorySourcePersistenceJournal.self,
+                from: data
+            )
+            try restore(journal.config, to: configURL)
+            try restore(journal.customRepositories, to: customRepositoriesURL)
+            try removePersistenceFileIfPresent(at: persistenceJournalURL)
+        } catch {
+            throw RepositorySourceManagementError.configWriteFailed(
+                "could not recover interrupted repository transaction: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    /** Captures one persistence target as a byte-exact file or directory-shape preimage. */
+    private func snapshot(of url: URL) throws -> RepositorySourceFileSnapshot {
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return RepositorySourceFileSnapshot(kind: .missing, data: nil)
+        }
+        guard !isDirectory.boolValue else {
+            return RepositorySourceFileSnapshot(kind: .directory, data: nil)
+        }
+        do {
+            return RepositorySourceFileSnapshot(kind: .regularFile, data: try Data(contentsOf: url))
+        } catch {
+            throw RepositorySourceManagementError.configWriteFailed(
+                "could not snapshot \(url.lastPathComponent): \(error.localizedDescription)"
+            )
+        }
+    }
+
+    /** Restores one journaled persistence target to its previous file-system shape and bytes. */
+    private func restore(_ snapshot: RepositorySourceFileSnapshot, to url: URL) throws {
+        switch snapshot.kind {
+        case .missing:
+            try removePersistenceFileIfPresent(at: url)
+        case .directory:
+            var isDirectory: ObjCBool = false
+            if fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+                guard !isDirectory.boolValue else { return }
+                try removePersistenceFileIfPresent(at: url)
+            }
+            try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        case .regularFile:
+            guard let data = snapshot.data else {
+                throw RepositorySourceManagementError.configWriteFailed(
+                    "transaction journal omitted \(url.lastPathComponent) bytes"
+                )
+            }
+            var isDirectory: ObjCBool = false
+            if fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory),
+               isDirectory.boolValue {
+                try removePersistenceFileIfPresent(at: url)
+            }
+            try fileManager.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try persistence.write(data, url)
+        }
+    }
+
+    /** Removes one persistence file when present and translates file-system failures. */
+    private func removePersistenceFileIfPresent(at url: URL) throws {
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        do {
+            try persistence.remove(url)
         } catch {
             throw RepositorySourceManagementError.configWriteFailed(error.localizedDescription)
         }

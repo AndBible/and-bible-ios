@@ -75,10 +75,9 @@ public final class WorkspaceStore {
         let maxOrder = workspaces().map(\.orderNumber).max() ?? -1
         let workspace = Workspace(name: name, orderNumber: maxOrder + 1)
         workspace.textDisplaySettings = source?.textDisplaySettings?.clearingThemeColors()
-        if var workspaceSettings = source?.workspaceSettings {
-            workspaceSettings.normalizeAutoAssignPrimaryLabel()
-            workspace.workspaceSettings = workspaceSettings
-        }
+        var workspaceSettings = source?.workspaceSettings ?? WorkspaceSettings()
+        workspaceSettings.normalizeAutoAssignPrimaryLabel()
+        workspace.workspaceSettings = workspaceSettings
         workspace.workspaceColor = source?.workspaceColor ?? Workspace.defaultWorkspaceColor
         modelContext.insert(workspace)
 
@@ -116,8 +115,9 @@ public final class WorkspaceStore {
      *   - newName: User-visible name for the cloned workspace.
      * - Returns: The cloned workspace.
      * - Side Effects: Inserts a new workspace graph, shifts later workspace order numbers, deep-copies windows,
-     *   page managers, and history items, remaps links-window references, assigns Android's default
-     *   workspace color when the source has no stored color, and saves `modelContext`.
+     *   page managers, history items, and Android-only page fidelity, remaps links-window references,
+     *   assigns Android's default workspace color when the source has no stored color, and saves
+     *   `modelContext`.
      * - Failure: Save errors are swallowed.
      * - Note: Window IDs are remapped so links-window references, maximized-window references, and page-manager
      *   ownership remain internally consistent.
@@ -145,6 +145,7 @@ public final class WorkspaceStore {
         // Deep-copy windows
         let sourceWindows = (source.windows ?? []).sorted { $0.orderNumber < $1.orderNumber }
         var windowIdMap: [UUID: UUID] = [:]  // old -> new, for links references
+        var clonedPageManagerWindowIDs: [(source: UUID, clone: UUID)] = []
 
         for srcWindow in sourceWindows {
             let newWindow = Window(
@@ -165,24 +166,9 @@ public final class WorkspaceStore {
             if let srcPM = srcWindow.pageManager {
                 let newPM = PageManager(id: newWindow.id, currentCategoryName: srcPM.currentCategoryName)
                 newPM.window = newWindow
-                newPM.bibleDocument = srcPM.bibleDocument
-                newPM.bibleVersification = srcPM.bibleVersification
-                newPM.bibleBibleBook = srcPM.bibleBibleBook
-                newPM.bibleChapterNo = srcPM.bibleChapterNo
-                newPM.bibleVerseNo = srcPM.bibleVerseNo
-                newPM.commentaryDocument = srcPM.commentaryDocument
-                newPM.commentaryAnchorOrdinal = srcPM.commentaryAnchorOrdinal
-                newPM.dictionaryDocument = srcPM.dictionaryDocument
-                newPM.dictionaryKey = srcPM.dictionaryKey
-                newPM.generalBookDocument = srcPM.generalBookDocument
-                newPM.generalBookKey = srcPM.generalBookKey
-                newPM.mapDocument = srcPM.mapDocument
-                newPM.mapKey = srcPM.mapKey
-                newPM.epubIdentifier = srcPM.epubIdentifier
-                newPM.epubHref = srcPM.epubHref
-                newPM.textDisplaySettings = srcPM.textDisplaySettings
-                newPM.jsState = srcPM.jsState
+                newPM.copyPersistedReaderState(from: srcPM)
                 modelContext.insert(newPM)
+                clonedPageManagerWindowIDs.append((source: srcWindow.id, clone: newWindow.id))
             }
 
             // Deep-copy HistoryItems
@@ -209,6 +195,9 @@ public final class WorkspaceStore {
         }
 
         save()
+        for windowIDs in clonedPageManagerWindowIDs {
+            copyPageManagerFidelity(from: windowIDs.source, to: windowIDs.clone)
+        }
         return cloned
     }
 
@@ -293,6 +282,61 @@ public final class WorkspaceStore {
     }
 
     /**
+     Adds an independently persisted pane by cloning an existing window and its complete reader state.
+
+     Android's `WindowRepository.createNewWindow` copies the source window entity, clears its links
+     target, restores the complete `CurrentPageManager.entity`, and gives the clone fresh identities.
+     The clone intentionally starts visible and has no navigation history, matching that behavior.
+
+     - Parameters:
+       - workspace: Parent workspace that will own the cloned window.
+       - source: Window whose pane and page-manager state should be copied.
+       - asLinksWindow: Final links-window role for the clone. This is explicit because Android's
+         change-to-normal action clones a links pane and then clears that role.
+     - Returns: A separately owned window and page manager, or `nil` when the source has no page
+       manager to clone.
+     - Side Effects: Inserts and saves a new window/page-manager graph, then copies any preserved
+       Android-only page-manager fidelity under the new window identifier.
+     - Failure Modes: A missing source page manager returns `nil` without inserting a fallback Bible
+       pane. Persistence failures retain the store's existing best-effort save behavior.
+     - Important: The source's `targetLinksWindowId` and history are deliberately not copied.
+     */
+    @discardableResult
+    func addWindow(
+        to workspace: Workspace,
+        cloning source: Window,
+        asLinksWindow: Bool
+    ) -> Window? {
+        guard let sourcePageManager = source.pageManager else { return nil }
+
+        let maxOrder = (workspace.windows ?? []).map(\.orderNumber).max() ?? -1
+        let window = Window(
+            isSynchronized: source.isSynchronized,
+            isPinMode: source.isPinMode,
+            isLinksWindow: asLinksWindow,
+            orderNumber: maxOrder + 1,
+            syncGroup: source.syncGroup,
+            layoutWeight: source.layoutWeight,
+            layoutState: "split"
+        )
+        window.workspace = workspace
+
+        let pageManager = PageManager(
+            id: window.id,
+            currentCategoryName: sourcePageManager.currentCategoryName
+        )
+        pageManager.window = window
+        pageManager.copyPersistedReaderState(from: sourcePageManager)
+
+        modelContext.insert(window)
+        modelContext.insert(pageManager)
+        save()
+        copyPageManagerFidelity(from: source.id, to: window.id)
+
+        return window
+    }
+
+    /**
      * Swaps the `orderNumber` values of two windows.
      * - Parameters:
      *   - window1: First window.
@@ -371,11 +415,54 @@ public final class WorkspaceStore {
     // MARK: - Persistence
 
     /**
+     Copies Android-only page-manager fields stored outside the SwiftData window graph.
+
+     - Parameters:
+       - sourceWindowID: Existing window whose raw category, commentary source, and generic-page
+         anchors should be read.
+       - clonedWindowID: Fresh window identifier that should own an independent fidelity row.
+     - Side Effects: Reads and, when source fidelity exists, writes one local `Setting` row after
+       the cloned graph has already been persisted.
+     - Failure Modes: Missing or malformed source fidelity produces no target row. Encoding and
+       settings persistence failures follow `RemoteSyncWorkspaceFidelityStore`'s best-effort
+       contract.
+     */
+    private func copyPageManagerFidelity(from sourceWindowID: UUID, to clonedWindowID: UUID) {
+        let fidelityStore = RemoteSyncWorkspaceFidelityStore(
+            settingsStore: SettingsStore(modelContext: modelContext)
+        )
+        guard let source = fidelityStore.pageManagerEntry(for: sourceWindowID) else { return }
+
+        fidelityStore.setPageManagerEntry(.init(
+            windowID: clonedWindowID,
+            rawCurrentCategoryName: source.rawCurrentCategoryName,
+            commentarySourceBookAndKey: source.commentarySourceBookAndKey,
+            dictionaryAnchorOrdinal: source.dictionaryAnchorOrdinal,
+            generalBookAnchorOrdinal: source.generalBookAnchorOrdinal,
+            mapAnchorOrdinal: source.mapAnchorOrdinal
+        ))
+    }
+
+    /**
+     * Saves window or workspace mutations performed by a coordinating service.
+     * - Side Effects: Flushes pending `modelContext` changes to disk.
+     * - Failure: Save errors are swallowed to preserve the store's existing eager-save contract.
+     * - Note: Entity creation, deletion, and ordering methods already save internally; this method
+     *   covers grouped property mutations that must be committed as one manager-routed action.
+     */
+    public func persistChanges() {
+        save()
+    }
+
+    /**
      * Saves pending workspace-related mutations.
-     * - Side Effects: Flushes `modelContext` to disk.
-     * - Failure: Save errors are swallowed.
+     * - Side Effects: Flushes `modelContext` and its remote-sync mutation journal atomically.
+     * - Failure: Journal or save errors are swallowed.
      */
     private func save() {
-        try? modelContext.save()
+        try? RemoteSyncMutationJournalService.savePendingGraphChanges(
+            for: .workspaces,
+            modelContext: modelContext
+        )
     }
 }

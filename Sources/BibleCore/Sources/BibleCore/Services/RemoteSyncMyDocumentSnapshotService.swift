@@ -43,6 +43,68 @@ public struct RemoteSyncMyDocumentCurrentSnapshot: Sendable, Equatable {
 }
 
 /**
+ Durable Android identity for one accepted My Documents row.
+
+ The identity manifest complements fingerprints so a deletion remains discoverable even when an
+ accepted initial backup had no current `LogEntry` rows.
+ */
+struct RemoteSyncMyDocumentAcceptedRowIdentity: Codable, Sendable, Equatable {
+    /// Canonical My Documents log key.
+    let key: String
+
+    /// Android table that owns the row.
+    let tableName: String
+
+    /// First Android composite-key component.
+    let entityID1: RemoteSyncSQLiteValue
+
+    /// Second Android composite-key component.
+    let entityID2: RemoteSyncSQLiteValue
+}
+
+/**
+ Immutable My Documents fingerprint and accepted-key generation.
+ */
+struct RemoteSyncMyDocumentAcceptedBaseline: Codable, Sendable, Equatable {
+    /// Opaque publication revision used to reject stale outbox acceptance.
+    let revision: UUID?
+
+    /// Exact projected fingerprints keyed by canonical Android log key.
+    let fingerprintsByKey: [String: String]
+
+    /// Accepted Android row identities used to emit later deletes.
+    let rowIdentities: [RemoteSyncMyDocumentAcceptedRowIdentity]
+
+    /** Creates one immutable accepted My Documents generation. */
+    init(
+        revision: UUID? = UUID(),
+        fingerprintsByKey: [String: String],
+        rowIdentities: [RemoteSyncMyDocumentAcceptedRowIdentity]
+    ) {
+        self.revision = revision
+        self.fingerprintsByKey = fingerprintsByKey
+        self.rowIdentities = rowIdentities
+    }
+}
+
+/**
+ Errors raised while reading or publishing the durable My Documents accepted baseline.
+ */
+enum RemoteSyncMyDocumentAcceptedBaselineError: Error, Equatable {
+    /// Persisted JSON could not be decoded as a complete accepted generation.
+    case invalidStoredBaseline
+
+    /// A projected fingerprint key did not belong to the My Documents namespace.
+    case invalidFingerprintKey(String)
+
+    /// An exportable projected row had no stable fingerprint.
+    case missingProjectedFingerprint(String)
+
+    /// The accepted baseline changed after an outbox generation was projected.
+    case staleAcceptedBaseline
+}
+
+/**
  Projects local My Documents SwiftData rows into Android My Documents sync rows.
 
  Android defines My Documents as four sync targets in `SyncUtilities.kt`:
@@ -57,14 +119,39 @@ public struct RemoteSyncMyDocumentCurrentSnapshot: Sendable, Equatable {
    category
 
  Failure modes:
- - fetch failures from `ModelContext` are swallowed and treated as an empty snapshot, matching the
-   existing outbound snapshot services
+ - compatibility projection methods swallow per-table fetch failures for existing outbound callers
+ - throwing projection and baseline methods propagate the first fetch failure before publication
  */
 public final class RemoteSyncMyDocumentSnapshotService {
+    /// Single settings key containing the accepted My Documents row-identity manifest.
+    static let acceptedBaselineKey = "remote_sync.accepted_baseline.mydocuments"
+
     // Android sync triggers write the SQL literal '' for entityId2 on single-key tables.
     static let emptySecondaryEntityID = RemoteSyncSQLiteValue.text("")
 
-    public init() {}
+    /// Deterministic pre-fetch checkpoint used by tests to model a strict SwiftData read failure.
+    private let strictSnapshotCheckpoint: () throws -> Void
+
+    /**
+     Creates a My Documents snapshot service with production strict-read behavior.
+
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init() {
+        strictSnapshotCheckpoint = {}
+    }
+
+    /**
+     Creates a snapshot service with a deterministic strict-read checkpoint for data-safety tests.
+
+     - Parameter strictSnapshotCheckpoint: Callback invoked before every throwing graph projection.
+     - Side effects: Stores the callback without invoking it.
+     - Failure modes: This initializer cannot fail; callback errors are rethrown by strict methods.
+     */
+    init(strictSnapshotCheckpoint: @escaping () throws -> Void) {
+        self.strictSnapshotCheckpoint = strictSnapshotCheckpoint
+    }
 
     /**
      Projects the current local My Documents graph into Android-shaped rows.
@@ -108,6 +195,7 @@ public final class RemoteSyncMyDocumentSnapshotService {
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> RemoteSyncMyDocumentCurrentSnapshot {
+        try strictSnapshotCheckpoint()
         let documents = try modelContext.fetch(FetchDescriptor<MyDocument>())
             .sorted(by: Self.documentSort)
         let pages = try modelContext.fetch(FetchDescriptor<MyDocumentPage>())
@@ -255,67 +343,202 @@ public final class RemoteSyncMyDocumentSnapshotService {
     }
 
     /**
-     Replaces the stored fingerprint baseline with the current My Documents snapshot.
+     Compatibility wrapper that replaces My Documents fingerprints from a fail-soft snapshot.
+
+     Existing non-destructive callers retain this API shape. Atomic publication must use
+     `refreshBaselineFingerprintsThrowing` so graph fetch failures abort before baseline mutation.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns the current My Documents graph.
+       - settingsStore: Settings store receiving the compatibility baseline.
+     - Side effects: Replaces My Documents fingerprints from the compatibility projection.
+     - Failure modes: SwiftData fetch failures are swallowed by `snapshotCurrentState` and projected
+       as empty tables, preserving the historical outbound-call contract.
      */
     public func refreshBaselineFingerprints(
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) {
         let snapshot = snapshotCurrentState(modelContext: modelContext, settingsStore: settingsStore)
-        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
-        fingerprintStore.clearCategory(.myDocuments)
+        try? acceptBaseline(acceptedBaseline(from: snapshot), settingsStore: settingsStore)
+    }
+
+    /**
+     Replaces My Documents fingerprints only after a complete strict graph projection succeeds.
+
+     Atomic restore and patch publication use this path so a failed graph read cannot clear the
+     accepted baseline or publish fingerprints for an authoritative empty snapshot.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns the current My Documents graph.
+       - settingsStore: Settings store receiving the fingerprint baseline.
+     - Side effects: Replaces My Documents fingerprints after every graph table has been read.
+     - Failure modes: Rethrows the strict checkpoint and any SwiftData fetch failure before baseline
+       mutation begins.
+     */
+    public func refreshBaselineFingerprintsThrowing(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws {
+        let snapshot = try snapshotCurrentStateThrowing(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        try acceptBaseline(acceptedBaselineThrowing(from: snapshot), settingsStore: settingsStore)
+    }
+
+    /**
+     Converts one complete My Documents projection into an immutable accepted generation.
+
+     - Parameter snapshot: Successfully projected My Documents rows and fingerprints.
+     - Returns: Exact fingerprints and accepted Android row identities for the projection.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    func acceptedBaseline(
+        from snapshot: RemoteSyncMyDocumentCurrentSnapshot
+    ) -> RemoteSyncMyDocumentAcceptedBaseline {
+        RemoteSyncMyDocumentAcceptedBaseline(
+            fingerprintsByKey: snapshot.fingerprintsByKey,
+            rowIdentities: acceptedRowIdentities(from: snapshot)
+        )
+    }
+
+    /**
+     Converts a strict My Documents projection into a validated accepted generation.
+
+     - Parameter snapshot: Complete strict projection.
+     - Returns: Immutable fingerprints and row identities for the projected generation.
+     - Side effects: none.
+     - Failure modes: Throws `missingProjectedFingerprint` when any exportable row lacks a stable
+       fingerprint.
+     */
+    func acceptedBaselineThrowing(
+        from snapshot: RemoteSyncMyDocumentCurrentSnapshot
+    ) throws -> RemoteSyncMyDocumentAcceptedBaseline {
+        let identities = acceptedRowIdentities(from: snapshot)
+        for identity in identities where snapshot.fingerprintsByKey[identity.key] == nil {
+            throw RemoteSyncMyDocumentAcceptedBaselineError.missingProjectedFingerprint(identity.key)
+        }
+        return RemoteSyncMyDocumentAcceptedBaseline(
+            fingerprintsByKey: snapshot.fingerprintsByKey,
+            rowIdentities: identities
+        )
+    }
+
+    /** Collects deterministic Android row identities for one My Documents projection. */
+    private func acceptedRowIdentities(
+        from snapshot: RemoteSyncMyDocumentCurrentSnapshot
+    ) -> [RemoteSyncMyDocumentAcceptedRowIdentity] {
+        var identities: [RemoteSyncMyDocumentAcceptedRowIdentity] = []
+
+        /** Appends one Android row identity to the immutable baseline. */
+        func append(key: String, tableName: String, rowID: UUID) {
+            identities.append(
+                RemoteSyncMyDocumentAcceptedRowIdentity(
+                    key: key,
+                    tableName: tableName,
+                    entityID1: .blob(Self.uuidBlob(rowID)),
+                    entityID2: Self.emptySecondaryEntityID
+                )
+            )
+        }
 
         for (key, row) in snapshot.documentRowsByKey {
-            guard let fingerprint = snapshot.fingerprintsByKey[key] else {
-                continue
-            }
-            fingerprintStore.setFingerprint(
-                fingerprint,
-                for: .myDocuments,
-                tableName: "MyDocument",
-                entityID1: .blob(Self.uuidBlob(row.id)),
-                entityID2: Self.emptySecondaryEntityID
-            )
+            append(key: key, tableName: "MyDocument", rowID: row.id)
         }
-
         for (key, row) in snapshot.pageRowsByKey {
-            guard let fingerprint = snapshot.fingerprintsByKey[key] else {
-                continue
-            }
-            fingerprintStore.setFingerprint(
-                fingerprint,
-                for: .myDocuments,
-                tableName: "MyDocumentPage",
-                entityID1: .blob(Self.uuidBlob(row.id)),
-                entityID2: Self.emptySecondaryEntityID
-            )
+            append(key: key, tableName: "MyDocumentPage", rowID: row.id)
         }
-
         for (key, row) in snapshot.pageContentRowsByKey {
-            guard let fingerprint = snapshot.fingerprintsByKey[key] else {
-                continue
-            }
-            fingerprintStore.setFingerprint(
-                fingerprint,
-                for: .myDocuments,
-                tableName: "MyDocumentPageContent",
-                entityID1: .blob(Self.uuidBlob(row.pageId)),
-                entityID2: Self.emptySecondaryEntityID
-            )
+            append(key: key, tableName: "MyDocumentPageContent", rowID: row.pageId)
+        }
+        for (key, row) in snapshot.aiPageCacheEntryRowsByKey {
+            append(key: key, tableName: "AiPageCacheEntry", rowID: row.pageId)
         }
 
-        for (key, row) in snapshot.aiPageCacheEntryRowsByKey {
-            guard let fingerprint = snapshot.fingerprintsByKey[key] else {
-                continue
-            }
-            fingerprintStore.setFingerprint(
-                fingerprint,
-                for: .myDocuments,
-                tableName: "AiPageCacheEntry",
-                entityID1: .blob(Self.uuidBlob(row.pageId)),
-                entityID2: Self.emptySecondaryEntityID
-            )
+        return identities.sorted { $0.key < $1.key }
+    }
+
+    /**
+     Reads the durable accepted My Documents generation when one has been published.
+
+     - Parameter settingsStore: Local settings store containing synchronization metadata.
+     - Returns: Stored accepted generation, or `nil` before first publication.
+     - Side effects: Reads one settings row.
+     - Failure modes: Throws `invalidStoredBaseline` for malformed persisted JSON; settings fetch
+       failures invalidate an enclosing atomic batch.
+     */
+    func storedAcceptedBaseline(
+        settingsStore: SettingsStore
+    ) throws -> RemoteSyncMyDocumentAcceptedBaseline? {
+        guard let payload = settingsStore.getString(Self.acceptedBaselineKey) else {
+            return nil
         }
+        guard let data = payload.data(using: .utf8),
+              let baseline = try? JSONDecoder().decode(RemoteSyncMyDocumentAcceptedBaseline.self, from: data) else {
+            throw RemoteSyncMyDocumentAcceptedBaselineError.invalidStoredBaseline
+        }
+        return baseline
+    }
+
+    /**
+     Verifies that an outbox was projected from the currently accepted My Documents generation.
+
+     - Parameters:
+       - expectedRevision: Revision captured during strict preflight, including `nil` for legacy baselines.
+       - expectedBaselineExists: Whether strict preflight observed an accepted baseline row.
+       - settingsStore: Store containing the current accepted generation.
+     - Side effects: Reads one settings row.
+     - Failure modes: Throws for malformed state or when another generation replaced the baseline.
+     */
+    func validateAcceptedBaselineRevision(
+        expectedRevision: UUID?,
+        expectedBaselineExists: Bool,
+        settingsStore: SettingsStore
+    ) throws {
+        let currentBaseline = try storedAcceptedBaseline(settingsStore: settingsStore)
+        guard (currentBaseline != nil) == expectedBaselineExists,
+              currentBaseline?.revision == expectedRevision else {
+            throw RemoteSyncMyDocumentAcceptedBaselineError.staleAcceptedBaseline
+        }
+    }
+
+    /**
+     Publishes an already-projected My Documents generation without re-reading SwiftData.
+
+     - Parameters:
+       - baseline: Immutable fingerprints and row identities from the accepted generation.
+       - settingsStore: Store receiving fingerprint and accepted-key mutations.
+     - Side effects: Replaces all My Documents fingerprints and the accepted-key manifest.
+     - Failure modes: Throws for an out-of-namespace fingerprint key or encoding failure; settings
+       failures invalidate an enclosing `SettingsStore.performAtomicBatch`.
+     */
+    func acceptBaseline(
+        _ baseline: RemoteSyncMyDocumentAcceptedBaseline,
+        settingsStore: SettingsStore
+    ) throws {
+        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let fingerprintPrefix = fingerprintStore.prefix(for: .myDocuments)
+        let logPrefix = logEntryStore.prefix(for: .myDocuments)
+
+        fingerprintStore.clearCategory(.myDocuments)
+        for (logKey, fingerprint) in baseline.fingerprintsByKey.sorted(by: { $0.key < $1.key }) {
+            guard logKey.hasPrefix(logPrefix) else {
+                throw RemoteSyncMyDocumentAcceptedBaselineError.invalidFingerprintKey(logKey)
+            }
+            let suffix = String(logKey.dropFirst(logPrefix.count))
+            settingsStore.setString("\(fingerprintPrefix)\(suffix)", value: fingerprint)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(baseline)
+        guard let payload = String(data: data, encoding: .utf8) else {
+            throw RemoteSyncMyDocumentAcceptedBaselineError.invalidStoredBaseline
+        }
+        settingsStore.setString(Self.acceptedBaselineKey, value: payload)
     }
 
     /**

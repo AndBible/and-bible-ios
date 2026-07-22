@@ -25,8 +25,23 @@ public enum RemoteSyncReadingPlanRestoreError: Error, Equatable {
     /// One Android `readingStatus` payload was not valid JSON for the expected schema.
     case malformedReadingStatus(planCode: String, dayNumber: Int)
 
+    /// More than one status row targets Android's unique `(planCode, planDay)` identity.
+    case duplicateReadingStatus(planCode: String, dayNumber: Int)
+
     /// One Android UUID-like blob could not be converted into an iOS `UUID`.
     case invalidIdentifierBlob(table: String, column: String)
+
+    /// One staged table exceeds the bounded row count accepted before allocation.
+    case tooManyRows(table: String, count: Int64)
+
+    /// One text identity is absent, malformed UTF-8, unsafe as a plan code, or too large.
+    case invalidTextValue(table: String, column: String)
+
+    /// One Android day field is outside its signed and allocation-safe domain.
+    case invalidDayNumber(table: String, value: Int64)
+
+    /// One staged text payload exceeds the per-field byte ceiling.
+    case fieldTooLarge(table: String, column: String, byteCount: Int)
 }
 
 /**
@@ -74,8 +89,11 @@ public struct RemoteSyncAndroidReadingPlan: Sendable, Equatable {
     /// Android reading-plan code used to resolve the underlying plan definition.
     public let planCode: String
 
-    /// Persisted Android plan start date.
-    public let startDate: Date
+    /// Exact persisted Android signed-Int64 plan start date.
+    public let startDateMilliseconds: Int64
+
+    /// Date-backed presentation retained for compatibility callers.
+    public var startDate: Date { AndroidTimestamp.date(from: startDateMilliseconds) }
 
     /// Persisted Android current-day pointer.
     public let currentDay: Int
@@ -89,7 +107,7 @@ public struct RemoteSyncAndroidReadingPlan: Sendable, Equatable {
      - Parameters:
        - id: Android identifier blob converted into iOS UUID form.
        - planCode: Android reading-plan code used to resolve the underlying plan definition.
-       - startDate: Persisted Android plan start date.
+       - startDateMilliseconds: Exact persisted Android plan start date.
        - currentDay: Persisted Android current-day pointer.
        - statuses: All staged status rows that belong to this plan code.
      - Side effects: none.
@@ -98,15 +116,45 @@ public struct RemoteSyncAndroidReadingPlan: Sendable, Equatable {
     public init(
         id: UUID,
         planCode: String,
-        startDate: Date,
+        startDateMilliseconds: Int64,
         currentDay: Int,
         statuses: [RemoteSyncAndroidReadingPlanStatus]
     ) {
         self.id = id
         self.planCode = planCode
-        self.startDate = startDate
+        self.startDateMilliseconds = startDateMilliseconds
         self.currentDay = currentDay
         self.statuses = statuses
+    }
+
+    /**
+     Creates a compatibility snapshot from a Date-backed caller without a trapping integer cast.
+
+     - Parameters:
+       - id: Android identifier blob converted into iOS UUID form.
+       - planCode: Android reading-plan code.
+       - startDate: Legacy Date-backed start date.
+       - currentDay: Persisted Android current-day pointer.
+       - statuses: Status rows belonging to the plan.
+     - Side Effects: none.
+     - Failure modes: Dates outside signed-Int64 milliseconds saturate by sign. Database readers
+       use the exact integer initializer and never enter this compatibility path.
+     */
+    public init(
+        id: UUID,
+        planCode: String,
+        startDate: Date,
+        currentDay: Int,
+        statuses: [RemoteSyncAndroidReadingPlanStatus]
+    ) {
+        let fallback: Int64 = startDate.timeIntervalSince1970.sign == .minus ? .min : .max
+        self.init(
+            id: id,
+            planCode: planCode,
+            startDateMilliseconds: (try? AndroidTimestamp.milliseconds(from: startDate)) ?? fallback,
+            currentDay: currentDay,
+            statuses: statuses
+        )
     }
 }
 
@@ -129,7 +177,7 @@ public struct RemoteSyncAndroidReadingPlanSnapshot: Sendable, Equatable {
      - Parameters:
        - plans: Staged Android reading plans grouped with their matching status rows.
        - orphanStatuses: Status rows whose `planCode` had no matching `ReadingPlan` row.
-     - Side effects: none.
+       - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
     public init(
@@ -172,35 +220,133 @@ public struct RemoteSyncReadingPlanRestoreReport: Sendable, Equatable {
 }
 
 /**
+ One fully materialized reading-plan day ready for atomic SwiftData replacement.
+
+ This value type lets initial-backup restore and incremental patch replay share the same graph
+ publication path after each source has completed its own validation and completion calculation.
+ */
+struct RemoteSyncPreparedReadingPlanDay: Sendable, Equatable {
+    /// One-based position in the plan definition.
+    let dayNumber: Int
+
+    /// Canonical reading references from the selected bundled, user, or add-on definition.
+    let readings: String
+
+    /// Completion state reconstructed from Android status semantics.
+    let isCompleted: Bool
+}
+
+/**
+ One fully materialized reading plan ready for atomic SwiftData replacement.
+ */
+struct RemoteSyncPreparedReadingPlan: Sendable, Equatable {
+    /// Stable Android reading-plan identifier.
+    let id: UUID
+
+    /// Android plan definition code.
+    let planCode: String
+
+    /// Display name from the matching catalog definition.
+    let planName: String
+
+    /// Exact persisted Android plan start date.
+    let startDateMilliseconds: Int64
+
+    /// Date-backed presentation used by the current SwiftData model.
+    var startDate: Date { AndroidTimestamp.date(from: startDateMilliseconds) }
+
+    /// Normalized current-day position.
+    let currentDay: Int
+
+    /// Number of days in the matching catalog definition.
+    let totalDays: Int
+
+    /// Whether the restored plan should become active immediately.
+    let isActive: Bool
+
+    /// Complete regenerated day graph.
+    let days: [RemoteSyncPreparedReadingPlanDay]
+}
+
+/**
+ Complete reading-plan graph and fidelity-status generation published by one atomic replacement.
+
+ Callers must finish source-specific validation before constructing this payload. Publication uses
+ one shared `ModelContext`, allowing both initial restore and patch replay to join a surrounding
+ `SettingsStore` batch without introducing a second commit boundary.
+ */
+struct RemoteSyncReadingPlanReplacement: Sendable, Equatable {
+    /// Complete replacement set of plans and generated days.
+    let plans: [RemoteSyncPreparedReadingPlan]
+
+    /// Complete replacement set of raw Android status payloads.
+    let statuses: [RemoteSyncReadingPlanStatusStore.Status]
+}
+
+/**
  Reads staged Android reading-plan databases and restores them into iOS SwiftData.
 
  The restore contract is intentionally conservative:
  - staged SQLite rows are read exactly from Android's `ReadingPlan` and `ReadingPlanStatus` tables
- - restore is refused when the staged database references plan codes that this iOS build cannot
-   recreate from `ReadingPlanService.availablePlans`
+ - restore is refused when the staged database references plan codes that this device cannot
+   recreate from its bundled, add-on, or device-local `ReadingPlanService` catalog
  - raw Android per-reading status JSON is preserved locally through
-   `RemoteSyncReadingPlanStatusStore` so iOS does not silently discard progress fidelity it cannot
-   yet render natively
+   `RemoteSyncReadingPlanStatusStore` and rendered through the shared typed reading-plan status contract
 
  Mapping notes:
- - Android's selected/current plan preference is not stored in the sync database, so iOS derives
-   `ReadingPlan.isActive` from whether every reconstructed day is complete
+ - Android's selected/current plan preference is not stored in the reading-plan sync database;
+   restored rows remain inactive until `ReadingPlanSelectionStore` reconciles `reading_plan`
  - for non-date-based plans, Android treats all days before `planCurrentDay` as historic and fully
    read even when earlier `ReadingPlanStatus` rows have already been deleted; this restore mirrors
    that behavior
+
+ Side effects:
+ - replaces the local plan/day graph and preserved status rows through one settings-backed batch
+
+ Failure modes:
+ - rejects orphan statuses, unavailable local plan definitions, and malformed status payloads
+ - rethrows definition recovery, cancellation, context, fetch, encoding, and save errors
 
  Concurrency:
  - this type is not `Sendable`; callers must respect the confinement of the supplied `ModelContext`
    and `SettingsStore`
  */
 public final class RemoteSyncReadingPlanRestoreService {
-    private struct PreparedDay {
-        let dayNumber: Int
-        let readings: String
-        let isCompleted: Bool
+    /// Maximum plan parents accepted from one untrusted database.
+    private static let maximumPlanRowCount: Int64 = 10_000
+
+    /// Maximum status rows accepted from one untrusted database.
+    private static let maximumStatusRowCount: Int64 = 100_000
+
+    /// Maximum bytes accepted for one raw Android status JSON payload.
+    private static let maximumStatusByteCount = 1 * 1_024 * 1_024
+
+    /// Android-equivalent custom-plan directory used when resolving restored templates.
+    private let userPlanDirectory: URL
+
+    /// Recovers interrupted device-local definition publication before catalog resolution.
+    private let definitionStore: RemoteSyncReadingPlanDefinitionStore
+
+    /// Durable value snapshot of all reading-plan graph rows before an atomic replacement.
+    private struct DurableGraph: Equatable {
+        /// Complete parent-plan rows ordered by stable identifier.
+        let plans: [DurablePlan]
+
+        /// Complete day rows, including any orphan rows, ordered by stable identifier.
+        let days: [DurableDay]
+
+        /// Definition publication markers colocated with the graph store.
+        let definitionPublicationStates: [DurableDefinitionPublicationState]
     }
 
-    private struct PreparedPlan {
+    /// Durable value representation of one graph-colocated definition publication marker.
+    private struct DurableDefinitionPublicationState: Equatable {
+        let storageKey: String
+        let committedGeneration: String?
+    }
+
+    /// Durable value representation of one `ReadingPlan` row.
+    private struct DurablePlan: Equatable {
         let id: UUID
         let planCode: String
         let planName: String
@@ -208,26 +354,59 @@ public final class RemoteSyncReadingPlanRestoreService {
         let currentDay: Int
         let totalDays: Int
         let isActive: Bool
-        let days: [PreparedDay]
-        let rawStatuses: [RemoteSyncAndroidReadingPlanStatus]
     }
 
-    private struct AndroidReadingStatusPayload: Decodable {
-        let chapterReadArray: [AndroidChapterRead]
+    /// Durable value representation of one `ReadingPlanDay` row and its parent identity.
+    private struct DurableDay: Equatable {
+        let id: UUID
+        let planID: UUID?
+        let dayNumber: Int
+        let isCompleted: Bool
+        let completedDate: Date?
+        let readings: String
     }
 
-    private struct AndroidChapterRead: Decodable {
-        let readingNumber: Int
-        let isRead: Bool
+    /**
+     Captures a fresh-context recovery action for the complete durable reading-plan graph.
+
+     Local definition publication uses this action when a custom import changes files and plan rows in one
+     settings-backed batch. Reusing the restore service's value snapshot keeps both mutation paths on
+     the same cross-configuration compensation contract.
+
+     - Parameter modelContext: Clean context containing the pre-mutation plan and day generation.
+     - Returns: Recovery action suitable for `SettingsStore.performAtomicBatch`.
+     - Side Effects: Performs strict read-only plan and day fetches now; the returned closure rewrites
+       the graph only if a later partial commit differs from the captured generation.
+     - Failure modes: Rethrows snapshot fetch failures now or fresh-context recovery failures later.
+     */
+    static func durableGraphRecovery(
+        from modelContext: ModelContext
+    ) throws -> (ModelContainer) throws -> Void {
+        let durableGraph = try captureDurableGraph(from: modelContext)
+        return { container in
+            try restoreDurableGraph(durableGraph, in: container)
+        }
     }
 
     /**
      Creates a reading-plan restore service.
 
+     - Parameters:
+       - userPlanDirectory: Destination equivalent to Android's `jsword/readingplan` directory.
+       - fileManager: Filesystem implementation used for transactional definition installation.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
-    public init() {}
+    public init(
+        userPlanDirectory: URL = ReadingPlanService.defaultUserReadingPlanDirectory(),
+        fileManager: FileManager = .default
+    ) {
+        self.userPlanDirectory = userPlanDirectory
+        definitionStore = RemoteSyncReadingPlanDefinitionStore(
+            userPlanDirectory: userPlanDirectory,
+            fileManager: fileManager
+        )
+    }
 
     /**
      Reads one staged Android reading-plan SQLite database into a typed snapshot.
@@ -243,6 +422,7 @@ public final class RemoteSyncReadingPlanRestoreService {
          absent
        - throws `RemoteSyncReadingPlanRestoreError.invalidIdentifierBlob` when Android UUID-like
          BLOB columns cannot be converted into `UUID`
+       - rejects any schema outside Android's exact reading-plan Room contract
      */
     public func readSnapshot(from databaseURL: URL) throws -> RemoteSyncAndroidReadingPlanSnapshot {
         var db: OpaquePointer?
@@ -251,20 +431,33 @@ public final class RemoteSyncReadingPlanRestoreService {
         }
         defer { sqlite3_close(db) }
 
+        try RemoteSyncAndroidDatabaseContract.validateInboundDatabase(
+            db,
+            category: .readingPlans
+        )
         try requireTable(named: "ReadingPlan", in: db)
         try requireTable(named: "ReadingPlanStatus", in: db)
+        try requireRowCount(
+            in: "ReadingPlan",
+            database: db,
+            maximum: Self.maximumPlanRowCount
+        )
+        try requireRowCount(
+            in: "ReadingPlanStatus",
+            database: db,
+            maximum: Self.maximumStatusRowCount
+        )
 
         let statuses = try fetchStatuses(from: db)
         let statusesByPlanCode = Dictionary(grouping: statuses, by: \.planCode)
         let planRows = try fetchPlans(from: db)
-
         let knownPlanCodes = Set(planRows.map(\.planCode))
         let orphanStatuses = statuses.filter { !knownPlanCodes.contains($0.planCode) }
         let plans = planRows.map { planRow in
             RemoteSyncAndroidReadingPlan(
                 id: planRow.id,
                 planCode: planRow.planCode,
-                startDate: planRow.startDate,
+                startDateMilliseconds: planRow.startDateMilliseconds,
                 currentDay: planRow.currentDay,
                 statuses: statusesByPlanCode[planRow.planCode, default: []].sorted { $0.dayNumber < $1.dayNumber }
             )
@@ -284,11 +477,15 @@ public final class RemoteSyncReadingPlanRestoreService {
     /**
      Replaces local iOS reading plans with the supplied staged Android snapshot.
 
-     Restore is all-or-nothing at the semantic level. The method first validates that every staged
-     plan code is reproducible from `ReadingPlanService.availablePlans`, that there are no orphan
-     status rows, and that any status JSON needed for completion calculation is structurally valid.
-     Only after that preflight succeeds does it delete existing plans, recreate new `ReadingPlan`
-     and `ReadingPlanDay` rows, and preserve the raw Android status payloads locally.
+     Restore is durably all-or-nothing. The method first validates that every staged
+     plan code is reproducible from the device-local catalog, that there are no orphan status rows,
+     and that status JSON needed for completion
+     calculation is structurally valid. Only after that preflight succeeds does one explicit
+     settings-backed SwiftData batch delete
+     existing plans, recreate new `ReadingPlan` and `ReadingPlanDay` rows, and preserve the raw
+     Android status payloads. The batch performs one primary throwing save, rolls back pending state
+     on failure or cancellation, and durably restores the old graph and settings generations when
+     separate SwiftData configurations commit only part of that save.
 
      - Parameters:
        - snapshot: Staged Android snapshot previously read from `readSnapshot(from:)`.
@@ -296,82 +493,306 @@ public final class RemoteSyncReadingPlanRestoreService {
        - statusStore: Local-only store used to preserve raw Android status JSON.
      - Returns: Summary of restored plans, recreated day rows, and preserved raw statuses.
      - Side effects:
+       - recovers any interrupted device-local definition publication before catalog resolution
        - deletes existing local `ReadingPlan` graphs
        - inserts replacement `ReadingPlan` and `ReadingPlanDay` rows
        - clears and repopulates preserved Android status payloads in `statusStore`
-       - saves `modelContext`
+       - saves the shared `modelContext` exactly once on success after the replacement is staged
      - Failure modes:
        - throws `RemoteSyncReadingPlanRestoreError.orphanStatuses` when the staged database contains
          status rows whose `planCode` has no matching plan row
        - throws `RemoteSyncReadingPlanRestoreError.unsupportedPlanDefinitions` when iOS cannot
-         reconstruct one or more staged plan codes from bundled templates
+         reconstruct one or more staged plan codes from the device-local catalog
        - throws `RemoteSyncReadingPlanRestoreError.malformedReadingStatus` when a status payload that
          affects completion calculation is not valid Android JSON
-       - rethrows SwiftData save errors from `modelContext.save()`
+       - throws `SettingsStoreAtomicBatchError` when `statusStore` is not bound to the exact clean
+         `modelContext` supplied for the graph replacement
+       - throws `CancellationError` when the current task is cancelled before commit
+       - rethrows definition recovery, strict status-encoding/fetch, and SwiftData save
+         errors
      */
     public func replaceLocalReadingPlans(
         from snapshot: RemoteSyncAndroidReadingPlanSnapshot,
         modelContext: ModelContext,
         statusStore: RemoteSyncReadingPlanStatusStore
     ) throws -> RemoteSyncReadingPlanRestoreReport {
-        let preparedPlans = try preparePlans(from: snapshot)
-
-        let existingPlans = (try? modelContext.fetch(FetchDescriptor<ReadingPlan>())) ?? []
-        for plan in existingPlans {
-            modelContext.delete(plan)
-        }
-
-        statusStore.clearAll()
-
-        var restoredDayCount = 0
-        var preservedStatusCount = 0
-        for preparedPlan in preparedPlans {
-            let restoredPlan = ReadingPlan(
-                id: preparedPlan.id,
-                planCode: preparedPlan.planCode,
-                planName: preparedPlan.planName,
-                startDate: preparedPlan.startDate,
-                currentDay: preparedPlan.currentDay,
-                totalDays: preparedPlan.totalDays,
-                isActive: preparedPlan.isActive
-            )
-            modelContext.insert(restoredPlan)
-
-            for day in preparedPlan.days {
-                let restoredDay = ReadingPlanDay(
-                    dayNumber: day.dayNumber,
-                    isCompleted: day.isCompleted,
-                    readings: day.readings
-                )
-                restoredDay.plan = restoredPlan
-                modelContext.insert(restoredDay)
-                restoredDayCount += 1
-            }
-
-            for rawStatus in preparedPlan.rawStatuses {
-                statusStore.setStatus(
-                    rawStatus.readingStatusJSON,
-                    planCode: rawStatus.planCode,
-                    dayNumber: rawStatus.dayNumber,
-                    remoteStatusID: rawStatus.id
-                )
-                preservedStatusCount += 1
-            }
-        }
-
-        try modelContext.save()
-
-        return RemoteSyncReadingPlanRestoreReport(
-            restoredPlanCodes: preparedPlans.map(\.planCode).sorted(),
-            restoredDayCount: restoredDayCount,
-            preservedStatusCount: preservedStatusCount
+        try replaceLocalReadingPlans(
+            from: snapshot,
+            modelContext: modelContext,
+            statusStore: statusStore,
+            mutationCheckpoint: { try Task.checkCancellation() }
         )
+    }
+
+    /**
+     Replaces local reading plans atomically while invoking a deterministic interruption checkpoint.
+
+     This internal overload lets concurrency tests interrupt after staged graph/status mutations while
+     production delegates every checkpoint to `Task.checkCancellation()`. All semantic preflight still
+     occurs before entering the atomic batch.
+
+     - Parameters:
+       - snapshot: Validated or untrusted staged Android reading-plan snapshot.
+       - modelContext: Exact clean context shared by plans, days, and the status store's settings.
+       - statusStore: Preserved Android status store bound to `modelContext`.
+       - mutationCheckpoint: Throwing callback invoked before mutation, after each destructive or
+         plan/status replacement phase, and immediately before commit.
+     - Returns: Summary of the replacement after its primary save succeeds.
+     - Side Effects: Replaces all plan/day/status rows through one atomic settings batch.
+     - Throws: Rethrows preflight, checkpoint, context-contract, encoding, fetch, save, and durable
+       recovery errors; failed publication restores the complete old durable generation.
+     */
+    func replaceLocalReadingPlans(
+        from snapshot: RemoteSyncAndroidReadingPlanSnapshot,
+        modelContext: ModelContext,
+        statusStore: RemoteSyncReadingPlanStatusStore,
+        mutationCheckpoint: @escaping () throws -> Void
+    ) throws -> RemoteSyncReadingPlanRestoreReport {
+        try definitionStore.prepareForSnapshot(
+            settingsStore: statusStore.definitionPublicationSettingsStore
+        )
+        let preparedPlans = try preparePlans(from: snapshot)
+        let statuses = snapshot.plans.flatMap(\.statuses).map { status in
+            RemoteSyncReadingPlanStatusStore.Status(
+                planCode: status.planCode,
+                dayNumber: status.dayNumber,
+                readingStatusJSON: status.readingStatusJSON,
+                remoteStatusID: status.id
+            )
+        }
+
+        return try replaceLocalReadingPlans(
+            with: RemoteSyncReadingPlanReplacement(
+                plans: preparedPlans,
+                statuses: statuses
+            ),
+            modelContext: modelContext,
+            statusStore: statusStore,
+            mutationCheckpoint: mutationCheckpoint
+        )
+    }
+
+    /**
+     Publishes one fully prepared reading-plan generation through the shared atomic batch boundary.
+
+     Patch replay calls this method from inside its wider settings batch, so graph replacement joins
+     raw statuses, log entries, applied-patch rows, and fingerprint baselines in the outer commit.
+     Initial-backup restore calls it without an outer batch and lets the status store own the commit.
+
+     - Parameters:
+       - replacement: Complete prevalidated plan/day graph and raw status generation.
+       - modelContext: Exact clean context shared by graph models and the status store.
+       - statusStore: Status store backed by the same `SettingsStore` and context.
+       - mutationCheckpoint: Throwing interruption check invoked throughout destructive mutation.
+     - Returns: Summary of the staged replacement after its owning batch commits.
+     - Side Effects: Deletes the old plan/day/status generation and stages the complete replacement.
+     - Throws: Rethrows context-contract, checkpoint, fetch, encoding, final-save, and durable
+       recovery errors. The owning settings batch restores the prior durable generation on failure.
+     */
+    func replaceLocalReadingPlans(
+        with replacement: RemoteSyncReadingPlanReplacement,
+        modelContext: ModelContext,
+        statusStore: RemoteSyncReadingPlanStatusStore,
+        mutationCheckpoint: () throws -> Void = { try Task.checkCancellation() }
+    ) throws -> RemoteSyncReadingPlanRestoreReport {
+        let durableGraph = try Self.captureDurableGraph(from: modelContext)
+
+        return try statusStore.performAtomicBatch(
+            in: modelContext,
+            durableRecovery: { container in
+                try Self.restoreDurableGraph(durableGraph, in: container)
+            }
+        ) {
+            try mutationCheckpoint()
+
+            let existingDays = try modelContext.fetch(FetchDescriptor<ReadingPlanDay>())
+            for day in existingDays {
+                modelContext.delete(day)
+                try mutationCheckpoint()
+            }
+
+            let existingPlans = try modelContext.fetch(FetchDescriptor<ReadingPlan>())
+            for plan in existingPlans {
+                modelContext.delete(plan)
+                try mutationCheckpoint()
+            }
+
+            statusStore.clearAll()
+            let timestampStore = RemoteSyncReadingPlanTimestampStore(
+                settingsStore: statusStore.definitionPublicationSettingsStore
+            )
+            timestampStore.clearAll()
+            try mutationCheckpoint()
+
+            var restoredDayCount = 0
+            for preparedPlan in replacement.plans {
+                let restoredPlan = ReadingPlan(
+                    id: preparedPlan.id,
+                    planCode: preparedPlan.planCode,
+                    planName: preparedPlan.planName,
+                    startDate: preparedPlan.startDate,
+                    currentDay: preparedPlan.currentDay,
+                    totalDays: preparedPlan.totalDays,
+                    isActive: preparedPlan.isActive
+                )
+                modelContext.insert(restoredPlan)
+                timestampStore.setMilliseconds(
+                    preparedPlan.startDateMilliseconds,
+                    for: preparedPlan.id
+                )
+
+                for day in preparedPlan.days {
+                    let restoredDay = ReadingPlanDay(
+                        dayNumber: day.dayNumber,
+                        isCompleted: day.isCompleted,
+                        readings: day.readings
+                    )
+                    restoredDay.plan = restoredPlan
+                    modelContext.insert(restoredDay)
+                    restoredDayCount += 1
+                }
+                try mutationCheckpoint()
+            }
+
+            for status in replacement.statuses.sorted(by: Self.statusSort) {
+                try statusStore.setStatusThrowing(status)
+                try mutationCheckpoint()
+            }
+
+            try mutationCheckpoint()
+            return RemoteSyncReadingPlanRestoreReport(
+                restoredPlanCodes: replacement.plans.map(\.planCode).sorted(),
+                restoredDayCount: restoredDayCount,
+                preservedStatusCount: replacement.statuses.count
+            )
+        }
+    }
+
+    /**
+     Captures every persisted reading-plan parent and day row before replacement begins.
+
+     - Parameter modelContext: Clean context that owns the reading-plan graph.
+     - Returns: Store-independent value snapshot suitable for fresh-context recovery.
+     - Side Effects: Performs strict plan, day, and definition-publication-state fetches.
+     - Failure modes: Rethrows SwiftData fetch failures before any mutation begins.
+     */
+    private static func captureDurableGraph(from modelContext: ModelContext) throws -> DurableGraph {
+        let plans = try modelContext.fetch(FetchDescriptor<ReadingPlan>()).map { plan in
+            DurablePlan(
+                id: plan.id,
+                planCode: plan.planCode,
+                planName: plan.planName,
+                startDate: plan.startDate,
+                currentDay: plan.currentDay,
+                totalDays: plan.totalDays,
+                isActive: plan.isActive
+            )
+        }.sorted { $0.id.uuidString < $1.id.uuidString }
+        let days = try modelContext.fetch(FetchDescriptor<ReadingPlanDay>()).map { day in
+            DurableDay(
+                id: day.id,
+                planID: day.plan?.id,
+                dayNumber: day.dayNumber,
+                isCompleted: day.isCompleted,
+                completedDate: day.completedDate,
+                readings: day.readings
+            )
+        }.sorted { $0.id.uuidString < $1.id.uuidString }
+        let definitionPublicationStates = try modelContext.fetch(
+            FetchDescriptor<ReadingPlanDefinitionPublicationState>()
+        ).map { state in
+            DurableDefinitionPublicationState(
+                storageKey: state.storageKey,
+                committedGeneration: state.committedGeneration
+            )
+        }.sorted { $0.storageKey < $1.storageKey }
+        return DurableGraph(
+            plans: plans,
+            days: days,
+            definitionPublicationStates: definitionPublicationStates
+        )
+    }
+
+    /**
+     Restores a pre-commit reading-plan graph through a fresh graph-only save when needed.
+
+     A failed graph-store commit leaves the durable graph equal to `expected`, so no save is issued
+     against the still-failing store. A settings-store failure can leave the graph committed; in that
+     case this helper replaces all plan/day rows and graph-colocated publication markers, then saves
+     only their configuration.
+
+     - Parameters:
+       - expected: Exact plan/day generation captured before the failed batch.
+       - container: Production-shaped container spanning graph and settings configurations.
+     - Side Effects: When durable graph state differs, replaces every plan/day row in a fresh context.
+     - Failure modes: Rethrows strict fetch or graph-only save failures.
+     */
+    private static func restoreDurableGraph(
+        _ expected: DurableGraph,
+        in container: ModelContainer
+    ) throws {
+        let recoveryContext = ModelContext(container)
+        recoveryContext.autosaveEnabled = false
+        let current = try captureDurableGraph(from: recoveryContext)
+        guard current != expected else {
+            return
+        }
+
+        let currentPlans = try recoveryContext.fetch(FetchDescriptor<ReadingPlan>())
+        let currentDays = try recoveryContext.fetch(FetchDescriptor<ReadingPlanDay>())
+        let currentPublicationStates = try recoveryContext.fetch(
+            FetchDescriptor<ReadingPlanDefinitionPublicationState>()
+        )
+        for plan in currentPlans {
+            recoveryContext.delete(plan)
+        }
+        for day in currentDays where day.plan == nil {
+            recoveryContext.delete(day)
+        }
+        for state in currentPublicationStates {
+            recoveryContext.delete(state)
+        }
+
+        var plansByID: [UUID: ReadingPlan] = [:]
+        for plan in expected.plans {
+            let restoredPlan = ReadingPlan(
+                id: plan.id,
+                planCode: plan.planCode,
+                planName: plan.planName,
+                startDate: plan.startDate,
+                currentDay: plan.currentDay,
+                totalDays: plan.totalDays,
+                isActive: plan.isActive
+            )
+            recoveryContext.insert(restoredPlan)
+            plansByID[plan.id] = restoredPlan
+        }
+        for day in expected.days {
+            let restoredDay = ReadingPlanDay(
+                id: day.id,
+                dayNumber: day.dayNumber,
+                isCompleted: day.isCompleted,
+                readings: day.readings
+            )
+            restoredDay.completedDate = day.completedDate
+            restoredDay.plan = day.planID.flatMap { plansByID[$0] }
+            recoveryContext.insert(restoredDay)
+        }
+        for state in expected.definitionPublicationStates {
+            recoveryContext.insert(
+                ReadingPlanDefinitionPublicationState(
+                    storageKey: state.storageKey,
+                    committedGeneration: state.committedGeneration
+                )
+            )
+        }
+        try recoveryContext.save()
     }
 
     /**
      Normalizes one staged Android snapshot into validated iOS-ready reading-plan graphs.
 
-     This preflight step resolves bundled iOS plan templates, rejects orphan status rows and
+     This preflight step resolves the device's bundled, add-on, and local plan templates, rejects orphan status rows and
      unsupported plan codes, computes per-day completion, and preserves the raw Android status rows
      for later fidelity storage. It performs all semantic validation before any caller mutates
      SwiftData.
@@ -382,19 +803,25 @@ public final class RemoteSyncReadingPlanRestoreService {
      - Failure modes:
        - throws `RemoteSyncReadingPlanRestoreError.orphanStatuses` when the snapshot contains status
          rows whose `planCode` has no corresponding plan row
-       - throws `RemoteSyncReadingPlanRestoreError.unsupportedPlanDefinitions` when bundled iOS
-         templates do not contain one or more staged plan codes
+       - throws `RemoteSyncReadingPlanRestoreError.unsupportedPlanDefinitions` when the local catalog
+         does not contain one or more staged plan codes
        - rethrows `RemoteSyncReadingPlanRestoreError.malformedReadingStatus` from completion
          calculation when Android status JSON cannot be decoded
      */
-    private func preparePlans(from snapshot: RemoteSyncAndroidReadingPlanSnapshot) throws -> [PreparedPlan] {
+    private func preparePlans(
+        from snapshot: RemoteSyncAndroidReadingPlanSnapshot
+    ) throws -> [RemoteSyncPreparedReadingPlan] {
         if !snapshot.orphanStatuses.isEmpty {
             throw RemoteSyncReadingPlanRestoreError.orphanStatuses(
                 Array(Set(snapshot.orphanStatuses.map(\.planCode))).sorted()
             )
         }
 
-        let templatesByCode = Dictionary(uniqueKeysWithValues: ReadingPlanService.availablePlans.map { ($0.code, $0) })
+        let templatesByCode = Dictionary(
+            uniqueKeysWithValues: ReadingPlanService.catalog(
+                userPlanDirectory: userPlanDirectory
+            ).templates.map { ($0.code, $0) }
+        )
         let missingPlanCodes = Array(
             Set(snapshot.plans.map(\.planCode).filter { templatesByCode[$0] == nil })
         ).sorted()
@@ -405,33 +832,34 @@ public final class RemoteSyncReadingPlanRestoreService {
         return try snapshot.plans.map { plan in
             let template = templatesByCode[plan.planCode]!
             let isDateBasedPlan = Self.isDateBasedPlan(template)
-            let normalizedCurrentDay = min(max(plan.currentDay, 1), max(template.totalDays, 1))
-            let statusesByDay = Dictionary(uniqueKeysWithValues: plan.statuses.map { ($0.dayNumber, $0) })
+            let effectiveCurrentDay = max(plan.currentDay, 1)
+            var statusesByDay: [Int: RemoteSyncAndroidReadingPlanStatus] = [:]
+            for status in plan.statuses {
+                guard statusesByDay[status.dayNumber] == nil else {
+                    throw RemoteSyncReadingPlanRestoreError.duplicateReadingStatus(
+                        planCode: status.planCode,
+                        dayNumber: status.dayNumber
+                    )
+                }
+                statusesByDay[status.dayNumber] = status
+            }
 
-            var preparedDays: [PreparedDay] = []
-            preparedDays.reserveCapacity(template.totalDays)
+            var preparedDays: [RemoteSyncPreparedReadingPlanDay] = []
+            preparedDays.reserveCapacity(template.dayNumbers.count)
 
-            var allDaysCompleted = true
-            for dayNumber in 1...template.totalDays {
+            for dayNumber in template.dayNumbers {
                 let readings = template.readingsForDay(dayNumber)
-                let expectedReadingCount = Self.expectedReadingCount(
-                    for: readings,
-                    isDateBasedPlan: isDateBasedPlan
-                )
+                let expectedReadingCount = Self.expectedReadingCount(for: readings)
                 let completion = try Self.isDayComplete(
                     status: statusesByDay[dayNumber],
                     dayNumber: dayNumber,
-                    currentDay: normalizedCurrentDay,
+                    currentDay: effectiveCurrentDay,
                     expectedReadingCount: expectedReadingCount,
                     isDateBasedPlan: isDateBasedPlan
                 )
 
-                if !completion {
-                    allDaysCompleted = false
-                }
-
                 preparedDays.append(
-                    PreparedDay(
+                    RemoteSyncPreparedReadingPlanDay(
                         dayNumber: dayNumber,
                         readings: readings,
                         isCompleted: completion
@@ -439,18 +867,40 @@ public final class RemoteSyncReadingPlanRestoreService {
                 )
             }
 
-            return PreparedPlan(
+            return RemoteSyncPreparedReadingPlan(
                 id: plan.id,
                 planCode: plan.planCode,
                 planName: template.name,
-                startDate: plan.startDate,
-                currentDay: normalizedCurrentDay,
+                startDateMilliseconds: plan.startDateMilliseconds,
+                currentDay: plan.currentDay,
                 totalDays: template.totalDays,
-                isActive: !allDaysCompleted,
-                days: preparedDays,
-                rawStatuses: plan.statuses
+                isActive: false,
+                days: preparedDays
             )
         }
+    }
+
+    /**
+     Orders preserved statuses deterministically before replacing their namespaced setting rows.
+
+     - Parameters:
+       - lhs: First preserved status.
+       - rhs: Second preserved status.
+     - Returns: `true` when `lhs` sorts before `rhs` by plan code, day, then remote identifier.
+     - Side Effects: none.
+     - Failure modes: This comparator cannot fail.
+     */
+    private static func statusSort(
+        _ lhs: RemoteSyncReadingPlanStatusStore.Status,
+        _ rhs: RemoteSyncReadingPlanStatusStore.Status
+    ) -> Bool {
+        if lhs.planCode != rhs.planCode {
+            return lhs.planCode < rhs.planCode
+        }
+        if lhs.dayNumber != rhs.dayNumber {
+            return lhs.dayNumber < rhs.dayNumber
+        }
+        return (lhs.remoteStatusID?.uuidString ?? "") < (rhs.remoteStatusID?.uuidString ?? "")
     }
 
     /**
@@ -496,7 +946,9 @@ public final class RemoteSyncReadingPlanRestoreService {
        - rethrows `RemoteSyncReadingPlanRestoreError.invalidIdentifierBlob` when Android identifier
          BLOBs are absent, malformed, or not 16 bytes long
      */
-    private func fetchPlans(from db: OpaquePointer) throws -> [(id: UUID, planCode: String, startDate: Date, currentDay: Int)] {
+    private func fetchPlans(
+        from db: OpaquePointer
+    ) throws -> [(id: UUID, planCode: String, startDateMilliseconds: Int64, currentDay: Int)] {
         let sql = """
         SELECT id, planCode, planStartDate, planCurrentDay
         FROM ReadingPlan
@@ -509,13 +961,31 @@ public final class RemoteSyncReadingPlanRestoreService {
             throw RemoteSyncReadingPlanRestoreError.invalidSQLiteDatabase
         }
 
-        var rows: [(UUID, String, Date, Int)] = []
+        var rows: [(UUID, String, Int64, Int)] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             let id = try uuidFromBlob(statement: statement, column: 0, table: "ReadingPlan", name: "id")
-            let planCode = stringColumn(statement: statement, index: 1)
+            let planCode = try planCodeColumn(
+                statement: statement,
+                index: 1,
+                table: "ReadingPlan"
+            )
             let startDateMillis = sqlite3_column_int64(statement, 2)
-            let currentDay = Int(sqlite3_column_int(statement, 3))
-            rows.append((id, planCode, Date(timeIntervalSince1970: TimeInterval(startDateMillis) / 1000.0), currentDay))
+            guard sqlite3_column_type(statement, 3) == SQLITE_INTEGER else {
+                throw RemoteSyncReadingPlanRestoreError.invalidDayNumber(
+                    table: "ReadingPlan",
+                    value: 0
+                )
+            }
+            let currentDayValue = sqlite3_column_int64(statement, 3)
+            guard currentDayValue >= Int64(Int32.min),
+                  currentDayValue <= Int64(Int32.max) else {
+                throw RemoteSyncReadingPlanRestoreError.invalidDayNumber(
+                    table: "ReadingPlan",
+                    value: currentDayValue
+                )
+            }
+            let currentDay = Int(currentDayValue)
+            rows.append((id, planCode, startDateMillis, currentDay))
         }
         return rows
     }
@@ -552,9 +1022,24 @@ public final class RemoteSyncReadingPlanRestoreService {
             rows.append(
                 RemoteSyncAndroidReadingPlanStatus(
                     id: id,
-                    planCode: stringColumn(statement: statement, index: 1),
-                    dayNumber: Int(sqlite3_column_int(statement, 2)),
-                    readingStatusJSON: stringColumn(statement: statement, index: 3)
+                    planCode: try planCodeColumn(
+                        statement: statement,
+                        index: 1,
+                        table: "ReadingPlanStatus"
+                    ),
+                    dayNumber: try dayNumberColumn(
+                        statement: statement,
+                        index: 2,
+                        table: "ReadingPlanStatus"
+                    ),
+                    readingStatusJSON: try textColumn(
+                        statement: statement,
+                        index: 3,
+                        table: "ReadingPlanStatus",
+                        column: "readingStatus",
+                        maximumByteCount: Self.maximumStatusByteCount,
+                        permitsEmpty: true
+                    )
                 )
             )
         }
@@ -606,11 +1091,110 @@ public final class RemoteSyncReadingPlanRestoreService {
         return uuid
     }
 
-    private func stringColumn(statement: OpaquePointer?, index: Int32) -> String {
-        guard let raw = sqlite3_column_text(statement, index) else {
-            return ""
+    /** Reads one exact bounded UTF-8 text cell without C-string truncation. */
+    private func textColumn(
+        statement: OpaquePointer?,
+        index: Int32,
+        table: String,
+        column: String,
+        maximumByteCount: Int,
+        permitsEmpty: Bool
+    ) throws -> String {
+        guard sqlite3_column_type(statement, index) == SQLITE_TEXT else {
+            throw RemoteSyncReadingPlanRestoreError.invalidTextValue(
+                table: table,
+                column: column
+            )
         }
-        return String(cString: raw)
+        let byteCount = Int(sqlite3_column_bytes(statement, index))
+        guard byteCount <= maximumByteCount else {
+            throw RemoteSyncReadingPlanRestoreError.fieldTooLarge(
+                table: table,
+                column: column,
+                byteCount: byteCount
+            )
+        }
+        guard (permitsEmpty || byteCount > 0),
+              let bytes = sqlite3_column_text(statement, index),
+              let value = String(
+                  data: Data(bytes: bytes, count: byteCount),
+                  encoding: .utf8
+              ) else {
+            throw RemoteSyncReadingPlanRestoreError.invalidTextValue(
+                table: table,
+                column: column
+            )
+        }
+        return value
+    }
+
+    /** Reads and validates one bounded Android reading-plan filename identity. */
+    private func planCodeColumn(
+        statement: OpaquePointer?,
+        index: Int32,
+        table: String
+    ) throws -> String {
+        let value = try textColumn(
+            statement: statement,
+            index: index,
+            table: table,
+            column: "planCode",
+            maximumByteCount: RemoteSyncReadingPlanDefinitionStore.maximumPlanCodeByteCount,
+            permitsEmpty: false
+        )
+        guard value != ".",
+              value != "..",
+              !value.contains("/"),
+              !value.contains("\\"),
+              !value.contains("\0") else {
+            throw RemoteSyncReadingPlanRestoreError.invalidTextValue(
+                table: table,
+                column: "planCode"
+            )
+        }
+        return value
+    }
+
+    /** Reads one Android signed-Int32 day number before converting the SQLite value. */
+    private func dayNumberColumn(
+        statement: OpaquePointer?,
+        index: Int32,
+        table: String
+    ) throws -> Int {
+        guard sqlite3_column_type(statement, index) == SQLITE_INTEGER else {
+            throw RemoteSyncReadingPlanRestoreError.invalidDayNumber(table: table, value: 0)
+        }
+        let value = sqlite3_column_int64(statement, index)
+        guard value >= Int64(Int32.min), value <= Int64(Int32.max) else {
+            throw RemoteSyncReadingPlanRestoreError.invalidDayNumber(table: table, value: value)
+        }
+        return Int(value)
+    }
+
+    /** Rejects an oversized table before row materialization begins. */
+    private func requireRowCount(
+        in table: String,
+        database: OpaquePointer,
+        maximum: Int64
+    ) throws {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            database,
+            "SELECT COUNT(*) FROM \(table)",
+            -1,
+            &statement,
+            nil
+        ) == SQLITE_OK, let statement else {
+            throw RemoteSyncReadingPlanRestoreError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw RemoteSyncReadingPlanRestoreError.invalidSQLiteDatabase
+        }
+        let count = sqlite3_column_int64(statement, 0)
+        guard count >= 0, count <= maximum else {
+            throw RemoteSyncReadingPlanRestoreError.tooManyRows(table: table, count: count)
+        }
     }
 
     /**
@@ -635,26 +1219,13 @@ public final class RemoteSyncReadingPlanRestoreService {
      Date-based Android plans prefix the reading list with a date token separated by `;`. That prefix
      does not represent a reading and must be removed before counting comma-delimited readings.
 
-     - Parameters:
-       - readings: Raw reading string from a bundled iOS template.
-       - isDateBasedPlan: Whether the template uses Android's date-prefixed plan format.
+     - Parameter readings: Raw reading string from a bundled iOS template.
      - Returns: Number of non-empty readings encoded in the supplied day string.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    private static func expectedReadingCount(for readings: String, isDateBasedPlan: Bool) -> Int {
-        let readingsPortion: String
-        if isDateBasedPlan, let separatorIndex = readings.firstIndex(of: ";") {
-            readingsPortion = String(readings[readings.index(after: separatorIndex)...])
-        } else {
-            readingsPortion = readings
-        }
-
-        return readingsPortion
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .count
+    private static func expectedReadingCount(for readings: String) -> Int {
+        ReadingPlanDayAssignment(rawValue: readings).readings.count
     }
 
     /**
@@ -692,10 +1263,9 @@ public final class RemoteSyncReadingPlanRestoreService {
             return expectedReadingCount == 0
         }
 
-        let decoder = JSONDecoder()
-        let payload: AndroidReadingStatusPayload
+        let payload: AndroidReadingPlanStatusPayload
         do {
-            payload = try decoder.decode(AndroidReadingStatusPayload.self, from: Data(status.readingStatusJSON.utf8))
+            payload = try AndroidReadingPlanStatusPayload(androidJSON: status.readingStatusJSON)
         } catch {
             throw RemoteSyncReadingPlanRestoreError.malformedReadingStatus(
                 planCode: status.planCode,
@@ -703,16 +1273,6 @@ public final class RemoteSyncReadingPlanRestoreService {
             )
         }
 
-        if expectedReadingCount == 0 {
-            return true
-        }
-
-        let readByNumber = Dictionary(uniqueKeysWithValues: payload.chapterReadArray.map { ($0.readingNumber, $0.isRead) })
-        for readingNumber in 1...expectedReadingCount {
-            if readByNumber[readingNumber] != true {
-                return false
-            }
-        }
-        return true
+        return payload.isAllRead(readingCount: expectedReadingCount)
     }
 }

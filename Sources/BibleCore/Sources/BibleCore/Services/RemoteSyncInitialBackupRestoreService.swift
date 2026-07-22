@@ -1,6 +1,7 @@
 // RemoteSyncInitialBackupRestoreService.swift — Category-level initial-backup restore dispatch
 
 import Foundation
+import SQLite3
 import SwiftData
 
 /**
@@ -54,6 +55,7 @@ through one generic SQLite importer.
 
  Side effects:
  - mutates live local SwiftData records for the supported category
+ - installs authoritative reading-plan definition files before reading-plan graph reconstruction
  - may write local-only settings rows needed to preserve Android-only fidelity
  - replaces local Android sync metadata rows for the category after content restore succeeds
  - refreshes outbound bookmark, workspace, reading-plan, and My Documents fingerprint baselines
@@ -61,6 +63,7 @@ through one generic SQLite importer.
 
  Failure modes:
  - rethrows category-specific restore errors from the selected restore service
+ - rethrows reading-plan definition validation, installation, and rollback errors
  - rethrows staged sync-metadata read errors when Android `LogEntry` or `SyncStatus` tables are
    present but malformed
 
@@ -136,13 +139,16 @@ public final class RemoteSyncInitialBackupRestoreService {
        - settingsStore: Local-only settings store used by category-specific fidelity helpers.
      - Returns: Category-specific restore summary describing the applied restore.
      - Side effects:
-       - mutates live SwiftData state for the supported category
-       - may persist local-only helper state needed to preserve Android-only fidelity
-       - replaces local Android sync metadata rows for the category after the content restore succeeds
-       - refreshes outbound fingerprint baselines after successful restores
+       - atomically replaces live category content, Android-only fidelity, sync metadata, and
+         outbound fingerprint baselines through the supplied settings context
+       - for reading plans, installs definitions before graph reconstruction and restores prior bytes
+         if any later content, metadata, fingerprint, or commit step fails
      - Failure modes:
        - rethrows category-specific snapshot and restore errors from the selected service
        - rethrows staged sync-metadata read errors when present Android metadata tables are malformed
+       - throws `SettingsStoreAtomicBatchError` for mismatched or dirty contexts
+       - rethrows cancellation, strict fetch, encoding, and commit failures after rolling the
+         complete category publish back
      */
     public func restoreInitialBackup(
         _ stagedBackup: RemoteSyncStagedInitialBackup,
@@ -150,79 +156,186 @@ public final class RemoteSyncInitialBackupRestoreService {
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> RemoteSyncInitialBackupRestoreReport {
-        let metadataSnapshot = try metadataRestoreService.readSnapshot(from: stagedBackup.databaseFileURL)
-
-        let report: RemoteSyncInitialBackupRestoreReport
-        switch category {
-        case .bookmarks:
-            let snapshot = try bookmarkRestoreService.readSnapshot(from: stagedBackup.databaseFileURL)
-            let bookmarkReport = try bookmarkRestoreService.replaceLocalBookmarks(
-                from: snapshot,
-                modelContext: modelContext,
-                settingsStore: settingsStore
-            )
-            report = .bookmarks(bookmarkReport)
-        case .readingPlans:
-            let snapshot = try readingPlanRestoreService.readSnapshot(from: stagedBackup.databaseFileURL)
-            let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
-            let readingPlanReport = try readingPlanRestoreService.replaceLocalReadingPlans(
-                from: snapshot,
-                modelContext: modelContext,
-                statusStore: statusStore
-            )
-            report = .readingPlans(readingPlanReport)
-        case .workspaces:
-            let snapshot = try workspaceRestoreService.readSnapshot(from: stagedBackup.databaseFileURL)
-            let workspaceReport = try workspaceRestoreService.replaceLocalWorkspaces(
-                from: snapshot,
-                modelContext: modelContext,
-                settingsStore: settingsStore
-            )
-            report = .workspaces(workspaceReport)
-        case .myDocuments:
-            let snapshot = try myDocumentRestoreService.readSnapshot(from: stagedBackup.databaseFileURL)
-            let myDocumentReport = try myDocumentRestoreService.replaceLocalMyDocuments(
-                from: snapshot,
-                modelContext: modelContext
-            )
-            report = .myDocuments(myDocumentReport)
-        case .progress:
-            let progressReport = try AndroidDatabaseBackupProgressMapper.apply(
-                from: stagedBackup.databaseFileURL,
-                mode: .restore,
-                settingsStore: settingsStore
-            )
-            report = .progress(progressReport)
-        }
-
-        _ = metadataRestoreService.replaceLocalMetadata(
-            from: metadataSnapshot,
+        try restoreInitialBackup(
+            stagedBackup,
             category: category,
-            settingsStore: settingsStore
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            publishCheckpoint: { try Task.checkCancellation() }
         )
-        if category == .bookmarks {
-            bookmarkSnapshotService.refreshBaselineFingerprints(
-                modelContext: modelContext,
-                settingsStore: settingsStore
+    }
+
+    /**
+     Restores one initial backup with a deterministic checkpoint inside the atomic publish.
+
+     Category content, Android sync metadata, and outbound fingerprint baselines publish through
+     one settings-backed SwiftData transaction. Category restore services join that outer batch,
+     including the settings-only Progress path, so no successful content restore can retain stale
+     retry or outbound-diff bookkeeping. Reading-plan definition installation wraps that complete
+     publication so identity and progress are never reconstructed before their custom file exists.
+
+     - Parameters:
+       - stagedBackup: Downloaded and extracted Android initial database.
+       - category: Sync category represented by the database.
+       - modelContext: Exact clean context shared by graph and settings models.
+       - settingsStore: Settings store bound to `modelContext`.
+       - publishCheckpoint: Throwing callback before category mutation and after all content and
+         metadata mutations have staged.
+     - Returns: Category-specific restore report after the single commit succeeds.
+     - Side Effects: Reads the staged database and atomically replaces content, metadata, and
+       fingerprint state for one category; reading-plan restores also transactionally replace custom
+       definition files before graph reconstruction.
+     - Throws: Rethrows exact Room schema/bounds, parsing, category restore, context-contract,
+       source-generation mismatch, checkpoint, cancellation, strict fetch, encoding, and commit
+       errors; final failure rolls the category publish back.
+     */
+    func restoreInitialBackup(
+        _ stagedBackup: RemoteSyncStagedInitialBackup,
+        category: RemoteSyncCategory,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        publishCheckpoint: @escaping () throws -> Void
+    ) throws -> RemoteSyncInitialBackupRestoreReport {
+        let readingPlanSnapshot: RemoteSyncAndroidReadingPlanSnapshot?
+        if category == .readingPlans {
+            readingPlanSnapshot = try readingPlanRestoreService.readSnapshot(
+                from: stagedBackup.databaseFileURL
             )
-        } else if category == .workspaces {
-            workspaceSnapshotService.refreshBaselineFingerprints(
-                modelContext: modelContext,
-                settingsStore: settingsStore
-            )
-        } else if category == .readingPlans {
-            readingPlanSnapshotService.refreshBaselineFingerprints(
-                modelContext: modelContext,
-                settingsStore: settingsStore
-            )
-        } else if category == .myDocuments {
-            myDocumentSnapshotService.refreshBaselineFingerprints(
-                modelContext: modelContext,
-                settingsStore: settingsStore
-            )
-        } else if category == .progress {
-            progressSnapshotService.refreshBaselineFingerprints(settingsStore: settingsStore)
+        } else {
+            readingPlanSnapshot = nil
         }
-        return report
+        let workspaceSnapshot: RemoteSyncAndroidWorkspaceSnapshot?
+        if category == .workspaces {
+            workspaceSnapshot = try workspaceRestoreService.readSnapshot(
+                from: stagedBackup.databaseFileURL,
+                expectedSourceVersion: stagedBackup.schemaVersion
+            )
+        } else {
+            workspaceSnapshot = nil
+        }
+        if category == .progress {
+            try Self.validateProgressDatabaseBeforeMetadata(
+                at: stagedBackup.databaseFileURL
+            )
+        }
+        let metadataSnapshot = try metadataRestoreService.readSnapshot(
+            from: stagedBackup.databaseFileURL
+        )
+
+        let publish: () throws -> RemoteSyncInitialBackupRestoreReport = { [self] in
+            try settingsStore.performAtomicBatch(in: modelContext) {
+                try publishCheckpoint()
+                let report: RemoteSyncInitialBackupRestoreReport
+                switch category {
+                case .bookmarks:
+                    let snapshot = try bookmarkRestoreService.readSnapshot(
+                        from: stagedBackup.databaseFileURL
+                    )
+                    let bookmarkReport = try bookmarkRestoreService.replaceLocalBookmarks(
+                        from: snapshot,
+                        modelContext: modelContext,
+                        settingsStore: settingsStore,
+                        preserveUnverifiedLocalBookmarks: true
+                    )
+                    report = .bookmarks(bookmarkReport)
+                case .readingPlans:
+                    guard let readingPlanSnapshot else {
+                        throw RemoteSyncReadingPlanRestoreError.invalidSQLiteDatabase
+                    }
+                    let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
+                    let readingPlanReport = try readingPlanRestoreService.replaceLocalReadingPlans(
+                        from: readingPlanSnapshot,
+                        modelContext: modelContext,
+                        statusStore: statusStore,
+                        mutationCheckpoint: { try Task.checkCancellation() }
+                    )
+                    report = .readingPlans(readingPlanReport)
+                case .workspaces:
+                    guard let workspaceSnapshot else {
+                        throw RemoteSyncWorkspaceRestoreError.invalidSQLiteDatabase
+                    }
+                    let workspaceReport = try workspaceRestoreService.replaceLocalWorkspaces(
+                        from: workspaceSnapshot,
+                        modelContext: modelContext,
+                        settingsStore: settingsStore
+                    )
+                    report = .workspaces(workspaceReport)
+                case .myDocuments:
+                    let snapshot = try myDocumentRestoreService.readSnapshot(
+                        from: stagedBackup.databaseFileURL
+                    )
+                    let myDocumentReport = try myDocumentRestoreService.replaceLocalMyDocuments(
+                        from: snapshot,
+                        modelContext: modelContext,
+                        settingsStore: settingsStore
+                    )
+                    report = .myDocuments(myDocumentReport)
+                case .progress:
+                    let progressReport = try AndroidDatabaseBackupProgressMapper.apply(
+                        from: stagedBackup.databaseFileURL,
+                        mode: .restore,
+                        settingsStore: settingsStore
+                    )
+                    report = .progress(progressReport)
+                }
+
+                _ = metadataRestoreService.replaceLocalMetadata(
+                    from: metadataSnapshot,
+                    category: category,
+                    settingsStore: settingsStore
+                )
+                if category == .bookmarks {
+                    try bookmarkSnapshotService.refreshBaselineFingerprintsThrowing(
+                        modelContext: modelContext,
+                        settingsStore: settingsStore
+                    )
+                } else if category == .workspaces {
+                    try workspaceSnapshotService.refreshBaselineFingerprintsStrict(
+                        modelContext: modelContext,
+                        settingsStore: settingsStore
+                    )
+                } else if category == .readingPlans {
+                    try readingPlanSnapshotService.refreshBaselineFingerprintsStrict(
+                        modelContext: modelContext,
+                        settingsStore: settingsStore
+                    )
+                } else if category == .myDocuments {
+                    try myDocumentSnapshotService.refreshBaselineFingerprintsThrowing(
+                        modelContext: modelContext,
+                        settingsStore: settingsStore
+                    )
+                } else if category == .progress {
+                    progressSnapshotService.refreshBaselineFingerprints(settingsStore: settingsStore)
+                }
+                try publishCheckpoint()
+                return report
+            }
+        }
+
+        return try publish()
+    }
+
+    /**
+     Validates a Progress initial backup before the generic metadata reader allocates any rows.
+
+     - Parameter databaseURL: Extracted `progress.sqlite3` file staged for restore.
+     - Side effects: Opens the database read-only and compares its complete Room and payload contract.
+     - Throws: Exact typed database-contract failures, or `invalidDatabase` when SQLite cannot open it.
+     */
+    private static func validateProgressDatabaseBeforeMetadata(at databaseURL: URL) throws {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(
+            databaseURL.path,
+            &database,
+            SQLITE_OPEN_READONLY,
+            nil
+        ) == SQLITE_OK, let database else {
+            throw RemoteSyncAndroidDatabaseContractError.invalidDatabase
+        }
+        defer { sqlite3_close(database) }
+        try RemoteSyncAndroidDatabaseContract.validateInboundDatabase(
+            database,
+            category: .progress
+        )
     }
 }

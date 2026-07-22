@@ -12,6 +12,49 @@ import SwiftUI
  or text-display widget behavior.
  */
 final class SettingsIconsTests: XCTestCase {
+    /**
+     Verifies platform capability hides only settings that would be inert.
+
+     Android can intercept physical volume keys, but iOS has no supported equivalent event API, so
+     the persisted preference must not be advertised as functional. The single AndBible app keeps
+     runtime discrete-mode, calculator-gate, help, and PIN controls visible.
+
+     Failure meaning:
+     - iOS can expose a setting with no behavior consumer
+     - one-app runtime security controls can disappear behind a removed build identity
+     */
+    func testApplicationPreferenceVisibilityMatchesPlatformCapabilities() {
+        XCTAssertFalse(ApplicationSettingsPresentation.isPreferenceVisible(.volumeKeysScroll))
+        XCTAssertTrue(ApplicationSettingsPresentation.isPreferenceVisible(.discreteHelp))
+        XCTAssertTrue(ApplicationSettingsPresentation.isPreferenceVisible(.calculatorPin))
+        XCTAssertTrue(ApplicationSettingsPresentation.isPreferenceVisible(.discreteMode))
+        XCTAssertTrue(ApplicationSettingsPresentation.isPreferenceVisible(.showCalculator))
+    }
+
+    /**
+     Pins the high-risk global color route wiring and unsupported volume-setting removal.
+
+     Both Application Preferences and the reader's direct Global Text Options destination must
+     supply workspace metadata to the shared color editor. The settings source must not retain a
+     volume-key row or search entry after the capability policy classifies it as unsupported.
+
+     Failure meaning:
+     - one global route can silently hide `workspace_color`
+     - the setting can reappear without a hardware-key consumer
+     */
+    func testGlobalColorRoutesWireWorkspaceMetadataAndVolumeSettingStaysHidden() throws {
+        let settingsSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift"
+        )
+        let readerSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        )
+
+        XCTAssertTrue(settingsSource.contains("workspaceColor: activeWorkspaceColorBinding"))
+        XCTAssertTrue(readerSource.contains("workspaceColor: workspaceColorBinding"))
+        XCTAssertFalse(settingsSource.contains(".volumeKeysScroll"))
+    }
+
     func testApplicationPreferenceIconsComeFromAndroidSettingsXml() {
         XCTAssertEqual(
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "navigate_to_verse_pref")?.androidDrawableName,
@@ -146,6 +189,16 @@ final class SettingsIconsTests: XCTestCase {
         XCTAssertEqual(sync.icon?.androidDrawableName, "ic_syncdb_24dp")
         XCTAssertEqual(sync.searchEntry.identifier, sync.identifier)
 
+        let aiSettings = ApplicationSettingsPresentation.aiSettingsShortcut
+        XCTAssertEqual(aiSettings.identifier, "settingsAISettingsLink")
+        XCTAssertEqual(aiSettings.androidKey, "ai_settings_shortcut")
+        XCTAssertEqual(aiSettings.titleLocalizationKey, "ai_settings")
+        XCTAssertEqual(aiSettings.titleDefault, "AI Settings")
+        XCTAssertEqual(aiSettings.summaryLocalizationKey, "ai_settings_shortcut_summary")
+        XCTAssertTrue(aiSettings.keywords.contains("ai_settings_shortcut"))
+        XCTAssertEqual(aiSettings.icon?.androidDrawableName, "icon_robot")
+        XCTAssertEqual(aiSettings.searchEntry.identifier, aiSettings.identifier)
+
         let readingProgress = ApplicationSettingsPresentation.readingProgressSettingsShortcut
         XCTAssertEqual(readingProgress.identifier, "settingsReadingProgressLink")
         XCTAssertEqual(readingProgress.androidKey, "reading_progress_settings_shortcut")
@@ -160,19 +213,19 @@ final class SettingsIconsTests: XCTestCase {
     func testApplicationPreferenceFeatureShortcutsFollowRuntimeAvailability() {
         XCTAssertEqual(
             ApplicationSettingsPresentation.featureShortcuts(canOpenReadingProgressSettings: false),
-            [.syncSettings]
+            [.syncSettings, .aiSettings]
         )
         XCTAssertEqual(
             ApplicationSettingsPresentation.featureShortcuts(canOpenReadingProgressSettings: true),
-            [.syncSettings, .readingProgressSettings]
+            [.syncSettings, .aiSettings, .readingProgressSettings]
         )
         XCTAssertEqual(
             ApplicationSettingsPresentation.primaryLinkIdentifiers(canOpenReadingProgressSettings: false),
-            ["settingsGlobalTextOptionsLink", "settingsSyncLink"]
+            ["settingsGlobalTextOptionsLink", "settingsSyncLink", "settingsAISettingsLink"]
         )
         XCTAssertEqual(
             ApplicationSettingsPresentation.primaryLinkIdentifiers(canOpenReadingProgressSettings: true),
-            ["settingsGlobalTextOptionsLink", "settingsSyncLink", "settingsReadingProgressLink"]
+            ["settingsGlobalTextOptionsLink", "settingsSyncLink", "settingsAISettingsLink", "settingsReadingProgressLink"]
         )
     }
 
@@ -509,13 +562,12 @@ final class SettingsIconsTests: XCTestCase {
     /**
      Verifies the iOS color editor exposes Android's durable color rows by scope.
 
-     Android's root global color activity inflates the `workspace_color` row, but the commit path
-     writes workspace color only from a `SettingsLevel.WORKSPACE` bundle into workspace metadata.
-     iOS must therefore avoid giving true global settings an active-workspace side effect while
-     still exposing the row from workspace-scoped text options and hiding it for windows.
+     Android inflates `workspace_color` for global and workspace color activities and hides it only
+     for a window-specific route. iOS stores both non-window routes in active-workspace metadata so
+     the color remains separate from inheritable text/background settings.
 
      Failure meaning:
-     - true global settings can mutate workspace metadata
+     - global settings hide Android's workspace-color row
      - workspace settings can no longer edit Android's action-bar color
      - window settings expose a workspace-owned row
      */
@@ -531,14 +583,7 @@ final class SettingsIconsTests: XCTestCase {
         ]
         XCTAssertEqual(
             ColorSettingsView.visibleAndroidKeys(scope: .global),
-            [
-                "text_color_day",
-                "background_color_day",
-                "noise_day",
-                "text_color_night",
-                "background_color_night",
-                "noise_night",
-            ]
+            expectedWorkspaceKeys
         )
         XCTAssertEqual(
             ColorSettingsView.visibleAndroidKeys(scope: .workspace),
@@ -558,12 +603,11 @@ final class SettingsIconsTests: XCTestCase {
     }
 
     /**
-     Verifies color reset only resets workspace metadata when the caller owns a workspace binding.
+     Verifies color reset follows the caller-supplied non-window workspace binding.
 
-     Android resets `WorkspaceSettings.workspaceColor` from workspace-level Text Options, but root
-     global and window routes must not overwrite workspace metadata. This test exercises the shared
-     reset helper with and without a workspace binding so reset behavior follows the same ownership
-     contract as row visibility.
+     Android exposes workspace color on global/workspace routes and hides it for windows. This test
+     exercises the shared reset helper with and without a workspace binding so reset behavior
+     follows the same non-window/window ownership contract as row visibility.
      */
     func testColorSettingsResetOnlyMutatesWorkspaceColorForWorkspaceOwnedScope() {
         var settings = TextDisplaySettings.appDefaults

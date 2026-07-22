@@ -41,6 +41,119 @@ describe("scroll composable", () => {
     });
 
     /**
+     * Protects Android setup-content parity for anchored selection restoration.
+     *
+     * Android highlights every ordinal in the supplied source range before restoring the anchor.
+     * The source module and OSIS reference must reach the highlighter so mixed-module documents do
+     * not infer identity from whichever pane happens to be active.
+     */
+    it("highlights the complete setup anchor range before restoring scroll", async () => {
+        const target = document.createElement("span");
+        target.id = "o-77";
+        Object.defineProperty(target, "innerText", {value: "John 3:16"});
+        target.getBoundingClientRect = () => ({top: 240});
+        document.body.appendChild(target);
+
+        Object.defineProperty(window, "scrollY", {value: 0, configurable: true});
+        vi.stubGlobal("devicePixelRatio", 1);
+        vi.spyOn(window, "getComputedStyle").mockReturnValue({
+            getPropertyValue: () => "20px",
+        });
+        const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+        const highlightOrdinal = vi.fn();
+        const resetHighlights = vi.fn();
+
+        mount(defineComponent({
+            setup() {
+                useScroll(
+                    {},
+                    {disableAnimations: false, topOffset: 0, bottomOffset: 0, imeOpen: false},
+                    ref({topOffset: 30}),
+                    {highlightOrdinal, resetHighlights},
+                    ref(Promise.resolve()),
+                    ref(4)
+                );
+            },
+            template: "<div />",
+        }));
+
+        eventBus.emit("setup_content", [{
+            jumpToOrdinal: null,
+            jumpToAnchor: 77,
+            jumpToId: null,
+            topOffset: 0,
+            bottomOffset: 0,
+            ordinalStart: 77,
+            ordinalEnd: 79,
+            highlight: true,
+            bookInitials: "NASB",
+            osisRef: "John.3",
+        }]);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(resetHighlights).toHaveBeenCalledOnce();
+        expect(highlightOrdinal.mock.calls).toEqual([
+            [77, "NASB", "John.3"],
+            [78, "NASB", "John.3"],
+            [79, "NASB", "John.3"],
+        ]);
+        expect(scrollTo).toHaveBeenCalled();
+    });
+
+    /**
+     * Protects document-generation isolation while setup-content awaits newly rendered content.
+     *
+     * A setup event belonging to an obsolete document must not highlight or restore-scroll after a
+     * newer generation replaces it, even when the obsolete document promise resolves later.
+     */
+    it("drops stale setup anchor highlight and scroll work", async () => {
+        let resolveDocument;
+        const pendingDocument = new Promise(resolve => {
+            resolveDocument = resolve;
+        });
+        const generation = ref(8);
+        const highlightOrdinal = vi.fn();
+        const resetHighlights = vi.fn();
+        const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+        mount(defineComponent({
+            setup() {
+                useScroll(
+                    {},
+                    {disableAnimations: false, topOffset: 0, bottomOffset: 0, imeOpen: false},
+                    ref({topOffset: 30}),
+                    {highlightOrdinal, resetHighlights},
+                    ref(pendingDocument),
+                    generation
+                );
+            },
+            template: "<div />",
+        }));
+
+        eventBus.emit("setup_content", [{
+            jumpToOrdinal: null,
+            jumpToAnchor: 77,
+            jumpToId: null,
+            topOffset: 0,
+            bottomOffset: 0,
+            ordinalStart: 77,
+            ordinalEnd: 79,
+            highlight: true,
+            bookInitials: "NASB",
+            osisRef: "John.3",
+        }]);
+        generation.value = 9;
+        resolveDocument();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(resetHighlights).not.toHaveBeenCalled();
+        expect(highlightOrdinal).not.toHaveBeenCalled();
+        expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    /**
      * Protects Android parity for synchronized-scroll anchoring.
      *
      * Android resolves the target verse's rendered document position instead of trusting

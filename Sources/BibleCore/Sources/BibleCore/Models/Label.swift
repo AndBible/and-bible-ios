@@ -125,20 +125,36 @@ public final class Label {
     /// Reserved system label name used to mark paragraph breaks.
     public static let paragraphBreakLabelName = "__PARAGRAPH_BREAK_LABEL__"
 
-    /// Deterministic identifier for the speak system label used during CloudKit sync.
-    public static let speakLabelId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    /// Reserved system label name used for AI-generated bookmark content.
+    public static let aiLabelName = "__AI_LABEL__"
 
-    /// Deterministic identifier for the unlabeled system label used during CloudKit sync.
-    public static let unlabeledId = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+    /// Android's fixed identifier for the speak system label.
+    public static let speakLabelId = UUID(uuidString: "00000000-0000-ab1e-0000-5bea400001a1")!
 
-    /// Deterministic identifier for the paragraph-break system label used during sync.
-    public static let paragraphBreakLabelId = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+    /// Android's fixed identifier for the unlabeled system label.
+    public static let unlabeledId = UUID(uuidString: "00000000-0000-ab1e-0000-001abe1ed001")!
+
+    /// Android's fixed identifier for the paragraph-break system label.
+    public static let paragraphBreakLabelId = UUID(uuidString: "00000000-0000-ab1e-0000-ba4a64a30001")!
+
+    /// Android's fixed identifier for the AI system label.
+    public static let aiLabelId = UUID(uuidString: "00000000-0000-ab1e-0000-a100000001a1")!
+
+    /// Speak-label identifier used by pre-parity iOS builds and migrated during bootstrap.
+    static let legacySpeakLabelId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+
+    /// Unlabeled identifier used by pre-parity iOS builds and migrated during bootstrap.
+    static let legacyUnlabeledId = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+
+    /// Paragraph-label identifier used by pre-parity iOS builds and migrated during bootstrap.
+    static let legacyParagraphBreakLabelId = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
 
     /// Returns true when this label matches one of the reserved system label names.
     public var isSystemLabel: Bool {
         name == Label.speakLabelName ||
         name == Label.unlabeledName ||
-        name == Label.paragraphBreakLabelName
+        name == Label.paragraphBreakLabelName ||
+        name == Label.aiLabelName
     }
 
     /// Returns true when the label is user-created and safe to expose in normal label UI.

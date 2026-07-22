@@ -5,24 +5,38 @@ import SwiftData
 import BibleCore
 
 /**
- Shows one reading plan's current day, progress, and recent-day navigation.
+ Shows one reading plan's current day, progress, exact reader actions, and recent-day navigation.
 
- The view loads the selected plan from SwiftData, derives the expected current day, and lets the
- user mark days complete or incomplete while keeping the parent plan's active/completed state in sync.
+ The view loads the selected plan from SwiftData, derives Android's current day, and persists each
+ reading's completion independently in Android's `ReadingPlanStatus` JSON contract.
 
  Data dependencies:
  - `planId` identifies the persisted reading plan to display
  - `modelContext` is used to load and persist plan/day progress changes
+ - `planVersificationResolver` supplies the definition's optional raw JSword versification and
+   throws when the definition itself cannot be loaded
+ - `onPerformAction` maps exact plan-canon targets into the active module and performs Read/Speak
 
  Side effects:
  - `onAppear` loads the plan and derives the initial selected day index
- - marking or unmarking a day mutates SwiftData and may advance the selected day or reactivate the plan
+ - toggling a reading updates its Android status row and the derived SwiftData day cache
  - toolbar actions can rebase the start date, set the selected day as current, or reset the plan
+ - successful Read, Speak, and Speak All callbacks mark only their represented reading numbers
+ - dismissal cancels in-flight action work before it can mutate progress
  - plan completion status is recalculated after each completion change
  */
 public struct DailyReadingView: View {
     /// Identifier of the reading plan to load and display.
     let planId: UUID
+
+    /// Loads the optional raw JSword versification declared by one plan definition.
+    let planVersificationResolver: ReadingPlanVersificationResolver?
+
+    /// Parent-owned active-module mapper and Read/Speak action handler.
+    let onPerformAction: DailyReadingActionHandler?
+
+    /// Parent-owned route closure invoked after a successful Read has saved progress.
+    let onReadCompleted: (@MainActor () -> Void)?
 
     /// SwiftData context used to load and persist plan progress.
     @Environment(\.modelContext) private var modelContext
@@ -48,13 +62,43 @@ public struct DailyReadingView: View {
     /// Whether the destructive reset confirmation is currently presented.
     @State private var showResetConfirmation = false
 
+    /// Forces status-backed rows to refresh after best-effort settings writes.
+    @State private var statusRevision = 0
+
+    /// One replaceable Read/Speak operation owned by this presentation.
+    @State private var actionTask: Task<Void, Never>?
+
+    /// Identity of the operation currently represented by progress UI.
+    @State private var activeAction: DailyReadingPendingAction?
+
+    /// Generation allowed to clear state or dismiss after the parent action returns.
+    @State private var actionGeneration = UUID()
+
+    /// Visible request-construction or parent-action failure.
+    @State private var actionFailureMessage: String?
+
     /**
      Creates the daily reading screen for one persisted plan.
 
-     - Parameter planId: Identifier of the plan whose day-by-day progress should be shown.
+     - Parameters:
+       - planId: Identifier of the plan whose day-by-day progress should be shown.
+       - planVersificationResolver: Loads the plan definition's optional raw versification value,
+         throwing when the definition itself is unavailable.
+       - onPerformAction: Maps and validates targets in the active Bible, then navigates or starts speech.
+       - onReadCompleted: Closes the parent reading-plan route after Read progress is durable.
+     - Side effects: None until the user requests an action.
+     - Failure modes: Missing callbacks fail visibly and never mark progress.
      */
-    public init(planId: UUID) {
+    public init(
+        planId: UUID,
+        planVersificationResolver: ReadingPlanVersificationResolver? = nil,
+        onPerformAction: DailyReadingActionHandler? = nil,
+        onReadCompleted: (@MainActor () -> Void)? = nil
+    ) {
         self.planId = planId
+        self.planVersificationResolver = planVersificationResolver
+        self.onPerformAction = onPerformAction
+        self.onReadCompleted = onReadCompleted
     }
 
     /// Currently selected day, or `nil` when the plan has not loaded yet.
@@ -67,6 +111,19 @@ public struct DailyReadingView: View {
     private var progress: Double {
         guard let plan else { return 0 }
         return ReadingPlanService.completionPercentage(for: plan)
+    }
+
+    /// Android per-reading status store bound to this view's persistence context.
+    private var progressStore: ReadingPlanProgressStore {
+        ReadingPlanProgressStore(
+            modelContext: modelContext,
+            settingsStore: SettingsStore(modelContext: modelContext)
+        )
+    }
+
+    /// Android single-selected-plan preference store bound to this view's persistence context.
+    private var selectionStore: ReadingPlanSelectionStore {
+        ReadingPlanSelectionStore(settingsStore: SettingsStore(modelContext: modelContext))
     }
 
     /**
@@ -119,35 +176,50 @@ public struct DailyReadingView: View {
                 defaultValue: "This removes the plan and its reading progress."
             ))
         }
+        .alert(
+            String(localized: "error_occurred", defaultValue: "Error"),
+            isPresented: Binding(
+                get: { actionFailureMessage != nil },
+                set: { if !$0 { actionFailureMessage = nil } }
+            )
+        ) {
+            Button(String(localized: "ok", defaultValue: "OK"), role: .cancel) {
+                actionFailureMessage = nil
+            }
+        } message: {
+            Text(actionFailureMessage ?? "")
+        }
         .onAppear {
             loadPlan()
         }
+        .onDisappear(perform: cancelReadingAction)
     }
 
     /// Android-parity current-plan actions exposed from the daily-reading toolbar.
     private var dailyReadingActionsMenu: some View {
         Menu {
-            Button {
-                setSelectedDayAsCurrent()
-            } label: {
-                SwiftUI.Label(
-                    String(localized: "reading_plan_set_current_day", defaultValue: "Set Current Day"),
-                    systemImage: "calendar.badge.clock"
-                )
-            }
-            .disabled(plan == nil || currentDay == nil)
-            .accessibilityIdentifier("dailyReadingSetCurrentDayButton")
+            if let plan, !ReadingPlanService.isDateBased(plan) {
+                Button {
+                    setSelectedDayAsCurrent()
+                } label: {
+                    SwiftUI.Label(
+                        String(localized: "reading_plan_set_current_day", defaultValue: "Set Current Day"),
+                        systemImage: "calendar.badge.clock"
+                    )
+                }
+                .disabled(currentDay == nil)
+                .accessibilityIdentifier("dailyReadingSetCurrentDayButton")
 
-            Button {
-                presentStartDatePicker()
-            } label: {
-                SwiftUI.Label(
-                    String(localized: "reading_plan_set_start_date", defaultValue: "Set Start Date"),
-                    systemImage: "calendar"
-                )
+                Button {
+                    presentStartDatePicker()
+                } label: {
+                    SwiftUI.Label(
+                        String(localized: "reading_plan_set_start_date", defaultValue: "Set Start Date"),
+                        systemImage: "calendar"
+                    )
+                }
+                .accessibilityIdentifier("dailyReadingSetStartDateButton")
             }
-            .disabled(plan == nil)
-            .accessibilityIdentifier("dailyReadingSetStartDateButton")
 
             Button(role: .destructive) {
                 showResetConfirmation = true
@@ -209,9 +281,11 @@ public struct DailyReadingView: View {
                 VStack(alignment: .leading) {
                     Text(plan.planName)
                         .font(.title2.weight(.bold))
-                    Text("Started \(plan.startDate, style: .date)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !ReadingPlanService.isDateBased(plan) {
+                        Text("Started \(plan.startDate, style: .date)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 Text("\(Int(progress * 100))%")
@@ -247,10 +321,13 @@ public struct DailyReadingView: View {
 
             Spacer()
 
-            Text("Day \(currentDayIndex + 1)")
+            let displayedDayNumber = currentDay?.dayNumber
+                ?? plan.map { ReadingPlanService.expectedDay(for: $0) }
+                ?? 1
+            Text("Day \(displayedDayNumber)")
                 .font(.headline)
                 .accessibilityIdentifier("dailyReadingCurrentDayLabel")
-                .accessibilityValue("\(currentDayIndex + 1)")
+                .accessibilityValue("\(displayedDayNumber)")
 
             Spacer()
 
@@ -271,12 +348,16 @@ public struct DailyReadingView: View {
      Builds the reading card for the currently selected day, including completion actions.
      */
     private func readingCard(_ day: ReadingPlanDay) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let assignment = ReadingPlanDayAssignment(rawValue: day.readings)
+        let dayStatus = status(for: day)
+        let allRead = dayStatus.isAllRead(readingCount: assignment.readings.count)
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(String(localized: "daily_reading_today"))
                     .font(.headline)
                 Spacer()
-                if day.isCompleted {
+                if allRead {
                     HStack(spacing: 4) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
@@ -287,54 +368,223 @@ public struct DailyReadingView: View {
                 }
             }
 
-            // Parse readings into individual passages
-            let passages = day.readings.components(separatedBy: ";")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
+            ForEach(Array(assignment.readings.enumerated()), id: \.offset) { offset, passage in
+                let readingNumber = offset + 1
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(isOn: Binding(
+                        get: { self.status(for: day).isRead(readingNumber) },
+                        set: { setReading(readingNumber, isRead: $0, day: day) }
+                    )) {
+                        Text(passage)
+                            .font(.body)
+                    }
+                    .toggleStyle(ReadingPlanCheckboxToggleStyle())
+                    .disabled(!isReadingEditable(day))
+                    .accessibilityIdentifier("dailyReadingStatusToggle::\(readingNumber)")
 
-            ForEach(passages, id: \.self) { passage in
-                HStack {
-                    Image(systemName: "book")
-                        .foregroundStyle(.blue)
-                        .font(.body)
-                    Text(passage)
-                        .font(.body)
-                    Spacer()
+                    HStack(spacing: 8) {
+                        Spacer()
+                        dailyReadingActionButton(
+                            kind: .read,
+                            readingNumbers: [readingNumber],
+                            assignment: assignment,
+                            day: day
+                        )
+                        dailyReadingActionButton(
+                            kind: .speak,
+                            readingNumbers: [readingNumber],
+                            assignment: assignment,
+                            day: day
+                        )
+                    }
                 }
                 .padding(.vertical, 4)
             }
 
-            if !day.isCompleted {
-                Button {
-                    markDayComplete(day)
-                } label: {
-                    HStack {
-                        Spacer()
-                        SwiftUI.Label(String(localized: "mark_as_read"), systemImage: "checkmark")
-                        Spacer()
-                    }
+            if assignment.readings.count > 1 {
+                Divider()
+                HStack {
+                    Text(String(localized: "all", defaultValue: "All"))
+                        .font(.body.weight(.medium))
+                    Spacer()
+                    dailyReadingActionButton(
+                        kind: .speak,
+                        readingNumbers: Array(1...assignment.readings.count),
+                        assignment: assignment,
+                        day: day,
+                        speaksAll: true
+                    )
                 }
-                .buttonStyle(.borderedProminent)
-                .padding(.top, 4)
-                .accessibilityIdentifier("dailyReadingMarkAsReadButton")
-            } else {
-                Button {
-                    unmarkDay(day)
-                } label: {
-                    HStack {
-                        Spacer()
-                        SwiftUI.Label(String(localized: "unmark"), systemImage: "arrow.uturn.backward")
-                        Spacer()
-                    }
-                }
-                .buttonStyle(.bordered)
-                .padding(.top, 4)
-                .accessibilityIdentifier("dailyReadingUnmarkButton")
             }
+
+            Button {
+                finishDay(day)
+            } label: {
+                HStack {
+                    Spacer()
+                    SwiftUI.Label(String(localized: "done"), systemImage: "checkmark")
+                    Spacer()
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!allRead)
+            .padding(.top, 4)
+            .accessibilityIdentifier("dailyReadingDoneButton")
         }
         .padding()
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /**
+     Builds one Read, Speak, or Speak All command with stable in-flight feedback.
+
+     - Parameters:
+       - kind: Reader operation represented by the button.
+       - readingNumbers: One-based assignment positions represented by the operation.
+       - assignment: Parsed day assignment used to build exact source-canon targets.
+       - day: Persisted day whose progress may be marked after success.
+       - speaksAll: Whether the speech button represents every reading.
+     - Returns: Bordered command button that cannot start overlapping work.
+     - Side effects: Tapping starts `performReadingAction`.
+     - Failure modes: Failures are presented by the owning view alert.
+     */
+    private func dailyReadingActionButton(
+        kind: DailyReadingActionKind,
+        readingNumbers: [Int],
+        assignment: ReadingPlanDayAssignment,
+        day: ReadingPlanDay,
+        speaksAll: Bool = false
+    ) -> some View {
+        let pending = DailyReadingPendingAction(kind: kind, readingNumbers: readingNumbers)
+        let isRunning = activeAction == pending
+        let title: String
+        let icon: String
+        switch (kind, speaksAll) {
+        case (.read, _):
+            title = String(localized: "read", defaultValue: "Read")
+            icon = "book"
+        case (.speak, true):
+            title = String(localized: "speak", defaultValue: "Speak")
+            icon = "speaker.wave.2"
+        case (.speak, false):
+            title = String(localized: "speak", defaultValue: "Speak")
+            icon = "speaker.wave.2"
+        }
+
+        return Button {
+            performReadingAction(
+                kind: kind,
+                readingNumbers: readingNumbers,
+                assignment: assignment,
+                day: day
+            )
+        } label: {
+            if isRunning {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel(title)
+            } else {
+                SwiftUI.Label(title, systemImage: icon)
+            }
+        }
+        .buttonStyle(.bordered)
+        .disabled(actionTask != nil)
+        .accessibilityIdentifier(
+            "dailyReading\(kind == .read ? "Read" : (speaksAll ? "SpeakAll" : "Speak"))Button::\(readingNumbers.map(String.init).joined(separator: "-"))"
+        )
+    }
+
+    /**
+     Builds and executes one exact plan-canon action before marking represented readings complete.
+
+     - Parameters:
+       - kind: Read or speech operation.
+       - readingNumbers: One-based reading positions to parse and mark after success.
+       - assignment: Current day's canonical Android assignment.
+       - day: Persisted day receiving successful progress updates.
+     - Side effects: Invokes the parent handler, marks progress after success, and dismisses after Read.
+     - Failure modes: Missing wiring, invalid plan references, unsupported versification, mapping
+       failures, and speech/navigation failures show an alert and do not mutate progress.
+     */
+    private func performReadingAction(
+        kind: DailyReadingActionKind,
+        readingNumbers: [Int],
+        assignment: ReadingPlanDayAssignment,
+        day: ReadingPlanDay
+    ) {
+        guard actionTask == nil, let plan else { return }
+        guard let onPerformAction else {
+            actionFailureMessage = DailyReadingActionError.handlerUnavailable.localizedDescription
+            return
+        }
+        guard let planVersificationResolver else {
+            actionFailureMessage = DailyReadingActionError
+                .versificationResolverUnavailable
+                .localizedDescription
+            return
+        }
+        let planVersification: String?
+        do {
+            planVersification = try planVersificationResolver(plan.planCode)
+        } catch {
+            actionFailureMessage = error.localizedDescription
+            return
+        }
+
+        let request: DailyReadingActionRequest
+        do {
+            request = try DailyReadingActionRequestFactory.makeRequest(
+                planID: plan.id,
+                planCode: plan.planCode,
+                dayNumber: day.dayNumber,
+                assignment: assignment,
+                planVersification: planVersification,
+                kind: kind,
+                readingNumbers: readingNumbers
+            )
+        } catch {
+            actionFailureMessage = error.localizedDescription
+            return
+        }
+
+        let pending = DailyReadingPendingAction(kind: kind, readingNumbers: readingNumbers)
+        let generation = UUID()
+        actionGeneration = generation
+        activeAction = pending
+        actionTask = Task { @MainActor in
+            let result = await DailyReadingActionExecutor.execute(
+                request,
+                handler: onPerformAction
+            ) {
+                for readingNumber in request.readingNumbers {
+                    try persistReading(readingNumber, isRead: true, day: day)
+                }
+            }
+            guard actionGeneration == generation, activeAction == pending else { return }
+            activeAction = nil
+            actionTask = nil
+            switch result {
+            case .completed where kind == .read:
+                if let onReadCompleted {
+                    onReadCompleted()
+                } else {
+                    dismiss()
+                }
+            case .completed, .cancelled:
+                break
+            case .failed(let message):
+                actionFailureMessage = message
+            }
+        }
+    }
+
+    /** Cancels in-flight reader work and invalidates its late completion. */
+    private func cancelReadingAction() {
+        actionTask?.cancel()
+        actionTask = nil
+        activeAction = nil
+        actionGeneration = UUID()
     }
 
     /// Compact list of nearby days for quick navigation around the current selection.
@@ -351,11 +601,11 @@ public struct DailyReadingView: View {
             ForEach(range, id: \.self) { idx in
                 let day = sortedDays[idx]
                 HStack {
-                    Text("Day \(idx + 1)")
+                    Text("Day \(day.dayNumber)")
                         .font(.subheadline.weight(idx == currentDayIndex ? .bold : .regular))
                         .frame(width: 60, alignment: .leading)
 
-                    Text(day.readings)
+                    Text(ReadingPlanDayAssignment(rawValue: day.readings).readings.joined(separator: ", "))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -387,7 +637,7 @@ public struct DailyReadingView: View {
 
      Side effects:
      - populates `plan` and `sortedDays`
-     - derives the expected one-based current day from `ReadingPlanService` and converts it to a zero-based index
+     - selects only an assignment whose sparse Android day key equals the expected current day
      */
     private func loadPlan() {
         let store = ReadingPlanStore(modelContext: modelContext)
@@ -395,9 +645,13 @@ public struct DailyReadingView: View {
 
         if let plan {
             sortedDays = (plan.days ?? []).sorted { $0.dayNumber < $1.dayNumber }
-            // expectedDay returns 1-based day number; convert to 0-based index
-            let expected = ReadingPlanService.expectedDay(for: plan) - 1
-            currentDayIndex = min(max(expected, 0), max(sortedDays.count - 1, 0))
+            do {
+                _ = try progressStore.migrateLegacyStatuses(in: plan)
+            } catch {
+                actionFailureMessage = error.localizedDescription
+            }
+            let expected = ReadingPlanService.expectedDay(for: plan)
+            currentDayIndex = sortedDays.firstIndex { $0.dayNumber == expected } ?? -1
         }
     }
 
@@ -410,12 +664,17 @@ public struct DailyReadingView: View {
      */
     private func setSelectedDayAsCurrent() {
         guard let plan, let currentDay else { return }
-        ReadingPlanService.setCurrentDay(
-            currentDay.dayNumber,
-            for: plan,
-            modelContext: modelContext
-        )
-        loadPlan()
+        do {
+            try ReadingPlanService.setCurrentDay(
+                currentDay.dayNumber,
+                for: plan,
+                modelContext: modelContext,
+                progressStore: progressStore
+            )
+            loadPlan()
+        } catch {
+            actionFailureMessage = error.localizedDescription
+        }
     }
 
     /**
@@ -441,13 +700,18 @@ public struct DailyReadingView: View {
      */
     private func applyDraftStartDate() {
         guard let plan else { return }
-        ReadingPlanService.setStartDate(
-            draftStartDate,
-            for: plan,
-            modelContext: modelContext
-        )
-        showStartDatePicker = false
-        loadPlan()
+        do {
+            try ReadingPlanService.setStartDate(
+                draftStartDate,
+                for: plan,
+                modelContext: modelContext,
+                settingsStore: SettingsStore(modelContext: modelContext)
+            )
+            showStartDatePicker = false
+            loadPlan()
+        } catch {
+            actionFailureMessage = error.localizedDescription
+        }
     }
 
     /**
@@ -460,57 +724,125 @@ public struct DailyReadingView: View {
      */
     private func resetCurrentPlan() {
         guard let plan else { return }
-        ReadingPlanService.resetPlan(plan, modelContext: modelContext)
-        self.plan = nil
-        sortedDays = []
-        dismiss()
-    }
-
-    /**
-     Marks one day complete, saves progress, auto-advances when possible, and refreshes plan completion.
-
-     - Parameter day: Day to mark completed.
-     */
-    private func markDayComplete(_ day: ReadingPlanDay) {
-        day.isCompleted = true
-        day.completedDate = Date()
-        try? modelContext.save()
-
-        // Auto-advance to next unread day
-        if currentDayIndex < sortedDays.count - 1 {
-            currentDayIndex += 1
-        }
-
-        // Check if plan is complete
-        checkPlanCompletion()
-    }
-
-    /**
-     Marks one day incomplete and reactivates the plan if it had previously completed.
-
-     - Parameter day: Day to mark incomplete.
-     */
-    private func unmarkDay(_ day: ReadingPlanDay) {
-        day.isCompleted = false
-        day.completedDate = nil
-        try? modelContext.save()
-
-        // Reactivate plan if it was completed
-        if let plan, !plan.isActive {
-            plan.isActive = true
-            try? modelContext.save()
+        do {
+            try ReadingPlanService.resetPlan(
+                plan,
+                modelContext: modelContext,
+                progressStore: progressStore,
+                selectionStore: selectionStore
+            )
+            self.plan = nil
+            sortedDays = []
+            dismiss()
+        } catch {
+            actionFailureMessage = error.localizedDescription
         }
     }
 
-    /**
-     Updates the parent plan's `isActive` flag when every day is now complete.
-     */
-    private func checkPlanCompletion() {
+    /// Reads one day's effective Android status and registers the state refresh dependency.
+    private func status(for day: ReadingPlanDay) -> AndroidReadingPlanStatusPayload {
+        _ = statusRevision
+        guard let plan else { return AndroidReadingPlanStatusPayload() }
+        do {
+            return try progressStore.status(for: day, in: plan)
+        } catch {
+            Task { @MainActor in
+                actionFailureMessage = error.localizedDescription
+            }
+            return AndroidReadingPlanStatusPayload()
+        }
+    }
+
+    /// Whether Android allows explicit status edits for this displayed day.
+    private func isReadingEditable(_ day: ReadingPlanDay) -> Bool {
+        guard let plan else { return false }
+        return ReadingPlanService.isDateBased(plan) || day.dayNumber >= max(plan.currentDay, 1)
+    }
+
+    /// Persists one Android reading-number toggle without collapsing partial completion.
+    private func setReading(_ readingNumber: Int, isRead: Bool, day: ReadingPlanDay) {
+        do {
+            try persistReading(readingNumber, isRead: isRead, day: day)
+        } catch {
+            actionFailureMessage = error.localizedDescription
+        }
+    }
+
+    /** Persists one reading mutation and exposes any storage or journal failure to its caller. */
+    private func persistReading(
+        _ readingNumber: Int,
+        isRead: Bool,
+        day: ReadingPlanDay
+    ) throws {
         guard let plan else { return }
-        let allDone = sortedDays.allSatisfy(\.isCompleted)
-        if allDone {
-            plan.isActive = false
-            try? modelContext.save()
+        _ = try progressStore.setReading(
+            readingNumber,
+            isRead: isRead,
+            day: day,
+            plan: plan
+        )
+        statusRevision += 1
+    }
+
+    /// Applies Android's enabled Done transition and selects the returned due day.
+    private func finishDay(_ day: ReadingPlanDay) {
+        guard let plan else { return }
+        do {
+            let nextDay = try ReadingPlanService.finishDay(
+                day,
+                in: plan,
+                modelContext: modelContext,
+                progressStore: progressStore,
+                selectionStore: selectionStore
+            )
+            statusRevision += 1
+            guard let nextDay else {
+                self.plan = nil
+                sortedDays = []
+                dismiss()
+                return
+            }
+            if let nextIndex = sortedDays.firstIndex(where: { $0.dayNumber == nextDay }) {
+                currentDayIndex = nextIndex
+            }
+        } catch {
+            actionFailureMessage = error.localizedDescription
         }
+    }
+}
+
+/** Stable identity for one Daily Reading operation represented by progress UI. */
+private struct DailyReadingPendingAction: Equatable {
+    /// Read or speech operation.
+    let kind: DailyReadingActionKind
+
+    /// One-based reading positions represented by the operation.
+    let readingNumbers: [Int]
+}
+
+/** iOS checkbox presentation for Android's per-reading completion control. */
+private struct ReadingPlanCheckboxToggleStyle: ToggleStyle {
+    /**
+     Builds a stable checkbox row while preserving SwiftUI toggle semantics.
+
+     - Parameter configuration: Toggle binding and caller-provided passage label.
+     - Returns: Plain button row with a familiar square/checkmark control.
+     - Side effects: Tapping flips the supplied toggle binding.
+     - Failure modes: none.
+     */
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: configuration.isOn ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(configuration.isOn ? Color.accentColor : .secondary)
+                configuration.label
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

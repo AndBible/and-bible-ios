@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Seaded tagakiusatuile";
 "discrete_mode" = "Peida religioossed sümbolid";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "Rakendusest";
 "version" = "Version";
 "export" = "Ekspordi";
@@ -440,10 +440,6 @@
 "calculator_pin_description" = "PIN-kood rakendusesse sisenemiseks, kui kalkulaator on kuvatud.";
 "discrete_help_title" = "Loe esmalt seda!";
 "discrete_help_summary" = "Juhised seadete jaoks ja teave konkreetse diskreetse versiooni kohta.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Rakenduse käitumine";
 "prefs_display_customization_cat" = "Vaade ja välimus";
@@ -514,7 +510,6 @@
 
 "prefs_volume_keys_scroll_title" = "Helitugevuse nuppude kerimine";
 "prefs_volume_keys_scroll_summary" = "Kasuta helitugevuse üles/alla nuppe piibli teksti kerimiseks";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Eksperimentaalsed funktsioonid";
 "prefs_experimental_features_summary" = "Vali, milliseid eksperimentaalseid funktsioone lubada. Need funktsioonid on veel arendamisel ja võivad muutuda või eemaldatakse";
 "experimental_feature_bookmark_edit_actions" = "Järjehoidja muutmise toimingud";
@@ -642,3 +637,389 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "SD-kaardi peale on kasutaja lugemisplaan, mis on kaustas jsword/readingplan sama nimega kui rakendusesisene plaan. Seda pole võimalik siin näidata. Palun nimeta fail millekski muuks ümber, jättes faili laienduseks .properties";
 "error_no_content" = "Valitud salmi jaoks sisu pole";
+
+/* Android shared translations */
+"calculator_par1" = "Enne rakendusse sisenemist näidatakse kalkulaatori ekraani.";
+"calculator_par2" = "Selles saad teha standardseid arvutusi ja kui soovid rakendusse siseneda, sisesta lihtsalt oma PIN-kood (vaikimisi on 1234) ja vajuta seejärel nuppu \"=\".";
+"calculator_par3" = "Kohandatud PIN-koodi saad seada \"Kalkulaatori PIN\" seade kaudu.";
+"give_passphrase_for_module" = "Dokument %@ on krüpteeritud ja selle avamiseks on vaja parooli";
+"show_unlock_info" = "Moodul ja avamise info";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "ZIP-fail lahtipakkimine...";
+"install_failed_reason" = "Mooduli paigaldus ebaõnnestus: %@.";
+"install_zip_successfull" = "Moodul on paigaldatud";
+"module_install_phase_committing" = "Palun oota, laadin mooduleid failist.";
+"module_install_phase_downloading" = "Lae alla";
+"module_install_phase_queued" = "Palun oota...";
+"storage_space_warning" = "Pole piisavalt ruumi.";
+
+/* Android shared translations */
+"error_occurred" = "Tekkis viga";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Päheõppimine";
+"memorize_tab_reading" = "Lugemine";
+"reading_progress_active_days" = "aktiivseid päevi";
+"reading_progress_bible_heatmap" = "Piibli ülevaade";
+"reading_progress_calendar" = "Lugemise aktiivsus";
+"reading_progress_chapters_read" = "peatükki loetud";
+"reading_progress_cycle" = "Tsükkel %d";
+"reading_progress_history_for" = "Lugemise edenemine: %1$@";
+"reading_progress_history_no_entries" = "Valitud jaoks pole lugemiskirjeid.";
+"reading_progress_history_title" = "Lugemise ajalugu";
+"reading_progress_history_version_unknown" = "Tundmatu versioon";
+"reading_progress_new_cycle" = "Uus tsükkel";
+"reading_progress_new_cycle_confirm" = "Alustada uut lugemistsüklit? See alustab edenemise jälgimist otsast, säilitades eelmise tsükli andmed.";
+"reading_progress_new_testament" = "Uus Testament";
+"reading_progress_next_cycle" = "Järgmine tsükkel";
+"reading_progress_old_testament" = "Vana Testament";
+"reading_progress_overall" = "%@%% piiblist loetud";
+"reading_progress_percent_read_scale" = "Protsent\nLoetud";
+"reading_progress_previous_cycle" = "Eelmine tsükkel";
+"reading_progress_read_count_scale" = "Loetud\nArv";
+"reading_progress_title" = "Lugemise/päheõppimise edenemine";
+
+/* Android shared translations */
+"conf_change_chapter" = "Peatüki muudatused";
+"conf_change_title" = "Pealkirjad";
+"conf_replace_divinename" = "Kasuta jumala nime Jehoova";
+"conf_save_playback_settings_to_bookmarks" = "Salvesta esitamise järjehoidjate seaded";
+"conf_speak_auto_bookmark" = "Automaatne järjehoidjate lisamine";
+"conf_speak_footnotes" = "Allmärkused";
+"conf_speak_sleep_timer" = "Määra unetaimer";
+"conf_speak_synchronize" = "Tekst jälgib kõnet";
+"forward" = "Edasi";
+"playback_settings_title" = "Esitamise seaded";
+"rewind" = "Tagasi";
+"speak_bookmarks_menu_title" = "Kuula alates järjehoidjast";
+"speak_next" = "Järgmine";
+"speak_previous" = "Eelmine";
+"speak_settings_title" = "Üldised kõne seaded";
+
+/* Android shared translations */
+"sleep_timer_title" = "Unetaimer minutites";
+"speak_beginning_of_passage" = "Vali koha algus";
+"speak_ending_of_passage" = "Vali koha lõpp";
+"speak_ending_verse_must_be_later" = "Lõpusalm peab olema pärast alguse salmi.";
+"speak_verse_range_to_repeat" = "Vali salmide vahemik, mida korrata";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Keel pole saadaval.";
+
+/* Android shared translations */
+"description" = "Kirjeldus";
+"errorTitle" = "Tekkis viga";
+"error_executing_search" = "Vigane otsingupäring";
+"export_something" = "Ekspordi %@";
+"import_items" = "Impordi %@";
+"install_zip_module" = "Paigalda Piibli moodul";
+"my_document_content_type_label" = "Sisu tüüp";
+"my_document_create_title" = "Loo uus dokument";
+"my_document_import_document" = "Impordi failid dokumendina";
+"my_document_new_name" = "Dokument %d";
+"my_document_new_page_name" = "Leht %1$d";
+"my_document_rename_title" = "Nimeta dokument ümber";
+"my_document_save_changes" = "Salvestada muudatused?";
+"overwrite" = "Jah";
+"package_directory" = "Pakettide kataloog (Zip-failid)";
+"read" = "Lugemine";
+"reading_plan_set_current_day" = "Tõsta järg käeolevale päevale...";
+"reading_plan_set_start_date" = "Määra alguskuupäev...";
+"search_all_words" = "Kõik sõnad";
+"search_any_word" = "Mõni sõnadest";
+"search_fts_query" = "Toorpäringu süntaks";
+"search_phrase" = "Fraas";
+"search_words_group_prompt" = "Leia salmid";
+"show_notes" = "Näita märkmeid";
+"speak_book_changed" = "Raamatut on muudetud.";
+"speak_chapter_changed" = "Peatükk";
+"success" = "Valmis";
+"summary" = "Kokkuvõte";
+"undo" = "Loobu";
+
+/* Android shared translations */
+"my_document_no_description" = "Kirjeldus puudub";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Dokumendist ei leitud";
+"my_document_cannot_delete_ai_documents" = "AI dokumente ei saa kustutada, kui need sisaldavad lehti. Kustuta esmalt lehed.";
+"my_document_create_page_title" = "Uus leht";
+"my_document_import_empty_selection" = "Ühtegi imporditavat faili pole valitud";
+"system_items1" = "Veel";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Pead alla laadima Strongi numbreid sisaldava piibli ja looma selle indeksi Otsingu kaudu";
+
+/* Android shared translations */
+"add_model" = "Lisa mudel";
+"agent_already_running" = "AI agent on juba töötamas. Palun oota või peata see esmalt.";
+"agent_log_cancelled" = "Tühistatud";
+"agent_log_completed" = "Lõpetatud";
+"agent_log_executing" = "Täitmine: %@";
+"agent_log_idle" = "AI assistent";
+"agent_log_iteration" = "Iteratsioon %d";
+"agent_log_model_not_configured" = "Mudelit pole seadistatud";
+"agent_log_tool_failed" = "Tööriist %@ ebaõnnestus";
+"agent_log_view_raw" = "Vaata AI toorlogisid";
+"agent_max_iterations_title" = "Agendi maksimaalsed iteratsioonid";
+"agent_permission_mode_summary" = "Juhib, millal on nõutav kasutaja kinnitus enne AI kirjutamistoiminguid";
+"agent_permission_title" = "Agendi luba";
+"ai_add_provider" = "Lisa teenusepakkuja";
+"ai_advanced_category" = "Täpsem";
+"ai_agent_notification_running" = "AI agent töötab…";
+"ai_behavior_category" = "Käitumine";
+"ai_connection_settings" = "Ühenduse seaded";
+"ai_disclaimer_approach" = "AndBible kasutab AI-d peamiselt teksti töötlemiseks sinul paigaldatud dokumentidest — kommentaarid, sõnaraamatud ja muud moodulid — selle asemel, et toetuda mudeli oma treenimisandmetele.";
+"ai_disclaimer_dialog_title" = "AI tööriistad — oluline teave";
+"ai_disclaimer_intro" = "AI tööriistad võivad oluliselt rikastada sinu piibliuurimise kogemust ja avada uusi viise Pühakirjaga suhtlemiseks.";
+"ai_disclaimer_point1" = "AI võib teha vigu, sealhulgas \"hallutsinatsioone\" (enesekindlalt esitada valet või väljamõeldud teavet). Ära võta selle väljundit pimesi vastu.";
+"ai_disclaimer_point2" = "AI vastused võivad peegeldada eelarvamusi treenimisandmetest, olla tahtlikult eksitavad või esitada kindlat teoloogilist vaatenurka, nagu oleks see neutraalne või täielik.";
+"ai_disclaimer_point3" = "Sina vastutad AI-genereeritud sisu kasutamise eest. Kontrolli tulemused alati Pühakirja vastu enne neile toetumist.";
+"ai_disclaimer_point4" = "AndBible püüab muuta kontrollimise lihtsaks (nt täpsed lähteviited kommentaarides), kuid lõplik vastutus lasub alati sinul.";
+"ai_disclaimer_point5" = "\"Katsuge kõike, hoidke kinni sellest, mis on hea.\" (1. Tessalooniklastele 5:21)";
+"ai_disclaimer_point6" = "Nendel tööriistadel pole hinge ega Püha Vaimu. Need on tekstide töötlemise tööriistad, mitte vaimsed juhid. Need ei sobi otseselt jutluste, kõnede ega muu vaimse sisu ettevalmistamiseks ilma hoolika inimliku järelevalve, palve ja eristamisvõimeta.";
+"ai_disclaimer_point7" = "Targalt kasutades võivad need paljudele kasutajatele ja kasutusjuhtudele kasu tuua. Kuid kui oled ebakindel riskide aktsepteerimisel, on nende mitte kasutamine samuti täiesti kehtiv valik.";
+"ai_disclaimer_point8" = "Sinu andmed saadetakse valitud AI teenusepakkuja serveritesse. API võtit kasutades nõustud selle teenusepakkuja tingimuste ja privaatsuspoliitikaga. Ise hostitatavad mudelid on võimalikud, kuid nõuavad rohkem tehnilist teadlikkust ega pruugi anda sama häid tulemusi kui ärilised mudelid.";
+"ai_disclaimer_point9" = "AI teenusepakkujad küsivad API kasutuse eest tasu. AndBiblis kuvatavad kuluarvestused on ligikaudsed — kontrolli tegelikke tasusid alati oma teenusepakkuja arveldusest.";
+"ai_disclaimer_responsibility" = "Kuid need on siiski võimsad tööriistad — ja suure võimuga kaasneb suur vastutus. Palun pea silmas järgmist.";
+"ai_disclaimer_warning_title" = "Tähtis: Loe enne AI tööriistade kasutamist";
+"ai_doc_choose_page" = "Vali AI dokumendi leht";
+"ai_document_filter_activity_title" = "AI dokumentide ligipääs";
+"ai_document_regenerate" = "Taasloo";
+"ai_hidden_status" = "peidetud";
+"ai_hide_prompt" = "Peida";
+"ai_language_title" = "AI vastuste keel";
+"ai_models_category" = "Mudelid";
+"ai_models_summary_none" = "Mudeleid pole seadistatud";
+"ai_provider_api_format" = "API vorming";
+"ai_provider_api_key" = "API võti";
+"ai_provider_api_key_not_set" = "API võti on seadmata";
+"ai_provider_delete_confirm" = "Kustuta teenusepakkuja \"%1$@\"? Seda teenusepakkujat kasutavad käsud lähevad tagasi vaikimisi.";
+"ai_provider_edit" = "Muuda";
+"ai_provider_endpoint" = "API lõpp-punkt";
+"ai_provider_endpoint_description" = "Ainult baas-URL. AndBible lisab automaatselt \"/chat/completions\" (OpenAI vorming) või \"/messages\" (Anthropic vorming). Mudelite loendeid laaditakse \"/models\" kaudu.";
+"ai_provider_name" = "Teenusepakkuja nimi";
+"ai_provider_saved" = "Teenusepakkuja salvestatud";
+"ai_provider_select_type" = "Vali teenusepakkuja tüüp";
+"ai_providers_models_category" = "Teenusepakkujad ja mudelid";
+"ai_providers_summary_none" = "Teenusepakkujaid pole seadistatud";
+"ai_regenerate_fresh_run" = "Uus käivitus (ignoreeri eelmist tulemust)";
+"ai_regenerate_instructions_hint" = "Lisajuhised (valikuline)";
+"ai_regenerate_keep_previous" = "Hoia eelmine versioon";
+"ai_regenerate_prompt_not_found" = "Ei saa taasluua: algset käsku ei leitud. See võib olla kustutatud.";
+"ai_regenerate_title" = "Taasloo";
+"ai_settings" = "AI seaded";
+"ai_setup_description" = "AndBible saab kasutada AI-d piibli teksti tõlkimiseks, salmide selgitamiseks, kokkuvõtete loomiseks jne. Alustamiseks seadista ühendus OpenAI-ühilduva API teenusepakkujaga.";
+"ai_setup_title" = "Seadista AI";
+"ai_usage_category" = "Kasutus";
+"ask_model_before_run_title" = "Küsi mudel enne käivitamist";
+"auto_hide_agent_log_title" = "Peida AI-paneel pärast lõpetamist";
+"bookmarks_and_mynotes_title" = "Järjehoidjad ja minu märkmed";
+"built_in_prompt" = "Sisseehitatud";
+"built_in_prompt_notice" = "See on sisseehitatud käsk, mida ei saa muuta. Kasuta \"Kopeeri kohandamiseks\", et luua muudetav koopia.";
+"category_none" = "Kategooria puudub";
+"commentary_max_response_no_limit" = "Limiit puudub";
+"commentary_max_response_title" = "Kommentaari vastuse suuruse limiit";
+"copy_to_customize" = "Kopeeri kohandamiseks";
+"custom_agent_system_prompt_title" = "Agendi süsteemi käsk";
+"custom_system_prompt_custom" = "Kohandatud";
+"custom_text_transform_system_prompt_title" = "Teksti teisendamise süsteemi käsk";
+"default_prompt_ask_question" = "Esita küsimus";
+"default_prompt_ask_question_desc" = "Küsi mistahes küsimust valitud tekstikoha kohta";
+"default_prompt_bookmark_annotate" = "Järjehoidja ja märkused";
+"default_prompt_bookmark_annotate_desc" = "Loob järjehoidja koos AI-genereeritud uurimismärkusega";
+"default_prompt_compare_translations" = "Võrdle tõlkeid";
+"default_prompt_compare_translations_desc" = "Näitab, kuidas erinevad paigaldatud tõlked teksti esitavad";
+"default_prompt_cross_references" = "Ristviited";
+"default_prompt_cross_references_desc" = "Leiab ja selgitab seotud piiblikohti";
+"default_prompt_custom" = "Kohandatud käsk";
+"default_prompt_custom_desc" = "Käivita kohandatud ülesanne valitud tekstikohal";
+"default_prompt_custom_template" = "Järgi kasutaja ülesande kirjeldust valitud piiblikoha jaoks.";
+"default_prompt_enhance_note" = "Täiusta märget";
+"default_prompt_enhance_note_desc" = "Parandab sinu märkme grammatikat, selgust ja loetavust";
+"default_prompt_explain_verses" = "Selgita salme";
+"default_prompt_explain_verses_desc" = "Selgitab valitud salmide tähendust ja konteksti";
+"default_prompt_explain_verses_studypad" = "Selgita salme → Uurimismärkmik";
+"default_prompt_explain_verses_studypad_desc" = "Loo uurimismärkmik salmi haaval selgituse ja järjehoidjatega";
+"default_prompt_study_layout" = "Ava uurimise paigutus";
+"default_prompt_study_layout_desc" = "Avab kommentaari ja paralleelse tõlke aknad uurimiseks";
+"default_prompt_summary" = "Kokkuvõte";
+"default_prompt_summary_desc" = "Loob valitud teksti kokkuvõtte";
+"default_prompt_thematic_study" = "Temaatiline uuring";
+"default_prompt_thematic_study_desc" = "Koostab uurimismärkmiku koos põhiteemaga seotud tekstikohtade ja märkmetega";
+"default_prompt_translate_to_language" = "Tõlgi %@ keelde";
+"default_prompt_translate_to_ui_language_desc" = "Tõlgib dokumendi teksti rakenduse kasutajaliidese keelde";
+"default_prompt_word_study" = "Sõnaanalüüs";
+"default_prompt_word_study_desc" = "Analüüsib algseid heebrea/kreeka sõnu";
+"default_prompt_workspace_assistant" = "Tööala assistent";
+"default_prompt_workspace_assistant_desc" = "Halda aknaid: loo, sulge, korrasta, vaheta dokumente";
+"delete_category" = "Kustuta kategooria";
+"delete_category_and_prompts" = "Kustuta kategooria ja selle käsud";
+"delete_category_keep_prompts" = "Liiguta käsud juure ja kustuta kategooria";
+"doc_type_addons" = "Lisamoodulid";
+"easy_setup_enter_api_key" = "Sisesta oma API võti";
+"easy_setup_success" = "Ühendus õnnestus!";
+"easy_setup_test_connection" = "Testi ühendust";
+"easy_setup_testing" = "Testimine…";
+"easy_setup_title" = "Kiire seadistamine";
+"help_bookmarks_text" = "Järjehoidjaid saab luua, valides teksti ja valides hüpikmenüüst \"Järjehoidja\". Uuele järjehoidjale saad lisada oma märkmeid, puudutades esiletõstetud teksti piiblisvaates. Kommentaarides on ka erispetsiaalne dokument \"Minu märkmed\", mis võimaldab näha oma märkmeid eraldi aknas.";
+"help_memorize_text" = "Päheõppimise vaade aitab sul lõike pähe õppida. Kasuta harjutamiseks Sõnahägustamist, Sõnade Segamist, Sõnade Sisestamist või Sõnade Järjestamist. Edukad harjutused märgivad salmid automaatselt päheõpituks (seda saab keelata).";
+"help_read_more_link" = "Loe lisaks kasutusjuhendist";
+"hide_category" = "Peida AI toimingutest";
+"llm_actions" = "AI toimingud";
+"llm_continue_iterations_message" = "AI agent on saavutanud oma %1$d iteratsiooni limiidi lõpetamiseta. Jätkata %2$d iteratsiooni võrra?";
+"llm_continue_iterations_title" = "Jätkata?";
+"llm_custom_input_price_title" = "Sisendi hind ($/Mmärki)";
+"llm_custom_model_dialog_message" = "Sisesta mudeli ID";
+"llm_custom_output_price_title" = "Väljundi hind ($/Mmärki)";
+"llm_error_max_iterations" = "Maksimaalne iteratsioonide arv (%1$d) saavutati lõpetamiseta";
+"llm_error_unknown" = "Tundmatu viga";
+"llm_note_updated" = "Märge uuendatud";
+"llm_openrouter_model" = "Mudel";
+"llm_provider_custom" = "Kohandatud (OpenAI-ühilduv)";
+"llm_reset_usage_confirm_message" = "See kustutab kõik kumulatiivsed kasutuse andmed.";
+"llm_reset_usage_confirm_title" = "Lähtesta kasutuse andmed?";
+"llm_reset_usage_title" = "Lähtesta kasutuse andmed";
+"llm_usage_summary_default" = "Kasutuse andmed puuduvad";
+"llm_usage_summary_title" = "Märkide kasutus";
+"manage_prompts" = "Halda AI käske";
+"manage_tool_permissions_title" = "Tööriista load";
+"model_pricing_summary" = "%1$@ sisse / %2$@ välja Mmärgi kohta";
+"model_select_provider" = "Teenusepakkuja";
+"model_set_default" = "Sea vaikemudel";
+"move_category_down" = "Liiguta alla";
+"move_category_up" = "Liiguta üles";
+"new_category" = "Uus kategooria";
+"new_category_name" = "Kategooria nimi";
+"new_prompt" = "Uus käsk";
+"permission_allow_all" = "Luba kõik";
+"permission_allow_all_session" = "Luba kõik tööriistad sel seansil";
+"permission_allow_for_session" = "Luba selle seansi jaoks";
+"permission_allow_once" = "Luba üks kord";
+"permission_always_allow_confirm" = "Oled kindel, et soovid alati lubada \"%1$@\"?";
+"permission_always_allow_confirm_reset_hint" = "Seda saab AI seadetes lähtestada.";
+"permission_always_ask" = "Küsi alati";
+"permission_ask_once_per_run" = "Küsi üks kord käivitamise kohta";
+"permission_deny" = "Keeldu";
+"permission_deny_all" = "Keela kõik";
+"permission_option_always_allow" = "Luba alati";
+"permission_option_always_deny" = "Keela alati";
+"permission_status_default" = "Küsi (vaikimisi)";
+"prompt_auto_include_commentaries" = "Lisa automaatselt kommentaarid";
+"prompt_auto_include_documents" = "Lisa automaatselt paigaldatud dokumendid";
+"prompt_bible_only" = "Ainult piibli dokumendid";
+"prompt_category" = "Kategooria";
+"prompt_category_favorites" = "Lemmikud";
+"prompt_category_general" = "Üldine";
+"prompt_category_notes" = "Märkmed";
+"prompt_category_study" = "Uuring";
+"prompt_category_uncategorized" = "Kategoriseerimata";
+"prompt_context_note_editor" = "Märkme redaktor";
+"prompt_context_text_selection" = "Teksti valik";
+"prompt_context_verse_selection" = "Salmi valik";
+"prompt_context_window_menu" = "Akna menüü";
+"prompt_context_workspace_menu" = "Tööala menüü";
+"prompt_description" = "Kirjeldus";
+"prompt_edit_before_run" = "Täpsusta enne käivitamist";
+"prompt_is_text_transformation" = "Teksti teisendamine";
+"prompt_max_iterations_hint" = "Jäta tühjaks globaalse vaikeväärtuse jaoks";
+"prompt_max_iterations_unlimited" = "Piiramatu";
+"prompt_model_default" = "Vaikimisi";
+"prompt_model_override" = "Mudel";
+"prompt_name" = "Nimi";
+"prompt_no_document_creation" = "Dokumentide loomine keelatud";
+"prompt_permission_mode" = "Lubade režiim";
+"prompt_permission_mode_description" = "Juhib, millal on nõutav kasutaja kinnitus enne AI kirjutamistoiminguid. Allpool olevad tööriista seaded võivad seda üksikute tööriistade puhul alistada.";
+"prompt_permission_use_default" = "Kasuta vaikimisi";
+"prompt_show_in" = "Näita kohas";
+"prompt_strict_context_matching" = "Kontekstist sõltuv vahemälu";
+"prompt_tab_advanced" = "Täpsem";
+"prompt_tab_permissions" = "Load";
+"prompt_tab_prompt" = "Käsk";
+"prompt_template" = "Käsu mall";
+"prompt_tool_permissions" = "Tööriista load";
+"raw_log_delete_all" = "Kustuta kõik";
+"raw_log_error_indicator" = "Viga";
+"raw_log_history_empty" = "Salvestatud logisid pole";
+"raw_log_history_title" = "AI logi ajalugu";
+"raw_log_item_tokens" = "%1$@ sisse / %2$@ välja";
+"raw_log_older_1_month" = "Vanemad kui 1 kuu";
+"raw_log_older_1_week" = "Vanemad kui 1 nädal";
+"raw_log_older_3_months" = "Vanemad kui 3 kuud";
+"raw_log_retention_summary_disabled" = "Keelatud (hoia kõik)";
+"raw_log_retention_title" = "Kustuta vanad logid automaatselt";
+"reset_all_ai_settings" = "Lähtesta kõik AI seaded";
+"reset_all_ai_settings_confirm_message" = "See kustutab API võtme, teenusepakkuja, lõpp-punkti, mudeli ja lähtestab kõik käsud vaikimisi. Jätkata?";
+"reset_all_ai_settings_confirm_title" = "Lähtestada kõik AI seaded?";
+"reset_all_permissions" = "Lähtesta kõik";
+"reset_to_default" = "Lähtesta vaikimisi";
+"save_and_exit" = "Salvesta";
+"select_llm_prompt" = "Vali AI toiming";
+"select_model_before_run_title" = "Vali mudel";
+"set_default_model_for_prompt" = "Sea selle käsu vaikemudel";
+"show_category" = "Näita AI toimingutes";
+"specify_before_run_title" = "Täpsusta ülesanne";
+"tool_add_bookmark_note" = "Lisa järjehoidja märge";
+"tool_add_label_to_bookmark" = "Lisa silt järjehoidjale";
+"tool_add_my_document_page" = "Lisa Minu Dokumendi leht";
+"tool_add_study_pad_entry" = "Lisa uurimismärkmiku kirje";
+"tool_category_bible_search" = "Piibel ja otsing";
+"tool_category_bookmarks" = "Järjehoidjad";
+"tool_category_general_books" = "Üldised raamatud";
+"tool_category_labels" = "Sildid";
+"tool_category_my_documents" = "Minu dokumendid";
+"tool_category_study_pads" = "Uurimismärkmikud";
+"tool_category_windows" = "Aknad";
+"tool_create_bookmark" = "Loo järjehoidja";
+"tool_create_label" = "Loo silt";
+"tool_create_my_document" = "Loo Minu Dokument";
+"tool_create_study_pad" = "Loo uurimismärkmik";
+"tool_create_window" = "Loo aken";
+"tool_delete_bookmark" = "Kustuta järjehoidja";
+"tool_delete_label" = "Kustuta silt";
+"tool_delete_my_document_page" = "Kustuta Minu Dokumendi leht";
+"tool_edit_my_document_page" = "Muuda Minu Dokumendi lehte";
+"tool_finish_with_my_document_page" = "Ava Minu Dokumendi leht";
+"tool_finish_with_study_pad" = "Ava uurimismärkmik";
+"tool_finish_without_document" = "Lõpeta ilma dokumendita";
+"tool_get_all_labels" = "Nimeta kõik sildid";
+"tool_get_bookmarks_for_verse" = "Hangi salmi järjehoidjad";
+"tool_get_bookmarks_with_label" = "Hangi sildiga järjehoidjad";
+"tool_get_commentaries" = "Loe kommentaare";
+"tool_get_dictionary_entry" = "Otsi sõnaraamatukirjet";
+"tool_get_genbook_content" = "Loe üldise raamatu sisu";
+"tool_get_genbook_keys" = "Nimeta üldise raamatu võtmed";
+"tool_get_installed_documents" = "Nimeta paigaldatud dokumendid";
+"tool_get_my_document_pages" = "Nimeta Minu Dokumendi lehed";
+"tool_get_my_documents" = "Nimeta Minu Dokumendid";
+"tool_get_study_pad_content" = "Loe uurimismärkmiku sisu";
+"tool_get_verse_content" = "Loe salmi sisu";
+"tool_get_windows" = "Nimeta aknad";
+"tool_manage_window" = "Halda akent";
+"tool_remove_label_from_bookmark" = "Eemalda silt järjehoidjalt";
+"tool_search_bible" = "Otsi piiblist";
+"tool_search_by_strongs" = "Otsi Strongi numbri järgi";
+"tool_search_study_pads" = "Otsi uurimismärkmikest";
+"tool_set_document_title" = "Sea dokumendi pealkiri";
+"tool_set_window_document" = "Sea akna dokument";
+"tool_update_bookmark_note" = "Uuenda järjehoidja märget";
+"tool_update_studypad_text_entry" = "Uuenda uurimismärkmiku tekstikirjet";
+"verse_tip" = "Osalise värsi või mitme värsi valimiseks kasuta pikka vajutust";
+"watch_tutorial_video" = "Vaata videoõpetust (inglise keeles)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Taastatakse AI dokumenti…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Nõustun ja võtan täieliku vastutuse";
+"ai_disclaimer_accept_title" = "Nõustu AI lahtiütlusega";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "AI ühenduse ja käskude seaded";
+"prefs_features_cat" = "Funktsioonid";

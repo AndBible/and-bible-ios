@@ -40,7 +40,7 @@ struct WindowTabBar: View {
     var onShowBookChooser: (() -> Void)?
 
     /// Attempts typed-reference navigation for a specific window and reports success/failure.
-    var onGoToTypedRef: ((Window, String) -> Bool)?
+    var onGoToTypedRef: ((BibleCore.Window, String) -> Bool)?
 
     /// Controls presentation of the typed-reference alert from the tab context menu.
     @State private var showGoToRefAlert = false
@@ -49,7 +49,7 @@ struct WindowTabBar: View {
     @State private var goToRefText = ""
 
     /// Window targeted by the currently presented typed-reference alert.
-    @State private var goToRefWindow: Window?
+    @State private var goToRefWindow: BibleCore.Window?
 
     /// Whether a visible pane is still opening and should block more user-created windows.
     private var isAddWindowDisabled: Bool {
@@ -323,8 +323,21 @@ struct WindowTabBar: View {
 
     // MARK: - Window Tab
 
-    /// Builds the Android-style compact button for one window, including context menu actions.
-    private func windowTab(for window: Window, tabPalette: AndroidWindowTabPalette) -> some View {
+    /**
+     Builds the Android-style compact button and manager-routed context actions for one window.
+
+     - Parameters:
+       - window: Window represented by the tab.
+       - tabPalette: Resolved footer colors for visible, hidden, and active states.
+     - Returns: A fixed-size tab with content, layout, sync, pin, and close actions.
+     - Side Effects: User actions route all window-state mutations through `WindowManager`.
+     - Failure Modes: Missing rendered controller state falls back to persisted page-manager labels.
+     */
+    private func windowTab(
+        for window: BibleCore.Window,
+        tabPalette: AndroidWindowTabPalette
+    ) -> some View {
+        let actionDispatcher = WindowTabActionDispatcher(target: windowManager)
         let isMinimized = window.layoutState == "minimized"
         let isActive = !isMinimized && window.id == windowManager.activeWindow?.id
         let renderedState = renderedContentTabState(for: window)
@@ -335,11 +348,18 @@ struct WindowTabBar: View {
         let reference = renderedState?.reference ?? shortReference(for: window)
         let buttonForegroundColor = tabPalette.footerButtonForegroundColor(isVisible: isVisible)
         let canCopyReference = !fullReference(for: window).isEmpty
-        let canMoveWindow = !window.isLinksWindow && !windowManager.isMaximized
+        let moveCandidates = windowManager.windowsInPersistedOrder.filter {
+            windowManager.isEffectivelyPinned($0) == windowManager.isEffectivelyPinned(window)
+        }
+        let currentMoveIndex = moveCandidates.firstIndex(where: { $0.id == window.id })
+        let canMoveWindow = !window.isLinksWindow
+            && !windowManager.isMaximized
+            && moveCandidates.count > 1
         let canSyncWindow = isWindowSyncable(window)
-        let autoPinEnabled = windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false
+        let autoPinEnabled = windowManager.activeWorkspace?.workspaceSettings?.autoPin
+            ?? WorkspaceSettings.defaultAutoPin
         let canPinWindow = !window.isLinksWindow && !windowManager.isMaximized && !autoPinEnabled
-        let topCornerRadius: CGFloat = (window.isPinMode || window.isLinksWindow) ? 6 : 1
+        let topCornerRadius: CGFloat = (windowManager.isEffectivelyPinned(window) || window.isLinksWindow) ? 6 : 1
         let tabShape = UnevenRoundedRectangle(
             cornerRadii: RectangleCornerRadii(
                 topLeading: topCornerRadius,
@@ -350,11 +370,7 @@ struct WindowTabBar: View {
         )
 
         return Button {
-            if isMinimized {
-                windowManager.restoreWindow(window)
-            } else {
-                windowManager.activeWindow = window
-            }
+            actionDispatcher.perform(.select(isMinimized: isMinimized), for: window)
         } label: {
             ZStack(alignment: .topLeading) {
                 tabShape
@@ -438,7 +454,7 @@ struct WindowTabBar: View {
                 }
 
                 Button(String(localized: "go_to_reference"), systemImage: "arrow.right.doc.on.clipboard") {
-                    windowManager.activeWindow = window
+                    actionDispatcher.perform(.activate, for: window)
                     goToRefWindow = window
                     goToRefText = ""
                     showGoToRefAlert = true
@@ -449,41 +465,38 @@ struct WindowTabBar: View {
 
             if isMinimized {
                 Button(String(localized: "restore"), systemImage: "arrow.up.left.and.arrow.down.right") {
-                    windowManager.restoreWindow(window)
+                    actionDispatcher.perform(.restore, for: window)
                 }
             } else {
                 // Move window actions
-                if canMoveWindow && windowManager.visibleWindows.count > 1 {
-                    let sorted = windowManager.visibleWindows.sorted { $0.orderNumber < $1.orderNumber }
-                    let currentIndex = sorted.firstIndex(where: { $0.id == window.id })
-
+                if canMoveWindow {
                     Button(String(localized: "move_up"), systemImage: "arrow.up") {
-                        guard let idx = currentIndex, idx > 0 else { return }
-                        windowManager.swapWindowOrder(window, sorted[idx - 1])
+                        guard let index = currentMoveIndex, index > 0 else { return }
+                        actionDispatcher.perform(.move(toPosition: index - 1), for: window)
                     }
-                    .disabled(currentIndex == nil || currentIndex == 0)
+                    .disabled(currentMoveIndex == nil || currentMoveIndex == 0)
 
                     Button(String(localized: "move_down"), systemImage: "arrow.down") {
-                        guard let idx = currentIndex, idx < sorted.count - 1 else { return }
-                        windowManager.swapWindowOrder(window, sorted[idx + 1])
+                        guard let index = currentMoveIndex, index < moveCandidates.count - 1 else { return }
+                        actionDispatcher.perform(.move(toPosition: index + 1), for: window)
                     }
-                    .disabled(currentIndex == nil || currentIndex == sorted.count - 1)
+                    .disabled(currentMoveIndex == nil || currentMoveIndex == moveCandidates.count - 1)
 
                     Divider()
                 }
 
                 Button(String(localized: "minimize"), systemImage: "minus") {
-                    windowManager.minimizeWindow(window)
+                    actionDispatcher.perform(.minimize, for: window)
                 }
                 .disabled(windowManager.visibleWindows.count <= 1)
 
                 if windowManager.isMaximized {
                     Button(String(localized: "restore_size"), systemImage: "arrow.down.right.and.arrow.up.left") {
-                        windowManager.unmaximize()
+                        actionDispatcher.perform(.unmaximize, for: window)
                     }
                 } else {
                     Button(String(localized: "maximize"), systemImage: "arrow.up.left.and.arrow.down.right") {
-                        windowManager.maximizeWindow(window)
+                        actionDispatcher.perform(.maximize, for: window)
                     }
                 }
             }
@@ -494,7 +507,7 @@ struct WindowTabBar: View {
                 if canSyncWindow {
                     Toggle(isOn: Binding(
                         get: { window.isSynchronized },
-                        set: { window.isSynchronized = $0 }
+                        set: { actionDispatcher.perform(.setSynchronized($0), for: window) }
                     )) {
                         SwiftUI.Label(String(localized: "sync_scrolling"), systemImage: "arrow.triangle.2.circlepath")
                     }
@@ -503,7 +516,7 @@ struct WindowTabBar: View {
                 if canPinWindow {
                     Toggle(isOn: Binding(
                         get: { window.isPinMode },
-                        set: { window.isPinMode = $0 }
+                        set: { actionDispatcher.perform(.setPinMode($0), for: window) }
                     )) {
                         SwiftUI.Label(String(localized: "pin"), systemImage: "pin")
                     }
@@ -511,11 +524,11 @@ struct WindowTabBar: View {
 
                 if canSyncWindow {
                     Menu(String(localized: "sync_group")) {
-                        ForEach(0..<6) { group in
+                        ForEach(WindowSyncGroupPresentation.storedGroups, id: \.self) { group in
                             Button {
-                                window.syncGroup = group
+                                actionDispatcher.perform(.changeSyncGroup(group), for: window)
                             } label: {
-                                let groupTitle = String.localizedStringWithFormat(String(localized: "Group %lld"), group)
+                                let groupTitle = WindowSyncGroupPresentation.title(forStoredGroup: group)
                                 if window.syncGroup == group {
                                     SwiftUI.Label(groupTitle, systemImage: "checkmark")
                                 } else {
@@ -530,7 +543,7 @@ struct WindowTabBar: View {
             }
 
             Button(String(localized: "close"), systemImage: "xmark", role: .destructive) {
-                windowManager.removeWindow(window)
+                actionDispatcher.perform(.close, for: window)
             }
             .disabled(windowManager.allWindows.count <= 1)
         }
@@ -562,7 +575,7 @@ struct WindowTabBar: View {
      - Failure modes: Missing controller state, malformed tokens, or empty module labels return
        `nil` so the tab uses persisted `PageManager` fields.
      */
-    private func renderedContentTabState(for window: Window) -> RenderedContentTabState? {
+    private func renderedContentTabState(for window: BibleCore.Window) -> RenderedContentTabState? {
         guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else { return nil }
         let tokens = BibleReaderRenderedContentState.tokens(from: ctrl.renderedContentState)
 
@@ -593,7 +606,7 @@ struct WindowTabBar: View {
      - Returns: Module initials for the category, falling back to `KJV` for Bible tabs.
      - Side effects: None.
      */
-    private func persistedModuleName(for window: Window, categoryName: String) -> String {
+    private func persistedModuleName(for window: BibleCore.Window, categoryName: String) -> String {
         guard let pageManager = window.pageManager else { return "KJV" }
         switch categoryName {
         case DocumentCategory.commentary.pageManagerKey:
@@ -623,7 +636,7 @@ struct WindowTabBar: View {
      - Returns: Asset-catalog icon name for `ToolbarAssetIcon`.
      - Side effects: None.
      */
-    private func iconName(for window: Window, categoryName: String) -> String {
+    private func iconName(for window: BibleCore.Window, categoryName: String) -> String {
         if window.isLinksWindow {
             return "SettingsIconLink"
         }
@@ -667,7 +680,7 @@ struct WindowTabBar: View {
     }
 
     /// Returns a compact OSIS-style reference summary for display inside the tab pill.
-    private func shortReference(for window: Window) -> String {
+    private func shortReference(for window: BibleCore.Window) -> String {
         guard !isAndroidMultiDocument(window) else { return "" }
 
         // Use controller's dynamic book list if available, otherwise fallback to static
@@ -684,7 +697,7 @@ struct WindowTabBar: View {
     }
 
     /// Copies the current reference for the given window and triggers toast feedback.
-    private func copyReference(for window: Window) {
+    private func copyReference(for window: BibleCore.Window) {
         let ref = fullReference(for: window)
         guard !ref.isEmpty else { return }
         #if os(iOS)
@@ -697,7 +710,7 @@ struct WindowTabBar: View {
     }
 
     /// Returns the full human-readable reference string for copy-to-clipboard actions.
-    private func fullReference(for window: Window) -> String {
+    private func fullReference(for window: BibleCore.Window) -> String {
         guard !isAndroidMultiDocument(window) else { return "" }
 
         // Try to get reference from controller if available
@@ -726,7 +739,7 @@ struct WindowTabBar: View {
      - Returns: `true` when the tab is showing Android's `general_book` + `Multi` fake document.
      - Side effects: None.
      */
-    private func isAndroidMultiDocument(_ window: Window) -> Bool {
+    private func isAndroidMultiDocument(_ window: BibleCore.Window) -> Bool {
         if let ctrl = windowManager.controllers[window.id] as? BibleReaderController,
            ctrl.isShowingAndroidMultiDocument {
             return true
@@ -751,7 +764,7 @@ struct WindowTabBar: View {
      - Returns: `true` when sync controls should be visible for the tab's current page.
      - Side effects: None.
      */
-    private func isWindowSyncable(_ window: Window) -> Bool {
+    private func isWindowSyncable(_ window: BibleCore.Window) -> Bool {
         if let ctrl = windowManager.controllers[window.id] as? BibleReaderController {
             return ctrl.isCurrentPageSyncable
         }

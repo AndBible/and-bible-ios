@@ -1,6 +1,22 @@
 import Foundation
 import BibleCore
 import BibleView
+import SwordKit
+
+/**
+ Declares whether a Bible bookmark mutation creates a new Android entity or updates one identity.
+
+ Android's `BaseBookmarkWithNotes.new` flag makes this distinction explicit: new objects are
+ inserted even when their ranges overlap, while existing objects are updated by UUID. Carrying the
+ identity at the iOS action boundary prevents positional de-duplication from collapsing distinct
+ highlights.
+ */
+enum BibleBookmarkMutationIdentity: Equatable {
+    /// Insert a new bookmark with a new UUID.
+    case create
+    /// Update only the bookmark with this stable UUID.
+    case update(UUID)
+}
 
 /**
  Coordinates bookmark bridge mutations and turns their persistence effects into Vue bridge events.
@@ -35,10 +51,8 @@ struct BibleReaderBookmarkActionCoordinator {
     private let payloadFactory: BibleReaderAnnotationPayloadFactory
     /// Current reader book name used for legacy bookmark rows that do not carry their own book.
     private let currentBook: String
-    /// Supplies the current module versification for source ordinal fidelity.
-    private let currentV11n: () -> String
-    /// Projects rendered reader ordinals into Android's KJVA bookmark storage domain.
-    private let kjvaOrdinalRange: (Int, Int) -> (start: Int, end: Int)?
+    /// Resolves exact source coordinates into a typed, verified KJVA persistence contract.
+    private let verifiedKJVAOrdinalRange: (String, Int, Int) -> VerifiedKJVAOrdinalRange?
     /// Supplies the active Android-compatible notes content type for newly-created note rows.
     private let currentNotesContentType: () -> String
 
@@ -49,28 +63,25 @@ struct BibleReaderBookmarkActionCoordinator {
        - bookmarkService: Persistence facade for bookmark, label, note, and StudyPad mutations.
        - payloadFactory: Factory that projects persisted models into typed Vue bridge DTOs.
        - currentBook: Current reader book name to store on newly-created Bible bookmarks.
-       - currentV11n: Closure returning the active module versification for newly-created rows.
-       - kjvaOrdinalRange: Closure converting rendered start/end ordinals into KJVA storage ordinals.
+       - verifiedKJVAOrdinalRange: Closure resolving module initials and source ordinals into a
+         typed mapping contract with exact source references.
        - currentNotesContentType: Closure returning the current notes-content-type preference for
          new note rows.
      - Side effects: None during initialization.
-     - Failure modes: None.
+     - Failure modes: Bookmark writes later return no change when the resolver cannot prove the
+       source-to-KJVA mapping.
      */
     init(
         bookmarkService: BookmarkService,
         payloadFactory: BibleReaderAnnotationPayloadFactory,
         currentBook: String,
-        currentV11n: @escaping () -> String = { "KJVA" },
-        kjvaOrdinalRange: @escaping (Int, Int) -> (start: Int, end: Int)? = { start, end in
-            (start: min(start, end), end: max(start, end))
-        },
+        verifiedKJVAOrdinalRange: @escaping (String, Int, Int) -> VerifiedKJVAOrdinalRange?,
         currentNotesContentType: @escaping () -> String
     ) {
         self.bookmarkService = bookmarkService
         self.payloadFactory = payloadFactory
         self.currentBook = currentBook
-        self.currentV11n = currentV11n
-        self.kjvaOrdinalRange = kjvaOrdinalRange
+        self.verifiedKJVAOrdinalRange = verifiedKJVAOrdinalRange
         self.currentNotesContentType = currentNotesContentType
     }
 
@@ -89,13 +100,13 @@ struct BibleReaderBookmarkActionCoordinator {
        - wholeVerse: Whether the new bookmark highlights whole verses.
        - startOffset: Optional text-range start offset.
        - endOffset: Optional text-range end offset.
+       - identity: Explicit create or UUID-targeted update operation.
        - workspaceSettings: Active workspace settings for auto labels and StudyPad cursors.
      - Returns: Bookmark update and optional modal/config persistence events.
      - Side effects: May insert a Bible bookmark and bookmark-to-label rows.
-     - Failure modes: Missing labels in workspace settings are ignored by `BookmarkService`;
-       unresolvable KJVA projection falls back to the normalized source ordinal range so the bridge
-       remains usable for unsupported versifications without persisting reversed or zero-ended
-       source ranges.
+     - Failure modes: Missing labels in workspace settings are ignored by `BookmarkService`.
+       Unresolvable KJVA projection returns `.noChange`; source ordinals are never persisted in the
+       KJVA columns.
      */
     func addOrUpdateBibleBookmark(
         bookInitials: String,
@@ -105,37 +116,46 @@ struct BibleReaderBookmarkActionCoordinator {
         wholeVerse: Bool,
         startOffset: Int? = nil,
         endOffset: Int? = nil,
+        identity: BibleBookmarkMutationIdentity,
         workspaceSettings: WorkspaceSettings?
     ) -> BibleReaderBookmarkActionResult {
         let effectiveEndOrdinal = endOrdinal > 0 ? endOrdinal : startOrdinal
         let sourceStart = min(startOrdinal, effectiveEndOrdinal)
         let sourceEnd = max(startOrdinal, effectiveEndOrdinal)
-        let storageRange = kjvaOrdinalRange(sourceStart, sourceEnd) ?? (start: sourceStart, end: sourceEnd)
-        let existing = bookmarkService.bookmarks(for: storageRange.start, endOrdinal: storageRange.start, book: currentBook)
-            .first(where: { $0.kjvOrdinalStart == storageRange.start })
-
+        guard let storageRange = verifiedKJVAOrdinalRange(
+            bookInitials,
+            sourceStart,
+            sourceEnd
+        ) else {
+            return .noChange
+        }
         let bookmark: BibleBookmark
         let isNew: Bool
-        if let existing {
-            bookmark = existing
-            isNew = false
-        } else {
+        switch identity {
+        case .create:
             bookmark = bookmarkService.addBibleBookmark(
-                bookInitials: bookInitials,
-                startOrdinal: sourceStart,
-                endOrdinal: sourceEnd,
-                kjvOrdinalStart: storageRange.start,
-                kjvOrdinalEnd: storageRange.end,
-                v11n: currentV11n(),
+                ordinalRange: storageRange,
                 wholeVerse: wholeVerse,
                 startOffset: startOffset,
                 endOffset: endOffset,
                 addNote: addNote
             )
-            bookmark.book = currentBook
             applyAutoAssignPrimaryLabel(to: bookmark, workspaceSettings: workspaceSettings)
             isNew = true
+        case .update(let id):
+            guard let updated = bookmarkService.updateBibleBookmark(
+                id: id,
+                ordinalRange: storageRange,
+                wholeVerse: wholeVerse,
+                startOffset: startOffset,
+                endOffset: endOffset
+            ) else {
+                return .noChange
+            }
+            bookmark = updated
+            isNew = false
         }
+        bookmark.book = currentBook
 
         let assignment = isNew
             ? bookmarkService.applyInitialLabels(
@@ -162,22 +182,102 @@ struct BibleReaderBookmarkActionCoordinator {
      Creates a generic bookmark for non-Bible content.
 
      Android's generic bookmark path shares the same auto-label, primary-label, and modal-opening
-     semantics as Bible bookmark creation.
+     semantics as Bible bookmark creation. This primitive adapter remains for existing Vue and
+     non-SWORD callers; generic SWORD content uses the seed overload below.
+
+     - Parameters:
+       - bookInitials: Exact source document initials.
+       - osisRef: Exact persisted source key.
+       - startOrdinal: Optional local start ordinal; `nil` denotes a whole entry.
+       - endOrdinal: Optional local end ordinal; `nil` denotes a whole entry.
+       - addNote: Whether to open note editing after creation.
+       - wholeVerse: Whether offsets are hidden from the client styling range.
+       - startOffset: Optional UTF-16 offset in the first selected anchor.
+       - endOffset: Optional UTF-16 offset in the last selected anchor.
+       - workspaceSettings: Active workspace auto-label and StudyPad cursor state.
+     - Returns: Persistence and bridge events for the newly created generic bookmark.
+     - Side effects: Inserts the bookmark, applies labels, and may advance StudyPad cursor state.
+     - Failure modes: Missing configured labels are ignored by `BookmarkService`.
      */
     func addGenericBookmark(
         bookInitials: String,
         osisRef: String,
-        startOrdinal: Int,
-        endOrdinal: Int,
+        startOrdinal: Int?,
+        endOrdinal: Int?,
         addNote: Bool,
+        wholeVerse: Bool,
+        startOffset: Int? = nil,
+        endOffset: Int? = nil,
         workspaceSettings: WorkspaceSettings?
     ) -> BibleReaderBookmarkActionResult {
         let bookmark = bookmarkService.addGenericBookmark(
             bookInitials: bookInitials,
             key: osisRef,
             startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal
+            endOrdinal: endOrdinal,
+            wholeVerse: wholeVerse,
+            startOffset: startOffset,
+            endOffset: endOffset
         )
+        return completeGenericBookmarkCreation(
+            bookmark,
+            addNote: addNote,
+            workspaceSettings: workspaceSettings,
+            payload: { payloadFactory.genericBookmarkJSONForStudyPad(bookmark) }
+        )
+    }
+
+    /**
+     Creates a generic SWORD bookmark from its immutable exact-source contract.
+
+     The seed crosses the persistence boundary as Android's nullable `GenericBookmark` columns and
+     supplies the immediate Vue payload directly, so creation never reloads a nearest key or borrows
+     the active Bible. Later refreshes resolve the same persisted initials/key through the raw-fragment API again.
+
+     - Parameters:
+       - seed: Validated source, local ordinal range, paired UTF-16 offsets, and whole-entry flags.
+       - addNote: Whether to open note editing after creation.
+       - workspaceSettings: Active workspace auto-label and StudyPad cursor state.
+     - Returns: Persistence and bridge events for the newly created generic bookmark.
+     - Side effects: Inserts the bookmark, applies labels, and may advance StudyPad cursor state.
+     - Failure modes: Missing configured labels are ignored. Seed validation rejects malformed selections before
+       this boundary, and this method performs no active-source or nearest-key fallback.
+     */
+    func addGenericBookmark(
+        seed: SwordGenericBookmarkSeed,
+        addNote: Bool,
+        workspaceSettings: WorkspaceSettings?
+    ) -> BibleReaderBookmarkActionResult {
+        let bookmark = bookmarkService.addGenericBookmark(seed: seed)
+        return completeGenericBookmarkCreation(
+            bookmark,
+            addNote: addNote,
+            workspaceSettings: workspaceSettings,
+            payload: {
+                payloadFactory.genericBookmarkJSONForStudyPad(bookmark, sourceSeed: seed)
+            }
+        )
+    }
+
+    /**
+     Applies Android's shared label/modal behavior after any generic bookmark insertion.
+
+     - Parameters:
+       - bookmark: Newly inserted generic bookmark.
+       - addNote: Whether note editing should open immediately.
+       - workspaceSettings: Active workspace auto-label and StudyPad cursor state.
+       - payload: Deferred exact-source payload projection run after label assignment.
+     - Returns: Bookmark update, optional modal event, and workspace persistence flags.
+     - Side effects: Applies primary/initial labels and may advance StudyPad cursor state.
+     - Failure modes: Missing labels are ignored by `BookmarkService`; payload projection fails
+       closed to stored source identifiers.
+     */
+    private func completeGenericBookmarkCreation(
+        _ bookmark: GenericBookmark,
+        addNote: Bool,
+        workspaceSettings: WorkspaceSettings?,
+        payload: () -> GenericBookmarkData
+    ) -> BibleReaderBookmarkActionResult {
         applyAutoAssignPrimaryLabel(to: bookmark, workspaceSettings: workspaceSettings)
         let assignment = bookmarkService.applyInitialLabels(
             bookmarkId: bookmark.id,
@@ -186,7 +286,7 @@ struct BibleReaderBookmarkActionCoordinator {
         )
 
         var events: [BibleReaderBookmarkActionEvent] = [
-            .genericBookmarksUpdated([payloadFactory.genericBookmarkJSONForStudyPad(bookmark)]),
+            .genericBookmarksUpdated([payload()]),
         ]
         if shouldOpenBookmarkModal(isNew: true, addNote: addNote, workspaceSettings: workspaceSettings) {
             events.append(.bookmarkClicked(id: bookmark.id.uuidString, openLabels: true, openNotes: addNote))
@@ -211,9 +311,8 @@ struct BibleReaderBookmarkActionCoordinator {
          paragraph marker.
      - Returns: Bridge update result containing the inserted paragraph-break bookmark payload.
      - Side effects: Inserts a Bible bookmark and attaches Android's paragraph-break system label.
-     - Failure modes: Unresolvable KJVA projection falls back to the normalized source ordinal range
-       so unsupported versifications can still create paragraph breaks without persisting reversed
-       or zero-ended source ranges.
+     - Failure modes: Unresolvable KJVA projection returns `.noChange`; source ordinals are never
+       persisted in the KJVA columns.
      */
     func addParagraphBreakBibleBookmark(
         bookInitials: String,
@@ -223,14 +322,15 @@ struct BibleReaderBookmarkActionCoordinator {
         let effectiveEndOrdinal = endOrdinal > 0 ? endOrdinal : startOrdinal
         let sourceStart = min(startOrdinal, effectiveEndOrdinal)
         let sourceEnd = max(startOrdinal, effectiveEndOrdinal)
-        let storageRange = kjvaOrdinalRange(sourceStart, sourceEnd) ?? (start: sourceStart, end: sourceEnd)
+        guard let storageRange = verifiedKJVAOrdinalRange(
+            bookInitials,
+            sourceStart,
+            sourceEnd
+        ) else {
+            return .noChange
+        }
         let bookmark = bookmarkService.addParagraphBreakBibleBookmark(
-            bookInitials: bookInitials,
-            startOrdinal: sourceStart,
-            endOrdinal: sourceEnd,
-            kjvOrdinalStart: storageRange.start,
-            kjvOrdinalEnd: storageRange.end,
-            v11n: currentV11n(),
+            ordinalRange: storageRange,
             book: currentBook
         )
         return BibleReaderBookmarkActionResult(
@@ -274,15 +374,13 @@ struct BibleReaderBookmarkActionCoordinator {
         )
     }
 
-    /**
-     Removes a generic bookmark.
-     */
+    /// Removes a generic bookmark and emits Android's shared Vue deletion event.
     func removeGenericBookmark(_ bookmarkId: String) -> BibleReaderBookmarkActionResult {
         guard let uuid = UUID(uuidString: bookmarkId) else {
             return .noChange
         }
         bookmarkService.removeGenericBookmark(id: uuid)
-        return .noChange
+        return BibleReaderBookmarkActionResult(events: [.bookmarksDeleted([bookmarkId])])
     }
 
     /**

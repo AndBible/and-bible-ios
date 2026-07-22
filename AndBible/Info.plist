@@ -6,6 +6,8 @@
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
 	<string>AndBible</string>
+	<key>AndBibleCloudKitContainerIdentifier</key>
+	<string>iCloud.org.andbible.ios</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

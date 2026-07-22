@@ -128,6 +128,12 @@ const char *SWMgr_getPrefixPath(void *mgr) {
         (SWHANDLE)(uintptr_t)mgr);
 }
 
+void SWMgr_setCipherKey(void *mgr, const char *moduleName, const char *key) {
+    if (!mgr || !moduleName || !key) return;
+    org_crosswire_sword_SWMgr_setCipherKey(
+        (SWHANDLE)(uintptr_t)mgr, moduleName, key);
+}
+
 void SWMgr_setJavascript(void *mgr, int enabled) {
     if (!mgr) return;
     org_crosswire_sword_SWMgr_setJavascript(
@@ -409,29 +415,6 @@ const char *InstallMgr_getRemoteModuleLanguage(void *installMgr,
     return cached_remote_mods[index].language;
 }
 
-int InstallMgr_installModule(void *installMgr, void *mgr,
-                              const char *sourceName, const char *moduleName) {
-    if (!installMgr || !mgr) return -1;
-    int result = org_crosswire_sword_InstallMgr_remoteInstallModule(
-        (SWHANDLE)(uintptr_t)installMgr,
-        (SWHANDLE)(uintptr_t)mgr,
-        sourceName, moduleName);
-    // Invalidate module list cache since a new module was installed
-    cached_mod_count = -1;
-    return result;
-}
-
-int InstallMgr_uninstallModule(void *installMgr, void *mgr,
-                                const char *moduleName) {
-    if (!installMgr || !mgr) return -1;
-    int result = org_crosswire_sword_InstallMgr_uninstallModule(
-        (SWHANDLE)(uintptr_t)installMgr,
-        (SWHANDLE)(uintptr_t)mgr,
-        moduleName);
-    cached_mod_count = -1;
-    return result;
-}
-
 // --- SWConfig ---
 // Real SWORD API is path-based (no handle). We store the path as our "handle".
 
@@ -490,6 +473,7 @@ void SWMgr_setGlobalOption(void *mgr, const char *option, const char *value) { }
 const char *SWMgr_getGlobalOption(void *mgr, const char *option) { return empty_string; }
 const char *SWMgr_getConfigPath(void *mgr) { return empty_string; }
 const char *SWMgr_getPrefixPath(void *mgr) { return empty_string; }
+void SWMgr_setCipherKey(void *mgr, const char *moduleName, const char *key) { }
 void SWMgr_setJavascript(void *mgr, int enabled) { }
 
 const char *SWModule_getName(void *module) { return empty_string; }
@@ -524,15 +508,26 @@ void SWModule_setCipherKey(void *module, const char *key) { }
 const char **SWModule_getKeyChildren(void *module) { return NULL; }
 long SWModule_getVerseKeyIndex(void *module) { return -1; }
 int SWModule_setVerseKeyIndex(void *module, long index) { return 1; }
+int SWVersification_mapVerse(const char *sourceVersification, const char *targetVersification,
+                             const char *osisBookName, int chapter, int verse,
+                             const char **targetOsisBookOut, int *targetChapterOut,
+                             int *targetVerseOut) { return 1; }
 int SWVersification_mapVerseToKJVA(const char *sourceVersification, const char *osisBookName,
                                    int chapter, int verse, const char **kjvaOsisBookOut,
                                    int *kjvaChapterOut, int *kjvaVerseOut) { return 1; }
 int SWVersification_mapVerseFromKJVA(const char *targetVersification, const char *kjvaOsisBookName,
                                      int chapter, int verse, const char **targetOsisBookOut,
                                      int *targetChapterOut, int *targetVerseOut) { return 1; }
+int SWVersification_getReferenceIndex(const char *versification, const char *osisBookName,
+                                      int chapter, int verse, long *indexOut) { return 1; }
+int SWVersification_getReferenceForIndex(const char *versification, long index,
+                                         const char **osisBookOut, int *chapterOut,
+                                         int *verseOut) { return 1; }
 int SWVersification_decodeOrdinal(const char *versification, long ordinal,
-                                  const char **osisBookOut, int *chapterOut, int *verseOut) { return 1; }
-int SWVersification_isSystemDefined(const char *versification) { return 1; }
+                                  const char **osisBookOut, int *chapterOut,
+                                  int *verseOut) { return 1; }
+int SWVersification_hasSystem(const char *versification) { return 0; }
+int SWVersification_isSystemDefined(const char *versification) { return 0; }
 
 void *InstallMgr_new(const char *basePath) {
     static int sentinel = 2;
@@ -552,11 +547,6 @@ const char *InstallMgr_getRemoteModuleType(void *installMgr,
                                             const char *sourceName, int index) { return NULL; }
 const char *InstallMgr_getRemoteModuleLanguage(void *installMgr,
                                                 const char *sourceName, int index) { return NULL; }
-int InstallMgr_installModule(void *installMgr, void *mgr,
-                              const char *sourceName, const char *moduleName) { return -1; }
-int InstallMgr_uninstallModule(void *installMgr, void *mgr,
-                                const char *moduleName) { return -1; }
-
 void *SWConfig_new(const char *filename) {
     static int sentinel = 3;
     return (void *)&sentinel;
@@ -688,9 +678,149 @@ unsigned char *inflate_raw_data(const unsigned char *input, unsigned long input_
     return output;
 }
 
+typedef struct {
+    z_stream stream;
+    uLong crc;
+    unsigned long long input_byte_count;
+    unsigned long long output_byte_count;
+    int finished;
+} raw_deflater_context;
+
+void *raw_deflater_create(void) {
+    raw_deflater_context *context = calloc(1, sizeof(raw_deflater_context));
+    if (!context) return NULL;
+    context->crc = crc32(0L, Z_NULL, 0);
+    if (deflateInit2(&context->stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15, 8,
+                     Z_DEFAULT_STRATEGY) != Z_OK) {
+        free(context);
+        return NULL;
+    }
+    return context;
+}
+
+int raw_deflater_process(void *opaque_context,
+                         const unsigned char *input,
+                         unsigned int input_len,
+                         int finish,
+                         unsigned char *output,
+                         unsigned int output_capacity,
+                         unsigned int *consumed,
+                         unsigned int *produced) {
+    if (!opaque_context || !output || output_capacity == 0 || !consumed || !produced) {
+        return -1;
+    }
+    raw_deflater_context *context = (raw_deflater_context *)opaque_context;
+    if (context->finished) return -2;
+    context->stream.next_in = (Bytef *)input;
+    context->stream.avail_in = input_len;
+    context->stream.next_out = output;
+    context->stream.avail_out = output_capacity;
+
+    int result = deflate(&context->stream, finish ? Z_FINISH : Z_NO_FLUSH);
+    *consumed = input_len - context->stream.avail_in;
+    *produced = output_capacity - context->stream.avail_out;
+    if (*consumed > 0 && input) {
+        context->crc = crc32(context->crc, input, *consumed);
+        context->input_byte_count += *consumed;
+    }
+    context->output_byte_count += *produced;
+    if (result == Z_STREAM_END) {
+        context->finished = 1;
+        return 1;
+    }
+    return result == Z_OK || result == Z_BUF_ERROR ? 0 : -3;
+}
+
+int raw_deflater_metadata(void *opaque_context,
+                          unsigned int *crc32_value,
+                          unsigned long long *input_byte_count,
+                          unsigned long long *output_byte_count) {
+    if (!opaque_context || !crc32_value || !input_byte_count || !output_byte_count) {
+        return -1;
+    }
+    raw_deflater_context *context = (raw_deflater_context *)opaque_context;
+    if (!context->finished) return -2;
+    *crc32_value = (unsigned int)context->crc;
+    *input_byte_count = context->input_byte_count;
+    *output_byte_count = context->output_byte_count;
+    return 0;
+}
+
+void raw_deflater_destroy(void *opaque_context) {
+    if (!opaque_context) return;
+    raw_deflater_context *context = (raw_deflater_context *)opaque_context;
+    deflateEnd(&context->stream);
+    free(context);
+}
+
+typedef struct {
+    z_stream stream;
+    unsigned long long input_byte_count;
+    unsigned long long output_byte_count;
+    int finished;
+} raw_inflater_context;
+
+void *raw_inflater_create(void) {
+    raw_inflater_context *context = calloc(1, sizeof(raw_inflater_context));
+    if (!context) return NULL;
+    if (inflateInit2(&context->stream, -15) != Z_OK) {
+        free(context);
+        return NULL;
+    }
+    return context;
+}
+
+int raw_inflater_process(void *opaque_context,
+                         const unsigned char *input,
+                         unsigned int input_len,
+                         unsigned char *output,
+                         unsigned int output_capacity,
+                         unsigned int *consumed,
+                         unsigned int *produced) {
+    if (!opaque_context || !output || output_capacity == 0 || !consumed || !produced) {
+        return -1;
+    }
+    raw_inflater_context *context = (raw_inflater_context *)opaque_context;
+    if (context->finished) return -2;
+    context->stream.next_in = (Bytef *)input;
+    context->stream.avail_in = input_len;
+    context->stream.next_out = output;
+    context->stream.avail_out = output_capacity;
+
+    int result = inflate(&context->stream, Z_NO_FLUSH);
+    *consumed = input_len - context->stream.avail_in;
+    *produced = output_capacity - context->stream.avail_out;
+    context->input_byte_count += *consumed;
+    context->output_byte_count += *produced;
+    if (result == Z_STREAM_END) {
+        context->finished = 1;
+        return 1;
+    }
+    return result == Z_OK || result == Z_BUF_ERROR ? 0 : -3;
+}
+
+int raw_inflater_metadata(void *opaque_context,
+                          unsigned long long *input_byte_count,
+                          unsigned long long *output_byte_count) {
+    if (!opaque_context || !input_byte_count || !output_byte_count) return -1;
+    raw_inflater_context *context = (raw_inflater_context *)opaque_context;
+    if (!context->finished) return -2;
+    *input_byte_count = context->input_byte_count;
+    *output_byte_count = context->output_byte_count;
+    return 0;
+}
+
+void raw_inflater_destroy(void *opaque_context) {
+    if (!opaque_context) return;
+    raw_inflater_context *context = (raw_inflater_context *)opaque_context;
+    inflateEnd(&context->stream);
+    free(context);
+}
+
 int inflate_raw_file_range_to_file(const char *input_path,
                                    unsigned long input_offset,
                                    unsigned long input_len,
+                                   unsigned long output_limit,
                                    const char *output_path) {
     if (!input_path || !output_path) return -1;
 
@@ -720,6 +850,7 @@ int inflate_raw_file_range_to_file(const char *input_path,
     unsigned char input_buffer[65536];
     unsigned char output_buffer[65536];
     unsigned long remaining = input_len;
+    unsigned long total_written = 0;
     int ret = Z_OK;
     int result = 0;
 
@@ -748,10 +879,16 @@ int inflate_raw_file_range_to_file(const char *input_path,
             }
 
             size_t produced = sizeof(output_buffer) - stream.avail_out;
+            if (total_written > output_limit
+                    || (unsigned long)produced > output_limit - total_written) {
+                result = -11;
+                break;
+            }
             if (produced > 0 && fwrite(output_buffer, 1, produced, output) != produced) {
                 result = -8;
                 break;
             }
+            total_written += (unsigned long)produced;
         } while (stream.avail_in > 0 && ret != Z_STREAM_END);
 
         if (result != 0) break;

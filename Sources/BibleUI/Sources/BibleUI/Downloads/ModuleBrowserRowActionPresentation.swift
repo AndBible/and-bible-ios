@@ -30,8 +30,8 @@ struct ModuleBrowserStatusSlotPresentation: Equatable {
         /// Android `INSTALLED`, shown as a completed status icon.
         case installed
 
-        /// Android `BEING_INSTALLED`, shown with progress and a cancel affordance.
-        case progress(progressPercent: Int)
+        /// Android `BEING_INSTALLED`, preserving phase and optional percent plus cancel.
+        case progress(phase: ModuleInstallPhase, progressPercent: Int?)
 
         /// Android `ERROR_DOWNLOADING`, shown with a warning and retry affordance.
         case retryError
@@ -61,8 +61,8 @@ struct ModuleBrowserStatusSlotPresentation: Equatable {
         switch status {
         case .installed:
             kind = .installed
-        case .beingInstalled(let progressPercent):
-            kind = .progress(progressPercent: progressPercent)
+        case .beingInstalled(let progress):
+            kind = .progress(phase: progress.phase, progressPercent: progress.percent)
         case .errorDownloading:
             kind = .retryError
         case .updateAvailable:

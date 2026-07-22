@@ -29,6 +29,9 @@ public final class StudyPadTextEntry {
     /// Optional Android `TextContentType` raw value (`HTML` or `MARKDOWN`) for the text payload.
     public var contentType: String?
 
+    /// Optional AI prompt identifier that produced this StudyPad entry on Android.
+    public var sourcePromptId: UUID?
+
     /// Rich-text payload stored in a companion entity and cascade-deleted with the entry.
     @Relationship(deleteRule: .cascade, inverse: \StudyPadTextEntryText.entry)
     public var textEntry: StudyPadTextEntryText?

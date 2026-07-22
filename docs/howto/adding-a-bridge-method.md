@@ -61,10 +61,15 @@ If you changed the Vue.js client:
 
 ```bash
 cd bibleview-js
-npm run build-debug
+npm run build-production
+python3 ../scripts/manage_bibleview_bundle.py sync \
+  --source dist \
+  --destination ../Sources/BibleView/Sources/BibleView/Resources/bibleview-js \
+  --mode production
 ```
 
-Then ensure the packaged resources used by `BibleWebView` are current.
+The atomic sync updates the SwiftPM resource used by local Xcode builds. CI builds its own verified
+Debug artifact, while release archives rebuild and verify Production independently.
 
 ## 8. Validate End To End
 

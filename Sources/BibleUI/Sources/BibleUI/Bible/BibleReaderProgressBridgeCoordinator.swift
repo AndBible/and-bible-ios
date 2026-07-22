@@ -2,6 +2,13 @@ import Foundation
 import BibleCore
 import BibleView
 
+extension Notification.Name {
+    /// Posted when a reader progress mutation cannot durably persist or journal its change.
+    static let readingProgressPersistenceFailure = Notification.Name(
+        "org.andbible.reading-progress-persistence-failure"
+    )
+}
+
 /**
  Coordinates Android-compatible reading-progress and memorization bridge actions for one reader.
 
@@ -32,16 +39,15 @@ import BibleView
  - reading-progress requests with missing stores or invalid active chapter targets return without
    side effects, matching Android's guards around missing books/versifications
  - malformed reading-progress settings JSON returns without persistence or bridge events
+ - persistence and mutation-journal failures are reported through the injected failure callback
  - memorization target persistence is skipped when no memorization store exists, while `memorize`
    still opens the Memorize document to match Android's UI handoff after a guarded target insert
  */
 struct BibleReaderProgressBridgeCoordinator {
-    private typealias MemorizationKJVARange = (startOrdinal: Int, endOrdinal: Int)
-
     /// Resolved chapter identity used by Android-compatible reading-progress persistence.
     struct ReadingProgressBridgeTarget {
-        /// JSword/KJVA `BibleBook.ordinal` persisted by Android progress rows.
-        let kjvBookOrdinal: Int
+        /// Verified JSword/KJVA book identity plus Android's retained source chapter.
+        let identity: ReadingProgressKJVAIdentity
         /// Human-readable book name used by native iOS read-history presentation.
         let bookName: String
     }
@@ -63,12 +69,16 @@ struct BibleReaderProgressBridgeCoordinator {
      events stay meaningful to the open document.
      */
     struct MemorizationOrdinalResolution {
-        /// Inclusive Android KJVA storage start ordinal.
-        let startOrdinal: Int
-        /// Inclusive Android KJVA storage end ordinal.
-        let endOrdinal: Int
+        /// Verified KJVA range plus the exact source module, versification, and source ordinals.
+        let verifiedRange: VerifiedKJVAOrdinalRange
         /// Visible rendered verses inside the selected range that can receive Vue update events.
         let projections: [MemorizationOrdinalProjection]
+
+        /// Inclusive Android KJVA storage start ordinal.
+        var startOrdinal: Int { verifiedRange.kjvaOrdinalStart }
+
+        /// Inclusive Android KJVA storage end ordinal.
+        var endOrdinal: Int { verifiedRange.kjvaOrdinalEnd }
     }
 
     /// Supplies the active memorization store.
@@ -78,7 +88,7 @@ struct BibleReaderProgressBridgeCoordinator {
     /// Resolves and validates a bridge chapter target against the current reader document.
     private let resolveReadingTarget: (String, Int, Int) -> ReadingProgressBridgeTarget?
     /// Resolves rendered verse ordinals into Android's KJVA memorization storage domain.
-    private let resolveMemorizationRange: (Int, Int) -> MemorizationOrdinalResolution?
+    private let resolveMemorizationRange: (String, Int, Int) -> MemorizationOrdinalResolution?
     /// Opens the bundled Memorize Vue document for a selected verse range.
     private let loadMemorizeDocument: (String, Int, Int) -> Void
     /// Presents the native reading-progress UI using Android tab indexes.
@@ -91,6 +101,8 @@ struct BibleReaderProgressBridgeCoordinator {
     private let emitEvent: (String, String) -> Void
     /// Builds the current reader config JSON for `set_config` refreshes.
     private let buildConfigJSON: () -> String
+    /// Reports durable persistence failures without emitting optimistic success events.
+    private let reportPersistenceFailure: (Error) -> Void
 
     /**
      Creates a progress bridge coordinator bound to reader-owned stores and callbacks.
@@ -99,13 +111,15 @@ struct BibleReaderProgressBridgeCoordinator {
        - memorizationStore: Supplier for local memorization persistence.
        - readingStore: Supplier for local reading-progress persistence.
        - resolveReadingTarget: Closure that validates bridge chapter identity and returns KJVA data.
-       - resolveMemorizationRange: Closure projecting rendered ordinals into Android KJVA storage.
+       - resolveMemorizationRange: Closure validating source module identity and projecting rendered
+         ordinals into Android KJVA storage with durable source provenance.
        - loadMemorizeDocument: Closure opening the Memorize document for a selected range.
        - showReadingProgress: Native progress UI callback.
        - showReadingProgressSettings: Native settings UI callback.
        - showChapterReadHistory: Native read-history UI callback.
        - emit: BibleView event emitter.
        - buildConfigJSON: Config payload builder for settings changes.
+       - reportPersistenceFailure: Observer for persistence and mutation-journal failures.
      - Side effects: None during initialization.
      - Failure modes: None.
      */
@@ -113,13 +127,19 @@ struct BibleReaderProgressBridgeCoordinator {
         memorizationStore: @escaping () -> MemorizationProgressStore?,
         readingStore: @escaping () -> ReadingProgressStore?,
         resolveReadingTarget: @escaping (String, Int, Int) -> ReadingProgressBridgeTarget?,
-        resolveMemorizationRange: @escaping (Int, Int) -> MemorizationOrdinalResolution?,
+        resolveMemorizationRange: @escaping (String, Int, Int) -> MemorizationOrdinalResolution?,
         loadMemorizeDocument: @escaping (String, Int, Int) -> Void,
         showReadingProgress: @escaping (Int) -> Void,
         showReadingProgressSettings: @escaping () -> Void,
         showChapterReadHistory: @escaping (ChapterReadHistoryTarget) -> Void,
         emit: @escaping (String, String) -> Void,
-        buildConfigJSON: @escaping () -> String
+        buildConfigJSON: @escaping () -> String,
+        reportPersistenceFailure: @escaping (Error) -> Void = { error in
+            NotificationCenter.default.post(
+                name: .readingProgressPersistenceFailure,
+                object: error
+            )
+        }
     ) {
         self.memorizationStore = memorizationStore
         self.readingStore = readingStore
@@ -131,60 +151,69 @@ struct BibleReaderProgressBridgeCoordinator {
         self.showChapterReadHistory = showChapterReadHistory
         self.emitEvent = emit
         self.buildConfigJSON = buildConfigJSON
+        self.reportPersistenceFailure = reportPersistenceFailure
     }
 
     /// Adds the selected verse range as a memorization target and opens the Memorize document.
     func memorize(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        mutateMemorization(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
-            store.addMemorizationTargetIfNeeded(
-                bookInitials: "",
-                startOrdinal: range.startOrdinal,
-                endOrdinal: range.endOrdinal
-            )
+        mutateMemorization(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        ) { store, resolution in
+            try store.addMemorizationTargetIfNeeded(resolution.verifiedRange)
         }
         loadMemorizeDocument(bookInitials, startOrdinal, endOrdinal)
     }
 
     /// Marks the selected verse range as memorized in local iOS progress state.
     func markAsMemorized(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        mutateMemorization(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
-            store.markAsMemorized(
-                bookInitials: "",
-                startOrdinal: range.startOrdinal,
-                endOrdinal: range.endOrdinal
-            )
+        mutateMemorization(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        ) { store, resolution in
+            try store.markAsMemorized(resolution.verifiedRange)
         }
     }
 
     /// Adds the selected verse range to local memorization targets.
     func addMemorizationTarget(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        mutateMemorization(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
-            store.addMemorizationTarget(
-                bookInitials: "",
-                startOrdinal: range.startOrdinal,
-                endOrdinal: range.endOrdinal
-            )
+        mutateMemorization(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        ) { store, resolution in
+            try store.addMemorizationTarget(resolution.verifiedRange)
         }
     }
 
     /// Removes the selected verse range from local memorization targets.
     func removeMemorizationTarget(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        mutateMemorization(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
-            store.removeMemorizationTarget(
+        mutateMemorization(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        ) { store, resolution in
+            try store.removeMemorizationTarget(
                 bookInitials: "",
-                startOrdinal: range.startOrdinal,
-                endOrdinal: range.endOrdinal
+                startOrdinal: resolution.startOrdinal,
+                endOrdinal: resolution.endOrdinal
             )
         }
     }
 
     /// Removes the selected verse range from local memorized ranges.
     func unmarkMemorized(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        mutateMemorization(startOrdinal: startOrdinal, endOrdinal: endOrdinal) { store, range in
-            store.unmarkMemorized(
+        mutateMemorization(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        ) { store, resolution in
+            try store.unmarkMemorized(
                 bookInitials: "",
-                startOrdinal: range.startOrdinal,
-                endOrdinal: range.endOrdinal
+                startOrdinal: resolution.startOrdinal,
+                endOrdinal: resolution.endOrdinal
             )
         }
     }
@@ -195,14 +224,16 @@ struct BibleReaderProgressBridgeCoordinator {
               let target = resolveReadingTarget(bookInitials, startOrdinal, chapter) else {
             return
         }
-        let count = store.recordChapterRead(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            kjvBookOrdinal: target.kjvBookOrdinal,
-            chapter: chapter,
-            source: ReadingProgressSource(bridgeValue: source)
-        )
-        emitChapterReadStatus(chapter: chapter, count: count)
+        do {
+            let count = try store.recordChapterRead(
+                bookInitials: bookInitials,
+                identity: target.identity,
+                source: ReadingProgressSource(bridgeValue: source)
+            )
+            emitChapterReadStatus(chapter: chapter, count: count)
+        } catch {
+            reportPersistenceFailure(error)
+        }
     }
 
     /// Opens native chapter-read history for the active Bible chapter identity.
@@ -215,7 +246,7 @@ struct BibleReaderProgressBridgeCoordinator {
             ChapterReadHistoryTarget(
                 bookInitials: bookInitials,
                 startOrdinal: startOrdinal,
-                kjvBookOrdinal: target.kjvBookOrdinal,
+                kjvBookOrdinal: target.identity.kjvBookOrdinal,
                 bookName: target.bookName,
                 chapter: chapter
             )
@@ -234,11 +265,16 @@ struct BibleReaderProgressBridgeCoordinator {
 
     /// Persists Android-compatible reading-progress settings and notifies the embedded client.
     func setReadingProgressSettings(json: String) {
-        guard readingStore()?.applySettingsBundle(json: json) == true else {
+        guard let store = readingStore() else {
             return
         }
-        emitReadingProgressSettings()
-        emit(event: "set_config", data: buildConfigJSON())
+        do {
+            guard try store.applySettingsBundle(json: json) else { return }
+            emitReadingProgressSettings()
+            emit(event: "set_config", data: buildConfigJSON())
+        } catch {
+            reportPersistenceFailure(error)
+        }
     }
 
     /// Clears chapter-read status for the active reading-progress cycle and emits the new count.
@@ -247,8 +283,15 @@ struct BibleReaderProgressBridgeCoordinator {
               let target = resolveReadingTarget(bookInitials, startOrdinal, chapter) else {
             return
         }
-        let count = store.clearChapterReadStatus(kjvBookOrdinal: target.kjvBookOrdinal, chapter: chapter)
-        emitChapterReadStatus(chapter: chapter, count: count)
+        do {
+            let count = try store.clearChapterReadStatus(
+                kjvBookOrdinal: target.identity.kjvBookOrdinal,
+                chapter: chapter
+            )
+            emitChapterReadStatus(chapter: chapter, count: count)
+        } catch {
+            reportPersistenceFailure(error)
+        }
     }
 
     /// Builds the reading-progress settings object embedded in Memorize document payloads.
@@ -271,15 +314,21 @@ struct BibleReaderProgressBridgeCoordinator {
      - Returns: Saved normalized settings, or `nil` when no reading-progress store is configured.
      - Side effects: Persists settings JSON, emits `update_reading_progress_settings`, and refreshes
        `set_config` so the embedded client observes the same values.
-     - Failure modes: Returns `nil` without events when the reading store is unavailable.
+     - Failure modes: Returns `nil` without events when the reading store is unavailable or the
+       journaled persistence operation fails; persistence failures are reported to the observer.
      */
     @discardableResult
     func saveReadingProgressSettings(_ settings: ReadingProgressSettingsSnapshot) -> ReadingProgressSettingsSnapshot? {
         guard let store = readingStore() else { return nil }
-        let savedSettings = store.saveSettings(settings)
-        emitReadingProgressSettings()
-        emit(event: "set_config", data: buildConfigJSON())
-        return savedSettings
+        do {
+            let savedSettings = try store.saveSettings(settings)
+            emitReadingProgressSettings()
+            emit(event: "set_config", data: buildConfigJSON())
+            return savedSettings
+        } catch {
+            reportPersistenceFailure(error)
+            return nil
+        }
     }
 
     /**
@@ -291,24 +340,29 @@ struct BibleReaderProgressBridgeCoordinator {
      range ending at the start ordinal.
      */
     private func mutateMemorization(
+        bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int,
-        operation: (MemorizationProgressStore, MemorizationKJVARange) -> MemorizationProgressDelta
+        operation: (
+            MemorizationProgressStore,
+            MemorizationOrdinalResolution
+        ) throws -> MemorizationProgressDelta
     ) {
         guard let store = memorizationStore() else { return }
         let effectiveEnd = endOrdinal > 0 ? endOrdinal : startOrdinal
         let lower = min(startOrdinal, effectiveEnd)
         let upper = max(startOrdinal, effectiveEnd)
-        guard let resolution = resolveMemorizationRange(lower, upper) else { return }
+        guard let resolution = resolveMemorizationRange(bookInitials, lower, upper) else { return }
         let projections = resolution.projections.sorted { $0.renderedOrdinal < $1.renderedOrdinal }
         guard !projections.isEmpty else { return }
 
-        let kjvaDelta = operation(
-            store,
-            (startOrdinal: resolution.startOrdinal, endOrdinal: resolution.endOrdinal)
-        )
-        let renderedDelta = Self.renderedDelta(from: kjvaDelta, using: projections)
-        emitMemorizationData(renderedDelta)
+        do {
+            let kjvaDelta = try operation(store, resolution)
+            let renderedDelta = Self.renderedDelta(from: kjvaDelta, using: projections)
+            emitMemorizationData(renderedDelta)
+        } catch {
+            reportPersistenceFailure(error)
+        }
     }
 
     private static func renderedDelta(

@@ -10,98 +10,177 @@ import XCTest
  */
 final class SwordVersificationTests: XCTestCase {
     /**
-     Verifies KJVA references map back into divergent canons — the reverse of `mapVerseToKJVA`.
+     Verifies SWORD's general mapper converts both directions where compiled tables define it.
 
-     Android renders, displays, and navigates a stored KJVA bookmark in the active module's
-     versification via `Verse.toV11n(activeV11n)`. The engine must produce the true active-canon
-     verse rather than the identically-numbered KJVA verse: KJVA Ps 11:1 is Vulgate Ps 10:1, and the
-     Synodal superscription round-trips (KJVA Ps 51:0 -> Synodal Ps 50:1). An empty target defaults
-     to KJV; a present-but-unrecognized target returns nil. Values captured from SWORD's tables.
+     Vulgate and Synodal carry explicit SWORD mappings. LXX has no Psalm-offset resource in either
+     JSword or SWORD and therefore stays coordinate-identical for this fixture. Android-only table
+     overlays such as SynodalProt are tested at BibleCore's shared mapper boundary.
      */
-    func testMapsKJVAReferencesBackIntoDivergentCanons() {
+    func testMapsBetweenNamedVersificationsInBothDirections() {
         XCTAssertEqual(
-            SwordVersification.mapVerseFromKJVA(osisBookId: "Ps", chapter: 11, verse: 1, targetVersification: "Vulg"),
-            .init(osisBookId: "Ps", chapter: 10, verse: 1),
-            "KJVA Psalm 11:1 is Vulgate Psalm 10:1."
+            SwordVersification.mapVerse(
+                osisBookId: "Ps",
+                chapter: 11,
+                verse: 1,
+                sourceVersification: "KJVA",
+                targetVersification: "Vulg"
+            ),
+            .init(osisBookId: "Ps", chapter: 10, verse: 1)
         )
         XCTAssertEqual(
-            SwordVersification.mapVerseFromKJVA(osisBookId: "Ps", chapter: 10, verse: 1, targetVersification: "Vulg"),
-            .init(osisBookId: "Ps", chapter: 9, verse: 22),
-            "KJVA Psalm 10:1 is Vulgate Psalm 9:22."
+            SwordVersification.mapVerse(
+                osisBookId: "Ps",
+                chapter: 10,
+                verse: 1,
+                sourceVersification: "Vulg",
+                targetVersification: "KJVA"
+            ),
+            .init(osisBookId: "Ps", chapter: 11, verse: 1)
         )
         XCTAssertEqual(
-            SwordVersification.mapVerseFromKJVA(osisBookId: "Ps", chapter: 51, verse: 0, targetVersification: "Synodal"),
-            .init(osisBookId: "Ps", chapter: 50, verse: 1),
-            "The KJVA Psalm 51 superscription round-trips to Synodal Psalm 50:1."
+            SwordVersification.mapVerse(
+                osisBookId: "Ps",
+                chapter: 11,
+                verse: 1,
+                sourceVersification: "KJVA",
+                targetVersification: "Synodal"
+            ),
+            .init(osisBookId: "Ps", chapter: 10, verse: 1)
         )
-        // Shared-canon identity, empty -> KJV, and unrecognized -> nil.
         XCTAssertEqual(
-            SwordVersification.mapVerseFromKJVA(osisBookId: "Gen", chapter: 1, verse: 1, targetVersification: "KJV"),
-            .init(osisBookId: "Gen", chapter: 1, verse: 1)
-        )
-        XCTAssertEqual(
-            SwordVersification.mapVerseFromKJVA(osisBookId: "Gen", chapter: 1, verse: 1, targetVersification: ""),
-            .init(osisBookId: "Gen", chapter: 1, verse: 1)
-        )
-        // An unrecognized target falls back to KJV (identity for shared canon), not nil.
-        XCTAssertEqual(
-            SwordVersification.mapVerseFromKJVA(osisBookId: "Gen", chapter: 1, verse: 1, targetVersification: "NotAVersification"),
-            .init(osisBookId: "Gen", chapter: 1, verse: 1)
+            SwordVersification.mapVerse(
+                osisBookId: "Ps",
+                chapter: 11,
+                verse: 1,
+                sourceVersification: "KJVA",
+                targetVersification: "LXX"
+            ),
+            .init(osisBookId: "Ps", chapter: 11, verse: 1)
         )
     }
 
     /**
-     Verifies module-independent ordinal decoding — the iOS analogue of Android's `Verse(v11n, ord)`.
+     Verifies canon indexes round-trip real verses and chapter introductions.
 
-     A restored bookmark's original source ordinal must resolve from versification metadata alone,
-     without the producing module installed. SWORD's intro-inclusive `VerseKey` index matches the
-     JSword ordinal scheme (index 4 is Genesis 1:1). An empty or unrecognized name defaults to KJV;
-     a non-positive ordinal returns nil.
+     JSword mapping resources contain ranges that include verse 0. These primitives must preserve
+     those intro slots exactly while rejecting unknown systems and invalid coordinates. A failure
+     would make range expansion shift every mapping after a superscription.
      */
-    func testDecodesOrdinalsFromVersificationMetadataWithoutAModule() {
+    func testCanonReferenceIndexesRoundTripVerseAndIntroduction() throws {
+        let verse = SwordVersification.Reference(osisBookId: "Gen", chapter: 1, verse: 1)
+        let verseIndex = try XCTUnwrap(
+            SwordVersification.referenceIndex(for: verse, versification: "KJVA")
+        )
+        XCTAssertEqual(verseIndex, 4)
+        XCTAssertEqual(
+            SwordVersification.reference(forIndex: verseIndex, versification: "KJVA"),
+            verse
+        )
+
+        let introduction = SwordVersification.Reference(osisBookId: "Ps", chapter: 51, verse: 0)
+        let introductionIndex = try XCTUnwrap(
+            SwordVersification.referenceIndex(for: introduction, versification: "KJVA")
+        )
+        XCTAssertEqual(
+            SwordVersification.reference(forIndex: introductionIndex, versification: "KJVA"),
+            introduction
+        )
+        XCTAssertFalse(SwordVersification.supports("NotAVersification"))
+        XCTAssertNil(
+            SwordVersification.referenceIndex(
+                for: .init(osisBookId: "Gen", chapter: 1, verse: 99),
+                versification: "KJVA"
+            )
+        )
+        XCTAssertNil(
+            SwordVersification.referenceIndex(
+                for: .init(osisBookId: "NotABook", chapter: 1, verse: 1),
+                versification: "KJVA"
+            ),
+            "An unknown OSIS id must fail before native code indexes SWORD's book vector."
+        )
+    }
+
+    /**
+     Verifies convenience APIs retain their public shape without restoring permissive fallbacks.
+
+     The wrappers must delegate to the generalized strict implementation: valid reverse mappings
+     and ordinal decoding succeed, while unknown target and source systems fail instead of being
+     relabeled as KJV. A failure exposes callers to cross-versification data corruption.
+     */
+    func testConvenienceWrappersDelegateToStrictVersificationBoundaries() {
+        XCTAssertEqual(
+            SwordVersification.mapVerseFromKJVA(
+                osisBookId: "Ps",
+                chapter: 11,
+                verse: 1,
+                targetVersification: "Vulg"
+            ),
+            .init(osisBookId: "Ps", chapter: 10, verse: 1)
+        )
+        XCTAssertNil(
+            SwordVersification.mapVerseFromKJVA(
+                osisBookId: "Gen",
+                chapter: 1,
+                verse: 1,
+                targetVersification: "NotAVersification"
+            )
+        )
         XCTAssertEqual(
             SwordVersification.decodeOrdinal(versification: "KJV", ordinal: 4),
-            .init(osisBookId: "Gen", chapter: 1, verse: 1),
-            "Intro-inclusive index 4 is Genesis 1:1, matching the JSword ordinal scheme."
+            .init(osisBookId: "Gen", chapter: 1, verse: 1)
         )
-        XCTAssertEqual(
-            SwordVersification.decodeOrdinal(versification: "", ordinal: 4),
-            .init(osisBookId: "Gen", chapter: 1, verse: 1),
-            "An empty versification name defaults to KJV."
+        XCTAssertNil(
+            SwordVersification.decodeOrdinal(versification: "NotAVersification", ordinal: 4)
         )
-        XCTAssertEqual(
-            SwordVersification.decodeOrdinal(versification: "NotAVersification", ordinal: 4),
-            .init(osisBookId: "Gen", chapter: 1, verse: 1),
-            "An unrecognized versification name also defaults to KJV (libsword renders such modules under KJV)."
-        )
-        XCTAssertNil(SwordVersification.decodeOrdinal(versification: "KJV", ordinal: 0))
-    }
-
-    /**
-     Verifies versification recognition mirrors JSword's `Versifications.isDefined`.
-
-     A module whose declared versification SWORD recognizes (KJV, KJVA, Vulg, Synodal) is defined; a
-     present-but-unrecognized name is not (so the reader can mark it unsupported, matching Android);
-     an empty name is the KJV default and is always defined. See ADR-0010.
-     */
-    func testReportsWhetherAVersificationIsSystemDefined() {
-        XCTAssertTrue(SwordVersification.isVersificationDefined("KJV"))
         XCTAssertTrue(SwordVersification.isVersificationDefined("KJVA"))
-        XCTAssertTrue(SwordVersification.isVersificationDefined("Vulg"))
-        XCTAssertTrue(SwordVersification.isVersificationDefined("Synodal"))
-        XCTAssertTrue(SwordVersification.isVersificationDefined(""), "An empty name is the KJV default.")
-        XCTAssertFalse(SwordVersification.isVersificationDefined("BogusV11n"))
         XCTAssertFalse(SwordVersification.isVersificationDefined("NotAVersification"))
     }
 
     /**
-     Verifies shared canonical references map to KJVA unchanged and defaults/invalid inputs behave.
+     Verifies invalid targets and coordinates fail without returning source-domain placeholders.
+
+     This is the data-safety boundary for KJVA persistence: an unavailable conversion must be
+     explicit so callers cannot stamp a target versification onto unchanged source coordinates.
+     The test is deterministic and reads only SWORD's compiled mapping tables.
+     */
+    func testGeneralMapperRejectsUnknownTargetsAndInvalidCoordinates() {
+        XCTAssertNil(
+            SwordVersification.mapVerse(
+                osisBookId: "Gen",
+                chapter: 1,
+                verse: 1,
+                sourceVersification: "KJV",
+                targetVersification: "NotAVersification"
+            )
+        )
+        XCTAssertNil(
+            SwordVersification.mapVerse(
+                osisBookId: "Gen",
+                chapter: 0,
+                verse: 1,
+                sourceVersification: "KJV",
+                targetVersification: "KJVA"
+            )
+        )
+        XCTAssertNil(
+            SwordVersification.mapVerse(
+                osisBookId: "Gen",
+                chapter: 1,
+                verse: -1,
+                sourceVersification: "KJV",
+                targetVersification: "KJVA"
+            )
+        )
+    }
+
+    /**
+     Verifies shared canonical references map to KJVA unchanged and invalid inputs fail closed.
 
      KJV and KJVA share Genesis..Malachi and the New Testament numbering, so a KJV reference maps to
-     the identical KJVA reference; an empty OR unrecognized source versification defaults to KJV
-     (iOS libsword renders such modules under KJV, so their ordinals map as KJV instead of failing
-     into a raw-source-ordinal write); non-positive inputs and empty book ids return nil. A failure
-     means the adapter is not wired to SWORD's VersificationMgr or mis-handles defaults.
+     the identical KJVA reference. An absent source versification defaults to KJV on both platforms;
+     an unknown non-empty source, non-positive chapter, or empty book id returns nil. A failure means
+     the adapter could relabel unsupported source coordinates into a valid-looking target canon.
      */
     func testMapsSharedCanonAndDefaultsAndInvalidInputs() {
         XCTAssertEqual(
@@ -117,11 +196,8 @@ final class SwordVersificationTests: XCTestCase {
             SwordVersification.mapVerseToKJVA(osisBookId: "Gen", chapter: 1, verse: 1, sourceVersification: ""),
             .init(osisBookId: "Gen", chapter: 1, verse: 1)
         )
-        // An unrecognized source versification falls back to KJV (identity for shared canon) rather
-        // than nil, so the caller never persists a raw source ordinal into the KJVA columns.
-        XCTAssertEqual(
+        XCTAssertNil(
             SwordVersification.mapVerseToKJVA(osisBookId: "Gen", chapter: 1, verse: 1, sourceVersification: "NotAVersification"),
-            .init(osisBookId: "Gen", chapter: 1, verse: 1)
         )
         XCTAssertNil(
             SwordVersification.mapVerseToKJVA(osisBookId: "Gen", chapter: 0, verse: 1, sourceVersification: "KJV")
@@ -135,11 +211,9 @@ final class SwordVersificationTests: XCTestCase {
      Verifies divergent-canon Psalm-title verses map to KJVA chapter superscriptions (verse 0).
 
      The Septuagint/Synodal numbering carries a separate Psalm-title verse that KJVA folds into the
-     chapter superscription (verse 0). JSword represents that superscription as a real, positive
-     KJVA ordinal, so the engine must return verse 0 rather than nil — otherwise the caller stores a
-     raw source ordinal in the KJVA columns (the issue #356 write-side defect). These expectations
-     were captured directly from SWORD's mapping tables and match JSword's `Synodal.properties`
-     (`Ps.50.1=Ps.51.0`). A failure means verse-0 superscriptions regressed back to nil.
+     chapter superscription (verse 0). These expectations exercise SWORD's compiled mapping tables;
+     BibleCore separately pins Android's JSword resource behavior. A failure means this low-level
+     SWORD primitive regressed to dropping chapter superscriptions.
      */
     func testMapsDivergentCanonSuperscriptionsToKJVAVerseZero() {
         XCTAssertEqual(
@@ -163,12 +237,9 @@ final class SwordVersificationTests: XCTestCase {
      Verifies genuine non-identity mapping for versification-divergent canons.
 
      The Vulgate and Russian Synodal versifications number the Psalms per the Septuagint, offset by
-     one across a large range because Hebrew/KJVA Psalms 9 and 10 are a single psalm there. SWORD's
-     VersificationMgr remaps these verse-by-verse (the exact behavior Android's JSword `toV11n(KJVA)`
-     produces), so the engine must translate them onto their true KJVA counterparts rather than
-     re-interpreting the same numbers. These expectations were captured directly from SWORD's
-     compiled mapping tables. A failure means the mapping regressed to a name-identity lookup — the
-     issue #356 defect on the write side.
+     one across a large range because Hebrew/KJVA Psalms 9 and 10 are a single psalm there. These
+     expectations pin SWORD's compiled mapper only; BibleCore's `VersificationMapperTests` own exact
+     Android/JSword parity. A failure means the native primitive regressed to a name-identity lookup.
      */
     func testMapsDivergentCanonPsalmsToKJVA() {
         // Vulgate follows the Septuagint Psalm numbering.

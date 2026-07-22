@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Podešavanja za progonjene";
 "discrete_mode" = "Prikrij verske oznake";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "O programu";
 "version" = "Version";
 "export" = "Izvezi";
@@ -440,10 +440,6 @@
 "calculator_pin_description" = "PIN kod za otvaranje aplikacije kada je kalkulator prikazan.";
 "discrete_help_title" = "Pročitajte ovo prvo!";
 "discrete_help_summary" = "Instrukcije za podešavanja i informacije o posebnim diskretnim izdanjima.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Ponašanje aplikacije";
 "prefs_display_customization_cat" = "Izgled i osećaj";
@@ -514,7 +510,6 @@
 
 "prefs_volume_keys_scroll_title" = "Dugmad za jačinu zvuka listaju";
 "prefs_volume_keys_scroll_summary" = "Koristite pojačavanje/smanjivanje zvuka za listanje biblijskog teksta";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Eksperimentalne funkcije";
 "prefs_experimental_features_summary" = "Izaberite koje eksperimentalne funkcije da omogućite. Ove funkcije su još uvek u razvoju i mogu se promeniti ili ukloniti";
 "experimental_feature_bookmark_edit_actions" = "Radnje uređivanja obeleživača";
@@ -642,3 +637,387 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Na SD kartici postoji plan čitanja jsword/readingplan sa istim imenom kao i interni plan. Ne može biti ovde prikazan. Molim preimenujte datoteku, ostavljajući njenu ekstenziju kao .properties";
 "error_no_content" = "Nema sadržaja u označenom stihu";
+
+/* Android shared translations */
+"calculator_par1" = "Pre ulaska u aplikaciju, ekran kalkulatora je prikazan.";
+"calculator_par2" = "U njemu, možete vršiti standardne računicea kada budete želeli da otvorite aplikaciju, vi samo ukucajte Vaš PIN kod (standardni je 1234) i zaatim pritisnite \"=\" dugme.";
+"calculator_par3" = "Možete podesiti PIN Kod po želji unutar podešavanja \"Kalkulator PIN\".";
+"give_passphrase_for_module" = "Dokument %@ je šifrovan i zahteva lozinku radi otključavanja";
+"show_unlock_info" = "Modul & detalji otključavanja";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Trenutno otpakujem Zip arhivu...";
+"install_failed_reason" = "Instalacija modula bezuspeđna usled sledećih razloga: %@.";
+"install_zip_successfull" = "Modul je uspešno instaliran";
+"module_install_phase_committing" = "Molimo sačekajte. Učitavanje modula iz fajla u toku.";
+"module_install_phase_downloading" = "Preuzmi";
+"module_install_phase_queued" = "Molim sačekajte...";
+"storage_space_warning" = "Nedovoljno prostora na lokalnom skladištu.";
+
+/* Android shared translations */
+"error_occurred" = "Dogodila se greška";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Memorisanje";
+"memorize_tab_reading" = "Čitanje";
+"reading_progress_active_days" = "aktivni dani";
+"reading_progress_bible_heatmap" = "Pregled Biblije";
+"reading_progress_calendar" = "Aktivnost čitanja";
+"reading_progress_chapters_read" = "pročitana poglavlja";
+"reading_progress_cycle" = "Ciklus %d";
+"reading_progress_history_for" = "Napredak čitanja za %1$@";
+"reading_progress_history_no_entries" = "Nema unosa čitanja za ovaj izbor.";
+"reading_progress_history_title" = "Istorija čitanja";
+"reading_progress_history_version_unknown" = "Nepoznata verzija";
+"reading_progress_new_cycle" = "Novi ciklus";
+"reading_progress_new_cycle_confirm" = "Pokrenuti novi ciklus čitanja? Ovo će početi praćenje vašeg napretka od nule, čuvajući podatke vašeg prethodnog ciklusa.";
+"reading_progress_new_testament" = "Novi zavet";
+"reading_progress_next_cycle" = "Sledeći ciklus";
+"reading_progress_old_testament" = "Stari zavet";
+"reading_progress_overall" = "%@%% Biblije pročitano";
+"reading_progress_percent_read_scale" = "Procenat\nPročitanog";
+"reading_progress_previous_cycle" = "Prethodni ciklus";
+"reading_progress_read_count_scale" = "Broj\nPročitanih";
+"reading_progress_title" = "Napredak čitanja/memorisanja";
+
+/* Android shared translations */
+"conf_change_chapter" = "Promene poglavlja";
+"conf_change_title" = "Naslovi";
+"conf_replace_divinename" = "Zameni ime Božije sa Jahve";
+"conf_save_playback_settings_to_bookmarks" = "Sačuvaj postavke reprodukcije u obeleživače";
+"conf_speak_auto_bookmark" = "Automatsko obeležavanje";
+"conf_speak_footnotes" = "Fusnote";
+"conf_speak_sleep_timer" = "Postavi tajmer spavanja";
+"conf_speak_synchronize" = "Tekst prati izgovor";
+"forward" = "Premotaj unapred";
+"playback_settings_title" = "Postavke reprodukcije";
+"rewind" = "Premotaj unazad";
+"speak_bookmarks_menu_title" = "Izgovaraj od obeližavača";
+"speak_next" = "Sledeći";
+"speak_previous" = "Prethodni";
+"speak_settings_title" = "Opšte postavke izgovaranja";
+
+/* Android shared translations */
+"sleep_timer_title" = "Vreme spavanja u minutima";
+"speak_beginning_of_passage" = "Odaberi početak odeljka";
+"speak_ending_of_passage" = "Izaberi kraj odeljka";
+"speak_ending_verse_must_be_later" = "Završni stih mora biti posle početnog stiha";
+"speak_verse_range_to_repeat" = "Odaberi raspon stihova za ponavljanje";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Jezik nije dostupan.";
+
+/* Android shared translations */
+"ai_unknown_prompt" = "VI";
+"description" = "Opis";
+"errorTitle" = "Dogodila se greška";
+"error_executing_search" = "Neregularan upit za pretragu";
+"export_something" = "Izvezi %@";
+"import_items" = "Uvezi %@";
+"install_zip_module" = "Ugradi biblijski modul";
+"my_document_content_type_label" = "Vrsta sadržaja";
+"my_document_create_title" = "Kreiraj novi dokument";
+"my_document_import_document" = "Uvezi datoteke kao dokument";
+"my_document_new_name" = "Dokument %d";
+"my_document_new_page_name" = "Stranica %1$d";
+"my_document_rename_title" = "Preimenuj dokument";
+"my_document_save_changes" = "Sačuvati izmene?";
+"overwrite" = "Da";
+"package_directory" = "Direktorij paketa (Zip fajlovi)";
+"read" = "Čitanje";
+"reading_plan_set_current_day" = "Podesiti na trenutni dan...";
+"reading_plan_set_start_date" = "Postavi datum početka...";
+"search_all_words" = "Sve reči";
+"search_any_word" = "Bilo koja reč";
+"search_fts_query" = "Sintaksa sirovog upita";
+"search_phrase" = "Fraza";
+"search_words_group_prompt" = "Pronađi stihove";
+"show_notes" = "Pokaži beleške";
+"speak_book_changed" = "Knjiga promenjena.";
+"speak_chapter_changed" = "Poglavlje";
+"success" = "Gotovo";
+"summary" = "Sažetak";
+"undo" = "Otkaži";
+
+/* Android shared translations */
+"my_document_no_description" = "Bez opisa";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Nije pronađeno u dokumentu";
+"my_document_cannot_delete_ai_documents" = "VI dokumenti se ne mogu obrisati dok sadrže stranice. Najpre obrišite stranice.";
+"my_document_create_page_title" = "Nova stranica";
+"my_document_import_empty_selection" = "Nisu izabrane datoteke koje se mogu uvesti";
+"system_items1" = "Više";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Morate preuzeti Bibliju koja sadrži Strongove brojeve i preuzeti indeks putem Pretrage";
+
+/* Android shared translations */
+"add_model" = "Dodaj model";
+"agent_already_running" = "VI agent je već pokrenut. Sačekajte ili ga prvo zaustavite.";
+"agent_log_cancelled" = "Otkazano";
+"agent_log_completed" = "Završeno";
+"agent_log_executing" = "Izvršava: %@";
+"agent_log_idle" = "VI asistent";
+"agent_log_iteration" = "Iteracija %d";
+"agent_log_model_not_configured" = "Nije konfigurisan nijedan model";
+"agent_log_tool_failed" = "Alat %@ nije uspeo";
+"agent_log_view_raw" = "Prikaži sirovi LLM dnevnik";
+"agent_max_iterations_title" = "Maks. iteracija agenta";
+"agent_permission_mode_summary" = "Kontroliše kada je potrebna potvrda korisnika pre VI operacija pisanja";
+"agent_permission_title" = "Dozvola agenta";
+"ai_add_provider" = "Dodaj pružaoca";
+"ai_advanced_category" = "Napredno";
+"ai_agent_notification_running" = "VI agent radi…";
+"ai_behavior_category" = "Ponašanje";
+"ai_connection_settings" = "Podešavanja veze";
+"ai_disclaimer_approach" = "AndBible primarno koristi VI za obradu teksta iz dokumenata koje ste instalirali — komentara, rečnika i drugih modula — umesto da se oslanja na sopstvene podatke obuke modela.";
+"ai_disclaimer_dialog_title" = "VI alati — Važne informacije";
+"ai_disclaimer_intro" = "VI alati mogu u velikoj meri obogatiti vaše iskustvo proučavanja Biblije i otvoriti nove načine za angažovanje sa Pismom.";
+"ai_disclaimer_point1" = "VI može da pravi greške, uključujući „halucinacije\" (pouzdano iznošenje lažnih ili izmišljenih informacija). Nikad slepo ne prihvatajte njegov rezultat.";
+"ai_disclaimer_point2" = "VI odgovori mogu odražavati predrasude iz podataka obuke, mogu biti namerno obmanjujući ili mogu predstavljati određenu teološku perspektivu kao da je neutralna ili potpuna.";
+"ai_disclaimer_point3" = "Vi ste odgovorni za način na koji koristite sadržaj koji generiše VI. Uvek proverite rezultate prema Pismu pre nego što se na njima oslonite.";
+"ai_disclaimer_point4" = "AndBible nastoji da olakša proveru (npr. precizne izvorne citacije u komentarima), ali krajnja odgovornost uvek leži na vama.";
+"ai_disclaimer_point5" = "\"Ispitajte sve; držite se onoga što je dobro.\" (1. Solunjanima 5:21)";
+"ai_disclaimer_point6" = "Ovi alati nemaju dušu niti Svetog Duha. To su alati za obradu teksta, a ne duhovni vodiči. Nisu pogodni za direktno pripremanje propovedi, pobožnih sadržaja ili drugog duhovnog sadržaja bez pažljivog ljudskog nadzora, molitve i rasuđivanja.";
+"ai_disclaimer_point7" = "Mudro korišćeni, mogu koristiti mnogim korisnicima i slučajevima upotrebe. Ali ako niste sigurni u prihvatanje rizika, i odluka da ih ne koristite je potpuno valjana.";
+"ai_disclaimer_point8" = "Vaši podaci se šalju na servere vašeg izabranog pružaoca VI. Korišćenjem API ključa prihvatate uslove korišćenja i politiku privatnosti tog pružaoca. Samohosted modeli su mogući, ali zahtevaju više tehničkog znanja i možda neće davati rezultate jednako dobre kao komercijalni modeli.";
+"ai_disclaimer_point9" = "Pružaoci VI naplaćuju korišćenje API-ja. Procene troškova prikazane u AndBible-u su približne — uvek proverite naplatu vašeg pružaoca za stvarne troškove.";
+"ai_disclaimer_responsibility" = "Međutim, to su i dalje moćni alati — a uz veliku moć dolazi i velika odgovornost. Imajte na umu sledeće.";
+"ai_disclaimer_warning_title" = "Važno: Pročitajte pre korišćenja VI alata";
+"ai_doc_choose_page" = "Izaberite stranicu VI dokumenta";
+"ai_document_filter_activity_title" = "Pristup VI dokumentima";
+"ai_document_regenerate" = "Regeneriši";
+"ai_hidden_status" = "skriveno";
+"ai_hide_prompt" = "Sakrij";
+"ai_language_title" = "Jezik VI odgovora";
+"ai_models_category" = "Modeli";
+"ai_models_summary_none" = "Nije konfigurisan nijedan model";
+"ai_provider_api_format" = "Format API-ja";
+"ai_provider_api_key" = "API ključ";
+"ai_provider_api_key_not_set" = "API ključ nije postavljen";
+"ai_provider_delete_confirm" = "Obrisati pružaoca \"%1$@\"? Upiti koji koriste ovog pružaoca vratiće se na podrazumevani.";
+"ai_provider_edit" = "Uredi";
+"ai_provider_endpoint_description" = "Samo osnovni URL. AndBible automatski dodaje \"/chat/completions\" (OpenAI format) ili \"/messages\" (Anthropic format). Liste modela se preuzimaju sa \"/models\".";
+"ai_provider_name" = "Naziv pružaoca";
+"ai_provider_saved" = "Pružalac sačuvan";
+"ai_provider_select_type" = "Izaberite vrstu pružaoca";
+"ai_providers_models_category" = "Pružaoci i modeli";
+"ai_providers_summary_none" = "Nije konfigurisan nijedan pružalac";
+"ai_regenerate_fresh_run" = "Svеže pokretanje (ignoriši prethodni rezultat)";
+"ai_regenerate_instructions_hint" = "Dodatne instrukcije (opcionalno)";
+"ai_regenerate_keep_previous" = "Čuvaj prethodnu verziju";
+"ai_regenerate_prompt_not_found" = "Nije moguće regenerisati: originalni upit nije pronađen. Možda je obrisan.";
+"ai_regenerate_title" = "Regeneriši";
+"ai_settings" = "VI podešavanja";
+"ai_setup_description" = "AndBible može koristiti VI za prevođenje biblijskog teksta, objašnjavanje stihova, kreiranje sažetaka i još mnogo toga. Za početak, konfigurišite vezu sa pružaocem OpenAI-kompatibilnog API-ja.";
+"ai_setup_title" = "Konfiguriši VI";
+"ai_usage_category" = "Upotreba";
+"ask_model_before_run_title" = "Pitaj za model pre pokretanja";
+"auto_hide_agent_log_title" = "Sakrij VI panel kada se završi";
+"bookmarks_and_mynotes_title" = "Obeleživači i Moje Beleške";
+"built_in_prompt" = "Ugrađen";
+"built_in_prompt_notice" = "Ovo je ugrađeni upit i ne može se uređivati. Koristite „Kopiraj za prilagođavanje\" da kreirate uređujuću kopiju.";
+"category_none" = "Bez kategorije";
+"commentary_max_response_no_limit" = "Bez ograničenja";
+"commentary_max_response_title" = "Ograničenje veličine odgovora komentara";
+"copy_to_customize" = "Kopiraj za prilagođavanje";
+"custom_agent_system_prompt_title" = "Sistemski upit agenta";
+"custom_system_prompt_custom" = "Prilagođeno";
+"custom_text_transform_system_prompt_title" = "Sistemski upit za transformaciju teksta";
+"default_prompt_ask_question" = "Postavi pitanje";
+"default_prompt_ask_question_desc" = "Postavite bilo koje pitanje o izabranom odeljku";
+"default_prompt_bookmark_annotate" = "Označi i anotira";
+"default_prompt_bookmark_annotate_desc" = "Kreira obeleživač sa napomenom za proučavanje generisanom od strane VI";
+"default_prompt_compare_translations" = "Uporedi prevode";
+"default_prompt_compare_translations_desc" = "Prikazuje kako različiti instalirani prevodi prikazuju tekst";
+"default_prompt_cross_references" = "Unakrsne reference";
+"default_prompt_cross_references_desc" = "Pronalazi i objašnjava srodne biblijske odeljke";
+"default_prompt_custom" = "Prilagođeni upit";
+"default_prompt_custom_desc" = "Pokrenite prilagođeni zadatak na izabranom odeljku";
+"default_prompt_custom_template" = "Pratite korisnikovu specifikaciju zadatka za izabrani biblijski odeljak.";
+"default_prompt_enhance_note" = "Poboljšaj belešku";
+"default_prompt_enhance_note_desc" = "Poboljšava gramatiku, jasnoću i čitljivost vaše beleške";
+"default_prompt_explain_verses" = "Objasni stihove";
+"default_prompt_explain_verses_desc" = "Objašnjava značenje i kontekst izabranih stihova";
+"default_prompt_explain_verses_studypad" = "Objasni stihove → Radna sveska";
+"default_prompt_explain_verses_studypad_desc" = "Kreiraj radnu svesku sa objašnjenjem stih po stih i obeleživačima";
+"default_prompt_study_layout" = "Otvori raspored za proučavanje";
+"default_prompt_study_layout_desc" = "Otvara komentar i prozore paralelnih prevoda za proučavanje";
+"default_prompt_summary" = "Sažetak";
+"default_prompt_summary_desc" = "Kreira sažet pregled izabranog teksta";
+"default_prompt_thematic_study" = "Tematsko proučavanje";
+"default_prompt_thematic_study_desc" = "Gradi radnu svesku sa odeljcima i beleškama o centralnoj temi";
+"default_prompt_translate_to_language" = "Prevedi na %@";
+"default_prompt_translate_to_ui_language_desc" = "Prevodi tekst dokumenta na jezik interfejsa aplikacije";
+"default_prompt_word_study" = "Proučavanje reči";
+"default_prompt_word_study_desc" = "Analizira originalne hebrejske/grčke reči";
+"default_prompt_workspace_assistant" = "Asistent za radnu površ";
+"default_prompt_workspace_assistant_desc" = "Upravljajte prozorima: kreirajte, zatvarajte, premeštajte, menjajte dokumente";
+"delete_category" = "Obriši kategoriju";
+"delete_category_and_prompts" = "Obriši kategoriju i njene upite";
+"delete_category_keep_prompts" = "Premesti upite u koren i obriši kategoriju";
+"doc_type_addons" = "Dodaci";
+"easy_setup_enter_api_key" = "Unesite API ključ";
+"easy_setup_success" = "Veza uspešna!";
+"easy_setup_test_connection" = "Testiraj vezu";
+"easy_setup_testing" = "Testiranje…";
+"easy_setup_title" = "Brzo podešavanje";
+"help_bookmarks_text" = "Obeleživači se mogu kreirati odabirom nekog teksta i pritiskom na \"Obeleživač\" iz iskačućeg menija. Možete dodati Vaše beleške u novi obeleživač pritiskajući označeni tekst u biblijskom prozoru. Tu je i takođe i \"Moje Beleške\" posebni dokument u tumačenjima koji Vam dozvoljava da pogledate Vaše beleške u odvojenom prozoru.";
+"help_memorize_text" = "Prikaz Memorisanje pomaže vam da naučite odlomke napamet. Koristite Zamagljivanje reči, Mešanje reči, Kucanje reči ili Redosled reči za vežbanje. Uspešne vežbe automatski označavaju stihove kao naučene napamet (ovo se može onemogućiti).";
+"help_read_more_link" = "Pročitajte više u priručniku";
+"hide_category" = "Sakrij iz VI radnji";
+"llm_actions" = "VI radnje";
+"llm_continue_iterations_message" = "VI agent je dostigao limit od %1$d iteracija bez završetka. Nastaviti za još %2$d iteracija?";
+"llm_continue_iterations_title" = "Nastaviti?";
+"llm_custom_input_price_title" = "Cena ulaza ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Unesite ID modela";
+"llm_custom_output_price_title" = "Cena izlaza ($/Mtoken)";
+"llm_error_max_iterations" = "Dostignut je maksimalni broj iteracija (%1$d) bez završetka";
+"llm_error_unknown" = "Nepoznata greška";
+"llm_note_updated" = "Beleška ažurirana";
+"llm_provider_custom" = "Prilagođeni (kompatibilan sa OpenAI)";
+"llm_reset_usage_confirm_message" = "Ovo će obrisati sve kumulativne podatke o upotrebi.";
+"llm_reset_usage_confirm_title" = "Resetovati podatke o upotrebi?";
+"llm_reset_usage_title" = "Resetuj podatke o upotrebi";
+"llm_usage_summary_default" = "Nema podataka o upotrebi";
+"llm_usage_summary_title" = "Potrošnja tokena";
+"manage_prompts" = "Upravljaj VI upitima";
+"manage_tool_permissions_title" = "Dozvole alata";
+"model_pricing_summary" = "%1$@ ulaz / %2$@ izlaz po Mtokenu";
+"model_select_provider" = "Pružalac";
+"model_set_default" = "Postavi kao podrazumevani model";
+"move_category_down" = "Pomeri dole";
+"move_category_up" = "Pomeri gore";
+"new_category" = "Nova kategorija";
+"new_category_name" = "Naziv kategorije";
+"new_prompt" = "Novi upit";
+"permission_allow_all" = "Dozvoli sve";
+"permission_allow_all_session" = "Dozvoli sve alate za ovu sesiju";
+"permission_allow_for_session" = "Dozvoli za ovu sesiju";
+"permission_allow_once" = "Dozvoli jednom";
+"permission_always_allow_confirm" = "Da li ste sigurni da želite trajno dozvoliti \"%1$@\"?";
+"permission_always_allow_confirm_reset_hint" = "Ovo možete resetovati u VI podešavanjima.";
+"permission_always_ask" = "Uvek pitaj";
+"permission_ask_once_per_run" = "Pitaj jednom po pokretanju";
+"permission_deny" = "Odbij";
+"permission_deny_all" = "Odbij sve";
+"permission_option_always_allow" = "Uvek dozvoli";
+"permission_option_always_deny" = "Uvek odbij";
+"permission_status_default" = "Pitaj (podrazumevano)";
+"prompt_auto_include_commentaries" = "Automatski uključi komentare";
+"prompt_auto_include_documents" = "Automatski uključi instalirane dokumente";
+"prompt_bible_only" = "Samo biblijski dokumenti";
+"prompt_category" = "Kategorija";
+"prompt_category_favorites" = "Omiljeni";
+"prompt_category_general" = "Opšte";
+"prompt_category_notes" = "Beleške";
+"prompt_category_study" = "Proučavanje";
+"prompt_category_uncategorized" = "Nekategorisano";
+"prompt_context_note_editor" = "Uređivač beleški";
+"prompt_context_text_selection" = "Selekcija teksta";
+"prompt_context_verse_selection" = "Selekcija stihova";
+"prompt_context_window_menu" = "Meni prozora";
+"prompt_context_workspace_menu" = "Meni radne površi";
+"prompt_description" = "Opis";
+"prompt_edit_before_run" = "Navedi pre pokretanja";
+"prompt_is_text_transformation" = "Transformacija teksta";
+"prompt_max_iterations_hint" = "Ostavite prazno za globalno podrazumevano";
+"prompt_max_iterations_unlimited" = "Neograničeno";
+"prompt_model_default" = "Podrazumevano";
+"prompt_name" = "Naziv";
+"prompt_no_document_creation" = "Bez kreiranja dokumenta";
+"prompt_permission_mode" = "Režim dozvole";
+"prompt_permission_mode_description" = "Kontroliše kada je potrebna potvrda korisnika pre nego što VI izvrši operacije pisanja. Podešavanja po alatu ispod mogu da zamene ovo za pojedinačne alate.";
+"prompt_permission_use_default" = "Koristi podrazumevano";
+"prompt_show_in" = "Prikaži u";
+"prompt_strict_context_matching" = "Keš zavistan od konteksta";
+"prompt_tab_advanced" = "Napredno";
+"prompt_tab_permissions" = "Dozvole";
+"prompt_tab_prompt" = "Upit";
+"prompt_template" = "Šablon upita";
+"prompt_tool_permissions" = "Dozvole alata";
+"raw_log_delete_all" = "Obriši sve";
+"raw_log_error_indicator" = "Greška";
+"raw_log_history_empty" = "Nema sačuvanih dnevnika";
+"raw_log_history_title" = "Istorija VI dnevnika";
+"raw_log_item_tokens" = "%1$@ ulaz / %2$@ izlaz";
+"raw_log_older_1_month" = "Starije od 1 meseca";
+"raw_log_older_1_week" = "Starije od 1 nedelje";
+"raw_log_older_3_months" = "Starije od 3 meseca";
+"raw_log_retention_summary_disabled" = "Onemogućeno (čuvaj sve)";
+"raw_log_retention_title" = "Automatski brisati stare dnevnike";
+"reset_all_ai_settings" = "Resetuj sva VI podešavanja";
+"reset_all_ai_settings_confirm_message" = "Ovo će obrisati API ključ, pružaoca, endpoint, model i resetovati sve upite na podrazumevane vrednosti. Nastaviti?";
+"reset_all_ai_settings_confirm_title" = "Resetovati sva VI podešavanja?";
+"reset_all_permissions" = "Resetuj sve";
+"reset_to_default" = "Vrati na podrazumevano";
+"save_and_exit" = "Sačuvaj";
+"select_llm_prompt" = "Izaberite VI radnju";
+"select_model_before_run_title" = "Izaberite model";
+"set_default_model_for_prompt" = "Postavi kao podrazumevani model za ovaj upit";
+"show_category" = "Prikaži u VI radnjama";
+"specify_before_run_title" = "Navedi zadatak";
+"tool_add_bookmark_note" = "Dodaj belešku obeleživaču";
+"tool_add_label_to_bookmark" = "Dodaj oznaku obeleživaču";
+"tool_add_my_document_page" = "Dodaj stranicu Mog dokumenta";
+"tool_add_study_pad_entry" = "Dodaj unos u radnu svesku";
+"tool_category_bible_search" = "Biblija i pretraga";
+"tool_category_bookmarks" = "Obeleživači";
+"tool_category_general_books" = "Opšte knjige";
+"tool_category_labels" = "Oznake";
+"tool_category_my_documents" = "Moji dokumenti";
+"tool_category_study_pads" = "Radne sveske";
+"tool_category_windows" = "Prozori";
+"tool_create_bookmark" = "Kreiraj obeleživač";
+"tool_create_label" = "Kreiraj oznaku";
+"tool_create_my_document" = "Kreiraj Moj dokument";
+"tool_create_study_pad" = "Kreiraj radnu svesku";
+"tool_create_window" = "Kreiraj prozor";
+"tool_delete_bookmark" = "Obriši obeleživač";
+"tool_delete_label" = "Obriši oznaku";
+"tool_delete_my_document_page" = "Obriši stranicu Mog dokumenta";
+"tool_edit_my_document_page" = "Uredi stranicu Mog dokumenta";
+"tool_finish_with_my_document_page" = "Otvori stranicu Mog dokumenta";
+"tool_finish_with_study_pad" = "Otvori radnu svesku";
+"tool_finish_without_document" = "Završi bez dokumenta";
+"tool_get_all_labels" = "Lista svih oznaka";
+"tool_get_bookmarks_for_verse" = "Preuzmi obeleživače za stih";
+"tool_get_bookmarks_with_label" = "Preuzmi obeleživače sa oznakom";
+"tool_get_commentaries" = "Čitaj komentare";
+"tool_get_dictionary_entry" = "Pretraži unos u rečniku";
+"tool_get_genbook_content" = "Čitaj sadržaj opšte knjige";
+"tool_get_genbook_keys" = "Lista ključeva opšte knjige";
+"tool_get_installed_documents" = "Lista instaliranih dokumenata";
+"tool_get_my_document_pages" = "Lista stranica mog dokumenta";
+"tool_get_my_documents" = "Lista mojih dokumenata";
+"tool_get_study_pad_content" = "Čitaj sadržaj radne sveske";
+"tool_get_verse_content" = "Čitaj sadržaj stiha";
+"tool_get_windows" = "Lista prozora";
+"tool_manage_window" = "Upravljaj prozorom";
+"tool_remove_label_from_bookmark" = "Ukloni oznaku sa obeleživača";
+"tool_search_bible" = "Pretraži Bibliju";
+"tool_search_by_strongs" = "Pretraži po Strongovom broju";
+"tool_search_study_pads" = "Pretraži radne sveske";
+"tool_set_document_title" = "Postavi naslov dokumenta";
+"tool_set_window_document" = "Postavi dokument prozora";
+"tool_update_bookmark_note" = "Ažuriraj belešku obeleživača";
+"tool_update_studypad_text_entry" = "Ažuriraj tekstualni unos radne sveske";
+"verse_tip" = "Da biste izabrali deo ili više stihova, možete to učiniti dugim pritiskom na biblijski tekst";
+"watch_tutorial_video" = "Pogledajte video sa uputstvima (na engleskom)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Regenerisanje VI dokumenta…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Prihvatam i preuzimam punu odgovornost";
+"ai_disclaimer_accept_title" = "Prihvati odricanje od odgovornosti za VI";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Podešavanja VI veze i upita";
+"prefs_features_cat" = "Funkcije";

@@ -63,12 +63,14 @@ extension AndBibleUITests {
      * - Side effects:
      *   - resolves the app data container from the current simulator UDID
      *   - runs `UITestFixtureTool reset` and `seed` against that installed app container
+     *   - passes the fixture tool's encoded preference seed to the first app launch
      *   - skips host-side fixture work when the manifest uses the `none` sentinel for a
      *     launch-configuration-only test
      * - Failure modes:
      *   - records an XCTest failure when the fixture tool path, simulator UDID, or data container
      *     cannot be resolved from the current test-host environment
      *   - records an XCTest failure when the fixture reset or seed subprocess exits non-zero
+     *   - records an XCTest failure when the fixture tool does not report a valid preference seed
      */
     func prepareFixtureIfRequested(
         for app: XCUIApplication,
@@ -118,13 +120,14 @@ extension AndBibleUITests {
             ],
             timeout: 30
         )
-        XCTAssertEqual(
-            resetResult.status,
-            0,
-            "Fixture reset failed for scenario '\(scenario)':\nstdout:\n\(resetResult.stdout)\nstderr:\n\(resetResult.stderr)",
-            file: file,
-            line: line
-        )
+        guard resetResult.status == 0 else {
+            XCTFail(
+                "Fixture reset failed for scenario '\(scenario)':\nstdout:\n\(resetResult.stdout)\nstderr:\n\(resetResult.stderr)",
+                file: file,
+                line: line
+            )
+            return
+        }
 
         let seedResult = runHostProcess(
             executablePath: fixtureToolPath,
@@ -139,13 +142,30 @@ extension AndBibleUITests {
             ],
             timeout: 30
         )
-        XCTAssertEqual(
-            seedResult.status,
-            0,
-            "Fixture seed failed for scenario '\(scenario)':\nstdout:\n\(seedResult.stdout)\nstderr:\n\(seedResult.stderr)",
-            file: file,
-            line: line
-        )
+        guard seedResult.status == 0 else {
+            XCTFail(
+                "Fixture seed failed for scenario '\(scenario)':\nstdout:\n\(seedResult.stdout)\nstderr:\n\(seedResult.stderr)",
+                file: file,
+                line: line
+            )
+            return
+        }
+        let encodedPreferences = seedResult.stdout
+            .split(whereSeparator: \Character.isNewline)
+            .map(String.init)
+            .last?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let encodedPreferences,
+              !encodedPreferences.isEmpty,
+              Data(base64Encoded: encodedPreferences) != nil else {
+            XCTFail(
+                "Fixture seed did not report valid encoded preferences for scenario '\(scenario)'.",
+                file: file,
+                line: line
+            )
+            return
+        }
+        app.launchEnvironment["UITEST_PREFERENCE_SEED_BASE64"] = encodedPreferences
     }
 
     /**
@@ -493,14 +513,15 @@ extension AndBibleUITests {
         bundleIdentifier: String
     ) -> String? {
         let installedAppBundleURL = Bundle.main.bundleURL
-        let simulatorDataRootURL = installedAppBundleURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let dataApplicationsURL = simulatorDataRootURL
-            .appendingPathComponent("Containers", isDirectory: true)
+        var containersRootURL = installedAppBundleURL
+        while containersRootURL.lastPathComponent != "Containers" {
+            let parentURL = containersRootURL.deletingLastPathComponent()
+            guard parentURL.path != containersRootURL.path else {
+                return nil
+            }
+            containersRootURL = parentURL
+        }
+        let dataApplicationsURL = containersRootURL
             .appendingPathComponent("Data", isDirectory: true)
             .appendingPathComponent("Application", isDirectory: true)
 

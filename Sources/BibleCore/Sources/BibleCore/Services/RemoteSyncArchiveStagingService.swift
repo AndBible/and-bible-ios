@@ -102,6 +102,21 @@ public struct RemoteSyncStagedPatchArchive: Sendable, Equatable {
    initial backup requires a newer schema version than the current app supports
  */
 public final class RemoteSyncArchiveStagingService {
+    /// Maximum accepted compressed initial-backup bytes.
+    static let maximumCompressedInitialBackupByteCount = 64 * 1_024 * 1_024
+
+    /// Maximum accepted expanded initial-backup SQLite bytes.
+    static let maximumExpandedInitialBackupByteCount = 256 * 1_024 * 1_024
+
+    /// Maximum accepted compressed bytes for one patch archive.
+    static let maximumCompressedPatchByteCount = 16 * 1_024 * 1_024
+
+    /// Maximum accepted expanded SQLite bytes for one patch archive.
+    static let maximumExpandedPatchByteCount = 64 * 1_024 * 1_024
+
+    /// Maximum cumulative expanded SQLite bytes staged in one patch batch.
+    static let maximumCumulativeExpandedPatchByteCount = 256 * 1_024 * 1_024
+
     private let adapter: any RemoteSyncAdapting
     private let fileManager: FileManager
     private let temporaryDirectory: URL
@@ -131,6 +146,7 @@ public final class RemoteSyncArchiveStagingService {
 
      - Parameters:
      - remoteFile: Remote initial-backup archive descriptor.
+     - category: Sync category represented by the staged database.
      - currentSchemaVersion: Highest SQLite schema version this app can restore safely.
      - Returns: Staged SQLite database file and its extracted schema version.
      - Side effects:
@@ -142,23 +158,43 @@ public final class RemoteSyncArchiveStagingService {
        - rethrows filesystem write errors while staging files
        - throws `RemoteSyncArchiveStagingError.decompressionFailed` when gzip extraction fails
        - throws `RemoteSyncArchiveStagingError.invalidSQLiteDatabase` when the extracted file is not a readable SQLite database
-       - throws `RemoteSyncArchiveStagingError.incompatibleInitialBackupVersion` when the extracted database needs a newer schema version than `currentSchemaVersion`
+       - throws `RemoteSyncArchiveStagingError.incompatibleInitialBackupVersion` when the extracted
+         database generation is not an authoritative workspace source or needs a newer schema
+         version than `currentSchemaVersion`
      */
     public func downloadInitialBackup(
         _ remoteFile: RemoteSyncFile,
+        category: RemoteSyncCategory,
         currentSchemaVersion: Int
     ) async throws -> RemoteSyncStagedInitialBackup {
-        let archiveData = try await adapter.download(id: remoteFile.id)
         let archiveURL = stagingURL(prefix: "remote-sync-initial-", suffix: ".sqlite3.gz")
         let databaseURL = stagingURL(prefix: "remote-sync-initial-", suffix: ".sqlite3")
 
         do {
-            try archiveData.write(to: archiveURL, options: .atomic)
-            let databaseData = try Self.gunzip(archiveData)
-            try databaseData.write(to: databaseURL, options: .atomic)
+            try Task.checkCancellation()
+            _ = try await adapter.download(
+                id: remoteFile.id,
+                to: archiveURL,
+                maximumByteCount: Self.maximumCompressedInitialBackupByteCount
+            )
+            try Task.checkCancellation()
+            let member = try RemoteSyncBoundedFileIO.inspectGzip(
+                at: archiveURL,
+                maximumCompressedByteCount: Self.maximumCompressedInitialBackupByteCount,
+                maximumExpandedByteCount: Self.maximumExpandedInitialBackupByteCount
+            )
+            try RemoteSyncBoundedFileIO.inflateGzip(
+                member,
+                from: archiveURL,
+                to: databaseURL,
+                maximumExpandedByteCount: Self.maximumExpandedInitialBackupByteCount
+            )
+            try Task.checkCancellation()
 
             let schemaVersion = try Self.sqliteUserVersion(at: databaseURL)
-            if schemaVersion > currentSchemaVersion {
+            let isUnsupportedWorkspaceGeneration = category == .workspaces
+                && !RemoteSyncWorkspaceDatabaseMigrator.supportsSourceVersion(schemaVersion)
+            if schemaVersion > currentSchemaVersion || isUnsupportedWorkspaceGeneration {
                 throw RemoteSyncArchiveStagingError.incompatibleInitialBackupVersion(schemaVersion)
             }
 
@@ -191,21 +227,91 @@ public final class RemoteSyncArchiveStagingService {
         _ patches: [RemoteSyncDiscoveredPatch]
     ) async throws -> [RemoteSyncStagedPatchArchive] {
         var stagedArchives: [RemoteSyncStagedPatchArchive] = []
+        var createdArchiveURLs: [URL] = []
+        var cumulativeExpandedByteCount: UInt64 = 0
 
         do {
             for patch in patches {
-                let archiveData = try await adapter.download(id: patch.file.id)
+                try Task.checkCancellation()
                 let archiveURL = stagingURL(prefix: "remote-sync-patch-", suffix: ".sqlite3.gz")
-                try archiveData.write(to: archiveURL, options: .atomic)
+                createdArchiveURLs.append(archiveURL)
+                _ = try await adapter.download(
+                    id: patch.file.id,
+                    to: archiveURL,
+                    maximumByteCount: Self.maximumCompressedPatchByteCount
+                )
+                try Task.checkCancellation()
+                let member = try RemoteSyncBoundedFileIO.inspectGzip(
+                    at: archiveURL,
+                    maximumCompressedByteCount: Self.maximumCompressedPatchByteCount,
+                    maximumExpandedByteCount: Self.maximumExpandedPatchByteCount
+                )
+                let (nextCumulative, overflow) = cumulativeExpandedByteCount
+                    .addingReportingOverflow(member.expandedByteCount)
+                guard !overflow,
+                      nextCumulative <= UInt64(Self.maximumCumulativeExpandedPatchByteCount) else {
+                    throw RemoteSyncBoundedFileError.expandedSizeExceeded(
+                        overflow ? UInt64.max : nextCumulative
+                    )
+                }
+                cumulativeExpandedByteCount = nextCumulative
                 stagedArchives.append(
                     RemoteSyncStagedPatchArchive(patch: patch, archiveFileURL: archiveURL)
                 )
             }
             return stagedArchives
         } catch {
-            cleanup(urls: stagedArchives.map(\.archiveFileURL))
+            cleanup(urls: createdArchiveURLs)
             throw error
         }
+    }
+
+    /**
+     Streams one patch SQLite database into the exact inbound-compatible gzip contract.
+
+     - Parameters:
+       - databaseURL: Existing patch database written by a category-specific Room exporter.
+       - archiveURL: Unique durable outbox location that must not already exist.
+     - Returns: Exact archive size and SHA-256 digest produced during the write.
+     - Side Effects: Reads `databaseURL`, creates and fsyncs `archiveURL`, and removes partial output
+       on every failure or cancellation.
+     - Throws: Cancellation or `RemoteSyncBoundedFileError` for unsafe files, compression failure,
+       an expanded database above 64 MiB, or a complete gzip archive above 16 MiB.
+     */
+    static func gzipPatchDatabase(
+        at databaseURL: URL,
+        to archiveURL: URL
+    ) throws -> RemoteSyncRegularFileFingerprint {
+        try RemoteSyncBoundedFileIO.gzipRegularFile(
+            at: databaseURL,
+            to: archiveURL,
+            maximumInputByteCount: maximumExpandedPatchByteCount,
+            maximumOutputByteCount: maximumCompressedPatchByteCount
+        )
+    }
+
+    /**
+     Streams one full initial database into the larger bootstrap archive contract.
+
+     - Parameters:
+       - databaseURL: Existing full Android-compatible category database.
+       - archiveURL: Unique durable retry location that must not already exist.
+     - Returns: Exact archive size and SHA-256 digest produced during the write.
+     - Side Effects: Reads `databaseURL`, creates and fsyncs `archiveURL`, and removes partial output
+       on every failure or cancellation.
+     - Throws: Cancellation or `RemoteSyncBoundedFileError` for unsafe files, compression failure,
+       an expanded database above 256 MiB, or a complete gzip archive above 64 MiB.
+     */
+    static func gzipInitialBackupDatabase(
+        at databaseURL: URL,
+        to archiveURL: URL
+    ) throws -> RemoteSyncRegularFileFingerprint {
+        try RemoteSyncBoundedFileIO.gzipRegularFile(
+            at: databaseURL,
+            to: archiveURL,
+            maximumInputByteCount: maximumExpandedInitialBackupByteCount,
+            maximumOutputByteCount: maximumCompressedInitialBackupByteCount
+        )
     }
 
     /**
@@ -239,26 +345,135 @@ public final class RemoteSyncArchiveStagingService {
      - Parameter data: Raw uncompressed payload bytes.
      - Returns: Gzip-compressed payload.
      - Side effects: none.
-     - Failure modes: Throws `RemoteSyncArchiveStagingError.compressionFailed` when compression fails.
+     - Failure modes: Throws `RemoteSyncArchiveStagingError.compressionFailed` when input, output,
+       or compressor metadata exceeds the remote-sync archive contract.
      */
     static func gzip(_ data: Data) throws -> Data {
-        try data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Data in
-            guard let baseAddress = ptr.baseAddress else {
-                throw RemoteSyncArchiveStagingError.compressionFailed
-            }
-
-            var outputLength: UInt = 0
-            guard let output = gzip_data(
-                baseAddress.assumingMemoryBound(to: UInt8.self),
-                UInt(data.count),
-                &outputLength
-            ) else {
-                throw RemoteSyncArchiveStagingError.compressionFailed
-            }
-
-            defer { gunzip_free(output) }
-            return Data(bytes: output, count: Int(outputLength))
+        guard data.count <= maximumExpandedInitialBackupByteCount,
+              let context = raw_deflater_create() else {
+            throw RemoteSyncArchiveStagingError.compressionFailed
         }
+        defer { raw_deflater_destroy(context) }
+
+        let maximumOutputByteCount = maximumCompressedInitialBackupByteCount
+        var output = Data([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        var inputOffset = 0
+        while inputOffset < data.count {
+            let inputEnd = min(inputOffset + 64 * 1_024, data.count)
+            _ = try consumeGzipInput(
+                data,
+                range: inputOffset..<inputEnd,
+                finish: false,
+                context: context,
+                output: &output,
+                maximumOutputByteCount: maximumOutputByteCount
+            )
+            inputOffset = inputEnd
+        }
+
+        var reachedStreamEnd = false
+        while !reachedStreamEnd {
+            reachedStreamEnd = try consumeGzipInput(
+                data,
+                range: data.endIndex..<data.endIndex,
+                finish: true,
+                context: context,
+                output: &output,
+                maximumOutputByteCount: maximumOutputByteCount
+            )
+        }
+
+        var checksum: UInt32 = 0
+        var expandedByteCount: UInt64 = 0
+        var compressedByteCount: UInt64 = 0
+        guard raw_deflater_metadata(
+            context,
+            &checksum,
+            &expandedByteCount,
+            &compressedByteCount
+        ) == 0,
+            expandedByteCount == UInt64(data.count),
+            compressedByteCount == UInt64(output.count - 10),
+            output.count <= maximumOutputByteCount - 8 else {
+            throw RemoteSyncArchiveStagingError.compressionFailed
+        }
+
+        try appendLittleEndian(checksum, to: &output, maximumByteCount: maximumOutputByteCount)
+        try appendLittleEndian(
+            UInt32(truncatingIfNeeded: expandedByteCount),
+            to: &output,
+            maximumByteCount: maximumOutputByteCount
+        )
+        return output
+    }
+
+    /** Supplies one bounded input range and appends only output admitted by the gzip ceiling. */
+    private static func consumeGzipInput(
+        _ input: Data,
+        range: Range<Int>,
+        finish: Bool,
+        context: UnsafeMutableRawPointer,
+        output: inout Data,
+        maximumOutputByteCount: Int
+    ) throws -> Bool {
+        var inputOffset = range.lowerBound
+        repeat {
+            var outputBuffer = [UInt8](repeating: 0, count: 64 * 1_024)
+            let outputCapacity = UInt32(outputBuffer.count)
+            var consumed: UInt32 = 0
+            var produced: UInt32 = 0
+            let result = outputBuffer.withUnsafeMutableBytes { outputBytes in
+                input.withUnsafeBytes { inputBytes in
+                    raw_deflater_process(
+                        context,
+                        inputBytes.baseAddress?
+                            .assumingMemoryBound(to: UInt8.self)
+                            .advanced(by: inputOffset),
+                        UInt32(range.upperBound - inputOffset),
+                        finish ? 1 : 0,
+                        outputBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                        outputCapacity,
+                        &consumed,
+                        &produced
+                    )
+                }
+            }
+            guard result >= 0,
+                  result != 1 || finish,
+                  output.count <= maximumOutputByteCount,
+                  Int(produced) <= maximumOutputByteCount - output.count else {
+                throw RemoteSyncArchiveStagingError.compressionFailed
+            }
+            if produced > 0 {
+                output.append(contentsOf: outputBuffer.prefix(Int(produced)))
+            }
+            inputOffset += Int(consumed)
+            if result == 1 {
+                guard inputOffset == range.upperBound else {
+                    throw RemoteSyncArchiveStagingError.compressionFailed
+                }
+                return true
+            }
+            guard consumed > 0 || produced > 0 else {
+                throw RemoteSyncArchiveStagingError.compressionFailed
+            }
+        } while inputOffset < range.upperBound || range.isEmpty
+        return false
+    }
+
+    /** Appends one gzip trailer word without crossing the compressed-byte ceiling. */
+    private static func appendLittleEndian(
+        _ value: UInt32,
+        to output: inout Data,
+        maximumByteCount: Int
+    ) throws {
+        guard output.count <= maximumByteCount - 4 else {
+            throw RemoteSyncArchiveStagingError.compressionFailed
+        }
+        output.append(UInt8(truncatingIfNeeded: value))
+        output.append(UInt8(truncatingIfNeeded: value >> 8))
+        output.append(UInt8(truncatingIfNeeded: value >> 16))
+        output.append(UInt8(truncatingIfNeeded: value >> 24))
     }
 
     private func stagingURL(prefix: String, suffix: String) -> URL {
@@ -268,26 +483,6 @@ public final class RemoteSyncArchiveStagingService {
     private func cleanup(urls: [URL]) {
         for url in urls {
             try? fileManager.removeItem(at: url)
-        }
-    }
-
-    private static func gunzip(_ data: Data) throws -> Data {
-        try data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Data in
-            guard let baseAddress = ptr.baseAddress else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
-
-            var outputLength: UInt = 0
-            guard let output = gunzip_data(
-                baseAddress.assumingMemoryBound(to: UInt8.self),
-                UInt(data.count),
-                &outputLength
-            ) else {
-                throw RemoteSyncArchiveStagingError.decompressionFailed
-            }
-
-            defer { gunzip_free(output) }
-            return Data(bytes: output, count: Int(outputLength))
         }
     }
 

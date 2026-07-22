@@ -7,12 +7,16 @@ Checks:
 2. No iOS locale can remain English for a key when Android has a non-English translation.
 3. Per-key English-placeholder count may not exceed committed baseline (plus optional allowance).
 4. The iOS locale_pref picker must match Android arrays.xml values that have iOS resources.
+5. Runtime Calculator security help must use Android copy plus the truthful iOS name limitation.
+6. Every AI source key and literal fallback must have exact Android provenance.
 
 Usage:
   python3 scripts/check_settings_localization_guardrails.py
   python3 scripts/check_settings_localization_guardrails.py --write-baseline
   python3 scripts/check_settings_localization_guardrails.py --write-android-snapshot
   python3 scripts/check_settings_localization_guardrails.py --sync-android-shared-translations
+  python3 scripts/check_settings_localization_guardrails.py --sync-android-ai-translations
+  python3 scripts/check_settings_localization_guardrails.py --sync-discrete-security-copy
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import date
@@ -151,6 +156,37 @@ LOCALE_TO_ANDROID_VALUES = {
 ANDROID_ROOT_ENV = "ANDBIBLE_ANDROID_ROOT"
 # Stable provenance label for generated snapshots; never serialize a local checkout path.
 ANDROID_SNAPSHOT_SOURCE_RES = "app/src/main/res"
+DISCRETE_SECURITY_ANDROID_KEYS = (
+    "calculator_par1",
+    "calculator_par2",
+    "calculator_par3",
+)
+DISCRETE_SECURITY_IOS_FALLBACKS = {
+    "discrete_mode_description": (
+        "Changes only the launcher icon. AndBible remains visible as the app name in system app "
+        "information."
+    ),
+    "discrete_help_ios_note": (
+        "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, "
+        "but the app display name cannot be changed at runtime due to platform limitations."
+    ),
+}
+REMOVED_DISCRETE_SECURITY_KEYS = {
+    "discrete_help_par1",
+    "discrete_help_par2",
+    "discrete_help_par3",
+    "prefs_volume_keys_scroll_ios_note",
+    "discrete_mode_info_par1",
+    "discrete_mode_info_par2",
+    "discrete_mode_link",
+    "discrete_help_standard_icon_only_ios",
+    "discrete_help_calculator_enforced_ios",
+    "discrete_help_calculator_fallback_ios",
+}
+OBSOLETE_DISCRETE_MODE_SENTENCE = (
+    "When enabled, the app always launches as a calculator. Tap = seven times to temporarily "
+    "access the Bible. Disable this toggle to return to normal."
+)
 
 LINE_RE = re.compile(r'^"(?P<key>[^"]+)"\s*=\s*"(?P<val>(?:[^"\\]|\\.)*)";\s*$')
 LOCALE_OPTIONS_BLOCK_RE = re.compile(
@@ -183,6 +219,7 @@ LOCALE_PREF_RESOURCE_OVERRIDES = {
 
 ANDROID_SHARED_KEY_MAPPINGS = {
     "Find in %@": "search_in",
+    "ai_hidden_status": "hidden",
     "app_name": "app_name_andbible",
     "application_preferences": "settings",
     "bookmark": "add_bookmark1",
@@ -195,11 +232,15 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "create": "index_create",
     "cross_references": "prefs_show_xrefs_title",
     "delete_custom_repository_message_format": "delete_doc",
+    "description": "prompt_description",
     "dictionaries": "prefs_dictionaries_cat",
     "discrete_help_summary": "prefs_persecuted_summary",
     "discrete_help_title": "prefs_persecuted_help",
     "discrete_mode": "prefs_discrete_mode",
     "edit": "ai_provider_edit",
+    "errorTitle": "error_occurred",
+    "error_occurred": "error_occurred",
+    "extracting_zip_file": "extracting_zip_file",
     "footnotes": "prefs_show_footnotes_title",
     "fullscreen": "toggle_fullscreen",
     "help_bookmarks": "bookmarks",
@@ -209,12 +250,17 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "hyphenation": "prefs_hyphenation_title",
     "import": "import2",
     "infinite_scroll": "prefs_infinite_scroll_title",
+    "install_failed_reason": "install_failed_reason",
+    "install_zip_successfull": "install_zip_successfull",
     "label_edit_name": "label_name_prompt",
     "links": "strongs_links",
     "map": "doc_type_map",
     "mark_as_read_button": "prefs_mark_as_read_button_title",
     "memorization_indicators": "prefs_show_memorization_indicators_title",
     "module_category": "prompt_category",
+    "module_install_phase_committing": "install_zip_title",
+    "module_install_phase_downloading": "download_document_confirm_prefix",
+    "module_install_phase_queued": "please_wait",
     "module_language": "chooce_language_hint",
     "module_name": "prompt_name",
     "my_documents": "my_documents_title",
@@ -223,11 +269,16 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "non_strongs_word_italic": "prefs_non_strongs_word_italic_title",
     "ok": "okay",
     "old_testament": "search_old_testament",
+    "overwrite": "yes",
     "page_scroll_amount": "prefs_page_scroll_amount_title",
+    "package_directory": "packages_dir",
     "pin": "window_pin_mode",
     "reading_plan_completed": "agent_log_completed",
     "reading_plan_custom": "custom_system_prompt_custom",
+    "reading_plan_set_current_day": "set_current_day",
+    "reading_plan_set_start_date": "rdg_plan_set_start_date",
     "reading_plans": "reading_plans_plural",
+    "read": "tool_category_read",
     "repository_url": "repository_specification",
     "reset": "reset_generic",
     "save": "save_and_exit",
@@ -246,6 +297,9 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "skip": "error_skip",
     "strongs_hidden": "strongs_hidden_links",
     "strongs_inline": "strongs_text_and_links",
+    "success": "done",
+    "summary": "default_prompt_summary",
+    "storage_space_warning": "storage_space_warning",
     "sync_disabled": "tool_option_disabled",
     "text_display_font_family_title_format": "pref_font_family_label_name",
     "text_display_font_size_title_format": "font_size_title_pt",
@@ -257,6 +311,7 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "title_scroll_button": "prefs_title_scroll_button_title",
     "top_margin": "prefs_top_margin_title",
     "translations": "search_translations",
+    "undo": "cancel",
     "whole_bible": "search_all_bible",
     "window_disable_sync": "disable_sync",
     "workspaces": "help_workspaces_title",
@@ -284,21 +339,161 @@ Android-equivalent iOS surface.
 """
 
 
+AI_LOCALIZATION_SOURCE_DIRECTORIES = (
+    "Sources/BibleCore/Sources/BibleCore/AI",
+    "Sources/BibleUI/Sources/BibleUI/AI",
+)
+AI_ADDITIONAL_LOCALIZATION_KEYS = frozenset(
+    {
+        "ai_settings_shortcut_summary",
+        "llm_actions",
+        "prefs_features_cat",
+    }
+)
+AI_LOCALIZATION_LITERAL_PATTERNS = (
+    re.compile(r'String\s*\(\s*localized:\s*"([^"]+)"', re.DOTALL),
+    re.compile(r'\.localized\(\s*"([^"]+)"', re.DOTALL),
+    re.compile(
+        r'\b(?:titleKey|bodyKey|labelKey|emphasizedTextKey)\s*:\s*"([^"]+)"',
+        re.DOTALL,
+    ),
+)
+AI_LOCALIZATION_VALUE_LITERAL_RE = re.compile(
+    r'String\.LocalizationValue\(\s*"([^"]+)"',
+    re.DOTALL,
+)
+AI_LOCALIZATION_DEFAULT_RE = re.compile(
+    r'String\s*\(\s*localized:\s*"([^"]+)"\s*,\s*'
+    r'defaultValue:\s*"((?:[^"\\]|\\.)*)"',
+    re.DOTALL,
+)
+def discover_ai_localization_keys(repo_root: Path) -> set[str]:
+    """Return every statically declared localization key in the AI feature.
+
+    The inventory scans both AI source directories for direct localization
+    calls, localized help contracts, and indirect key fields. The Android-owned
+    entry-point strings declared outside those directories are included whenever the AI feature
+    sources are present. The function performs read-only source-file I/O and raises
+    ``ValueError`` for any interpolated localization literal because Swift treats
+    it as a format-pattern key rather than resolving the runtime interpolation.
+    """
+    source_paths = sorted(
+        path
+        for relative_directory in AI_LOCALIZATION_SOURCE_DIRECTORIES
+        for path in (repo_root / relative_directory).rglob("*.swift")
+    )
+    if not source_paths:
+        return set()
+
+    keys = set(AI_ADDITIONAL_LOCALIZATION_KEYS)
+    for path in source_paths:
+        source = path.read_text(encoding="utf-8")
+        for pattern in AI_LOCALIZATION_LITERAL_PATTERNS:
+            keys.update(pattern.findall(source))
+        for raw_key in AI_LOCALIZATION_VALUE_LITERAL_RE.findall(source):
+            if r"\(" in raw_key:
+                raise ValueError(
+                    "Interpolated AI localization key in "
+                    f"{path.relative_to(repo_root)}: {raw_key}"
+                )
+            else:
+                keys.add(raw_key)
+    return keys
+
+
+def discover_ai_localization_defaults(repo_root: Path) -> dict[str, set[str]]:
+    """Return direct AI localization fallbacks grouped by their iOS key.
+
+    Only literal ``defaultValue`` arguments are included; indirect localization
+    contracts have no fallback to compare. Swift string escapes are normalized
+    with the same parser used for `.strings` values. The function performs
+    read-only source-file I/O and returns an empty dictionary when the AI source
+    directories are absent from a focused test fixture.
+    """
+    defaults: dict[str, set[str]] = {}
+    for relative_directory in AI_LOCALIZATION_SOURCE_DIRECTORIES:
+        for path in sorted((repo_root / relative_directory).rglob("*.swift")):
+            source = path.read_text(encoding="utf-8")
+            for key, raw_default in AI_LOCALIZATION_DEFAULT_RE.findall(source):
+                defaults.setdefault(key, set()).add(unescape_ios(raw_default))
+    return defaults
+
+
+def missing_ai_localization_catalog_keys(
+    repo_root: Path,
+    catalog: AndroidSharedLocalization,
+) -> list[str]:
+    """Return AI source keys absent from an Android-derived localization catalog.
+
+    This read-only comparison catches a stale committed snapshot when CI has no
+    Android checkout. An empty result means every currently referenced AI key,
+    including ``llm_actions``, has recorded Android provenance and values.
+    """
+    return sorted(discover_ai_localization_keys(repo_root) - set(catalog.english_by_key))
+
+
 def default_repo_root() -> Path:
+    """Return the checkout root containing this localization guardrail.
+
+    Resolution is based only on this script's path, performs no I/O, and works in both primary and
+    linked Git worktrees. The returned path may not exist only when the script itself has been moved
+    during process execution.
+    """
     return Path(__file__).resolve().parents[1]
+
+
+def primary_git_checkout_root(repo_root: Path) -> Path | None:
+    """Resolve the primary checkout that owns a linked worktree's common Git directory.
+
+    ``repo_root`` may be either a primary checkout or a linked worktree. The helper runs one read-only
+    ``git rev-parse`` command and returns the common directory's parent. Git failures, empty output,
+    and filesystem resolution errors return ``None`` so callers can retain their normal sibling
+    fallback without hiding an explicit environment override.
+    """
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    try:
+        return Path(result.stdout.strip()).resolve().parent
+    except OSError:
+        return None
 
 
 def default_android_root() -> Path:
     """Return the Android resource tree used for live parity checks.
 
     ANDBIBLE_ANDROID_ROOT points to the Android repository checkout root so
-    bridge and localization guardrails can share one CI/local setup contract.
+    bridge and localization guardrails can share one CI/local setup contract. Without an override,
+    normal checkouts use the adjacent Android repository and linked worktrees also inspect the sibling
+    of their primary checkout. Git discovery is read-only; when no candidate exists, the conventional
+    sibling path is returned so the caller reports the expected missing-resource diagnostic.
     """
     android_root_env = os.environ.get(ANDROID_ROOT_ENV)
     if android_root_env:
         return Path(android_root_env).expanduser() / "app" / "src" / "main" / "res"
 
-    return Path(__file__).resolve().parents[2] / "and-bible" / "app" / "src" / "main" / "res"
+    repo_root = default_repo_root()
+    candidates = [repo_root.parent / "and-bible"]
+    primary_checkout = primary_git_checkout_root(repo_root)
+    if primary_checkout is not None:
+        candidates.append(primary_checkout.parent / "and-bible")
+    resource_candidates = [candidate / "app" / "src" / "main" / "res" for candidate in candidates]
+    for candidate in resource_candidates:
+        if candidate.is_dir():
+            return candidate
+    return resource_candidates[0]
 
 
 def default_android_snapshot() -> Path:
@@ -509,6 +704,124 @@ def build_android_locale_pref_options(android_root: Path) -> list[LocalePrefOpti
     return options
 
 
+def discrete_security_values_for_locale(
+    catalog: AndroidSharedLocalization,
+    locale: str,
+) -> dict[str, str]:
+    """Return complete security copy for one iOS locale.
+
+    Android-owned help uses a real Android translation when present and Android English otherwise.
+    iOS-only boundary statements intentionally use truthful English fallback in every locale until
+    Android owns equivalent text. The function performs no file I/O and fails when the generated
+    Android catalog omits a required source key.
+    """
+    missing = sorted(set(DISCRETE_SECURITY_ANDROID_KEYS) - set(catalog.english_by_key))
+    if missing:
+        raise ValueError(f"Android security copy missing source keys: {', '.join(missing)}")
+
+    translations = catalog.translations_by_locale.get(locale, {})
+    values = {
+        key: translations.get(key, catalog.english_by_key[key])
+        for key in DISCRETE_SECURITY_ANDROID_KEYS
+    }
+    values.update(DISCRETE_SECURITY_IOS_FALLBACKS)
+    return values
+
+
+def remove_ios_strings_keys(path: Path, keys: set[str]) -> tuple[bool, int]:
+    """Remove obsolete assignments from one `.strings` file without touching unrelated rows."""
+    old_text = path.read_text(encoding="utf-8")
+    output: list[str] = []
+    removed = 0
+    for line in old_text.splitlines():
+        match = LINE_RE.match(line.strip())
+        if match and match.group("key") in keys:
+            removed += 1
+            continue
+        output.append(line)
+
+    new_text = "\n".join(output) + "\n"
+    if new_text == old_text:
+        return False, 0
+    path.write_text(new_text, encoding="utf-8")
+    return True, removed
+
+
+def sync_discrete_security_localizations(
+    repo_root: Path,
+    catalog: AndroidSharedLocalization,
+) -> SharedLocalizationSyncResult:
+    """Write runtime Calculator security copy to both iOS localization trees.
+
+    The sync covers every supported iOS locale, imports Android translations where available,
+    applies the truthful iOS runtime-name limitation, and removes obsolete product-specific keys.
+    """
+    changed_paths: set[Path] = set()
+    values_written = 0
+
+    for tree in ("AndBible", "Localizations"):
+        for locale in sorted(LOCALE_TO_ANDROID_VALUES):
+            path = repo_root / tree / f"{locale}.lproj" / "Localizable.strings"
+            if not path.exists():
+                continue
+            values = discrete_security_values_for_locale(catalog, locale)
+            changed, written = update_ios_strings_file(path, values)
+            if changed:
+                changed_paths.add(path)
+                values_written += written
+            changed, removed = remove_ios_strings_keys(path, REMOVED_DISCRETE_SECURITY_KEYS)
+            if changed:
+                changed_paths.add(path)
+                values_written += removed
+
+    return SharedLocalizationSyncResult(
+        files_changed=len(changed_paths),
+        values_written=values_written,
+    )
+
+
+def audit_discrete_security_localizations(
+    repo_root: Path,
+    catalog: AndroidSharedLocalization,
+) -> list[str]:
+    """Enforce complete runtime Calculator copy across all locales and resource trees."""
+    failures: list[str] = []
+    expected_locales = set(LOCALE_TO_ANDROID_VALUES)
+
+    for tree in ("AndBible", "Localizations"):
+        root = repo_root / tree
+        actual_locales = {
+            path.name.removesuffix(".lproj")
+            for path in root.glob("*.lproj")
+            if path.is_dir()
+        }
+        for locale in sorted(expected_locales - actual_locales):
+            failures.append(f"discrete security missing locale: {tree}:{locale}")
+
+        for locale in sorted(expected_locales & actual_locales):
+            path = root / f"{locale}.lproj" / "Localizable.strings"
+            if not path.exists():
+                failures.append(f"discrete security missing resource: {tree}:{locale}")
+                continue
+            actual = parse_ios_strings(path)
+            expected = discrete_security_values_for_locale(catalog, locale)
+            for key, expected_value in sorted(expected.items()):
+                raw_value = actual.get(key)
+                if raw_value is None:
+                    failures.append(f"discrete security missing key: {tree}:{locale}:{key}")
+                elif unescape_ios(raw_value) != expected_value:
+                    failures.append(f"discrete security value drift: {tree}:{locale}:{key}")
+            for key in sorted(REMOVED_DISCRETE_SECURITY_KEYS & set(actual)):
+                failures.append(f"obsolete localization key remains: {tree}:{locale}:{key}")
+            if any(
+                OBSOLETE_DISCRETE_MODE_SENTENCE in unescape_ios(value)
+                for value in actual.values()
+            ):
+                failures.append(f"obsolete false security sentence remains: {tree}:{locale}")
+
+    return failures
+
+
 def load_snapshot_payload(path: Path) -> dict[str, object]:
     """Load a generated Android parity snapshot as a JSON object.
 
@@ -694,9 +1007,12 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
     Same-name keys and explicitly mapped cross-name keys are treated as
     Android-sourced localization contracts. Android XML values are normalized to
     runtime text and converted to iOS format specifiers before comparison or
-    sync. The returned mismatch list records current iOS English drift, but those
-    keys remain in scope so the sync and audit paths can repair and enforce
-    parity.
+    sync. AI source keys are required even before they exist in iOS English, so
+    the structured sync can bootstrap every Android translation instead of
+    relying on ad hoc locale edits. The returned mismatch list records current
+    iOS English drift or absence, but those keys remain in scope so the sync and
+    audit paths can repair and enforce parity. Missing Android provenance for an
+    AI source key raises ``ValueError`` before any file can be written.
     """
     ios_english = {
         key: unescape_ios(value)
@@ -708,6 +1024,7 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
         key: android_string_for_ios(value)
         for key, value in parse_android_strings(android_root / "values" / "strings.xml").items()
     }
+    required_ai_keys = discover_ai_localization_keys(repo_root)
     source_key_by_key = {
         key: key
         for key in set(ios_english) & set(android_base)
@@ -720,9 +1037,47 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
             if ios_key in ios_english and android_key in android_base
         }
     )
+    missing_android_sources: list[str] = []
+    for ios_key in sorted(required_ai_keys):
+        android_key = ANDROID_SHARED_KEY_MAPPINGS.get(ios_key, ios_key)
+        if (
+            android_key not in android_base
+            or (
+                ios_key in ANDROID_SHARED_SAME_NAME_EXCLUSIONS
+                and ios_key not in ANDROID_SHARED_KEY_MAPPINGS
+            )
+        ):
+            missing_android_sources.append(f"{ios_key} -> {android_key}")
+            continue
+        source_key_by_key[ios_key] = android_key
+    if missing_android_sources:
+        raise ValueError(
+            "AI localization keys have no Android string resource: "
+            + ", ".join(missing_android_sources)
+        )
+
+    mismatched_defaults: list[str] = []
+    for ios_key, defaults in sorted(discover_ai_localization_defaults(repo_root).items()):
+        android_key = ANDROID_SHARED_KEY_MAPPINGS.get(ios_key, ios_key)
+        expected = android_base.get(android_key)
+        if expected is None:
+            continue
+        for default in sorted(defaults):
+            if default != expected:
+                mismatched_defaults.append(
+                    f"{ios_key} -> {android_key}: {default!r} != {expected!r}"
+                )
+    if mismatched_defaults:
+        raise ValueError(
+            "AI localization defaults differ from Android English: "
+            + "; ".join(mismatched_defaults)
+        )
+
     safe_keys = sorted(source_key_by_key)
     english_mismatch_keys = sorted(
-        key for key in safe_keys if ios_english[key] != android_base[source_key_by_key[key]]
+        key
+        for key in safe_keys
+        if ios_english.get(key) != android_base[source_key_by_key[key]]
     )
     english_by_key = {
         key: android_base[source_key_by_key[key]]
@@ -906,6 +1261,9 @@ def audit_android_shared_translations(
     value_mismatch_by_key: dict[str, list[str]] = {}
     tree_mismatch_by_key: dict[str, list[str]] = {}
 
+    for key in missing_ai_localization_catalog_keys(repo_root, catalog):
+        missing_key_by_key[key] = ["android-catalog"]
+
     for key, expected_value in catalog.english_by_key.items():
         raw_a = ios_english_a.get(key)
         raw_b = ios_english_b.get(key)
@@ -1013,23 +1371,44 @@ def update_ios_strings_file(path: Path, values: dict[str, str]) -> tuple[bool, i
 def sync_android_shared_translations(
     repo_root: Path,
     catalog: AndroidSharedLocalization,
+    *,
+    included_keys: set[str] | None = None,
 ) -> SharedLocalizationSyncResult:
-    """Write Android English and translations for all same-name iOS keys.
+    """Write Android English and translations for selected shared iOS keys.
 
-    The sync covers both `AndBible` and `Localizations` locale trees. English
-    resources are rewritten from Android for every same-name key, while
-    non-English resources are rewritten only where Android has a translated
-    value. It mutates only existing iOS locale directories and returns
-    deterministic write counts for reporting and tests.
+    The sync covers both `AndBible` and `Localizations` locale trees. Passing no
+    key filter preserves the full shared-catalog behavior; a filter limits both
+    English and translated writes to that set. Non-English resources are
+    rewritten only where Android has a translated value. It mutates only
+    existing iOS locale directories and returns deterministic write counts for
+    reporting and tests. A stale Android catalog raises ``ValueError`` before
+    writes begin, preventing a partial locale import.
     """
+    requested_keys = set(catalog.english_by_key) if included_keys is None else included_keys
+    missing_catalog_keys = sorted(requested_keys - set(catalog.english_by_key))
+    if included_keys is None:
+        missing_catalog_keys = sorted(
+            set(missing_catalog_keys) | set(missing_ai_localization_catalog_keys(repo_root, catalog))
+        )
+    if missing_catalog_keys:
+        raise ValueError(
+            "Android localization catalog is missing requested source keys: "
+            + ", ".join(missing_catalog_keys)
+        )
+
     files_changed = 0
     values_written = 0
+    english_values = {
+        key: value
+        for key, value in catalog.english_by_key.items()
+        if key in requested_keys
+    }
 
     for tree in ("AndBible", "Localizations"):
         path = repo_root / tree / "en.lproj" / "Localizable.strings"
         if not path.exists():
             continue
-        changed, written = update_ios_strings_file(path, catalog.english_by_key)
+        changed, written = update_ios_strings_file(path, english_values)
         if changed:
             files_changed += 1
             values_written += written
@@ -1041,7 +1420,11 @@ def sync_android_shared_translations(
     )
 
     for locale in ios_locales:
-        expected_values = catalog.translations_by_locale.get(locale, {})
+        expected_values = {
+            key: value
+            for key, value in catalog.translations_by_locale.get(locale, {}).items()
+            if key in requested_keys
+        }
         if not expected_values:
             continue
         for tree in ("AndBible", "Localizations"):
@@ -1056,6 +1439,24 @@ def sync_android_shared_translations(
     return SharedLocalizationSyncResult(
         files_changed=files_changed,
         values_written=values_written,
+    )
+
+
+def sync_android_ai_translations(
+    repo_root: Path,
+    catalog: AndroidSharedLocalization,
+) -> SharedLocalizationSyncResult:
+    """Write only source-referenced AI translations from the Android catalog.
+
+    The source inventory includes both AI module trees and ``llm_actions``. The
+    shared writer still preserves ordering, comments, and unrelated keys in both
+    iOS localization trees. Missing Android provenance raises ``ValueError``
+    before any locale file is changed.
+    """
+    return sync_android_shared_translations(
+        repo_root,
+        catalog,
+        included_keys=discover_ai_localization_keys(repo_root),
     )
 
 
@@ -1275,6 +1676,16 @@ def main() -> int:
             "Update iOS locale files from Android for same-name keys whose English text matches"
         ),
     )
+    parser.add_argument(
+        "--sync-android-ai-translations",
+        action="store_true",
+        help="Update only source-referenced AI localization keys from Android",
+    )
+    parser.add_argument(
+        "--sync-discrete-security-copy",
+        action="store_true",
+        help="Update runtime Calculator security help from Android plus the iOS limitation",
+    )
     args = parser.parse_args()
 
     if args.write_android_snapshot:
@@ -1327,6 +1738,28 @@ def main() -> int:
         print(f"- android source: {android_source}")
         return 0
 
+    if args.sync_android_ai_translations:
+        result = sync_android_ai_translations(args.repo_root, shared_localization)
+        print("Android AI localization sync summary")
+        print(f"- files changed: {result.files_changed}")
+        print(f"- values written: {result.values_written}")
+        print(f"- source-referenced AI keys: {len(discover_ai_localization_keys(args.repo_root))}")
+        print(f"- android source: {android_source}")
+        return 0
+
+    if args.sync_discrete_security_copy:
+        try:
+            result = sync_discrete_security_localizations(args.repo_root, shared_localization)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print("Runtime Calculator security-copy sync summary")
+        print(f"- files changed: {result.files_changed}")
+        print(f"- values written or removed: {result.values_written}")
+        print(f"- locales checked: {len(LOCALE_TO_ANDROID_VALUES)}")
+        print(f"- android source: {android_source}")
+        return 0
+
     audit = run_audit(args.repo_root, non_english_by_key, android_source, shared_localization)
     locale_pref_audit = audit_locale_pref_contract(args.repo_root, locale_pref_options)
 
@@ -1347,6 +1780,17 @@ def main() -> int:
     }
 
     failures: list[str] = []
+
+    try:
+        discrete_security_failures = audit_discrete_security_localizations(
+            args.repo_root,
+            shared_localization,
+        )
+    except ValueError as exc:
+        discrete_security_failures = [str(exc)]
+    if discrete_security_failures:
+        failures.append("Runtime Calculator security-copy failures:")
+        failures.extend(f"  - {item}" for item in discrete_security_failures)
 
     if audit.tree_mismatches:
         failures.append("Tree consistency failures:")
@@ -1423,6 +1867,7 @@ def main() -> int:
     print(f"- locale_pref supported values: {len(locale_pref_audit.supported_values)}")
     print(f"- locale_pref unavailable Android values: {len(locale_pref_audit.unsupported_values)}")
     print(f"- locale_pref extra iOS-only resource locales: {len(locale_pref_audit.extra_ios_locales)}")
+    print(f"- discrete security-copy locales: {len(LOCALE_TO_ANDROID_VALUES)}")
     if audit.shared_localization is not None:
         print(f"- android shared source keys: {len(audit.shared_localization.safe_keys)}")
         print(f"- android shared explicit mapped keys: {len(ANDROID_SHARED_KEY_MAPPINGS)}")

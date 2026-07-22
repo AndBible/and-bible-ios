@@ -34,9 +34,9 @@ public struct BookmarkListVerseReference: Sendable, Equatable {
 /**
  Displays a searchable, filterable, and sortable list of Bible and generic bookmarks from SwiftData.
 
- `BookmarkListView` is the main bookmark-browser surface. It excludes note-bearing bookmarks that
- belong in the My Notes flow, supports label-chip filtering, search-by-reference text, and
- navigation back into the reader or into a label's study pad.
+ `BookmarkListView` is the main bookmark-browser surface. It keeps note-bearing Bible and generic
+ bookmarks in list membership, supports Android's persisted note/search and sort controls, and
+ emits exact typed navigation targets. It also imports and exports Android's bookmark CSV contract.
 
  Data dependencies:
  - `modelContext` is used for bookmark deletion
@@ -45,7 +45,8 @@ public struct BookmarkListVerseReference: Sendable, Equatable {
  - `labels` queries all labels so the view can build filter chips and label-manager entry points
 
  Side effects:
- - deleting rows or context-menu deletions mutate SwiftData and save immediately
+ - deleting rows, CSV import, or context-menu deletions mutate SwiftData and save immediately
+ - sort, note visibility, and CSV column choices persist through `AppPreferenceRegistry`
  - opening the label manager or label assignment changes bookmark-list navigation route state
  - selecting a bookmark dismisses through the caller-provided navigation callback rather than
    performing navigation directly inside the list
@@ -86,19 +87,43 @@ public struct BookmarkListView: View {
     @Query(sort: \BibleCore.Label.name) private var labels: [BibleCore.Label]
 
     /// Current bookmark sort order.
-    @State private var sortOrder: BookmarkSortOrder = .createdAtDesc
+    @State private var sortOrder: BookmarkSortOrder = .bibleOrder
+
+    /// Android's persisted note-preview/search visibility preference.
+    @State private var showNotes = true
 
     /// Selected label filter, or `nil` when showing all labels.
     @State private var selectedLabelId: UUID?
 
-    /// Search text applied to formatted references and note previews.
+    /// Android note-search text applied only while note previews are enabled.
     @State private var searchText = ""
 
     /// Current bookmark-list route for label management or label assignment.
     @State private var activeBookmarkListRoute: BookmarkListRoute?
 
-    /// Optional callback used to navigate back into the reader for a bookmark.
+    /// Current visible navigation or CSV outcome message.
+    @State private var presentedMessage: BookmarkListPresentedMessage?
+
+    /// Whether Android CSV import's document picker is presented.
+    @State private var showCSVImporter = false
+
+    /// Whether Android CSV export's column selector is presented.
+    @State private var showCSVColumnSelector = false
+
+    /// Whether the destination picker is writing `csvExportDocument`.
+    @State private var showCSVExporter = false
+
+    /// Selected Android CSV columns, restored from the unchecked-column preference before export.
+    @State private var selectedCSVColumns = Set(AndroidBookmarkCSVColumn.allCases)
+
+    /// Immutable encoded document handed to SwiftUI's export picker.
+    @State private var csvExportDocument: BookmarkCSVTransferDocument?
+
+    /// Legacy callback retained only until the parent reader adopts exact typed navigation.
     var onNavigate: ((String, Int) -> Void)?
+
+    /// Exact Bible/generic navigation callback for Android-parity reader wiring.
+    var onNavigateTarget: ((BookmarkNavigationTarget) throws -> Void)?
 
     /// Optional callback used to open a study pad for a selected label.
     var onOpenStudyPad: ((UUID) -> Void)?
@@ -108,7 +133,8 @@ public struct BookmarkListView: View {
 
     /**
      Optional resolver mapping a stored KJVA ordinal into the active module's versification for
-     display and navigation (Android renders list rows in the current Bible's versification).
+     display (Android renders list rows in the current Bible's versification). Exact navigation
+     uses `onNavigateTarget` independently of this presentation-only resolver.
      */
     var activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)?
 
@@ -119,23 +145,26 @@ public struct BookmarkListView: View {
      Creates the bookmark list view.
 
      - Parameters:
-       - onNavigate: Callback invoked when the user opens a bookmark from the list.
+       - onNavigate: Legacy source-compatible callback; exact navigation does not invoke it.
+       - onNavigateTarget: Exact typed callback preferred over the legacy chapter-only callback.
        - onOpenStudyPad: Callback invoked when the user wants to open a selected label's study pad.
        - bibleOrdinalResolver: Optional resolver that maps `(bookName, ordinal)` to a concrete
-         chapter/verse using the active Bible versification.
+         chapter/verse for legacy row display using the active Bible versification.
        - activeReferenceResolver: Optional resolver that maps a stored KJVA ordinal to the active
-         module's versification (book name plus chapter/verse) for display and navigation.
+         module's versification (book name plus chapter/verse) for display only.
        - showsDismissButton: Whether to show the sheet-style Done button; app-owned destination
          routes rely on navigation-stack back chrome instead.
      */
     public init(
         onNavigate: ((String, Int) -> Void)? = nil,
+        onNavigateTarget: ((BookmarkNavigationTarget) throws -> Void)? = nil,
         onOpenStudyPad: ((UUID) -> Void)? = nil,
         bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
         activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil,
         showsDismissButton: Bool = true
     ) {
         self.onNavigate = onNavigate
+        self.onNavigateTarget = onNavigateTarget
         self.onOpenStudyPad = onOpenStudyPad
         self.bibleOrdinalResolver = bibleOrdinalResolver
         self.activeReferenceResolver = activeReferenceResolver
@@ -143,31 +172,28 @@ public struct BookmarkListView: View {
     }
 
     /**
-     Bookmarks after note suppression, label filtering, text filtering, and sort application.
+     Bookmarks after label filtering, note-aware text filtering, and sort application.
      */
     private var filteredBookmarks: [BookmarkListItem] {
         BookmarkListProjection.filteredItems(
             bookmarkListItems,
             selectedLabelId: selectedLabelId,
             searchText: searchText,
-            sortOrder: sortOrder
+            sortOrder: sortOrder,
+            showNotes: showNotes
         )
     }
 
     /// Bookmark rows that belong in the native bookmark browser before label/search filtering.
     private var bookmarkListItems: [BookmarkListItem] {
-        let bibleItems = bibleBookmarks
-            .filter { ($0.notes?.notes ?? "").isEmpty }
-            .map {
+        let bibleItems = bibleBookmarks.map {
                 BookmarkListItem(
                     bibleBookmark: $0,
                     ordinalResolver: bibleOrdinalResolver,
                     activeReferenceResolver: activeReferenceResolver
                 )
             }
-        let genericItems = genericBookmarks
-            .filter { ($0.notes?.notes ?? "").isEmpty }
-            .map(BookmarkListItem.init(genericBookmark:))
+        let genericItems = genericBookmarks.map(BookmarkListItem.init(genericBookmark:))
         return bibleItems + genericItems
     }
 
@@ -217,11 +243,47 @@ public struct BookmarkListView: View {
                         Image(systemName: "tag")
                     }
                     sortMenu
+                    bookmarkActionsMenu
                 }
             }
         }
         .navigationDestination(item: $activeBookmarkListRoute) { route in
             bookmarkListDestination(route)
+        }
+        .onAppear(perform: restoreBookmarkListPreferences)
+        .onChange(of: sortOrder) { _, value in
+            SettingsStore(modelContext: modelContext).setString(.bookmarkSortOrder, value: value.rawValue)
+        }
+        .onChange(of: showNotes) { _, value in
+            if !value { searchText = "" }
+            SettingsStore(modelContext: modelContext).setBool(.bookmarkShowNotes, value: value)
+        }
+        .sheet(isPresented: $showCSVColumnSelector) {
+            BookmarkCSVColumnSelectionView(
+                selectedColumns: $selectedCSVColumns,
+                onExport: prepareCSVExport,
+                onCancel: { showCSVColumnSelector = false }
+            )
+        }
+        .fileImporter(
+            isPresented: $showCSVImporter,
+            allowedContentTypes: BookmarkCSVTransferDocument.readableContentTypes,
+            allowsMultipleSelection: false,
+            onCompletion: importCSVSelection
+        )
+        .fileExporter(
+            isPresented: $showCSVExporter,
+            document: csvExportDocument,
+            contentType: .commaSeparatedText,
+            defaultFilename: csvExportFileName,
+            onCompletion: completeCSVExport
+        )
+        .alert(item: $presentedMessage) { message in
+            Alert(
+                title: Text(message.title),
+                message: Text(message.message),
+                dismissButton: .default(Text(String(localized: "ok", defaultValue: "OK")))
+            )
         }
     }
 
@@ -250,13 +312,16 @@ public struct BookmarkListView: View {
                 labelFilterSection
             }
 
-            bookmarkSearchSection
+            if showNotes {
+                bookmarkSearchSection
+            }
 
             // Bookmark list
             ForEach(filteredBookmarks) { bookmark in
                 BookmarkRow(
                     bookmark: bookmark,
-                    onNavigate: onNavigate,
+                    showNotes: showNotes,
+                    onSelect: { navigate(to: bookmark) },
                     onEditLabels: { activeBookmarkListRoute = .labelAssignment(bookmark.id) }
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -299,10 +364,15 @@ public struct BookmarkListView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
 
+                #if os(iOS)
                 TextField(String(localized: "search_bookmarks"), text: $searchText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .accessibilityIdentifier("bookmarkListSearchField")
+                #else
+                TextField(String(localized: "search_bookmarks"), text: $searchText)
+                    .accessibilityIdentifier("bookmarkListSearchField")
+                #endif
 
                 if !searchText.isEmpty {
                     Button {
@@ -367,20 +437,183 @@ public struct BookmarkListView: View {
     private var sortMenu: some View {
         Menu {
             Picker(String(localized: "sort"), selection: $sortOrder) {
-                Text(String(localized: "sort_bible_order"))
+                SwiftUI.Label(
+                    String(localized: "sort_bible_order"),
+                    systemImage: "arrow.up"
+                )
                     .tag(BookmarkSortOrder.bibleOrder)
                     .accessibilityIdentifier("bookmarkListSortOption::bibleOrder")
-                Text(String(localized: "sort_date_created"))
+                SwiftUI.Label(
+                    String(localized: "sort_bible_order"),
+                    systemImage: "arrow.down"
+                )
+                    .tag(BookmarkSortOrder.bibleOrderDesc)
+                    .accessibilityIdentifier("bookmarkListSortOption::bibleOrderDesc")
+                SwiftUI.Label(
+                    String(localized: "sort_date_created"),
+                    systemImage: "arrow.up"
+                )
+                    .tag(BookmarkSortOrder.createdAt)
+                    .accessibilityIdentifier("bookmarkListSortOption::createdAt")
+                SwiftUI.Label(
+                    String(localized: "sort_date_created"),
+                    systemImage: "arrow.down"
+                )
                     .tag(BookmarkSortOrder.createdAtDesc)
                     .accessibilityIdentifier("bookmarkListSortOption::createdAtDesc")
-                Text(String(localized: "sort_last_updated"))
-                    .tag(BookmarkSortOrder.lastUpdated)
-                    .accessibilityIdentifier("bookmarkListSortOption::lastUpdated")
             }
         } label: {
             Image(systemName: "arrow.up.arrow.down")
         }
         .accessibilityIdentifier("bookmarkListSortMenu")
+    }
+
+    /// Android bookmark presentation and CSV transfer commands.
+    private var bookmarkActionsMenu: some View {
+        Menu {
+            Toggle(
+                String(localized: "show_notes", defaultValue: "Show notes"),
+                isOn: $showNotes
+            )
+            .accessibilityIdentifier("bookmarkListShowNotesToggle")
+
+            Divider()
+
+            Button {
+                showCSVImporter = true
+            } label: {
+                SwiftUI.Label(
+                    String(
+                        format: String(localized: "import_items", defaultValue: "Import %@"),
+                        "CSV"
+                    ),
+                    systemImage: "square.and.arrow.down"
+                )
+            }
+            .accessibilityIdentifier("bookmarkListImportCSVButton")
+
+            Button {
+                presentCSVColumnSelector()
+            } label: {
+                SwiftUI.Label(
+                    String(
+                        format: String(localized: "export_something", defaultValue: "Export %@"),
+                        "CSV"
+                    ),
+                    systemImage: "square.and.arrow.up"
+                )
+            }
+            .disabled(filteredBookmarks.allSatisfy { !$0.isBibleBookmark })
+            .accessibilityIdentifier("bookmarkListExportCSVButton")
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .accessibilityIdentifier("bookmarkListActionsMenu")
+    }
+
+    /**
+     Restores Android's durable sort, note-preview, and unchecked CSV-column preferences.
+
+     - Side effects: Mutates local SwiftUI state from `SettingsStore`.
+     - Failure modes: Unknown sort strings fall back to Android's Bible-order default; unknown CSV
+       columns are ignored so newer Android exports do not hide supported columns.
+     */
+    private func restoreBookmarkListPreferences() {
+        let settings = SettingsStore(modelContext: modelContext)
+        sortOrder = BookmarkSortOrder(rawValue: settings.getString(.bookmarkSortOrder)) ?? .bibleOrder
+        showNotes = settings.getBool(.bookmarkShowNotes)
+        let unchecked = Set(settings.getStringSet(.bookmarkCSVUncheckedColumns))
+        selectedCSVColumns = Set(AndroidBookmarkCSVColumn.allCases.filter {
+            !unchecked.contains($0.rawValue)
+        })
+    }
+
+    /** Opens Android's export-column selector with the persisted selection. */
+    private func presentCSVColumnSelector() {
+        restoreBookmarkListPreferences()
+        showCSVColumnSelector = true
+    }
+
+    /**
+     Encodes the visible Bible subset and advances from column selection to destination selection.
+
+     - Side effects: Persists unchecked columns and populates the export document state.
+     - Failure modes: Encoding failures are shown in an alert and do not open the destination picker.
+     */
+    private func prepareCSVExport() {
+        let settings = SettingsStore(modelContext: modelContext)
+        let unchecked = AndroidBookmarkCSVColumn.allCases
+            .filter { !selectedCSVColumns.contains($0) }
+            .map(\.rawValue)
+        settings.setStringSet(.bookmarkCSVUncheckedColumns, values: unchecked)
+
+        let bookmarks = filteredBookmarks.compactMap { item -> BibleBookmark? in
+            guard case .bible(let bookmark) = item.source else { return nil }
+            return bookmark
+        }
+        do {
+            let data = try AndroidBookmarkCSVCodec.encode(
+                bookmarks: bookmarks,
+                selectedColumns: selectedCSVColumns
+            )
+            csvExportDocument = BookmarkCSVTransferDocument(data: data)
+            showCSVColumnSelector = false
+            showCSVExporter = true
+        } catch {
+            showCSVColumnSelector = false
+            presentedMessage = .error(error.localizedDescription)
+        }
+    }
+
+    /** Handles one document-picker result and commits a valid CSV file atomically. */
+    private func importCSVSelection(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessed { url.stopAccessingSecurityScopedResource() }
+            }
+            let data = try Data(contentsOf: url)
+            let summary = try AndroidBookmarkCSVTransferService(
+                modelContext: modelContext
+            ).importCSV(data)
+            presentedMessage = .success(String.localizedStringWithFormat(
+                String(
+                    localized: "csv_import_success",
+                    defaultValue: "Import completed: %1$ld created, %2$ld updated"
+                ),
+                summary.created,
+                summary.updated
+            ))
+        } catch {
+            presentedMessage = .error(error.localizedDescription)
+        }
+    }
+
+    /** Converts the export picker's terminal result into a visible success or failure message. */
+    private func completeCSVExport(_ result: Result<URL, Error>) {
+        switch result {
+        case .success:
+            let count = filteredBookmarks.filter(\.isBibleBookmark).count
+            presentedMessage = .success(String.localizedStringWithFormat(
+                String(
+                    localized: "csv_export_success",
+                    defaultValue: "Exported %ld bookmarks to CSV"
+                ),
+                count
+            ))
+        case .failure(let error):
+            presentedMessage = .error(error.localizedDescription)
+        }
+        csvExportDocument = nil
+    }
+
+    /// Timestamped Android-compatible default filename for the destination picker.
+    private var csvExportFileName: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm"
+        return "bible_bookmarks_\(formatter.string(from: Date())).csv"
     }
 
     /// Horizontal label-filter chips plus the selected-label study-pad action.
@@ -439,7 +672,7 @@ public struct BookmarkListView: View {
      */
     private func deleteBookmarks(at offsets: IndexSet) {
         let toDelete = offsets.map { filteredBookmarks[$0] }
-        try? BookmarkListMutation.deleteItems(toDelete, in: modelContext)
+        _ = try? BookmarkListMutation.deleteItems(toDelete, in: modelContext)
     }
 
     /**
@@ -453,7 +686,45 @@ public struct BookmarkListView: View {
        - silently discards save failures because the list has no retry UI for destructive actions
      */
     private func deleteBookmark(_ bookmark: BookmarkListItem) {
-        try? BookmarkListMutation.deleteItems([bookmark], in: modelContext)
+        _ = try? BookmarkListMutation.deleteItems([bookmark], in: modelContext)
+    }
+
+    /**
+     Emits one exact bookmark destination and dismisses only after successful parent handling.
+
+     The legacy Bible callback remains temporarily source-compatible for the parent reader but is
+     never invoked. Parent integration must provide `onNavigateTarget` so exact verses, source
+     versification, and generic keys remain intact end to end.
+
+     - Parameter bookmark: Selected normalized bookmark row.
+     - Side effects: Invokes a navigation callback, may dismiss the list, or presents an error.
+     - Failure modes: Corrupt targets, missing generic handlers, and parent mapping failures remain
+       visible and keep the bookmark list open.
+     */
+    private func navigate(to bookmark: BookmarkListItem) {
+        guard let target = bookmark.exactNavigationTarget else {
+            presentedMessage = .error(
+                bookmark.navigationError?.localizedDescription ?? String(
+                    localized: "error_occurred",
+                    defaultValue: "An error has occurred"
+                )
+            )
+            return
+        }
+        if let onNavigateTarget {
+            do {
+                try onNavigateTarget(target)
+                dismiss()
+            } catch {
+                presentedMessage = .error(error.localizedDescription)
+            }
+            return
+        }
+
+        presentedMessage = .error(String(
+            localized: "error_occurred",
+            defaultValue: "An error has occurred"
+        ))
     }
 
     /**
@@ -467,8 +738,8 @@ public struct BookmarkListView: View {
         ordinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
         activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil
     ) -> String {
-        // Prefer the active module's versification (Android renders list rows in the current Bible);
-        // fall back to KJVA numbering when no active module resolver is available.
+        // Prefer the active module's versification for Android-parity display; exact navigation is
+        // emitted separately through the typed target contract.
         let resolve: (Int) -> (bookName: String, reference: BookmarkListVerseReference)? = { ordinal in
             activeReferenceResolver?(ordinal) ?? kjvaVerseReference(ordinal: ordinal)
         }
@@ -485,19 +756,21 @@ public struct BookmarkListView: View {
             )
         }
 
-        let bookName = bookmark.book ?? "Unknown"
-        let startReference = ordinalResolver?(bookName, bookmark.ordinalStart)
-            ?? compatibilityVerseReference(ordinal: bookmark.ordinalStart)
-        // Normalize: treat endOrdinal <= 0 or <= startOrdinal as single verse
-        let effectiveEnd = bookmark.ordinalEnd > bookmark.ordinalStart ? bookmark.ordinalEnd : bookmark.ordinalStart
-        let endReference = ordinalResolver?(bookName, effectiveEnd)
-            ?? compatibilityVerseReference(ordinal: effectiveEnd)
-
-        return formattedBibleReference(
-            startBookName: bookName,
-            startReference: startReference,
-            endBookName: bookName,
-            endReference: endReference
+        let legacyBookName = bookmark.book?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let effectiveEnd = bookmark.ordinalEnd > 0 ? bookmark.ordinalEnd : bookmark.ordinalStart
+        if !legacyBookName.isEmpty,
+           let startReference = ordinalResolver?(legacyBookName, bookmark.ordinalStart),
+           let endReference = ordinalResolver?(legacyBookName, effectiveEnd) {
+            return formattedBibleReference(
+                startBookName: legacyBookName,
+                startReference: startReference,
+                endBookName: legacyBookName,
+                endReference: endReference
+            )
+        }
+        return String(
+            localized: "error_occurred",
+            defaultValue: "An error has occurred"
         )
     }
 
@@ -551,18 +824,6 @@ public struct BookmarkListView: View {
     }
 
     /**
-     Compatibility fallback for no-module bookmark list previews.
-
-     Real rows should resolve through the KJVA columns first. The injected resolver and this
-     fallback remain for malformed legacy rows that predate Android-compatible bookmark storage.
-     */
-    fileprivate static func compatibilityVerseReference(ordinal: Int) -> BookmarkListVerseReference {
-        let chapter = max(1, ((ordinal - 1) / 40) + 1)
-        let verse = max(1, ordinal - ((chapter - 1) * 40))
-        return BookmarkListVerseReference(chapter: chapter, verse: verse)
-    }
-
-    /**
      Converts a generic bookmark target into user-visible list text.
 
      - Parameter bookmark: Generic bookmark whose module/key should be rendered.
@@ -586,9 +847,9 @@ public struct BookmarkListView: View {
  Pure BookmarkList filtering, sorting, and accessibility-state projection.
 
  `BookmarkListView` owns SwiftUI rendering and navigation. This helper owns the data projection
- that Android parity depends on: label filtering, in-content search, sort order, and the compact
- state exported for UI automation. Keeping it separate lets package tests protect the contract
- without launching the app.
+ that Android parity depends on: label filtering, note-only search while notes are shown, sort
+ order, and the compact state exported for UI automation. Keeping it separate lets package tests
+ protect the contract without launching the app.
  */
 enum BookmarkListProjection {
     /**
@@ -597,8 +858,9 @@ enum BookmarkListProjection {
      - Parameters:
        - items: Normalized bookmark rows before UI filtering.
        - selectedLabelId: Optional selected label chip.
-       - searchText: Current in-content search query.
+       - searchText: Current note-search query.
        - sortOrder: Active Android-compatible bookmark sort order.
+       - showNotes: Whether Android's note preview and note-search mode is enabled.
      - Returns: Rows in the order the bookmark list should render.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
@@ -607,7 +869,8 @@ enum BookmarkListProjection {
         _ items: [BookmarkListItem],
         selectedLabelId: UUID?,
         searchText: String,
-        sortOrder: BookmarkSortOrder
+        sortOrder: BookmarkSortOrder,
+        showNotes: Bool = true
     ) -> [BookmarkListItem] {
         var result = items
 
@@ -615,26 +878,104 @@ enum BookmarkListProjection {
             result = result.filter { $0.labels.contains { $0.id == selectedLabelId } }
         }
 
-        if !searchText.isEmpty {
-            result = result.filter { $0.searchableText.localizedCaseInsensitiveContains(searchText) }
+        if showNotes, !searchText.isEmpty {
+            result = result.filter {
+                $0.searchableText.localizedCaseInsensitiveContains(searchText)
+            }
         }
+
+        var bibleItems = result.filter(\.isBibleBookmark)
+        let genericItems = result.filter { !$0.isBibleBookmark }.sorted(by: genericBookmarkPrecedes)
 
         switch sortOrder {
         case .bibleOrder:
-            result.sort { compareItems($0, $1, by: \.documentSortKey, ascending: true) }
+            bibleItems.sort { bibleDocumentOrderPrecedes($0, $1, ascending: true) }
         case .bibleOrderDesc:
-            result.sort { compareItems($0, $1, by: \.documentSortKey, ascending: false) }
+            bibleItems.sort { bibleDocumentOrderPrecedes($0, $1, ascending: false) }
         case .createdAt:
-            result.sort { compareItems($0, $1, by: \.createdAt, ascending: true) }
+            bibleItems.sort { compareItems($0, $1, by: \.createdAt, ascending: true) }
         case .createdAtDesc:
-            result.sort { compareItems($0, $1, by: \.createdAt, ascending: false) }
+            bibleItems.sort { compareItems($0, $1, by: \.createdAt, ascending: false) }
         case .lastUpdated:
-            result.sort { compareItems($0, $1, by: \.lastUpdatedOn, ascending: false) }
+            bibleItems.sort { compareItems($0, $1, by: \.lastUpdatedOn, ascending: true) }
         case .orderNumber:
-            result.sort { compareItems($0, $1, by: \.documentSortKey, ascending: true) }
+            if let selectedLabelId {
+                bibleItems.sort { lhs, rhs in
+                    let lhsOrder = lhs.orderNumber(for: selectedLabelId) ?? -1
+                    let rhsOrder = rhs.orderNumber(for: selectedLabelId) ?? -1
+                    if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+                    return bibleDocumentOrderPrecedes(lhs, rhs, ascending: true)
+                }
+            } else {
+                bibleItems.sort { bibleDocumentOrderPrecedes($0, $1, ascending: true) }
+            }
         }
 
-        return result
+        return bibleItems + genericItems
+    }
+
+    /**
+     Compares Bible rows using Android's KJVA ordinal and text-offset ordering.
+
+     - Parameters:
+       - lhs: Left-hand Bible row.
+       - rhs: Right-hand Bible row.
+       - ascending: Whether ordinal and non-null offset values increase or decrease.
+     - Returns: `true` when `lhs` precedes `rhs` in Android Bible order.
+     - Side effects: None.
+     - Failure modes: Non-Bible rows sort by stable UUID only; callers normally pre-filter them.
+     */
+    private static func bibleDocumentOrderPrecedes(
+        _ lhs: BookmarkListItem,
+        _ rhs: BookmarkListItem,
+        ascending: Bool
+    ) -> Bool {
+        guard case .bible(let lhsBookmark) = lhs.source,
+              case .bible(let rhsBookmark) = rhs.source else {
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+        if lhsBookmark.kjvOrdinalStart != rhsBookmark.kjvOrdinalStart {
+            return ascending
+                ? lhsBookmark.kjvOrdinalStart < rhsBookmark.kjvOrdinalStart
+                : lhsBookmark.kjvOrdinalStart > rhsBookmark.kjvOrdinalStart
+        }
+        if lhsBookmark.startOffset != rhsBookmark.startOffset {
+            switch (lhsBookmark.startOffset, rhsBookmark.startOffset) {
+            case (nil, _?): return true
+            case (_?, nil): return false
+            case let (lhsOffset?, rhsOffset?):
+                return ascending ? lhsOffset < rhsOffset : lhsOffset > rhsOffset
+            case (nil, nil): break
+            }
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    /**
+     Compares generic rows using Android's fixed `bookInitials, key` query order.
+
+     - Parameters:
+       - lhs: Left-hand generic row.
+       - rhs: Right-hand generic row.
+     - Returns: `true` when `lhs` precedes `rhs`, with UUID as a deterministic duplicate tie-breaker.
+     - Side effects: None.
+     - Failure modes: Non-generic rows sort by stable UUID only; callers normally pre-filter them.
+     */
+    private static func genericBookmarkPrecedes(
+        _ lhs: BookmarkListItem,
+        _ rhs: BookmarkListItem
+    ) -> Bool {
+        guard case .generic(let lhsBookmark) = lhs.source,
+              case .generic(let rhsBookmark) = rhs.source else {
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+        if lhsBookmark.bookInitials != rhsBookmark.bookInitials {
+            return lhsBookmark.bookInitials < rhsBookmark.bookInitials
+        }
+        if lhsBookmark.key != rhsBookmark.key {
+            return lhsBookmark.key < rhsBookmark.key
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 
     /**
@@ -807,9 +1148,6 @@ struct BookmarkListItem: Identifiable {
     /// Text searched by the bookmark list search field.
     let searchableText: String
 
-    /// Stable document-order key used by sort options.
-    let documentSortKey: Int
-
     /// Bookmark creation timestamp.
     let createdAt: Date
 
@@ -825,12 +1163,41 @@ struct BookmarkListItem: Identifiable {
     /// Labels assigned to the bookmark.
     let labels: [BibleCore.Label]
 
-    /// Optional reader navigation target for Bible bookmarks.
+    /// Exact Bible or generic destination emitted to the parent reader.
+    let exactNavigationTarget: BookmarkNavigationTarget?
+
+    /// Fail-closed reason why `exactNavigationTarget` could not be created.
+    let navigationError: BookmarkNavigationTargetError?
+
+    /// Legacy chapter-only target retained for source compatibility with existing package tests.
     let navigationTarget: (bookName: String, chapter: Int)?
 
     /// Identifier-safe row reference segment used by UI automation.
     var accessibilitySegment: String {
         bookmarkListAccessibilitySegment(reference)
+    }
+
+    /// Whether this row belongs to Android's Bible-first bookmark result partition.
+    var isBibleBookmark: Bool {
+        if case .bible = source { return true }
+        return false
+    }
+
+    /**
+     Returns the StudyPad junction order for one selected label.
+
+     - Parameter labelID: Label whose junction controls Android `ORDER_NUMBER` sorting.
+     - Returns: Persisted junction order, or `nil` when the row is not attached to that label.
+     - Side effects: None.
+     - Failure modes: Missing/deleted relationships return `nil`.
+     */
+    func orderNumber(for labelID: UUID) -> Int? {
+        switch source {
+        case .bible(let bookmark):
+            return bookmark.bookmarkToLabels?.first { $0.label?.id == labelID }?.orderNumber
+        case .generic(let bookmark):
+            return bookmark.bookmarkToLabels?.first { $0.label?.id == labelID }?.orderNumber
+        }
     }
 
     /// Creates a normalized row for one Bible bookmark.
@@ -848,15 +1215,27 @@ struct BookmarkListItem: Identifiable {
         self.id = bookmark.id
         self.source = .bible(bookmark)
         self.reference = reference
-        self.searchableText = "\(reference) \(noteText)"
-        self.documentSortKey = bookmark.kjvOrdinalStart
+        self.searchableText = noteText
         self.createdAt = bookmark.createdAt
         self.lastUpdatedOn = bookmark.lastUpdatedOn
         self.customIcon = bookmark.customIcon
         self.noteText = noteText
         self.labels = bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
-        // Navigate in the active module's versification (Android's list navigation); fall back to
-        // KJVA numbering when no active module resolver is available.
+        do {
+            self.exactNavigationTarget = try BookmarkNavigationTargetResolver.resolve(bookmark)
+            self.navigationError = nil
+        } catch let error as BookmarkNavigationTargetError {
+            self.exactNavigationTarget = nil
+            self.navigationError = error
+        } catch {
+            self.exactNavigationTarget = nil
+            self.navigationError = .invalidBibleOrdinals(
+                start: bookmark.kjvOrdinalStart,
+                end: bookmark.kjvOrdinalEnd
+            )
+        }
+
+        // This projection exists only until the parent adopts `onNavigateTarget`; it never guesses.
         if let target = activeReferenceResolver?(bookmark.kjvOrdinalStart)
             ?? BookmarkListView.kjvaVerseReference(ordinal: bookmark.kjvOrdinalStart) {
             self.navigationTarget = (
@@ -864,13 +1243,7 @@ struct BookmarkListItem: Identifiable {
                 chapter: target.reference.chapter
             )
         } else {
-            let bookName = bookmark.book ?? "Genesis"
-            let resolvedStart = ordinalResolver?(bookName, bookmark.ordinalStart)
-                ?? BookmarkListView.compatibilityVerseReference(ordinal: bookmark.ordinalStart)
-            self.navigationTarget = (
-                bookName: bookName,
-                chapter: resolvedStart.chapter
-            )
+            self.navigationTarget = nil
         }
     }
 
@@ -881,13 +1254,22 @@ struct BookmarkListItem: Identifiable {
         self.id = bookmark.id
         self.source = .generic(bookmark)
         self.reference = reference
-        self.searchableText = "\(reference) \(noteText)"
-        self.documentSortKey = bookmark.ordinalStart
+        self.searchableText = noteText
         self.createdAt = bookmark.createdAt
         self.lastUpdatedOn = bookmark.lastUpdatedOn
         self.customIcon = bookmark.customIcon
         self.noteText = noteText
         self.labels = bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
+        do {
+            self.exactNavigationTarget = try BookmarkNavigationTargetResolver.resolve(bookmark)
+            self.navigationError = nil
+        } catch let error as BookmarkNavigationTargetError {
+            self.exactNavigationTarget = nil
+            self.navigationError = error
+        } catch {
+            self.exactNavigationTarget = nil
+            self.navigationError = .missingGenericKey
+        }
         self.navigationTarget = nil
     }
 }
@@ -904,8 +1286,11 @@ private struct BookmarkRow: View {
     /// Bookmark being rendered.
     let bookmark: BookmarkListItem
 
-    /// Callback used to navigate to the bookmark's passage.
-    var onNavigate: ((String, Int) -> Void)?
+    /// Whether note previews are visible under Android's persisted setting.
+    let showNotes: Bool
+
+    /// Callback used to resolve or visibly reject the exact bookmark target.
+    var onSelect: () -> Void
 
     /// Callback used to open label editing for the bookmark.
     var onEditLabels: (() -> Void)?
@@ -919,16 +1304,11 @@ private struct BookmarkRow: View {
      Builds the main row button that navigates back into the reader for the bookmark passage.
 
      - Returns: Row button containing the bookmark summary content.
-     - Side effects:
-       - invokes `onNavigate` with the bookmark's book/chapter when tapped
+     - Side effects: Invokes `onSelect` when tapped.
      - Failure modes: This helper cannot fail.
      */
     private var selectionButton: some View {
-        Button {
-            if let target = bookmark.navigationTarget {
-                onNavigate?(target.bookName, target.chapter)
-            }
-        } label: {
+        Button(action: onSelect) {
             VStack(alignment: .leading, spacing: 4) {
                 headerRow
                 notePreview
@@ -976,7 +1356,7 @@ private struct BookmarkRow: View {
     @ViewBuilder
     /// Optional note-preview text shown when the bookmark has saved note content.
     private var notePreview: some View {
-        if !bookmark.noteText.isEmpty {
+        if showNotes, !bookmark.noteText.isEmpty {
             Text(bookmark.noteText)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -1100,4 +1480,32 @@ private func bookmarkListAccessibilitySegment(_ value: String) -> String {
     }
     let collapsed = mapped.joined().replacingOccurrences(of: "_+", with: "_", options: .regularExpression)
     return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+}
+
+/** Immutable success or failure alert presented by bookmark navigation and CSV transfer. */
+private struct BookmarkListPresentedMessage: Identifiable {
+    /// Unique presentation identity so repeated equivalent outcomes remain visible.
+    let id = UUID()
+
+    /// Localized alert title.
+    let title: String
+
+    /// User-visible outcome detail.
+    let message: String
+
+    /** Creates a visible failure outcome without side effects. */
+    static func error(_ message: String) -> BookmarkListPresentedMessage {
+        BookmarkListPresentedMessage(
+            title: String(localized: "error_occurred", defaultValue: "Error"),
+            message: message
+        )
+    }
+
+    /** Creates a visible successful transfer outcome without side effects. */
+    static func success(_ message: String) -> BookmarkListPresentedMessage {
+        BookmarkListPresentedMessage(
+            title: String(localized: "success", defaultValue: "Success"),
+            message: message
+        )
+    }
 }

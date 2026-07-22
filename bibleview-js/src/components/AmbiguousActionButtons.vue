@@ -29,7 +29,18 @@
     </template>
 
     <!-- More options button -->
-    <div v-if="secondaryButtons.length > 0" class="large-action" @click.stop="showMoreMenu = true" @touchstart.stop>
+    <div
+      v-if="secondaryButtons.length > 0"
+      class="large-action"
+      role="button"
+      tabindex="0"
+      :aria-label="strings.more"
+      :title="strings.more"
+      @click.stop="showMoreMenu = true"
+      @keydown.enter.stop.prevent="showMoreMenu = true"
+      @keydown.space.stop.prevent="showMoreMenu = true"
+      @touchstart.stop
+    >
       <FontAwesomeIcon :icon="faEllipsisV"/>
       <div class="title">{{ strings.more }}</div>
     </div>
@@ -48,6 +59,15 @@
 </template>
 
 <script lang="ts" setup>
+/**
+ * Presents Android's category-aware action menu for one Bible or generic-document selection.
+ *
+ * @param selectionInfo Exact module, document-key, and inclusive ordinal metadata for the selection.
+ * @param hasActions Whether the containing modal should use its action-bearing layout.
+ * @fires close After an action finishes capturing the current selection or requests dismissal.
+ * @remarks Button visibility reacts to native configuration and per-category disabled-action lists.
+ * Native bridge calls occur only after explicit activation; malformed selection metadata fails closed.
+ */
 import {computed, inject, nextTick, onMounted, ref} from "vue";
 import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
 import {useCommon} from "@/composables";
@@ -87,15 +107,25 @@ const buttonRefs = ref<any[]>([]);
 // How many buttons to show before using a "more" menu
 const visibleButtonCount = ref(4);
 
+/**
+ * Computes the Android-compatible commands reachable for the active selection category.
+ *
+ * The result reacts to selection metadata, experimental-feature state, AI provider availability,
+ * and category-specific disabled-action preferences. It mutates no native or DOM state and hides AI
+ * fail-closed when native configuration is missing or false.
+ */
 const modalButtons = computed<ModalButtonId[]>(() => {
     let allButtons: ModalButtonId[]
     if(verseInfo.value) {
-         allButtons = ["BOOKMARK", "BOOKMARK_NOTES", "MY_NOTES", "SHARE", "COMPARE", "SPEAK", "MEMORIZE", "ADD_PARAGRAPH_BREAK"];
+         allButtons = ["BOOKMARK", "BOOKMARK_NOTES", "MY_NOTES", "SHARE", "COMPARE", "SPEAK", "MEMORIZE", "ADD_PARAGRAPH_BREAK", "LLM_ACTION"];
     } else {
-         allButtons = ["BOOKMARK", "BOOKMARK_NOTES", "SPEAK", "ADD_PARAGRAPH_BREAK"];
+         allButtons = ["BOOKMARK", "BOOKMARK_NOTES", "SPEAK", "ADD_PARAGRAPH_BREAK", "LLM_ACTION"];
     }
     if (!isExperimentalFeatureEnabled(appSettings, "add_paragraph_break")) {
         allButtons = allButtons.filter(b => b !== "ADD_PARAGRAPH_BREAK");
+    }
+    if (!appSettings.llmConfigured) {
+        allButtons = allButtons.filter(b => b !== "LLM_ACTION");
     }
     let disabledButtons: ModalButtonId[];
     if(verseInfo.value) {
@@ -173,6 +203,14 @@ function hasButton(buttonId: ModalButtonId) {
     return modalButtons.value.includes(buttonId);
 }
 
+/**
+ * Dispatches one visible selection command through its category-specific handler.
+ *
+ * @param buttonId Android-compatible identifier selected by pointer or keyboard activation.
+ * @returns Nothing; the selected handler owns native bridge calls and modal dismissal.
+ * @remarks The overflow menu closes before dispatch. Unknown values are impossible through the
+ * `ModalButtonId` contract and therefore produce no side effect.
+ */
 function handleButtonClick(buttonId: ModalButtonId) {
     // Close the more menu when an action is selected
     showMoreMenu.value = false;
@@ -201,6 +239,9 @@ function handleButtonClick(buttonId: ModalButtonId) {
             break;
         case 'ADD_PARAGRAPH_BREAK':
             addParagraphBreak();
+            break;
+        case 'LLM_ACTION':
+            triggerAISelectionAction();
             break;
     }
 }
@@ -266,6 +307,38 @@ function addParagraphBreak() {
         android.addParagraphBreakBookmark(verseInfo.value.bookInitials, startOrdinal.value, endOrdinal.value);
     } else if(ordinalInfo.value) {
         android.addGenericParagraphBreakBookmark(ordinalInfo.value.bookInitials, ordinalInfo.value.osisRef, startOrdinal.value, endOrdinal.value);
+    }
+    emit("close");
+}
+
+/**
+ * Routes the current DOM selection through Android's category-specific AI bridge method.
+ *
+ * Bible selections preserve module initials and exact inclusive verse ordinals. Generic selections
+ * additionally preserve the document key. The browser selection text is captured before the modal
+ * closes so native prompt composition receives the same highlighted text Android supplies.
+ *
+ * @returns Nothing; emits `close` after routing or after a fail-closed metadata miss.
+ * @remarks Missing selection metadata emits no bridge call. An intentionally empty browser
+ * selection remains an empty string, and the function performs no asynchronous work.
+ */
+function triggerAISelectionAction() {
+    const selectedText = window.getSelection()?.toString() ?? "";
+    if (verseInfo.value) {
+        android.llmAction(
+            verseInfo.value.bookInitials,
+            startOrdinal.value,
+            endOrdinal.value,
+            selectedText,
+        );
+    } else if (ordinalInfo.value) {
+        android.llmActionGeneric(
+            ordinalInfo.value.bookInitials,
+            ordinalInfo.value.osisRef,
+            startOrdinal.value,
+            endOrdinal.value,
+            selectedText,
+        );
     }
     emit("close");
 }

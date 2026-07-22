@@ -167,7 +167,7 @@
 "import_export" = "Import & Export";
 "settings_security" = "Configurações para perseguidos";
 "discrete_mode" = "Ocultar símbolos religiosos";
-"discrete_mode_description" = "When enabled, the app always launches as a calculator. Tap = seven times to temporarily access the Bible. Disable this toggle to return to normal.";
+"discrete_mode_description" = "Changes only the launcher icon. AndBible remains visible as the app name in system app information.";
 "settings_about" = "Sobre";
 "version" = "Version";
 "export" = "Exportar";
@@ -440,10 +440,6 @@
 "calculator_pin_description" = "Código PIN para acessar o aplicativo quando a calculadora é exibida.";
 "discrete_help_title" = "Leia primeiro!";
 "discrete_help_summary" = "Instruções para configurações e informações específicas sobre o modo discreto.";
-"discrete_help_par1" = "Before entering the app, the calculator screen is displayed. In it, you can do standard calculus, and when you want to enter the app, you just type your PIN code (default is 1234) and then press the = button.";
-"discrete_help_par2" = "You can set up a custom PIN code by Calculator PIN setting. You can also tap = seven times quickly as a fallback.";
-"discrete_help_par3" = "The 'Hide religious symbols' setting changes the app icon to a calculator icon in the launcher.";
-"discrete_help_ios_note" = "Note: On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
 
 "prefs_behavior_customization_cat" = "Comportamento da aplicação";
 "prefs_display_customization_cat" = "Aparência";
@@ -514,7 +510,6 @@
 
 "prefs_volume_keys_scroll_title" = "Botões de volume rolam";
 "prefs_volume_keys_scroll_summary" = "Use volume para cima/baixo para rolar o texto da Bíblia";
-"prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Feitos experimentais";
 "prefs_experimental_features_summary" = "Selecionar quais recursos experimentais ativar. Esses recursos ainda estão em desenvolvimento e podem ser alterados ou removidos";
 "experimental_feature_bookmark_edit_actions" = "Ações de edição de marcadores";
@@ -642,3 +637,389 @@
 /* Android shared translations */
 "plan_duplicate_user_plan" = "Existe um plano de leitura do usuário no cartão SD jsword/readingplan com o mesmo nome que um plano interno. Não pode ser listado aqui. Mude o nome do arquivo, deixando sua extensão como .properties";
 "error_no_content" = "Nenhum conteúdo para o versículo selecionado";
+
+/* Android shared translations */
+"calculator_par1" = "Antes de entrar no aplicativo, a tela da calculadora é exibida.";
+"calculator_par2" = "Nele, você pode fazer cálculo padrão, e quando quiser entrar no aplicativo, você basta digitar seu código PIN (o padrão é 1234) e pressionar o botão \"=\".";
+"calculator_par3" = "Você pode configurar um código PIN personalizado pela configuração \"PIN da calculadora\".";
+"give_passphrase_for_module" = "O documento %@ está encriptado e precisa de senha para ser desbloqueado";
+"show_unlock_info" = "Informação de módulo e de desbloqueio";
+
+/* Android shared translations */
+
+/* Android shared translations */
+"extracting_zip_file" = "Extraindo arquivo zip agora...";
+"install_failed_reason" = "Falha na instalação do módulo devido a seguinte razão: %@";
+"install_zip_successfull" = "Módulo instalado com sucesso";
+"module_install_phase_committing" = "Aguarde. Carregando módulos de um arquivo.";
+"module_install_phase_downloading" = "Baixar";
+"module_install_phase_queued" = "Por favor espere...";
+"storage_space_warning" = "Espaço de armazenamento insuficiente";
+
+/* Android shared translations */
+"error_occurred" = "Ocorreu um erro";
+
+/* Android shared translations */
+"memorize_tab_memorization" = "Memorização";
+"memorize_tab_reading" = "Leitura";
+"reading_progress_active_days" = "dias ativos";
+"reading_progress_bible_heatmap" = "Visão geral da Bíblia";
+"reading_progress_calendar" = "Atividade de leitura";
+"reading_progress_chapters_read" = "capítulos lidos";
+"reading_progress_cycle" = "Ciclo %d";
+"reading_progress_history_for" = "Progresso de leitura para %1$@";
+"reading_progress_history_no_entries" = "Nenhum registro de leitura para esta seleção.";
+"reading_progress_history_title" = "Histórico de Leitura";
+"reading_progress_history_version_unknown" = "Versão desconhecida";
+"reading_progress_new_cycle" = "Novo ciclo";
+"reading_progress_new_cycle_confirm" = "Iniciar um novo ciclo de leitura? Isso começará a rastrear seu progresso do zero, preservando os dados do ciclo anterior.";
+"reading_progress_new_testament" = "Novo Testamento";
+"reading_progress_next_cycle" = "Próximo ciclo";
+"reading_progress_old_testament" = "Antigo Testamento";
+"reading_progress_overall" = "%@%% da Bíblia lida";
+"reading_progress_percent_read_scale" = "Percentual\nLido";
+"reading_progress_previous_cycle" = "Ciclo anterior";
+"reading_progress_read_count_scale" = "Qtde\nLida";
+"reading_progress_title" = "Progresso de leitura/memorização";
+
+/* Android shared translations */
+"conf_change_chapter" = "Mudanças de capítulo";
+"conf_change_title" = "Títulos";
+"conf_replace_divinename" = "Substituir nome divino por Javé";
+"conf_save_playback_settings_to_bookmarks" = "Guardar as configurações de reprodução nos marcadores";
+"conf_speak_auto_bookmark" = "Marcadores automáticos";
+"conf_speak_footnotes" = "Notas de rodapé";
+"conf_speak_sleep_timer" = "Definir o temporizador";
+"conf_speak_synchronize" = "O texto segue a fala";
+"forward" = "Avançar";
+"playback_settings_title" = "Configurações de reprodução";
+"rewind" = "Retroceder";
+"speak_bookmarks_menu_title" = "Falar a partir de um marcador";
+"speak_next" = "Próximo";
+"speak_previous" = "Anterior";
+"speak_settings_title" = "Configurações gerais para a fala";
+
+/* Android shared translations */
+"sleep_timer_title" = "Temporizador em minutos";
+"speak_beginning_of_passage" = "Escolher o início da passagem";
+"speak_ending_of_passage" = "Escolher o fim da passagem";
+"speak_ending_verse_must_be_later" = "O versículo final deve ser posterior ao versículo inicial";
+"speak_verse_range_to_repeat" = "Escolher intervalo de versículos para repetir";
+
+/* Android shared translations */
+"tts_lang_not_available" = "Idioma não disponível";
+
+/* Android shared translations */
+"ai_unknown_prompt" = "IA";
+"description" = "Descrição";
+"errorTitle" = "Ocorreu um erro";
+"error_executing_search" = "Erro ao executar a pesquisa";
+"export_something" = "Exportar %@";
+"import_items" = "Importar %@";
+"install_zip_module" = "Instalar módulo bíblico";
+"my_document_content_type_label" = "Tipo de conteúdo";
+"my_document_create_title" = "Criar novo documento";
+"my_document_import_document" = "Importar arquivos como documento";
+"my_document_new_name" = "Documento %d";
+"my_document_new_page_name" = "Página %1$d";
+"my_document_rename_title" = "Renomear documento";
+"my_document_save_changes" = "Salvar alterações?";
+"overwrite" = "Sim";
+"package_directory" = "Diretório de pacotes (arquivos ZIP)";
+"read" = "Leitura";
+"reading_plan_set_current_day" = "Definir como dia atual...";
+"reading_plan_set_start_date" = "Definir data de início";
+"search_all_words" = "Todas as palavras";
+"search_any_word" = "Qualquer palavra";
+"search_fts_query" = "Sintaxe de consulta";
+"search_phrase" = "Frase";
+"search_words_group_prompt" = "Encontrar versículos";
+"show_notes" = "Mostrar notas";
+"speak_book_changed" = "Livro alterado";
+"speak_chapter_changed" = "Capítulo";
+"success" = "Feito";
+"summary" = "Resumo";
+"undo" = "Cancelar";
+
+/* Android shared translations */
+"my_document_no_description" = "Sem descrição";
+
+/* Android shared translations */
+"error_key_not_in_document" = "Não encontrado no documento";
+"my_document_cannot_delete_ai_documents" = "Documentos de IA não podem ser excluídos enquanto contiverem páginas. Exclua as páginas primeiro.";
+"my_document_create_page_title" = "Nova página";
+"my_document_import_empty_selection" = "Nenhum arquivo importável selecionado";
+"system_items1" = "Mais";
+
+/* Android shared translations */
+"no_indexed_bible_with_strongs_ref" = "Você deve fazer baixar uma bíblia contendo números do dicionário Strong e baixar o índice através da Pesquisa";
+
+/* Android shared translations */
+"add_model" = "Adicionar modelo";
+"agent_already_running" = "Um agente de IA já está em execução. Aguarde ou pare-o primeiro.";
+"agent_log_cancelled" = "Cancelado";
+"agent_log_completed" = "Concluído";
+"agent_log_executing" = "Executando: %@";
+"agent_log_idle" = "Assistente de IA";
+"agent_log_iteration" = "Iteração %d";
+"agent_log_model_not_configured" = "Nenhum modelo configurado";
+"agent_log_tool_failed" = "Ferramenta %@ falhou";
+"agent_log_view_raw" = "Ver log bruto do LLM";
+"agent_max_iterations_title" = "Máximo de iterações do agente";
+"agent_permission_mode_summary" = "Controla quando a confirmação do usuário é necessária antes de operações de escrita da IA";
+"agent_permission_title" = "Permissão do Agente";
+"ai_add_provider" = "Adicionar provedor";
+"ai_advanced_category" = "Avançado";
+"ai_agent_notification_running" = "Agente de IA trabalhando…";
+"ai_behavior_category" = "Comportamento";
+"ai_connection_settings" = "Configurações de conexão";
+"ai_disclaimer_approach" = "O AndBible usa principalmente a IA para processar textos dos documentos que você instalou — comentários, dicionários e outros módulos — em vez de depender dos próprios dados de treinamento do modelo.";
+"ai_disclaimer_dialog_title" = "Ferramentas de IA — Informações importantes";
+"ai_disclaimer_intro" = "As ferramentas de IA podem enriquecer muito sua experiência de estudo bíblico e abrir novas formas de se envolver com as Escrituras.";
+"ai_disclaimer_point1" = "A IA pode cometer erros, incluindo \"alucinações\" (afirmar com confiança informações falsas ou fabricadas). Nunca aceite seus resultados cegamente.";
+"ai_disclaimer_point2" = "As respostas da IA podem refletir preconceitos de seus dados de treinamento, ser intencionalmente enganosas ou apresentar uma perspectiva teológica específica como se fosse neutra ou completa.";
+"ai_disclaimer_point3" = "Você é responsável pelo uso do conteúdo gerado por IA. Sempre verifique os resultados com as Escrituras antes de se basear neles.";
+"ai_disclaimer_point4" = "O AndBible se esforça para facilitar a verificação (por exemplo, citações precisas de fontes em comentários), mas a responsabilidade final é sempre sua.";
+"ai_disclaimer_point5" = "\"Examinai tudo. Retende o bem.\" (1 Tessalonicenses 5:21)";
+"ai_disclaimer_point6" = "Essas ferramentas não têm alma nem Espírito Santo. São ferramentas de processamento de texto, não guias espirituais. Não são adequadas para preparar diretamente sermões, devocionais ou outro conteúdo espiritual sem cuidadosa supervisão humana, oração e discernimento.";
+"ai_disclaimer_point7" = "Usadas com sabedoria, podem beneficiar muitos usuários e casos de uso. Mas se você não tiver certeza sobre aceitar os riscos, optar por não usá-las também é uma escolha perfeitamente válida.";
+"ai_disclaimer_point8" = "Seus dados são enviados aos servidores do provedor de IA que você escolheu. Ao usar uma chave de API, você aceita os termos e a política de privacidade daquele provedor. Modelos auto-hospedados são possíveis, mas exigem mais conhecimento técnico e podem não produzir resultados tão bons quanto os modelos comerciais.";
+"ai_disclaimer_point9" = "Os provedores de IA cobram pelo uso da API. As estimativas de custo exibidas no AndBible são aproximadas — sempre verifique a fatura do seu provedor para os valores reais.";
+"ai_disclaimer_responsibility" = "No entanto, ainda são ferramentas poderosas — e grandes poderes trazem grandes responsabilidades. Tenha os seguintes pontos em mente.";
+"ai_disclaimer_warning_title" = "Importante: Leia antes de usar as ferramentas de IA";
+"ai_doc_choose_page" = "Escolher página de documento de IA";
+"ai_document_filter_activity_title" = "Acesso a documentos da IA";
+"ai_document_regenerate" = "Regenerar";
+"ai_hidden_status" = "oculto";
+"ai_hide_prompt" = "Ocultar";
+"ai_language_title" = "Idioma das respostas da IA";
+"ai_models_category" = "Modelos";
+"ai_models_summary_none" = "Nenhum modelo configurado";
+"ai_provider_api_format" = "Formato da API";
+"ai_provider_api_key" = "Chave de API";
+"ai_provider_api_key_not_set" = "Chave de API não definida";
+"ai_provider_delete_confirm" = "Excluir provedor \"%1$@\"? Os prompts que usam este provedor voltarão ao padrão.";
+"ai_provider_edit" = "Editar";
+"ai_provider_endpoint" = "Endpoint da API";
+"ai_provider_endpoint_description" = "Somente a URL base. O AndBible acrescenta \"/chat/completions\" (formato OpenAI) ou \"/messages\" (formato Anthropic) automaticamente. As listas de modelos são obtidas de \"/models\".";
+"ai_provider_name" = "Nome do provedor";
+"ai_provider_saved" = "Provedor salvo";
+"ai_provider_select_type" = "Selecionar tipo de provedor";
+"ai_providers_models_category" = "Provedores e modelos";
+"ai_providers_summary_none" = "Nenhum provedor configurado";
+"ai_regenerate_fresh_run" = "Execução nova (ignorar resultado anterior)";
+"ai_regenerate_instructions_hint" = "Instruções adicionais (opcional)";
+"ai_regenerate_keep_previous" = "Manter versão anterior";
+"ai_regenerate_prompt_not_found" = "Não é possível regenerar: o prompt original não foi encontrado. Ele pode ter sido excluído.";
+"ai_regenerate_title" = "Regenerar";
+"ai_settings" = "Configurações de IA";
+"ai_setup_description" = "O AndBible pode usar IA para traduzir textos bíblicos, explicar versículos, criar resumos e muito mais. Para começar, configure uma conexão com um provedor de API compatível com OpenAI.";
+"ai_setup_title" = "Configurar IA";
+"ai_usage_category" = "Uso";
+"ask_model_before_run_title" = "Perguntar sobre modelo antes de executar";
+"auto_hide_agent_log_title" = "Ocultar painel de IA ao concluir";
+"bookmarks_and_mynotes_title" = "Marcadores e Minhas notas";
+"built_in_prompt" = "Integrado";
+"built_in_prompt_notice" = "Este é um prompt integrado e não pode ser editado. Use \"Copiar para personalizar\" para criar uma cópia editável.";
+"category_none" = "Sem categoria";
+"commentary_max_response_no_limit" = "Sem limite";
+"commentary_max_response_title" = "Limite de tamanho de resposta do comentário";
+"copy_to_customize" = "Copiar para personalizar";
+"custom_agent_system_prompt_title" = "Prompt de sistema do agente";
+"custom_system_prompt_custom" = "Personalizado";
+"custom_text_transform_system_prompt_title" = "Prompt de sistema de transformação de texto";
+"default_prompt_ask_question" = "Fazer uma pergunta";
+"default_prompt_ask_question_desc" = "Faça qualquer pergunta sobre a passagem selecionada";
+"default_prompt_bookmark_annotate" = "Marcar e anotar";
+"default_prompt_bookmark_annotate_desc" = "Cria um marcador com uma nota de estudo gerada por IA";
+"default_prompt_compare_translations" = "Comparar traduções";
+"default_prompt_compare_translations_desc" = "Mostra como diferentes traduções instaladas renderizam o texto";
+"default_prompt_cross_references" = "Referências cruzadas";
+"default_prompt_cross_references_desc" = "Encontra e explica passagens bíblicas relacionadas";
+"default_prompt_custom" = "Prompt personalizado";
+"default_prompt_custom_desc" = "Executar uma tarefa personalizada na passagem selecionada";
+"default_prompt_custom_template" = "Siga a especificação de tarefa do usuário para a passagem bíblica selecionada.";
+"default_prompt_enhance_note" = "Aprimorar nota";
+"default_prompt_enhance_note_desc" = "Melhora a gramática, clareza e legibilidade da sua nota";
+"default_prompt_explain_verses" = "Explicar versículos";
+"default_prompt_explain_verses_desc" = "Explica o significado e o contexto dos versículos selecionados";
+"default_prompt_explain_verses_studypad" = "Explicar versículos → Bloco de Estudo";
+"default_prompt_explain_verses_studypad_desc" = "Criar um Bloco de Estudo com explicação versículo a versículo e marcadores";
+"default_prompt_study_layout" = "Abrir layout de estudo";
+"default_prompt_study_layout_desc" = "Abre janelas de comentários e tradução paralela para estudo";
+"default_prompt_summary" = "Resumo";
+"default_prompt_summary_desc" = "Cria um resumo conciso do texto selecionado";
+"default_prompt_thematic_study" = "Estudo temático";
+"default_prompt_thematic_study_desc" = "Cria um StudyPad com passagens e notas sobre o tema central";
+"default_prompt_translate_to_language" = "Traduzir para %@";
+"default_prompt_translate_to_ui_language_desc" = "Traduz o texto do documento para o idioma da interface do aplicativo";
+"default_prompt_word_study" = "Estudo de palavras";
+"default_prompt_word_study_desc" = "Analisa palavras originais em hebraico/grego";
+"default_prompt_workspace_assistant" = "Assistente de área de trabalho";
+"default_prompt_workspace_assistant_desc" = "Gerenciar janelas: criar, fechar, reorganizar, alterar documentos";
+"delete_category" = "Excluir categoria";
+"delete_category_and_prompts" = "Excluir categoria e seus prompts";
+"delete_category_keep_prompts" = "Mover prompts para a raiz e excluir categoria";
+"doc_type_addons" = "Complementos de tipo de documento";
+"easy_setup_enter_api_key" = "Digite sua chave de API";
+"easy_setup_success" = "Conexão bem-sucedida!";
+"easy_setup_test_connection" = "Testar conexão";
+"easy_setup_testing" = "Testando…";
+"easy_setup_title" = "Configuração rápida";
+"help_bookmarks_text" = "Os marcadores podem ser criados selecionando algum texto e escolhendo \"Marcador\" no menu pop-up. Você pode adicionar as suas notas personalizadas ao novo marcador tocando no texto agora destacado na visualização da Bíblia. Também existe um documento especial \"Minhas Notas\" nos comentários que permite ver suas notas numa janela separada.";
+"help_memorize_text" = "A visualização Memorizar ajuda você a aprender passagens de cor. Use Borrar Palavras, Embaralhar Palavras, Digitar Palavras ou Ordenar Palavras para praticar. Exercícios bem-sucedidos marcam automaticamente os versículos como memorizados (isso pode ser desativado).";
+"help_read_more_link" = "Leia mais no manual";
+"hide_category" = "Ocultar das ações de IA";
+"llm_actions" = "Ações de IA";
+"llm_continue_iterations_message" = "O agente de IA atingiu seu limite de %1$d iterações sem concluir. Continuar por mais %2$d iterações?";
+"llm_continue_iterations_title" = "Continuar?";
+"llm_custom_input_price_title" = "Preço de entrada ($/Mtoken)";
+"llm_custom_model_dialog_message" = "Insira o ID do modelo";
+"llm_custom_output_price_title" = "Preço de saída ($/Mtoken)";
+"llm_error_max_iterations" = "Número máximo de iterações (%1$d) atingido sem conclusão";
+"llm_error_unknown" = "Erro desconhecido";
+"llm_note_updated" = "Nota atualizada";
+"llm_openrouter_model" = "Modelo";
+"llm_provider_custom" = "Personalizado (compatível com OpenAI)";
+"llm_reset_usage_confirm_message" = "Isso limpará todos os dados de uso acumulados.";
+"llm_reset_usage_confirm_title" = "Redefinir dados de uso?";
+"llm_reset_usage_title" = "Redefinir dados de uso";
+"llm_usage_summary_default" = "Sem dados de uso";
+"llm_usage_summary_title" = "Uso de tokens";
+"manage_prompts" = "Gerenciar prompts de IA";
+"manage_tool_permissions_title" = "Permissões de ferramentas";
+"model_pricing_summary" = "%1$@ entrada / %2$@ saída por Mtoken";
+"model_select_provider" = "Provedor";
+"model_set_default" = "Definir como modelo padrão";
+"move_category_down" = "Mover para baixo";
+"move_category_up" = "Mover para cima";
+"new_category" = "Nova categoria";
+"new_category_name" = "Nome da categoria";
+"new_prompt" = "Novo prompt";
+"permission_allow_all" = "Permitir tudo";
+"permission_allow_all_session" = "Permitir todas as ferramentas nesta sessão";
+"permission_allow_for_session" = "Permitir nesta sessão";
+"permission_allow_once" = "Permitir uma vez";
+"permission_always_allow_confirm" = "Tem certeza de que deseja permitir permanentemente \"%1$@\"?";
+"permission_always_allow_confirm_reset_hint" = "Você pode redefinir isso nas Configurações de IA.";
+"permission_always_ask" = "Sempre perguntar";
+"permission_ask_once_per_run" = "Perguntar uma vez por execução";
+"permission_deny" = "Negar";
+"permission_deny_all" = "Negar tudo";
+"permission_option_always_allow" = "Sempre permitir";
+"permission_option_always_deny" = "Sempre negar";
+"permission_status_default" = "Perguntar (padrão)";
+"prompt_auto_include_commentaries" = "Incluir automaticamente comentários";
+"prompt_auto_include_documents" = "Incluir automaticamente documentos instalados";
+"prompt_bible_only" = "Apenas documentos bíblicos";
+"prompt_category" = "Categoria";
+"prompt_category_favorites" = "Favoritos";
+"prompt_category_general" = "Geral";
+"prompt_category_notes" = "Notas";
+"prompt_category_study" = "Estudo";
+"prompt_category_uncategorized" = "Sem categoria";
+"prompt_context_note_editor" = "Editor de notas";
+"prompt_context_text_selection" = "Seleção de texto";
+"prompt_context_verse_selection" = "Seleção de versículo";
+"prompt_context_window_menu" = "Menu da janela";
+"prompt_context_workspace_menu" = "Menu da área de trabalho";
+"prompt_description" = "Descrição";
+"prompt_edit_before_run" = "Especificar antes de executar";
+"prompt_is_text_transformation" = "Transformação de texto";
+"prompt_max_iterations_hint" = "Deixe vazio para usar o padrão global";
+"prompt_max_iterations_unlimited" = "Ilimitado";
+"prompt_model_default" = "Padrão";
+"prompt_model_override" = "Modelo";
+"prompt_name" = "Nome";
+"prompt_no_document_creation" = "Sem criação de documento";
+"prompt_permission_mode" = "Modo de permissão";
+"prompt_permission_mode_description" = "Controla quando a confirmação do usuário é necessária antes que a IA realize operações de escrita. As configurações por ferramenta abaixo podem substituir isso para ferramentas individuais.";
+"prompt_permission_use_default" = "Usar padrão";
+"prompt_show_in" = "Mostrar em";
+"prompt_strict_context_matching" = "Cache dependente de contexto";
+"prompt_tab_advanced" = "Avançado";
+"prompt_tab_permissions" = "Permissões";
+"prompt_template" = "Modelo de prompt";
+"prompt_tool_permissions" = "Permissões de ferramentas";
+"raw_log_delete_all" = "Excluir todos";
+"raw_log_error_indicator" = "Erro";
+"raw_log_history_empty" = "Nenhum log salvo";
+"raw_log_history_title" = "Histórico de Logs de IA";
+"raw_log_item_tokens" = "%1$@ entrada / %2$@ saída";
+"raw_log_older_1_month" = "Mais de 1 mês";
+"raw_log_older_1_week" = "Mais de 1 semana";
+"raw_log_older_3_months" = "Mais de 3 meses";
+"raw_log_retention_summary_disabled" = "Desativado (manter todos)";
+"raw_log_retention_title" = "Exclusão automática de logs antigos";
+"reset_all_ai_settings" = "Redefinir todas as configurações de IA";
+"reset_all_ai_settings_confirm_message" = "Isso limpará a chave de API, provedor, endpoint, modelo e redefinirá todos os prompts para os padrões. Continuar?";
+"reset_all_ai_settings_confirm_title" = "Redefinir todas as configurações de IA?";
+"reset_all_permissions" = "Redefinir tudo";
+"reset_to_default" = "Redefinir para padrão";
+"save_and_exit" = "Salvar";
+"select_llm_prompt" = "Selecionar ação de IA";
+"select_model_before_run_title" = "Selecionar modelo";
+"set_default_model_for_prompt" = "Definir como modelo padrão para este prompt";
+"show_category" = "Mostrar nas ações de IA";
+"specify_before_run_title" = "Especificar tarefa";
+"tool_add_bookmark_note" = "Adicionar nota ao marcador";
+"tool_add_label_to_bookmark" = "Adicionar etiqueta ao marcador";
+"tool_add_my_document_page" = "Adicionar página a Meu Documento";
+"tool_add_study_pad_entry" = "Adicionar entrada ao bloco de estudo";
+"tool_category_bible_search" = "Bíblia e pesquisa";
+"tool_category_bookmarks" = "Marcadores";
+"tool_category_general_books" = "Livros Gerais";
+"tool_category_labels" = "Etiquetas";
+"tool_category_my_documents" = "Meus Documentos";
+"tool_category_study_pads" = "Blocos de estudo";
+"tool_category_windows" = "Janelas";
+"tool_create_bookmark" = "Criar marcador";
+"tool_create_label" = "Criar etiqueta";
+"tool_create_my_document" = "Criar Meu Documento";
+"tool_create_study_pad" = "Criar bloco de estudo";
+"tool_create_window" = "Criar janela";
+"tool_delete_bookmark" = "Excluir marcador";
+"tool_delete_label" = "Excluir etiqueta";
+"tool_delete_my_document_page" = "Excluir página de Meu Documento";
+"tool_edit_my_document_page" = "Editar página de Meu Documento";
+"tool_finish_with_my_document_page" = "Abrir página Meu Documento";
+"tool_finish_with_study_pad" = "Abrir bloco de estudo";
+"tool_finish_without_document" = "Concluir sem documento";
+"tool_get_all_labels" = "Listar todas as etiquetas";
+"tool_get_bookmarks_for_verse" = "Obter marcadores do versículo";
+"tool_get_bookmarks_with_label" = "Obter marcadores com etiqueta";
+"tool_get_commentaries" = "Ler comentários";
+"tool_get_dictionary_entry" = "Consultar entrada do dicionário";
+"tool_get_genbook_content" = "Ler conteúdo de livro geral";
+"tool_get_genbook_keys" = "Listar chaves de livro geral";
+"tool_get_installed_documents" = "Listar documentos instalados";
+"tool_get_my_document_pages" = "Listar páginas de Meu Documento";
+"tool_get_my_documents" = "Listar Meus Documentos";
+"tool_get_study_pad_content" = "Ler conteúdo do bloco de estudo";
+"tool_get_verse_content" = "Ler conteúdo do versículo";
+"tool_get_windows" = "Listar janelas";
+"tool_manage_window" = "Gerenciar janela";
+"tool_remove_label_from_bookmark" = "Remover etiqueta do marcador";
+"tool_search_bible" = "Pesquisar na Bíblia";
+"tool_search_by_strongs" = "Pesquisar pelo número de Strong";
+"tool_search_study_pads" = "Pesquisar blocos de estudo";
+"tool_set_document_title" = "Definir título do documento";
+"tool_set_window_document" = "Definir documento da janela";
+"tool_update_bookmark_note" = "Atualizar nota do marcador";
+"tool_update_studypad_text_entry" = "Atualizar entrada de texto do bloco de estudo";
+"verse_tip" = "Para selecionar parte ou vários versículos, mantenha pressionado o texto da Bíblia";
+"watch_tutorial_video" = "Assista ao vídeo tutorial (Inglês)";
+
+/* Android shared translations */
+"ai_document_regenerating" = "Regenerando documento de IA…";
+
+/* Android shared translations */
+"discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"ai_disclaimer_accept_button" = "Aceito e assumo total responsabilidade";
+"ai_disclaimer_accept_title" = "Aceitar aviso de IA";
+
+/* Android shared translations */
+"ai_settings_shortcut_summary" = "Configurações de conexão de IA e prompt";
+"prefs_features_cat" = "Recursos";

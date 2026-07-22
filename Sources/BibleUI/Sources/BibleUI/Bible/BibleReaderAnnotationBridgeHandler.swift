@@ -1,6 +1,7 @@
 import Foundation
 import BibleCore
 import BibleView
+import SwordKit
 import os.log
 
 private let annotationBridgeHandlerLogger = Logger(
@@ -107,7 +108,8 @@ struct BibleReaderAnnotationBridgeHandler {
         addNote: Bool,
         wholeVerse: Bool,
         startOffset: Int? = nil,
-        endOffset: Int? = nil
+        endOffset: Int? = nil,
+        identity: BibleBookmarkMutationIdentity
     ) {
         guard let coordinator = coordinator(bridge) else {
             annotationBridgeHandlerLogger.warning("addBookmark: bookmarkService is nil")
@@ -120,17 +122,35 @@ struct BibleReaderAnnotationBridgeHandler {
             addNote: addNote,
             wholeVerse: wholeVerse,
             startOffset: startOffset,
-            endOffset: endOffset
+            endOffset: endOffset,
+            identity: identity
         )
     }
 
-    /// Creates a Bible bookmark requested from the web client.
+    /**
+     Creates a Bible bookmark requested from a bridge adapter with explicit selection semantics.
+
+     - Parameters:
+       - bridge: Reader bridge that receives mutation events.
+       - bookInitials: Stored source module initials.
+       - startOrdinal: Inclusive source start ordinal.
+       - endOrdinal: Inclusive source end ordinal.
+       - addNote: Whether to open note editing after creation.
+       - wholeVerse: Whether the request covers whole verses.
+       - startOffset: Optional UTF-16 selection start for partial bookmarks.
+       - endOffset: Optional UTF-16 selection end for partial bookmarks.
+     - Side effects: Creates and emits a bookmark through the annotation coordinator.
+     - Failure modes: Missing coordinator services leave persistence and bridge state unchanged.
+     */
     mutating func addBookmark(
         bridge: BibleBridge,
         bookInitials: String,
         startOrdinal: Int,
         endOrdinal: Int,
-        addNote: Bool
+        addNote: Bool,
+        wholeVerse: Bool,
+        startOffset: Int?,
+        endOffset: Int?
     ) {
         addOrUpdateBibleBookmark(
             bridge: bridge,
@@ -138,7 +158,10 @@ struct BibleReaderAnnotationBridgeHandler {
             startOrdinal: startOrdinal,
             endOrdinal: endOrdinal,
             addNote: addNote,
-            wholeVerse: true
+            wholeVerse: wholeVerse,
+            startOffset: startOffset,
+            endOffset: endOffset,
+            identity: .create
         )
     }
 
@@ -147,9 +170,12 @@ struct BibleReaderAnnotationBridgeHandler {
         bridge: BibleBridge,
         bookInitials: String,
         osisRef: String,
-        startOrdinal: Int,
-        endOrdinal: Int,
-        addNote: Bool
+        startOrdinal: Int?,
+        endOrdinal: Int?,
+        addNote: Bool,
+        wholeVerse: Bool,
+        startOffset: Int? = nil,
+        endOffset: Int? = nil
     ) {
         annotationBridgeHandlerLogger.info("Add generic bookmark: \(bookInitials) ref=\(osisRef)")
         guard let coordinator = coordinator(bridge) else {
@@ -161,8 +187,41 @@ struct BibleReaderAnnotationBridgeHandler {
             osisRef: osisRef,
             startOrdinal: startOrdinal,
             endOrdinal: endOrdinal,
-            addNote: addNote
+            addNote: addNote,
+            wholeVerse: wholeVerse,
+            startOffset: startOffset,
+            endOffset: endOffset
         )
+    }
+
+    /**
+     Routes a validated generic SWORD selection into bookmark persistence and Vue events.
+
+     This native boundary is intentionally separate from the legacy scalar web adapter: callers
+     that loaded an exact raw fragment retain its source category, module-qualified fragment
+     identity, local ordinals, and paired UTF-16 offsets as one typed value.
+
+     - Parameters:
+       - bridge: Reader bridge that receives bookmark update events.
+       - seed: Immutable exact-source generic SWORD bookmark contract.
+       - addNote: Whether to open note editing after creation.
+     - Side effects: Creates a generic bookmark and emits annotation updates through the coordinator.
+     - Failure modes: Missing coordinator services leave persistence and bridge state unchanged;
+       invalid selections are rejected before seed construction.
+     */
+    func addGenericBookmark(
+        bridge: BibleBridge,
+        seed: SwordGenericBookmarkSeed,
+        addNote: Bool
+    ) {
+        annotationBridgeHandlerLogger.info(
+            "Add generic SWORD bookmark: \(seed.source.bookInitials) key=\(seed.source.key)"
+        )
+        guard let coordinator = coordinator(bridge) else {
+            annotationBridgeHandlerLogger.warning("addGenericBookmark(seed:): bookmarkService is nil")
+            return
+        }
+        coordinator.addGenericBookmark(seed: seed, addNote: addNote)
     }
 
     /// Creates a Bible paragraph-break bookmark requested from the web client.

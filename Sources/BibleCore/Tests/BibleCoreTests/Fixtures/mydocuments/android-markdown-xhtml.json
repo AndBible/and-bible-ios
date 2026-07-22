@@ -1,0 +1,10 @@
+{
+  "android_source": "app/src/main/java/net/bible/service/sword/mydocument/MarkdownToXhtml.kt",
+  "android_dependencies": {
+    "commonmark": "0.24.0",
+    "commonmark-ext-gfm-tables": "0.24.0",
+    "commons-text": "1.9"
+  },
+  "markdown": "# Study & prayer\n\n- First **bold** item\n- [Search](https://example.com/find?q=grace&lang=en)\n\n| Name | Value |\n| --- | --- |\n| left | `code` |\n\nLine one  \nline two\n\nEntity: &nbsp; &mdash; &amp;.\n\nLoose list:\n\n- First paragraph\n\n  Second paragraph\n- Other item\n\nNested list:\n\n- Outer\n  - Inner\n- Second outer\n",
+  "xhtml": "<div class=\"mydoc-markdown\"><h1>Study &amp; prayer</h1>\n<ul>\n<li>First <strong>bold</strong> item</li>\n<li><a href=\"https://example.com/find?q=grace&amp;lang=en\">Search</a></li>\n</ul>\n<table>\n<thead>\n<tr>\n<th>Name</th>\n<th>Value</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>left</td>\n<td><code>code</code></td>\n</tr>\n</tbody>\n</table>\n<p>Line one<br />\nline two</p>\n<p>Entity: \u00a0 \u2014 &amp;.</p>\n<p>Loose list:</p>\n<ul>\n<li>\n<p>First paragraph</p>\n<p>Second paragraph</p>\n</li>\n<li>\n<p>Other item</p>\n</li>\n</ul>\n<p>Nested list:</p>\n<ul>\n<li>Outer\n<ul>\n<li>Inner</li>\n</ul>\n</li>\n<li>Second outer</li>\n</ul>\n</div>"
+}

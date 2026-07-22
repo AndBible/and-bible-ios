@@ -115,3 +115,36 @@ public final class ReadingPlanDay {
         self.readings = readings
     }
 }
+
+/**
+ Persists the filesystem publication generation that is authoritative for one reading-plan graph.
+
+ The row lives in the same SwiftData configuration as `ReadingPlan` and `ReadingPlanDay`, so a
+ definition-directory commit marker cannot become durable independently of the graph it describes.
+ `storageKey` scopes state to one device-local definition directory.
+ */
+@Model
+public final class ReadingPlanDefinitionPublicationState {
+    /// Stable device-local definition-directory identity used for exact row lookup.
+    public var storageKey: String = ""
+
+    /// Filesystem generation identifier committed atomically with the corresponding plan graph.
+    public var committedGeneration: String?
+
+    /**
+     Creates one publication-state row without saving it.
+
+     - Parameters:
+       - storageKey: Stable digest of the device-local definition-directory path.
+       - committedGeneration: Filesystem generation currently paired with the graph, when any.
+       - Side effects: none until the row is inserted and its context is saved.
+     - Failure modes: Generation validation is performed by the definition publication service.
+     */
+    public init(
+        storageKey: String,
+        committedGeneration: String? = nil
+    ) {
+        self.storageKey = storageKey
+        self.committedGeneration = committedGeneration
+    }
+}

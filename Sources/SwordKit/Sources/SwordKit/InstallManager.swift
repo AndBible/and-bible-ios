@@ -119,8 +119,10 @@ private struct AndroidDefaultRepositorySource: Sendable {
  let sources = installMgr.remoteSources()
  installMgr.refreshSource("CrossWire")
  let modules = installMgr.availableModules(from: "CrossWire")
- installMgr.install(moduleName: "KJV", from: "CrossWire", into: swordManager)
  ```
+
+ Live module-tree mutation is intentionally owned by `ModuleRepository`, whose transaction
+ publisher serializes all writers for the canonical SWORD root.
  */
 public final class InstallManager: @unchecked Sendable {
     private static let defaultConfigVersionMarker = "# AndBibleDefaultSourcesVersion=2"
@@ -443,37 +445,4 @@ public final class InstallManager: @unchecked Sendable {
         availableModules(from: sourceName).filter { $0.language == language }
     }
 
-    // MARK: - Install / Uninstall
-
-    /**
-     Install a module from a remote source.
-     - Parameters:
-       - moduleName: The module abbreviation to install.
-       - sourceName: The remote source to download from.
-       - manager: The SwordManager to install into.
-     - Returns: `true` if installation succeeded.
-     */
-    @discardableResult
-    public func install(moduleName: String, from sourceName: String, into manager: SwordManager) -> Bool {
-        // Note: This blocks until download completes. Call from a background task.
-        return SwordRuntime.sync {
-            let mgrHandle = manager.rawHandle
-            return InstallMgr_installModule(handle, mgrHandle, sourceName, moduleName) == 0
-        }
-    }
-
-    /**
-     Uninstall a module.
-     - Parameters:
-       - moduleName: The module abbreviation to uninstall.
-       - manager: The SwordManager the module is installed in.
-     - Returns: `true` if uninstallation succeeded.
-     */
-    @discardableResult
-    public func uninstall(moduleName: String, from manager: SwordManager) -> Bool {
-        return SwordRuntime.sync {
-            let mgrHandle = manager.rawHandle
-            return InstallMgr_uninstallModule(handle, mgrHandle, moduleName) == 0
-        }
-    }
 }

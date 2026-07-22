@@ -132,7 +132,8 @@ Notes:
   only AI-generated pages and refreshes the active reader document, falling back
   to the current Bible chapter when the visible page was deleted. Regenerate
   validates the AI-page metadata and hands native context to the iOS regeneration
-  callback; the shared AI dialog/backend remains tracked separately in #5/#89.
+  callback, which presents the app-owned regeneration flow through the originating
+  pane's AI coordinator.
   User-authored pages without source prompt metadata are ignored and logged. The
   related `mydocuments` sync category is implemented separately through
   #72/#104/#105/#106/#108/#107/#109.
@@ -149,13 +150,16 @@ Notes:
   tab-position mapping, settings validation, and
   `update_reading_progress_settings` events. The related `progress` sync
   category remains tracked in #73 and distinct from `readingplans`.
-- Android's AI bridge family is accepted but deferred. iOS should not add
+- Android's AI bridge family is implemented with the exact standalone method names
   `llmAction`, `llmActionGeneric`, `noteEditorLlmAction`, `openAiDocPage`,
-  `openAiDocPageChooser`, or `openPromptEditor` as standalone bridge names before the
-  shared AI backend and iOS bridge shell contract exist. #89 owns the bridge shell
-  contract after #5, #90 owns text-action behavior, #91 owns AI document navigation, and
-  #92 owns prompt editor behavior. The related `ai_settings` sync category remains tracked
-  in #74 and must wait for the shared AI settings contract.
+  `openAiDocPageChooser`, and `openPromptEditor`. BibleView validates each method's typed
+  Android arguments before the originating pane routes it through `AIReaderRunCoordinator`.
+  Text actions retain their explicit document, range, selection, and editor-target identity;
+  one AI document marker opens directly while multiple markers use the app-owned chooser; and
+  prompt editor requests resolve through the source-aware prompt repository before presentation.
+  Missing or malformed targets fail closed through credential-free native errors. Non-secret AI
+  state is stored in SwiftData while provider credentials remain device-local in Keychain. The
+  related `ai_settings` remote-sync category is a separate parity task tracked in #74.
 
 ### StudyPad
 

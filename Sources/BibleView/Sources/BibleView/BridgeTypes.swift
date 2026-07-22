@@ -29,6 +29,61 @@ private extension KeyedEncodingContainer {
     }
 }
 
+// MARK: - Incoming Document Actions
+
+/**
+ Exact source payload for creating a selection-free bookmark over one generic document page.
+
+ Vue sends source identity without selection or ordinal state, matching Android's whole-page generic
+ bookmark command. This value performs no I/O and is deterministic for a given bridge message;
+ malformed bridge arguments are rejected before it is initialized.
+ */
+public struct GenericWholePageBookmarkRequest: Equatable, Sendable {
+    /// Exact module initials that produced the rendered generic document.
+    public let sourceInitials: String
+    /// Exact source key used to load the rendered page.
+    public let sourceKey: String
+    /**
+     Creates an immutable whole-page bookmark request from validated bridge values.
+
+     - Parameters:
+       - sourceInitials: Exact source module initials; native integration must not substitute the
+         active module.
+       - sourceKey: Exact source page key; native integration must preserve its spelling.
+     - Note: Initialization has no side effects and performs no source lookup or normalization.
+     */
+    public init(sourceInitials: String, sourceKey: String) {
+        self.sourceInitials = sourceInitials
+        self.sourceKey = sourceKey
+    }
+}
+
+/**
+ Exact native navigation target carried by an AI document marker.
+
+ The pair intentionally excludes current reader state: native integration must resolve precisely the
+ supplied AI document and key. This value performs no lookup or navigation itself.
+ */
+public struct AIDocumentPageRequest: Equatable, Sendable {
+    /// Exact AI document module initials supplied by the marker payload.
+    public let documentInitials: String
+    /// Exact page key supplied by the marker payload.
+    public let pageKey: String
+
+    /**
+     Creates an immutable AI document navigation target from validated bridge values.
+
+     - Parameters:
+       - documentInitials: Exact document module initials; no active-document fallback is allowed.
+       - pageKey: Exact page key to resolve in that document.
+     - Note: Initialization is deterministic and has no side effects or failure path.
+     */
+    public init(documentInitials: String, pageKey: String) {
+        self.documentInitials = documentInitials
+        self.pageKey = pageKey
+    }
+}
+
 // MARK: - OSIS Fragment
 
 /// A fragment of Bible text with metadata, matching TypeScript OsisFragment.
@@ -41,8 +96,11 @@ public struct OsisFragment: Codable, Sendable {
     public var key: String
     /// Human-readable form of `key`, such as `Genesis 1`.
     public var keyName: String
-    /// Versification identifier used when resolving ordinals and references.
-    public var v11n: String
+    /**
+     Versification identifier used when resolving ordinals and references, or `nil` for a
+     non-verse-key document that has no versification domain.
+     */
+    public var v11n: String?
     /// Document category expected by the client: `BIBLE`, `COMMENTARY`, or `GENERAL_BOOK`.
     public var bookCategory: String // "BIBLE", "COMMENTARY", "GENERAL_BOOK"
     /// Module initials that produced the fragment, such as `KJV`.
@@ -57,8 +115,8 @@ public struct OsisFragment: Codable, Sendable {
     public var features: OsisFeatures
     /// Whether this fragment was produced from a Strong's-capable module.
     public var hasStrongs: Bool
-    /// Inclusive ordinal range rendered in this fragment.
-    public var ordinalRange: [Int]
+    /// Inclusive ordinal range rendered in this fragment, or `nil` for an unnumbered key.
+    public var ordinalRange: [Int]?
     /// BCP-47 language tag used for typography and language-sensitive client behavior.
     public var language: String
     /// Text direction passed to the web client: `ltr` or `rtl`.
@@ -90,7 +148,7 @@ public struct OsisFragment: Codable, Sendable {
         xml: String,
         key: String,
         keyName: String,
-        v11n: String = "KJVA",
+        v11n: String? = nil,
         bookCategory: String = "BIBLE",
         bookInitials: String,
         bookAbbreviation: String = "",
@@ -98,7 +156,7 @@ public struct OsisFragment: Codable, Sendable {
         isNewTestament: Bool = false,
         features: OsisFeatures = OsisFeatures(),
         hasStrongs: Bool = false,
-        ordinalRange: [Int] = [],
+        ordinalRange: [Int]? = nil,
         language: String = "en",
         direction: String = "ltr",
         isNativeHtml: Bool = false
@@ -134,7 +192,7 @@ public struct OsisFragment: Codable, Sendable {
         self.originalXml = try container.decodeIfPresent(String.self, forKey: .originalXml)
         self.key = try container.decode(String.self, forKey: .key)
         self.keyName = try container.decode(String.self, forKey: .keyName)
-        self.v11n = try container.decode(String.self, forKey: .v11n)
+        self.v11n = try container.decodeIfPresent(String.self, forKey: .v11n)
         self.bookCategory = try container.decode(String.self, forKey: .bookCategory)
         self.bookInitials = try container.decode(String.self, forKey: .bookInitials)
         self.bookAbbreviation = try container.decode(String.self, forKey: .bookAbbreviation)
@@ -142,10 +200,41 @@ public struct OsisFragment: Codable, Sendable {
         self.isNewTestament = try container.decode(Bool.self, forKey: .isNewTestament)
         self.features = try container.decode(OsisFeatures.self, forKey: .features)
         self.hasStrongs = try container.decode(Bool.self, forKey: .hasStrongs)
-        self.ordinalRange = try container.decode([Int].self, forKey: .ordinalRange)
+        self.ordinalRange = try container.decodeIfPresent([Int].self, forKey: .ordinalRange)
         self.language = try container.decode(String.self, forKey: .language)
         self.direction = try container.decode(String.self, forKey: .direction)
         self.isNativeHtml = try container.decodeIfPresent(Bool.self, forKey: .isNativeHtml) ?? false
+    }
+
+    /**
+     Encodes Android's nullable fragment metadata without dropping either key.
+
+     Android serializes `v11n` as JSON null for documents without a SWORD versification and
+     `ordinalRange` as JSON null for keys that are not verse ranges. Explicit nulls preserve that
+     distinction for Vue and keep Swift's optional encoding from silently omitting contract fields.
+
+     - Parameter encoder: Destination encoder for the reader bridge payload.
+     - Side effects: Writes every Android fragment field to the encoder.
+     - Failure modes: Rethrows encoding failures from the supplied encoder.
+     */
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(xml, forKey: .xml)
+        try container.encodeIfPresent(originalXml, forKey: .originalXml)
+        try container.encode(key, forKey: .key)
+        try container.encode(keyName, forKey: .keyName)
+        try container.encodeNullable(v11n, forKey: .v11n)
+        try container.encode(bookCategory, forKey: .bookCategory)
+        try container.encode(bookInitials, forKey: .bookInitials)
+        try container.encode(bookAbbreviation, forKey: .bookAbbreviation)
+        try container.encode(osisRef, forKey: .osisRef)
+        try container.encode(isNewTestament, forKey: .isNewTestament)
+        try container.encode(features, forKey: .features)
+        try container.encode(hasStrongs, forKey: .hasStrongs)
+        try container.encodeNullable(ordinalRange, forKey: .ordinalRange)
+        try container.encode(language, forKey: .language)
+        try container.encode(direction, forKey: .direction)
+        try container.encode(isNativeHtml, forKey: .isNativeHtml)
     }
 }
 
@@ -484,8 +573,8 @@ public struct GenericBookmarkData: Codable, Sendable {
     public var type: String // "generic-bookmark"
     /// Android-compatible hash code used by legacy client logic.
     public var hashCode: Int
-    /// Inclusive ordinal range if the source content exposes ordinals.
-    public var ordinalRange: [Int]
+    /// Inclusive ordinal range; Android emits nullable elements for whole-page generic bookmarks.
+    public var ordinalRange: [Int?]
     /// Optional start/end text offsets for partial bookmarks.
     public var offsetRange: [Int?]?
     /// Flat list of label identifiers assigned to this bookmark.
@@ -527,13 +616,15 @@ public struct GenericBookmarkData: Codable, Sendable {
     public var keyName: String
     /// HTML/text snippet with the bookmarked segment emphasized.
     public var highlightedText: String
+    /// Optional source fragment used by Vue to render the bookmarked generic document context.
+    public var osisFragment: OsisFragment?
 
     /// Creates a generic bookmark bridge payload matching the TypeScript client object.
     public init(
         id: IdType,
         type: String,
         hashCode: Int,
-        ordinalRange: [Int],
+        ordinalRange: [Int?],
         offsetRange: [Int?]?,
         labels: [IdType],
         bookInitials: String,
@@ -553,7 +644,8 @@ public struct GenericBookmarkData: Codable, Sendable {
         editAction: EditActionData?,
         key: String,
         keyName: String,
-        highlightedText: String
+        highlightedText: String,
+        osisFragment: OsisFragment?
     ) {
         self.id = id
         self.type = type
@@ -579,6 +671,7 @@ public struct GenericBookmarkData: Codable, Sendable {
         self.key = key
         self.keyName = keyName
         self.highlightedText = highlightedText
+        self.osisFragment = osisFragment
     }
 
     /**
@@ -614,6 +707,7 @@ public struct GenericBookmarkData: Codable, Sendable {
         try container.encode(key, forKey: .key)
         try container.encode(keyName, forKey: .keyName)
         try container.encode(highlightedText, forKey: .highlightedText)
+        try container.encodeNullable(osisFragment, forKey: .osisFragment)
     }
 }
 

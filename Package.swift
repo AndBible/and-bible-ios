@@ -15,6 +15,9 @@ let package = Package(
         .library(name: "BibleUI", targets: ["BibleUI"]),
         .executable(name: "UITestFixtureTool", targets: ["UITestFixtureTool"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/swiftlang/swift-markdown.git", exact: "0.8.0"),
+    ],
     targets: [
         // Pre-built libsword C++ library (SWORD project)
         .binaryTarget(
@@ -47,12 +50,26 @@ let package = Package(
         .target(
             name: "SwordKit",
             dependencies: ["CLibSword"],
-            path: "Sources/SwordKit/Sources/SwordKit"
+            path: "Sources/SwordKit/Sources/SwordKit",
+            resources: [
+                .copy("Resources/versification"),
+            ]
         ),
         .testTarget(
             name: "SwordKitTests",
             dependencies: ["SwordKit", "CLibSword"],
             path: "Sources/SwordKit/Tests/SwordKitTests"
+        ),
+
+        // Pinned Snowball stemmers matching JSword's Lucene 3.6.2 vocabulary fixtures.
+        .target(
+            name: "CSearchStemmers",
+            path: "Sources/SearchStemmers",
+            exclude: ["LICENSE.snowball"],
+            publicHeadersPath: "include",
+            cSettings: [
+                .headerSearchPath("snowball"),
+            ]
         ),
 
         // BibleCore: Domain models, persistence, business logic
@@ -61,16 +78,26 @@ let package = Package(
             dependencies: [
                 "SwordKit",
                 "CLibSword",
+                "CSearchStemmers",
+                .product(name: "Markdown", package: "swift-markdown"),
             ],
             path: "Sources/BibleCore/Sources/BibleCore",
             resources: [
                 .copy("Resources/readingplan"),
+                .copy("Resources/jsword-bible-names"),
+                .copy("Resources/speak"),
+                .copy("Resources/search"),
             ]
         ),
         .testTarget(
             name: "BibleCoreTests",
             dependencies: ["BibleCore", "SwordKit", "CLibSword"],
-            path: "Sources/BibleCore/Tests/BibleCoreTests"
+            path: "Sources/BibleCore/Tests/BibleCoreTests",
+            exclude: ["Fixtures/android-bookmark-room-v12.sql"],
+            resources: [
+                .copy("Fixtures/mydocuments"),
+                .copy("Fixtures/search"),
+            ]
         ),
 
         // BibleView: WKWebView + Vue.js bridge
@@ -101,7 +128,8 @@ let package = Package(
         .testTarget(
             name: "BibleUITests",
             dependencies: ["BibleUI", "BibleCore", "BibleView", "SwordKit"],
-            path: "Sources/BibleUI/Tests/BibleUITests"
+            path: "Sources/BibleUI/Tests/BibleUITests",
+            exclude: ["Fixtures/sword"]
         ),
         .executableTarget(
             name: "UITestFixtureTool",

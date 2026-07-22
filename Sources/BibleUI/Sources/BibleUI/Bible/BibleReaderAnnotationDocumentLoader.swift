@@ -208,8 +208,8 @@ struct BibleReaderAnnotationDocumentLoader {
             return false
         }
 
-        let verseRange = "\(currentBook) \(currentChapter):1-\(range.verseCount)"
-        let docId = "\(osisBookId).\(currentChapter).1-\(osisBookId).\(currentChapter).\(range.verseCount)"
+        let verseRange = "\(currentBook) \(currentChapter)"
+        let docId = "ordinal-\(range.start)-\(range.end)"
         let document = MyNotesDocumentPayload(
             id: docId,
             type: "notes",
@@ -412,12 +412,20 @@ struct BibleReaderAnnotationDocumentLoader {
      - Parameter request: Active reader state and store providers.
      - Returns: JSON string for one Memorize document, or `nil` when no verse text can be resolved.
      - Side effects: May move the active SWORD module cursor while collecting verse text.
-     - Failure modes: Returns `nil` for invalid ordinal ranges or JSON serialization failure.
+     - Failure modes: Returns `nil` for invalid ordinal ranges, unavailable source modules, empty
+       source text, or JSON serialization failure. Source ordinals are never relabeled as KJVA when
+       their real module/versification is unavailable.
      */
     private func buildMemorizeDocumentJSON(_ request: MemorizeDocumentRequest) -> String? {
         guard let ordinalRange = memorizeOrdinalRange(request) else { return nil }
         let textItems = memorizeTextItems(request)
         guard !textItems.isEmpty else { return nil }
+        guard let sourceModule = request.activeModule?.info.name == request.bookInitials
+            ? request.activeModule
+            : request.swordManager?.module(named: request.bookInitials) else {
+            return nil
+        }
+        let sourceVersification = VersificationMapper.versificationName(for: sourceModule)
 
         let document: [String: Any] = [
             "id": "memorize-\(request.bookInitials)-\(ordinalRange.start)-\(ordinalRange.end)",
@@ -426,7 +434,7 @@ struct BibleReaderAnnotationDocumentLoader {
             "texts": textItems,
             "state": memorizeDocumentState(from: request.stateJSON),
             "bookInitials": request.bookInitials,
-            "v11n": "KJVA",
+            "v11n": sourceVersification,
             "osisRef": memorizeOsisRef(request),
             "startOrdinal": ordinalRange.start,
             "endOrdinal": ordinalRange.end,

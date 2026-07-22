@@ -68,11 +68,282 @@ public struct VerseKeyReference: Sendable, Equatable {
 }
 
 /**
+ One exact Bible verse captured from SWORD's source-neutral OSIS and canonical-text filters.
+
+ The copied strings never retain native pointers. Either content projection may be absent while the
+ verse identity remains valid, matching Android's independent canonical-text and OSIS extraction.
+ */
+public struct SwordVerseSourceEntry: Equatable, Sendable {
+    /// Exact source-versification reference resolved from the requested ordinal.
+    public let reference: VerseKeyReference
+
+    /// Source-format-neutral OSIS returned by `SWModule_getOSISFragment`, when available.
+    public let osisFragment: String?
+
+    /// Canonical visible text returned by SWORD's strip-text filter, when available.
+    public let canonicalText: String?
+}
+
+/**
+ One bounded source-versification passage captured while holding a single SWORD cursor lease.
+ */
+public struct SwordVerseSourceRange: Equatable, Sendable {
+    /// Addressable verses in source ordinal order; intro ordinals inside the span are omitted.
+    public let entries: [SwordVerseSourceEntry]
+
+    /// Inclusive source ordinal start validated before content inspection began.
+    public let sourceOrdinalStart: Int
+
+    /// Inclusive source ordinal end validated before content inspection began.
+    public let sourceOrdinalEnd: Int
+
+    /// Source-versification OSIS identity, including both endpoints for a multi-verse range.
+    public let sourceOSISRange: String
+
+    /// One Android-equivalent canonical projection over the complete source passage.
+    public let canonicalText: String?
+}
+
+/** Fail-closed errors from bounded SWORD Bible source inspection. */
+public enum SwordVerseSourceInspectionError: Error, Equatable, Sendable {
+    /// One or both numeric endpoints cannot define a forward, positive verse span.
+    case invalidRange
+
+    /// The inclusive span exceeds the caller's work limit.
+    case rangeTooLarge(maximumCount: Int)
+
+    /// A supplied endpoint does not resolve to an exact normal verse in the module's versification.
+    case nonAddressableEndpoint(Int)
+
+    /// SWORD did not return to the exact key and verse index held before inspection.
+    case cursorRestorationFailed
+}
+
+/** Immutable state used to prove that a composite SWORD read restored its caller's cursor. */
+struct SwordModuleCursorSnapshot: Equatable, Sendable {
+    /// Normalized key text copied before inspection.
+    let keyText: String
+
+    /// VerseKey index copied before inspection, or `nil` for a non-VerseKey cursor.
+    let verseIndex: Int?
+
+    /**
+     Checks a restored cursor against both pieces of captured identity.
+
+     - Parameters:
+       - restoredKeyText: Key text after restoration.
+       - restoredVerseIndex: VerseKey index after restoration, if present.
+     - Returns: `true` only when key and index match the captured state exactly.
+     - Side effects: None.
+     - Failure modes: Missing or changed identity returns `false`.
+     */
+    func matches(restoredKeyText: String, restoredVerseIndex: Int?) -> Bool {
+        keyText == restoredKeyText && verseIndex == restoredVerseIndex
+    }
+}
+
+/** Projects one complete Bible source capture through Android's canonical-text state machine. */
+private enum SwordBibleCanonicalTextProjection {
+    /** Internal control-flow failure that selects the independent strip-text projection. */
+    private enum ProjectionError: Error {
+        case incompleteConvertedOSIS
+    }
+
+    /** Stateful output writer matching Android's cross-node whitespace handling. */
+    private struct Writer {
+        var output = ""
+        var spaceJustWritten = true
+
+        /** Starts a verse without trimming or rewriting output already emitted by earlier verses. */
+        mutating func beginVerse() {
+            spaceJustWritten = true
+        }
+
+        /** Ends a verse with Android's single canonical separator. */
+        mutating func endVerse() {
+            write(" ")
+        }
+
+        /**
+         Appends one decoded SAX-style character chunk with Android's whitespace suppression.
+
+         - Parameter value: One complete text or marker chunk from the source tree.
+         - Side effects: Appends to `output` and updates cross-node whitespace state.
+         - Failure modes: Empty values and redundant all-whitespace chunks are ignored.
+         */
+        mutating func write(_ value: String?) {
+            guard let value, !value.isEmpty else { return }
+            let decoded = SwordHTML4EntityDecoder.decode(value)
+            guard !decoded.isEmpty else { return }
+            if decoded.allSatisfy(\.isWhitespace) {
+                guard !spaceJustWritten else { return }
+                output.append(" ")
+                spaceJustWritten = true
+            } else {
+                output.append(decoded)
+                spaceJustWritten = decoded.last?.isWhitespace == true
+            }
+        }
+    }
+
+    /**
+     Projects all converted verse fragments in one structured pass, with an independent strip-text
+     fallback when converted OSIS is absent or malformed.
+
+     - Parameter entries: Addressable source verses in exact passage order.
+     - Returns: Android-compatible canonical text, including its final verse separator, or `nil`
+       when neither complete source projection can produce text.
+     - Side effects: Parses copied XML in memory; no SWORD cursor or native pointer is retained.
+     - Failure modes: Malformed or partial OSIS selects the complete strip-text fallback. Missing
+       values in both projections return `nil` without affecting structured OSIS publication.
+     */
+    static func project(_ entries: [SwordVerseSourceEntry]) -> String? {
+        guard !entries.isEmpty else { return nil }
+        if let sourceProjection = try? projectConvertedOSIS(entries), !sourceProjection.isEmpty {
+            return sourceProjection
+        }
+
+        let canonicalPieces = entries.compactMap(\.canonicalText)
+        guard canonicalPieces.count == entries.count else { return nil }
+        var writer = Writer()
+        for piece in canonicalPieces {
+            writer.beginVerse()
+            writer.write(piece)
+            writer.endVerse()
+        }
+        return writer.output.isEmpty ? nil : writer.output
+    }
+
+    /**
+     Builds one passage tree and walks canonical source nodes in document order.
+
+     - Parameter entries: Complete source entries whose converted OSIS is independently optional.
+     - Returns: One canonical passage projection, including Android's final verse separator.
+     - Side effects: Parses copied XML fragments and allocates an in-memory passage tree.
+     - Throws: XML parser failures or `ProjectionError` when any converted fragment is absent.
+     */
+    private static func projectConvertedOSIS(
+        _ entries: [SwordVerseSourceEntry]
+    ) throws -> String {
+        let passage = SwordXMLNode.element(name: "div", attributes: [:])
+        for entry in entries {
+            guard let fragment = entry.osisFragment else {
+                throw ProjectionError.incompleteConvertedOSIS
+            }
+            let parserRoot = try SwordXMLTreeParser.parse(
+                xml: "<andbible-canonical-root>\(fragment)</andbible-canonical-root>"
+            )
+            let verse = SwordXMLNode.element(
+                name: "verse",
+                attributes: ["osisID": entry.reference.osisRef]
+            )
+            verse.children = parserRoot.children
+            passage.children.append(verse)
+        }
+
+        var writer = Writer()
+        walk(passage, writeContent: true, writer: &writer)
+        return writer.output
+    }
+
+    /**
+     Recursively applies Android canonical inclusion and marker rules to one source node.
+
+     - Parameters:
+       - node: Current source-tree node.
+       - writeContent: Inclusion state inherited from the parent element.
+       - writer: Passage-level canonical writer shared across the traversal.
+     - Side effects: Appends included text/markers and mutates passage whitespace state.
+     - Failure modes: None; malformed XML is rejected before traversal begins.
+     */
+    private static func walk(
+        _ node: SwordXMLNode,
+        writeContent: Bool,
+        writer: inout Writer
+    ) {
+        guard node.isElement else {
+            if writeContent, node.isTextLike {
+                writer.write(node.stringValue)
+            }
+            return
+        }
+
+        let name = node.localName
+        var childWrite = writeContent
+        if node.attribute(named: "canonical") == "true" {
+            childWrite = true
+        } else {
+            switch name {
+            case "verse":
+                writer.beginVerse()
+                childWrite = true
+            case "milestone":
+                writer.write(node.attribute(named: "marker") ?? "")
+                childWrite = false
+            case "note", "title":
+                childWrite = false
+            case "q":
+                writer.write(node.attribute(named: "marker") ?? "")
+                childWrite = true
+            case "l", "lb", "p":
+                writer.write(" ")
+            default:
+                break
+            }
+        }
+
+        for child in node.children {
+            walk(child, writeContent: childWrite, writer: &writer)
+        }
+        if name == "verse" {
+            writer.endVerse()
+        }
+    }
+}
+
+/**
+ Describes a SWORD backend failure while enumerating or validating generic module keys.
+
+ SWORD uses error code `1` as the ordinary out-of-bounds sentinel at the end of iteration. Other
+ codes indicate that the backend could not complete the requested operation and must not be
+ represented as an empty module or a missing key.
+
+ Associated values identify the affected module, attempted key when applicable, and raw SWORD error
+ code. The error is deterministic value data with no side effects; callers may present its localized
+ description and retry the same operation after the backend becomes readable.
+ */
+public enum SwordModuleKeyAccessError: Error, Equatable, LocalizedError, Sendable {
+    /// Key enumeration stopped because SWORD reported a non-terminal backend error.
+    case keyListReadFailed(moduleName: String, errorCode: Int)
+
+    /// Exact-key validation stopped because SWORD reported a non-terminal backend error.
+    case exactKeyReadFailed(moduleName: String, key: String, errorCode: Int)
+
+    /**
+     Produces actionable diagnostic text for Android-equivalent key chooser error presentation.
+
+     - Returns: Module/key context plus the raw SWORD error code, or `nil` only if a future case does
+       not provide a description.
+     - Side effects: None.
+     - Failure modes: None for current cases; the message deliberately remains available to retry UI.
+     */
+    public var errorDescription: String? {
+        switch self {
+        case .keyListReadFailed(let moduleName, let errorCode):
+            return "Could not read entries from \(moduleName) (SWORD error \(errorCode))."
+        case .exactKeyReadFailed(let moduleName, let key, let errorCode):
+            return "Could not verify entry \(key) in \(moduleName) (SWORD error \(errorCode))."
+        }
+    }
+}
+
+/**
  Swift wrapper around a SWORD SWModule instance.
 
  Provides verse key navigation, text retrieval, and search capabilities.
  All operations are serialized through `SwordRuntime` since libsword and the flat bridge keep
- process-global state and are not thread-safe.
+ process-global state and are not thread-safe. Successful generic key enumeration is cached for this
+ immutable module-handle lifetime; backend failures are not cached and remain retryable.
 
  Do not create instances directly — obtain them from `SwordManager.module(named:)`.
  */
@@ -81,6 +352,15 @@ public final class SwordModule: @unchecked Sendable {
 
     /// Module metadata.
     public let info: ModuleInfo
+
+    /**
+     Successful generic key snapshot shared by switch preflight and chooser presentation.
+
+     Access is confined to `SwordRuntime.sync`, so the unchecked-sendable wrapper never races this
+     mutable cache. `Array` copy-on-write lets callers retain the snapshot without another native
+     traversal or eager buffer copy. Failures leave the value `nil` so Retry performs a fresh read.
+     */
+    private var cachedAllKeys: [String]?
 
     init(handle: UnsafeMutableRawPointer, modulePath: String? = nil) {
         self.handle = handle
@@ -132,6 +412,7 @@ public final class SwordModule: @unchecked Sendable {
                 description: description,
                 category: ModuleCategory(typeString: typeStr, modDrv: modDrv),
                 language: language,
+                moduleDriver: modDrv,
                 version: versionStr,
                 isEncrypted: isEncrypted,
                 isUnlocked: !isEncrypted || (cipherKey.map { String(cString: $0) } ?? "").isEmpty == false,
@@ -286,6 +567,168 @@ public final class SwordModule: @unchecked Sendable {
             SWModule_setKeyText(handle, previousKey)
             return (actualKey, verseKey, rawEntry)
         }
+    }
+
+    /**
+     Atomically captures canonical source text for one verse and restores the previous cursor.
+
+     Android AI context keeps the raw OSIS fragment and `getCanonicalText` projection together.
+     Reading both inside one `SwordRuntime` block guarantees they describe the same exact key while
+     leaving existing raw-only inspection callers on their cheaper contract.
+
+     - Parameter keyText: Exact SWORD verse key such as `=Gen.1.1`.
+     - Returns: Resolved key, structured VerseKey metadata, raw OSIS, and stripped canonical text.
+     - Side effects: Temporarily moves the module cursor, runs SWORD's source text filter, and
+       restores the prior key before returning.
+     - Failure modes: Missing/non-VerseKey entries return `nil` metadata and empty source fields as
+       reported by SWORD; callers must validate exact coordinates before accepting the content.
+     */
+    public func inspectVerseKeySourceRestoringPrevious(
+        _ keyText: String
+    ) -> (
+        actualKey: String,
+        verseKey: VerseKeyChildren?,
+        rawEntry: String,
+        strippedText: String
+    ) {
+        SwordRuntime.sync {
+            let previousKey = String(cString: SWModule_getKeyText(handle))
+            defer { SWModule_setKeyText(handle, previousKey) }
+            SWModule_setKeyText(handle, keyText)
+            return (
+                actualKey: String(cString: SWModule_getKeyText(handle)),
+                verseKey: Self.currentVerseKeyChildren(handle: handle),
+                rawEntry: String(cString: SWModule_getRawEntry(handle)),
+                strippedText: String(cString: SWModule_getStripText(handle))
+            )
+        }
+    }
+
+    /**
+     Captures one bounded Bible passage through SWORD's source-neutral OSIS conversion.
+
+     Both endpoints are resolved before any range walk. The method then inspects at most
+     `maximumVerseCount` ordinals under one `SwordRuntime` lease, skips only non-verse intro slots,
+     and restores the exact prior cursor before returning any copied result.
+
+     - Parameters:
+       - startOrdinal: Inclusive first ordinal in the module's own versification.
+       - endOrdinal: Inclusive last ordinal in the module's own versification.
+       - maximumVerseCount: Maximum inclusive ordinal span accepted by this operation.
+     - Returns: Exact source identities plus independently optional OSIS and canonical text.
+     - Side effects: Temporarily moves the module cursor while holding the process-wide SWORD gate.
+     - Throws: `SwordVerseSourceInspectionError` for invalid, excessive, non-addressable, or
+       non-restorable requests.
+     */
+    public func inspectVerseSourceRangeRestoringPrevious(
+        startOrdinal: Int,
+        endOrdinal: Int,
+        maximumVerseCount: Int = 500
+    ) throws -> SwordVerseSourceRange {
+        try SwordRuntime.sync {
+            let previousIndexValue = SWModule_getVerseKeyIndex(handle)
+            let cursorSnapshot = SwordModuleCursorSnapshot(
+                keyText: String(cString: SWModule_getKeyText(handle)),
+                verseIndex: previousIndexValue >= 0 ? Int(previousIndexValue) : nil
+            )
+
+            let captureResult: Result<SwordVerseSourceRange, SwordVerseSourceInspectionError>
+            if startOrdinal <= 0 || endOrdinal < startOrdinal || maximumVerseCount <= 0 {
+                captureResult = .failure(.invalidRange)
+            } else {
+                let distance = endOrdinal - startOrdinal
+                if distance >= maximumVerseCount {
+                    captureResult = .failure(.rangeTooLarge(maximumCount: maximumVerseCount))
+                } else {
+                    let referenceAtOrdinal: (Int) -> VerseKeyReference? = { ordinal in
+                        guard SWModule_setVerseKeyIndex(self.handle, CLong(ordinal)) == 0,
+                              let children = Self.currentVerseKeyChildren(handle: self.handle),
+                              children.chapter > 0,
+                              children.verse > 0,
+                              Int(SWModule_getVerseKeyIndex(self.handle)) == ordinal else {
+                            return nil
+                        }
+                        return VerseKeyReference(
+                            osisBookId: children.osisBookName,
+                            chapter: children.chapter,
+                            verse: children.verse,
+                            ordinal: ordinal
+                        )
+                    }
+
+                    guard let startReference = referenceAtOrdinal(startOrdinal) else {
+                        captureResult = .failure(.nonAddressableEndpoint(startOrdinal))
+                        return try Self.finishSourceInspection(
+                            captureResult,
+                            restoring: cursorSnapshot,
+                            handle: handle
+                        )
+                    }
+                    guard let endReference = referenceAtOrdinal(endOrdinal) else {
+                        captureResult = .failure(.nonAddressableEndpoint(endOrdinal))
+                        return try Self.finishSourceInspection(
+                            captureResult,
+                            restoring: cursorSnapshot,
+                            handle: handle
+                        )
+                    }
+
+                    let count = distance + 1
+                    var entries: [SwordVerseSourceEntry] = []
+                    entries.reserveCapacity(count)
+                    for offset in 0..<count {
+                        let ordinal = startOrdinal + offset
+                        guard let reference = referenceAtOrdinal(ordinal) else { continue }
+                        let osis = SWModule_getOSISFragment(handle).map(String.init(cString:))
+                        let canonical = SWModule_getStripText(handle).map(String.init(cString:))
+                        entries.append(SwordVerseSourceEntry(
+                            reference: reference,
+                            osisFragment: osis.flatMap { $0.isEmpty ? nil : $0 },
+                            canonicalText: canonical.flatMap { $0.isEmpty ? nil : $0 }
+                        ))
+                    }
+
+                    let canonicalText = SwordBibleCanonicalTextProjection.project(entries)
+                    let sourceOSISRange = startReference.osisRef == endReference.osisRef
+                        ? startReference.osisRef
+                        : "\(startReference.osisRef)-\(endReference.osisRef)"
+                    captureResult = .success(SwordVerseSourceRange(
+                        entries: entries,
+                        sourceOrdinalStart: startOrdinal,
+                        sourceOrdinalEnd: endOrdinal,
+                        sourceOSISRange: sourceOSISRange,
+                        canonicalText: canonicalText
+                    ))
+                }
+            }
+
+            return try Self.finishSourceInspection(
+                captureResult,
+                restoring: cursorSnapshot,
+                handle: handle
+            )
+        }
+    }
+
+    /** Restores captured key and VerseKey index, publishing no result unless both are exact. */
+    private static func finishSourceInspection(
+        _ result: Result<SwordVerseSourceRange, SwordVerseSourceInspectionError>,
+        restoring snapshot: SwordModuleCursorSnapshot,
+        handle: UnsafeMutableRawPointer
+    ) throws -> SwordVerseSourceRange {
+        SWModule_setKeyText(handle, snapshot.keyText)
+        if let verseIndex = snapshot.verseIndex {
+            _ = SWModule_setVerseKeyIndex(handle, CLong(verseIndex))
+        }
+        let restoredIndexValue = SWModule_getVerseKeyIndex(handle)
+        let restoredIndex = restoredIndexValue >= 0 ? Int(restoredIndexValue) : nil
+        guard snapshot.matches(
+            restoredKeyText: String(cString: SWModule_getKeyText(handle)),
+            restoredVerseIndex: restoredIndex
+        ) else {
+            throw SwordVerseSourceInspectionError.cursorRestorationFailed
+        }
+        return try result.get()
     }
 
     private static func currentVerseKeyChildren(handle: UnsafeMutableRawPointer) -> VerseKeyChildren? {
@@ -803,27 +1246,114 @@ public final class SwordModule: @unchecked Sendable {
     // MARK: - Key Browsing
 
     /**
-     Collect all entry keys in the module (for dictionary/genbook key browsing).
-     Uses begin()/next() iteration, returns array of key strings.
-     Faster than `iterateAllEntries` since it skips text retrieval.
+     Loads every entry key for dictionary, general-book, and map browsing.
+
+     The method preserves source order and duplicate/empty keys because Android's chooser filtering
+     owns those presentation decisions. SWORD error code `1` is the normal out-of-bounds sentinel for
+     an empty module or the end of a successful iteration; any other code is a backend failure.
+
+     - Returns: Exact module keys in source order, sharing the successful module-lifetime snapshot.
+     - Side effects: The first successful read temporarily moves the module cursor while holding
+       `SwordRuntime`, restores the caller's previous key, and caches the immutable result. Cached
+       reads do not touch the native cursor.
+     - Throws: `SwordModuleKeyAccessError.keyListReadFailed` when SWORD reports a non-terminal
+       backend error. Failures are not cached; callers must keep them distinct from a successful
+       empty array and may retry.
      */
-    public func allKeys() -> [String] {
-        SwordRuntime.sync {
+    public func loadAllKeys() throws -> [String] {
+        try SwordRuntime.sync {
+            if let cachedAllKeys {
+                return cachedAllKeys
+            }
+
             let savedKey = String(cString: SWModule_getKeyText(handle))
             defer { SWModule_setKeyText(handle, savedKey) }
 
             SWModule_begin(handle)
-            guard SWModule_popError(handle) == 0 else { return [] }
+            let startError = Int(SWModule_popError(handle))
+            if startError == Self.endOfKeyListErrorCode {
+                cachedAllKeys = []
+                return []
+            }
+            guard startError == 0 else {
+                throw SwordModuleKeyAccessError.keyListReadFailed(
+                    moduleName: info.name,
+                    errorCode: startError
+                )
+            }
 
             var keys: [String] = []
             while true {
                 let key = String(cString: SWModule_getKeyText(handle))
                 keys.append(key)
-                if SWModule_next(handle) != 0 { break }
+                let nextError = Int(SWModule_next(handle))
+                if nextError == Self.endOfKeyListErrorCode {
+                    break
+                }
+                guard nextError == 0 else {
+                    throw SwordModuleKeyAccessError.keyListReadFailed(
+                        moduleName: info.name,
+                        errorCode: nextError
+                    )
+                }
             }
+            cachedAllKeys = keys
             return keys
         }
     }
+
+    /**
+     Collects module keys for legacy non-interactive scans that cannot present read failures.
+
+     Interactive dictionary/general-book/map surfaces must call `loadAllKeys()` so backend errors do
+     not masquerade as empty modules. This compatibility method remains for existing search and speech
+     pipelines whose public contracts currently accept only an array.
+
+     - Returns: Exact keys, or an empty array when key enumeration fails.
+     - Side effects: Delegates to `loadAllKeys()`, including temporary cursor movement/restoration.
+     - Failure modes: Intentionally collapses the typed error for compatibility; do not use it for UI.
+     */
+    public func allKeys() -> [String] {
+        (try? loadAllKeys()) ?? []
+    }
+
+    /**
+     Tests whether a generic SWORD module contains one exact key without accepting nearest-key snaps.
+
+     - Parameter keyText: Previously selected dictionary/general-book/map key to validate.
+     - Returns: `true` only when loading the entry leaves SWORD positioned on the identical key;
+       empty keys and ordinary out-of-bounds misses return `false`.
+     - Side effects: Temporarily moves the module cursor and reads the raw entry to force RawLD and
+       TreeKey backends to finalize key normalization, then restores the previous key.
+     - Throws: `SwordModuleKeyAccessError.exactKeyReadFailed` for non-terminal backend errors.
+     */
+    public func containsExactKey(_ keyText: String) throws -> Bool {
+        guard !keyText.isEmpty else { return false }
+
+        return try SwordRuntime.sync {
+            let savedKey = String(cString: SWModule_getKeyText(handle))
+            defer { SWModule_setKeyText(handle, savedKey) }
+
+            SWModule_setKeyText(handle, keyText)
+            _ = SWModule_getRawEntry(handle)
+            let readError = Int(SWModule_popError(handle))
+            if readError == Self.endOfKeyListErrorCode {
+                return false
+            }
+            guard readError == 0 else {
+                throw SwordModuleKeyAccessError.exactKeyReadFailed(
+                    moduleName: info.name,
+                    key: keyText,
+                    errorCode: readError
+                )
+            }
+            let resolvedKey = String(cString: SWModule_getKeyText(handle))
+            return resolvedKey.utf8.elementsEqual(keyText.utf8)
+        }
+    }
+
+    /// SWORD's `KEYERR_OUTOFBOUNDS` value, used for an empty module, missing key, or normal EOF.
+    private static let endOfKeyListErrorCode = 1
 
     /**
      Get child keys at the current position (for tree-key modules like general books).

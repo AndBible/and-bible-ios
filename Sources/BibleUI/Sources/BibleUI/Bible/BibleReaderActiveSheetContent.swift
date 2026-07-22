@@ -10,6 +10,7 @@ import SwiftUI
 struct BibleReaderActiveSheetContent: View {
     let sheet: BibleReaderView.ReaderSheet
     let controller: BibleReaderController?
+    let speakService: SpeakService
     let readingProgressInitialTab: ReadingProgressTab
     let chapterReadHistoryTarget: ChapterReadHistoryTarget?
 
@@ -21,6 +22,7 @@ struct BibleReaderActiveSheetContent: View {
      - Parameters:
        - sheet: Reader sheet route to render.
        - controller: Focused reader controller backing sheet navigation actions.
+       - speakService: Reader-owned speech runtime passed to workspace management.
        - readingProgressInitialTab: Initial reading-progress tab for progress routes.
        - chapterReadHistoryTarget: Optional chapter read-history target.
        - onDismiss: Callback used to close the active sheet.
@@ -34,12 +36,14 @@ struct BibleReaderActiveSheetContent: View {
     init(
         sheet: BibleReaderView.ReaderSheet,
         controller: BibleReaderController?,
+        speakService: SpeakService,
         readingProgressInitialTab: ReadingProgressTab,
         chapterReadHistoryTarget: ChapterReadHistoryTarget?,
         onDismiss: @escaping () -> Void
     ) {
         self.sheet = sheet
         self.controller = controller
+        self.speakService = speakService
         self.readingProgressInitialTab = readingProgressInitialTab
         self.chapterReadHistoryTarget = chapterReadHistoryTarget
         self.onDismiss = onDismiss
@@ -105,7 +109,7 @@ struct BibleReaderActiveSheetContent: View {
             }
         case .workspaces:
             NavigationStack {
-                WorkspaceSelectorView()
+                WorkspaceSelectorView(speakService: speakService)
             }
         case .about:
             NavigationStack {
