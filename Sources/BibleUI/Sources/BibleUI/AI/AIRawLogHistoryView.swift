@@ -631,19 +631,24 @@ private struct AIRawLogDetailView: View {
     private func prepareBugReport() {
         showsBugReportConfirmation = false
         guard AIModelCatalog.isSupported(log.modelName) else { return }
-        guard AIBugReportMailComposer.canSendMail else {
+        guard AddressedMailComposer.capability == .available else {
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
             return
         }
 
         do {
             let attachment = try LLMRawLogPayloadDecoder.gzipAttachmentData(log.logData)
-            bugReportMail = AIBugReportMailPayload(
+            bugReportMail = AddressedMailPayload(
                 recipient: "errors.andbible@gmail.com",
                 subject: bugReportSubject,
                 body: bugReportBody,
-                attachmentData: attachment,
-                attachmentFilename: "ai_raw_log.txt.gz"
+                attachments: [
+                    AddressedMailAttachment(
+                        data: attachment,
+                        filename: "ai_raw_log.txt.gz",
+                        mimeType: "application/gzip"
+                    )
+                ]
             )
         } catch {
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
