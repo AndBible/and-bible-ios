@@ -100,6 +100,31 @@ final class ProductFeedbackReportPreparationTests: XCTestCase {
     }
 
     /**
+     Stored-ZIP headers must count toward the export ceiling before archive allocation begins.
+
+     The payload bytes and generated manifest fit the 10 MiB limit by themselves; a failure here
+     means ZIP metadata could bypass the user-visible bound until after a large archive allocation.
+     */
+    func testUnavailableMailExportCountsStoredZipMetadataInPreflightLimit() {
+        let payload = AddressedMailPayload(
+            recipient: "errors.andbible@gmail.com",
+            subject: "subject",
+            body: "",
+            attachments: [
+                .init(
+                    data: Data(repeating: 0, count: ProductFeedbackReportExportBuilder.maximumArchiveByteCount - 512),
+                    filename: "log.txt",
+                    mimeType: "text/plain"
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(try ProductFeedbackReportExportBuilder.write(payload: payload)) { error in
+            XCTAssertEqual(error as? ProductFeedbackReportExportError, .archiveTooLarge)
+        }
+    }
+
+    /**
      Credential-shaped values must never survive from a unified-log message into report evidence.
 
      This is a deterministic redaction seam; a failure means the user could export secrets after
