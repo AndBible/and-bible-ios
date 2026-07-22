@@ -1,20 +1,6 @@
 import Foundation
 import SwiftUI
 
-/** Reader-owned manual-report state that prevents duplicate collection and premature mail handoff. */
-enum ManualBugReportState {
-    /// No report is being prepared or presented.
-    case idle
-    /// Evidence is being collected before consent.
-    case collecting
-    /// A prepared, unsent report is awaiting an explicit user decision.
-    case awaitingConsent(AddressedMailPayload)
-    /// The system mail composer owns the prepared report presentation.
-    case presentingMail
-    /// Mail is unavailable; the report has not been sent.
-    case mailUnavailable
-}
-
 /**
  Renders Android's manual diagnostic-report confirmation before iOS system sharing.
 
@@ -60,6 +46,9 @@ struct AndroidBugReportDialog: View {
 
 /** Blocks duplicate manual-report launches while evidence is collected before consent. */
 struct AndroidBugReportPreparationDialog: View {
+    /// Whether a previous ZIP creation failed; collection wording is retained for export retry.
+    let isExportRetry: Bool
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.36).ignoresSafeArea()
@@ -67,7 +56,9 @@ struct AndroidBugReportPreparationDialog: View {
                 ProgressView()
                 Text(String(localized: "send_bug_report_title", defaultValue: "Preparing bug report"))
                     .font(.headline)
-                Text("Collecting available diagnostic evidence. Nothing has been sent.")
+                Text(isExportRetry
+                    ? String(localized: "bug_report_attachment_line_1", defaultValue: "Preparing your report for export. Nothing has been sent.")
+                    : String(localized: "bug_report_attachment_line_1", defaultValue: "Collecting available diagnostic evidence. Nothing has been sent."))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
@@ -83,16 +74,25 @@ struct AndroidBugReportPreparationDialog: View {
 /** Explains that a prepared report was not sent because no configured mail account is available. */
 struct AndroidBugReportUnsentDialog: View {
     let onDismiss: () -> Void
+    let onExport: () -> Void
+    /// Explains a failed local ZIP attempt without implying any report was sent.
+    let exportFailed: Bool
 
     var body: some View {
         ZStack {
             Color.black.opacity(0.36).ignoresSafeArea()
             VStack(alignment: .leading, spacing: 16) {
-                Text("Bug report not sent").font(.headline)
-                Text("Mail is not configured on this device. No bug report has been sent.")
+                Text(String(localized: "bug_report_not_sent", defaultValue: "Bug report not sent")).font(.headline)
+                Text(exportFailed
+                    ? String(localized: "bug_report_export_failed", defaultValue: "The report could not be exported. No bug report has been sent.")
+                    : String(localized: "bug_report_mail_unavailable", defaultValue: "Mail is not configured on this device. No bug report has been sent."))
                     .foregroundStyle(.secondary)
-                Button(String(localized: "ok", defaultValue: "OK"), action: onDismiss)
-                    .buttonStyle(.borderedProminent)
+                HStack {
+                    Button(String(localized: "cancel", defaultValue: "Cancel"), action: onDismiss)
+                    Spacer()
+                    Button(String(localized: "bug_report_export", defaultValue: "Export report"), action: onExport)
+                        .buttonStyle(.borderedProminent)
+                }
             }
             .padding()
             .frame(maxWidth: 480)
