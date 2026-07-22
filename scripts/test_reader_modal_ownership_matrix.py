@@ -798,8 +798,8 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("onReportBug", rate_dialog)
         self.assertIn("onDismiss", rate_dialog)
 
-    def test_bug_report_builds_diagnostics_before_system_sharing(self) -> None:
-        """Manual bug reports require Android-like consent and diagnostics, not a bare issue URL."""
+    def test_bug_report_prepares_diagnostics_before_consent_gated_mail_handoff(self) -> None:
+        """Manual reports prepare evidence before consent and never degrade to an unaddressed share."""
         source = READER_VIEW.read_text(encoding="utf-8")
         drawer_handler = swift_function_body(source, "handleReaderNavigationDrawerAction")
         report_body = swift_switch_case_body(drawer_handler, "reportBug")
@@ -812,14 +812,27 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             / "Shared"
             / "AndroidBugReportDialog.swift"
         ).read_text(encoding="utf-8")
+        preparation_source = (
+            REPO_ROOT
+            / "Sources"
+            / "BibleUI"
+            / "Sources"
+            / "BibleUI"
+            / "Shared"
+            / "ProductFeedbackReportPreparation.swift"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("presentBugReportDialog", report_body)
         self.assertNotIn("openExternalLink", report_body)
         self.assertIn("bugReportDialogOverlay", source)
-        self.assertIn("sendBugReportToSystemShare", source)
-        self.assertIn("shareText = AndroidBugReportDiagnostic.manualReport()", source)
-        self.assertIn("App id:", report_source)
-        self.assertIn("Operating system:", report_source)
+        self.assertIn("manualBugReportState", source)
+        self.assertIn("ProductFeedbackReportPreparation.prepare()", source)
+        self.assertIn("presentPreparedBugReport", source)
+        self.assertIn("AddressedMailComposer", source)
+        self.assertNotIn("shareText = AndroidBugReportDiagnostic.manualReport()", source)
+        self.assertIn("App id:", preparation_source)
+        self.assertIn("Operating system:", preparation_source)
+        self.assertIn("ProductFeedbackContract.diagnosticRecipient", preparation_source)
         self.assertIn("androidBugReportDialog", report_source)
 
     def test_progress_settings_is_a_reader_destination_not_a_sheet(self) -> None:

@@ -347,8 +347,11 @@ public struct BibleReaderView: View {
     /// Reader-owned Android Rate & Review dialog, shown before the system review controller.
     @State private var isRateReviewDialogPresented = false
 
-    /// Reader-owned Android manual bug-report confirmation before the system share handoff.
-    @State private var isBugReportDialogPresented = false
+    /// Reader-owned state for manual evidence collection, consent, and addressed mail handoff.
+    @State private var manualBugReportState: ManualBugReportState = .idle
+
+    /// Prepared report presented only after the user consents to system mail composition.
+    @State private var manualBugReportMailPayload: AddressedMailPayload?
 
     /// Initial search applied when Downloads is opened from an Android-compatible download link.
     @State private var downloadsInitialSearchText = ""
@@ -901,6 +904,12 @@ public struct BibleReaderView: View {
                     commentaryQuickModuleSelectorOverlay(anchor: anchor)
                 }
             }
+            .sheet(item: $manualBugReportMailPayload) { payload in
+                AddressedMailComposer(payload: payload) {
+                    manualBugReportMailPayload = nil
+                    manualBugReportState = .idle
+                }
+            }
     }
 
     /**
@@ -1230,16 +1239,27 @@ public struct BibleReaderView: View {
         }
     }
 
-    /** Renders Android's manual diagnostic bug-report confirmation before system sharing. */
+    /** Renders collection progress, consent, and explicit unavailable-mail state. */
     @ViewBuilder
     private var bugReportDialogOverlay: some View {
-        if isBugReportDialogPresented {
+        switch manualBugReportState {
+        case .idle, .presentingMail:
+            EmptyView()
+        case .collecting:
+            AndroidBugReportPreparationDialog()
+                .transition(.opacity)
+                .zIndex(20)
+        case .awaitingConsent(let payload):
             AndroidBugReportDialog(
                 onDismiss: dismissBugReportDialog,
-                onSendReport: sendBugReportToSystemShare
+                onSendReport: { presentPreparedBugReport(payload) }
             )
             .transition(.opacity)
             .zIndex(20)
+        case .mailUnavailable:
+            AndroidBugReportUnsentDialog(onDismiss: dismissBugReportDialog)
+                .transition(.opacity)
+                .zIndex(20)
         }
     }
 
@@ -2282,21 +2302,31 @@ public struct BibleReaderView: View {
         #endif
     }
 
-    /// Closes Android's diagnostic-report confirmation without mutating the pending share payload.
+    /// Cancels collection or consent without opening a system handoff.
     private func dismissBugReportDialog() {
-        isBugReportDialogPresented = false
+        manualBugReportState = .idle
+        manualBugReportMailPayload = nil
     }
 
-    /// Opens Android's manual diagnostic-report confirmation over the reader.
+    /// Collects available evidence before showing Android's manual-report consent question.
     private func presentBugReportDialog() {
-        isBugReportDialogPresented = true
+        guard case .idle = manualBugReportState else { return }
+        manualBugReportState = .collecting
+        Task { @MainActor in
+            await Task.yield()
+            guard case .collecting = manualBugReportState else { return }
+            manualBugReportState = .awaitingConsent(ProductFeedbackReportPreparation.prepare())
+        }
     }
 
-    /** Builds Android-equivalent app/device diagnostics and hands them to the system share surface. */
-    private func sendBugReportToSystemShare() {
-        dismissBugReportDialog()
-        myDocumentSharePayload = nil
-        shareText = AndroidBugReportDiagnostic.manualReport()
+    /// Presents addressed mail only after the user has consented to the prepared report.
+    private func presentPreparedBugReport(_ payload: AddressedMailPayload) {
+        guard AddressedMailComposer.capability == .available else {
+            manualBugReportState = .mailUnavailable
+            return
+        }
+        manualBugReportState = .presentingMail
+        manualBugReportMailPayload = payload
     }
 
     /// Presents a reader-stack destination and captures the pane target that should back it.

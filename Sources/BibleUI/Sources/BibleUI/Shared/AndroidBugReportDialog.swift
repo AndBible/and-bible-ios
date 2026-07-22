@@ -1,37 +1,18 @@
 import Foundation
 import SwiftUI
 
-/**
- Builds the app/device payload included in Android's manually initiated bug-report flow.
-
- The platform fields intentionally avoid user content and credentials. The returned plain text can
- be passed to iOS's system share surface, which is the equivalent of Android's email chooser.
- */
-enum AndroidBugReportDiagnostic {
-    /** Returns the manual-report subject and diagnostic body for the current app process. */
-    static func manualReport(
-        bundle: Bundle = .main,
-        processInfo: ProcessInfo = .processInfo,
-        locale: Locale = .current,
-        timeZone: TimeZone = .current
-    ) -> String {
-        let metadata = AndBibleAppVersionMetadata.current(bundle: bundle)
-        let appID = bundle.bundleIdentifier ?? "net.bible.androidactivity"
-        let operatingSystem = processInfo.operatingSystemVersionString
-        let memoryMegabytes = processInfo.physicalMemory / 1_048_576
-        return """
-        [\(metadata.marketingVersion) manual] Bug report for AndBible
-
-        App id: \(appID)
-        Version: \(metadata.detailText)
-        Operating system: \(operatingSystem)
-        Locale: \(locale.identifier)
-        Time zone: \(timeZone.identifier)
-        Physical memory Mb: \(memoryMegabytes)
-
-        Please describe what happened, the expected result, and steps to reproduce it below.
-        """
-    }
+/** Reader-owned manual-report state that prevents duplicate collection and premature mail handoff. */
+enum ManualBugReportState {
+    /// No report is being prepared or presented.
+    case idle
+    /// Evidence is being collected before consent.
+    case collecting
+    /// A prepared, unsent report is awaiting an explicit user decision.
+    case awaitingConsent(AddressedMailPayload)
+    /// The system mail composer owns the prepared report presentation.
+    case presentingMail
+    /// Mail is unavailable; the report has not been sent.
+    case mailUnavailable
 }
 
 /**
@@ -74,5 +55,50 @@ struct AndroidBugReportDialog: View {
             .padding(24)
         }
         .accessibilityIdentifier("androidBugReportDialog")
+    }
+}
+
+/** Blocks duplicate manual-report launches while evidence is collected before consent. */
+struct AndroidBugReportPreparationDialog: View {
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.36).ignoresSafeArea()
+            VStack(spacing: 16) {
+                ProgressView()
+                Text(String(localized: "send_bug_report_title", defaultValue: "Preparing bug report"))
+                    .font(.headline)
+                Text("Collecting available diagnostic evidence. Nothing has been sent.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding()
+            .frame(maxWidth: 360)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(24)
+        }
+        .accessibilityIdentifier("androidBugReportPreparationDialog")
+    }
+}
+
+/** Explains that a prepared report was not sent because no configured mail account is available. */
+struct AndroidBugReportUnsentDialog: View {
+    let onDismiss: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.36).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Bug report not sent").font(.headline)
+                Text("Mail is not configured on this device. No bug report has been sent.")
+                    .foregroundStyle(.secondary)
+                Button(String(localized: "ok", defaultValue: "OK"), action: onDismiss)
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding()
+            .frame(maxWidth: 480)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(24)
+        }
+        .accessibilityIdentifier("androidBugReportUnsentDialog")
     }
 }
