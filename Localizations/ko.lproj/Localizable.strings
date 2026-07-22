@@ -1007,3 +1007,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "AI 연결 및 프롬프트 설정";
 "prefs_features_cat" = "기능";
+
+/* Android shared translations */
+"ai_configure_button" = "연결 구성";
+"ai_disclaimer_warning_summary" = "AI 사용의 위험성과 책임";
+"ai_provider_tier_community" = "기타 공급자 (테스트되지 않음)";
+"ai_provider_tier_recommended" = "권장";
+"ai_providers_category" = "공급자";
+"easy_setup_anthropic_desc" = "합리적인 가격, 우수한 품질";
+"easy_setup_api_key_instructions" = "API 키 받기:";
+"easy_setup_done_message" = "성경에서 텍스트를 선택하고 AI 기능을 사용해 보세요. 설정에서 더 많은 모델과 공급자를 추가할 수 있습니다.";
+"easy_setup_done_title" = "AI가 준비되었습니다!";
+"easy_setup_free_tier" = "무료 티어";
+"easy_setup_gemini_desc" = "무료 티어 사용 가능, 좋은 품질";
+"easy_setup_openai_desc" = "잘 알려진, 신뢰할 수 있는";
+"easy_setup_pref_summary" = "몇 단계로 권장 공급자와 AI 설정";
+"edit_model_title" = "모델 편집";
+"show_also_unsupported_providers" = "지원되지 않는 공급자도 표시";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "계속할지 묻기 전 최대 반복 횟수 (0 = 무제한)";
+"ai_document_filter_summary" = "AI가 읽을 수 있는 문서 선택";
+"ai_document_filter_summary_count" = "%d개 문서 제외됨";
+"ai_document_filter_title" = "문서 접근";
+"ai_language_app_default" = "앱 언어 (%1$@)";
+"ai_language_custom" = "사용자 지정…";
+"ai_language_custom_example" = "예: suomi, Tagalog, en";
+"ai_language_custom_hint" = "언어 이름 또는 코드 입력";
+"ai_prompts_restored" = "숨긴 프롬프트 복원됨";
+"ai_restore_hidden_prompts" = "숨긴 프롬프트 복원";
+"are_you_sure" = "확실합니까?";
+"ask_model_before_run_summary" = "프롬프트 실행 전 모델 선택 대화상자 표시 (프롬프트에 명시적 모델 지정 시 건너뜀)";
+"auto_hide_agent_log_summary" = "작업이 성공적으로 완료되거나 취소되면 AI 패널을 자동으로 숨깁니다. 오류가 발생하면 패널이 계속 표시됩니다.";
+"commentary_max_response_dialog_message" = "AI가 주석을 가져올 때 총 응답이 이 토큰 제한을 초과하면, 선택 대화 상자에서 AI에 전송할 주석을 선택할 수 있습니다.\n\n0 = 제한 없음 (모든 주석이 자동으로 전송됩니다).";
+"commentary_max_response_dialog_title" = "최대 응답 크기 설정 (토큰)";
+"commentary_max_response_value" = "~%@ 토큰";
+"csv_export_failed" = "CSV 내보내기 실패: %@";
+"csv_import_errors" = "오류가 있는 가져오기 완료: %1$d개 생성, %2$d개 업데이트, %3$d개 오류";
+"csv_import_failed" = "CSV 가져오기 실패: %@";
+"csv_import_success" = "가져오기 완료: %1$d개 생성, %2$d개 업데이트";
+"custom_system_prompt_default" = "기본값";
+"delete_prompt_confirm_message" = "이 프롬프트를 삭제하시겠습니까?";
+"discard_changes_confirmation" = "저장하지 않은 변경 사항을 취소하시겠습니까?";
+"doc_type_commentary" = "주석";
+"export_prompts_csv" = "프롬프트를 CSV로 내보내기";
+"global_tool_permissions_title" = "기본 도구 설정";
+"help_ai_connection_text" = "여기서 AI 공급자, 모델, 권한 및 기타 연결 옵션을 구성하세요. 각 공급자는 자체 API 키가 필요합니다. 여러 공급자를 추가하고 기본 모델을 선택할 수 있습니다.";
+"help_ai_document_filter_text" = "AI 에이전트가 읽을 수 있는 성경, 주석 및 기타 모듈을 제한합니다. 기본적으로 AI는 설치된 모든 모듈을 볼 수 있습니다. 특정 출처만 고려하려면 필터링을 통해 노이즈와 비용을 줄일 수 있습니다.";
+"help_ai_models_text" = "이 공급자의 모델을 관리합니다. 새 릴리스를 가져오려면 공급자의 API에서 모델 목록을 새로 고침하거나, 목록에 없는 경우 모델 이름을 수동으로 추가할 수 있습니다.";
+"help_ai_providers_text" = "AI 공급자(Google Gemini, OpenAI, Anthropic 등)를 관리합니다. 각 공급자는 자체 API 키가 필요합니다. 여러 공급자를 추가하고 특정 프롬프트에 다른 공급자를 지정할 수 있습니다.";
+"help_ai_settings_text" = "AI 설정은 프롬프트와 카테고리를 관리하는 곳입니다. 여기서 새 프롬프트를 만들고, 카테고리로 정리하고, 프롬프트를 CSV로 가져오기/내보내기 하고, 애드온 프롬프트 팩을 설치하고, AI 연결 설정에 접근할 수 있습니다.";
+"help_global_tool_permissions_text" = "개별 AI 도구의 권한을 구성합니다. 각 읽기 도구에 대해 AI가 사용할 수 있는지 여부(활성화 또는 비활성화)를 선택합니다. 각 쓰기 도구에 대해 항상 허용, 항상 거부 또는 묻기(AI 연결 설정에서 설정한 전역 권한 모드로 대체됨)를 선택합니다.";
+"import_prompts_addon" = "애드온으로 설치 (읽기 전용)";
+"import_prompts_csv" = "CSV에서 프롬프트 가져오기";
+"import_prompts_editable" = "편집 가능한 프롬프트로 가져오기";
+"llm_custom_model" = "사용자 지정…";
+"llm_openrouter_category" = "카테고리";
+"llm_openrouter_category_all" = "전체";
+"llm_reset_usage_summary" = "누적 토큰 및 비용 추적 지우기";
+"llm_usage_summary_format" = "입력: %1$d 토큰 | 출력: %2$d 토큰\n예상 비용: %3$@";
+"manage_tool_permissions_summary" = "도구별 권한 재정의 관리";
+"model_delete_confirm" = "모델 \"%1$@\"을(를) 삭제하시겠습니까?";
+"model_supported_badge" = "✓ 지원됨";
+"move_to_category" = "카테고리로 이동…";
+"no_prompts_to_export" = "내보낼 사용자 프롬프트가 없습니다";
+"prompts_csv_export_success" = "%d개의 프롬프트를 CSV로 내보냈습니다";
+"raw_llm_log_copied" = "로그가 클립보드에 복사되었습니다";
+"raw_llm_log_empty" = "사용 가능한 원시 로그 데이터가 없습니다";
+"raw_llm_log_total" = "합계: 입력 %1$@ / 출력 %2$@%3$@";
+"raw_log_delete_confirm" = "%d개 선택됨";
+"raw_log_delete_old" = "오래된 로그 삭제…";
+"raw_log_delete_selected" = "선택 항목 삭제";
+"raw_log_history_summary" = "저장된 AI 대화 로그 보기 및 관리";
+"raw_log_retention_summary_days" = "%d일 후";
+"show_also_unsupported_models" = "지원되지 않는 모델도 표시";
+"tool_category_read" = "읽기";
+"tool_category_write" = "쓰기";
+"tool_option_disabled" = "비활성화됨";
+"tool_option_enabled" = "활성화됨";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "AI 버그 신고";
+"bug_report_email_text" = "다음으로 선호하는 이메일 애플리케이션(예: Gmail)을 선택하여 개발팀에 리포트를 보내주세요.";
+"send_ai_bug_report_title" = "AI 버그 신고";
+
+/* Android shared translations */
+"addon_prompt_badge" = "애드온: %@";
+"addon_prompt_notice" = "이 프롬프트는 애드온 모듈 \"%@\"에서 제공된 것으로 편집할 수 없습니다. 편집 가능한 복사본을 만들려면 \"복사하여 커스터마이즈\"를 사용하십시오.";
+"ai_available_tools" = "사용 가능한 도구";
+"ai_read_tools" = "읽기 도구";
+"ai_write_tools" = "쓰기 도구";
+"delete_category_confirm_title" = "카테고리 \"%@\"을(를) 삭제하시겠습니까?";
+"delete_prompt_confirmation" = "프롬프트 \"%@\"을(를) 삭제하시겠습니까?";
+"edit_prompt" = "프롬프트 편집";
+"help_prompt_edit_text" = "사용자 지정 프롬프트를 사용하면 성경 공부를 위한 재사용 가능한 AI 지시를 만들 수 있습니다. 이름, 설명, 템플릿, 표시될 컨텍스트, 그리고 선택적으로 사용자 지정 공급자/모델을 설정하세요. 기본 제공 프롬프트는 직접 편집할 수 없습니다 — \"복사하여 사용자 지정\"을 사용해 나만의 버전을 만드세요.";
+"help_tool_info_text" = "AI 도구는 AI가 데이터를 읽거나 사용자를 대신해 변경을 수행하기 위해 호출할 수 있는 전문화된 기능입니다. 읽기 도구(구절, 주석, 사전, 북마크)는 권한이 필요하지 않습니다. 쓰기 도구(북마크 만들기, 노트, 스터디 패드 항목)는 권한 시스템에 의해 제어됩니다.";
+"prompt_name_required" = "프롬프트 이름이 필요합니다";
+"prompt_template_required" = "프롬프트 템플릿이 필요합니다";
+"raw_llm_log_entry_api_response" = "API 응답 (반복 %d)";
+"raw_llm_log_entry_assistant" = "어시스턴트 응답";
+"raw_llm_log_entry_empty" = "(비어 있음)";
+"raw_llm_log_entry_system" = "시스템 프롬프트";
+"raw_llm_log_entry_tokens" = "~%@ 토큰";
+"raw_llm_log_entry_tool_call" = "도구 호출: %@";
+"raw_llm_log_entry_tool_definitions" = "도구 정의 (%d개 도구)";
+"raw_llm_log_entry_tool_desc" = "설명: %@";
+"raw_llm_log_entry_tool_params" = "매개변수: %@";
+"raw_llm_log_entry_tool_result" = "도구 결과 [%@]";
+"raw_llm_log_entry_usage" = "입력: %1$@ / 출력: %2$@%3$@";
+"raw_llm_log_entry_user" = "사용자 메시지";
+"raw_llm_log_title" = "원시 LLM 로그";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "선택한 구절에 대한 주석 항목을 자동으로 가져와 포함하여 AI 반복 횟수를 줄입니다.";
+"prompt_auto_include_documents_description" = "설치된 문서 목록을 프롬프트 컨텍스트에 자동으로 포함하여 AI 반복 횟수를 줄입니다.";
+"prompt_copied" = "프롬프트가 복사되었습니다";
+"prompt_edit_before_run_description" = "프롬프트를 실행하기 전에 작업을 지정할 수 있는 텍스트 필드를 표시합니다";
+"prompt_is_text_transformation_description" = "텍스트 콘텐츠를 변환하면서 서식(링크, 제목, 굵게/기울임)을 보존하는 단순화된 시스템 프롬프트를 사용합니다. 도구는 사용되지 않습니다. 번역 및 편집 프롬프트에 적합합니다.";
+"prompt_max_iterations" = "최대 반복 횟수 재정의";
+"prompt_max_iterations_description" = "이 프롬프트의 전역 최대 반복 횟수를 재정의합니다. 비워두면 전역 기본값 사용, 0 = 무제한.";
+"prompt_no_document_creation_description" = "활성화하면 AI가 문서를 생성하지 않습니다. 결과는 활동 로그에만 표시됩니다. 작업 전용 프롬프트(북마크, 레이블, 스터디 패드 작업)에 유용합니다.";
+"prompt_strict_context_matching_description" = "활성화하면 모든 컨텍스트(성경 버전, 선택된 텍스트)가 동일한 경우에만 캐시가 매칭됩니다. 비활성화하면 성경 버전에 관계없이 구절이 동일한 경우 캐시가 매칭됩니다.";

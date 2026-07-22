@@ -10,7 +10,7 @@ enum AIConfigurationEntryRequest: String, Equatable, Identifiable, Sendable {
     /// Create a custom provider configuration.
     case addProvider
 
-    /// Stable identity used while an acceptance sheet is presented.
+    /// Stable identity retained while an app-owned acceptance destination is visible.
     var id: String { rawValue }
 }
 
@@ -30,7 +30,7 @@ enum AIDisclaimerGate {
      - Parameters:
        - request: Exact configuration action the user selected.
        - isAccepted: Persisted AI disclaimer acceptance state.
-     - Returns: Either the original action or an acceptance request carrying that same action.
+     - Returns: The original action when accepted, otherwise an acceptance request carrying it.
      - Side effects: None; persistence occurs only after the user explicitly accepts.
      - Failure modes: None.
      */

@@ -1005,3 +1005,124 @@ Podczas korzystania z Dysku Google, aplikacja %@ otrzymuje uprawnienie na dostę
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Ustawienia połączenia AI i promptów";
 "prefs_features_cat" = "Funkcje";
+
+/* Android shared translations */
+"ai_configure_button" = "Konfiguruj połączenie";
+"ai_disclaimer_warning_summary" = "Ryzyka i obowiązki związane z używaniem AI";
+"ai_provider_tier_community" = "Inni dostawcy (niesprawdzeni)";
+"ai_provider_tier_recommended" = "Zalecani";
+"ai_providers_category" = "Dostawcy";
+"easy_setup_anthropic_desc" = "Przystępna cena, doskonała jakość";
+"easy_setup_api_key_instructions" = "Pobierz swój klucz API z:";
+"easy_setup_done_message" = "Zaznacz tekst w Biblii i wypróbuj funkcje AI. Możesz dodać więcej modeli i dostawców w ustawieniach.";
+"easy_setup_done_title" = "AI jest gotowe!";
+"easy_setup_free_tier" = "Bezpłatny poziom";
+"easy_setup_gemini_desc" = "Dostępny bezpłatny poziom, dobra jakość";
+"easy_setup_openai_desc" = "Znany, niezawodny";
+"easy_setup_pref_summary" = "Skonfiguruj AI z zalecanym dostawcą w kilku krokach";
+"edit_model_title" = "Edytuj model";
+"show_also_unsupported_providers" = "Pokaż również nieobsługiwanych dostawców";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maksymalna liczba iteracji przed pytaniem o kontynuację (0 = bez limitu)";
+"ai_document_filter_summary" = "Wybierz, które dokumenty AI może odczytywać";
+"ai_document_filter_summary_count" = "%d dokumentów wykluczonych";
+"ai_document_filter_title" = "Dostęp do dokumentów";
+"ai_language_app_default" = "Język aplikacji (%1$@)";
+"ai_language_custom" = "Niestandardowy…";
+"ai_language_custom_example" = "np. suomi, Tagalog, pl";
+"ai_language_custom_hint" = "Wprowadź nazwę lub kod języka";
+"ai_prompts_restored" = "Ukryte prompty przywrócone";
+"ai_restore_hidden_prompts" = "Przywróć ukryte prompty";
+"are_you_sure" = "Czy na pewno?";
+"ask_model_before_run_summary" = "Pokaż okno wyboru modelu przed wykonaniem promptu (pomijane, gdy prompt ma jawne nadpisanie modelu)";
+"auto_hide_agent_log_summary" = "Automatycznie ukrywaj panel AI, gdy zadanie zakończy się pomyślnie lub zostanie anulowane. W przypadku błędu panel pozostaje widoczny.";
+"commentary_max_response_dialog_message" = "Gdy AI pobiera komentarze i łączna odpowiedź przekracza ten limit tokenów, okno wyboru pozwala wybrać, które komentarze wysłać do AI.\n\n0 = brak limitu (wszystkie komentarze są wysyłane automatycznie).";
+"commentary_max_response_dialog_title" = "Ustaw maksymalny rozmiar odpowiedzi (tokeny)";
+"commentary_max_response_value" = "~%@ tokenów";
+"csv_export_failed" = "Nie udało się wyeksportować do CSV: %@";
+"csv_import_errors" = "Zakończono import z błędami: %1$d nowych, %2$d zaktualizowanych, %3$d błędów";
+"csv_import_failed" = "Nie udało się zaimportować CSV: %@";
+"csv_import_success" = "Zakończono import: %1$d nowych, %2$d zaktualizowanych";
+"custom_system_prompt_default" = "Domyślny";
+"delete_prompt_confirm_message" = "Czy na pewno chcesz usunąć ten prompt?";
+"discard_changes_confirmation" = "Odrzucić niezapisane zmiany?";
+"doc_type_commentary" = "Komentarz";
+"export_prompts_csv" = "Eksportuj prompty do CSV";
+"global_tool_permissions_title" = "Domyślne ustawienia narzędzi";
+"help_ai_connection_text" = "Skonfiguruj tutaj swoich dostawców AI, modele, uprawnienia i inne opcje połączenia. Każdy dostawca wymaga własnego klucza API. Możesz dodać wielu dostawców i wybrać domyślny model.";
+"help_ai_document_filter_text" = "Ogranicz, które Biblie, komentarze i inne moduły agent AI może odczytywać. Domyślnie AI widzi wszystkie zainstalowane moduły; filtrowanie pomaga ograniczyć szum i koszty, gdy chcesz, aby brało pod uwagę tylko określone źródła.";
+"help_ai_models_text" = "Zarządzaj modelami dla tego dostawcy. Możesz odświeżyć listę modeli z API dostawcy, aby pobrać nowe wersje, lub ręcznie dodać nazwę modelu, jeśli nie ma go na pobranej liście.";
+"help_ai_providers_text" = "Zarządzaj dostawcami AI (Google Gemini, OpenAI, Anthropic itp.). Każdy dostawca wymaga własnego klucza API. Możesz dodać wielu dostawców i przypisać różnych dostawców do konkretnych monitów.";
+"help_ai_settings_text" = "Ustawienia AI to miejsce, w którym zarządzasz monitami i kategoriami. Stąd możesz tworzyć nowe monity, organizować je w kategorie, importować/eksportować monity jako CSV, instalować pakiety dodatkowych monitów i przechodzić do ustawień połączenia AI.";
+"help_global_tool_permissions_text" = "Skonfiguruj uprawnienia dla poszczególnych narzędzi AI. Dla każdego narzędzia do odczytu wybierz, czy AI może go używać (Włączone lub Wyłączone). Dla każdego narzędzia do zapisu wybierz opcję Zawsze zezwalaj, Zawsze odmawiaj lub Pytaj (co powraca do globalnego trybu uprawnień ustawionego w ustawieniach połączenia AI).";
+"import_prompts_addon" = "Zainstaluj jako dodatek (tylko do odczytu)";
+"import_prompts_csv" = "Importuj prompty z CSV";
+"import_prompts_editable" = "Importuj jako edytowalne prompty";
+"llm_custom_model" = "Niestandardowy…";
+"llm_openrouter_category" = "Kategoria";
+"llm_openrouter_category_all" = "Wszystkie";
+"llm_reset_usage_summary" = "Wyczyść skumulowane śledzenie tokenów i kosztów";
+"llm_usage_summary_format" = "Wejście: %1$d tokenów | Wyjście: %2$d tokenów\nSzacowany koszt: %3$@";
+"manage_tool_permissions_summary" = "Zarządzaj nadpisaniami uprawnień dla poszczególnych narzędzi";
+"model_delete_confirm" = "Usunąć model „%1$@\"?";
+"model_supported_badge" = "✓ Obsługiwany";
+"move_to_category" = "Przenieś do kategorii…";
+"no_prompts_to_export" = "Brak promptów użytkownika do eksportu";
+"prompts_csv_export_success" = "Wyeksportowano %d promptów do CSV";
+"raw_llm_log_copied" = "Dziennik skopiowany do schowka";
+"raw_llm_log_empty" = "Brak danych dziennika";
+"raw_llm_log_total" = "Łącznie: wej %1$@ / wyj %2$@%3$@";
+"raw_log_delete_confirm" = "%d zaznaczonych";
+"raw_log_delete_old" = "Usuń stare dzienniki…";
+"raw_log_delete_selected" = "Usuń zaznaczone";
+"raw_log_history_summary" = "Przeglądaj i zarządzaj zapisanymi dziennikami rozmów AI";
+"raw_log_retention_summary_days" = "Po %d dniach";
+"show_also_unsupported_models" = "Pokaż również nieobsługiwane modele";
+"tool_category_read" = "Czytaj";
+"tool_category_write" = "Zapisz";
+"tool_option_disabled" = "Wyłączone";
+"tool_option_enabled" = "Włączone";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Zgłoś błąd AI";
+"bug_report_email_text" = "W następnym kroku wybierz preferowaną aplikację pocztową (np. Gmail), aby wysłać zgłoszenie do zespołu programistów.";
+"send_ai_bug_report_title" = "Zgłoś błąd AI";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Dodatek: %@";
+"addon_prompt_notice" = "Ten prompt pochodzi z modułu dodatku „%@\" i nie można go edytować. Użyj opcji „Kopiuj, aby dostosować\", aby utworzyć edytowalną kopię.";
+"ai_available_tools" = "Dostępne narzędzia";
+"ai_read_tools" = "Narzędzia odczytu";
+"ai_write_tools" = "Narzędzia zapisu";
+"delete_category_confirm_title" = "Usunąć kategorię „%@\"?";
+"delete_prompt_confirmation" = "Usunąć prompt „%@\"?";
+"edit_prompt" = "Edytuj prompt";
+"help_prompt_edit_text" = "Niestandardowe monity pozwalają tworzyć wielokrotnie używane instrukcje AI do nauki. Ustaw nazwę, opis, szablon, konteksty, w których ma się pojawiać, oraz opcjonalnie niestandardowego dostawcę/model. Wbudowanych monitów nie można edytować bezpośrednio — użyj opcji \"Kopiuj, aby dostosować\", aby utworzyć własną wersję.";
+"help_tool_info_text" = "Narzędzia AI to wyspecjalizowane funkcje, które AI może wywoływać, aby odczytywać Twoje dane lub wprowadzać zmiany w Twoim imieniu. Narzędzia do odczytu (wersety, komentarze, słowniki, zakładki) nigdy nie wymagają uprawnień. Narzędzia do zapisu (tworzenie zakładek, notatek, wpisów w bloczku notatek) są objęte systemem uprawnień.";
+"prompt_name_required" = "Nazwa promptu jest wymagana";
+"prompt_template_required" = "Szablon promptu jest wymagany";
+"raw_llm_log_entry_api_response" = "Odpowiedź API (iteracja %d)";
+"raw_llm_log_entry_assistant" = "Odpowiedź asystenta";
+"raw_llm_log_entry_empty" = "(pusty)";
+"raw_llm_log_entry_system" = "Prompt systemowy";
+"raw_llm_log_entry_tokens" = "~%@ tokenów";
+"raw_llm_log_entry_tool_call" = "Wywołanie narzędzia: %@";
+"raw_llm_log_entry_tool_definitions" = "Definicje narzędzi (%d narzędzi)";
+"raw_llm_log_entry_tool_desc" = "Opis: %@";
+"raw_llm_log_entry_tool_params" = "Parametry: %@";
+"raw_llm_log_entry_tool_result" = "Wynik narzędzia [%@]";
+"raw_llm_log_entry_usage" = "wej: %1$@ / wyj: %2$@%3$@";
+"raw_llm_log_entry_user" = "Wiadomość użytkownika";
+"raw_llm_log_title" = "Surowy dziennik AI";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Automatycznie pobieraj i dołączaj wpisy komentarzy do zaznaczonych wersetów, oszczędzając iterację AI.";
+"prompt_auto_include_documents_description" = "Automatycznie dołączaj listę zainstalowanych dokumentów do kontekstu promptu, oszczędzając iterację AI.";
+"prompt_copied" = "Prompt skopiowany";
+"prompt_edit_before_run_description" = "Pokaż pole tekstowe do określenia zadania przed uruchomieniem promptu";
+"prompt_is_text_transformation_description" = "Używa uproszczonego promptu systemowego, który zachowuje formatowanie (linki, nagłówki, pogrubienie/kursywa) podczas przekształcania treści tekstu. Narzędzia nie są używane. Idealne do promptów tłumaczenia i edycji.";
+"prompt_max_iterations" = "Nadpisanie maksymalnej liczby iteracji";
+"prompt_max_iterations_description" = "Nadpisz globalne maksimum iteracji dla tego promptu. Puste = domyślne globalne, 0 = bez ograniczeń.";
+"prompt_no_document_creation_description" = "Po włączeniu AI nie będzie tworzyć dokumentu. Wyniki są wyświetlane tylko w dzienniku aktywności. Przydatne w przypadku promptów wykonujących tylko działania (zakładki, etykiety, operacje Bloczka notatek).";
+"prompt_strict_context_matching_description" = "Po włączeniu pamięć podręczna dopasowuje się tylko wtedy, gdy cały kontekst (wersja Biblii, zaznaczony tekst) jest taki sam. Po wyłączeniu dopasowuje się, gdy wersety są takie same, niezależnie od wersji Biblii.";

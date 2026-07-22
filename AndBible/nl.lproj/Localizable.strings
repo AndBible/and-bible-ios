@@ -1018,3 +1018,119 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "AI-verbindings- en promptinstellingen";
 "prefs_features_cat" = "Functies";
+
+/* Android shared translations */
+"ai_configure_button" = "Verbinding configureren";
+"ai_disclaimer_warning_summary" = "Risico's en verantwoordelijkheden bij het gebruik van AI";
+"ai_provider_tier_community" = "Andere providers (niet getest)";
+"ai_provider_tier_recommended" = "Aanbevolen";
+"easy_setup_anthropic_desc" = "Betaalbaar, uitstekende kwaliteit";
+"easy_setup_api_key_instructions" = "Haal uw API-sleutel op via:";
+"easy_setup_done_message" = "Selecteer tekst in de bijbel en probeer de AI-functies. U kunt meer modellen en providers toevoegen in de instellingen.";
+"easy_setup_done_title" = "AI is klaar!";
+"easy_setup_free_tier" = "Gratis niveau";
+"easy_setup_gemini_desc" = "Gratis niveau beschikbaar, goede kwaliteit";
+"easy_setup_openai_desc" = "Bekend, betrouwbaar";
+"easy_setup_pref_summary" = "AI instellen met een aanbevolen provider in een paar stappen";
+"edit_model_title" = "Model bewerken";
+"show_also_unsupported_providers" = "Toon ook niet-ondersteunde providers";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maximum aantal iteraties voordat om verdere instructies gevraagd wordt (0 = onbeperkt)";
+"ai_document_filter_summary" = "Kies welke documenten de AI kan lezen";
+"ai_document_filter_summary_count" = "%d documenten uitgesloten";
+"ai_document_filter_title" = "Documenttoegang";
+"ai_language_app_default" = "App-taal (%1$@)";
+"ai_language_custom" = "Aangepast…";
+"ai_language_custom_example" = "bijv. suomi, Tagalog, nl";
+"ai_language_custom_hint" = "Voer taalnaam of -code in";
+"ai_prompts_restored" = "Verborgen prompts hersteld";
+"ai_restore_hidden_prompts" = "Verborgen prompts herstellen";
+"are_you_sure" = "Weet je het zeker?";
+"ask_model_before_run_summary" = "Toon een modelselectiedialogvenster voordat een prompt wordt uitgevoerd (overgeslagen als de prompt een expliciete modeloverschrijving heeft)";
+"auto_hide_agent_log_summary" = "Verberg het AI-paneel automatisch wanneer een taak met succes is voltooid of geannuleerd. Bij een fout blijft het paneel zichtbaar.";
+"commentary_max_response_dialog_message" = "Als de AI commentaren ophaalt en de totale respons deze tokenlimiet overschrijdt, kunt u via een selectiedialoog kiezen welke commentaren naar de AI worden gestuurd.\n\n0 = geen limiet (alle commentaren worden automatisch gestuurd).";
+"commentary_max_response_dialog_title" = "Maximale responsgrootte instellen (tokens)";
+"csv_export_failed" = "CSV-export mislukt: %@";
+"csv_import_errors" = "Import voltooid met fouten: %1$d aangemaakt, %2$d bijgewerkt, %3$d fouten";
+"csv_import_failed" = "CSV-import mislukt: %@";
+"csv_import_success" = "Import voltooid: %1$d aangemaakt, %2$d bijgewerkt";
+"custom_system_prompt_default" = "Standaard";
+"delete_prompt_confirm_message" = "Weet u zeker dat u deze prompt wilt verwijderen?";
+"discard_changes_confirmation" = "Niet-opgeslagen wijzigingen verwijderen?";
+"doc_type_commentary" = "Commentaar";
+"export_prompts_csv" = "Prompts exporteren naar CSV";
+"global_tool_permissions_title" = "Standaard hulpmiddeleninstellingen";
+"help_ai_connection_text" = "Configureer hier uw AI-providers, modellen, machtigingen en andere verbindingsopties. Elke provider heeft een eigen API-sleutel nodig. U kunt meerdere providers toevoegen en een standaardmodel selecteren.";
+"help_ai_document_filter_text" = "Beperk welke Bijbels, commentaren en andere modules de AI-agent kan lezen. Standaard ziet de AI alle geïnstalleerde modules; filteren helpt ruis en kosten te verminderen als u wilt dat de AI alleen specifieke bronnen raadpleegt.";
+"help_ai_models_text" = "Beheer modellen voor deze provider. U kunt de modellijst vernieuwen via de API van de provider om nieuwe releases op te halen, of handmatig een modelnaam toevoegen als deze niet in de opgehaalde lijst staat.";
+"help_ai_providers_text" = "Beheer AI-providers (Google Gemini, OpenAI, Anthropic, enz.). Elke provider heeft een eigen API-sleutel nodig. U kunt meerdere providers toevoegen en verschillende providers toewijzen aan specifieke prompts.";
+"help_ai_settings_text" = "In AI-instellingen beheert u uw prompts en categorieën. Hier kunt u nieuwe prompts aanmaken, ze in categorieën indelen, prompts importeren/exporteren als CSV, aanvullende promptpakketten installeren en de AI-verbindingsinstellingen bereiken.";
+"help_global_tool_permissions_text" = "Configureer machtigingen voor individuele AI-tools. Kies voor elke leestool of de AI deze mag gebruiken (Ingeschakeld of Uitgeschakeld). Kies voor elke schrijftool Altijd toestaan, Altijd weigeren of Vragen (wat terugvalt op de globale machtigingsmodus in de AI-verbindingsinstellingen).";
+"import_prompts_addon" = "Installeren als add-on (alleen-lezen)";
+"import_prompts_csv" = "Prompts importeren uit CSV";
+"import_prompts_editable" = "Importeren als bewerkbare prompts";
+"llm_custom_model" = "Aangepast…";
+"llm_openrouter_category" = "Categorie";
+"llm_openrouter_category_all" = "Alle";
+"llm_reset_usage_summary" = "Cumulatieve token- en kostenregistratie wissen";
+"llm_usage_summary_format" = "Invoer: %1$d tokens | Uitvoer: %2$d tokens\nGeschatte kosten: %3$@";
+"manage_tool_permissions_summary" = "Machtigingsoverschrijvingen per hulpmiddel beheren";
+"model_delete_confirm" = "Model \"%1$@\" verwijderen?";
+"model_supported_badge" = "✓ Ondersteund";
+"move_to_category" = "Naar categorie verplaatsen…";
+"no_prompts_to_export" = "Geen gebruikersprompts om te exporteren";
+"prompts_csv_export_success" = "%d prompts geëxporteerd naar CSV";
+"raw_llm_log_copied" = "Logboek gekopieerd naar klembord";
+"raw_llm_log_empty" = "Geen onbewerkte logboekgegevens beschikbaar";
+"raw_llm_log_total" = "Totaal: in %1$@ / uit %2$@%3$@";
+"raw_log_delete_confirm" = "%d geselecteerd";
+"raw_log_delete_old" = "Oude logboeken verwijderen…";
+"raw_log_delete_selected" = "Geselecteerde verwijderen";
+"raw_log_history_summary" = "Opgeslagen AI-gesprekslogboeken bekijken en beheren";
+"raw_log_retention_summary_days" = "Na %d dagen";
+"show_also_unsupported_models" = "Toon ook niet-ondersteunde modellen";
+"tool_category_read" = "Lezen";
+"tool_category_write" = "Schrijven";
+"tool_option_disabled" = "Uitgeschakeld";
+"tool_option_enabled" = "Ingeschakeld";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "AI-fout melden";
+"bug_report_email_text" = "Selecteer uw email programma (bijvoorbeeld Gmail) om het rapport aan het team van ontwikkelaars te sturen.";
+"send_ai_bug_report_title" = "AI-fout melden";
+
+/* Android shared translations */
+"addon_prompt_notice" = "Deze prompt is afkomstig van add-on-module \"%@\" en kan niet worden bewerkt. Gebruik \"Kopiëren om aan te passen\" om een bewerkbare kopie te maken.";
+"ai_available_tools" = "Beschikbare hulpmiddelen";
+"ai_read_tools" = "Leesinstrumenten";
+"ai_write_tools" = "Schrijfinstrumenten";
+"delete_category_confirm_title" = "Categorie \"%@\" verwijderen?";
+"delete_prompt_confirmation" = "Prompt \"%@\" verwijderen?";
+"edit_prompt" = "Prompt bewerken";
+"help_prompt_edit_text" = "Met aangepaste prompts kunt u herbruikbare AI-instructies voor uw studie maken. Stel een naam, beschrijving, sjabloon en de contexten in waar de prompt moet verschijnen, en optioneel een aangepaste provider/model. Ingebouwde prompts kunnen niet direct worden bewerkt — gebruik \"Kopiëren om aan te passen\" om uw eigen versie te maken.";
+"help_tool_info_text" = "AI-tools zijn gespecialiseerde functies die de AI kan aanroepen om uw gegevens te lezen of namens u wijzigingen aan te brengen. Leestools (verzen, commentaren, woordenboeken, bladwijzers) vereisen nooit toestemming. Schrijftools (bladwijzers aanmaken, notities, studiemappen) zijn onderworpen aan het toestemmingssysteem.";
+"prompt_name_required" = "Promptnaam is verplicht";
+"prompt_template_required" = "Promptsjabloon is verplicht";
+"raw_llm_log_entry_api_response" = "API-antwoord (iteratie %d)";
+"raw_llm_log_entry_assistant" = "Assistent-antwoord";
+"raw_llm_log_entry_empty" = "(leeg)";
+"raw_llm_log_entry_system" = "Systeemprompt";
+"raw_llm_log_entry_tool_call" = "Aanroep hulpmiddel: %@";
+"raw_llm_log_entry_tool_definitions" = "Hulpmiddeldefinities (%d hulpmiddelen)";
+"raw_llm_log_entry_tool_desc" = "Beschrijving: %@";
+"raw_llm_log_entry_tool_result" = "Resultaat hulpmiddel [%@]";
+"raw_llm_log_entry_usage" = "in: %1$@ / uit: %2$@%3$@";
+"raw_llm_log_entry_user" = "Gebruikersbericht";
+"raw_llm_log_title" = "Onbewerkt LLM-logboek";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Automatisch commentaaritems ophalen en opnemen voor de geselecteerde verzen, waardoor een AI-iteratie wordt bespaard.";
+"prompt_auto_include_documents_description" = "Automatisch de lijst met geïnstalleerde documenten opnemen in de promptcontext, waardoor een AI-iteratie wordt bespaard.";
+"prompt_copied" = "Prompt gekopieerd";
+"prompt_edit_before_run_description" = "Toon een tekstveld om de taak op te geven voordat de prompt wordt uitgevoerd";
+"prompt_is_text_transformation_description" = "Gebruikt een vereenvoudigd systeemprompt dat opmaak (koppelingen, koppen, vet/cursief) behoudt bij het transformeren van tekstinhoud. Er worden geen tools gebruikt. Ideaal voor vertaal- en bewerkingsprompts.";
+"prompt_max_iterations" = "Max. iteraties overschrijven";
+"prompt_max_iterations_description" = "Overschrijf het globale maximum aantal iteraties voor deze prompt. Leeg = globale standaard, 0 = onbeperkt.";
+"prompt_no_document_creation_description" = "Wanneer ingeschakeld, maakt de AI geen document aan. Resultaten worden alleen weergegeven in het activiteitenlogboek. Handig voor prompts met alleen acties (bladwijzers, labels, studiepad-bewerkingen).";
+"prompt_strict_context_matching_description" = "Wanneer ingeschakeld, komt de cache alleen overeen als alle context (Bijbelvertaling, geselecteerde tekst) hetzelfde is. Wanneer uitgeschakeld, komt de cache overeen als de verzen hetzelfde zijn, ongeacht de Bijbelvertaling.";

@@ -1007,3 +1007,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Tekoälyn yhteys- ja kehoteasetukset";
 "prefs_features_cat" = "Ominaisuudet";
+
+/* Android shared translations */
+"ai_configure_button" = "Määritä yhteys";
+"ai_disclaimer_warning_summary" = "Tekoälyn käytön riskit ja vastuut";
+"ai_provider_tier_community" = "Muut palveluntarjoajat (ei testattu)";
+"ai_provider_tier_recommended" = "Suositeltu";
+"ai_providers_category" = "Palveluntarjoajat";
+"easy_setup_anthropic_desc" = "Edullinen, erinomainen laatu";
+"easy_setup_api_key_instructions" = "Hanki API-avaimesi täältä:";
+"easy_setup_done_message" = "Valitse tekstiä Raamatusta ja kokeile tekoälyominaisuuksia. Voit lisätä malleja ja palveluntarjoajia asetuksissa.";
+"easy_setup_done_title" = "Tekoäly on valmis!";
+"easy_setup_free_tier" = "Ilmainen taso";
+"easy_setup_gemini_desc" = "Ilmainen taso saatavilla, hyvä laatu";
+"easy_setup_openai_desc" = "Tunnettu, luotettava";
+"easy_setup_pref_summary" = "Määritä tekoäly suositellulla palveluntarjoajalla muutamassa vaiheessa";
+"edit_model_title" = "Muokkaa mallia";
+"show_also_unsupported_providers" = "Näytä myös tukemattomat palveluntarjoajat";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Iteraatioiden enimmäismäärä ennen jatkamisen kysymistä (0 = rajoittamaton)";
+"ai_document_filter_summary" = "Valitse, mitä dokumentteja tekoäly voi lukea";
+"ai_document_filter_summary_count" = "%d dokumenttia estetty";
+"ai_document_filter_title" = "Dokumenttien käyttöoikeus";
+"ai_language_app_default" = "Sovelluksen kieli (%1$@)";
+"ai_language_custom" = "Mukautettu…";
+"ai_language_custom_example" = "esim. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Syötä kielen nimi tai koodi";
+"ai_prompts_restored" = "Piilotetut kehotteet palautettu";
+"ai_restore_hidden_prompts" = "Palauta piilotetut kehotteet";
+"are_you_sure" = "Oletko varma?";
+"ask_model_before_run_summary" = "Näytä mallin valintaikkuna ennen kehotteen suorittamista (ohitetaan, kun kehotteella on oma mallimääritys)";
+"auto_hide_agent_log_summary" = "Piilota tekoälypaneeli automaattisesti, kun tehtävä valmistuu onnistuneesti tai perutaan. Virhetilanteessa paneeli jää näkyviin.";
+"commentary_max_response_dialog_message" = "Kun tekoäly hakee kommentaareja ja kokonaisvastaus ylittää tämän token-rajan, valintaikkuna antaa valita, mitkä kommentaarit lähetetään tekoälylle.\n\n0 = ei rajaa (kaikki kommentaarit lähetetään automaattisesti).";
+"commentary_max_response_dialog_title" = "Aseta vastauksen enimmäiskoko (tokeneina)";
+"commentary_max_response_value" = "~%@ tokenia";
+"csv_export_failed" = "CSV vienti epäonnistui: %@";
+"csv_import_errors" = "Tuonti valmistui: %1$d luotu, %2$d päivitetty, %3$d virhettä";
+"csv_import_failed" = "CSV tuonti epäonnistui: %@";
+"csv_import_success" = "Tuonti valmistui: %1$d luotu, %2$d päivitetty";
+"custom_system_prompt_default" = "Oletus";
+"delete_prompt_confirm_message" = "Haluatko varmasti poistaa tämän kehotteen?";
+"discard_changes_confirmation" = "Hylätäänkö tallentamattomat muutokset?";
+"doc_type_commentary" = "Kommentaari";
+"export_prompts_csv" = "Vie kehotteet CSV-tiedostoon";
+"global_tool_permissions_title" = "Työkalujen oletusasetukset";
+"help_ai_connection_text" = "Määritä tässä tekoälyn palveluntarjoajat, mallit, käyttöoikeudet ja muut yhteysasetukset. Jokainen palveluntarjoaja tarvitsee oman API-avaimen. Voit lisätä useita palveluntarjoajia ja valita oletusmallin.";
+"help_ai_document_filter_text" = "Rajaa, mitä Raamatun käännöksiä, kommentaareja ja muita moduuleja tekoälyagentin sallitaan lukea. Oletuksena tekoäly näkee kaikki asennetut moduulit; suodattaminen vähentää hälyä ja kustannuksia, kun haluat sen huomioivan vain tietyt lähteet.";
+"help_ai_models_text" = "Hallinnoi tämän palveluntarjoajan malleja. Voit päivittää malliluettelon palveluntarjoajan ohjelmointirajapinnasta uusien julkaisujen noutamiseksi tai lisätä mallin nimen manuaalisesti, jos se ei ole haetussa luettelossa.";
+"help_ai_providers_text" = "Hallinnoi tekoälyn palveluntarjoajia (Google Gemini, OpenAI, Anthropic jne.). Jokainen palveluntarjoaja tarvitsee oman API-avaimen. Voit lisätä useita palveluntarjoajia ja määrittää eri palveluntarjoajia tietyille kehotteille.";
+"help_ai_settings_text" = "Tekoälyasetuksissa hallitset kehotteita ja luokkia. Täältä voit luoda uusia kehotteita, järjestää niitä luokkiin, tuoda/viedä kehotteita CSV-muodossa, asentaa lisäosa-kehotepaketteja ja siirtyä tekoälyn yhteysasetuksiin.";
+"help_global_tool_permissions_text" = "Määritä yksittäisten tekoälytyökalujen käyttöoikeudet. Jokaiselle lukutyökalulle valitse, saako tekoäly käyttää sitä (Käytössä tai Ei käytössä). Jokaiselle kirjoitustyökalulle valitse Salli aina, Estä aina tai Kysy (joka noudattaa tekoälyn yhteysasetuksissa määritettyä yleistä lupakäytäntöä).";
+"import_prompts_addon" = "Asenna lisäosana (vain luku)";
+"import_prompts_csv" = "Tuo kehotteet CSV-tiedostosta";
+"import_prompts_editable" = "Tuo muokattavina kehotteina";
+"llm_custom_model" = "Mukautettu…";
+"llm_openrouter_category" = "Kategoria";
+"llm_openrouter_category_all" = "Kaikki";
+"llm_reset_usage_summary" = "Tyhjennä kertyneet token- ja kustannustiedot";
+"llm_usage_summary_format" = "Syöte: %1$d tokenia | Tuloste: %2$d tokenia\nArvioitu kustannus: %3$@";
+"manage_tool_permissions_summary" = "Hallitse työkalukohtaisia käyttöoikeuksia";
+"model_delete_confirm" = "Poistetaanko malli \"%1$@\"?";
+"model_supported_badge" = "✓ Tuettu";
+"move_to_category" = "Siirrä kategoriaan…";
+"no_prompts_to_export" = "Ei käyttäjän kehotteita vietäväksi";
+"prompts_csv_export_success" = "Vietiin %d kehotetta CSV-tiedostoon";
+"raw_llm_log_copied" = "Loki kopioitu leikepöydälle";
+"raw_llm_log_empty" = "Raakaa lokitietoa ei ole saatavilla";
+"raw_llm_log_total" = "Yhteensä: sisään %1$@ / ulos %2$@%3$@";
+"raw_log_delete_confirm" = "%d valittu";
+"raw_log_delete_old" = "Poista vanhat lokit…";
+"raw_log_delete_selected" = "Poista valitut";
+"raw_log_history_summary" = "Tarkastele ja hallinnoi tallennettuja tekoälykeskustelulokeja";
+"raw_log_retention_summary_days" = "%d päivän jälkeen";
+"show_also_unsupported_models" = "Näytä myös tukemattomat mallit";
+"tool_category_read" = "Luku";
+"tool_category_write" = "Kirjoitus";
+"tool_option_disabled" = "Pois käytöstä";
+"tool_option_enabled" = "Käytössä";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Ilmoita tekoälyvirheestä";
+"bug_report_email_text" = "Valitse seuraavaksi haluamasi sähköpostisovellus (GMail esimerkiksi) lähettääksi raportin kehittäjätiimille.";
+"send_ai_bug_report_title" = "Ilmoita tekoälyvirheestä";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Lisäosa: %@";
+"addon_prompt_notice" = "Tämä kehote on lisäosamoduulista \"%@\" eikä sitä voi muokata. Käytä \"Kopioi muokattavaksi\" luodaksesi muokattavan kopion.";
+"ai_available_tools" = "Käytettävissä olevat työkalut";
+"ai_read_tools" = "Lukutyökalut";
+"ai_write_tools" = "Kirjoitustyökalut";
+"delete_category_confirm_title" = "Poistetaanko kategoria \"%@\"?";
+"delete_prompt_confirmation" = "Poistetaanko kehote \"%@\"?";
+"edit_prompt" = "Muokkaa kehotetta";
+"help_prompt_edit_text" = "Mukautetuilla kehotteilla voit luoda uudelleenkäytettäviä tekoälyohjeita opiskeluasi varten. Aseta nimi, kuvaus, malli, kontekstit joissa se näkyy, ja halutessasi mukautettu palveluntarjoaja/malli. Sisäänrakennettuja kehotteita ei voi muokata suoraan — käytä \"Kopioi muokattavaksi\" luodaksesi oman version.";
+"help_tool_info_text" = "Tekoälytyökalut ovat erikoistuneita toimintoja, joita tekoäly voi kutsua lukeakseen tietojasi tai tehdäkseen muutoksia puolestasi. Lukutyökalut (jakeet, kommentaarit, sanakirjat, kirjanmerkit) eivät koskaan vaadi lupaa. Kirjoitustyökalut (kirjanmerkkien, muistiinpanojen ja opintoalustamerkintöjen luominen) ovat lupajärjestelmän alaisia.";
+"prompt_name_required" = "Kehotteen nimi on pakollinen";
+"prompt_template_required" = "Kehotepohja on pakollinen";
+"raw_llm_log_entry_api_response" = "API-vastaus (kierros %d)";
+"raw_llm_log_entry_assistant" = "Avustajan vastaus";
+"raw_llm_log_entry_empty" = "(tyhjä)";
+"raw_llm_log_entry_system" = "Järjestelmäkehote";
+"raw_llm_log_entry_tokens" = "~%@ tokenia";
+"raw_llm_log_entry_tool_call" = "Työkalukutsu: %@";
+"raw_llm_log_entry_tool_definitions" = "Työkalumäärittelyt (%d työkalua)";
+"raw_llm_log_entry_tool_desc" = "Kuvaus: %@";
+"raw_llm_log_entry_tool_params" = "Parametrit: %@";
+"raw_llm_log_entry_tool_result" = "Työkalun tulos [%@]";
+"raw_llm_log_entry_usage" = "sisään: %1$@ / ulos: %2$@%3$@";
+"raw_llm_log_entry_user" = "Käyttäjän viesti";
+"raw_llm_log_title" = "LLM-raaka loki";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Hae ja sisällytä kommentaarimerkinnät valituille jakeille automaattisesti, mikä säästää yhden tekoälykierroksen.";
+"prompt_auto_include_documents_description" = "Sisällytä asennettujen teosten luettelo automaattisesti kehotteen kontekstiin, mikä säästää yhden tekoälykierroksen.";
+"prompt_copied" = "Kehote kopioitu";
+"prompt_edit_before_run_description" = "Näytä tekstikenttä tehtävän tarkentamiseksi ennen kehotteen suoritusta";
+"prompt_is_text_transformation_description" = "Käyttää yksinkertaistettua järjestelmäkehotetta, joka säilyttää muotoilun (linkit, otsikot, lihavointi/kursiivi) ja muuntaa tekstisisällön. Työkaluja ei käytetä. Sopii käännös- ja muokkauskehotteille.";
+"prompt_max_iterations" = "Enimmäiskierrosten ohitus";
+"prompt_max_iterations_description" = "Ohita yleinen enimmäiskierrosmäärä tämän kehotteen osalta. Tyhjä = yleinen oletus, 0 = rajoittamaton.";
+"prompt_no_document_creation_description" = "Kun käytössä, tekoäly ei luo dokumenttia. Tulokset näytetään vain toimintalokissa. Hyödyllinen pelkkien toimintojen kehotteille (kirjanmerkit, kirjanmerkkiryhmät, opintoalustan toiminnot).";
+"prompt_strict_context_matching_description" = "Kun käytössä, välimuisti osuu vain kun kaikki konteksti (raamatunkäännös, valittu teksti) on sama. Kun pois käytöstä, välimuisti osuu kun jakeet ovat samat riippumatta raamatunkäännöksestä.";

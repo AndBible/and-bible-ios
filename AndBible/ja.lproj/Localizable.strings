@@ -1179,3 +1179,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "AIの接続とプロンプト設定";
 "prefs_features_cat" = "機能";
+
+/* Android shared translations */
+"ai_configure_button" = "接続を設定";
+"ai_disclaimer_warning_summary" = "AIを使用するリスクと責任";
+"ai_provider_tier_community" = "その他のプロバイダー（未テスト）";
+"ai_provider_tier_recommended" = "推奨";
+"ai_providers_category" = "プロバイダー";
+"easy_setup_anthropic_desc" = "リーズナブルな価格、優れた品質";
+"easy_setup_api_key_instructions" = "APIキーの取得先：";
+"easy_setup_done_message" = "聖書でテキストを選択して、AI機能をお試しください。設定でモデルやプロバイダーを追加できます。";
+"easy_setup_done_title" = "AIの準備が整いました！";
+"easy_setup_free_tier" = "無料枠";
+"easy_setup_gemini_desc" = "無料枠あり、高品質";
+"easy_setup_openai_desc" = "知名度が高く、信頼性あり";
+"easy_setup_pref_summary" = "推奨プロバイダーを使って数ステップでAIをセットアップします";
+"edit_model_title" = "モデルを編集";
+"show_also_unsupported_providers" = "非対応プロバイダーも表示";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "続行確認を求めるまでの最大反復回数（0＝無制限）";
+"ai_document_filter_summary" = "AIが読み取れるドキュメントを選択";
+"ai_document_filter_summary_count" = "%d 件のドキュメントを除外中";
+"ai_document_filter_title" = "ドキュメントアクセス";
+"ai_language_app_default" = "アプリの言語（%1$@）";
+"ai_language_custom" = "カスタム…";
+"ai_language_custom_example" = "例: suomi、Tagalog、en";
+"ai_language_custom_hint" = "言語名またはコードを入力";
+"ai_prompts_restored" = "非表示のプロンプトを復元しました";
+"ai_restore_hidden_prompts" = "非表示のプロンプトを復元";
+"are_you_sure" = "よろしいですか？";
+"ask_model_before_run_summary" = "プロンプト実行前にモデル選択ダイアログを表示します（プロンプトに明示的なモデル指定がある場合はスキップ）";
+"auto_hide_agent_log_summary" = "タスクが正常に完了またはキャンセルされたときに、AIパネルを自動的に非表示にします。エラー時はパネルが表示されたままになります。";
+"commentary_max_response_dialog_message" = "AIが注解を取得し、合計レスポンスがこのトークン制限を超えた場合、選択ダイアログでAIに送信する注解を選べます。\n\n0 = 制限なし（すべての注解が自動的に送信されます）。";
+"commentary_max_response_dialog_title" = "最大レスポンスサイズを設定（トークン数）";
+"commentary_max_response_value" = "約%@トークン";
+"csv_export_failed" = "CSVエクスポートに失敗しました: %@";
+"csv_import_errors" = "エラーありでインポート完了: %1$d 件作成、%2$d 件更新、%3$d 件エラー";
+"csv_import_failed" = "CSVインポートに失敗しました: %@";
+"csv_import_success" = "インポート完了: %1$d 件作成、%2$d 件更新";
+"custom_system_prompt_default" = "デフォルト";
+"delete_prompt_confirm_message" = "このプロンプトを削除してもよろしいですか？";
+"discard_changes_confirmation" = "未保存の変更を破棄しますか？";
+"doc_type_commentary" = "注解";
+"export_prompts_csv" = "プロンプトをCSVにエクスポート";
+"global_tool_permissions_title" = "ツールのデフォルト設定";
+"help_ai_connection_text" = "AIプロバイダー、モデル、権限、その他の接続オプションをここで設定します。各プロバイダーには独自のAPIキーが必要です。複数のプロバイダーを追加し、デフォルトモデルを選択できます。";
+"help_ai_document_filter_text" = "AIエージェントが読み取れる聖書、注解、その他のモジュールを制限します。デフォルトでは、AIはインストールされているすべてのモジュールを参照します。特定のソースのみを考慮させたい場合は、フィルタリングによってノイズとコストを削減できます。";
+"help_ai_models_text" = "このプロバイダーのモデルを管理します。プロバイダーのAPIからモデルリストを更新して新しいリリースを取得するか、取得したリストにないモデル名を手動で追加できます。";
+"help_ai_providers_text" = "AIプロバイダー（Google Gemini、OpenAI、Anthropicなど）を管理します。各プロバイダーには独自のAPIキーが必要です。複数のプロバイダーを追加し、特定のプロンプトに異なるプロバイダーを割り当てることができます。";
+"help_ai_settings_text" = "AI設定では、プロンプトとカテゴリを管理します。ここから新しいプロンプトを作成し、カテゴリに整理し、プロンプトをCSVとしてインポート/エクスポートし、アドオンプロンプトパックをインストールし、AI接続設定にアクセスできます。";
+"help_global_tool_permissions_text" = "個々のAIツールの権限を設定します。各読み取りツールについて、AIがそれを使用できるか（有効または無効）を選択します。各書き込みツールについて、常に許可、常に拒否、または確認（AI接続設定で設定されたグローバル権限モードにフォールバック）を選択します。";
+"import_prompts_addon" = "アドオンとしてインストール（読み取り専用）";
+"import_prompts_csv" = "CSVからプロンプトをインポート";
+"import_prompts_editable" = "編集可能なプロンプトとしてインポート";
+"llm_custom_model" = "カスタム…";
+"llm_openrouter_category" = "カテゴリー";
+"llm_openrouter_category_all" = "すべて";
+"llm_reset_usage_summary" = "累積トークンおよびコストの記録をクリア";
+"llm_usage_summary_format" = "入力: %1$dトークン | 出力: %2$dトークン\n推定コスト: %3$@";
+"manage_tool_permissions_summary" = "ツールごとの権限オーバーライドを管理";
+"model_delete_confirm" = "モデル \"%1$@\" を削除しますか？";
+"model_supported_badge" = "✓ 対応済み";
+"move_to_category" = "カテゴリに移動…";
+"no_prompts_to_export" = "エクスポートするユーザープロンプトがありません";
+"prompts_csv_export_success" = "%d 件のプロンプトをCSVにエクスポートしました";
+"raw_llm_log_copied" = "ログをクリップボードにコピーしました";
+"raw_llm_log_empty" = "生ログデータがありません";
+"raw_llm_log_total" = "合計: 入力 %1$@ / 出力 %2$@%3$@";
+"raw_log_delete_confirm" = "%d件選択中";
+"raw_log_delete_old" = "古いログを削除…";
+"raw_log_delete_selected" = "選択を削除";
+"raw_log_history_summary" = "保存されたAI会話ログの表示と管理";
+"raw_log_retention_summary_days" = "%d日後";
+"show_also_unsupported_models" = "非対応モデルも表示";
+"tool_category_read" = "読み取り";
+"tool_category_write" = "書き込み";
+"tool_option_disabled" = "無効";
+"tool_option_enabled" = "有効";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "AIバグを報告";
+"bug_report_email_text" = "次に、レポートを開発チームに送信するためのメールアプリ（Gmailなど）を選択してください。";
+"send_ai_bug_report_title" = "AIバグを報告";
+
+/* Android shared translations */
+"addon_prompt_badge" = "アドオン：%@";
+"addon_prompt_notice" = "このプロンプトはアドオンモジュール「%@」からのものであり、編集できません。編集可能なコピーを作成するには「カスタマイズのためにコピー」を使用してください。";
+"ai_available_tools" = "利用可能なツール";
+"ai_read_tools" = "読み取りツール";
+"ai_write_tools" = "書き込みツール";
+"delete_category_confirm_title" = "カテゴリ「%@」を削除しますか？";
+"delete_prompt_confirmation" = "プロンプト「%@」を削除しますか？";
+"edit_prompt" = "プロンプトを編集";
+"help_prompt_edit_text" = "カスタムプロンプトを使用すると、聖書研究のための再利用可能なAI指示を作成できます。名前、説明、テンプレート、表示するコンテキスト、およびオプションでカスタムプロバイダー/モデルを設定します。組み込みプロンプトは直接編集できません — 「コピーしてカスタマイズ」を使用して独自のバージョンを作成してください。";
+"help_tool_info_text" = "AIツールは、AIがあなたのデータを読み取ったり、あなたの代わりに変更を加えたりするために呼び出せる特殊な機能です。読み取りツール（節、注解、辞書、ブックマーク）は権限を必要としません。書き込みツール（ブックマーク、ノート、スタディパッドエントリの作成）は権限システムによって管理されます。";
+"prompt_name_required" = "プロンプト名は必須です";
+"prompt_template_required" = "プロンプトテンプレートは必須です";
+"raw_llm_log_entry_api_response" = "APIレスポンス (反復 %d)";
+"raw_llm_log_entry_assistant" = "アシスタントの応答";
+"raw_llm_log_entry_empty" = "（空）";
+"raw_llm_log_entry_system" = "システムプロンプト";
+"raw_llm_log_entry_tokens" = "約 %@ トークン";
+"raw_llm_log_entry_tool_call" = "ツール呼び出し: %@";
+"raw_llm_log_entry_tool_definitions" = "ツール定義 (%d 個)";
+"raw_llm_log_entry_tool_desc" = "説明: %@";
+"raw_llm_log_entry_tool_params" = "パラメータ: %@";
+"raw_llm_log_entry_tool_result" = "ツール結果 [%@]";
+"raw_llm_log_entry_usage" = "入力: %1$@ / 出力: %2$@%3$@";
+"raw_llm_log_entry_user" = "ユーザーメッセージ";
+"raw_llm_log_title" = "LLM生ログ";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "選択した節の注解エントリを自動的に取得してコンテキストに含めることで、AIの反復処理を節約します。";
+"prompt_auto_include_documents_description" = "インストール済みドキュメントの一覧をプロンプトコンテキストに自動的に含めることで、AIの反復処理を節約します。";
+"prompt_copied" = "プロンプトをコピーしました";
+"prompt_edit_before_run_description" = "プロンプトを実行する前にタスクを指定するためのテキストフィールドを表示します";
+"prompt_is_text_transformation_description" = "テキスト内容を変換しながら書式（リンク、見出し、太字/斜体）を保持する簡略化されたシステムプロンプトを使用します。ツールは使用しません。翻訳・編集プロンプトに最適です。";
+"prompt_max_iterations" = "最大反復回数の上書き";
+"prompt_max_iterations_description" = "このプロンプトのグローバル最大反復回数を上書きします。空白＝グローバルデフォルト、0＝無制限。";
+"prompt_no_document_creation_description" = "有効にすると、AIはドキュメントを作成しません。結果はアクティビティログのみに表示されます。アクション専用プロンプト（ブックマーク、ラベル、スタディパッド操作）に便利です。";
+"prompt_strict_context_matching_description" = "有効にすると、すべてのコンテキスト（聖書バージョン、選択テキスト）が同じ場合にのみキャッシュが一致します。無効にすると、聖書バージョンに関係なく節が同じ場合にキャッシュが一致します。";

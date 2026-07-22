@@ -1179,3 +1179,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Cài đặt kết nối AI và lệnh nhắc";
 "prefs_features_cat" = "Tính năng";
+
+/* Android shared translations */
+"ai_configure_button" = "Cấu hình kết nối";
+"ai_disclaimer_warning_summary" = "Rủi ro và trách nhiệm khi sử dụng AI";
+"ai_provider_tier_community" = "Nhà cung cấp khác (chưa được kiểm tra)";
+"ai_provider_tier_recommended" = "Được khuyến nghị";
+"ai_providers_category" = "Nhà cung cấp";
+"easy_setup_anthropic_desc" = "Giá cả phải chăng, chất lượng xuất sắc";
+"easy_setup_api_key_instructions" = "Lấy khóa API của bạn tại:";
+"easy_setup_done_message" = "Chọn văn bản trong Kinh Thánh và thử các tính năng AI. Bạn có thể thêm nhiều mô hình và nhà cung cấp hơn trong cài đặt.";
+"easy_setup_done_title" = "AI đã sẵn sàng!";
+"easy_setup_free_tier" = "Gói miễn phí";
+"easy_setup_gemini_desc" = "Có gói miễn phí, chất lượng tốt";
+"easy_setup_openai_desc" = "Nổi tiếng, đáng tin cậy";
+"easy_setup_pref_summary" = "Thiết lập AI với nhà cung cấp được đề xuất trong vài bước";
+"edit_model_title" = "Chỉnh sửa mô hình";
+"show_also_unsupported_providers" = "Hiển thị cả nhà cung cấp không được hỗ trợ";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Số vòng lặp tối đa trước khi hỏi để tiếp tục (0 = không giới hạn)";
+"ai_document_filter_summary" = "Chọn tài liệu nào AI có thể đọc";
+"ai_document_filter_summary_count" = "%d tài liệu bị loại trừ";
+"ai_document_filter_title" = "Quyền truy cập tài liệu";
+"ai_language_app_default" = "Ngôn ngữ ứng dụng (%1$@)";
+"ai_language_custom" = "Tùy chỉnh…";
+"ai_language_custom_example" = "vd. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Nhập tên hoặc mã ngôn ngữ";
+"ai_prompts_restored" = "Đã khôi phục các lệnh ẩn";
+"ai_restore_hidden_prompts" = "Khôi phục các lệnh đã ẩn";
+"are_you_sure" = "Bạn có chắc không?";
+"ask_model_before_run_summary" = "Hiển thị hộp thoại chọn mô hình trước khi thực thi lệnh nhắc (bỏ qua khi lệnh nhắc có ghi đè mô hình rõ ràng)";
+"auto_hide_agent_log_summary" = "Tự động ẩn bảng AI khi một tác vụ hoàn tất thành công hoặc bị hủy. Khi có lỗi, bảng vẫn hiển thị.";
+"commentary_max_response_dialog_message" = "Khi AI tìm kiếm chú giải và tổng phản hồi vượt quá giới hạn token này, một hộp thoại lựa chọn cho phép bạn chọn chú giải nào sẽ gửi đến AI.\n\n0 = không giới hạn (tất cả chú giải được gửi tự động).";
+"commentary_max_response_dialog_title" = "Đặt kích thước phản hồi tối đa (token)";
+"commentary_max_response_value" = "~%@ token";
+"csv_export_failed" = "Xuất CSV thất bại: %@";
+"csv_import_errors" = "Nhập hoàn tất với lỗi: đã tạo %1$d, đã cập nhật %2$d, %3$d lỗi";
+"csv_import_failed" = "Nhập CSV thất bại: %@";
+"csv_import_success" = "Nhập hoàn tất: đã tạo %1$d, đã cập nhật %2$d";
+"custom_system_prompt_default" = "Mặc định";
+"delete_prompt_confirm_message" = "Bạn có chắc muốn xóa lệnh này không?";
+"discard_changes_confirmation" = "Hủy bỏ các thay đổi chưa lưu?";
+"doc_type_commentary" = "Chú giải";
+"export_prompts_csv" = "Xuất lời nhắc sang CSV";
+"global_tool_permissions_title" = "Cài đặt công cụ mặc định";
+"help_ai_connection_text" = "Cấu hình các nhà cung cấp AI, mô hình, quyền và các tùy chọn kết nối khác tại đây. Mỗi nhà cung cấp cần khóa API riêng. Bạn có thể thêm nhiều nhà cung cấp và chọn một mô hình mặc định.";
+"help_ai_document_filter_text" = "Giới hạn những Kinh Thánh, chú giải và các mô-đun khác mà tác nhân AI có thể đọc. Theo mặc định AI có thể thấy tất cả các mô-đun đã cài đặt; lọc giúp giảm nhiễu và chi phí khi bạn chỉ muốn xem xét các nguồn cụ thể.";
+"help_ai_models_text" = "Quản lý các mô hình cho nhà cung cấp này. Bạn có thể làm mới danh sách mô hình từ API của nhà cung cấp để nhận các bản phát hành mới, hoặc thêm tên mô hình thủ công nếu nó không có trong danh sách đã tải.";
+"help_ai_providers_text" = "Quản lý các nhà cung cấp AI (Google Gemini, OpenAI, Anthropic, v.v.). Mỗi nhà cung cấp cần khóa API riêng. Bạn có thể thêm nhiều nhà cung cấp và gán các nhà cung cấp khác nhau cho các lệnh nhắc cụ thể.";
+"help_ai_settings_text" = "Cài đặt AI là nơi bạn quản lý các lệnh nhắc và danh mục. Từ đây bạn có thể tạo lệnh nhắc mới, sắp xếp chúng thành danh mục, nhập/xuất lệnh nhắc dưới dạng CSV, cài đặt gói lệnh nhắc bổ sung và truy cập cài đặt kết nối AI.";
+"help_global_tool_permissions_text" = "Cấu hình quyền cho từng công cụ AI riêng lẻ. Với mỗi công cụ đọc, chọn xem AI có thể sử dụng nó không (Bật hoặc Tắt). Với mỗi công cụ ghi, chọn Luôn cho phép, Luôn từ chối hoặc Hỏi (sẽ dùng chế độ quyền toàn cục được đặt trong cài đặt Kết nối AI).";
+"import_prompts_addon" = "Cài đặt dưới dạng tiện ích (chỉ đọc)";
+"import_prompts_csv" = "Nhập lời nhắc từ CSV";
+"import_prompts_editable" = "Nhập dưới dạng lệnh nhắc có thể chỉnh sửa";
+"llm_custom_model" = "Tùy chỉnh…";
+"llm_openrouter_category" = "Danh mục";
+"llm_openrouter_category_all" = "Tất cả";
+"llm_reset_usage_summary" = "Xóa theo dõi tích lũy token và chi phí";
+"llm_usage_summary_format" = "Đầu vào: %1$d token | Đầu ra: %2$d token\nChí phí ước tính: %3$@";
+"manage_tool_permissions_summary" = "Quản lý ghi đè quyền từng công cụ";
+"model_delete_confirm" = "Xóa mô hình \"%1$@\"?";
+"model_supported_badge" = "✓ Được hỗ trợ";
+"move_to_category" = "Chuyển vào danh mục…";
+"no_prompts_to_export" = "Không có lời nhắc người dùng để xuất";
+"prompts_csv_export_success" = "Đã xuất %d lời nhắc sang CSV";
+"raw_llm_log_copied" = "Đã sao chép nhật ký vào bộ nhớ tạm";
+"raw_llm_log_empty" = "Không có dữ liệu nhật ký thô";
+"raw_llm_log_total" = "Tổng cộng: vào %1$@ / ra %2$@%3$@";
+"raw_log_delete_confirm" = "%d đã chọn";
+"raw_log_delete_old" = "Xóa nhật ký cũ…";
+"raw_log_delete_selected" = "Xóa mục đã chọn";
+"raw_log_history_summary" = "Xem và quản lý nhật ký cuộc trò chuyện AI đã lưu";
+"raw_log_retention_summary_days" = "Sau %d ngày";
+"show_also_unsupported_models" = "Hiển thị cả mô hình không được hỗ trợ";
+"tool_category_read" = "Đọc";
+"tool_category_write" = "Ghi";
+"tool_option_disabled" = "Đã tắt";
+"tool_option_enabled" = "Đã bật";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Báo cáo lỗi AI";
+"bug_report_email_text" = "Tiếp theo, vui lòng chọn ứng dụng email ưa thích của bạn (ví dụ: Gmail) để gửi báo cáo đến nhóm phát triển.";
+"send_ai_bug_report_title" = "Báo cáo lỗi AI";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Tiện ích: %@";
+"addon_prompt_notice" = "Lệnh nhắc này từ mô-đun tiện ích \"%@\" và không thể chỉnh sửa. Dùng \"Sao chép để tùy chỉnh\" để tạo bản sao có thể chỉnh sửa.";
+"ai_available_tools" = "Công cụ có sẵn";
+"ai_read_tools" = "Công cụ đọc";
+"ai_write_tools" = "Công cụ ghi";
+"delete_category_confirm_title" = "Xóa danh mục \"%@\"?";
+"delete_prompt_confirmation" = "Xóa lệnh nhắc \"%@\"?";
+"edit_prompt" = "Chỉnh sửa lệnh nhắc";
+"help_prompt_edit_text" = "Lệnh nhắc tùy chỉnh cho phép bạn tạo các hướng dẫn AI có thể tái sử dụng cho việc nghiên cứu. Đặt tên, mô tả, mẫu, các ngữ cảnh hiển thị và tùy chọn nhà cung cấp/mô hình tùy chỉnh. Các lệnh nhắc tích hợp không thể chỉnh sửa trực tiếp — sử dụng \"Sao chép để tùy chỉnh\" để tạo phiên bản của riêng bạn.";
+"help_tool_info_text" = "Các công cụ AI là các chức năng chuyên biệt mà AI có thể gọi để đọc dữ liệu của bạn hoặc thực hiện thay đổi thay mặt bạn. Các công cụ đọc (câu kinh, chú giải, từ điển, đánh dấu) không bao giờ cần quyền. Các công cụ ghi (tạo đánh dấu, ghi chú, mục sổ tay nghiên cứu) được kiểm soát bởi hệ thống quyền.";
+"prompt_name_required" = "Tên lệnh nhắc là bắt buộc";
+"prompt_template_required" = "Mẫu lệnh nhắc là bắt buộc";
+"raw_llm_log_entry_api_response" = "Phản hồi API (lần lặp %d)";
+"raw_llm_log_entry_assistant" = "Phản hồi trợ lý";
+"raw_llm_log_entry_empty" = "(trống)";
+"raw_llm_log_entry_system" = "Lời nhắc hệ thống";
+"raw_llm_log_entry_tokens" = "~%@ token";
+"raw_llm_log_entry_tool_call" = "Gọi công cụ: %@";
+"raw_llm_log_entry_tool_definitions" = "Định nghĩa công cụ (%d công cụ)";
+"raw_llm_log_entry_tool_desc" = "Mô tả: %@";
+"raw_llm_log_entry_tool_params" = "Tham số: %@";
+"raw_llm_log_entry_tool_result" = "Kết quả công cụ [%@]";
+"raw_llm_log_entry_usage" = "vào: %1$@ / ra: %2$@%3$@";
+"raw_llm_log_entry_user" = "Tin nhắn người dùng";
+"raw_llm_log_title" = "Nhật ký LLM thô";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Tự động tìm nạp và thêm các mục chú giải cho các câu được chọn, tiết kiệm một lần lặp AI.";
+"prompt_auto_include_documents_description" = "Tự động thêm danh sách tài liệu đã cài đặt vào ngữ cảnh lệnh nhắc, tiết kiệm một lần lặp AI.";
+"prompt_copied" = "Đã sao chép lệnh nhắc";
+"prompt_edit_before_run_description" = "Hiển thị trường văn bản để chỉ định nhiệm vụ trước khi chạy lệnh nhắc";
+"prompt_is_text_transformation_description" = "Sử dụng lệnh hệ thống đơn giản hóa giữ nguyên định dạng (liên kết, tiêu đề, đậm/nghiêng) trong khi biến đổi nội dung văn bản. Không sử dụng công cụ. Lý tưởng cho các lệnh nhắc dịch thuật và chỉnh sửa.";
+"prompt_max_iterations" = "Ghi đè số vòng lặp tối đa";
+"prompt_max_iterations_description" = "Ghi đè số vòng lặp tối đa toàn cục cho lệnh nhắc này. Để trống = mặc định toàn cục, 0 = không giới hạn.";
+"prompt_no_document_creation_description" = "Khi bật, AI sẽ không tạo tài liệu. Kết quả chỉ hiển thị trong nhật ký hoạt động. Hữu ích cho các lệnh nhắc chỉ thực hiện hành động (đánh dấu, nhãn, thao tác Sổ tay nghiên cứu).";
+"prompt_strict_context_matching_description" = "Khi bật, bộ nhớ đệm chỉ khớp khi tất cả ngữ cảnh (phiên bản Kinh Thánh, văn bản được chọn) giống nhau. Khi tắt, bộ nhớ đệm khớp khi các câu giống nhau bất kể phiên bản Kinh Thánh.";

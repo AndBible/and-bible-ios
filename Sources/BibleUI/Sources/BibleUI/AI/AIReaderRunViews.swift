@@ -173,6 +173,7 @@ private struct AIReaderRunActivityView: View {
   @Environment(\.dismiss) private var dismiss
   @Bindable var coordinator: AIReaderRunCoordinator
   @State private var permanentPermissionConfirmationID: UUID?
+  @State private var rawLogSnapshot: AIReaderLiveRawLogSnapshot?
 
   var body: some View {
     NavigationStack {
@@ -211,6 +212,16 @@ private struct AIReaderRunActivityView: View {
                 .font(.callout)
                 .textSelection(.enabled)
             }
+            if let liveRawLog = coordinator.liveRawLog {
+              Button {
+                rawLogSnapshot = liveRawLog
+              } label: {
+                Label(
+                  String(localized: "agent_log_view_raw", defaultValue: "View raw LLM log"),
+                  systemImage: "doc.text.magnifyingglass"
+                )
+              }
+            }
           }
         }
       }
@@ -236,6 +247,15 @@ private struct AIReaderRunActivityView: View {
           }
         }
       }
+      #if os(iOS)
+        .fullScreenCover(item: $rawLogSnapshot) { snapshot in
+          AIReaderLiveRawLogView(snapshot: snapshot)
+        }
+      #else
+        .sheet(item: $rawLogSnapshot) { snapshot in
+          AIReaderLiveRawLogView(snapshot: snapshot)
+        }
+      #endif
     }
   }
 

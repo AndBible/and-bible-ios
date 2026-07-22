@@ -688,3 +688,10 @@
 
 /* Android shared translations */
 "discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"are_you_sure" = "你確定嗎？";
+"doc_type_commentary" = "註釋";
+
+/* Android shared translations */
+"bug_report_email_text" = "然後，請選擇你想用的電郵程式 (例如Gmail)，將回報發送至開發團隊。";

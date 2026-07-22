@@ -1005,3 +1005,124 @@ Kada koristite Google Drive, %@ dozvoljen je pristup samo datotekama aplikacije,
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "AI povezivanje i postavke upita";
 "prefs_features_cat" = "Značajke";
+
+/* Android shared translations */
+"ai_configure_button" = "Konfiguriraj povezivanje";
+"ai_disclaimer_warning_summary" = "Rizici i odgovornosti korištenja AI-ja";
+"ai_provider_tier_community" = "Ostali pružatelji (nisu testirani)";
+"ai_provider_tier_recommended" = "Preporučeno";
+"ai_providers_category" = "Pružatelji";
+"easy_setup_anthropic_desc" = "Pristupačna cijena, izvrsna kvaliteta";
+"easy_setup_api_key_instructions" = "Nabavi svoj API ključ na:";
+"easy_setup_done_message" = "Označi tekst u Bibliji i isprobaj AI značajke. Više modela i pružatelja možeš dodati u postavkama.";
+"easy_setup_done_title" = "AI je spreman!";
+"easy_setup_free_tier" = "Besplatna razina";
+"easy_setup_gemini_desc" = "Dostupna besplatna razina, dobra kvaliteta";
+"easy_setup_openai_desc" = "Poznat, pouzdan";
+"easy_setup_pref_summary" = "Postavi AI s preporučenim pružateljem u nekoliko koraka";
+"edit_model_title" = "Uredi model";
+"show_also_unsupported_providers" = "Prikaži i nepodržane davatelje usluge";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maksimalan broj iteracija prije upita za nastavak (0 = neograničeno)";
+"ai_document_filter_summary" = "Odaberite koje dokumente AI može čitati";
+"ai_document_filter_summary_count" = "%d dokumenata isključeno";
+"ai_document_filter_title" = "Pristup dokumentima";
+"ai_language_app_default" = "Jezik aplikacije (%1$@)";
+"ai_language_custom" = "Prilagođeni…";
+"ai_language_custom_example" = "npr. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Unesite naziv ili kôd jezika";
+"ai_prompts_restored" = "Skrivene upute vraćene";
+"ai_restore_hidden_prompts" = "Vrati skrivene upute";
+"are_you_sure" = "Jeste li sigurni?";
+"ask_model_before_run_summary" = "Prikaži dijalog za odabir modela prije izvršavanja upita (preskače se kad upit ima eksplicitno zadani model)";
+"auto_hide_agent_log_summary" = "Automatski sakrij AI ploču kada se zadatak uspješno dovrši ili otkaže. U slučaju pogreške ploča ostaje vidljiva.";
+"commentary_max_response_dialog_message" = "Kada AI dohvaća komentare i ukupni odgovor premaši ovo ograničenje tokena, dijalog za odabir vam omogućuje da odaberete koje komentare poslati AI-ju.\n\n0 = bez ograničenja (svi komentari se šalju automatski).";
+"commentary_max_response_dialog_title" = "Postavi maksimalnu veličinu odgovora (tokeni)";
+"commentary_max_response_value" = "~%@ tokena";
+"csv_export_failed" = "CSV izvoz nije uspio: %@";
+"csv_import_errors" = "Uvoz završen s pogreškama: %1$d stvoreno, %2$d ažurirano, %3$d pogrešaka";
+"csv_import_failed" = "CSV uvoz nije uspio: %@";
+"csv_import_success" = "Uvoz završen: %1$d stvoreno, %2$d ažurirano";
+"custom_system_prompt_default" = "Zadano";
+"delete_prompt_confirm_message" = "Jeste li sigurni da želite obrisati ovu uputu?";
+"discard_changes_confirmation" = "Odbaciti nespremljene promjene?";
+"doc_type_commentary" = "Komentar";
+"export_prompts_csv" = "Izvezi upite u CSV";
+"global_tool_permissions_title" = "Zadane postavke alata";
+"help_ai_connection_text" = "Ovdje konfigurirajte svoje AI pružatelje, modele, dopuštenja i druge mogućnosti veze. Svaki pružatelj treba vlastiti API ključ. Možete dodati više pružatelja i odabrati zadani model.";
+"help_ai_document_filter_text" = "Ograničite koje Biblije, komentare i druge module AI agent može čitati. Prema zadanim postavkama AI vidi sve instalirane module; filtriranje pomaže smanjiti šum i troškove kada želite da uzima u obzir samo određene izvore.";
+"help_ai_models_text" = "Upravljajte modelima za ovog pružatelja. Možete osvježiti popis modela putem API-ja pružatelja kako biste preuzeli nova izdanja ili ručno dodati naziv modela ako nije na dohvaćenom popisu.";
+"help_ai_providers_text" = "Upravljajte AI pružateljima (Google Gemini, OpenAI, Anthropic itd.). Svaki pružatelj treba vlastiti API ključ. Možete dodati više pružatelja i dodijeliti različite za određene upite.";
+"help_ai_settings_text" = "AI postavke su mjesto gdje upravljate upitima i kategorijama. Odavde možete stvarati nove upite, organizirati ih u kategorije, uvoziti/izvoziti upite kao CSV, instalirati dodatne pakete upita i pristupiti postavkama AI veze.";
+"help_global_tool_permissions_text" = "Konfigurirajte dopuštenja za pojedinačne AI alate. Za svaki alat za čitanje odaberite smije li ga AI koristiti (Omogućeno ili Onemogućeno). Za svaki alat za pisanje odaberite Uvijek dopusti, Uvijek odbij ili Pitaj (što se vraća na globalni način dopuštenja postavljen u AI postavkama veze).";
+"import_prompts_addon" = "Instaliraj kao dodatak (samo za čitanje)";
+"import_prompts_csv" = "Uvezi upite iz CSV-a";
+"import_prompts_editable" = "Uvezi kao upute koje se mogu uređivati";
+"llm_custom_model" = "Prilagođeni…";
+"llm_openrouter_category" = "Kategorija";
+"llm_openrouter_category_all" = "Sve";
+"llm_reset_usage_summary" = "Obriši kumulativno praćenje tokena i troškova";
+"llm_usage_summary_format" = "Ulaz: %1$d tokena | Izlaz: %2$d tokena\nProcijenjena cijena: %3$@";
+"manage_tool_permissions_summary" = "Upravljaj dozvolama za pojedine alate";
+"model_delete_confirm" = "Obrisati model \"%1$@\"?";
+"model_supported_badge" = "✓ Podržano";
+"move_to_category" = "Premjesti u kategoriju…";
+"no_prompts_to_export" = "Nema korisničkih upita za izvoz";
+"prompts_csv_export_success" = "Izvezeno %d upita u CSV";
+"raw_llm_log_copied" = "Dnevnik kopiran u međuspremnik";
+"raw_llm_log_empty" = "Nema dostupnih podataka u dnevniku";
+"raw_llm_log_total" = "Ukupno: ulaz %1$@ / izlaz %2$@%3$@";
+"raw_log_delete_confirm" = "%d odabrano";
+"raw_log_delete_old" = "Obriši stare zapise…";
+"raw_log_delete_selected" = "Obriši odabrano";
+"raw_log_history_summary" = "Pregled i upravljanje spremljenim AI zapisima razgovora";
+"raw_log_retention_summary_days" = "Nakon %d dana";
+"show_also_unsupported_models" = "Prikaži i nepodržane modele";
+"tool_category_read" = "Čitanje";
+"tool_category_write" = "Pisanje";
+"tool_option_disabled" = "Onemogućeno";
+"tool_option_enabled" = "Omogućeno";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Prijavi AI grešku";
+"bug_report_email_text" = "Sljedeće, molimo Vas da odaberete Vašu željenu aplikaciju e-pošte (primjerice Gmail) kako biste poslali izvješće programerskom timu.";
+"send_ai_bug_report_title" = "Prijavi AI grešku";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Dodatak: %@";
+"addon_prompt_notice" = "Ovaj upit dolazi iz dodatnog modula \"%@\" i ne može se uređivati. Koristi \"Kopiraj za prilagodbu\" za stvaranje kopije koju možeš uređivati.";
+"ai_available_tools" = "Dostupni alati";
+"ai_read_tools" = "Alati za čitanje";
+"ai_write_tools" = "Alati za pisanje";
+"delete_category_confirm_title" = "Obrisati kategoriju \"%@\"?";
+"delete_prompt_confirmation" = "Obrisati uputu \"%@\"?";
+"edit_prompt" = "Uredi uputu";
+"help_prompt_edit_text" = "Prilagođeni upiti omogućuju vam stvaranje višekratno upotrebljivih AI uputa za vaše proučavanje. Postavite naziv, opis, predložak, kontekste u kojima bi se trebao prikazati i po potrebi prilagođenog pružatelja/model. Ugrađene upite nije moguće izravno uređivati — upotrijebite \"Kopiraj radi prilagodbe\" kako biste stvorili vlastitu verziju.";
+"help_tool_info_text" = "AI alati su specijalizirane funkcije koje AI može pozivati kako bi čitao vaše podatke ili vršio promjene u vaše ime. Alati za čitanje (redci, komentari, rječnici, straničnici) nikada ne zahtijevaju dopuštenje. Alati za pisanje (stvaranje straničnika, bilješki, unosa u radnu bilježnicu) upravljani su sustavom dopuštenja.";
+"prompt_name_required" = "Naziv upute je obavezan";
+"prompt_template_required" = "Predložak upute je obavezan";
+"raw_llm_log_entry_api_response" = "API odgovor (iteracija %d)";
+"raw_llm_log_entry_assistant" = "Odgovor asistenta";
+"raw_llm_log_entry_empty" = "(prazno)";
+"raw_llm_log_entry_system" = "Sistemski upit";
+"raw_llm_log_entry_tokens" = "~%@ tokena";
+"raw_llm_log_entry_tool_call" = "Poziv alata: %@";
+"raw_llm_log_entry_tool_definitions" = "Definicije alata (%d alata)";
+"raw_llm_log_entry_tool_desc" = "Opis: %@";
+"raw_llm_log_entry_tool_params" = "Parametri: %@";
+"raw_llm_log_entry_tool_result" = "Rezultat alata [%@]";
+"raw_llm_log_entry_usage" = "ulaz: %1$@ / izlaz: %2$@%3$@";
+"raw_llm_log_entry_user" = "Poruka korisnika";
+"raw_llm_log_title" = "Neformatiran LLM dnevnik";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Automatski dohvati i uključi unose komentara za odabrane retke, čime se štedi jedna AI iteracija.";
+"prompt_auto_include_documents_description" = "Automatski uključi popis instaliranih dokumenata u kontekst upute, čime se štedi jedna AI iteracija.";
+"prompt_copied" = "Uputa kopirana";
+"prompt_edit_before_run_description" = "Prikaži tekstualno polje za određivanje zadatka prije pokretanja upute";
+"prompt_is_text_transformation_description" = "Koristi pojednostavljenu sistemsku uputu koja čuva oblikovanje (poveznice, naslove, podebljano/ukošeno) pri transformaciji sadržaja teksta. Alati se ne koriste. Idealno za upute za prijevod i uređivanje.";
+"prompt_max_iterations" = "Nadjačaj maksimalan broj iteracija";
+"prompt_max_iterations_description" = "Nadjačaj globalni maksimalan broj iteracija za ovaj upit. Prazno = globalna zadana vrijednost, 0 = neograničeno.";
+"prompt_no_document_creation_description" = "Kada je omogućeno, AI neće stvoriti dokument. Rezultati se prikazuju samo u dnevniku aktivnosti. Korisno za upute koje samo izvršavaju radnje (straničnici, oznake, radne bilježnice).";
+"prompt_strict_context_matching_description" = "Kada je omogućeno, predmemorija se poklapa samo kada je cijeli kontekst (biblijski prijevod, odabrani tekst) isti. Kada je onemogućeno, predmemorija se poklapa kada su redci isti bez obzira na biblijski prijevod.";

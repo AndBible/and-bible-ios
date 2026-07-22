@@ -1019,3 +1019,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Nastavenia AI pripojenia a promptov";
 "prefs_features_cat" = "Funkcie";
+
+/* Android shared translations */
+"ai_configure_button" = "Nastaviť pripojenie";
+"ai_disclaimer_warning_summary" = "Riziká a zodpovednosti pri používaní AI";
+"ai_provider_tier_community" = "Iní poskytovatelia (netestované)";
+"ai_provider_tier_recommended" = "Odporúčané";
+"ai_providers_category" = "Poskytovatelia";
+"easy_setup_anthropic_desc" = "Cenovo dostupné, vynikajúca kvalita";
+"easy_setup_api_key_instructions" = "Získajte API kľúč od:";
+"easy_setup_done_message" = "Označte text v Biblii a vyskúšajte funkcie AI. Ďalšie modely a poskytovateľov môžete pridať v nastaveniach.";
+"easy_setup_done_title" = "AI je pripravená!";
+"easy_setup_free_tier" = "Bezplatná úroveň";
+"easy_setup_gemini_desc" = "Dostupná bezplatná úroveň, dobrá kvalita";
+"easy_setup_openai_desc" = "Dobre známe, spoľahlivé";
+"easy_setup_pref_summary" = "Nastaviť AI s odporúčaným poskytovateľom v niekoľkých krokoch";
+"edit_model_title" = "Upraviť model";
+"show_also_unsupported_providers" = "Zobraziť aj nepodporovaných poskytovateľov";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maximálny počet iterácií pred opýtaním na pokračovanie (0 = neobmedzene)";
+"ai_document_filter_summary" = "Zvoliť, ktoré dokumenty môže AI čítať";
+"ai_document_filter_summary_count" = "%d dokumentov vylúčených";
+"ai_document_filter_title" = "Prístup k dokumentom";
+"ai_language_app_default" = "Jazyk aplikácie (%1$@)";
+"ai_language_custom" = "Vlastný…";
+"ai_language_custom_example" = "napr. suomi, Tagalog, sk";
+"ai_language_custom_hint" = "Zadajte názov alebo kód jazyka";
+"ai_prompts_restored" = "Skryté výzvy obnovené";
+"ai_restore_hidden_prompts" = "Obnoviť skryté výzvy";
+"are_you_sure" = "Ste si istý?";
+"ask_model_before_run_summary" = "Zobraziť dialóg výberu modelu pred vykonaním promptu (preskočí sa, ak má prompt explicitné prepísanie modelu)";
+"auto_hide_agent_log_summary" = "Automaticky skryť AI panel, keď sa úloha úspešne dokončí alebo zruší. Pri chybe zostane panel viditeľný.";
+"commentary_max_response_dialog_message" = "Keď AI načíta komentáre a celková odpoveď prekročí tento limit tokenov, dialóg výberu vám umožní zvoliť, ktoré komentáre odoslať AI.\n\n0 = bez limitu (všetky komentáre sa odošlú automaticky).";
+"commentary_max_response_dialog_title" = "Nastaviť maximálnu veľkosť odpovede (tokeny)";
+"commentary_max_response_value" = "~%@ tokenov";
+"csv_export_failed" = "Export CSV zlyhal: %@";
+"csv_import_errors" = "Import dokončený s chybami: %1$d vytvorených, %2$d aktualizovaných, %3$d chýb";
+"csv_import_failed" = "Import CSV zlyhal: %@";
+"csv_import_success" = "Import dokončený: %1$d vytvorených, %2$d aktualizovaných";
+"custom_system_prompt_default" = "Predvolený";
+"delete_prompt_confirm_message" = "Naozaj chcete vymazať túto výzvu?";
+"discard_changes_confirmation" = "Zahodiť neuložené zmeny?";
+"doc_type_commentary" = "Komentáre";
+"export_prompts_csv" = "Exportovať výzvy do CSV";
+"global_tool_permissions_title" = "Predvolené nastavenia nástrojov";
+"help_ai_connection_text" = "Tu nakonfigurujte svojich poskytovateľov AI, modely, oprávnenia a ďalšie možnosti pripojenia. Každý poskytovateľ potrebuje vlastný API kľúč. Môžete pridať viacerých poskytovateľov a vybrať predvolený model.";
+"help_ai_document_filter_text" = "Obmedzte, ktoré Biblie, komentáre a ďalšie moduly môže agent AI čítať. Predvolene AI vidí všetky nainštalované moduly; filtrovanie pomáha znížiť šum a náklady, keď chcete, aby zvažoval iba konkrétne zdroje.";
+"help_ai_models_text" = "Spravujte modely pre tohto poskytovateľa. Môžete obnoviť zoznam modelov z API poskytovateľa, aby ste získali nové vydania, alebo manuálne pridať názov modelu, ak nie je v načítanom zozname.";
+"help_ai_providers_text" = "Spravujte poskytovateľov AI (Google Gemini, OpenAI, Anthropic atď.). Každý poskytovateľ potrebuje vlastný API kľúč. Môžete pridať viacerých poskytovateľov a priradiť rôznych k špecifickým výzvam.";
+"help_ai_settings_text" = "Nastavenia AI je miesto, kde spravujete svoje výzvy a kategórie. Odtiaľto môžete vytvárať nové výzvy, organizovať ich do kategórií, importovať/exportovať výzvy ako CSV, inštalovať balíky doplnkových výziev a dostať sa k nastaveniam pripojenia AI.";
+"help_global_tool_permissions_text" = "Nakonfigurujte oprávnenia pre jednotlivé nástroje AI. Pre každý nástroj na čítanie vyberte, či ho AI môže používať (Povolené alebo Zakázané). Pre každý nástroj na zápis vyberte Vždy povoliť, Vždy zakázať alebo Opýtať sa (čo závisí od globálneho režimu oprávnení nastaveného v nastaveniach pripojenia AI).";
+"import_prompts_addon" = "Nainštalovať ako doplnok (iba na čítanie)";
+"import_prompts_csv" = "Importovať výzvy z CSV";
+"import_prompts_editable" = "Importovať ako upraviteľné výzvy";
+"llm_custom_model" = "Vlastný…";
+"llm_openrouter_category" = "Kategória";
+"llm_openrouter_category_all" = "Všetky";
+"llm_reset_usage_summary" = "Vymazať kumulatívne sledovanie tokenov a nákladov";
+"llm_usage_summary_format" = "Vstup: %1$d tokenov | Výstup: %2$d tokenov\nOdhadované náklady: %3$@";
+"manage_tool_permissions_summary" = "Spravovať povolenia jednotlivých nástrojov";
+"model_delete_confirm" = "Vymazať model \"%1$@\"?";
+"model_supported_badge" = "✓ Podporovaný";
+"move_to_category" = "Presunúť do kategórie…";
+"no_prompts_to_export" = "Žiadne používateľské výzvy na export";
+"prompts_csv_export_success" = "Exportovaných %d výziev do CSV";
+"raw_llm_log_copied" = "Záznam skopírovaný do schránky";
+"raw_llm_log_empty" = "Žiadne surové záznamy nie sú k dispozícii";
+"raw_llm_log_total" = "Celkovo: vstup %1$@ / výstup %2$@%3$@";
+"raw_log_delete_confirm" = "%d vybraných";
+"raw_log_delete_old" = "Odstrániť staré protokoly…";
+"raw_log_delete_selected" = "Odstrániť vybrané";
+"raw_log_history_summary" = "Zobraziť a spravovať uložené protokoly konverzácií AI";
+"raw_log_retention_summary_days" = "Po %d dňoch";
+"show_also_unsupported_models" = "Zobraziť aj nepodporované modely";
+"tool_category_read" = "Čítanie";
+"tool_category_write" = "Zápis";
+"tool_option_disabled" = "Vypnuté";
+"tool_option_enabled" = "Zapnuté";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Nahlásiť chybu AI";
+"bug_report_email_text" = "Potom vyberte preferovanú e-mailovú aplikáciu (napríklad Gmail), aby ste správu odoslali tímu vývojárov.";
+"send_ai_bug_report_title" = "Nahlásiť chybu AI";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Doplnok: %@";
+"addon_prompt_notice" = "Tento prompt pochádza z doplnkového modulu „%@\" a nedá sa upravovať. Použite „Kopírovať na úpravu\" na vytvorenie upraviteľnej kópie.";
+"ai_available_tools" = "Dostupné nástroje";
+"ai_read_tools" = "Nástroje na čítanie";
+"ai_write_tools" = "Nástroje na zápis";
+"delete_category_confirm_title" = "Vymazať kategóriu \"%@\"?";
+"delete_prompt_confirmation" = "Vymazať výzvu \"%@\"?";
+"edit_prompt" = "Upraviť výzvu";
+"help_prompt_edit_text" = "Vlastné výzvy vám umožňujú vytvárať opakovane použiteľné AI pokyny pre vaše štúdium. Nastavte názov, popis, šablónu, kontexty, v ktorých sa má zobrazovať, a voliteľne vlastného poskytovateľa/model. Zabudované výzvy nie je možné priamo upravovať — použite \"Kopírovať na prispôsobenie\" a vytvorte vlastnú verziu.";
+"help_tool_info_text" = "Nástroje AI sú špecializované funkcie, ktoré môže AI volať na čítanie vašich údajov alebo vykonávanie zmien vo vašom mene. Nástroje na čítanie (verše, komentáre, slovníky, záložky) nevyžadujú žiadne oprávnenia. Nástroje na zápis (vytváranie záložiek, poznámok, zápisov do študijnej zložky) sú riadené systémom oprávnení.";
+"prompt_name_required" = "Názov výzvy je povinný";
+"prompt_template_required" = "Šablóna výzvy je povinná";
+"raw_llm_log_entry_api_response" = "Odpoveď API (iterácia %d)";
+"raw_llm_log_entry_assistant" = "Odpoveď asistenta";
+"raw_llm_log_entry_empty" = "(prázdne)";
+"raw_llm_log_entry_system" = "Systémová výzva";
+"raw_llm_log_entry_tokens" = "~%@ tokenov";
+"raw_llm_log_entry_tool_call" = "Volanie nástroja: %@";
+"raw_llm_log_entry_tool_definitions" = "Definície nástrojov (%d nástrojov)";
+"raw_llm_log_entry_tool_desc" = "Popis: %@";
+"raw_llm_log_entry_tool_params" = "Parametre: %@";
+"raw_llm_log_entry_tool_result" = "Výsledok nástroja [%@]";
+"raw_llm_log_entry_usage" = "vstup: %1$@ / výstup: %2$@%3$@";
+"raw_llm_log_entry_user" = "Správa používateľa";
+"raw_llm_log_title" = "Surový záznam LLM";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Automaticky načítať a zahrnúť záznamy komentárov pre vybrané verše, čím sa ušetrí jedna iterácia AI.";
+"prompt_auto_include_documents_description" = "Automaticky zahrnúť zoznam nainštalovaných dokumentov do kontextu výzvy, čím sa ušetrí jedna iterácia AI.";
+"prompt_copied" = "Výzva skopírovaná";
+"prompt_edit_before_run_description" = "Zobraziť textové pole na špecifikáciu úlohy pred spustením výzvy";
+"prompt_is_text_transformation_description" = "Používa zjednodušenú systémovú výzvu, ktorá zachováva formátovanie (odkazy, nadpisy, tučné/kurzíva) pri transformácii obsahu textu. Nepoužívajú sa žiadne nástroje. Ideálne pre výzvy na preklad a úpravu.";
+"prompt_max_iterations" = "Prepísanie max. iterácií";
+"prompt_max_iterations_description" = "Prepísať globálne max. iterácie pre tento prompt. Prázdne = globálne predvolené, 0 = neobmedzene.";
+"prompt_no_document_creation_description" = "Keď je povolené, AI nevytvorí dokument. Výsledky sa zobrazujú iba v protokole aktivít. Užitočné pre výzvy zamerané len na akcie (záložky, štítky, operácie so študijnou zložkou).";
+"prompt_strict_context_matching_description" = "Keď je povolené, zhoda vo vyrovnávacej pamäti nastane len vtedy, keď je celý kontext (verzia Biblie, vybraný text) rovnaký. Keď je zakázané, zhoda nastane vtedy, keď sú verše rovnaké bez ohľadu na verziu Biblie.";

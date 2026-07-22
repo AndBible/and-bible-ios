@@ -1023,3 +1023,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Yapay zeka bağlantısı ve istem ayarları";
 "prefs_features_cat" = "Özellikler";
+
+/* Android shared translations */
+"ai_configure_button" = "Bağlantıyı Yapılandır";
+"ai_disclaimer_warning_summary" = "Yapay zeka kullanımının riskleri ve sorumlulukları";
+"ai_provider_tier_community" = "Diğer sağlayıcılar (test edilmemiş)";
+"ai_provider_tier_recommended" = "Önerilen";
+"ai_providers_category" = "Sağlayıcılar";
+"easy_setup_anthropic_desc" = "Uygun fiyatlı, mükemmel kalite";
+"easy_setup_api_key_instructions" = "API anahtarınızı şuradan alın:";
+"easy_setup_done_message" = "Kutsal Kitap'ta metin seçin ve Yapay Zeka özelliklerini deneyin. Ayarlarda daha fazla model ve sağlayıcı ekleyebilirsiniz.";
+"easy_setup_done_title" = "Yapay Zeka hazır!";
+"easy_setup_free_tier" = "Ücretsiz katman";
+"easy_setup_gemini_desc" = "Ücretsiz katman mevcut, kaliteli";
+"easy_setup_openai_desc" = "Tanınmış, güvenilir";
+"easy_setup_pref_summary" = "Yapay zekayı birkaç adımda önerilen bir sağlayıcıyla kurun";
+"edit_model_title" = "Modeli düzenle";
+"show_also_unsupported_providers" = "Desteklenmeyen sağlayıcıları da göster";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Devam etmeyi sormadan önce maksimum yineleme sayısı (0 = sınırsız)";
+"ai_document_filter_summary" = "Yapay zekanın okuyabileceği belgeleri seçin";
+"ai_document_filter_summary_count" = "%d belge hariç tutuldu";
+"ai_document_filter_title" = "Belge erişimi";
+"ai_language_app_default" = "Uygulama dili (%1$@)";
+"ai_language_custom" = "Özel…";
+"ai_language_custom_example" = "örn. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Dil adı veya kodu girin";
+"ai_prompts_restored" = "Gizlenen istemler geri yüklendi";
+"ai_restore_hidden_prompts" = "Gizlenen istemleri geri yükle";
+"are_you_sure" = "Emin misin?";
+"ask_model_before_run_summary" = "Bir istem çalıştırılmadan önce model seçimi iletişim kutusunu göster (istemde açık bir model geçersiz kılma varsa atlanır)";
+"auto_hide_agent_log_summary" = "Bir görev başarıyla tamamlandığında veya iptal edildiğinde yapay zeka panelini otomatik olarak gizler. Hata durumunda panel görünür kalır.";
+"commentary_max_response_dialog_message" = "Yapay zeka yorum çektiğinde ve toplam yanıt bu jeton sınırını aştığında, yapay zekaya hangi yorumların gönderileceğini seçmenizi sağlayan bir seçim iletişim kutusu açılır.\n\n0 = sınır yok (tüm yorumlar otomatik olarak gönderilir).";
+"commentary_max_response_dialog_title" = "Maksimum yanıt boyutunu ayarla (jeton)";
+"commentary_max_response_value" = "~%@ jeton";
+"csv_export_failed" = "CSV dışa aktarma başarısız: %@";
+"csv_import_errors" = "İçe aktarma hatalarla tamamlandı: %1$d oluşturuldu, %2$d güncellendi, %3$d hata";
+"csv_import_failed" = "CSV içe aktarma başarısız: %@";
+"csv_import_success" = "İçe aktarma tamamlandı: %1$d oluşturuldu, %2$d güncellendi";
+"custom_system_prompt_default" = "Varsayılan";
+"delete_prompt_confirm_message" = "Bu istemi silmek istediğinizden emin misiniz?";
+"discard_changes_confirmation" = "Kaydedilmemiş değişiklikler atılsın mı?";
+"doc_type_commentary" = "Yorum Kitabı";
+"export_prompts_csv" = "İstemleri CSV'ye dışa aktar";
+"global_tool_permissions_title" = "Varsayılan araç ayarları";
+"help_ai_connection_text" = "Yapay zeka sağlayıcılarınızı, modellerinizi, izinlerinizi ve diğer bağlantı seçeneklerini burada yapılandırın. Her sağlayıcının kendi API anahtarına ihtiyacı vardır. Birden fazla sağlayıcı ekleyebilir ve varsayılan bir model seçebilirsiniz.";
+"help_ai_document_filter_text" = "Yapay zeka aracısının okuyabileceği Kutsal Kitap çevirilerini, yorumları ve diğer modülleri sınırlayın. Varsayılan olarak yapay zeka yüklü tüm modülleri görür; filtreleme, yalnızca belirli kaynakları dikkate almasını istediğinizde gürültüyü ve maliyeti azaltmaya yardımcı olur.";
+"help_ai_models_text" = "Bu sağlayıcı için modelleri yönetin. Yeni sürümleri takip etmek için model listesini sağlayıcının API'sinden yenileyebilir veya listede yoksa model adını manuel olarak ekleyebilirsiniz.";
+"help_ai_providers_text" = "Yapay zeka sağlayıcılarını (Google Gemini, OpenAI, Anthropic, vb.) yönetin. Her sağlayıcının kendi API anahtarına ihtiyacı vardır. Birden fazla sağlayıcı ekleyebilir ve belirli istemlere farklı sağlayıcılar atayabilirsiniz.";
+"help_ai_settings_text" = "Yapay Zeka Ayarları, istemlerinizi ve kategorilerinizi yönettiğiniz yerdir. Buradan yeni istemler oluşturabilir, onları kategorilere göre düzenleyebilir, istemleri CSV olarak içe/dışa aktarabilir, eklenti istem paketleri yükleyebilir ve yapay zeka bağlantı ayarlarına ulaşabilirsiniz.";
+"help_global_tool_permissions_text" = "Bireysel yapay zeka araçları için izinleri yapılandırın. Her okuma aracı için yapay zekanın onu kullanıp kullanamayacağını seçin (Etkin veya Devre Dışı). Her yazma aracı için Her zaman izin ver, Her zaman reddet veya Sor (bu, Yapay Zeka Bağlantı ayarlarında belirlenen genel izin moduna geri döner) seçeneklerinden birini belirleyin.";
+"import_prompts_addon" = "Eklenti olarak yükle (salt okunur)";
+"import_prompts_csv" = "İstemleri CSV'den içe aktar";
+"import_prompts_editable" = "Düzenlenebilir istemler olarak içe aktar";
+"llm_custom_model" = "Özel…";
+"llm_openrouter_category" = "Kategori";
+"llm_openrouter_category_all" = "Tümü";
+"llm_reset_usage_summary" = "Birikimli token ve maliyet takibini temizle";
+"llm_usage_summary_format" = "Giriş: %1$d token | Çıkış: %2$d token\nTahmini maliyet: %3$@";
+"manage_tool_permissions_summary" = "Araç başına izin geçersiz kılmalarını yönet";
+"model_delete_confirm" = "\"%1$@\" modeli silinsin mi?";
+"model_supported_badge" = "✓ Destekleniyor";
+"move_to_category" = "Kategoriye taşı…";
+"no_prompts_to_export" = "Dışa aktarılacak kullanıcı istemi yok";
+"prompts_csv_export_success" = "%d istem CSV'ye dışa aktarıldı";
+"raw_llm_log_copied" = "Günlük panoya kopyalandı";
+"raw_llm_log_empty" = "Ham günlük verisi mevcut değil";
+"raw_llm_log_total" = "Toplam: giriş %1$@ / çıkış %2$@%3$@";
+"raw_log_delete_confirm" = "%d seçildi";
+"raw_log_delete_old" = "Eski günlükleri sil…";
+"raw_log_delete_selected" = "Seçilenleri sil";
+"raw_log_history_summary" = "Kaydedilen yapay zeka konuşma günlüklerini görüntüle ve yönet";
+"raw_log_retention_summary_days" = "%d günden sonra";
+"show_also_unsupported_models" = "Desteklenmeyen modelleri de göster";
+"tool_category_read" = "Oku";
+"tool_category_write" = "Yaz";
+"tool_option_disabled" = "Devre dışı";
+"tool_option_enabled" = "Etkin";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Yapay zeka hatası bildir";
+"bug_report_email_text" = "Ardından, raporu geliştirici ekibine göndermek için lütfen tercih ettiğiniz e-posta uygulamasını (örneğin Gmail) seçin.";
+"send_ai_bug_report_title" = "Yapay Zeka Hatası Bildir";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Eklenti: %@";
+"addon_prompt_notice" = "Bu istem \"%@\" eklenti modülünden gelmektedir ve düzenlenemez. Düzenlenebilir bir kopya oluşturmak için \"Özelleştirmek için kopyala\" seçeneğini kullanın.";
+"ai_available_tools" = "Kullanılabilir araçlar";
+"ai_read_tools" = "Okuma Araçları";
+"ai_write_tools" = "Yazma Araçları";
+"delete_category_confirm_title" = "\"%@\" kategorisi silinsin mi?";
+"delete_prompt_confirmation" = "\"%@\" istemi silinsin mi?";
+"edit_prompt" = "İstemi düzenle";
+"help_prompt_edit_text" = "Özel istemler, çalışmanız için yeniden kullanılabilir yapay zeka talimatları oluşturmanızı sağlar. Bir ad, açıklama, şablon, görünmesi gereken bağlamlar ve isteğe bağlı olarak özel bir sağlayıcı/model belirleyin. Yerleşik istemler doğrudan düzenlenemez — kendi sürümünüzü oluşturmak için \"Özelleştirmek için kopyala\" seçeneğini kullanın.";
+"help_tool_info_text" = "Yapay zeka araçları, yapay zekanın verilerinizi okumak veya sizin adınıza değişiklik yapmak için çağırabileceği özel işlevlerdir. Okuma araçları (ayetler, yorumlar, sözlükler, yer imleri) hiçbir zaman izin gerektirmez. Yazma araçları (yer imi oluşturma, not, çalışma defteri girişleri) izin sistemi tarafından kontrol edilir.";
+"prompt_name_required" = "İstem adı zorunludur";
+"prompt_template_required" = "İstem şablonu zorunludur";
+"raw_llm_log_entry_api_response" = "API yanıtı (yineleme %d)";
+"raw_llm_log_entry_assistant" = "Asistan yanıtı";
+"raw_llm_log_entry_empty" = "(boş)";
+"raw_llm_log_entry_system" = "Sistem istemi";
+"raw_llm_log_entry_tokens" = "~%@ token";
+"raw_llm_log_entry_tool_call" = "Araç çağrısı: %@";
+"raw_llm_log_entry_tool_definitions" = "Araç tanımları (%d araç)";
+"raw_llm_log_entry_tool_desc" = "Açıklama: %@";
+"raw_llm_log_entry_tool_params" = "Parametreler: %@";
+"raw_llm_log_entry_tool_result" = "Araç sonucu [%@]";
+"raw_llm_log_entry_usage" = "giriş: %1$@ / çıkış: %2$@%3$@";
+"raw_llm_log_entry_user" = "Kullanıcı mesajı";
+"raw_llm_log_title" = "Ham LLM Günlüğü";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Seçilen ayetler için tefsir girişlerini otomatik olarak getirir ve ekler, bir yapay zeka adımından tasarruf sağlar.";
+"prompt_auto_include_documents_description" = "Yüklü belgelerin listesini otomatik olarak istem bağlamına ekler, bir yapay zeka adımından tasarruf sağlar.";
+"prompt_copied" = "İstem kopyalandı";
+"prompt_edit_before_run_description" = "İstemi çalıştırmadan önce görevi belirtmek için bir metin alanı göster";
+"prompt_is_text_transformation_description" = "Metin içeriğini dönüştürürken biçimlendirmeyi (bağlantılar, başlıklar, kalın/italik) koruyan basitleştirilmiş bir sistem istemi kullanır. Hiçbir araç kullanılmaz. Çeviri ve düzenleme istemleri için idealdir.";
+"prompt_max_iterations" = "Maks. yineleme geçersiz kılma";
+"prompt_max_iterations_description" = "Bu istem için genel maksimum yinelemeyi geçersiz kılın. Boş = genel varsayılan, 0 = sınırsız.";
+"prompt_no_document_creation_description" = "Etkinleştirildiğinde yapay zeka belge oluşturmaz. Sonuçlar yalnızca etkinlik günlüğünde gösterilir. Yalnızca eylem içeren istemler için kullanışlıdır (yer imleri, etiketler, çalışma defteri işlemleri).";
+"prompt_strict_context_matching_description" = "Etkinleştirildiğinde önbellek yalnızca tüm bağlam (Kutsal Kitap versiyonu, seçili metin) aynı olduğunda eşleşir. Devre dışı bırakıldığında Kutsal Kitap versiyonundan bağımsız olarak ayetler aynıysa eşleşir.";

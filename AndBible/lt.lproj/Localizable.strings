@@ -1025,3 +1025,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "DI ryšio ir užklausų nustatymai";
 "prefs_features_cat" = "Funkcijos";
+
+/* Android shared translations */
+"ai_configure_button" = "Konfigūruoti ryšį";
+"ai_disclaimer_warning_summary" = "DI naudojimo rizika ir atsakomybė";
+"ai_provider_tier_community" = "Kiti tiekėjai (neišbandyta)";
+"ai_provider_tier_recommended" = "Rekomenduojama";
+"ai_providers_category" = "Tiekėjai";
+"easy_setup_anthropic_desc" = "Nebrangu, puiki kokybė";
+"easy_setup_api_key_instructions" = "Gaukite savo API raktą iš:";
+"easy_setup_done_message" = "Pasirinkite tekstą Biblijoje ir išbandykite DI funkcijas. Nustatymuose galite pridėti daugiau modelių ir tiekėjų.";
+"easy_setup_done_title" = "DI paruoštas!";
+"easy_setup_free_tier" = "Nemokamas lygis";
+"easy_setup_gemini_desc" = "Yra nemokamas lygis, gera kokybė";
+"easy_setup_openai_desc" = "Gerai žinomas, patikimas";
+"easy_setup_pref_summary" = "Nustatykite DI su rekomenduojamu tiekėju keliais žingsniais";
+"edit_model_title" = "Taisyti modelį";
+"show_also_unsupported_providers" = "Rodyti taip pat nepalaikomus tiekėjus";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maksimalus iteracijų skaičius prieš paklausiant tęsti (0 = neribota)";
+"ai_document_filter_summary" = "Pasirinkite, kuriuos dokumentus DI gali skaityti";
+"ai_document_filter_summary_count" = "%d dokumentų neįtraukta";
+"ai_document_filter_title" = "Prieiga prie dokumentų";
+"ai_language_app_default" = "Programos kalba (%1$@)";
+"ai_language_custom" = "Pasirinktinė…";
+"ai_language_custom_example" = "pvz. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Įveskite kalbos pavadinimą arba kodą";
+"ai_prompts_restored" = "Paslėpti raginimai atkurti";
+"ai_restore_hidden_prompts" = "Atkurti paslėptus raginimus";
+"are_you_sure" = "Ar tikrai?";
+"ask_model_before_run_summary" = "Rodyti modelio pasirinkimo dialogą prieš vykdant užklausą (praleidžiama, kai užklausa turi aiškų modelio pasirinkimą)";
+"auto_hide_agent_log_summary" = "Automatiškai paslėpti DI skydelį, kai užduotis sėkmingai baigiama arba atsisakoma. Įvykus klaidai skydelis lieka matomas.";
+"commentary_max_response_dialog_message" = "Kai DI gauna komentarus ir bendras atsakymas viršija šią žetonų ribą, pasirinkimo dialogas leidžia pasirinkti, kuriuos komentarus siųsti DI.\n\n0 = be apribojimų (visi komentarai siunčiami automatiškai).";
+"commentary_max_response_dialog_title" = "Nustatyti maksimalų atsakymo dydį (žetonai)";
+"commentary_max_response_value" = "~%@ žetonų";
+"csv_export_failed" = "CSV eksportavimas patyrė nesėkmę: %@";
+"csv_import_errors" = "Importavimas užbaigtas su klaidomis: sukurta %1$d, atnaujinta %2$d, su klaidomis %3$d";
+"csv_import_failed" = "CSV importavimas patyrė nesėkmę: %@";
+"csv_import_success" = "Importavimas užbaigtas: sukurta %1$d, atnaujinta %2$d";
+"custom_system_prompt_default" = "Numatytasis";
+"delete_prompt_confirm_message" = "Ar tikrai norite ištrinti šį raginimą?";
+"discard_changes_confirmation" = "Atmesti neišsaugotus pakeitimus?";
+"doc_type_commentary" = "Komentarai";
+"export_prompts_csv" = "Eksportuoti užklausas į CSV";
+"global_tool_permissions_title" = "Numatytieji įrankių nustatymai";
+"help_ai_connection_text" = "Čia konfigūruokite savo DI tiekėjus, modelius, leidimus ir kitas ryšio parinktis. Kiekvienas tiekėjas reikalauja savo API rakto. Galite pridėti kelis tiekėjus ir pasirinkti numatytąjį modelį.";
+"help_ai_document_filter_text" = "Apribokite, kurias Biblijas, komentarus ir kitus modulius DI agentas gali skaityti. Pagal numatytuosius nustatymus DI mato visus įdiegtus modulius; filtravimas padeda sumažinti triukšmą ir išlaidas, kai norite, kad jis nagrinėtų tik konkrečius šaltinius.";
+"help_ai_models_text" = "Tvarkykite šio tiekėjo modelius. Galite atnaujinti modelių sąrašą iš tiekėjo API, kad gautumėte naujausius leidimus, arba rankiniu būdu pridėti modelio pavadinimą, jei jo nėra gaunamame sąraše.";
+"help_ai_providers_text" = "Tvarkykite DI tiekėjus (Google Gemini, OpenAI, Anthropic ir kt.). Kiekvienas tiekėjas reikalauja savo API rakto. Galite pridėti kelis tiekėjus ir priskirti skirtingus raginimams.";
+"help_ai_settings_text" = "DI nustatymuose galite valdyti raginimai ir kategorijas. Čia galite kurti naujus raginimus, rūšiuoti juos į kategorijas, importuoti / eksportuoti raginimus kaip CSV, diegti priedų raginimų paketus ir pasiekti DI ryšio nustatymus.";
+"help_global_tool_permissions_text" = "Konfigūruokite atskiriems DI įrankiams suteikiamus leidimus. Kiekvienam skaitymo įrankiui pasirinkite, ar DI gali jį naudoti (Įjungta arba Išjungta). Kiekvienam rašymo įrankiui pasirinkite Visada leisti, Visada drausti arba Klausti (kuris grįžta prie bendro leidimų režimo, nustatyto DI ryšio nustatymuose).";
+"import_prompts_addon" = "Įdiegti kaip priedą (tik skaityti)";
+"import_prompts_csv" = "Importuoti užklausas iš CSV";
+"import_prompts_editable" = "Importuoti kaip taisomus raginimus";
+"llm_custom_model" = "Pasirinktinis…";
+"llm_openrouter_category" = "Kategorija";
+"llm_openrouter_category_all" = "Visi";
+"llm_reset_usage_summary" = "Išvalyti sukauptų žetonų ir kainos stebėjimą";
+"llm_usage_summary_format" = "Įvestis: %1$d žetonai | Išvestis: %2$d žetonai\nNumatoma kaina: %3$@";
+"manage_tool_permissions_summary" = "Tvarkyti atskirų įrankių leidimų perrašymus";
+"model_delete_confirm" = "Ištrinti modelį \"%1$@\"?";
+"model_supported_badge" = "✓ Palaikoma";
+"move_to_category" = "Perkelti į kategoriją…";
+"no_prompts_to_export" = "Nėra naudotojo užklausų eksportavimui";
+"prompts_csv_export_success" = "Eksportuota %d užklausų į CSV";
+"raw_llm_log_copied" = "Žurnalas nukopijuotas į iškarpinę";
+"raw_llm_log_empty" = "Neapdoroto žurnalo duomenų nėra";
+"raw_llm_log_total" = "Iš viso: įvestis %1$@ / išvestis %2$@%3$@";
+"raw_log_delete_confirm" = "%d pasirinkta";
+"raw_log_delete_old" = "Ištrinti senus žurnalus…";
+"raw_log_delete_selected" = "Ištrinti pasirinktus";
+"raw_log_history_summary" = "Peržiūrėti ir tvarkyti išsaugotus DI pokalbių žurnalus";
+"raw_log_retention_summary_days" = "Po %d dienų";
+"show_also_unsupported_models" = "Rodyti taip pat nepalaikomus modelius";
+"tool_category_read" = "Skaitymas";
+"tool_category_write" = "Rašymas";
+"tool_option_disabled" = "Išjungta";
+"tool_option_enabled" = "Įjungta";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Pranešti apie DI klaidą";
+"bug_report_email_text" = "Toliau, pasirinkite pageidaujamą el. pašto kliento programėlę (pvz., Gmail), kad išsiųstumėte plėtotojų komandai pranešimą apie klaidą.";
+"send_ai_bug_report_title" = "Pranešti apie DI klaidą";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Priedas: %@";
+"addon_prompt_notice" = "Šis raginimas yra iš priedo modulio \"%@\" ir negali būti taisomas. Naudokite „Kopijuoti ir tinkinti\" norėdami sukurti taisomą kopiją.";
+"ai_available_tools" = "Galimi įrankiai";
+"ai_read_tools" = "Skaitymo įrankiai";
+"ai_write_tools" = "Rašymo įrankiai";
+"delete_category_confirm_title" = "Ištrinti kategoriją \"%@\"?";
+"delete_prompt_confirmation" = "Ištrinti raginimą \"%@\"?";
+"edit_prompt" = "Taisyti raginimą";
+"help_prompt_edit_text" = "Pasirinktiniai raginimai leidžia kurti daugkartinio naudojimo DI instrukcijas studijoms. Nustatykite pavadinimą, aprašymą, šabloną, kontekstus, kuriuose jis turėtų pasirodyti, ir pasirinktinai – pasirinktinį tiekėją / modelį. Integruotų raginimų tiesiogiai redaguoti negalima — naudokite \"Kopijuoti ir tinkinti\", kad sukurtumėte savo versiją.";
+"help_tool_info_text" = "DI įrankiai yra specializuotos funkcijos, kurias DI gali iškviesti, kad skaitytų jūsų duomenis arba atliktų pakeitimus jūsų vardu. Skaitymo įrankiai (eilutės, komentarai, žodynai, žymės) niekada nereikalauja leidimo. Rašymo įrankiai (žymių, pastabų, bloknoto įrašų kūrimas) valdomi leidimų sistemos.";
+"prompt_name_required" = "Raginimo pavadinimas yra privalomas";
+"prompt_template_required" = "Raginimo šablonas yra privalomas";
+"raw_llm_log_entry_api_response" = "API atsakymas (iteracija %d)";
+"raw_llm_log_entry_assistant" = "Asistento atsakymas";
+"raw_llm_log_entry_empty" = "(tuščia)";
+"raw_llm_log_entry_system" = "Sistemos užklausa";
+"raw_llm_log_entry_tokens" = "~%@ žetonų";
+"raw_llm_log_entry_tool_call" = "Įrankio iškvietimas: %@";
+"raw_llm_log_entry_tool_definitions" = "Įrankių aprašai (%d įrankių)";
+"raw_llm_log_entry_tool_desc" = "Aprašymas: %@";
+"raw_llm_log_entry_tool_params" = "Parametrai: %@";
+"raw_llm_log_entry_tool_result" = "Įrankio rezultatas [%@]";
+"raw_llm_log_entry_usage" = "įvestis: %1$@ / išvestis: %2$@%3$@";
+"raw_llm_log_entry_user" = "Naudotojo žinutė";
+"raw_llm_log_title" = "Neapdorotas DI žurnalas";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Automatiškai gauti ir įtraukti komentarų įrašus pasirinktoms eilutėms, taupant DI iteraciją.";
+"prompt_auto_include_documents_description" = "Automatiškai įtraukti įdiegtų dokumentų sąrašą į raginimo kontekstą, taupant DI iteraciją.";
+"prompt_copied" = "Raginimas nukopijuotas";
+"prompt_edit_before_run_description" = "Rodyti teksto lauką užduočiai nurodyti prieš paleidžiant raginimą";
+"prompt_is_text_transformation_description" = "Naudoja supaprastintą sistemos raginimą, kuris išsaugo formatavimą (nuorodas, antraštes, paryškintą/kursyvą) transformuodamas teksto turinį. Įrankiai nenaudojami. Idealiai tinka vertimo ir redagavimo raginimams.";
+"prompt_max_iterations" = "Maks. iteracijų perrašymas";
+"prompt_max_iterations_description" = "Perrašyti globalų maks. iteracijų skaičių šiai užklausai. Tuščia = globalus numatytasis, 0 = neribota.";
+"prompt_no_document_creation_description" = "Kai įjungta, DI nesukurs dokumento. Rezultatai rodomi tik veiklos žurnale. Naudinga tik veiksmų raginimuose (žymės, etiketės, bloknotų operacijos).";
+"prompt_strict_context_matching_description" = "Kai įjungta, talpykla sutampa tik tada, kai visas kontekstas (Biblijos versija, pasirinktas tekstas) yra vienodas. Kai išjungta, talpykla sutampa, kai eilutės yra vienodos, nepriklausomai nuo Biblijos versijos.";

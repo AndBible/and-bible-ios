@@ -689,3 +689,10 @@ Google Drive пайдаланған кезде, %@ кез келген жеке 
 
 /* Android shared translations */
 "discrete_help_ios_note" = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations.";
+
+/* Android shared translations */
+"are_you_sure" = "Сіз сенімдісіз бе?";
+"doc_type_commentary" = "Пікір Түсініктеме";
+
+/* Android shared translations */
+"bug_report_email_text" = "Әрі қарай, әзірлеушілер тобына есепті жіберу үшін қалаған электрондық пошта қолданбасын (мысалы, Gmail) таңдаңыз.";

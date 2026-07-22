@@ -1180,3 +1180,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Mipangilio ya muunganisho wa AI na maagizo";
 "prefs_features_cat" = "Vipengele";
+
+/* Android shared translations */
+"ai_configure_button" = "Sanidi Muunganisho";
+"ai_disclaimer_warning_summary" = "Hatari na majukumu ya kutumia AI";
+"ai_provider_tier_community" = "Watoa huduma wengine (haijapimwa)";
+"ai_provider_tier_recommended" = "Inayopendekezwa";
+"ai_providers_category" = "Watoa Huduma";
+"easy_setup_anthropic_desc" = "Nafuu, ubora bora";
+"easy_setup_api_key_instructions" = "Pata ufunguo wako wa API kutoka:";
+"easy_setup_done_message" = "Chagua maandishi katika Biblia na ujaribu vipengele vya AI. Unaweza kuongeza mifano na watoa huduma zaidi katika mipangilio.";
+"easy_setup_done_title" = "AI iko tayari!";
+"easy_setup_free_tier" = "Kiwango cha bure";
+"easy_setup_gemini_desc" = "Kiwango cha bure kinapatikana, ubora mzuri";
+"easy_setup_openai_desc" = "Inajulikana sana, ya kuaminika";
+"easy_setup_pref_summary" = "Sanidi AI na mtoa huduma anayependekezwa kwa hatua chache";
+"edit_model_title" = "Hariri mfano";
+"show_also_unsupported_providers" = "Onyesha pia watoa huduma wasiooauni";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Marudio ya juu zaidi kabla ya kuuliza kuendelea (0 = bila kikomo)";
+"ai_document_filter_summary" = "Chagua hati zipi AI inaweza kusoma";
+"ai_document_filter_summary_count" = "Hati %d zilizotengwa";
+"ai_document_filter_title" = "Ufikiaji wa hati";
+"ai_language_app_default" = "Lugha ya programu (%1$@)";
+"ai_language_custom" = "Maalum…";
+"ai_language_custom_example" = "mfano. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Ingiza jina la lugha au msimbo";
+"ai_prompts_restored" = "Maagizo yaliyofichwa yamerejesha";
+"ai_restore_hidden_prompts" = "Rejesha maagizo yaliyofichwa";
+"are_you_sure" = "Una uhakika?";
+"ask_model_before_run_summary" = "Onyesha mazungumzo ya uteuzi wa mfano kabla ya kutekeleza agizo (kurukwa agizo lina upinzani wa mfano uliowekwa wazi)";
+"auto_hide_agent_log_summary" = "Ficha kiotomatiki paneli ya AI wakati kazi inapokamilika kwa mafanikio au inapoghairiwa. Ikiwa kuna hitilafu, paneli hubaki ikionekana.";
+"commentary_max_response_dialog_message" = "AI inapopata maoni na jumla ya jibu inazidi kikomo hiki cha tokeni, mazungumzo ya uteuzi yanakuruhusu kuchagua maoni gani ya kutuma kwa AI.\n\n0 = bila kikomo (maoni yote yanatumwa kiotomatiki).";
+"commentary_max_response_dialog_title" = "Weka ukubwa wa juu wa jibu (tokeni)";
+"commentary_max_response_value" = "~tokeni %@";
+"csv_export_failed" = "Usafirishaji wa CSV umeshindwa: %@";
+"csv_import_errors" = "Uingizaji umekamilika na hitilafu: %1$d ziliundwa, %2$d zilisasishwa, hitilafu %3$d";
+"csv_import_failed" = "Uingizaji wa CSV umeshindwa: %@";
+"csv_import_success" = "Uingizaji umekamilika: %1$d ziliundwa, %2$d zilisasishwa";
+"custom_system_prompt_default" = "Chaguo-msingi";
+"delete_prompt_confirm_message" = "Je, una uhakika unataka kufuta agizo hili?";
+"discard_changes_confirmation" = "Tupa mabadiliko ambayo hayakuhifadhiwa?";
+"doc_type_commentary" = "Maoni";
+"export_prompts_csv" = "Safirisha maagizo kwenye CSV";
+"global_tool_permissions_title" = "Mipangilio ya chaguo-msingi ya zana";
+"help_ai_connection_text" = "Sanidi watoa huduma wako wa AI, mifano, ruhusa na chaguzi nyingine za muunganisho hapa. Kila mtoa huduma anahitaji ufunguo wake wa API. Unaweza kuongeza watoa huduma wengi na kuchagua mfano wa chaguo-msingi.";
+"help_ai_document_filter_text" = "Punguza Biblia, maoni na moduli nyingine ambazo wakala wa AI anaweza kusoma. Kwa chaguo-msingi AI huona moduli zote zilizosanikishwa; kuchuja husaidia kupunguza kelele na gharama unapotaka izingatie vyanzo maalum tu.";
+"help_ai_models_text" = "Simamia mifano ya mtoa huduma huyu. Unaweza kuburudisha orodha ya mifano kutoka kwa API ya mtoa huduma ili kupata matoleo mapya, au kuongeza jina la mfano kwa mkono ikiwa haipo kwenye orodha iliyopakuliwa.";
+"help_ai_providers_text" = "Simamia watoa huduma wa AI (Google Gemini, OpenAI, Anthropic, n.k.). Kila mtoa huduma anahitaji ufunguo wake wa API. Unaweza kuongeza watoa huduma wengi na kuwagawia tofauti kwa maagizo maalum.";
+"help_ai_settings_text" = "Mipangilio ya AI ndipo unaposimamia maagizo na makundi yako. Kutoka hapa unaweza kuunda maagizo mapya, kuyapanga katika makundi, kuingiza/kusafirisha maagizo kama CSV, kusanikisha vifurushi vya maagizo vya ziada, na kufika mipangilio ya muunganisho wa AI.";
+"help_global_tool_permissions_text" = "Sanidi ruhusa kwa zana za AI binafsi. Kwa kila zana ya kusoma, chagua ikiwa AI inaweza kuitumia (Imewezeshwa au Imezimwa). Kwa kila zana ya kuandika, chagua Ruhusu daima, Kataa daima, au Uliza (ambayo inarudi kwa hali ya ruhusa ya kimataifa iliyowekwa katika mipangilio ya Muunganisho wa AI).";
+"import_prompts_addon" = "Sanikisha kama kiongezi (tu kusoma)";
+"import_prompts_csv" = "Ingiza maagizo kutoka kwa CSV";
+"import_prompts_editable" = "Ingiza kama maagizo yanayoweza kuhaririwa";
+"llm_custom_model" = "Maalum…";
+"llm_openrouter_category" = "Kitengo";
+"llm_openrouter_category_all" = "Yote";
+"llm_reset_usage_summary" = "Futa ufuatiliaji wa jumla wa tokeni na gharama";
+"llm_usage_summary_format" = "Ingizo: tokeni %1$d | Towe: tokeni %2$d\nGhali inayokadiriwa: %3$@";
+"manage_tool_permissions_summary" = "Simamia upinzani wa ruhusa kwa kila zana";
+"model_delete_confirm" = "Futa mfano \"%1$@\"?";
+"model_supported_badge" = "✓ Inaauni";
+"move_to_category" = "Hamia kwenye kitengo…";
+"no_prompts_to_export" = "Hakuna maagizo ya mtumiaji ya kusafirisha";
+"prompts_csv_export_success" = "Maagizo %d yamessafirisha kwenye CSV";
+"raw_llm_log_copied" = "Kumbukumbu imenakiliwa kwenye ubao wa kunakili";
+"raw_llm_log_empty" = "Hakuna data ya kumbukumbu ghafi inayopatikana";
+"raw_llm_log_total" = "Jumla: ndani %1$@ / nje %2$@%3$@";
+"raw_log_delete_confirm" = "%d zilizochaguliwa";
+"raw_log_delete_old" = "Futa kumbukumbu za zamani…";
+"raw_log_delete_selected" = "Futa zilizochaguliwa";
+"raw_log_history_summary" = "Tazama na simamia kumbukumbu zilizohifadhiwa za mazungumzo ya AI";
+"raw_log_retention_summary_days" = "Baada ya siku %d";
+"show_also_unsupported_models" = "Onyesha pia mifano isiyoauni";
+"tool_category_read" = "Soma";
+"tool_category_write" = "Andika";
+"tool_option_disabled" = "Imezimwa";
+"tool_option_enabled" = "Imewezeshwa";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Ripoti hitilafu ya AI";
+"bug_report_email_text" = "Inayofuata, tafadhali chagua programu yako unayoipenda ya barua pepe (Gmail kwa mfano) kutuma ripoti kwa timu ya wasanidi.";
+"send_ai_bug_report_title" = "Ripoti Hitilafu ya AI";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Kiongezi: %@";
+"addon_prompt_notice" = "Agizo hili linatoka kwa moduli ya kiongezi \"%@\" na haliwezi kuhaririwa. Tumia \"Nakili kubinafsisha\" kuunda nakili inayoweza kuhaririwa.";
+"ai_available_tools" = "Zana zinazopatikana";
+"ai_read_tools" = "Zana za Kusoma";
+"ai_write_tools" = "Zana za Uandishi";
+"delete_category_confirm_title" = "Futa kitengo \"%@\"?";
+"delete_prompt_confirmation" = "Futa agizo \"%@\"?";
+"edit_prompt" = "Hariri agizo";
+"help_prompt_edit_text" = "Maagizo maalum yanakuruhusu kuunda maelekezo ya AI yanayoweza kutumika tena kwa masomo yako. Weka jina, maelezo, kiolezo, mazingira yanayopaswa kuonekana, na kwa hiari mtoa huduma/mfano maalum. Maagizo ya msingi hayawezi kuhaririwa moja kwa moja — tumia \"Nakili ili kubadilisha\" kuunda toleo lako mwenyewe.";
+"help_tool_info_text" = "Zana za AI ni kazi maalum ambazo AI inaweza kuziita kusoma data yako au kufanya mabadiliko kwa niaba yako. Zana za kusoma (mistari, maoni, kamusi, alamisho) haziitaji ruhusa. Zana za kuandika (kuunda alamisho, maelezo, maingizo ya daftari la masomo) zinahitaji ruhusa kupitia mfumo wa ruhusa.";
+"prompt_name_required" = "Jina la agizo linahitajika";
+"prompt_template_required" = "Kiolezo cha agizo kinahitajika";
+"raw_llm_log_entry_api_response" = "Jibu la API (marudio %d)";
+"raw_llm_log_entry_assistant" = "Jibu la msaidizi";
+"raw_llm_log_entry_empty" = "(tupu)";
+"raw_llm_log_entry_system" = "Maagizo ya mfumo";
+"raw_llm_log_entry_tokens" = "~Tokeni %@";
+"raw_llm_log_entry_tool_call" = "Wito wa zana: %@";
+"raw_llm_log_entry_tool_definitions" = "Ufafanuzi wa zana (%d zana)";
+"raw_llm_log_entry_tool_desc" = "Maelezo: %@";
+"raw_llm_log_entry_tool_params" = "Vigezo: %@";
+"raw_llm_log_entry_tool_result" = "Matokeo ya zana [%@]";
+"raw_llm_log_entry_usage" = "ndani: %1$@ / nje: %2$@%3$@";
+"raw_llm_log_entry_user" = "Ujumbe wa mtumiaji";
+"raw_llm_log_title" = "Kumbukumbu Ghafi ya LLM";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Pata na ujumuishe kiotomatiki maingizo ya maoni kwa mistari iliyochaguliwa, kuokoa marudio ya AI.";
+"prompt_auto_include_documents_description" = "Jumuisha kiotomatiki orodha ya hati zilizosanikishwa katika muktadha wa agizo, kuokoa marudio ya AI.";
+"prompt_copied" = "Agizo limenanakiliwa";
+"prompt_edit_before_run_description" = "Onyesha uwanja wa maandishi wa kubainisha kazi kabla ya kuendesha agizo";
+"prompt_is_text_transformation_description" = "Hutumia maagizo ya mfumo yaliyorahisishwa ambayo yanahifadhi muundo (viungo, vichwa, ujasiri/italiki) wakati wa kubadilisha maudhui ya maandishi. Zana hazitumiki. Inafaa kwa maagizo ya tafsiri na uhariri.";
+"prompt_max_iterations" = "Upinzani wa marudio ya juu zaidi";
+"prompt_max_iterations_description" = "Pindua marudio ya juu zaidi ya kimataifa kwa agizo hili. Tupu = chaguo-msingi ya kimataifa, 0 = bila kikomo.";
+"prompt_no_document_creation_description" = "Ikiwezeshwa, AI haitaunda hati. Matokeo yanaonyeshwa tu katika kumbukumbu ya shughuli. Inafaa kwa maagizo ya vitendo-tu (alamisho, lebo, shughuli za Daftari la Masomo).";
+"prompt_strict_context_matching_description" = "Ikiwezeshwa, akiba inalingana tu wakati muktadha wote (toleo la Biblia, maandishi yaliyochaguliwa) ni sawa. Ikizimwa, akiba inalingana wakati mistari iko sawa bila kujali toleo la Biblia.";

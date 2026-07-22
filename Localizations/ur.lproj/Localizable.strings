@@ -1142,3 +1142,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "AI کنکشن اور پرامپٹ ترتیبات";
 "prefs_features_cat" = "خصوصیات";
+
+/* Android shared translations */
+"ai_configure_button" = "کنکشن ترتیب دیں";
+"ai_disclaimer_warning_summary" = "AI استعمال کرنے کے خطرات اور ذمہ داریاں";
+"ai_provider_tier_community" = "دیگر فراہم کنندگان (جانچے نہیں گئے)";
+"ai_provider_tier_recommended" = "تجویز کردہ";
+"ai_providers_category" = "فراہم کنندگان";
+"easy_setup_anthropic_desc" = "سستی، بہترین معیار";
+"easy_setup_api_key_instructions" = "اپنی API کلید یہاں سے حاصل کریں:";
+"easy_setup_done_message" = "بائبل میں متن منتخب کریں اور AI خصوصیات آزمائیں۔ آپ ترتیبات میں مزید ماڈل اور فراہم کنندگان شامل کر سکتے ہیں۔";
+"easy_setup_done_title" = "AI تیار ہے!";
+"easy_setup_free_tier" = "مفت درجہ";
+"easy_setup_gemini_desc" = "مفت درجہ دستیاب، اچھا معیار";
+"easy_setup_openai_desc" = "معروف، قابل اعتماد";
+"easy_setup_pref_summary" = "چند مراحل میں تجویز کردہ فراہم کنندہ کے ساتھ AI ترتیب دیں";
+"edit_model_title" = "ماڈل ترمیم کریں";
+"show_also_unsupported_providers" = "غیر سپورٹ شدہ فراہم کنندگان بھی دکھائیں";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "جاری رکھنے کا سوال پوچھنے سے پہلے زیادہ سے زیادہ تکرار (0 = لامحدود)";
+"ai_document_filter_summary" = "منتخب کریں کہ AI کون سی دستاویزات پڑھ سکتا ہے";
+"ai_document_filter_summary_count" = "%d دستاویزات خارج";
+"ai_document_filter_title" = "دستاویز رسائی";
+"ai_language_app_default" = "ایپ زبان (%1$@)";
+"ai_language_custom" = "کسٹم…";
+"ai_language_custom_example" = "مثلاً suomi، Tagalog، en";
+"ai_language_custom_hint" = "زبان کا نام یا کوڈ داخل کریں";
+"ai_prompts_restored" = "پوشیدہ پرامپٹس بحال ہو گئے";
+"ai_restore_hidden_prompts" = "پوشیدہ پرامپٹس بحال کریں";
+"are_you_sure" = "کیا آپ یقین میں ہیں؟";
+"ask_model_before_run_summary" = "پرامپٹ چلانے سے پہلے ماڈل انتخاب ڈائلاگ دکھائیں (جب پرامپٹ کا واضح ماڈل اوور رائڈ ہو تو چھوڑ دیں)";
+"auto_hide_agent_log_summary" = "جب کوئی کام کامیابی سے مکمل ہو جائے یا منسوخ کیا جائے تو AI پینل خود بخود چھپائیں۔ خرابی کی صورت میں پینل نظر آتا رہے گا۔";
+"commentary_max_response_dialog_message" = "جب AI تفسیریں لائے اور مجموعی جواب اس ٹوکن حد سے تجاوز کرے تو انتخاب ڈائلاگ آپ کو چننے دیتا ہے کہ AI کو کون سی تفسیریں بھیجنی ہیں۔\n\n0 = کوئی حد نہیں (تمام تفسیریں خودبخود بھیجی جاتی ہیں)۔";
+"commentary_max_response_dialog_title" = "زیادہ سے زیادہ جواب کا سائز سیٹ کریں (ٹوکنز)";
+"commentary_max_response_value" = "~%@ ٹوکنز";
+"csv_export_failed" = "CSV برآمد ناکام: %@";
+"csv_import_errors" = "خرابیوں کے ساتھ درآمد مکمل: %1$d بنائے گئے، %2$d اپ ڈیٹ ہوئے، %3$d خرابیاں";
+"csv_import_failed" = "CSV درآمد ناکام: %@";
+"csv_import_success" = "درآمد مکمل: %1$d بنائے گئے، %2$d اپ ڈیٹ ہوئے";
+"custom_system_prompt_default" = "ڈیفالٹ";
+"delete_prompt_confirm_message" = "کیا آپ واقعی یہ پرامپٹ حذف کرنا چاہتے ہیں؟";
+"discard_changes_confirmation" = "غیر محفوظ تبدیلیاں رد کریں؟";
+"doc_type_commentary" = "تفسیر";
+"export_prompts_csv" = "پرامپٹس CSV میں برآمد کریں";
+"global_tool_permissions_title" = "ڈیفالٹ ٹول ترتیبات";
+"help_ai_connection_text" = "یہاں اپنے AI فراہم کنندگان، ماڈلز، اجازتیں اور دیگر کنکشن اختیارات ترتیب دیں۔ ہر فراہم کنندہ کو اپنی API کلید کی ضرورت ہے۔ آپ متعدد فراہم کنندگان شامل کر سکتے ہیں اور ایک ڈیفالٹ ماڈل منتخب کر سکتے ہیں۔";
+"help_ai_document_filter_text" = "محدود کریں کہ AI ایجنٹ کون سی بائبلز، تفسیر اور دیگر ماڈیولز پڑھ سکتا ہے۔ بطور ڈیفالٹ AI تمام انسٹال شدہ ماڈیولز دیکھتا ہے؛ فلٹرنگ شور اور لاگت کو کم کرنے میں مدد کرتی ہے جب آپ چاہتے ہیں کہ یہ صرف مخصوص ذرائع پر غور کرے۔";
+"help_ai_models_text" = "اس فراہم کنندہ کے لیے ماڈلز کا انتظام کریں۔ آپ نئی ریلیزز حاصل کرنے کے لیے فراہم کنندہ کی API سے ماڈل کی فہرست تازہ کر سکتے ہیں، یا اگر فہرست میں نہ ہو تو دستی طور پر ماڈل کا نام شامل کر سکتے ہیں۔";
+"help_ai_providers_text" = "AI فراہم کنندگان (Google Gemini، OpenAI، Anthropic، وغیرہ) کا انتظام کریں۔ ہر فراہم کنندہ کو اپنی API کلید کی ضرورت ہے۔ آپ متعدد فراہم کنندگان شامل کر سکتے ہیں اور مختلف پرامپٹس کو مختلف فراہم کنندگان تفویض کر سکتے ہیں۔";
+"help_ai_settings_text" = "AI ترتیبات وہ جگہ ہے جہاں آپ اپنے پرامپٹس اور زمرے منظم کرتے ہیں۔ یہاں سے آپ نئے پرامپٹس بنا سکتے ہیں، انہیں زمروں میں ترتیب دے سکتے ہیں، CSV کے طور پر پرامپٹس درآمد/برآمد کر سکتے ہیں، ایڈ آن پرامپٹ پیکس انسٹال کر سکتے ہیں، اور AI کنکشن ترتیبات تک پہنچ سکتے ہیں۔";
+"help_global_tool_permissions_text" = "انفرادی AI ٹولز کے لیے اجازتیں ترتیب دیں۔ ہر ریڈ ٹول کے لیے، انتخاب کریں کہ آیا AI اسے استعمال کر سکتا ہے (فعال یا غیر فعال)۔ ہر رائٹ ٹول کے لیے، ہمیشہ اجازت دیں، ہمیشہ انکار کریں، یا پوچھیں (جو AI کنکشن ترتیبات میں مقرر عالمی اجازت موڈ پر واپس جاتا ہے) میں سے انتخاب کریں۔";
+"import_prompts_addon" = "ایڈ-آن کے طور پر انسٹال کریں (صرف پڑھنے کے لیے)";
+"import_prompts_csv" = "CSV سے پرامپٹس درآمد کریں";
+"import_prompts_editable" = "قابل ترمیم پرامپٹس کے طور پر درآمد کریں";
+"llm_custom_model" = "کسٹم…";
+"llm_openrouter_category" = "زمرہ";
+"llm_openrouter_category_all" = "تمام";
+"llm_reset_usage_summary" = "مجموعی ٹوکن اور لاگت ٹریکنگ صاف کریں";
+"llm_usage_summary_format" = "ان پٹ: %1$d ٹوکنز | آؤٹ پٹ: %2$d ٹوکنز\nتخمینی لاگت: %3$@";
+"manage_tool_permissions_summary" = "فی ٹول اجازت اوور رائڈز منظم کریں";
+"model_delete_confirm" = "ماڈل \"%1$@\" حذف کریں؟";
+"model_supported_badge" = "✓ سپورٹ شدہ";
+"move_to_category" = "زمرے میں منتقل کریں…";
+"no_prompts_to_export" = "برآمد کرنے کے لیے کوئی صارف پرامپٹ نہیں";
+"prompts_csv_export_success" = "%d پرامپٹس برآمد ہوئے";
+"raw_llm_log_copied" = "لاگ کلپ بورڈ پر کاپی ہو گئی";
+"raw_llm_log_empty" = "کوئی خام لاگ ڈیٹا دستیاب نہیں";
+"raw_llm_log_total" = "مجموعی: ان %1$@ / آؤٹ %2$@%3$@";
+"raw_log_delete_confirm" = "%d منتخب";
+"raw_log_delete_old" = "پرانے لاگز حذف کریں…";
+"raw_log_delete_selected" = "منتخب حذف کریں";
+"raw_log_history_summary" = "محفوظ AI گفتگو لاگز دیکھیں اور منظم کریں";
+"raw_log_retention_summary_days" = "%d دنوں کے بعد";
+"show_also_unsupported_models" = "غیر سپورٹ شدہ ماڈل بھی دکھائیں";
+"tool_category_read" = "پڑھیں";
+"tool_category_write" = "لکھیں";
+"tool_option_disabled" = "غیر فعال";
+"tool_option_enabled" = "فعال";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "AI بگ رپورٹ کریں";
+"bug_report_email_text" = "اگلے، براہ کرم اپنی پسندیدہ ای میل ایپلیکیشن (مثلاً Gmail) منتخب کریں تاکہ رپورٹ ڈویلپر ٹیم کو بھیجی جا سکے۔";
+"send_ai_bug_report_title" = "AI بگ رپورٹ کریں";
+
+/* Android shared translations */
+"addon_prompt_badge" = "ایڈ-آن: %@";
+"addon_prompt_notice" = "یہ پرامپٹ ایڈ-آن ماڈیول \"%@\" سے ہے اور ترمیم نہیں کیا جا سکتا۔ قابل ترمیم کاپی بنانے کے لیے \"کسٹمائز کرنے کے لیے کاپی کریں\" استعمال کریں۔";
+"ai_available_tools" = "دستیاب ٹولز";
+"ai_read_tools" = "پڑھنے کے ٹولز";
+"ai_write_tools" = "لکھنے کے ٹولز";
+"delete_category_confirm_title" = "زمرہ \"%@\" حذف کریں؟";
+"delete_prompt_confirmation" = "پرامپٹ \"%@\" حذف کریں؟";
+"edit_prompt" = "پرامپٹ ترمیم کریں";
+"help_prompt_edit_text" = "حسب ضرورت پرامپٹس آپ کو اپنے مطالعے کے لیے دوبارہ قابل استعمال AI ہدایات بنانے کی سہولت دیتے ہیں۔ ایک نام، تفصیل، سانچہ، وہ تناظر جہاں یہ ظاہر ہو، اور اختیاری طور پر ایک مخصوص فراہم کنندہ/ماڈل ترتیب دیں۔ بلٹ ان پرامپٹس براہ راست ترمیم نہیں کیے جا سکتے — اپنا ورژن بنانے کے لیے \"Copy to customize\" استعمال کریں۔";
+"help_tool_info_text" = "AI ٹولز مخصوص فنکشنز ہیں جنہیں AI آپ کا ڈیٹا پڑھنے یا آپ کی جانب سے تبدیلیاں کرنے کے لیے استعمال کر سکتا ہے۔ ریڈ ٹولز (آیات، تفسیر، لغت، بک مارکس) کبھی اجازت نہیں مانگتے۔ رائٹ ٹولز (بک مارکس، نوٹس، مطالعہ پیڈ اندراجات بنانا) اجازت کے نظام سے گزرتے ہیں۔";
+"prompt_name_required" = "پرامپٹ کا نام ضروری ہے";
+"prompt_template_required" = "پرامپٹ ٹیمپلیٹ ضروری ہے";
+"raw_llm_log_entry_api_response" = "API جواب (تکرار %d)";
+"raw_llm_log_entry_assistant" = "معاون جواب";
+"raw_llm_log_entry_empty" = "(خالی)";
+"raw_llm_log_entry_system" = "سسٹم پرامپٹ";
+"raw_llm_log_entry_tokens" = "~%@ ٹوکنز";
+"raw_llm_log_entry_tool_call" = "ٹول کال: %@";
+"raw_llm_log_entry_tool_definitions" = "ٹول تعریفیں (%d ٹولز)";
+"raw_llm_log_entry_tool_desc" = "تفصیل: %@";
+"raw_llm_log_entry_tool_params" = "پیرامیٹر: %@";
+"raw_llm_log_entry_tool_result" = "ٹول نتیجہ [%@]";
+"raw_llm_log_entry_usage" = "ان: %1$@ / آؤٹ: %2$@%3$@";
+"raw_llm_log_entry_user" = "صارف پیغام";
+"raw_llm_log_title" = "خام LLM لاگ";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "منتخب آیات کے لیے تفسیر اندراجات خودبخود لائیں اور شامل کریں، AI کی ایک تکرار بچائیں۔";
+"prompt_auto_include_documents_description" = "پرامپٹ سیاق و سباق میں نصب شدہ دستاویزات کی فہرست خودبخود شامل کریں، AI کی ایک تکرار بچائیں۔";
+"prompt_copied" = "پرامپٹ کاپی ہو گیا";
+"prompt_edit_before_run_description" = "پرامپٹ چلانے سے پہلے کام بتانے کے لیے ٹیکسٹ فیلڈ دکھائیں";
+"prompt_is_text_transformation_description" = "ایک آسان سسٹم پرامپٹ استعمال کرتا ہے جو فارمیٹنگ (لنکس، سرخیاں، موٹا/ترچھا) محفوظ رکھتے ہوئے متن مواد تبدیل کرتا ہے۔ کوئی ٹولز استعمال نہیں ہوتے۔ ترجمہ اور ترمیم پرامپٹس کے لیے مثالی۔";
+"prompt_max_iterations" = "زیادہ سے زیادہ تکرار اوور رائڈ";
+"prompt_max_iterations_description" = "اس پرامپٹ کے لیے عالمی زیادہ سے زیادہ تکرار اوور رائڈ کریں۔ خالی = عالمی ڈیفالٹ، 0 = لامحدود۔";
+"prompt_no_document_creation_description" = "فعال ہونے پر، AI کوئی دستاویز نہیں بنائے گا۔ نتائج صرف سرگرمی لاگ میں دکھائے جائیں گے۔ صرف عمل والے پرامپٹس (بک مارکس، لیبل، مطالعہ پیڈ کام) کے لیے مفید۔";
+"prompt_strict_context_matching_description" = "فعال ہونے پر، کیش صرف اس وقت مطابق ہوتا ہے جب تمام سیاق و سباق (بائبل ورژن، منتخب متن) یکساں ہو۔ غیر فعال ہونے پر، کیش اس وقت مطابق ہوتا ہے جب آیات بائبل ورژن سے قطع نظر یکساں ہوں۔";

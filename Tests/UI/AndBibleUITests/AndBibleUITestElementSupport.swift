@@ -47,6 +47,26 @@ extension AndBibleUITests {
         identifier.hasPrefix("moduleBrowserRow::")
     }
 
+    /**
+     Returns whether an identifier belongs to a dynamically keyed AI action row.
+
+     SwiftUI exports these selectable Android-parity rows as buttons even though their identifiers
+     end in provider, model, or UUID values rather than the shared `Button` suffix. Keeping the
+     known families explicit prevents the generic resolver from mistaking them for container views.
+
+     - Parameter identifier: Accessibility identifier requested by a UI test.
+     - Returns: `true` for dynamic AI provider and model action identifiers.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    func isAIDynamicActionIdentifier(_ identifier: String) -> Bool {
+        identifier.hasPrefix("aiQuickSetupProvider_")
+            || identifier.hasPrefix("aiProviderType_")
+            || identifier.hasPrefix("aiModelProvider_")
+            || identifier.hasPrefix("aiModelChoice_")
+            || identifier.hasPrefix("aiModelRow_")
+    }
+
     func heuristicElementCandidates(
         for identifier: String,
         in app: XCUIApplication
@@ -76,8 +96,18 @@ extension AndBibleUITests {
             ]
         }
 
+        if isAIDynamicActionIdentifier(identifier) {
+            return [
+                app.buttons[identifier].firstMatch,
+                app.collectionViews.buttons[identifier].firstMatch,
+                app.cells.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
+        }
+
         if identifier.hasSuffix("Screen") {
             return [
+                app.alerts[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,

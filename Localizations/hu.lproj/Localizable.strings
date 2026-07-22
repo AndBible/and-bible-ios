@@ -1004,3 +1004,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "AI kapcsolati és prompt beállítások";
 "prefs_features_cat" = "Funkciók";
+
+/* Android shared translations */
+"ai_configure_button" = "Kapcsolat konfigurálása";
+"ai_disclaimer_warning_summary" = "Az AI használatának kockázatai és felelőssége";
+"ai_provider_tier_community" = "Egyéb szolgáltatók (nem teszteltek)";
+"ai_provider_tier_recommended" = "Ajánlott";
+"ai_providers_category" = "Szolgáltatók";
+"easy_setup_anthropic_desc" = "Megfizethető, kiváló minőség";
+"easy_setup_api_key_instructions" = "Kérje le az API-kulcsát innen:";
+"easy_setup_done_message" = "Jelöljön ki szöveget a Bibliában, és próbálja ki az AI funkciókat. A beállításokban további modelleket és szolgáltatókat adhat hozzá.";
+"easy_setup_done_title" = "Az AI készen áll!";
+"easy_setup_free_tier" = "Ingyenes szint";
+"easy_setup_gemini_desc" = "Ingyenes szint elérhető, jó minőség";
+"easy_setup_openai_desc" = "Közismert, megbízható";
+"easy_setup_pref_summary" = "AI beállítása ajánlott szolgáltatóval néhány lépésben";
+"edit_model_title" = "Modell szerkesztése";
+"show_also_unsupported_providers" = "Nem támogatott szolgáltatók megjelenítése is";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maximális iterációszám folytatás kérdése előtt (0 = korlátlan)";
+"ai_document_filter_summary" = "Válassza ki, mely dokumentumokat olvashatja az AI";
+"ai_document_filter_summary_count" = "%d dokumentum kizárva";
+"ai_document_filter_title" = "Dokumentumhozzáférés";
+"ai_language_app_default" = "Alkalmazás nyelve (%1$@)";
+"ai_language_custom" = "Egyéni…";
+"ai_language_custom_example" = "pl. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Adja meg a nyelv nevét vagy kódját";
+"ai_prompts_restored" = "Rejtett parancsok visszaállítva";
+"ai_restore_hidden_prompts" = "Rejtett parancsok visszaállítása";
+"are_you_sure" = "Biztosan?";
+"ask_model_before_run_summary" = "Modellválasztó párbeszédablak megjelenítése prompt végrehajtása előtt (kihagyva, ha a prompthoz explicit modell van megadva)";
+"auto_hide_agent_log_summary" = "Automatikusan elrejti az AI-panelt, amikor egy feladat sikeresen befejeződik vagy megszakad. Hiba esetén a panel látható marad.";
+"commentary_max_response_dialog_message" = "Ha az AI kommentárokat kér le, és az összes válasz meghaladja ezt a tokenkorlátot, egy kiválasztási párbeszédpanel jelenik meg, amelyen kiválaszthatja, mely kommentárokat küldje el az AI-nak.\n\n0 = nincs korlát (az összes kommentár automatikusan elküldésre kerül).";
+"commentary_max_response_dialog_title" = "Maximális válaszméret beállítása (tokenben)";
+"commentary_max_response_value" = "~%@ token";
+"csv_export_failed" = "CSV-exportálás sikertelen: %@";
+"csv_import_errors" = "Importálás befejezve hibákkal: %1$d létrehozva, %2$d frissítve, %3$d hiba";
+"csv_import_failed" = "CSV-importálás sikertelen: %@";
+"csv_import_success" = "Importálás befejezve: %1$d létrehozva, %2$d frissítve";
+"custom_system_prompt_default" = "Alapértelmezett";
+"delete_prompt_confirm_message" = "Biztosan törli ezt a parancsot?";
+"discard_changes_confirmation" = "Elveti a nem mentett módosításokat?";
+"doc_type_commentary" = "Kommentár";
+"export_prompts_csv" = "Promptok exportálása CSV-be";
+"global_tool_permissions_title" = "Alapértelmezett eszközbeállítások";
+"help_ai_connection_text" = "Itt konfigurálhatja az AI-szolgáltatókat, modelleket, engedélyeket és egyéb kapcsolati beállításokat. Minden szolgáltatóhoz saját API-kulcs szükséges. Több szolgáltatót is felvehet, és kiválaszthat egy alapértelmezett modellt.";
+"help_ai_document_filter_text" = "Korlátozhatja, hogy az AI-ügynök mely Bibliákat, kommentárokat és egyéb modulokat olvashatja. Alapértelmezés szerint az AI az összes telepített modult látja; a szűrés segít csökkenteni a zajt és a költségeket, ha csak bizonyos forrásokat szeretne figyelembe venni.";
+"help_ai_models_text" = "Kezelheti az ehhez a szolgáltatóhoz tartozó modelleket. Frissítheti a modellistát a szolgáltató API-jából az új kiadások megjelenítéséhez, vagy manuálisan is hozzáadhat egy modellnevet, ha az nem szerepel a letöltött listában.";
+"help_ai_providers_text" = "AI-szolgáltatók kezelése (Google Gemini, OpenAI, Anthropic stb.). Minden szolgáltatóhoz saját API-kulcs szükséges. Több szolgáltatót is felvehet, és különböző promptokhoz eltérő szolgáltatót rendelhet.";
+"help_ai_settings_text" = "Az AI-beállításokban kezelheti a promptjait és kategóriáit. Innen új promptokat hozhat létre, kategóriákba rendezheti azokat, CSV formátumban importálhat/exportálhat promptokat, kiegészítő promptcsomagokat telepíthet, és elérheti az AI-kapcsolat beállításait.";
+"help_global_tool_permissions_text" = "Konfigurálhatja az egyes AI-eszközök engedélyeit. Minden olvasó eszközhöz megadhatja, hogy az AI használhatja-e (Engedélyezve vagy Letiltva). Minden írási eszközhöz választhat: Mindig engedélyez, Mindig megtagad, vagy Kérdez (ami az AI-kapcsolat beállításaiban megadott globális engedélyezési módhoz tér vissza).";
+"import_prompts_addon" = "Telepítés bővítményként (csak olvasható)";
+"import_prompts_csv" = "Promptok importálása CSV-ből";
+"import_prompts_editable" = "Importálás szerkeszthető parancsokként";
+"llm_custom_model" = "Egyéni…";
+"llm_openrouter_category" = "Kategória";
+"llm_openrouter_category_all" = "Összes";
+"llm_reset_usage_summary" = "Összesített token- és költségadatok törlése";
+"llm_usage_summary_format" = "Bemenet: %1$d token | Kimenet: %2$d token\nBecsült költség: %3$@";
+"manage_tool_permissions_summary" = "Eszközönkénti engedély-felülbírálatok kezelése";
+"model_delete_confirm" = "Törli a(z) \"%1$@\" modellt?";
+"model_supported_badge" = "✓ Támogatott";
+"move_to_category" = "Áthelyezés kategóriába…";
+"no_prompts_to_export" = "Nincs exportálható felhasználói prompt";
+"prompts_csv_export_success" = "%d prompt exportálva CSV-be";
+"raw_llm_log_copied" = "Napló másolva a vágólapra";
+"raw_llm_log_empty" = "Nincs elérhető nyers naplóadat";
+"raw_llm_log_total" = "Összesen: be %1$@ / ki %2$@%3$@";
+"raw_log_delete_confirm" = "%d kijelölve";
+"raw_log_delete_old" = "Régi naplók törlése…";
+"raw_log_delete_selected" = "Kijelöltek törlése";
+"raw_log_history_summary" = "Mentett AI-beszélgetési naplók megtekintése és kezelése";
+"raw_log_retention_summary_days" = "%d nap után";
+"show_also_unsupported_models" = "Nem támogatott modellek megjelenítése is";
+"tool_category_read" = "Olvasás";
+"tool_category_write" = "Írás";
+"tool_option_disabled" = "Letiltva";
+"tool_option_enabled" = "Engedélyezve";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "AI hiba bejelentése";
+"bug_report_email_text" = "A következőkben válassza ki az email alkalmazást (például Gmail), amivel el szeretné küldeni a jelentést a fejlesztőknek.";
+"send_ai_bug_report_title" = "AI hiba bejelentése";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Bővítmény: %@";
+"addon_prompt_notice" = "Ez a parancs a(z) \"%@\" bővítménymodulból származik, és nem szerkeszthető. Szerkeszthető másolat létrehozásához használja a „Másolás testreszabáshoz\" lehetőséget.";
+"ai_available_tools" = "Elérhető eszközök";
+"ai_read_tools" = "Olvasóeszközök";
+"ai_write_tools" = "Írási eszközök";
+"delete_category_confirm_title" = "Töröljük a(z) \"%@\" kategóriát?";
+"delete_prompt_confirmation" = "Törli a(z) \"%@\" parancsot?";
+"edit_prompt" = "Parancs szerkesztése";
+"help_prompt_edit_text" = "Az egyéni promptok segítségével újrafelhasználható AI-utasításokat hozhat létre a tanulmányozáshoz. Adjon meg nevet, leírást, sablont, a megjelenési kontextusokat, valamint opcionálisan egyéni szolgáltatót/modellt. A beépített promptok nem szerkeszthetők közvetlenül – használja a \"Másolás testreszabáshoz\" lehetőséget saját verzió létrehozásához.";
+"help_tool_info_text" = "Az AI-eszközök speciális funkciók, amelyeket az AI az Ön adatainak olvasásához vagy módosításához hívhat meg. Az olvasó eszközök (versek, kommentárok, szótárak, könyvjelzők) soha nem igényelnek engedélyt. Az írási eszközök (könyvjelzők, jegyzetek, jegyzetlap bejegyzések létrehozása) az engedélyrendszeren keresztül vezérelhetők.";
+"prompt_name_required" = "A parancs neve kötelező";
+"prompt_template_required" = "A parancs sablonja kötelező";
+"raw_llm_log_entry_api_response" = "API-válasz (%d. iteráció)";
+"raw_llm_log_entry_assistant" = "Asszisztens válasza";
+"raw_llm_log_entry_empty" = "(üres)";
+"raw_llm_log_entry_system" = "Rendszerprompt";
+"raw_llm_log_entry_tokens" = "~%@ token";
+"raw_llm_log_entry_tool_call" = "Eszközhívás: %@";
+"raw_llm_log_entry_tool_definitions" = "Eszközdefiníciók (%d eszköz)";
+"raw_llm_log_entry_tool_desc" = "Leírás: %@";
+"raw_llm_log_entry_tool_params" = "Paraméterek: %@";
+"raw_llm_log_entry_tool_result" = "Eszközeredmény [%@]";
+"raw_llm_log_entry_usage" = "be: %1$@ / ki: %2$@%3$@";
+"raw_llm_log_entry_user" = "Felhasználói üzenet";
+"raw_llm_log_title" = "Nyers LLM-napló";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "A kiválasztott versekhez tartozó kommentárbejegyzések automatikus lekérése és bevonása, AI-iteráció megtakarítása érdekében.";
+"prompt_auto_include_documents_description" = "A telepített dokumentumok listájának automatikus bevonása a parancs kontextusába, AI-iteráció megtakarítása érdekében.";
+"prompt_copied" = "Parancs másolva";
+"prompt_edit_before_run_description" = "Szövegmező megjelenítése a feladat megadásához a parancs futtatása előtt";
+"prompt_is_text_transformation_description" = "Egyszerűsített rendszerparancsot használ, amely megőrzi a formázást (hivatkozások, fejlécek, félkövér/dőlt), miközben átalakítja a szövegtartalmat. Nem használ eszközöket. Ideális fordítási és szerkesztési parancsokhoz.";
+"prompt_max_iterations" = "Max. iteráció felülbírálása";
+"prompt_max_iterations_description" = "A globális max. iteráció felülbírálása ehhez a prompthoz. Üres = globális alapértelmezés, 0 = korlátlan.";
+"prompt_no_document_creation_description" = "Ha engedélyezve van, az AI nem hoz létre dokumentumot. Az eredmények csak a tevékenységnaplóban jelennek meg. Csak műveleti parancsokhoz hasznos (könyvjelzők, címkék, jegyzetlap-műveletek).";
+"prompt_strict_context_matching_description" = "Ha engedélyezve van, a gyorsítótár csak akkor egyezik, ha az összes kontextus (Biblia-verzió, kiválasztott szöveg) megegyezik. Ha letiltva van, a gyorsítótár akkor egyezik, ha a versek megegyeznek, a Biblia-verziótól függetlenül.";

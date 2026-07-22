@@ -1001,3 +1001,124 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Reglări conexiune AI și prompturi";
 "prefs_features_cat" = "Caracteristici";
+
+/* Android shared translations */
+"ai_configure_button" = "Configurează conexiunea";
+"ai_disclaimer_warning_summary" = "Riscuri și responsabilități în utilizarea AI";
+"ai_provider_tier_community" = "Alți furnizori (netestați)";
+"ai_provider_tier_recommended" = "Recomandat";
+"ai_providers_category" = "Furnizori";
+"easy_setup_anthropic_desc" = "Accesibil, calitate excelentă";
+"easy_setup_api_key_instructions" = "Obține cheia API de la:";
+"easy_setup_done_message" = "Selectează text în Biblie și încearcă funcțiile AI. Poți adăuga mai multe modele și provideri în reglări.";
+"easy_setup_done_title" = "AI este gata!";
+"easy_setup_free_tier" = "Nivel gratuit";
+"easy_setup_gemini_desc" = "Nivel gratuit disponibil, calitate bună";
+"easy_setup_openai_desc" = "Cunoscut, de încredere";
+"easy_setup_pref_summary" = "Configurează AI cu un provider recomandat în câțiva pași";
+"edit_model_title" = "Modifică modelul";
+"show_also_unsupported_providers" = "Afișează și furnizorii neacceptați";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Număr maxim de iterații înainte de a întreba dacă se continuă (0 = nelimitat)";
+"ai_document_filter_summary" = "Alege documentele pe care AI le poate citi";
+"ai_document_filter_summary_count" = "%d documente excluse";
+"ai_document_filter_title" = "Acces la documente";
+"ai_language_app_default" = "Limba aplicației (%1$@)";
+"ai_language_custom" = "Personalizată…";
+"ai_language_custom_example" = "ex. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Introduceți numele sau codul limbii";
+"ai_prompts_restored" = "Comenzile ascunse au fost recuperate";
+"ai_restore_hidden_prompts" = "Recuperează comenzile ascunse";
+"are_you_sure" = "Ești sigur?";
+"ask_model_before_run_summary" = "Afișează un dialog de selectare a modelului înainte de executarea unui prompt (omis când promptul are o înlocuire explicită de model)";
+"auto_hide_agent_log_summary" = "Ascunde automat panoul AI atunci când o sarcină se încheie cu succes sau este anulată. În caz de eroare, panoul rămâne vizibil.";
+"commentary_max_response_dialog_message" = "Când AI-ul preia comentarii și răspunsul total depășește această limită de tokenuri, un dialog de selecție îți permite să alegi ce comentarii să trimiți AI-ului.\n\n0 = fără limită (toate comentariile sunt trimise automat).";
+"commentary_max_response_dialog_title" = "Setează dimensiunea maximă a răspunsului (tokenuri)";
+"commentary_max_response_value" = "~%@ tokenuri";
+"csv_export_failed" = "Nu s-s reușit exportarea CSV-ului: %@";
+"csv_import_errors" = "Importare completată cu erori: %1$d create, %2$d actualizate, %3$d erori";
+"csv_import_failed" = "Nu s-a reușit importarea CSV-ului: %@";
+"csv_import_success" = "Importare completă: %1$d create, %2$d actualizate";
+"custom_system_prompt_default" = "Implicit";
+"delete_prompt_confirm_message" = "Ești sigur că vrei să ștergi această comandă?";
+"discard_changes_confirmation" = "Renunți la modificările nesalvate?";
+"doc_type_commentary" = "Comentariu";
+"export_prompts_csv" = "Exportă prompturi în CSV";
+"global_tool_permissions_title" = "Reglări implicite pentru instrumente";
+"help_ai_connection_text" = "Configurează providerii tăi AI, modelele, permisiunile și alte opțiuni de conexiune aici. Fiecare provider are nevoie de propriul cheie API. Poți adăuga mai mulți provideri și selecta un model implicit.";
+"help_ai_document_filter_text" = "Limitează care Biblii, comentarii și alte module poate citi agentul AI. Implicit, AI-ul vede toate modulele instalate; filtrarea ajută la reducerea zgomotului și a costurilor când vrei ca acesta să ia în considerare doar anumite surse.";
+"help_ai_models_text" = "Gestionează modelele pentru acest provider. Poți reîmprospăta lista de modele din API-ul providerului pentru a obține versiunile noi, sau adăuga manual un nume de model dacă nu se află în lista preluată.";
+"help_ai_providers_text" = "Gestionează providerii AI (Google Gemini, OpenAI, Anthropic, etc.). Fiecare provider are nevoie de propriul cheie API. Poți adăuga mai mulți provideri și le poți atribui diferitelor prompturi.";
+"help_ai_settings_text" = "Reglările AI este locul unde îți gestionezi prompturile și categoriile. De aici poți crea prompturi noi, le poți organiza în categorii, importa/exporta prompturi ca CSV, instala pachete suplimentare de prompturi și accesa reglările conexiunii AI.";
+"help_global_tool_permissions_text" = "Configurează permisiunile pentru instrumentele AI individuale. Pentru fiecare instrument de citire, alege dacă AI-ul îl poate utiliza (Activat sau Dezactivat). Pentru fiecare instrument de scriere, alege Permite întotdeauna, Interzice întotdeauna sau Întreabă (care revine la modul global de permisiuni setat în reglările conexiunii AI).";
+"import_prompts_addon" = "Instalează ca supliment (doar citire)";
+"import_prompts_csv" = "Importă prompturi din CSV";
+"import_prompts_editable" = "Importă ca comenzi editabile";
+"llm_custom_model" = "Personalizat…";
+"llm_openrouter_category" = "Categorie";
+"llm_openrouter_category_all" = "Toate";
+"llm_reset_usage_summary" = "Șterge urmărirea cumulativă a tokenilor și costurilor";
+"llm_usage_summary_format" = "Intrare: %1$d tokeni | Ieșire: %2$d tokeni\nCost estimat: %3$@";
+"manage_tool_permissions_summary" = "Gestionează suprascrierile de permisiuni per instrument";
+"model_delete_confirm" = "Ștergi modelul \"%1$@\"?";
+"model_supported_badge" = "✓ Acceptat";
+"move_to_category" = "Mută în categorie…";
+"no_prompts_to_export" = "Nu există prompturi de utilizator de exportat";
+"prompts_csv_export_success" = "%d prompturi exportate în CSV";
+"raw_llm_log_copied" = "Jurnalul a fost copiat";
+"raw_llm_log_empty" = "Nu există date de jurnal brut disponibile";
+"raw_llm_log_total" = "Total: intrare %1$@ / ieșire %2$@%3$@";
+"raw_log_delete_confirm" = "%d selectate";
+"raw_log_delete_old" = "Șterge jurnalele vechi…";
+"raw_log_delete_selected" = "Șterge selecția";
+"raw_log_history_summary" = "Vizualizați și gestionați jurnalele de conversații AI salvate";
+"raw_log_retention_summary_days" = "După %d zile";
+"show_also_unsupported_models" = "Afișează și modelele neacceptate";
+"tool_category_read" = "Citire";
+"tool_category_write" = "Scriere";
+"tool_option_disabled" = "Dezactivat";
+"tool_option_enabled" = "Activat";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Raportează eroare AI";
+"bug_report_email_text" = "Apoi, alege aplicația de e-mail preferată (Gmail, de exemplu) pentru a trimite raportul către echipa de programatori.";
+"send_ai_bug_report_title" = "Raportează eroare AI";
+
+/* Android shared translations */
+"addon_prompt_badge" = "Supliment: %@";
+"addon_prompt_notice" = "Această comandă provine din modulul supliment \"%@\" și nu poate fi modificată. Folosește „Copiază pentru personalizare\" pentru a crea o copie editabilă.";
+"ai_available_tools" = "Instrumente disponibile";
+"ai_read_tools" = "Instrumente de citire";
+"ai_write_tools" = "Instrumente de scriere";
+"delete_category_confirm_title" = "Ștergi categoria \"%@\"?";
+"delete_prompt_confirmation" = "Ștergi comanda \"%@\"?";
+"edit_prompt" = "Modifică comanda";
+"help_prompt_edit_text" = "Prompturile personalizate îți permit să creezi instrucțiuni AI reutilizabile pentru studiul tău. Setează un nume, descriere, șablon, contextele unde ar trebui să apară și, opțional, un provider/model personalizat. Prompturile integrate nu pot fi editate direct — folosește \"Copiază pentru a personaliza\" pentru a crea propria versiune.";
+"help_tool_info_text" = "Instrumentele AI sunt funcții specializate pe care AI le poate apela pentru a citi datele tale sau a face modificări în numele tău. Instrumentele de citire (versete, comentarii, dicționare, semne de carte) nu necesită niciodată permisiune. Instrumentele de scriere (crearea de semne de carte, notițe, intrări în notițele de studiu) sunt controlate de sistemul de permisiuni.";
+"prompt_name_required" = "Numele comenzii este obligatoriu";
+"prompt_template_required" = "Șablonul de comandă este obligatoriu";
+"raw_llm_log_entry_api_response" = "Răspuns API (iterația %d)";
+"raw_llm_log_entry_assistant" = "Răspuns asistent";
+"raw_llm_log_entry_empty" = "(gol)";
+"raw_llm_log_entry_system" = "Prompt sistem";
+"raw_llm_log_entry_tokens" = "~%@ tokenuri";
+"raw_llm_log_entry_tool_call" = "Apel instrument: %@";
+"raw_llm_log_entry_tool_definitions" = "Definiții instrumente (%d instrumente)";
+"raw_llm_log_entry_tool_desc" = "Descriere: %@";
+"raw_llm_log_entry_tool_params" = "Parametri: %@";
+"raw_llm_log_entry_tool_result" = "Rezultat instrument [%@]";
+"raw_llm_log_entry_usage" = "intrare: %1$@ / ieșire: %2$@%3$@";
+"raw_llm_log_entry_user" = "Mesaj utilizator";
+"raw_llm_log_title" = "Jurnal LLM brut";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Preia și include automat intrările de comentariu pentru versetele selectate, economisind o iterație AI.";
+"prompt_auto_include_documents_description" = "Include automat lista documentelor instalate în contextul comenzii, economisind o iterație AI.";
+"prompt_copied" = "Comandă copiată";
+"prompt_edit_before_run_description" = "Afișează un câmp de text pentru specificarea sarcinii înainte de rularea comenzii";
+"prompt_is_text_transformation_description" = "Folosește un prompt de sistem simplificat care păstrează formatarea (linkuri, titluri, bold/italic) în timp ce transformă conținutul textului. Nu se folosesc instrumente. Ideal pentru comenzi de traducere și editare.";
+"prompt_max_iterations" = "Înlocuire număr maxim de iterații";
+"prompt_max_iterations_description" = "Înlocuiește numărul maxim global de iterații pentru acest prompt. Gol = implicit global, 0 = nelimitat.";
+"prompt_no_document_creation_description" = "Când este activat, AI nu va crea un document. Rezultatele sunt afișate doar în jurnalul de activitate. Util pentru comenzi de acțiune exclusivă (semne de carte, etichete, operații StudyPad).";
+"prompt_strict_context_matching_description" = "Când este activat, cache-ul se potrivește doar când tot contextul (versiunea biblică, textul selectat) este același. Când este dezactivat, cache-ul se potrivește când versetele sunt aceleași indiferent de versiunea biblică.";

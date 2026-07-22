@@ -1126,3 +1126,119 @@
 /* Android shared translations */
 "ai_settings_shortcut_summary" = "Mga setting ng AI connection at prompt";
 "prefs_features_cat" = "Mga feature";
+
+/* Android shared translations */
+"ai_configure_button" = "I-configure ang Koneksyon";
+"ai_disclaimer_warning_summary" = "Mga panganib at responsibilidad sa paggamit ng AI";
+"ai_provider_tier_community" = "Iba pang provider (hindi nasubukan)";
+"ai_provider_tier_recommended" = "Inirerekomenda";
+"ai_providers_category" = "Mga Provider";
+"easy_setup_anthropic_desc" = "Abot-kaya, napakagandang kalidad";
+"easy_setup_api_key_instructions" = "Kunin ang iyong API key mula sa:";
+"easy_setup_done_message" = "Pumili ng teksto sa Bibliya at subukan ang mga feature ng AI. Maaari kang magdagdag ng higit pang mga modelo at provider sa mga setting.";
+"easy_setup_done_title" = "Handa na ang AI!";
+"easy_setup_free_tier" = "Libreng tier";
+"easy_setup_gemini_desc" = "May libreng tier, magandang kalidad";
+"easy_setup_openai_desc" = "Kilala, mapagkakatiwalaan";
+"easy_setup_pref_summary" = "I-set up ang AI gamit ang inirerekomendang provider sa ilang hakbang";
+"edit_model_title" = "I-edit ang modelo";
+"show_also_unsupported_providers" = "Ipakita rin ang mga hindi sinusuportahang provider";
+
+/* Android shared translations */
+"agent_max_iterations_summary" = "Maximum na iterasyon bago magtanong na magpatuloy (0 = walang limitasyon)";
+"ai_document_filter_summary" = "Piliin kung aling mga dokumento ang mababasa ng AI";
+"ai_document_filter_summary_count" = "%d dokumento ang hindi kasama";
+"ai_document_filter_title" = "Access sa dokumento";
+"ai_language_app_default" = "Wika ng app (%1$@)";
+"ai_language_custom_example" = "hal. suomi, Tagalog, en";
+"ai_language_custom_hint" = "Ilagay ang pangalan o code ng wika";
+"ai_prompts_restored" = "Naibalik ang mga nakatagong prompt";
+"ai_restore_hidden_prompts" = "Ibalik ang mga nakatagong prompt";
+"are_you_sure" = "Sigurado ka ba?";
+"ask_model_before_run_summary" = "Magpakita ng dialog para sa pagpili ng modelo bago i-execute ang prompt (nilalaktawan kapag ang prompt ay may tahasang model override)";
+"auto_hide_agent_log_summary" = "Awtomatikong itago ang AI panel kapag matagumpay na natapos o kinansela ang isang gawain. Kapag may error, mananatiling nakikita ang panel.";
+"commentary_max_response_dialog_message" = "Kapag kumukuha ang AI ng mga komentaryo at ang kabuuang tugon ay lalampas sa limitasyon ng token, magpapakita ng dialog ng pagpili upang makapili kung aling mga komentaryo ang ipapadala sa AI.\n\n0 = walang limitasyon (lahat ng komentaryo ay awtomatikong ipapadala).";
+"commentary_max_response_dialog_title" = "Itakda ang maximum na laki ng tugon (tokens)";
+"commentary_max_response_value" = "~%@ token";
+"csv_export_failed" = "Nabigo ang pag-export ng CSV: %@";
+"csv_import_errors" = "Natapos ang import na may mga error: %1$d nilikha, %2$d na-update, %3$d mga error";
+"csv_import_failed" = "Nabigo ang pag-import ng CSV: %@";
+"csv_import_success" = "Natapos ang import: %1$d nilikha, %2$d na-update";
+"delete_prompt_confirm_message" = "Tiyak bang gusto mong tanggalin ang prompt na ito?";
+"discard_changes_confirmation" = "Itapon ang mga hindi nai-save na pagbabago?";
+"doc_type_commentary" = "Komentaryo";
+"export_prompts_csv" = "I-export ang mga prompt sa CSV";
+"global_tool_permissions_title" = "Mga default na setting ng tool";
+"help_ai_connection_text" = "I-configure ang iyong mga AI provider, modelo, pahintulot at iba pang mga opsyon ng koneksyon dito. Ang bawat provider ay nangangailangan ng sariling API key. Maaari kang magdagdag ng maraming provider at pumili ng default na modelo.";
+"help_ai_document_filter_text" = "Limitahan kung aling mga Bibliya, komentaryo at iba pang mga module ang mababasa ng AI agent. Bilang default, nakikita ng AI ang lahat ng naka-install na module; nakakatulong ang pag-filter na mabawasan ang ingay at gastos kapag gusto mo lang itong isaalang-alang ang mga partikular na pinagkukunan.";
+"help_ai_models_text" = "Pamahalaan ang mga modelo para sa provider na ito. Maaari mong i-refresh ang listahan ng modelo mula sa API ng provider para makuha ang mga bagong release, o manu-manong magdagdag ng pangalan ng modelo kung wala ito sa na-fetch na listahan.";
+"help_ai_providers_text" = "Pamahalaan ang mga AI provider (Google Gemini, OpenAI, Anthropic, atbp.). Ang bawat provider ay nangangailangan ng sariling API key. Maaari kang magdagdag ng maraming provider at mag-assign ng iba't iba sa mga partikular na prompt.";
+"help_ai_settings_text" = "Ang AI Settings ay kung saan mo pinamamahalaan ang iyong mga prompt at kategorya. Mula rito maaari kang gumawa ng mga bagong prompt, ayusin ang mga ito sa mga kategorya, mag-import/mag-export ng mga prompt bilang CSV, mag-install ng mga add-on prompt pack, at maabot ang mga setting ng koneksyon ng AI.";
+"help_global_tool_permissions_text" = "I-configure ang mga pahintulot para sa mga indibidwal na AI tool. Para sa bawat read tool, piliin kung maaari itong gamitin ng AI (Pinagana o Hindi Pinagana). Para sa bawat write tool, piliin ang Palaging payagan, Palaging tanggihan, o Tanungin (na bumabalik sa global na mode ng pahintulot na nakatakda sa mga setting ng Koneksyon ng AI).";
+"import_prompts_addon" = "I-install bilang add-on (read-only)";
+"import_prompts_csv" = "Mag-import ng mga prompt mula sa CSV";
+"import_prompts_editable" = "I-import bilang mga maaaring i-edit na prompt";
+"llm_openrouter_category" = "Kategorya";
+"llm_openrouter_category_all" = "Lahat";
+"llm_reset_usage_summary" = "I-clear ang pinagsama-samang pagsubaybay ng token at gastos";
+"llm_usage_summary_format" = "Input: %1$d token | Output: %2$d token\nTinantiyang gastos: %3$@";
+"manage_tool_permissions_summary" = "Pamahalaan ang mga override ng pahintulot bawat tool";
+"model_delete_confirm" = "Tanggalin ang modelo na \"%1$@\"?";
+"model_supported_badge" = "✓ Sinusuportahan";
+"move_to_category" = "Ilipat sa kategorya…";
+"no_prompts_to_export" = "Walang mga prompt ng gumagamit na ie-export";
+"prompts_csv_export_success" = "Na-export ang %d prompt sa CSV";
+"raw_llm_log_copied" = "Nakopya ang log sa clipboard";
+"raw_llm_log_empty" = "Walang available na raw na log data";
+"raw_llm_log_total" = "Kabuuan: papasok %1$@ / palabas %2$@%3$@";
+"raw_log_delete_confirm" = "%d napili";
+"raw_log_delete_old" = "Tanggalin ang lumang mga log…";
+"raw_log_delete_selected" = "Tanggalin ang mga napili";
+"raw_log_history_summary" = "Tingnan at pamahalaan ang mga nasaved na log ng AI conversation";
+"raw_log_retention_summary_days" = "Pagkatapos ng %d araw";
+"show_also_unsupported_models" = "Ipakita rin ang mga hindi sinusuportahang modelo";
+"tool_category_read" = "Basahin";
+"tool_category_write" = "Isulat";
+"tool_option_disabled" = "Hindi pinagana";
+"tool_option_enabled" = "Pinagana";
+
+/* Android shared translations */
+"ai_bug_report_menu" = "Mag-ulat ng AI bug";
+"bug_report_email_text" = "Susunod, mangyaring piliin ang iyong gustong email application (tulad ng Gmail) para ipadala ang ulat sa team ng developer.";
+"send_ai_bug_report_title" = "Mag-ulat ng AI Bug";
+
+/* Android shared translations */
+"addon_prompt_notice" = "Ang prompt na ito ay mula sa add-on na modyul na \"%@\" at hindi maaaring i-edit. Gamitin ang \"Kopyahin para i-customize\" upang gumawa ng maaaring i-edit na kopya.";
+"ai_available_tools" = "Mga available na tool";
+"ai_read_tools" = "Mga Read Tool";
+"ai_write_tools" = "Mga Write Tool";
+"delete_category_confirm_title" = "Tanggalin ang kategoryang \"%@\"?";
+"delete_prompt_confirmation" = "Tanggalin ang prompt na \"%@\"?";
+"edit_prompt" = "I-edit ang prompt";
+"help_prompt_edit_text" = "Ang mga custom na prompt ay nagbibigay-daan sa iyong gumawa ng mga reusable na instruksyon ng AI para sa iyong pag-aaral. Magtakda ng pangalan, paglalarawan, template, mga konteksto kung saan ito dapat lumabas, at opsyonal na custom na provider/modelo. Ang mga built-in na prompt ay hindi maaaring direktang i-edit — gamitin ang \"Kopyahin para i-customize\" para gumawa ng sarili mong bersyon.";
+"help_tool_info_text" = "Ang mga AI tool ay mga espesyal na function na maaaring tawagin ng AI para basahin ang iyong data o gumawa ng mga pagbabago sa iyong ngalan. Ang mga read tool (mga talata, komentaryo, diksyonaryo, mga bookmark) ay hindi kailanman nangangailangan ng pahintulot. Ang mga write tool (paggawa ng mga bookmark, tala, mga entry sa study pad) ay kontrolado ng sistema ng pahintulot.";
+"prompt_name_required" = "Kailangan ang pangalan ng prompt";
+"prompt_template_required" = "Kailangan ang template ng prompt";
+"raw_llm_log_entry_api_response" = "Tugon ng API (ulit %d)";
+"raw_llm_log_entry_assistant" = "Tugon ng assistant";
+"raw_llm_log_entry_empty" = "(walang laman)";
+"raw_llm_log_entry_tokens" = "~%@ na token";
+"raw_llm_log_entry_tool_call" = "Tawag sa tool: %@";
+"raw_llm_log_entry_tool_definitions" = "Mga kahulugan ng tool (%d na tool)";
+"raw_llm_log_entry_tool_desc" = "Paglalarawan: %@";
+"raw_llm_log_entry_tool_params" = "Mga parameter: %@";
+"raw_llm_log_entry_tool_result" = "Resulta ng tool [%@]";
+"raw_llm_log_entry_usage" = "papasok: %1$@ / palabas: %2$@%3$@";
+"raw_llm_log_entry_user" = "Mensahe ng user";
+"raw_llm_log_title" = "Raw na LLM Log";
+
+/* Android shared translations */
+"prompt_auto_include_commentaries_description" = "Awtomatikong kunin at isama ang mga entry ng komentaryo para sa mga napiling talata, na nakakatipid ng isang iteration ng AI.";
+"prompt_auto_include_documents_description" = "Awtomatikong isama ang listahan ng mga naka-install na dokumento sa konteksto ng prompt, na nakakatipid ng isang iteration ng AI.";
+"prompt_copied" = "Nakopya ang prompt";
+"prompt_edit_before_run_description" = "Magpakita ng text field para tukuyin ang gawain bago patakbuhin ang prompt";
+"prompt_is_text_transformation_description" = "Gumagamit ng pinasimpleng system prompt na pinapanatili ang pag-format (mga link, heading, bold/italic) habang binabago ang nilalaman ng teksto. Walang mga tool na ginagamit. Perpekto para sa mga prompt ng pagsasalin at pag-edit.";
+"prompt_max_iterations" = "Override ng max na iterasyon";
+"prompt_max_iterations_description" = "I-override ang global max na iterasyon para sa prompt na ito. Blangko = global default, 0 = walang limitasyon.";
+"prompt_no_document_creation_description" = "Kapag naka-enable, hindi gagawa ng dokumento ang AI. Ang mga resulta ay ipinakita lamang sa activity log. Kapaki-pakinabang para sa mga prompt na action lamang (mga bookmark, label, operasyon ng StudyPad).";
+"prompt_strict_context_matching_description" = "Kapag naka-enable, ang cache ay tutugma lamang kapag ang lahat ng konteksto (bersyon ng Bibliya, napiling teksto) ay pareho. Kapag naka-disable, ang cache ay tutugma kapag ang mga talata ay pareho anuman ang bersyon ng Bibliya.";
