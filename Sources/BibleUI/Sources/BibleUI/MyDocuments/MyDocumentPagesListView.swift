@@ -109,9 +109,15 @@ struct MyDocumentPagesListView: View {
         .onAppear {
             if baselinePages == nil { baselinePages = pages }
         }
-        .sheet(item: $editorRequest) { request in
-            MyDocumentPageEditor(request: request) { title, type, content in
-                applyEditor(request, title: title, contentType: type, content: content)
+        .overlay {
+            if let editorRequest {
+                MyDocumentPageEditor(
+                    request: editorRequest,
+                    onCancel: { self.editorRequest = nil }
+                ) { title, type, content in
+                    applyEditor(editorRequest, title: title, contentType: type, content: content)
+                    self.editorRequest = nil
+                }
             }
         }
         .sheet(isPresented: $showsExport) {

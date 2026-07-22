@@ -44,8 +44,11 @@ private struct ReadingProgressPersistenceFailure: Identifiable {
 struct ReadingProgressView: View {
     let readingStore: ReadingProgressStore?
     let memorizationStore: MemorizationProgressStore?
+    let settingsController: BibleReaderController?
     let onOpenMemorizeRange: (MemorizationProgressRange) -> Void
     let onOpenChapter: (String, Int) -> Void
+    /// Android's persisted tab used when an activity launch does not carry an explicit tab extra.
+    @AppStorage("reading_progress_last_tab") private var persistedTabRawValue = ReadingProgressTab.reading.rawValue
     @State private var selectedTab: ReadingProgressTab
     @AppStorage("reading_progress_mem_overview") private var memorizationOverviewActive = true
     @State private var memorizationRevision = 0
@@ -58,6 +61,7 @@ struct ReadingProgressView: View {
     @State private var selectedReadingDayMilliseconds: Int64?
     @State private var showNewReadingCycleConfirmation = false
     @State private var persistenceFailure: ReadingProgressPersistenceFailure?
+    @State private var isHelpPresented = false
     /// History rows staged for Android-style delete-on-dismiss with tap-again undo.
     @State private var pendingReadingDeleteIDs: Set<UUID> = []
 
@@ -70,15 +74,20 @@ struct ReadingProgressView: View {
     init(
         readingStore: ReadingProgressStore?,
         memorizationStore: MemorizationProgressStore?,
-        initialTab: ReadingProgressTab,
+        settingsController: BibleReaderController? = nil,
+        initialTab: ReadingProgressTab? = nil,
         onOpenMemorizeRange: @escaping (MemorizationProgressRange) -> Void = { _ in },
         onOpenChapter: @escaping (String, Int) -> Void = { _, _ in }
     ) {
         self.readingStore = readingStore
         self.memorizationStore = memorizationStore
+        self.settingsController = settingsController
         self.onOpenMemorizeRange = onOpenMemorizeRange
         self.onOpenChapter = onOpenChapter
-        _selectedTab = State(initialValue: initialTab)
+        let persistedTab = ReadingProgressTab(
+            rawValue: UserDefaults.standard.integer(forKey: "reading_progress_last_tab")
+        ) ?? .reading
+        _selectedTab = State(initialValue: initialTab ?? persistedTab)
     }
 
     var body: some View {
@@ -98,6 +107,33 @@ struct ReadingProgressView: View {
             }
         }
         .navigationTitle(String(localized: "reading_progress_title", defaultValue: "Read/Memory Progress"))
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if let settingsController {
+                    NavigationLink {
+                        ReadingProgressSettingsView(controller: settingsController)
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel(String(localized: "settings", defaultValue: "Settings"))
+                    .accessibilityIdentifier("readingProgressSettingsAction")
+                }
+
+                Button {
+                    isHelpPresented = true
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                }
+                .accessibilityLabel(String(localized: "help", defaultValue: "Help"))
+                .accessibilityIdentifier("readingProgressHelpAction")
+            }
+        }
+        .onAppear {
+            persistedTabRawValue = selectedTab.rawValue
+        }
+        .onChange(of: selectedTab) { _, tab in
+            persistedTabRawValue = tab.rawValue
+        }
         .alert(item: $memorizationDeletionRequest) { request in
             Alert(
                 title: Text(""),
@@ -121,6 +157,14 @@ struct ReadingProgressView: View {
                 )),
                 dismissButton: .default(Text(String(localized: "ok", defaultValue: "OK")))
             )
+        }
+        .alert(String(localized: "help", defaultValue: "Help"), isPresented: $isHelpPresented) {
+            Button(String(localized: "ok", defaultValue: "OK"), role: .cancel) {}
+        } message: {
+            Text(String(
+                localized: "help_reading_progress_text",
+                defaultValue: "Your Bible reading and memorization progress at a glance. Mark chapters as read manually with the \"Mark as read\" button, or enable automatic tracking. Memorize exercises also feed into this view."
+            ))
         }
         .confirmationDialog(
             String(localized: "reading_progress_new_cycle", defaultValue: "New cycle"),

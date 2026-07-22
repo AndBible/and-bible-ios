@@ -9,23 +9,19 @@ import XCTest
  */
 final class ReaderPassageChooserSourceGuardTests: XCTestCase {
     /**
-     Verifies the passage chooser uses its Android-style full-screen shell.
+     Verifies the passage chooser uses its Android-style reader-stack destination.
 
-     Android presents book/chapter/verse selection as a full-screen dark chooser with its own
-     toolbar, not as the narrow hamburger drawer. Failure means iOS is artificially preserving a
-     platform-specific presentation that hides part of the picker behind the reader surface.
+     Android presents book/chapter/verse selection as a separate full-screen activity, not as an
+     in-place reader overlay. Failure means iOS is artificially preserving a platform-specific
+     presentation that hides part of the picker behind the reader surface.
      */
-    func testPassageChooserUsesFullScreenChooserShell() throws {
+    func testPassageChooserUsesReaderDestinationInsteadOfOverlay() throws {
         let source = try bibleUISource(named: "BibleReaderView.swift")
-        let overlayStart = try XCTUnwrap(source.range(of: "private var bookChooserDrawerOverlay"))
-        let overlayEnd = try XCTUnwrap(
-            source[overlayStart.lowerBound...].range(of: "private func dismissReaderNavigationDrawer")
-        )
-        let overlaySource = String(source[overlayStart.lowerBound..<overlayEnd.lowerBound])
-
-        XCTAssertTrue(overlaySource.contains("ReaderPassageChooserOverlay"))
-        XCTAssertFalse(overlaySource.contains("ReaderSideDrawerOverlay"))
-        XCTAssertFalse(overlaySource.contains("onCancel: dismissBookChooser"))
+        XCTAssertTrue(source.contains("case passageChooser"))
+        XCTAssertTrue(source.contains("case .passageChooser:"))
+        XCTAssertTrue(source.contains("presentReaderDestinationPreservingPane(.passageChooser)"))
+        XCTAssertTrue(source.contains("passageChooserScreen"))
+        XCTAssertFalse(source.contains("bookChooserDrawerOverlay"))
     }
 
     /**
@@ -59,27 +55,27 @@ final class ReaderPassageChooserSourceGuardTests: XCTestCase {
     }
 
     /**
-     Verifies the drawer-hosted passage chooser does not depend on native navigation bars.
+    Verifies the destination-hosted passage chooser owns its Android-style app bar.
 
      Android's chooser activity owns its visible app bar as chooser content. `BibleReaderView`
      hides native navigation chrome for the reader, so the reader-hosted chooser must not try to
      recover by forcing a nested SwiftUI navigation bar visible. Failure means the app can regress
      to a brittle host-level toolbar that disappears under the reader shell.
      */
-    func testPassageChooserDrawerDoesNotDependOnNativeNavigationBarInsideReader() throws {
+    func testPassageChooserDestinationDoesNotDependOnNativeNavigationBar() throws {
         let source = try bibleUISource(named: "BibleReaderView.swift")
-        guard let drawerStart = source.range(of: "private var bookChooserDrawerContent"),
+        guard let destinationStart = source.range(of: "private var bookChooserDestinationContent"),
               let nextSection = source.range(
                 of: "private var searchSheetContent",
-                range: drawerStart.upperBound..<source.endIndex
+                range: destinationStart.upperBound..<source.endIndex
               ) else {
-            return XCTFail("Could not locate book chooser drawer content in BibleReaderView.swift")
+            return XCTFail("Could not locate book chooser destination content in BibleReaderView.swift")
         }
 
-        let drawerSource = source[drawerStart.lowerBound..<nextSection.lowerBound]
+        let destinationSource = source[destinationStart.lowerBound..<nextSection.lowerBound]
 
-        XCTAssertTrue(drawerSource.contains("BookChooserView("))
-        XCTAssertFalse(drawerSource.contains(".toolbar(.visible, for: .navigationBar)"))
+        XCTAssertTrue(destinationSource.contains("BookChooserView("))
+        XCTAssertFalse(destinationSource.contains("NavigationStack"))
     }
 
     /**
@@ -139,7 +135,7 @@ final class ReaderPassageChooserSourceGuardTests: XCTestCase {
         )
         XCTAssertTrue(chooserSource.contains("completeReferenceChooser(with: verseName, for: generation)"))
         XCTAssertFalse(chooserSource.contains("\"\\(osisId).\\(chapter).\\(verse)\""))
-        XCTAssertTrue(source.contains(".sheet(item: $refChooserPresentation) { generation in"))
+        XCTAssertTrue(source.contains(".fullScreenCover(item: $refChooserPresentation) { generation in"))
         XCTAssertTrue(source.contains("handleReferenceChooserDismissal(for: generation)"))
         XCTAssertTrue(
             source.contains("refChooserPresentation = refChooserRequest.replace(with: completion)")

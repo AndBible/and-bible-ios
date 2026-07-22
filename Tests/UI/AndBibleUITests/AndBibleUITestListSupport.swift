@@ -658,12 +658,12 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens History from the reader shell.
+     Opens History from the reader shell's app-owned dialog.
      *
      * - Parameter app: Running application whose reader shell should present History.
      * - Returns: The root accessibility-identified History screen element.
      * - Side effects:
-     *   - opens the reader overflow menu and pushes the History sheet
+     *   - opens the reader navigation drawer and presents History's app-owned dialog
      * - Failure modes:
      *   - fails if the reader menu button, History action, or History screen root never appears
      */
@@ -673,6 +673,24 @@ extension AndBibleUITests {
             actionIdentifier: "readerOpenHistoryAction",
             destinationIdentifier: "historyScreen",
             readinessIdentifiers: ["historyDoneButton", "historyClearButton", "historyEmptyState"],
+            in: app
+        )
+    }
+
+    /**
+     Opens Android's Read/Memory Progress activity equivalent from the reader drawer.
+
+     - Parameter app: Running application whose reader shell owns the navigation destination.
+     - Returns: The root accessibility-identified Reading Progress destination.
+     - Side effects: Opens the reader navigation drawer and pushes Reading Progress onto the reader stack.
+     - Failure modes: Fails if the drawer action, destination root, or destination presentation never appears.
+     */
+    @discardableResult
+    func openReadingProgress(in app: XCUIApplication) -> XCUIElement {
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenReadingProgressAction",
+            destinationIdentifier: "readingProgressScreen",
+            readinessIdentifiers: [],
             in: app
         )
     }

@@ -64,6 +64,47 @@ enum HistoryListPresentation {
     }
 
     /**
+     Formats one persisted History row using Android's `KeyHistoryItem.description` contract.
+
+     Android appends the active document abbreviation after the localized reference.  iOS stores
+     that abbreviation separately, so this projection restores it without changing the persisted
+     history schema or the generic reference formatter used by legacy callers.
+
+     - Parameters:
+       - key: Stored OSIS-style reference from the history checkpoint.
+       - document: Active module initials captured with the checkpoint.
+       - bookNameResolver: Optional module-aware OSIS name resolver supplied by the reader.
+     - Returns: Localized reference followed by the nonempty document abbreviation.
+     - Side effects: none.
+     - Failure modes: Falls back to the raw key and omits an unavailable document abbreviation.
+     */
+    static func formattedDescription(
+        key: String,
+        document: String,
+        bookNameResolver: ((String) -> String?)?
+    ) -> String {
+        let reference = formattedKey(key, bookNameResolver: bookNameResolver)
+        let abbreviation = document.trimmingCharacters(in: .whitespacesAndNewlines)
+        return abbreviation.isEmpty ? reference : "\(reference) \(abbreviation)"
+    }
+
+    /**
+     Formats a History timestamp using Android's dialog-row information density.
+
+     - Parameter date: Timestamp captured with the persisted navigation checkpoint.
+     - Returns: Localized time, weekday, day, and abbreviated month, for example `2:35 PM, Tue 21 Jul`.
+     - Side effects: Reads the user's current locale and time zone through `DateFormatter`.
+     - Failure modes: The formatter always returns a nonempty localized string for valid `Date` values.
+     */
+    static func androidDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.timeZone = .current
+        formatter.dateFormat = "h:mm a, E d MMM"
+        return formatter.string(from: date)
+    }
+
+    /**
      Resolves the deterministic accessibility identifier for one history row.
 
      - Parameter item: History row whose stored key should back the identifier.

@@ -23,9 +23,10 @@ struct MyDocumentPageEditorRequest: Identifiable {
  their stored type.
  */
 struct MyDocumentPageEditor: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     let request: MyDocumentPageEditorRequest
+    let onCancel: () -> Void
     let onSave: (String, MyDocumentContentType, String) -> Void
 
     @State private var pageTitle: String
@@ -34,9 +35,11 @@ struct MyDocumentPageEditor: View {
 
     init(
         request: MyDocumentPageEditorRequest,
+        onCancel: @escaping () -> Void,
         onSave: @escaping (String, MyDocumentContentType, String) -> Void
     ) {
         self.request = request
+        self.onCancel = onCancel
         self.onSave = onSave
         _pageTitle = State(initialValue: request.initialTitle)
         _contentType = State(initialValue: request.initialContentType)
@@ -44,12 +47,21 @@ struct MyDocumentPageEditor: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
+        ZStack {
+            Color.black.opacity(0.36)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onCancel)
+
+            VStack(alignment: .leading, spacing: 16) {
+                Text(request.title)
+                    .font(.headline)
+                    .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
+
                 TextField(
                     String(localized: "name", defaultValue: "Name"),
                     text: $pageTitle
                 )
+                .textFieldStyle(.roundedBorder)
 
                 Picker(
                     String(localized: "my_document_content_type_label", defaultValue: "Content type"),
@@ -65,26 +77,29 @@ struct MyDocumentPageEditor: View {
 
                 TextEditor(text: $content)
                     .font(.body.monospaced())
-                    .frame(minHeight: 280)
+                    .frame(minHeight: 260)
+                    .padding(6)
+                    .background(AndroidDialogSurfacePalette.fieldBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
                     .accessibilityIdentifier("myDocumentPageContentEditor")
-            }
-            .navigationTitle(request.title)
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "cancel")) { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
+
+                HStack {
+                    Spacer()
+                    Button(String(localized: "cancel"), action: onCancel)
+                        .accessibilityIdentifier("myDocumentPageEditorCancelButton")
                     Button(String(localized: "save")) {
                         onSave(pageTitle, contentType, content)
-                        dismiss()
                     }
                     .disabled(pageTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .foregroundStyle(AndroidDialogSurfacePalette.accent(for: colorScheme))
+                    .accessibilityIdentifier("myDocumentPageEditorSaveButton")
                 }
             }
+            .padding(24)
+            .frame(maxWidth: 680)
+            .background(AndroidDialogSurfacePalette.background(for: colorScheme), in: RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 16)
+            .padding(24)
         }
-        .frame(minWidth: 420, minHeight: 480)
+        .accessibilityIdentifier("androidMyDocumentPageEditorDialog")
     }
 }

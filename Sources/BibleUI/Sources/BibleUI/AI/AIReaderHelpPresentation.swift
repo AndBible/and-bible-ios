@@ -117,42 +117,50 @@ struct AIReaderHelpDialog: View {
     /// Semantic help content selected by the bridge route.
     let presentation: AIReaderHelpPresentation
 
-    /// Dismisses the native sheet from its toolbar action.
-    @Environment(\.dismiss) private var dismiss
+    /// Closes the app-owned Android-style dialog.
+    let onDismiss: () -> Void
 
     /** Renders title, links, emphasis, and body in Android's vertical content order. */
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if let tutorialLink = presentation.tutorialLink {
-                        helpLink(tutorialLink)
+        ZStack {
+            Color.black.opacity(0.36)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onDismiss)
+
+            VStack(alignment: .leading, spacing: 16) {
+                Text(presentation.title.localizedValue)
+                    .font(.headline)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let tutorialLink = presentation.tutorialLink {
+                            helpLink(tutorialLink)
+                        }
+                        if let emphasizedTextKey = presentation.emphasizedTextKey {
+                            Text(String(localized: String.LocalizationValue(emphasizedTextKey)))
+                                .bold()
+                        }
+                        helpText(presentation.body)
+                        if let documentationLink = presentation.documentationLink {
+                            helpLink(documentationLink)
+                        }
                     }
-                    if let emphasizedTextKey = presentation.emphasizedTextKey {
-                        Text(String(localized: String.LocalizationValue(emphasizedTextKey)))
-                            .bold()
-                    }
-                    helpText(presentation.body)
-                    if let documentationLink = presentation.documentationLink {
-                        helpLink(documentationLink)
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-            }
-            .navigationTitle(presentation.title.localizedValue)
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(String(localized: "okay")) { dismiss() }
+
+                HStack {
+                    Spacer()
+                    Button(String(localized: "okay"), action: onDismiss)
                 }
             }
+            .padding()
+            .frame(maxWidth: 640, maxHeight: 700)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 16)
+            .padding(24)
         }
-        #if os(iOS)
-        .presentationDetents([.medium, .large])
-        #endif
+        .accessibilityIdentifier("androidAIReaderHelpDialog")
     }
 
     /** Renders one allowlisted URL with its shared localized label. */

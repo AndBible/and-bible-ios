@@ -7,6 +7,140 @@ import UIKit
 
 extension AndBibleUITests {
     /**
+     Verifies persisted Android manual night mode renders the reader with dark chrome.
+
+     The fixture uses `night_mode_pref3=manual` plus `night_mode=true`, avoiding a dependency on
+     the simulator's system appearance. The assertion uses the reader header's exported rendered
+     state and stable drawer control instead of localized visual text.
+
+     * - Side effects:
+     *   - launches the reader with the dedicated persisted night-mode fixture
+     * - Failure modes:
+     *   - fails if the reader ignores its Android-equivalent persisted night-mode settings or
+     *     loses the app-owned navigation drawer while night chrome is active
+     */
+    func testReaderNightModeRendersDarkReaderChrome() {
+        let app = makeApp()
+        app.launch()
+
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 30),
+            "Expected the night-mode reader shell to become ready."
+        )
+        waitForReaderRenderedContentState(containing: "nightMode=true", in: app, timeout: 15)
+        tapReaderNavigationDrawerButton(in: app, timeout: 30)
+        XCTAssertTrue(
+            requireElement("readerNavigationDrawer", in: app, timeout: 15).exists,
+            "Expected the app-owned reader drawer to remain reachable in night mode."
+        )
+    }
+
+    /**
+     Verifies the reader drawer remains reachable with a non-English locale and XXXL Dynamic Type.
+
+     The drawer control must retain its 44-point hit area and layout priority when the reader header
+     has localized, expanded text. This test stops at the drawer surface; the default-size History
+     route tests own the deferred drawer-action and dialog assertions.
+
+     * - Side effects:
+     *   - launches the baseline reader fixture with Spanish locale and XXXL Dynamic Type
+     *   - opens the reader navigation drawer through its stable accessibility identifier
+     * - Failure modes:
+     *   - fails if the reader header compresses or hides the app-owned drawer control
+     */
+    func testReaderDrawerOpensInSpanishAtLargeDynamicType() {
+        let app = makeApp()
+        app.launchArguments += [
+            "-AppleLanguages", "(es)",
+            "-AppleLocale", "es_ES",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL",
+        ]
+        app.launch()
+
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 30),
+            "Expected the localized large-text reader shell to become ready."
+        )
+        tapReaderNavigationDrawerButton(in: app, timeout: 30)
+        XCTAssertTrue(
+            requireElement("readerNavigationDrawer", in: app, timeout: 15).exists,
+            "Expected the app-owned reader drawer to be visible at large Dynamic Type."
+        )
+    }
+
+    /**
+     Verifies Read/Memory Progress uses Android's full reader destination rather than a generic sheet.
+
+     Android launches `ReadingProgressActivity` from the main drawer and returns to the reader with
+     normal back navigation. The iOS equivalent must keep that destination owned by the launching
+     reader pane, retain the no-sheet invariant, and return through reader back chrome.
+
+     * - Side effects:
+     *   - opens Reading Progress from the production navigation drawer
+     *   - returns to the reader through the destination's explicit back control
+     * - Failure modes:
+     *   - fails if the route is absent from the drawer, becomes a generic sheet/modal, or cannot return
+     *   - fails if the destination loses its reader-stack ownership while visible
+     */
+    func testReadingProgressUsesReaderDestinationAndReturns() {
+        let app = makeApp()
+        app.launch()
+
+        let destination = openReadingProgress(in: app)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=readingProgress", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Reading Progress should use reader destination back chrome, not a generic sheet Done button."
+        )
+
+        tapElementReliably(requireElement("readerDestinationBackButton", in: app, timeout: 10), timeout: 10)
+        waitForElementToDisappear(destination, timeout: 10)
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected destination back navigation to return to the reader shell."
+        )
+    }
+
+    /**
+     Verifies Android's dialog-themed History route returns a selected row to its reader pane.
+
+     The Android History activity is dialog-themed and scopes the result to its launching window.
+     The iOS dialog must therefore render its named app-owned surface, omit iOS-only destructive
+     controls, close after selection, and navigate the seeded reader from Genesis 1 to Exodus 2.
+
+     * - Side effects:
+     *   - opens the drawer History route using a window-scoped persisted History fixture
+     *   - selects the seeded Exodus checkpoint and waits for reader navigation to complete
+     * - Failure modes:
+     *   - fails if History regresses to an unnamed generic sheet, exposes destructive controls, or
+     *     cannot close and return the selection to the originating reader pane
+     */
+    func testHistoryDialogSelectsSeededReferenceInCapturedReaderPane() {
+        let app = makeApp()
+        app.launch()
+
+        let initialReference = requireReaderReferenceValue(in: app, timeout: 20)
+        XCTAssertTrue(initialReference.localizedCaseInsensitiveContains("Genesis 1"))
+
+        tapReaderNavigationDrawerButton(in: app, timeout: 30)
+        tapElementReliably(requireElement("readerOpenHistoryAction", in: app, timeout: 15), timeout: 15)
+        waitForReaderRenderedContentState(containing: "historyDialog=presented", in: app, timeout: 10)
+        XCTAssertFalse(
+            unresolvedElement("historyClearButton", in: app).exists,
+            "Android's History dialog must not expose iOS-only clear-history controls."
+        )
+
+        tapElementReliably(requireHistoryRow(containing: "Exodus 2", in: app, timeout: 10), timeout: 10)
+        waitForReaderRenderedContentState(containing: "historyDialog=none", in: app, timeout: 10)
+        let updatedReference = waitForReaderReferenceValueToChange(from: initialReference, in: app, timeout: 20)
+        XCTAssertTrue(
+            updatedReference.localizedCaseInsensitiveContains("Exodus 2"),
+            "Expected the captured History selection to navigate the reader to Exodus 2, but saw '\(updatedReference)'."
+        )
+    }
+
+    /**
      Verifies the drawer My Notes/My Documents action opens Android's app-owned document manager.
      *
      * Android's drawer `myDocumentsButton` launches `MyDocumentsActivity`, then
@@ -32,7 +166,6 @@ extension AndBibleUITests {
             in: app,
             timeout: 20
         )
-        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=myDocuments", in: app, timeout: 10)
         XCTAssertFalse(
@@ -115,7 +248,6 @@ extension AndBibleUITests {
             in: app,
             timeout: 20
         )
-        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=studyPads", in: app, timeout: 10)
         XCTAssertFalse(
@@ -143,7 +275,6 @@ extension AndBibleUITests {
         )
 
         XCTAssertTrue(openBookmarkList(in: app).exists)
-        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=bookmarks", in: app, timeout: 10)
         XCTAssertFalse(
             app.navigationBars.buttons["Done"].firstMatch.exists,

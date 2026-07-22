@@ -254,6 +254,38 @@ struct AndroidDatabaseBackupImportSheet: View {
     }
 }
 
+/** Renders Android's restore-or-import AlertDialog as an app-owned overlay window. */
+struct AndroidDatabaseBackupImportDialog: View {
+    let archive: AndroidDatabaseBackupArchive
+    let isApplying: Bool
+    let onDismiss: () -> Void
+    let onApply: ([AndroidDatabaseBackupSelection]) -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.36)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    guard !isApplying else { return }
+                    onDismiss()
+                }
+
+            AndroidDatabaseBackupImportSheet(
+                archive: archive,
+                isApplying: isApplying,
+                onCancel: onDismiss,
+                onApply: onApply
+            )
+            .frame(maxWidth: 640, maxHeight: 700)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 16)
+            .padding(24)
+        }
+        .accessibilityIdentifier("androidDatabaseBackupImportDialog")
+    }
+}
+
 /**
  Renders one Android backup section with support status, selection state, and operation mode.
 

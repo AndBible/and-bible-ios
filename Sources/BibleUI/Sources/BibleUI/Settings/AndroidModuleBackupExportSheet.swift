@@ -278,3 +278,41 @@ struct AndroidModuleBackupExportSheet: View {
         }
     }
 }
+
+/**
+ Renders Android's module multiselect as an app-owned dialog window.
+
+ Inputs and outputs mirror `AndroidModuleBackupExportSheet`; the wrapper owns only the dimmed
+ window surface and prevents accidental dismissal while the parent writes an archive. Taps outside
+ the dialog invoke `onCancel` only when export work is idle.
+ */
+struct AndroidModuleBackupExportDialog<Content: View>: View {
+    /// Whether the parent is currently writing the selected module archive.
+    let isExporting: Bool
+
+    /// Callback used to dismiss the dialog when no export is in progress.
+    let onCancel: () -> Void
+
+    /// Selection content shared by the settings and reader entry points.
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ZStack {
+            Color.black
+                .opacity(0.36)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    guard !isExporting else { return }
+                    onCancel()
+                }
+
+            content()
+                .frame(maxWidth: 640, maxHeight: 700)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(radius: 20)
+                .padding(24)
+        }
+        .accessibilityIdentifier("androidModuleBackupExportDialog")
+    }
+}

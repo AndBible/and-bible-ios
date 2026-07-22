@@ -176,6 +176,35 @@ final class HistoryListPresentationTests: XCTestCase {
     }
 
     /**
+     Verifies History row titles retain Android's module abbreviation after the reference.
+
+     Expected result:
+     - nonempty module initials are appended after the localized reference
+     - blank legacy module values do not introduce stray whitespace
+
+     Failure meaning:
+     - dialog rows would omit information rendered by Android's `KeyHistoryItem.description`.
+     */
+    func testFormattedDescriptionIncludesAndroidDocumentAbbreviation() {
+        XCTAssertEqual(
+            HistoryListPresentation.formattedDescription(
+                key: "Exod.2.1",
+                document: "KJV",
+                bookNameResolver: { $0 == "Exod" ? "Exodus" : nil }
+            ),
+            "Exodus 2 KJV"
+        )
+        XCTAssertEqual(
+            HistoryListPresentation.formattedDescription(
+                key: "not-a-reference",
+                document: " ",
+                bookNameResolver: nil
+            ),
+            "not-a-reference"
+        )
+    }
+
+    /**
      Builds a History row with deterministic ID and timestamp for package-level tests.
 
      - Parameters:

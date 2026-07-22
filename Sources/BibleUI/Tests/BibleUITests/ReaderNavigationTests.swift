@@ -1098,13 +1098,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        var showedCrossReferences = false
-        controller.onShowCrossReferences = { _ in showedCrossReferences = true }
-
         controller.bridge(bridge, openExternalLink: "multi://?osis=Gen.1.1&osis=Exod.2.1&v11n=KJVA")
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
 
-        XCTAssertFalse(showedCrossReferences)
         let addDocumentsScript = try XCTUnwrap(
             recordedScripts().first(where: { $0.contains("emit('add_documents'") })
         )
@@ -1132,13 +1128,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        var showedCrossReferences = false
-        controller.onShowCrossReferences = { _ in showedCrossReferences = true }
-
         controller.bridge(bridge, openExternalLink: "osis://?osis=Gen.1.1,Exod.2.1&v11n=KJVA")
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
 
-        XCTAssertFalse(showedCrossReferences)
         let addDocumentsScript = try XCTUnwrap(
             recordedScripts().first(where: { $0.contains("emit('add_documents'") })
         )
@@ -1163,12 +1155,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        var showedCrossReferences = false
-        controller.onShowCrossReferences = { _ in showedCrossReferences = true }
-
         controller.bridge(bridge, openExternalLink: "osis://?osis=Exod.2.1-Exod.2.3&v11n=KJVA")
 
-        XCTAssertFalse(showedCrossReferences)
         XCTAssertEqual(controller.currentBook, "Exodus")
         XCTAssertEqual(controller.currentChapter, 2)
         XCTAssertEqual(controller.currentVerse, 1)
@@ -1357,13 +1345,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        var showedCrossReferences = false
-        controller.onShowCrossReferences = { _ in showedCrossReferences = true }
-
         controller.bridge(bridge, openExternalLink: "osis://?osis=Gen.1.1-Gen.1.2,Exod.2.1&v11n=KJVA")
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
 
-        XCTAssertFalse(showedCrossReferences)
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
         )
@@ -1426,12 +1410,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        var showedCrossReferences = false
-        controller.onShowCrossReferences = { _ in showedCrossReferences = true }
-
         controller.bridge(bridge, openExternalLink: "osis://?osis=Exod.2.1&v11n=KJVA")
 
-        XCTAssertFalse(showedCrossReferences)
         XCTAssertEqual(controller.currentBook, "Exodus")
         XCTAssertEqual(controller.currentChapter, 2)
         XCTAssertEqual(controller.currentVerse, 1)

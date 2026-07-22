@@ -53,6 +53,7 @@ private enum FixtureScenario: String, CaseIterable {
     case syncNextCloud = "sync-nextcloud"
     case syncNextCloudBookmarksEnabled = "sync-nextcloud-bookmarks-enabled"
     case displayColorsCustom = "display-colors-custom"
+    case readerNightMode = "reader-night-mode"
     case downloadsRowOrder = "downloads-row-order"
 }
 
@@ -427,6 +428,8 @@ private final class FixtureContext {
             seedSyncNextCloud(enabledCategories: [.bookmarks])
         case .displayColorsCustom:
             seedCustomColorSettings()
+        case .readerNightMode:
+            seedReaderNightMode()
         case .downloadsRowOrder:
             try seedDownloadsRowOrderCatalog()
         }
@@ -1666,6 +1669,21 @@ private final class FixtureContext {
         settings.nightBackground = Int(Int32(bitPattern: 0xFF101820))
         settings.nightNoise = 5
         settingsStore.setGlobalTextDisplaySettings(settings)
+    }
+
+    /**
+     Seeds Android's manual night-mode policy with its toggle enabled.
+
+     Reader UI tests use this scenario to prove night rendering from the persisted Android-equivalent
+     settings rather than relying on the host simulator's system appearance.
+
+     - Side effects:
+     - stores `manual` for `night_mode_pref3`
+     - enables the persisted `night_mode` toggle
+     */
+    private func seedReaderNightMode() {
+        settingsStore.setString(.nightModePref3, value: NightModeSetting.manual.rawValue)
+        settingsStore.setBool("night_mode", value: true)
     }
 
     /**

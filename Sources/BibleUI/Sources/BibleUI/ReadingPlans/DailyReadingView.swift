@@ -53,7 +53,7 @@ public struct DailyReadingView: View {
     /// Reading plan days sorted by ascending day number.
     @State private var sortedDays: [ReadingPlanDay] = []
 
-    /// Whether the start-date picker sheet is currently presented.
+    /// Whether the Android-style start-date picker dialog is currently presented.
     @State private var showStartDatePicker = false
 
     /// Draft start date edited in the start-date picker before it is saved.
@@ -158,8 +158,14 @@ public struct DailyReadingView: View {
                 dailyReadingActionsMenu
             }
         }
-        .sheet(isPresented: $showStartDatePicker) {
-            startDatePickerSheet
+        .overlay {
+            if showStartDatePicker {
+                AndroidReadingPlanStartDateDialog(
+                    selection: $draftStartDate,
+                    onCancel: { showStartDatePicker = false },
+                    onApply: applyDraftStartDate
+                )
+            }
         }
         .confirmationDialog(
             String(localized: "reading_plan_reset_title", defaultValue: "Reset Reading Plan?"),
@@ -235,41 +241,6 @@ public struct DailyReadingView: View {
             Image(systemName: "ellipsis.circle")
         }
         .accessibilityIdentifier("dailyReadingActionsMenuButton")
-    }
-
-    /// Modal date picker for Android's set-start-date action.
-    private var startDatePickerSheet: some View {
-        NavigationStack {
-            Form {
-                DatePicker(
-                    String(localized: "reading_plan_start_date", defaultValue: "Start Date"),
-                    selection: $draftStartDate,
-                    in: ...Date(),
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.graphical)
-                .accessibilityIdentifier("dailyReadingStartDatePicker")
-            }
-            .navigationTitle(String(localized: "reading_plan_set_start_date", defaultValue: "Set Start Date"))
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "cancel")) {
-                        showStartDatePicker = false
-                    }
-                    .accessibilityIdentifier("dailyReadingStartDateCancelButton")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(String(localized: "done")) {
-                        applyDraftStartDate()
-                    }
-                    .accessibilityIdentifier("dailyReadingStartDateDoneButton")
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
     }
 
     /**
@@ -682,7 +653,7 @@ public struct DailyReadingView: View {
 
      Side effects:
      - mutates `draftStartDate`
-     - presents the start-date sheet
+     - presents the Android-style start-date dialog
      */
     private func presentStartDatePicker() {
         guard let plan else { return }
@@ -695,7 +666,7 @@ public struct DailyReadingView: View {
 
      Side effects:
      - updates the loaded plan through `ReadingPlanService`
-     - dismisses the picker sheet
+     - dismisses the picker dialog
      - reloads local view state from SwiftData after saving
      */
     private func applyDraftStartDate() {

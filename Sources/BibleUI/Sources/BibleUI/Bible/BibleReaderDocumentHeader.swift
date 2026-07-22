@@ -278,9 +278,12 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
             Image(systemName: "line.3.horizontal")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(surfacePalette.navigationDrawerColor)
-                .frame(width: 28, height: 28)
+                .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .fixedSize()
+        .layoutPriority(2)
         .accessibilityIdentifier("readerNavigationDrawerButton")
         .accessibilityLabel(localizedDrawerString("main_menu", default: "Main menu"))
     }

@@ -8,6 +8,14 @@ import SwordKit
 struct AIReaderCoordinatorHost: View {
   @Bindable var coordinator: AIReaderRunCoordinator
   let swordManager: SwordManager?
+  /**
+   Escalates Android's full PromptEditActivity route to reader-owned navigation.
+
+   The closure receives the prompt identity after this coordinator clears its transient route.
+   It mutates the parent reader's navigation state; no persistence or asynchronous work occurs
+   here. If the parent cannot present the destination, it owns the resulting navigation failure.
+   */
+  let onPresentPromptEditor: (UUID) -> Void
 
   var body: some View {
     Color.clear
@@ -33,14 +41,38 @@ struct AIReaderCoordinatorHost: View {
     case .documentChooser:
       AIReaderDocumentMarkerChooserView(coordinator: coordinator)
     case .promptEditor(_, let promptID):
-      NavigationStack {
-        AIPromptEditorView(
-          promptID: promptID,
-          swordManager: swordManager,
-          onChanged: {}
-        )
-      }
+      Color.clear
+        .frame(width: 0, height: 0)
+        .onAppear {
+          AIReaderPromptEditorHandoff.perform(
+            coordinator: coordinator,
+            promptID: promptID,
+            onPresent: onPresentPromptEditor
+          )
+        }
     }
+  }
+}
+
+/**
+ Performs the one-way transition from the pane-scoped AI coordinator to reader navigation.
+
+ - Parameters:
+   - coordinator: The transient AI route owner to clear before navigation.
+   - promptID: The already-resolved prompt identity for the destination.
+   - onPresent: Parent-reader callback that presents Prompt Edit for `promptID`.
+ - Side effects: Clears `coordinator.presentation` and invokes `onPresent` synchronously.
+ - Failure modes: The callback owns navigation failures; this helper does not persist or recover.
+ */
+enum AIReaderPromptEditorHandoff {
+  @MainActor
+  static func perform(
+    coordinator: AIReaderRunCoordinator,
+    promptID: UUID,
+    onPresent: (UUID) -> Void
+  ) {
+    coordinator.presentation = nil
+    onPresent(promptID)
   }
 }
 

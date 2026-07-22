@@ -9,6 +9,7 @@ enum BibleReaderNavigationDrawerAction {
     case studyPads
     case myNotes
     case readingPlans
+    case readingProgress
     case history
     case downloads
     case importExport
@@ -19,7 +20,6 @@ enum BibleReaderNavigationDrawerAction {
     case sponsorDevelopment
     case needHelp
     case contribute
-    case about
     case appLicense
     case tellFriend
     case rateApp
@@ -152,7 +152,7 @@ struct BibleReaderNavigationDrawer: View {
                         action: .studyPads
                     )
                     drawerRow(
-                        title: String(localized: "my_notes"),
+                        title: localizedDrawerString("my_documents_title", default: "My Documents"),
                         icon: .asset("DrawerDocuments"),
                         identifier: "readerOpenMyNotesAction",
                         action: .myNotes
@@ -162,6 +162,12 @@ struct BibleReaderNavigationDrawer: View {
                         icon: .asset("DrawerReadingPlan"),
                         identifier: "readerOpenReadingPlansAction",
                         action: .readingPlans
+                    )
+                    drawerRow(
+                        title: localizedDrawerString("reading_progress_title", default: "Read/Memory Progress"),
+                        icon: .system("chart.bar"),
+                        identifier: "readerOpenReadingProgressAction",
+                        action: .readingProgress
                     )
                     drawerRow(
                         title: localizedDrawerString("history", default: "History"),
@@ -196,7 +202,7 @@ struct BibleReaderNavigationDrawer: View {
                         action: .sponsorDevelopment
                     )
                     drawerRow(
-                        title: localizedDrawerString("questions_title", default: "Need Help"),
+                        title: localizedDrawerString("questions_title", default: "Questions?"),
                         icon: .system("questionmark.bubble"),
                         identifier: "readerNeedHelpAction",
                         action: .needHelp
@@ -206,12 +212,6 @@ struct BibleReaderNavigationDrawer: View {
                         icon: .system("figure.wave"),
                         identifier: "readerContributeAction",
                         action: .contribute
-                    )
-                    drawerRow(
-                        title: String(localized: "about"),
-                        icon: .system("info.circle"),
-                        identifier: "readerOpenAboutAction",
-                        action: .about
                     )
                     drawerRow(
                         title: localizedDrawerString("app_licence_title", default: "App Licence"),
