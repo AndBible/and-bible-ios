@@ -97,7 +97,6 @@ let package = Package(
             resources: [
                 .copy("Fixtures/mydocuments"),
                 .copy("Fixtures/search"),
-                .copy("Fixtures/android-product-feedback-contract.json"),
             ]
         ),
 
