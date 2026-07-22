@@ -570,7 +570,7 @@ struct AIReaderLiveRawLogView: View {
   private func prepareBugReport(_ presentation: AIReaderLiveRawLogPresentation) {
     showsBugReportConfirmation = false
     guard AIModelCatalog.isSupported(snapshot.modelName) else { return }
-    guard AIBugReportMailComposer.canSendMail else {
+    guard AddressedMailComposer.capability == .available else {
       failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
       return
     }
@@ -579,7 +579,7 @@ struct AIReaderLiveRawLogView: View {
         Data(presentation.formattedText.utf8)
       )
       let version = AndBibleAppVersionMetadata.current().marketingVersion
-      bugReportMail = AIBugReportMailPayload(
+      bugReportMail = AddressedMailPayload(
         recipient: "errors.andbible@gmail.com",
         subject: presentation.bugReportSubject(appVersion: version),
         body: presentation.bugReportBody(
@@ -588,8 +588,13 @@ struct AIReaderLiveRawLogView: View {
           platformLine: Self.platformLine,
           deviceLine: Self.deviceLine
         ),
-        attachmentData: attachment,
-        attachmentFilename: "ai_raw_log.txt.gz"
+        attachments: [
+          AddressedMailAttachment(
+            data: attachment,
+            filename: "ai_raw_log.txt.gz",
+            mimeType: "application/gzip"
+          )
+        ]
       )
     } catch {
       failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
