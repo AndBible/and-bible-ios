@@ -1158,14 +1158,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     var onShowStrongsSearch: ((String) -> Void)?
 
     /**
-     Legacy callback for native cross-reference sheets.
-
-     Multi-reference Bible links intentionally bypass this callback and render Vue
-     `MultiDocument` payloads so iOS follows Android's shared document pipeline.
-     */
-    var onShowCrossReferences: (([CrossReference]) -> Void)?
-
-    /**
      Callback for opening a transient multi-reference Vue document in the Android-style links window.
 
      The string parameter is a serialized `MultiDocument` payload. The owning pane decides whether
@@ -8558,46 +8550,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     )
     }
 
-    /** Resolves cross-reference previews through each link's selected installed Bible backend. */
-    private func lookupCrossReferences(_ refs: [OsisRef]) -> [CrossReference] {
-        return refs.map { ref in
-            let requestedName = ref.targetBookInitials?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let sourceName = requestedName?.isEmpty == false ? requestedName! : activeModuleName
-            guard let source = installedModuleResolver().scripture(named: sourceName) else {
-                return CrossReference(ref: ref, text: "")
-            }
-            var references: [VerseKeyReference] = []
-            for sourceReference in ref.sourceVerses {
-                guard let mapped = source.mappedReference(
-                          osisBookId: sourceReference.osisBookId,
-                          chapter: sourceReference.chapter,
-                          verse: sourceReference.verse,
-                          from: ref.sourceVersification
-                      ) else {
-                    return CrossReference(ref: ref, text: "")
-                }
-                if let previous = references.last {
-                    if previous == mapped { continue }
-                    guard source.isCanonicallyAdjacent(mapped, after: previous) else {
-                        return CrossReference(ref: ref, text: "")
-                    }
-                }
-                references.append(mapped)
-            }
-            guard let first = references.first,
-                  let last = references.last,
-                  let passage = try? source.passage(
-                      startOrdinal: first.ordinal,
-                      endOrdinal: last.ordinal
-                  ),
-                  !passage.plainText.isEmpty else {
-                return CrossReference(ref: ref, text: "")
-            }
-            return CrossReference(ref: ref, text: passage.plainText)
-        }
-    }
-
     /**
      Requests that the owning SwiftUI view present the downloads/install UI.
      */
@@ -11112,23 +11064,4 @@ struct OsisRef {
         }
         return "\(book) \(chapter):\(verse)-\(endBook) \(last.chapter):\(last.verse)"
     }
-}
-
-/// Cross-reference row containing both the parsed reference and preview verse text.
-public struct CrossReference: Identifiable {
-    /// Stable identifier for SwiftUI list rendering.
-    public let id = UUID()
-
-    /// Parsed reference coordinates.
-    let ref: OsisRef
-
-    /// Verse text preview resolved for the reference.
-    let text: String
-
-    /// Human-readable display string for the reference.
-    var displayName: String { ref.displayName }
-    /// Human-readable book name for navigation callbacks.
-    var book: String { ref.book }
-    /// Chapter number for navigation callbacks.
-    var chapter: Int { ref.chapter }
 }

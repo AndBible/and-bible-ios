@@ -64,7 +64,7 @@ public struct RepositoryManagerView: View {
     }
 
     /**
-     Builds the repository list, custom-source editor sheet, help, and reset controls.
+     Builds the repository list, Android activity-equivalent custom-source editor, help, and reset controls.
      */
     public var body: some View {
         List {
@@ -99,11 +99,8 @@ public struct RepositoryManagerView: View {
                 .accessibilityIdentifier("repositoryManagerHelpButton")
             }
         }
-        .sheet(item: $editorState) { _ in
-            NavigationStack {
-                sourceEditorView
-            }
-            .presentationDetents([.medium])
+        .navigationDestination(item: $editorState) { _ in
+            sourceEditorView
         }
         .alert(String(localized: "reset_sources_title", defaultValue: "Reset repositories"), isPresented: $showResetConfirm) {
             Button(String(localized: "reset", defaultValue: "Reset"), role: .destructive) {
@@ -373,7 +370,7 @@ public struct RepositoryManagerView: View {
     // MARK: - Source Editor
 
     /**
-     Builds the add/replace sheet for custom repositories.
+     Builds the add/replace destination for custom repositories.
      */
     private var sourceEditorView: some View {
         Form {
@@ -588,7 +585,7 @@ public struct RepositoryManagerView: View {
     }
 }
 
-private struct RepositorySourceEditorState: Identifiable {
+private struct RepositorySourceEditorState: Identifiable, Hashable {
     /// Stable sheet identity for SwiftUI modal presentation.
     let id = UUID()
 

@@ -129,14 +129,11 @@ public struct ReadingPlanListView: View {
         .navigationDestination(item: $activeReadingPlanRoute) { route in
             readingPlanListDestination(route)
         }
-        .sheet(isPresented: $showAvailablePlans) {
-            NavigationStack {
-                AvailablePlansView(
-                    onSelect: startSelectedTemplate,
-                    onImport: importAndStartCustomPlan
-                )
-            }
-            .presentationDetents([.large])
+        .navigationDestination(isPresented: $showAvailablePlans) {
+            AvailablePlansView(
+                onSelect: startSelectedTemplate,
+                onImport: importAndStartCustomPlan
+            )
         }
         .onChange(of: showAvailablePlans) { _, isPresented in
             guard !isPresented else { return }
@@ -182,7 +179,7 @@ public struct ReadingPlanListView: View {
     }
 
     /**
-     Pushes the just-created plan into Daily Reading after the selector sheet has dismissed.
+    Pushes the just-created plan into Daily Reading after the selector destination has returned.
 
      Side effects:
      - clears `pendingStartedPlanID`
@@ -368,7 +365,7 @@ public struct ReadingPlanListView: View {
         finishStartingPlan(plan)
     }
 
-    /** Updates sheet and navigation state after either start path returns a persisted plan. */
+    /** Updates selector and navigation state after either start path returns a persisted plan. */
     private func finishStartingPlan(_ plan: ReadingPlan) {
         selectedPlanCode = plan.planCode
         pendingStartedPlanID = plan.id

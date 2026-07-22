@@ -150,9 +150,16 @@ public struct MyDocumentsListView: View {
                 onOpenPage: onOpenPage
             )
         }
-        .sheet(item: $metadataEditorRequest) { request in
-            MyDocumentMetadataEditor(request: request) { name, description in
-                applyMetadataEditor(request, name: name, description: description)
+        .overlay {
+            if let request = metadataEditorRequest {
+                AndroidMyDocumentMetadataDialog(
+                    request: request,
+                    onDismiss: { metadataEditorRequest = nil },
+                    onSave: { name, description in
+                        applyMetadataEditor(request, name: name, description: description)
+                        metadataEditorRequest = nil
+                    }
+                )
             }
         }
         .sheet(isPresented: $showsExport) {

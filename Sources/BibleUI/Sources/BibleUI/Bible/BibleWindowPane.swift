@@ -182,14 +182,14 @@ struct BibleWindowPane: View {
     /// Requests the parent reader to present speak controls.
     var onShowSpeakControls: (() -> Void)?
 
+    /// Requests reader navigation for Android's full PromptEditActivity-equivalent screen.
+    var onShowAIPromptEditor: ((UUID) -> Void)?
+
     /// Forwards shareable plain-text content to the parent share presenter.
     var onShareText: ((String) -> Void)?
 
     /// Forwards My Documents content with Android's separate native subject and body values.
     var onShareMyDocument: ((MyDocumentSharePayload) -> Void)?
-
-    /// Forwards cross-reference payloads for parent-managed presentation.
-    var onShowCrossReferences: (([CrossReference]) -> Void)?
 
     /// Requests the parent reader to open the module picker for a document category.
     var onShowModulePicker: ((DocumentCategory) -> Void)?
@@ -255,14 +255,20 @@ struct BibleWindowPane: View {
                 windowMenuOverlay
             }
         }
-    .sheet(item: $readerHelpPresentation) { presentation in
-      AIReaderHelpDialog(presentation: presentation)
+    .overlay {
+      if let readerHelpPresentation {
+        AIReaderHelpDialog(
+          presentation: readerHelpPresentation,
+          onDismiss: { self.readerHelpPresentation = nil }
+        )
+      }
     }
     .overlay {
       if let aiRunCoordinator {
         AIReaderCoordinatorHost(
           coordinator: aiRunCoordinator,
-          swordManager: controller?.swordManager
+          swordManager: controller?.swordManager,
+          onPresentPromptEditor: { promptID in onShowAIPromptEditor?(promptID) }
         )
       }
     }
@@ -725,7 +731,6 @@ struct BibleWindowPane: View {
     }
         ctrl.onRequestOpenDownloads = { initialSearchText in onShowDownloads?(initialSearchText) }
         ctrl.onShowStrongsSearch = { strongsNum in onSearchForStrongs?(strongsNum) }
-        ctrl.onShowCrossReferences = { refs in onShowCrossReferences?(refs) }
         ctrl.onShowReadingProgress = { tab in onShowReadingProgress?(tab) }
         ctrl.onShowReadingProgressSettings = { onShowReadingProgressSettings?() }
         ctrl.onShowChapterReadHistory = { target in onShowChapterReadHistory?(target) }
@@ -738,19 +743,9 @@ struct BibleWindowPane: View {
     ctrl.onShowReaderHelp = { presentation in
       readerHelpPresentation = presentation
     }
-        ctrl.onShareHtml = { html in
-            #if os(iOS)
-        guard
-          let windowScene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene }).first,
-          let rootVC = windowScene.windows.first?.rootViewController
-        else { return }
-            var topVC = rootVC
-            while let presented = topVC.presentedViewController { topVC = presented }
-            let activityVC = UIActivityViewController(activityItems: [html], applicationActivities: nil)
-            topVC.present(activityVC, animated: true)
-            #endif
-        }
+        // The reader owns all system-share presentation so the handoff stays bound to the
+        // active reader scene rather than whichever UIWindowScene happens to be first.
+        ctrl.onShareHtml = { html in onShareText?(html) }
 
         ctrl.onToggleFullScreen = { onToggleFullScreen?() }
 

@@ -182,7 +182,7 @@ public struct SettingsView: View {
     /// Controls the restart-required alert shown after language changes.
     @State private var showRestartAlert = false
 
-    /// Controls the discrete-mode help sheet presentation.
+    /// Controls the Android-style discrete-mode help dialog.
     @State private var showDiscreteHelp = false
 
     /// Guards locale persistence until initial preference hydration finishes.
@@ -563,8 +563,13 @@ public struct SettingsView: View {
             } message: {
                 Text(settingsResetMessageText)
             }
-            .sheet(isPresented: $showDiscreteHelp) {
-                discreteHelpSheetContent
+            .alert(
+                String(localized: "settings_security"),
+                isPresented: $showDiscreteHelp
+            ) {
+                Button(String(localized: "okay")) {}
+            } message: {
+                Text(discreteHelpMessageText)
             }
             .searchable(
                 text: $settingsSearchText,
@@ -1628,41 +1633,14 @@ public struct SettingsView: View {
         .accessibilityIdentifier("settingsResetButton")
     }
 
-    /**
-     Builds the discrete-mode help sheet outside the main form expression.
-
-     Splitting this sheet content keeps the large settings screen type-checkable while preserving
-     the same modal behavior and toolbar dismissal. Its paragraph stack is an accessibility
-     container so the sheet marker remains distinct from the readable paragraph elements.
-
-     - Side effects: The Done action clears `showDiscreteHelp` and dismisses the sheet.
-     - Failure modes: View construction does not fail.
-     */
-    @ViewBuilder
-    private var discreteHelpSheetContent: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text(String(localized: "calculator_par1"))
-                    Text(String(localized: "calculator_par2"))
-                    Text(String(localized: "calculator_par3"))
-                    Text(String(localized: "discrete_help_ios_note"))
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("discreteModeSecurityHelp")
-                .padding()
-            }
-            .navigationTitle(String(localized: "settings_security"))
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(String(localized: "done")) { showDiscreteHelp = false }
-                }
-            }
-        }
+    /// Message content aligned with Android's `discrete_help` AlertDialog.
+    private var discreteHelpMessageText: String {
+        [
+            String(localized: "calculator_par1"),
+            String(localized: "calculator_par2"),
+            String(localized: "calculator_par3"),
+            String(localized: "discrete_help_ios_note")
+        ].joined(separator: "\n\n")
     }
 
     /**

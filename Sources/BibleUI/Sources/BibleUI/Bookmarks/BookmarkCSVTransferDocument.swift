@@ -44,54 +44,104 @@ struct BookmarkCSVTransferDocument: FileDocument {
     }
 }
 
-/** Android-style column selector presented before bookmark CSV export. */
+/** Android `Dialogs.multiselect`-equivalent column selector shown before the system export handoff. */
 struct BookmarkCSVColumnSelectionView: View {
-    /// Mutable selected-column set owned by the presenting bookmark list.
-    @Binding var selectedColumns: Set<AndroidBookmarkCSVColumn>
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Draft selection that commits only when Android's positive action is chosen.
+    @State private var selectedColumns: Set<AndroidBookmarkCSVColumn>
 
     /// Called after the user confirms at least one selected column.
-    let onExport: () -> Void
+    let onExport: (Set<AndroidBookmarkCSVColumn>) -> Void
 
     /// Called when the user dismisses without exporting.
     let onCancel: () -> Void
 
-    /** Builds a stable full-column toggle list with cancel and export commands. */
+    /** Creates a dialog draft from the presenting list's persisted selection. */
+    init(
+        selectedColumns: Set<AndroidBookmarkCSVColumn>,
+        onExport: @escaping (Set<AndroidBookmarkCSVColumn>) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        _selectedColumns = State(initialValue: selectedColumns)
+        self.onExport = onExport
+        self.onCancel = onCancel
+    }
+
+    /** Builds Android's app-owned multi-select dialog without a generic SwiftUI sheet. */
     var body: some View {
-        NavigationStack {
-            List(AndroidBookmarkCSVColumn.allCases, id: \.self) { column in
-                Toggle(column.displayName, isOn: Binding(
-                    get: { selectedColumns.contains(column) },
-                    set: { selected in
-                        if selected {
-                            selectedColumns.insert(column)
-                        } else {
-                            selectedColumns.remove(column)
+        ZStack {
+            Color.black.opacity(0.36)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onCancel)
+
+            VStack(alignment: .leading, spacing: 16) {
+                Text(String(
+                    localized: "csv_column_selection_title",
+                    defaultValue: "Select CSV Columns"
+                ))
+                .font(.headline)
+                .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(AndroidBookmarkCSVColumn.allCases, id: \.self) { column in
+                            Button {
+                                toggle(column)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: selectedColumns.contains(column)
+                                        ? "checkmark.square.fill"
+                                        : "square")
+                                        .foregroundStyle(selectedColumns.contains(column)
+                                            ? AndroidDialogSurfacePalette.accent(for: colorScheme)
+                                            : AndroidDialogSurfacePalette.secondaryText(for: colorScheme))
+                                    Text(column.displayName)
+                                        .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
+                                    Spacer()
+                                }
+                                .padding(.vertical, 10)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("bookmarkCSVColumnToggle::\(column.rawValue)")
+                            .accessibilityValue(selectedColumns.contains(column) ? "selected" : "unselected")
                         }
                     }
-                ))
-            }
-            .navigationTitle(String(
-                localized: "csv_column_selection_title",
-                defaultValue: "Select CSV Columns"
-            ))
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "cancel"), action: onCancel)
                 }
-                ToolbarItem(placement: .confirmationAction) {
+                .frame(maxHeight: 420)
+
+                HStack {
+                    Spacer()
+                    Button(String(localized: "cancel"), action: onCancel)
+                        .accessibilityIdentifier("bookmarkCSVColumnCancelButton")
                     Button(
                         String(
                             format: String(localized: "export_something", defaultValue: "Export %@"),
                             "CSV"
-                        ),
-                        action: onExport
-                    )
+                        )
+                    ) {
+                        onExport(selectedColumns)
+                    }
                     .disabled(selectedColumns.isEmpty)
+                    .foregroundStyle(AndroidDialogSurfacePalette.accent(for: colorScheme))
+                    .accessibilityIdentifier("bookmarkCSVColumnExportButton")
                 }
             }
+            .padding(24)
+            .frame(maxWidth: 520)
+            .background(AndroidDialogSurfacePalette.background(for: colorScheme), in: RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 16)
+            .padding(24)
+        }
+        .accessibilityIdentifier("androidBookmarkCSVColumnDialog")
+    }
+
+    /** Toggles one draft column without persisting or starting the export handoff. */
+    private func toggle(_ column: AndroidBookmarkCSVColumn) {
+        if selectedColumns.contains(column) {
+            selectedColumns.remove(column)
+        } else {
+            selectedColumns.insert(column)
         }
     }
 }

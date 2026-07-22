@@ -262,13 +262,20 @@ struct BibleReaderModulePicker: View {
         .moduleBrowserModuleDetailsDialog(details: selectedModuleDetails) {
             selectedModuleDetails = nil
         }
-        .sheet(isPresented: $showModuleBackupSelection) {
-            AndroidModuleBackupExportSheet(
-                modules: moduleBackupCandidates,
-                isExporting: isExportingModuleBackup,
-                onCancel: dismissModuleBackupSelection,
-                onExport: exportModuleBackup(moduleNames:)
-            )
+        .overlay {
+            if showModuleBackupSelection {
+                AndroidModuleBackupExportDialog(
+                    isExporting: isExportingModuleBackup,
+                    onCancel: dismissModuleBackupSelection
+                ) {
+                    AndroidModuleBackupExportSheet(
+                        modules: moduleBackupCandidates,
+                        isExporting: isExportingModuleBackup,
+                        onCancel: dismissModuleBackupSelection,
+                        onExport: exportModuleBackup(moduleNames:)
+                    )
+                }
+            }
         }
         .fileExporter(
             isPresented: $showModuleBackupExporter,

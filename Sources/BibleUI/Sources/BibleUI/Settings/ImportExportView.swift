@@ -539,15 +539,17 @@ public struct ImportExportView: View {
                 ShareSheet(items: [url], onCompletion: handleBackupShareCompletion)
             }
         }
-        .sheet(item: $androidBackupArchive, onDismiss: cleanupDismissedAndroidBackupArchive) { archive in
-            AndroidDatabaseBackupImportSheet(
-                archive: archive,
-                isApplying: isApplyingAndroidBackup,
-                onCancel: dismissAndroidBackupArchive,
-                onApply: applyAndroidBackupSelections
-            )
-            .onAppear {
-                androidBackupArchivePendingCleanup = archive
+        .overlay {
+            if let archive = androidBackupArchive {
+                AndroidDatabaseBackupImportDialog(
+                    archive: archive,
+                    isApplying: isApplyingAndroidBackup,
+                    onDismiss: dismissAndroidBackupArchive,
+                    onApply: applyAndroidBackupSelections
+                )
+                .onAppear {
+                    androidBackupArchivePendingCleanup = archive
+                }
             }
         }
         .fileImporter(
@@ -557,20 +559,20 @@ public struct ImportExportView: View {
         ) { result in
             handleRestoreImportPickerResult(result)
         }
-        .sheet(
-            isPresented: $showAndroidModuleBackupExportSheet,
-            onDismiss: {
-                if !isExportingAndroidModuleBackup {
-                    dismissAndroidModuleBackupExportSelection()
+        .overlay {
+            if showAndroidModuleBackupExportSheet {
+                AndroidModuleBackupExportDialog(
+                    isExporting: isExportingAndroidModuleBackup,
+                    onCancel: dismissAndroidModuleBackupExportSelection
+                ) {
+                    AndroidModuleBackupExportSheet(
+                        modules: androidModuleBackupExportModules,
+                        isExporting: isExportingAndroidModuleBackup,
+                        onCancel: dismissAndroidModuleBackupExportSelection,
+                        onExport: exportAndroidModuleBackup(moduleNames:)
+                    )
                 }
             }
-        ) {
-            AndroidModuleBackupExportSheet(
-                modules: androidModuleBackupExportModules,
-                isExporting: isExportingAndroidModuleBackup,
-                onCancel: dismissAndroidModuleBackupExportSelection,
-                onExport: exportAndroidModuleBackup(moduleNames:)
-            )
         }
         .alert(item: $pendingResetCategory) { category in
             Alert(

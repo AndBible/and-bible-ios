@@ -258,12 +258,14 @@ public struct BookmarkListView: View {
             if !value { searchText = "" }
             SettingsStore(modelContext: modelContext).setBool(.bookmarkShowNotes, value: value)
         }
-        .sheet(isPresented: $showCSVColumnSelector) {
-            BookmarkCSVColumnSelectionView(
-                selectedColumns: $selectedCSVColumns,
-                onExport: prepareCSVExport,
-                onCancel: { showCSVColumnSelector = false }
-            )
+        .overlay {
+            if showCSVColumnSelector {
+                BookmarkCSVColumnSelectionView(
+                    selectedColumns: selectedCSVColumns,
+                    onExport: prepareCSVExport,
+                    onCancel: { showCSVColumnSelector = false }
+                )
+            }
         }
         .fileImporter(
             isPresented: $showCSVImporter,
@@ -540,7 +542,8 @@ public struct BookmarkListView: View {
      - Side effects: Persists unchecked columns and populates the export document state.
      - Failure modes: Encoding failures are shown in an alert and do not open the destination picker.
      */
-    private func prepareCSVExport() {
+    private func prepareCSVExport(selectedColumns: Set<AndroidBookmarkCSVColumn>) {
+        selectedCSVColumns = selectedColumns
         let settings = SettingsStore(modelContext: modelContext)
         let unchecked = AndroidBookmarkCSVColumn.allCases
             .filter { !selectedCSVColumns.contains($0) }

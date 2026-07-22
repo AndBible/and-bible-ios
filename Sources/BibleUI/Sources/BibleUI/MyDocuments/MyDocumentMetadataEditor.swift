@@ -22,16 +22,19 @@ struct MyDocumentMetadataEditor: View {
 
     let request: MyDocumentMetadataEditorRequest
     let onSave: (String, String?) -> Void
+    let onCancel: (() -> Void)?
 
     @State private var name: String
     @State private var documentDescription: String
 
     init(
         request: MyDocumentMetadataEditorRequest,
-        onSave: @escaping (String, String?) -> Void
+        onSave: @escaping (String, String?) -> Void,
+        onCancel: (() -> Void)? = nil
     ) {
         self.request = request
         self.onSave = onSave
+        self.onCancel = onCancel
         _name = State(initialValue: request.initialName)
         _documentDescription = State(initialValue: request.initialDescription)
     }
@@ -56,17 +59,26 @@ struct MyDocumentMetadataEditor: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "cancel")) { dismiss() }
+                    Button(String(localized: "cancel"), action: dismissEditor)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(String(localized: "save")) {
                         onSave(name, documentDescription)
-                        dismiss()
+                        dismissEditor()
                     }
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
         .frame(minWidth: 340, minHeight: 260)
+    }
+
+    /// Closes through the owning app dialog when embedded, otherwise dismisses the legacy host.
+    private func dismissEditor() {
+        if let onCancel {
+            onCancel()
+        } else {
+            dismiss()
+        }
     }
 }

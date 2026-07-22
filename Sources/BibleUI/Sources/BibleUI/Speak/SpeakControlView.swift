@@ -156,7 +156,7 @@ public struct SpeakControlView: View {
                 showVerseRangeEditor = false
             }
         }
-        .sheet(isPresented: $showVerseRangeEditor) {
+        .navigationDestination(isPresented: $showVerseRangeEditor) {
             SpeakVerseRangeEditor(
                 positions: speakService.availableBiblePositions,
                 onApply: speakService.setVerseRange
@@ -437,7 +437,7 @@ public struct SpeakControlView: View {
 
 }
 
-/** Searchable two-stage Bible position chooser matching Android's beginning/end passage flow. */
+/** Navigation destination matching Android's two `GridChoosePassageBook` passage picks. */
 private struct SpeakVerseRangeEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: SpeakVerseRangeDraft
@@ -457,40 +457,38 @@ private struct SpeakVerseRangeEditor: View {
 
     /** Presents exact provider positions and advances from beginning to ending selection. */
     var body: some View {
-        NavigationStack {
-            List(filteredPositions) { position in
-                Button {
-                    select(position)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(position.keyName.isEmpty ? position.key : position.keyName)
-                        if !position.bookName.isEmpty {
-                            Text(position.bookName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+        List(filteredPositions) { position in
+            Button {
+                select(position)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(position.keyName.isEmpty ? position.key : position.keyName)
+                    if !position.bookName.isEmpty {
+                        Text(position.bookName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            .searchable(text: $searchText)
-            .navigationTitle(
-                String(
-                    localized: draft.start == nil
-                        ? "speak_beginning_of_passage"
-                        : "speak_ending_of_passage"
-                )
+        }
+        .searchable(text: $searchText)
+        .navigationTitle(
+            String(
+                localized: draft.start == nil
+                    ? "speak_beginning_of_passage"
+                    : "speak_ending_of_passage"
             )
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "cancel")) { dismiss() }
-                }
+        )
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(String(localized: "cancel")) { dismiss() }
             }
-            .alert(
-                String(localized: "speak_ending_verse_must_be_later"),
-                isPresented: $rejectedSelection
-            ) {
-                Button(String(localized: "ok"), role: .cancel) {}
-            }
+        }
+        .alert(
+            String(localized: "speak_ending_verse_must_be_later"),
+            isPresented: $rejectedSelection
+        ) {
+            Button(String(localized: "ok"), role: .cancel) {}
         }
     }
 
