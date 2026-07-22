@@ -33,10 +33,6 @@ enum ProductFeedbackReportExportBuilder {
         let manifest = ProductFeedbackExportManifest(payload: payload)
         let manifestData = try JSONEncoder().encode(manifest)
         let reportData = Data(payload.body.utf8)
-        let expandedByteCount = manifestData.count + reportData.count + payload.attachments.reduce(0) { $0 + $1.data.count }
-        guard expandedByteCount <= maximumArchiveByteCount else {
-            throw ProductFeedbackReportExportError.archiveTooLarge
-        }
         var entries = [
             ZipArchiveWriterEntry(name: "manifest.json", data: manifestData),
             ZipArchiveWriterEntry(name: "report.txt", data: reportData)
@@ -52,6 +48,9 @@ enum ProductFeedbackReportExportBuilder {
                 )
             )
         }
+        guard !projectedArchiveExceedsLimit(entries) else {
+            throw ProductFeedbackReportExportError.archiveTooLarge
+        }
         let archive = try ZipArchiveWriter.storedArchive(entries: entries)
         guard archive.count <= maximumArchiveByteCount else {
             throw ProductFeedbackReportExportError.archiveTooLarge
@@ -65,6 +64,26 @@ enum ProductFeedbackReportExportBuilder {
     /** Removes only the temporary ZIP created by this exporter after a terminal export result. */
     static func remove(_ export: ProductFeedbackReportExport) {
         try? FileManager.default.removeItem(at: export.fileURL)
+    }
+
+    /**
+     Calculates the exact stored-ZIP byte count before the writer allocates archive output.
+
+     - Parameter entries: Complete ordered archive entries whose names and payloads will be stored.
+     - Returns: `true` when payload bytes plus all stored-ZIP metadata exceed the archive ceiling.
+     - Side effects: none.
+     - Note: `ZipArchiveWriter.storedArchive` emits 30-byte local headers, 46-byte central headers,
+       two copies of each UTF-8 name, and a 22-byte end-of-central-directory record.
+     */
+    private static func projectedArchiveExceedsLimit(_ entries: [ZipArchiveWriterEntry]) -> Bool {
+        let endOfCentralDirectoryByteCount = 22
+        var byteCount = endOfCentralDirectoryByteCount
+        for entry in entries {
+            let entryByteCount = entry.data.count + 76 + (2 * entry.name.lengthOfBytes(using: .utf8))
+            guard entryByteCount <= maximumArchiveByteCount - byteCount else { return true }
+            byteCount += entryByteCount
+        }
+        return false
     }
 }
 
