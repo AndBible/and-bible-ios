@@ -25,6 +25,24 @@ enum AddressedMailCapability: Equatable {
     case unavailable
 }
 
+/**
+ Terminal result of one user-controlled system Mail presentation.
+
+ The result deliberately distinguishes an actual send from saving, cancellation, and composer
+ failure so product-report state can be truthful even though each terminal outcome closes the
+ system-owned presentation.
+ */
+enum AddressedMailResult: Equatable {
+    /// The user explicitly sent the addressed message through Mail.
+    case sent
+    /// The user saved the addressed message as a Mail draft without sending it.
+    case saved
+    /// The user dismissed Mail without sending or saving the report.
+    case cancelled
+    /// Mail reported a terminal error and did not confirm delivery.
+    case failed
+}
+
 /** Complete addressed email payload shared by AI and product diagnostic reports. */
 struct AddressedMailPayload: Identifiable {
     /// Stable SwiftUI presentation identity.
@@ -69,10 +87,31 @@ struct AddressedMailComposer: UIViewControllerRepresentable {
     let payload: AddressedMailPayload
     /// Called after the user sends, saves, cancels, or encounters a mail error.
     let onFinish: () -> Void
+    /// Receives the truthful terminal Mail outcome before the surrounding SwiftUI sheet closes.
+    let onResult: (AddressedMailResult) -> Void
+
+    /**
+     Creates an addressed system-mail presentation while preserving existing completion-only callers.
+
+     - Parameters:
+       - payload: Immutable evidence and localized message content prepared before consent.
+       - onFinish: Called after system Mail dismisses for any terminal outcome.
+       - onResult: Optionally receives the truthful Mail result before dismissal.
+     - Side effects: none until SwiftUI presents the system composer.
+     */
+    init(
+        payload: AddressedMailPayload,
+        onFinish: @escaping () -> Void,
+        onResult: @escaping (AddressedMailResult) -> Void = { _ in }
+    ) {
+        self.payload = payload
+        self.onFinish = onFinish
+        self.onResult = onResult
+    }
 
     /** Creates the delegate bridge that closes the SwiftUI presentation on every terminal result. */
     func makeCoordinator() -> Coordinator {
-        Coordinator(onFinish: onFinish)
+        Coordinator(onResult: onResult, onFinish: onFinish)
     }
 
     /**
@@ -106,20 +145,57 @@ struct AddressedMailComposer: UIViewControllerRepresentable {
 
     /** Delegate bridge for every system mail-composer terminal result. */
     final class Coordinator: NSObject, MFMailComposeViewControllerDelegate {
+        /// Receives one mapped Mail outcome before dismissal.
+        private let onResult: (AddressedMailResult) -> Void
         /// Parent dismissal callback.
         private let onFinish: () -> Void
 
-        init(onFinish: @escaping () -> Void) {
+        /**
+         Creates the delegate bridge for one composer presentation.
+
+         - Parameters:
+           - onResult: Receives a truthfully mapped terminal result exactly once.
+           - onFinish: Closes the SwiftUI presentation after UIKit dismisses the composer.
+         - Side effects: none until the Mail delegate reports a terminal event.
+         */
+        init(onResult: @escaping (AddressedMailResult) -> Void, onFinish: @escaping () -> Void) {
+            self.onResult = onResult
             self.onFinish = onFinish
         }
 
-        /** Dismisses the system composer after send, save, cancel, or failure. */
+        /**
+         Maps and reports every terminal Mail result, then dismisses the composer.
+
+         - Side effects: Invokes both callbacks and dismisses UIKit's system-owned controller.
+         - Note: An error is always reported as `.failed`, even if UIKit supplies another result.
+         */
         func mailComposeController(
             _ controller: MFMailComposeViewController,
             didFinishWith result: MFMailComposeResult,
             error: Error?
         ) {
+            onResult(AddressedMailComposer.result(for: result, error: error))
             controller.dismiss(animated: true, completion: onFinish)
+        }
+    }
+
+    /**
+     Converts Apple's result/error pair into an outcome that never overstates delivery.
+
+     - Parameters:
+       - result: Terminal state supplied by `MFMailComposeViewController`.
+       - error: Optional Mail failure; it takes precedence over the result value.
+     - Returns: A user-meaningful terminal state for report-flow cleanup and regression tests.
+     - Side effects: none.
+     */
+    static func result(for result: MFMailComposeResult, error: Error?) -> AddressedMailResult {
+        guard error == nil else { return .failed }
+        switch result {
+        case .sent: return .sent
+        case .saved: return .saved
+        case .cancelled: return .cancelled
+        case .failed: return .failed
+        @unknown default: return .failed
         }
     }
 }
@@ -133,6 +209,27 @@ struct AddressedMailComposer: View {
     let payload: AddressedMailPayload
     /// Retained only to keep the cross-platform view contract source-compatible.
     let onFinish: () -> Void
+    /// Retained so callers can receive a terminal outcome on iOS without platform conditionals.
+    let onResult: (AddressedMailResult) -> Void
+
+    /**
+     Retains the iOS composer initializer contract for non-iOS package builds.
+
+     - Parameters:
+       - payload: Prepared mail payload, which remains unused on platforms without Mail.
+       - onFinish: Completion retained for source compatibility.
+       - onResult: Terminal-result callback retained for source compatibility.
+     - Side effects: none.
+     */
+    init(
+        payload: AddressedMailPayload,
+        onFinish: @escaping () -> Void,
+        onResult: @escaping (AddressedMailResult) -> Void = { _ in }
+    ) {
+        self.payload = payload
+        self.onFinish = onFinish
+        self.onResult = onResult
+    }
 
     var body: some View { EmptyView() }
 }

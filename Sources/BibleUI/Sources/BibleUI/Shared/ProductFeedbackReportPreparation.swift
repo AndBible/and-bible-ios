@@ -24,6 +24,10 @@ enum ProductFeedbackReportPreparation {
         var attachments: [AddressedMailAttachment] = []
         var warnings: [String] = []
         #if os(iOS)
+        switch ProductFeedbackLogExporter.capture() {
+        case .attachment(let log): attachments.append(log)
+        case .unavailable(let warning): warnings.append(warning)
+        }
         if let screenshot = currentWindowScreenshot() {
             attachments.append(.init(data: screenshot, filename: "current_window.jpg", mimeType: "image/jpeg"))
         } else {
@@ -48,9 +52,12 @@ enum ProductFeedbackReportPreparation {
         warnings: [String]
     ) -> AddressedMailPayload {
         let attachmentDescription = attachments.isEmpty
-            ? "No diagnostic attachments were available."
-            : "Attached diagnostic evidence: \(attachments.map(\.filename).joined(separator: ", "))."
-        let notes = warnings.isEmpty ? "" : "\n\nPreparation notes:\n" + warnings.map { "- \($0)" }.joined(separator: "\n")
+            ? String(localized: "bug_report_no_attachments", defaultValue: "No diagnostic attachments were available.")
+            : String(
+                format: String(localized: "bug_report_attached_evidence", defaultValue: "Attached diagnostic evidence: %@"),
+                attachments.map(\.filename).joined(separator: ", ")
+            )
+        let notes = warnings.isEmpty ? "" : "\n\n" + String(localized: "bug_report_preparation_notes", defaultValue: "Preparation notes:") + "\n" + warnings.map { "- \($0)" }.joined(separator: "\n")
         return AddressedMailPayload(
             recipient: ProductFeedbackContract.diagnosticRecipient,
             subject: "[\(metadata.buildNumber) \(ProductFeedbackContract.manualReportSource)] Bug report for AndBible \(metadata.marketingVersion)",
@@ -59,6 +66,7 @@ enum ProductFeedbackReportPreparation {
         )
     }
 
+    /** Builds credential-free report metadata after evidence collection has completed. */
     private static func diagnosticBody(metadata: AndBibleAppVersionMetadata, attachmentDescription: String) -> String {
         let bundle = Bundle.main
         let processInfo = ProcessInfo.processInfo
@@ -70,22 +78,23 @@ enum ProductFeedbackReportPreparation {
         let deviceDescription = "Unavailable"
         #endif
         return """
-        App id: \(bundle.bundleIdentifier ?? "Unavailable")
-        Version: \(metadata.detailText)
-        Operating system: \(processInfo.operatingSystemVersionString)
-        Device: \(deviceDescription)
-        Locale: \(Locale.current.identifier)
-        Time zone: \(TimeZone.current.identifier)
-        Physical memory bytes: \(processInfo.physicalMemory)
-        Free storage bytes: \(freeStorage)
+        \(String(localized: "bug_report_app_id", defaultValue: "App id:")) \(bundle.bundleIdentifier ?? String(localized: "bug_report_unavailable", defaultValue: "Unavailable"))
+        \(String(localized: "bug_report_version", defaultValue: "Version:")) \(metadata.detailText)
+        \(String(localized: "bug_report_operating_system", defaultValue: "Operating system:")) \(processInfo.operatingSystemVersionString)
+        \(String(localized: "bug_report_device", defaultValue: "Device:")) \(deviceDescription)
+        \(String(localized: "bug_report_locale", defaultValue: "Locale:")) \(Locale.current.identifier)
+        \(String(localized: "bug_report_time_zone", defaultValue: "Time zone:")) \(TimeZone.current.identifier)
+        \(String(localized: "bug_report_physical_memory", defaultValue: "Physical memory bytes:")) \(processInfo.physicalMemory)
+        \(String(localized: "bug_report_free_storage", defaultValue: "Free storage bytes:")) \(freeStorage)
 
         \(attachmentDescription)
 
-        Please describe what happened, the expected result, and steps to reproduce it below.
+        \(String(localized: "bug_report_reproduction_prompt", defaultValue: "Please describe what happened, the expected result, and steps to reproduce it below."))
         """
     }
 
     #if os(iOS)
+    /** Captures the key app window and progressively lowers resolution/quality to the 2 MiB ceiling. */
     private static func currentWindowScreenshot() -> Data? {
         guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows).first(where: \.isKeyWindow), window.bounds.width > 0, window.bounds.height > 0 else { return nil }
         let sourceSize = window.bounds.size

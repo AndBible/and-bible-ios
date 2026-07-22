@@ -348,10 +348,13 @@ public struct BibleReaderView: View {
     @State private var isRateReviewDialogPresented = false
 
     /// Reader-owned state for manual evidence collection, consent, and addressed mail handoff.
-    @State private var manualBugReportState: ManualBugReportState = .idle
+    @State private var manualBugReportCoordinator = ManualBugReportCoordinator()
 
     /// Prepared report presented only after the user consents to system mail composition.
     @State private var manualBugReportMailPayload: AddressedMailPayload?
+
+    /// Complete ZIP retained only while the user chooses an export destination after unavailable mail.
+    @State private var manualBugReportExport: ProductFeedbackReportExport?
 
     /// Initial search applied when Downloads is opened from an Android-compatible download link.
     @State private var downloadsInitialSearchText = ""
@@ -905,9 +908,17 @@ public struct BibleReaderView: View {
                 }
             }
             .sheet(item: $manualBugReportMailPayload) { payload in
-                AddressedMailComposer(payload: payload) {
+                AddressedMailComposer(payload: payload, onFinish: {
                     manualBugReportMailPayload = nil
-                    manualBugReportState = .idle
+                }, onResult: { result in
+                    manualBugReportCoordinator.finishMail(result)
+                })
+            }
+            .sheet(item: $manualBugReportExport) { export in
+                ShareSheet(items: [export.fileURL]) { _ in
+                    ProductFeedbackReportExportBuilder.remove(export)
+                    manualBugReportExport = nil
+                    manualBugReportCoordinator.completeExport(success: true)
                 }
             }
     }
@@ -1242,24 +1253,32 @@ public struct BibleReaderView: View {
     /** Renders collection progress, consent, and explicit unavailable-mail state. */
     @ViewBuilder
     private var bugReportDialogOverlay: some View {
-        switch manualBugReportState {
+        switch manualBugReportCoordinator.phase {
         case .idle, .presentingMail:
             EmptyView()
-        case .collecting:
-            AndroidBugReportPreparationDialog()
+        case .collecting, .exporting:
+            AndroidBugReportPreparationDialog(isExportRetry: manualBugReportCoordinator.phase == .exporting)
                 .transition(.opacity)
                 .zIndex(20)
-        case .awaitingConsent(let payload):
-            AndroidBugReportDialog(
-                onDismiss: dismissBugReportDialog,
-                onSendReport: { presentPreparedBugReport(payload) }
-            )
-            .transition(.opacity)
-            .zIndex(20)
-        case .mailUnavailable:
-            AndroidBugReportUnsentDialog(onDismiss: dismissBugReportDialog)
+        case .awaitingConsent:
+            if let payload = manualBugReportMailPayload {
+                AndroidBugReportDialog(
+                    onDismiss: dismissBugReportDialog,
+                    onSendReport: { presentPreparedBugReport(payload) }
+                )
                 .transition(.opacity)
                 .zIndex(20)
+            }
+        case .mailUnavailable, .exportFailed:
+            if let payload = manualBugReportMailPayload {
+                AndroidBugReportUnsentDialog(
+                    onDismiss: dismissBugReportDialog,
+                    onExport: { exportPreparedBugReport(payload) },
+                    exportFailed: manualBugReportCoordinator.phase == .exportFailed
+                )
+                    .transition(.opacity)
+                    .zIndex(20)
+            }
         }
     }
 
@@ -2304,29 +2323,41 @@ public struct BibleReaderView: View {
 
     /// Cancels collection or consent without opening a system handoff.
     private func dismissBugReportDialog() {
-        manualBugReportState = .idle
+        manualBugReportCoordinator.cancel()
         manualBugReportMailPayload = nil
+        if let export = manualBugReportExport {
+            ProductFeedbackReportExportBuilder.remove(export)
+        }
+        manualBugReportExport = nil
     }
 
     /// Collects available evidence before showing Android's manual-report consent question.
     private func presentBugReportDialog() {
-        guard case .idle = manualBugReportState else { return }
-        manualBugReportState = .collecting
+        guard manualBugReportCoordinator.beginCollection() else { return }
         Task { @MainActor in
             await Task.yield()
-            guard case .collecting = manualBugReportState else { return }
-            manualBugReportState = .awaitingConsent(ProductFeedbackReportPreparation.prepare())
+            guard manualBugReportCoordinator.completeCollection() else { return }
+            manualBugReportMailPayload = ProductFeedbackReportPreparation.prepare()
         }
     }
 
     /// Presents addressed mail only after the user has consented to the prepared report.
     private func presentPreparedBugReport(_ payload: AddressedMailPayload) {
-        guard AddressedMailComposer.capability == .available else {
-            manualBugReportState = .mailUnavailable
-            return
-        }
-        manualBugReportState = .presentingMail
+        let capability = AddressedMailComposer.capability
+        guard manualBugReportCoordinator.requestMail(capability: capability) else { return }
+        guard capability == .available else { return }
         manualBugReportMailPayload = payload
+    }
+
+    /** Builds and presents one complete ZIP only after Mail availability has been made explicit. */
+    private func exportPreparedBugReport(_ payload: AddressedMailPayload) {
+        guard manualBugReportCoordinator.beginExport() else { return }
+        do {
+            let export = try ProductFeedbackReportExportBuilder.write(payload: payload)
+            manualBugReportExport = export
+        } catch {
+            manualBugReportCoordinator.completeExport(success: false)
+        }
     }
 
     /// Presents a reader-stack destination and captures the pane target that should back it.

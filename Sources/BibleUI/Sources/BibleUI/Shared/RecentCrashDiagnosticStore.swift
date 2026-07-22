@@ -1,7 +1,8 @@
 // RecentCrashDiagnosticStore.swift -- bounded retention for user-initiated diagnostic reports
 
-#if os(iOS)
 import Foundation
+
+#if os(iOS)
 import MetricKit
 
 /**
@@ -14,7 +15,6 @@ final class RecentCrashDiagnosticStore: NSObject, MXMetricManagerSubscriber {
     static let shared = RecentCrashDiagnosticStore()
 
     private let queue = DispatchQueue(label: "net.andbible.recent-crash-diagnostic")
-    private let maximumAge: TimeInterval = 24 * 60 * 60
     private let maximumBytes = 2 * 1_024 * 1_024
 
     private override init() { super.init() }
@@ -47,8 +47,7 @@ final class RecentCrashDiagnosticStore: NSObject, MXMetricManagerSubscriber {
         queue.sync {
             guard let data = try? Data(contentsOf: storageURL),
                   let envelope = try? JSONDecoder().decode(StoredCrashDiagnostic.self, from: data),
-                  now.timeIntervalSince(envelope.occurrence) <= maximumAge,
-                  now >= envelope.occurrence
+                  RecentCrashDiagnosticRetentionPolicy.isEligible(occurrence: envelope.occurrence, now: now)
             else {
                 try? FileManager.default.removeItem(at: storageURL)
                 return nil
@@ -87,3 +86,27 @@ private struct StoredCrashDiagnostic: Codable {
     let payload: Data
 }
 #endif
+
+/**
+ Defines the bounded freshness window for retained local MetricKit crash evidence.
+
+ The policy is intentionally platform-neutral so expiry boundaries are regression-tested without
+ MetricKit callbacks, persistent storage, or a running application scene.
+ */
+enum RecentCrashDiagnosticRetentionPolicy {
+    /// Maximum age for a crash diagnostic included in a newly user-initiated report.
+    static let maximumAge: TimeInterval = 24 * 60 * 60
+
+    /**
+     Accepts only a diagnostic that occurred no more than 24 hours ago and is not future dated.
+
+     - Parameters:
+       - occurrence: Timestamp supplied by MetricKit for the diagnostic payload.
+       - now: Current clock, injectable by tests to prove the retention boundary.
+     - Returns: `true` when the report may include the retained local payload.
+     - Side effects: none.
+     */
+    static func isEligible(occurrence: Date, now: Date) -> Bool {
+        now >= occurrence && now.timeIntervalSince(occurrence) <= maximumAge
+    }
+}
