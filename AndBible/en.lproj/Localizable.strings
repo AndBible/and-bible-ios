@@ -1341,6 +1341,8 @@
 "bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
 "bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
 "bug_report_export" = "Export report";
+"bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
+"bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
 "bug_report_no_attachments" = "No diagnostic attachments were available.";
 "bug_report_attached_evidence" = "Attached diagnostic evidence: %@";
 "bug_report_preparation_notes" = "Preparation notes:";
