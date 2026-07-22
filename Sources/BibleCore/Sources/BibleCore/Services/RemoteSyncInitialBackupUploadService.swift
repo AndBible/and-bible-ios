@@ -253,6 +253,7 @@ public final class RemoteSyncInitialBackupUploadService {
     private let retryDirectory: URL
     private let nowProvider: () -> Int64
     private let readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService
+    private let aiSettingsSnapshotService: RemoteSyncAISettingsSnapshotService
 
     /**
      Creates an initial-backup upload service for one remote backend.
@@ -261,6 +262,7 @@ public final class RemoteSyncInitialBackupUploadService {
        - adapter: Remote backend adapter used for initial-backup uploads.
        - deviceIdentifier: Stable device identifier used for patch-zero bookkeeping.
        - readingPlanSnapshotService: Snapshot service bound to this device's custom-plan directory.
+       - aiSettingsSnapshotService: Snapshot service bound to the device-local credential reader.
        - userPlanDirectory: Local custom-definition directory used by snapshot recovery.
        - fileManager: File manager used for temporary staging and cleanup.
        - temporaryDirectory: Optional staging directory override.
@@ -274,6 +276,7 @@ public final class RemoteSyncInitialBackupUploadService {
         adapter: any RemoteSyncAdapting,
         deviceIdentifier: String,
         readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService? = nil,
+        aiSettingsSnapshotService: RemoteSyncAISettingsSnapshotService = RemoteSyncAISettingsSnapshotService(),
         userPlanDirectory: URL = ReadingPlanService.defaultUserReadingPlanDirectory(),
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil,
@@ -287,6 +290,7 @@ public final class RemoteSyncInitialBackupUploadService {
                 userPlanDirectory: userPlanDirectory,
                 fileManager: fileManager
             )
+        self.aiSettingsSnapshotService = aiSettingsSnapshotService
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
         self.retryDirectory = retryDirectory
@@ -316,6 +320,7 @@ public final class RemoteSyncInitialBackupUploadService {
         adapter = nil
         deviceIdentifier = "manual-database-backup-export"
         readingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService(fileManager: fileManager)
+        aiSettingsSnapshotService = RemoteSyncAISettingsSnapshotService()
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
         retryDirectory = self.temporaryDirectory
@@ -1049,7 +1054,9 @@ public final class RemoteSyncInitialBackupUploadService {
                         settingsStore: settingsStore
                     )
                 }
-                try RemoteSyncMutationJournalService().clearPendingMutationsAcceptedByBaseline(
+                try RemoteSyncMutationJournalService(
+                    aiSettingsSnapshotService: aiSettingsSnapshotService
+                ).clearPendingMutationsAcceptedByBaseline(
                     Self.fingerprints(for: acceptedInitialBackup.fingerprintGeneration),
                     for: category,
                     modelContext: modelContext,
@@ -1531,12 +1538,11 @@ public final class RemoteSyncInitialBackupUploadService {
             )
         }
 
-        let snapshotService = RemoteSyncAISettingsSnapshotService()
-        let snapshot = try snapshotService.snapshotCurrentStateStrict(
+        let snapshot = try aiSettingsSnapshotService.snapshotCurrentStateStrict(
             modelContext: modelContext,
             settingsStore: settingsStore
         )
-        let acceptedBaseline = try snapshotService.acceptedBaseline(from: snapshot)
+        let acceptedBaseline = try aiSettingsSnapshotService.acceptedBaseline(from: snapshot)
         let acceptedTimestamp = try nextAcceptedTimestamp(
             for: .aiSettings,
             settingsStore: settingsStore

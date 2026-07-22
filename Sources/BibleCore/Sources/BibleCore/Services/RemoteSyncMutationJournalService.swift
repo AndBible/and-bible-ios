@@ -95,16 +95,28 @@ final class RemoteSyncMutationJournalService {
 
     private let nowProvider: () -> Int64
     private let readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService
+    private let aiSettingsSnapshotService: RemoteSyncAISettingsSnapshotService
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    /** Creates a mutation journal with an exact clock and reading-plan definition source. */
+    /**
+     Creates a mutation journal with exact category snapshot dependencies.
+
+     - Parameters:
+       - nowProvider: Android-compatible logical timestamp source.
+       - readingPlanSnapshotService: Reading-plan projector bound to custom definition storage.
+       - aiSettingsSnapshotService: AI projector bound to the device-local credential reader.
+     - Side Effects: none until a category projection is requested.
+     - Failure Modes: Construction cannot fail; strict projectors preserve their own failures.
+     */
     init(
         nowProvider: @escaping () -> Int64 = { AndroidTimestamp.currentMilliseconds() },
-        readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService()
+        readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService(),
+        aiSettingsSnapshotService: RemoteSyncAISettingsSnapshotService = RemoteSyncAISettingsSnapshotService()
     ) {
         self.nowProvider = nowProvider
         self.readingPlanSnapshotService = readingPlanSnapshotService
+        self.aiSettingsSnapshotService = aiSettingsSnapshotService
         encoder.outputFormatting = [.sortedKeys]
     }
 
@@ -118,6 +130,7 @@ final class RemoteSyncMutationJournalService {
      - Parameters:
        - category: Remote-sync category mutated by the database store.
        - modelContext: Context containing the already-staged graph mutation.
+       - aiSettingsSnapshotService: AI projector bound to the caller's credential reader.
      - Side Effects:
        - processes pending SwiftData changes so strict snapshot fetches exclude staged deletions
        - commits graph and journal together, or directly saves graph-only test schemas
@@ -125,7 +138,8 @@ final class RemoteSyncMutationJournalService {
      */
     static func savePendingGraphChanges(
         for category: RemoteSyncCategory,
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        aiSettingsSnapshotService: RemoteSyncAISettingsSnapshotService = RemoteSyncAISettingsSnapshotService()
     ) throws {
         guard modelContext.container.schema.entitiesByName["Setting"] != nil else {
             try modelContext.save()
@@ -134,7 +148,9 @@ final class RemoteSyncMutationJournalService {
 
         let settingsStore = SettingsStore(modelContext: modelContext)
         modelContext.processPendingChanges()
-        let journal = RemoteSyncMutationJournalService()
+        let journal = RemoteSyncMutationJournalService(
+            aiSettingsSnapshotService: aiSettingsSnapshotService
+        )
         let stagedDeletedIdentities = try journal.stagedDeletedIdentities(
             for: category,
             modelContext: modelContext,
@@ -626,13 +642,14 @@ final class RemoteSyncMutationJournalService {
             guard let modelContext else {
                 throw SettingsStoreAtomicBatchError.modelContextMismatch
             }
-            let service = RemoteSyncAISettingsSnapshotService()
-            let snapshot = try service.snapshotCurrentStateStrict(
+            let snapshot = try aiSettingsSnapshotService.snapshotCurrentStateStrict(
                 modelContext: modelContext,
                 settingsStore: settingsStore
             )
-            let current = try service.acceptedBaseline(from: snapshot)
-            let accepted = try service.storedAcceptedBaseline(settingsStore: settingsStore)
+            let current = try aiSettingsSnapshotService.acceptedBaseline(from: snapshot)
+            let accepted = try aiSettingsSnapshotService.storedAcceptedBaseline(
+                settingsStore: settingsStore
+            )
             return excludingStagedDeletions(
                 from: RemoteSyncMutationProjection(
                     currentFingerprints: snapshot.fingerprintsByKey,

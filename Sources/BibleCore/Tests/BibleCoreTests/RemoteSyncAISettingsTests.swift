@@ -17,6 +17,17 @@ private enum SimulatedAICredentialLookupError: Error, Equatable {
 }
 
 /**
+ Creates an AI settings projector that deterministically reports no device-local credentials.
+
+ - Returns: Strict snapshot service suitable for credential-free synchronization fixtures.
+ - Side effects: none.
+ - Failure modes: The injected lookup does not throw.
+ */
+private func makeCredentialFreeAISettingsSnapshotService() -> RemoteSyncAISettingsSnapshotService {
+    RemoteSyncAISettingsSnapshotService(credentialForProvider: { _ in nil })
+}
+
+/**
  Secret-store double whose compatibility lookup collapses failure while strict lookup preserves it.
 
  The mismatch models production Keychain compatibility behavior and proves AI sync selects the
@@ -216,7 +227,10 @@ final class RemoteSyncAISettingsTests: XCTestCase {
 
         let providerID = UUID(uuidString: "b2000000-0000-0000-0000-000000000001")!
         try credentialStore.setCredential("never-sync-this-secret", for: providerID)
-        let aiStore = AISettingsStore(modelContext: modelContext)
+        let aiStore = AISettingsStore(
+            modelContext: modelContext,
+            remoteSyncSnapshotService: snapshotService
+        )
         try aiStore.insertRawLog(
             LLMRawLogRecord(
                 id: UUID(uuidString: "b8000000-0000-0000-0000-000000000001")!,
@@ -246,7 +260,7 @@ final class RemoteSyncAISettingsTests: XCTestCase {
                 .isEmpty
         )
         XCTAssertTrue(
-            try RemoteSyncMutationJournalService()
+            try RemoteSyncMutationJournalService(aiSettingsSnapshotService: snapshotService)
                 .pendingMutations(for: .aiSettings, settingsStore: settingsStore)
                 .isEmpty
         )
@@ -268,7 +282,9 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         XCTAssertEqual(entries.first?.tableName, "LlmProviderConfig")
         XCTAssertEqual(entries.first?.type, .upsert)
         XCTAssertFalse(entries.contains(where: { $0.tableName == "LlmRawLogRecord" }))
-        let pending = try RemoteSyncMutationJournalService()
+        let pending = try RemoteSyncMutationJournalService(
+            aiSettingsSnapshotService: snapshotService
+        )
             .pendingMutations(for: .aiSettings, settingsStore: settingsStore)
         XCTAssertEqual(pending.count, 1)
         XCTAssertEqual(pending.values.first?.entry.tableName, "LlmProviderConfig")
@@ -479,7 +495,9 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: equalArchive.archiveFileURL) }
 
-        let applyService = RemoteSyncAISettingsPatchApplyService()
+        let applyService = RemoteSyncAISettingsPatchApplyService(
+            snapshotService: makeCredentialFreeAISettingsSnapshotService()
+        )
         let equalReport = try applyService.applyPatchArchives(
             [equalArchive],
             modelContext: modelContext,
@@ -605,7 +623,9 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: deleteArchive.archiveFileURL) }
 
-        let report = try RemoteSyncAISettingsPatchApplyService().applyPatchArchives(
+        let report = try RemoteSyncAISettingsPatchApplyService(
+            snapshotService: makeCredentialFreeAISettingsSnapshotService()
+        ).applyPatchArchives(
             [deleteArchive],
             modelContext: modelContext,
             settingsStore: settingsStore
@@ -676,7 +696,9 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: archive.archiveFileURL) }
 
-        let report = try RemoteSyncAISettingsPatchApplyService().applyPatchArchives(
+        let report = try RemoteSyncAISettingsPatchApplyService(
+            snapshotService: makeCredentialFreeAISettingsSnapshotService()
+        ).applyPatchArchives(
             [archive],
             modelContext: modelContext,
             settingsStore: settingsStore
@@ -745,7 +767,7 @@ final class RemoteSyncAISettingsTests: XCTestCase {
             )
         )
         try remoteContext.save()
-        let remoteSnapshot = try RemoteSyncAISettingsSnapshotService().snapshotCurrentStateStrict(
+        let remoteSnapshot = try makeCredentialFreeAISettingsSnapshotService().snapshotCurrentStateStrict(
             modelContext: remoteContext,
             settingsStore: SettingsStore(modelContext: remoteContext)
         )
@@ -773,7 +795,9 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: archive.archiveFileURL) }
 
-        _ = try RemoteSyncAISettingsPatchApplyService().applyPatchArchives(
+        _ = try RemoteSyncAISettingsPatchApplyService(
+            snapshotService: makeCredentialFreeAISettingsSnapshotService()
+        ).applyPatchArchives(
             [archive],
             modelContext: modelContext,
             settingsStore: settingsStore
@@ -834,14 +858,20 @@ final class RemoteSyncAISettingsTests: XCTestCase {
             fileTimestamp: 1_301
         )
         defer { try? FileManager.default.removeItem(at: archive.archiveFileURL) }
-        _ = try RemoteSyncAISettingsPatchApplyService().applyPatchArchives(
+        let snapshotService = makeCredentialFreeAISettingsSnapshotService()
+        _ = try RemoteSyncAISettingsPatchApplyService(
+            snapshotService: snapshotService
+        ).applyPatchArchives(
             [archive],
             modelContext: modelContext,
             settingsStore: settingsStore
         )
         XCTAssertTrue(try modelContext.fetch(FetchDescriptor<LLMConfiguredModel>()).isEmpty)
 
-        let aiStore = AISettingsStore(modelContext: modelContext)
+        let aiStore = AISettingsStore(
+            modelContext: modelContext,
+            remoteSyncSnapshotService: snapshotService
+        )
         let globalSettings = try aiStore.globalSettings()
         globalSettings.aiLanguage = "fi-FI"
         try aiStore.save()
@@ -851,6 +881,7 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directoryURL) }
         let uploadService = RemoteSyncAISettingsPatchUploadService(
             adapter: adapter,
+            snapshotService: snapshotService,
             temporaryDirectory: directoryURL,
             outboxDirectory: directoryURL.appendingPathComponent("outbox", isDirectory: true),
             nowProvider: { 1_400 }
@@ -920,7 +951,7 @@ final class RemoteSyncAISettingsTests: XCTestCase {
             )
         )
         try remoteContext.save()
-        let remoteSnapshot = try RemoteSyncAISettingsSnapshotService().snapshotCurrentStateStrict(
+        let remoteSnapshot = try makeCredentialFreeAISettingsSnapshotService().snapshotCurrentStateStrict(
             modelContext: remoteContext,
             settingsStore: SettingsStore(modelContext: remoteContext)
         )
@@ -941,7 +972,9 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: archive.archiveFileURL) }
 
-        let report = try RemoteSyncAISettingsPatchApplyService().applyPatchArchives(
+        let report = try RemoteSyncAISettingsPatchApplyService(
+            snapshotService: makeCredentialFreeAISettingsSnapshotService()
+        ).applyPatchArchives(
             [archive],
             modelContext: modelContext,
             settingsStore: settingsStore
@@ -1021,7 +1054,7 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         remoteContext.insert(remoteUsage)
         try remoteContext.save()
 
-        let remoteSnapshot = try RemoteSyncAISettingsSnapshotService().snapshotCurrentStateStrict(
+        let remoteSnapshot = try makeCredentialFreeAISettingsSnapshotService().snapshotCurrentStateStrict(
             modelContext: remoteContext,
             settingsStore: SettingsStore(modelContext: remoteContext)
         )
@@ -1049,7 +1082,9 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: archive.archiveFileURL) }
 
-        _ = try RemoteSyncAISettingsPatchApplyService().applyPatchArchives(
+        _ = try RemoteSyncAISettingsPatchApplyService(
+            snapshotService: makeCredentialFreeAISettingsSnapshotService()
+        ).applyPatchArchives(
             [archive],
             modelContext: modelContext,
             settingsStore: settingsStore
@@ -1079,7 +1114,11 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         let container = try makeAISettingsSyncContainer()
         let modelContext = ModelContext(container)
         let settingsStore = SettingsStore(modelContext: modelContext)
-        try AISettingsStore(modelContext: modelContext).insertProvider(
+        let snapshotService = makeCredentialFreeAISettingsSnapshotService()
+        try AISettingsStore(
+            modelContext: modelContext,
+            remoteSyncSnapshotService: snapshotService
+        ).insertProvider(
             LLMProviderConfig(
                 id: UUID(uuidString: "f2000000-0000-0000-0000-000000000001")!,
                 provider: .openAI,
@@ -1094,6 +1133,7 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directoryURL) }
         let service = RemoteSyncAISettingsPatchUploadService(
             adapter: adapter,
+            snapshotService: snapshotService,
             temporaryDirectory: directoryURL,
             outboxDirectory: directoryURL.appendingPathComponent("outbox", isDirectory: true),
             nowProvider: { 2_000 }
@@ -1172,8 +1212,13 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         )
 
         provider.displayName = "Edited during synchronization"
-        try AISettingsStore(modelContext: modelContext).save()
-        let journalService = RemoteSyncMutationJournalService()
+        try AISettingsStore(
+            modelContext: modelContext,
+            remoteSyncSnapshotService: snapshotService
+        ).save()
+        let journalService = RemoteSyncMutationJournalService(
+            aiSettingsSnapshotService: snapshotService
+        )
         let pendingBeforeReplay = try journalService.pendingMutations(
             for: .aiSettings,
             settingsStore: settingsStore
@@ -1243,7 +1288,10 @@ final class RemoteSyncAISettingsTests: XCTestCase {
             provider: .openAI,
             displayName: "Initial archive value"
         )
-        let aiStore = AISettingsStore(modelContext: modelContext)
+        let aiStore = AISettingsStore(
+            modelContext: modelContext,
+            remoteSyncSnapshotService: snapshotService
+        )
         try aiStore.insertProvider(provider)
         let initialSnapshot = try snapshotService.snapshotCurrentStateStrict(
             modelContext: modelContext,
@@ -1252,7 +1300,9 @@ final class RemoteSyncAISettingsTests: XCTestCase {
 
         provider.displayName = "Edited during upload"
         try aiStore.save()
-        let journalService = RemoteSyncMutationJournalService()
+        let journalService = RemoteSyncMutationJournalService(
+            aiSettingsSnapshotService: snapshotService
+        )
         try journalService.clearPendingMutationsAcceptedByBaseline(
             initialSnapshot.fingerprintsByKey,
             for: .aiSettings,
@@ -1291,7 +1341,10 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         let modelContext = ModelContext(container)
         let settingsStore = SettingsStore(modelContext: modelContext)
         let adapter = RemoteSyncMockAdapter()
-        let service = RemoteSyncAISettingsPatchUploadService(adapter: adapter)
+        let service = RemoteSyncAISettingsPatchUploadService(
+            adapter: adapter,
+            snapshotService: makeCredentialFreeAISettingsSnapshotService()
+        )
         let bootstrapState = RemoteSyncBootstrapState(
             syncFolderID: "/org.andbible.ios-sync-ai_settings",
             deviceFolderID: "/org.andbible.ios-sync-ai_settings/ios-device",
@@ -1363,6 +1416,9 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         let fixtureIDs = try insertCompleteAISettingsFixture(into: sourceConfigurationContext)
         let sourceCredentials = AICredentialStore(secretStore: sourceSecrets)
         try sourceCredentials.setCredential("source-provider-secret", for: fixtureIDs.provider)
+        let sourceSnapshotService = RemoteSyncAISettingsSnapshotService(
+            credentialForProvider: { sourceCredentials.credential(for: $0) }
+        )
 
         let adapter = RemoteSyncMockAdapter()
         await adapter.setMakeKnownResponse(sourceMarker)
@@ -1414,15 +1470,24 @@ final class RemoteSyncAISettingsTests: XCTestCase {
             adapter: adapter,
             bundleIdentifier: "org.andbible.ios",
             deviceIdentifier: "ios-source",
+            initialBackupRestoreService: RemoteSyncInitialBackupRestoreService(
+                aiSettingsSnapshotService: sourceSnapshotService
+            ),
             initialBackupUploadService: RemoteSyncInitialBackupUploadService(
                 adapter: adapter,
                 deviceIdentifier: "ios-source",
+                aiSettingsSnapshotService: sourceSnapshotService,
                 temporaryDirectory: sourceDirectory,
                 retryDirectory: sourceDirectory.appendingPathComponent("initial-outbox", isDirectory: true),
                 nowProvider: { 2_000 }
             ),
+            aiSettingsPatchApplyService: RemoteSyncAISettingsPatchApplyService(
+                snapshotService: sourceSnapshotService,
+                temporaryDirectory: sourceDirectory
+            ),
             aiSettingsPatchUploadService: RemoteSyncAISettingsPatchUploadService(
                 adapter: adapter,
+                snapshotService: sourceSnapshotService,
                 temporaryDirectory: sourceDirectory,
                 outboxDirectory: sourceDirectory.appendingPathComponent("patch-outbox", isDirectory: true),
                 nowProvider: { 2_000 }
@@ -1471,6 +1536,9 @@ final class RemoteSyncAISettingsTests: XCTestCase {
         destinationRemoteSettings.setSyncEnabled(true, for: .aiSettings)
         let destinationCredentials = AICredentialStore(secretStore: destinationSecrets)
         try destinationCredentials.setCredential("destination-provider-secret", for: fixtureIDs.provider)
+        let destinationSnapshotService = RemoteSyncAISettingsSnapshotService(
+            credentialForProvider: { destinationCredentials.credential(for: $0) }
+        )
         let destinationRawLog = LLMRawLogRecord(
             id: UUID(uuidString: "f8000000-0000-0000-0000-000000000020")!,
             promptName: "Destination lifecycle log",
@@ -1537,15 +1605,24 @@ final class RemoteSyncAISettingsTests: XCTestCase {
             adapter: adapter,
             bundleIdentifier: "org.andbible.ios",
             deviceIdentifier: "ios-destination",
+            initialBackupRestoreService: RemoteSyncInitialBackupRestoreService(
+                aiSettingsSnapshotService: destinationSnapshotService
+            ),
             initialBackupUploadService: RemoteSyncInitialBackupUploadService(
                 adapter: adapter,
                 deviceIdentifier: "ios-destination",
+                aiSettingsSnapshotService: destinationSnapshotService,
                 temporaryDirectory: destinationDirectory,
                 retryDirectory: destinationDirectory.appendingPathComponent("initial-outbox", isDirectory: true),
                 nowProvider: { 5_000 }
             ),
+            aiSettingsPatchApplyService: RemoteSyncAISettingsPatchApplyService(
+                snapshotService: destinationSnapshotService,
+                temporaryDirectory: destinationDirectory
+            ),
             aiSettingsPatchUploadService: RemoteSyncAISettingsPatchUploadService(
                 adapter: adapter,
+                snapshotService: destinationSnapshotService,
                 temporaryDirectory: destinationDirectory,
                 outboxDirectory: destinationDirectory.appendingPathComponent("patch-outbox", isDirectory: true),
                 nowProvider: { 5_000 }
@@ -1834,7 +1911,10 @@ final class RemoteSyncAISettingsTests: XCTestCase {
             try sourceContext.fetch(FetchDescriptor<AgentPrompt>()).first
         )
         sourceProvider.displayName = "Updated on device A"
-        try AISettingsStore(modelContext: sourceContext).deletePrompt(sourcePrompt)
+        try AISettingsStore(
+            modelContext: sourceContext,
+            remoteSyncSnapshotService: sourceSnapshotService
+        ).deletePrompt(sourcePrompt)
 
         await adapter.enqueueListFilesResult([patchFile])
         await adapter.enqueueUploadResult(
@@ -2414,7 +2494,7 @@ private func makeProviderSnapshot(
     let context = ModelContext(container)
     context.insert(LLMProviderConfig(id: id, provider: .openAI, displayName: displayName))
     try context.save()
-    return try RemoteSyncAISettingsSnapshotService().snapshotCurrentStateStrict(
+    return try makeCredentialFreeAISettingsSnapshotService().snapshotCurrentStateStrict(
         modelContext: context,
         settingsStore: SettingsStore(modelContext: context)
     )
@@ -2431,7 +2511,7 @@ private func makeProviderSnapshot(
 private func makeEmptyAISettingsSnapshot() throws -> RemoteSyncAISettingsCurrentSnapshot {
     let container = try makeAISettingsSyncContainer()
     let context = ModelContext(container)
-    return try RemoteSyncAISettingsSnapshotService().snapshotCurrentStateStrict(
+    return try makeCredentialFreeAISettingsSnapshotService().snapshotCurrentStateStrict(
         modelContext: context,
         settingsStore: SettingsStore(modelContext: context)
     )

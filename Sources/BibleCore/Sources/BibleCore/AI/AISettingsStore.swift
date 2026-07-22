@@ -29,15 +29,24 @@ public final class AISettingsStore {
     /// Context used for all AI model reads and writes.
     private let modelContext: ModelContext
 
+    /// Strict synchronized projector bound to the same device-local credential source as the caller.
+    private let remoteSyncSnapshotService: RemoteSyncAISettingsSnapshotService
+
     /**
      Creates a store bound to one SwiftData context.
 
-     - Parameter modelContext: Context whose schema includes the registered AI models.
+     - Parameters:
+       - modelContext: Context whose schema includes the registered AI models.
+       - remoteSyncSnapshotService: Strict AI sync projector used when journaling saved changes.
      - Side effects: none.
      - Failure modes: Missing model registrations surface when a fetch or save is attempted.
      */
-    public init(modelContext: ModelContext) {
+    public init(
+        modelContext: ModelContext,
+        remoteSyncSnapshotService: RemoteSyncAISettingsSnapshotService = RemoteSyncAISettingsSnapshotService()
+    ) {
         self.modelContext = modelContext
+        self.remoteSyncSnapshotService = remoteSyncSnapshotService
     }
 
     /**
@@ -434,7 +443,8 @@ public final class AISettingsStore {
     private func saveSynchronizedChanges() throws {
         try RemoteSyncMutationJournalService.savePendingGraphChanges(
             for: .aiSettings,
-            modelContext: modelContext
+            modelContext: modelContext,
+            aiSettingsSnapshotService: remoteSyncSnapshotService
         )
     }
 

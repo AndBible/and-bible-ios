@@ -305,6 +305,9 @@ public final class RemoteSyncAISettingsPatchUploadService {
     /// Strict seven-table SwiftData projector and baseline store.
     private let snapshotService: RemoteSyncAISettingsSnapshotService
 
+    /// Mutation journal sharing the projector's device-local credential reader.
+    private let mutationJournalService: RemoteSyncMutationJournalService
+
     /// Complete Android Room v23 sparse-database writer.
     private let databaseWriter: RemoteSyncAISettingsDatabaseWriter
 
@@ -349,6 +352,10 @@ public final class RemoteSyncAISettingsPatchUploadService {
         self.adapter = adapter
         remotePatchReconciler = RemoteSyncRemotePatchReconciler(adapter: adapter)
         self.snapshotService = snapshotService
+        mutationJournalService = RemoteSyncMutationJournalService(
+            nowProvider: nowProvider,
+            aiSettingsSnapshotService: snapshotService
+        )
         databaseWriter = RemoteSyncAISettingsDatabaseWriter(fileManager: fileManager)
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
@@ -519,13 +526,12 @@ public final class RemoteSyncAISettingsPatchUploadService {
         }
 
         let hasPendingMutations = try settingsStore.performAtomicBatch(in: modelContext) {
-            let mutationJournal = RemoteSyncMutationJournalService(nowProvider: nowProvider)
-            try mutationJournal.recordLocalChanges(
+            try mutationJournalService.recordLocalChanges(
                 for: .aiSettings,
                 modelContext: modelContext,
                 settingsStore: settingsStore
             )
-            return try !mutationJournal.pendingMutations(
+            return try !mutationJournalService.pendingMutations(
                 for: .aiSettings,
                 settingsStore: settingsStore
             ).isEmpty
@@ -537,13 +543,12 @@ public final class RemoteSyncAISettingsPatchUploadService {
         let highestRemotePatchNumber = try await highestRemotePatchNumber(in: deviceFolderID)
         let generation: UploadGeneration? = try settingsStore.performAtomicBatch(in: modelContext) {
             let sourceDevice = Self.sourceDeviceName(from: deviceFolderID)
-            let mutationJournal = RemoteSyncMutationJournalService(nowProvider: nowProvider)
-            try mutationJournal.recordLocalChanges(
+            try mutationJournalService.recordLocalChanges(
                 for: .aiSettings,
                 modelContext: modelContext,
                 settingsStore: settingsStore
             )
-            let pendingMutations = try mutationJournal.pendingMutations(
+            let pendingMutations = try mutationJournalService.pendingMutations(
                 for: .aiSettings,
                 settingsStore: settingsStore
             )
@@ -794,7 +799,7 @@ public final class RemoteSyncAISettingsPatchUploadService {
                 modelContext: modelContext,
                 settingsStore: settingsStore
             )
-            try RemoteSyncMutationJournalService().mergeAcceptedLogEntries(
+            try mutationJournalService.mergeAcceptedLogEntries(
                 acceptedEntries: pendingUpload.updatedEntries,
                 uploadedEntries: pendingUpload.uploadedEntries ?? pendingUpload.updatedEntries.filter {
                     $0.lastUpdated == pendingUpload.timestamp && $0.sourceDevice == pendingUpload.sourceDevice
@@ -1179,7 +1184,7 @@ public final class RemoteSyncAISettingsPatchUploadService {
                   existingEntriesByKey[key]?.type != .delete || pendingMutations[key] != nil else {
                 continue
             }
-            let deleteEntry = try RemoteSyncMutationJournalService().entryForUpload(
+            let deleteEntry = try mutationJournalService.entryForUpload(
                 key: key,
                 stateFingerprint: nil,
                 type: .delete,
@@ -1242,7 +1247,7 @@ public final class RemoteSyncAISettingsPatchUploadService {
                   ) else {
                 continue
             }
-            let entry = try RemoteSyncMutationJournalService().entryForUpload(
+            let entry = try mutationJournalService.entryForUpload(
                 key: key,
                 stateFingerprint: snapshot.fingerprintsByKey[key],
                 type: .upsert,
