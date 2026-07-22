@@ -254,6 +254,7 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "install_zip_successfull": "install_zip_successfull",
     "label_edit_name": "label_name_prompt",
     "links": "strongs_links",
+    "main_menu": "menu",
     "map": "doc_type_map",
     "mark_as_read_button": "prefs_mark_as_read_button_title",
     "memorization_indicators": "prefs_show_memorization_indicators_title",
@@ -367,6 +368,84 @@ AI_LOCALIZATION_DEFAULT_RE = re.compile(
     r'defaultValue:\s*"((?:[^"\\]|\\.)*)"',
     re.DOTALL,
 )
+ANDROID_RUNTIME_RESOURCE_KEY_PATTERNS = (
+    re.compile(r'localizedDrawerString\(\s*"([^"]+)"'),
+    re.compile(r'localizedAndroidOverflowString\(\s*androidKey:\s*"([^"]+)"'),
+)
+SHIPPED_SWIFT_LOCALIZATION_DIRECTORIES = (
+    "AndBible",
+    "Sources",
+)
+SHIPPED_SWIFT_LOCALIZATION_PATTERN = re.compile(
+    r'String\s*\(\s*localized:\s*"([^"]+)"',
+    re.DOTALL,
+)
+
+
+def discover_shipped_swift_localization_keys(repo_root: Path) -> set[str]:
+    """Return literal ``String(localized:)`` keys used by shipped Swift sources.
+
+    The inventory deliberately walks product code rather than a feature allowlist,
+    while excluding test fixtures and interpolated localization values. Interpolated
+    values are format patterns, not stable resource keys, so treating them as a
+    key would create a false raw-key failure. This function performs read-only
+    source-file I/O and returns an empty set for focused fixtures without product
+    source directories.
+    """
+    keys: set[str] = set()
+    for relative_directory in SHIPPED_SWIFT_LOCALIZATION_DIRECTORIES:
+        root = repo_root / relative_directory
+        if not root.is_dir():
+            continue
+        for source_path in sorted(root.rglob("*.swift")):
+            if "Tests" in source_path.parts:
+                continue
+            source = source_path.read_text(encoding="utf-8")
+            keys.update(
+                key
+                for key in SHIPPED_SWIFT_LOCALIZATION_PATTERN.findall(source)
+                if r"\(" not in key
+            )
+    return keys
+
+
+def discover_android_owned_swift_localization_keys(
+    repo_root: Path,
+    android_base: dict[str, str],
+) -> dict[str, str]:
+    """Map shipped literal Swift keys with Android provenance to Android resources.
+
+    A same-name Android resource establishes ownership directly; an explicit
+    mapping establishes ownership where platforms use different resource names.
+    Swift-only keys are intentionally omitted because Android cannot provide a
+    translation contract for them. The result is deterministic and performs no
+    writes beyond the source reads delegated to the shipped-key inventory.
+    """
+    source_keys: dict[str, str] = {}
+    for ios_key in discover_shipped_swift_localization_keys(repo_root):
+        android_key = ANDROID_SHARED_KEY_MAPPINGS.get(ios_key, ios_key)
+        if android_key in android_base:
+            source_keys[ios_key] = android_key
+    return dict(sorted(source_keys.items()))
+
+
+def discover_android_runtime_resource_keys(repo_root: Path) -> set[str]:
+    """Return literal Android resource keys used by iOS runtime lookup helpers.
+
+    Drawer and overflow code intentionally resolves Android-named resources through
+    ``Bundle.main.localizedString`` rather than Swift ``String(localized:)``. Those keys are
+    invisible to the ordinary iOS-English intersection, so this source scan makes them explicit
+    Android-owned catalog inputs. Dynamic keys are deliberately excluded because they cannot be
+    validated without a concrete resource contract.
+    """
+    keys: set[str] = set()
+    for source_path in sorted((repo_root / "Sources").rglob("*.swift")):
+        source = source_path.read_text(encoding="utf-8")
+        for pattern in ANDROID_RUNTIME_RESOURCE_KEY_PATTERNS:
+            keys.update(pattern.findall(source))
+    return keys
+
+
 def discover_ai_localization_keys(repo_root: Path) -> set[str]:
     """Return every statically declared localization key in the AI feature.
 
@@ -430,6 +509,29 @@ def missing_ai_localization_catalog_keys(
     including ``llm_actions``, has recorded Android provenance and values.
     """
     return sorted(discover_ai_localization_keys(repo_root) - set(catalog.english_by_key))
+
+
+def missing_android_owned_localization_catalog_keys(
+    repo_root: Path,
+    catalog: AndroidSharedLocalization,
+) -> list[str]:
+    """Return Android-owned source keys absent from a generated catalog.
+
+    This extends the previous AI-only stale-snapshot check to every shipped
+    literal Swift localization key with Android provenance and to runtime
+    Android-resource helpers. A non-empty result means CI could otherwise pass
+    while the app falls back to a raw localization key at runtime.
+    """
+    catalog_keys = set(catalog.english_by_key)
+    android_resource_keys = set(catalog.android_resource_keys)
+    android_owned_source_keys = {
+        key
+        for key in discover_shipped_swift_localization_keys(repo_root)
+        if ANDROID_SHARED_KEY_MAPPINGS.get(key, key) in android_resource_keys
+    }
+    android_owned_source_keys.update(discover_ai_localization_keys(repo_root))
+    android_owned_source_keys.update(discover_android_runtime_resource_keys(repo_root))
+    return sorted(android_owned_source_keys - catalog_keys)
 
 
 def default_repo_root() -> Path:
@@ -642,6 +744,7 @@ class AndroidSharedLocalization:
 
     safe_keys: list[str]
     english_mismatch_keys: list[str]
+    android_resource_keys: list[str]
     source_key_by_key: dict[str, str]
     english_by_key: dict[str, str]
     non_english_by_key: dict[str, list[str]]
@@ -1025,6 +1128,7 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
         for key, value in parse_android_strings(android_root / "values" / "strings.xml").items()
     }
     required_ai_keys = discover_ai_localization_keys(repo_root)
+    required_runtime_resource_keys = discover_android_runtime_resource_keys(repo_root)
     source_key_by_key = {
         key: key
         for key in set(ios_english) & set(android_base)
@@ -1050,9 +1154,18 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
             missing_android_sources.append(f"{ios_key} -> {android_key}")
             continue
         source_key_by_key[ios_key] = android_key
+    for ios_key in sorted(required_runtime_resource_keys):
+        android_key = ANDROID_SHARED_KEY_MAPPINGS.get(ios_key, ios_key)
+        if android_key not in android_base:
+            missing_android_sources.append(f"{ios_key} -> {android_key}")
+            continue
+        source_key_by_key[ios_key] = android_key
+    source_key_by_key.update(
+        discover_android_owned_swift_localization_keys(repo_root, android_base)
+    )
     if missing_android_sources:
         raise ValueError(
-            "AI localization keys have no Android string resource: "
+            "Android-owned localization keys have no Android string resource: "
             + ", ".join(missing_android_sources)
         )
 
@@ -1110,6 +1223,7 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
     return AndroidSharedLocalization(
         safe_keys=safe_keys,
         english_mismatch_keys=english_mismatch_keys,
+        android_resource_keys=sorted(android_base),
         source_key_by_key=dict(sorted(source_key_by_key.items())),
         english_by_key=english_by_key,
         non_english_by_key=non_english_by_key,
@@ -1155,6 +1269,11 @@ def load_android_shared_localization_from_snapshot(path: Path) -> AndroidSharedL
         raw.get("english_mismatch_keys"),
         path,
         "english_mismatch_keys",
+    )
+    android_resource_keys = _load_string_list(
+        raw.get("android_resource_keys"),
+        path,
+        "android_resource_keys",
     )
 
     raw_source_key_by_key = raw.get("source_key_by_key")
@@ -1227,6 +1346,7 @@ def load_android_shared_localization_from_snapshot(path: Path) -> AndroidSharedL
     return AndroidSharedLocalization(
         safe_keys=safe_keys,
         english_mismatch_keys=english_mismatch_keys,
+        android_resource_keys=android_resource_keys,
         source_key_by_key=source_key_by_key,
         english_by_key=english_by_key,
         non_english_by_key=non_english_by_key,
@@ -1261,7 +1381,7 @@ def audit_android_shared_translations(
     value_mismatch_by_key: dict[str, list[str]] = {}
     tree_mismatch_by_key: dict[str, list[str]] = {}
 
-    for key in missing_ai_localization_catalog_keys(repo_root, catalog):
+    for key in missing_android_owned_localization_catalog_keys(repo_root, catalog):
         missing_key_by_key[key] = ["android-catalog"]
 
     for key, expected_value in catalog.english_by_key.items():
@@ -1388,7 +1508,8 @@ def sync_android_shared_translations(
     missing_catalog_keys = sorted(requested_keys - set(catalog.english_by_key))
     if included_keys is None:
         missing_catalog_keys = sorted(
-            set(missing_catalog_keys) | set(missing_ai_localization_catalog_keys(repo_root, catalog))
+            set(missing_catalog_keys)
+            | set(missing_android_owned_localization_catalog_keys(repo_root, catalog))
         )
     if missing_catalog_keys:
         raise ValueError(
@@ -1516,6 +1637,7 @@ def write_android_non_english_snapshot(
         "android_shared_localization": {
             "safe_keys": shared_localization.safe_keys,
             "english_mismatch_keys": shared_localization.english_mismatch_keys,
+            "android_resource_keys": shared_localization.android_resource_keys,
             "source_key_by_key": shared_localization.source_key_by_key,
             "english_by_key": shared_localization.english_by_key,
             "non_english_by_key": shared_localization.non_english_by_key,

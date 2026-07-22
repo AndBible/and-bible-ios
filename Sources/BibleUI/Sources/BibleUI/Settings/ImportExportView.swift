@@ -504,27 +504,14 @@ public struct ImportExportView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .alert(
-            String(localized: "backup_backup_title", defaultValue: "Backup to where?"),
-            isPresented: $showBackupDestinationDialog,
-        ) {
-            Button(String(localized: "backup_phone_storage", defaultValue: "Phone storage")) {
-                finishPendingBackupExport(to: .phoneStorage)
+        .overlay {
+            if showBackupDestinationDialog {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "backup_backup_title", defaultValue: "Backup to where?"), message: String(localized: "backup_backup_message", defaultValue: "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"), actions: [
+                    .init(id: "phone", title: String(localized: "backup_phone_storage", defaultValue: "Phone storage"), style: .normal) { showBackupDestinationDialog = false; finishPendingBackupExport(to: .phoneStorage) },
+                    .init(id: "share", title: String(localized: "share", defaultValue: "Share"), style: .normal) { showBackupDestinationDialog = false; finishPendingBackupExport(to: .share) },
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { showBackupDestinationDialog = false; cancelPendingBackupExport() }
+                ])
             }
-            .accessibilityIdentifier("backupDestinationPhoneStorageButton")
-            Button(String(localized: "share", defaultValue: "Share")) {
-                finishPendingBackupExport(to: .share)
-            }
-            .accessibilityIdentifier("backupDestinationShareButton")
-            Button(String(localized: "cancel"), role: .cancel) {
-                cancelPendingBackupExport()
-            }
-            .accessibilityIdentifier("backupDestinationCancelButton")
-        } message: {
-            Text(String(
-                localized: "backup_backup_message",
-                defaultValue: "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"
-            ))
         }
         .fileExporter(
             isPresented: $showBackupFileExporter,
@@ -574,78 +561,40 @@ public struct ImportExportView: View {
                 }
             }
         }
-        .alert(item: $pendingResetCategory) { category in
-            Alert(
-                title: Text(category.localizedBackupResetButtonTitle),
-                message: Text(String(
-                    format: String(
-                        localized: "reset_database_confirm",
-                        defaultValue: "This will permanently delete all data in \"%@\" and reset it to the initial state. This cannot be undone.\n\nAre you sure?"
-                    ),
-                    category.localizedBackupResetTitle
-                )),
-                primaryButton: .destructive(Text(String(localized: "reset", defaultValue: "Reset"))) {
-                    resetDatabase(category)
-                },
-                secondaryButton: .cancel(Text(String(localized: "cancel")))
-            )
+        .overlay {
+            if let category = pendingResetCategory {
+                AndroidMyDocumentDecisionDialog(title: category.localizedBackupResetButtonTitle, message: String(format: String(localized: "reset_database_confirm", defaultValue: "This will permanently delete all data in \"%@\" and reset it to the initial state. This cannot be undone.\n\nAre you sure?"), category.localizedBackupResetTitle), actions: [
+                    .init(id: "reset", title: String(localized: "reset", defaultValue: "Reset"), style: .destructive) { pendingResetCategory = nil; resetDatabase(category) },
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingResetCategory = nil }
+                ])
+            }
         }
-        .alert(
-            String(
-                localized: "android_module_backup_overwrite_title",
-                defaultValue: "Overwrite existing module files?"
-            ),
-            isPresented: Binding(
-                get: { pendingLocalModuleOverwrite != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingLocalModuleOverwrite = nil
-                    }
-                }
-            ),
-            presenting: pendingLocalModuleOverwrite
-        ) { confirmation in
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingLocalModuleOverwrite = nil
+        .overlay {
+            if let confirmation = pendingLocalModuleOverwrite {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"), message: ModuleBrowserView.localModuleOverwriteMessage(confirmation.inspection), actions: [
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingLocalModuleOverwrite = nil },
+                    .init(id: "overwrite", title: String(localized: "overwrite", defaultValue: "Overwrite"), style: .destructive) { pendingLocalModuleOverwrite = nil; performSupportedDocumentInstall(confirmation.request, overwritePolicy: .replaceExisting(confirmation.inspection.overwriteAuthorization)) }
+                ])
             }
-            Button(String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) {
-                pendingLocalModuleOverwrite = nil
-                performSupportedDocumentInstall(
-                    confirmation.request,
-                    overwritePolicy: .replaceExisting(
-                        confirmation.inspection.overwriteAuthorization
-                    )
-                )
-            }
-        } message: { confirmation in
-            Text(ModuleBrowserView.localModuleOverwriteMessage(confirmation.inspection))
         }
-        .alert(
-            String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"),
-            isPresented: $showAndroidModuleBackupOverwriteAlert
-        ) {
-            Button(String(localized: "cancel"), role: .cancel) {
-                clearPendingAndroidModuleBackup()
+        .overlay {
+            if showAndroidModuleBackupOverwriteAlert {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"), message: androidModuleBackupOverwriteMessage(), actions: [
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { clearPendingAndroidModuleBackup() },
+                    .init(id: "overwrite", title: String(localized: "overwrite", defaultValue: "Overwrite"), style: .destructive) { restorePendingAndroidModuleBackup() }
+                ])
             }
-            Button(String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) {
-                restorePendingAndroidModuleBackup()
-            }
-        } message: {
-            Text(androidModuleBackupOverwriteMessage())
         }
         .androidToastFeedback(transientStatusMessage, bottomPadding: 48)
         .onChange(of: statusMessage) { _, newValue in
             showStatusAlert = newValue != nil
         }
-        .alert(
-            String(localized: "backup_and_restore", defaultValue: "Backup & Restore"),
-            isPresented: $showStatusAlert
-        ) {
-            Button(String(localized: "ok"), role: .cancel) {
-                statusMessage = nil
+        .overlay {
+            if showStatusAlert {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "backup_and_restore", defaultValue: "Backup & Restore"), message: statusMessage ?? "", actions: [
+                    .init(id: "okay", title: String(localized: "ok"), style: .normal) { statusMessage = nil; showStatusAlert = false }
+                ])
             }
-        } message: {
-            Text(statusMessage ?? "")
         }
         .onDisappear {
             androidModuleBackupExportOperationID = nil

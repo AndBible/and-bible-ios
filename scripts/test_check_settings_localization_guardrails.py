@@ -266,7 +266,7 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
                 snapshot_path,
                 {key: [] for key in PARITY_KEYS},
                 [],
-                AndroidSharedLocalization([], [], {}, {}, {}, {}),
+                AndroidSharedLocalization([], [], [], {}, {}, {}, {}),
             )
 
             payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
@@ -744,6 +744,7 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
         catalog = AndroidSharedLocalization(
             safe_keys=sorted(english_by_key),
             english_mismatch_keys=[],
+            android_resource_keys=sorted(english_by_key),
             source_key_by_key={key: key for key in english_by_key},
             english_by_key=english_by_key,
             non_english_by_key={key: ["fr"] for key in english_by_key},
@@ -1055,6 +1056,75 @@ class AILocalizationSourceGuardrailTests(unittest.TestCase):
 
         self.assertEqual(result.files_changed, 2)
         self.assertEqual(result.values_written, 8)
+
+
+class ShippedLocalizationSourceGuardrailTests(unittest.TestCase):
+    """Covers the product-wide Android-owned Swift localization inventory."""
+
+    def test_non_ai_literal_key_is_cataloged_synced_and_audited(self) -> None:
+        """Prevents non-AI screens from bypassing Android localization parity.
+
+        The fixture places a literal key in a reader-adjacent production source
+        path, omits it from both iOS English trees, and supplies Android English
+        plus French values. The catalog must discover the key without a feature
+        allowlist, the sync must populate both iOS trees, and the resulting
+        audit must be clean.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            android_root = root / "android"
+            source_path = (
+                root
+                / "Sources"
+                / "BibleUI"
+                / "Sources"
+                / "BibleUI"
+                / "Reader"
+                / "Fixture.swift"
+            )
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_text(
+                'let title = String(localized: "study_pad_android_owned")\n',
+                encoding="utf-8",
+            )
+            for tree in ("AndBible", "Localizations"):
+                for locale in ("en", "fr"):
+                    path = root / tree / f"{locale}.lproj" / "Localizable.strings"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text('"existing" = "Existing";\n', encoding="utf-8")
+            android_path = android_root / "values" / "strings.xml"
+            android_path.parent.mkdir(parents=True, exist_ok=True)
+            android_path.write_text(
+                '<resources><string name="study_pad_android_owned">Study Pads</string></resources>',
+                encoding="utf-8",
+            )
+            french_path = android_root / "values-fr" / "strings.xml"
+            french_path.parent.mkdir(parents=True, exist_ok=True)
+            french_path.write_text(
+                '<resources><string name="study_pad_android_owned">Cahiers d\'etude</string></resources>',
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                localization_guardrails,
+                "LOCALE_TO_ANDROID_VALUES",
+                {"en": "values", "fr": "values-fr"},
+            ):
+                catalog = build_android_shared_localization(root, android_root)
+                self.assertEqual(
+                    catalog.source_key_by_key["study_pad_android_owned"],
+                    "study_pad_android_owned",
+                )
+                sync_android_shared_translations(root, catalog)
+                audit = audit_android_shared_translations(root, catalog)
+
+            for tree in ("AndBible", "Localizations"):
+                english = parse_ios_strings(root / tree / "en.lproj" / "Localizable.strings")
+                french = parse_ios_strings(root / tree / "fr.lproj" / "Localizable.strings")
+                self.assertEqual(english["study_pad_android_owned"], "Study Pads")
+                self.assertEqual(french["study_pad_android_owned"], "Cahiers d'etude")
+            self.assertEqual(audit.missing_key_by_key, {})
+            self.assertEqual(audit.value_mismatch_by_key, {})
 
 
 if __name__ == "__main__":

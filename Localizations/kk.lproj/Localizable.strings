@@ -376,7 +376,7 @@
 "restart_required" = "Restart Required";
 "restart_to_apply_sync" = "Please restart the app to apply sync changes.";
 "disable_sync_title" = "Disable iCloud Sync?";
-"disable_sync" = "Disable Sync";
+"disable_sync" = "Синхрондауды өшіру";
 "disable_sync_warning" = "Data already synced to iCloud will remain. New changes will only be saved locally.";
 
 
@@ -696,3 +696,70 @@ Google Drive пайдаланған кезде, %@ кез келген жеке 
 
 /* Android shared translations */
 "bug_report_email_text" = "Әрі қарай, әзірлеушілер тобына есепті жіберу үшін қалаған электрондық пошта қолданбасын (мысалы, Gmail) таңдаңыз.";
+
+/* Android shared translations */
+"administration" = "Басқару";
+"app_licence_title" = "Бастапқы Лицензия Ашық";
+"app_name_medium" = "Киелі Кітапты Зерттеу (AndBible)";
+"buy_development" = "Әзірлеу жұмыстарын сатып алыңыз";
+"contact" = "Байланыс";
+"help_and_tips" = "Көмек пен кеңестер";
+"how_to_contribute" = "Қалай үлес қосып беруге болады?";
+"information" = "Ақпарат";
+"main_menu" = "Мәзір";
+"options_menu_night_mode" = "Түнгі режим";
+"questions_title" = "Сұрақтар?";
+"rate_application" = "Бағалау мен Қайта шолу";
+"rdg_plan_title" = "Оқу Жоспары";
+"send_bug_report_title" = "Кері жауап қорытындысын беру / Қате туралы есеп ақпараты";
+"strongs_mode_title" = "Стронг режимін таңдаңыз";
+"studypads" = "Оқу Планшеттері";
+"switch_to_workspace" = "Жұмыс кеңістіктері";
+"tell_friend_title" = "Досыңа ұсыну";
+"toggle_fullscreen" = "Толық бейне беті";
+"window_pinning_menutitle" = "Терезені бекіту";
+
+/* Android shared translations */
+"backup_and_restore" = "Сақтық көшіру мен Қалпына келтіру";
+"backup_backup_message" = "Бөлісу функциясы арқылы (электрондық пошта, Google Drive т.б.с.с.) телефонға немесе басқа жерге сақтық көшірме жасау керек пе?";
+"backup_backup_title" = "Сақтық көшірме қайда жасау керек?";
+"backup_database" = "Дерекқор";
+"backup_database_info" = "Бетбелгілер, белгілер, жазбалар, оқу тақталары, оқу жоспарлары, жұмыс кеңістігі т.б.";
+"backup_document_info" = "Киелі кітаптар, түсіндірмелер, сөздіктер, карталар және т.";
+"backup_documents" = "Құжаттар";
+"backup_phone_storage" = "Телефон жад қоймасы";
+"backup_to" = "Сақтық көшірме жасау…";
+"book" = "Кітап";
+"bug_report" = "қате туралы есеп ақпаратты жіберу (Негізгі мәзірден)";
+"bug_report_email_title" = "Қате туралы есепті электрондық пошта арқылы жіберіңіз";
+"compare_description" = "Аудармаларды салыстыру";
+"db_bookmarks" = "Бетбелгілер, Менің жазбаларым, белгілер және оқу тақталары";
+"db_repositories" = "Репозиторийлер және қатысты параметрлер";
+"document" = "Құжат";
+"font_size_pt" = "%d шрифт өлшемі";
+"font_size_title" = "Шрифт көлемі";
+"history_for" = "Тарих (%1$@: Терезе %2$d)";
+"how_to_help" = "өтініш, көмектесу үшін не істей алатыныңызды оқып шығыңыз.";
+"line_spacing_title" = "Жол арасын кеңейту";
+"my_notes_description" = "Бетбелгілерге бекітілген пайдаланушы өңдейтін жазбалар";
+"pref_font_family_label" = "Шрифттер тобы";
+"prefs_in_window_bible_bookmark_modal_buttons_title" = "Бір рет түрту әрекеттері (Киелі кітап)";
+"prefs_in_window_bookmark_modal_buttons_description" = "Мәтін түртілгенде, бір рет түрту әрекеті терезесі көрсетіледі. Қандай әрекет түймелері көрсетілуі керек?";
+"prefs_in_window_gen_bookmark_modal_buttons_title" = "Бір рет түрту әрекеттері (Басқа)";
+"prefs_line_spacing_pt" = "Жол арасын кеңейту %1.1fх";
+"prefs_text_size_sample_text" = "Мысалы мәтін";
+"prefs_top_margin_title" = "Жоғарғы шекара";
+"proceed_google_play" = "Google Play -ге өтіңіз";
+"rate_message3" = "Егер нақты мәтін қолданбада болмаса, %@.";
+"rate_message4" = "Бұл қолданбаны әзірлеушілер құжаттардың жүргізілуіне жауапты емес.";
+"rate_message5" = "Оң және егжей-тегжейлі шолулар AndBible Open Source жобасына көп көмектеседі. Рақмет сізге!";
+"rate_message6" = "Теріс шолу жасамас бұрын, келесілерді ескеріңіз:";
+"rate_title" = "Бағалау және шолу қолданбасы";
+"reset_generic" = "Қайта бастау";
+"search_bible_section_group_prompt" = "Қайда Іздеу";
+"send_email" = "әзірлеушілерге электрондық хат жіберу";
+"synchronizing" = "Синхрондау...";
+"text_maintainers" = "Өтініш, мәтін жасаушыларға мәселелер туралы хабарлаңыз";
+"type_text_or_bible_reference" = "Мәтінді немесе Киелі кітап сілтемесін теріңіз";
+"unlock_info" = "Шифрланған модуль ақпаратты бұғаттан шығару";
+"warn_bad_document" = "Ескерту: Бұл құжат (кем дегенде ішінара) нашар техникалық сапа болуы мүмкін.";

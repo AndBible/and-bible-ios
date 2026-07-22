@@ -623,3 +623,16 @@
 
 /* Android shared translations */
 "doc_type_commentary" = "Sharh";
+
+/* Android shared translations */
+"administration" = "Sozlamalar";
+"main_menu" = "Menyu";
+"options_menu_night_mode" = "Tungi ko'rinish";
+"rdg_plan_title" = "O'qish Rejasi";
+
+/* Android shared translations */
+"backup_and_restore" = "Faylni saqlab qo'yish; Qayta tiklash";
+"compare_description" = "Tarjimalarni taqqosla";
+"prefs_text_size_sample_text" = "Namuna matn";
+"reset_generic" = "Ilk holatga qaytarish";
+"search_bible_section_group_prompt" = "Qaerni qidir";

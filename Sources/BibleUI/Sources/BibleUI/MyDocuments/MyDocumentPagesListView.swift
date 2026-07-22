@@ -129,49 +129,23 @@ struct MyDocumentPagesListView: View {
             allowsMultipleSelection: false,
             onCompletion: importPage
         )
-        .confirmationDialog(
-            String(localized: "my_document_save_changes", defaultValue: "Save changes?"),
-            isPresented: $showsDirtyDecision,
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "save")) { saveAndContinue() }
-            Button(String(localized: "no", defaultValue: "Don't Save"), role: .destructive) {
-                discardAndContinue()
+        .overlay {
+            if showsDirtyDecision {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "my_document_save_changes", defaultValue: "Save changes?"), message: nil, actions: [
+                    .init(id: "save", title: String(localized: "save"), style: .normal, perform: saveAndContinue),
+                    .init(id: "discard", title: String(localized: "no", defaultValue: "Don't Save"), style: .destructive, perform: discardAndContinue),
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingOpenPage = nil; pendingExitAfterDecision = false; showsDirtyDecision = false }
+                ])
+            } else if pendingDeletePage != nil {
+                AndroidMyDocumentDecisionDialog(title: String(format: String(localized: "my_document_page_delete_confirmation", defaultValue: "Delete %@?"), pendingDeletePage?.title ?? ""), message: nil, actions: [
+                    .init(id: "delete", title: String(localized: "delete"), style: .destructive, perform: deletePendingPage),
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingDeletePage = nil }
+                ])
+            } else if let errorMessage {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "errorTitle", defaultValue: "Error occurred"), message: errorMessage, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { self.errorMessage = nil }
+                ])
             }
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingOpenPage = nil
-                pendingExitAfterDecision = false
-            }
-        }
-        .confirmationDialog(
-            String(
-                format: String(
-                    localized: "my_document_page_delete_confirmation",
-                    defaultValue: "Delete %@?"
-                ),
-                pendingDeletePage?.title ?? ""
-            ),
-            isPresented: Binding(
-                get: { pendingDeletePage != nil },
-                set: { if !$0 { pendingDeletePage = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "delete"), role: .destructive) {
-                deletePendingPage()
-            }
-            Button(String(localized: "cancel"), role: .cancel) {}
-        }
-        .alert(
-            String(localized: "errorTitle", defaultValue: "Error occurred"),
-            isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
         }
         .accessibilityIdentifier("myDocumentPagesScreen")
         .overlay(alignment: .topLeading) { myDocumentPagesStateExport }

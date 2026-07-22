@@ -624,3 +624,16 @@
 
 /* Android shared translations */
 "doc_type_commentary" = "Şərhlər";
+
+/* Android shared translations */
+"administration" = "Mudiriyyət";
+"main_menu" = "Menyu";
+"options_menu_night_mode" = "Qaranlıq rejimi";
+"rdg_plan_title" = "Oxumaq planı";
+
+/* Android shared translations */
+"backup_and_restore" = "Back up & Bərpa";
+"compare_description" = "Tərcümələri qarşılaşdır";
+"prefs_text_size_sample_text" = "Mətn nümunəsi";
+"reset_generic" = "Sıfırdan başla";
+"search_bible_section_group_prompt" = "Axtarış yeri";

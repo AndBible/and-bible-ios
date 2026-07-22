@@ -544,32 +544,21 @@ public struct SettingsView: View {
     private var settingsFormWithPresentation: some View {
         settingsForm
             .navigationTitle(settingsNavigationTitleText)
-            .alert(
-                languageRestartAlertTitleText,
-                isPresented: $showRestartAlert
-            ) {
-                Button(String(localized: "ok")) {}
-            } message: {
-                Text(languageRestartAlertMessageText)
-            }
-            .alert(
-                settingsResetTitleText,
-                isPresented: $showResetConfirmation
-            ) {
-                Button(String(localized: "cancel"), role: .cancel) {}
-                Button(String(localized: "reset", defaultValue: "Reset"), role: .destructive) {
-                    resetApplicationPreferences()
+            .overlay {
+                if showRestartAlert {
+                    AndroidMyDocumentDecisionDialog(title: languageRestartAlertTitleText, message: languageRestartAlertMessageText, actions: [
+                        .init(id: "okay", title: String(localized: "ok"), style: .normal) { showRestartAlert = false }
+                    ])
+                } else if showResetConfirmation {
+                    AndroidMyDocumentDecisionDialog(title: settingsResetTitleText, message: settingsResetMessageText, actions: [
+                        .init(id: "reset", title: String(localized: "reset", defaultValue: "Reset"), style: .destructive) { showResetConfirmation = false; resetApplicationPreferences() },
+                        .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { showResetConfirmation = false }
+                    ])
+                } else if showDiscreteHelp {
+                    AndroidMyDocumentDecisionDialog(title: String(localized: "settings_security"), message: discreteHelpMessageText, actions: [
+                        .init(id: "okay", title: String(localized: "okay"), style: .normal) { showDiscreteHelp = false }
+                    ])
                 }
-            } message: {
-                Text(settingsResetMessageText)
-            }
-            .alert(
-                String(localized: "settings_security"),
-                isPresented: $showDiscreteHelp
-            ) {
-                Button(String(localized: "okay")) {}
-            } message: {
-                Text(discreteHelpMessageText)
             }
             .searchable(
                 text: $settingsSearchText,

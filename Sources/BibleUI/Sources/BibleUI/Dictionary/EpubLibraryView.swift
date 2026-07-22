@@ -183,33 +183,17 @@ struct EpubLibraryView: View {
                 epubs = EpubReader.installedEpubs()
                 isLoading = false
             }
-            .confirmationDialog(
-                String(localized: "delete"),
-                isPresented: Binding(
-                    get: { deletionState.isAwaitingConfirmation },
-                    set: { if !$0 { deletionState.cancel() } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button(String(localized: "delete"), role: .destructive, action: deletePendingEpubs)
-                Button(String(localized: "cancel"), role: .cancel) {
-                    deletionState.cancel()
+            .overlay {
+                if deletionState.isAwaitingConfirmation {
+                    AndroidMyDocumentDecisionDialog(title: String(localized: "delete"), message: deletionState.pending.map(\.title).joined(separator: ", "), actions: [
+                        .init(id: "delete", title: String(localized: "delete"), style: .destructive, perform: deletePendingEpubs),
+                        .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { deletionState.cancel() }
+                    ])
+                } else if let message = deletionErrorMessage {
+                    AndroidMyDocumentDecisionDialog(title: String(localized: "error"), message: message, actions: [
+                        .init(id: "okay", title: String(localized: "ok"), style: .normal) { deletionErrorMessage = nil }
+                    ])
                 }
-            } message: {
-                Text(deletionState.pending.map(\.title).joined(separator: ", "))
-            }
-            .alert(
-                String(localized: "error"),
-                isPresented: Binding(
-                    get: { deletionErrorMessage != nil },
-                    set: { if !$0 { deletionErrorMessage = nil } }
-                )
-            ) {
-                Button(String(localized: "ok"), role: .cancel) {
-                    deletionErrorMessage = nil
-                }
-            } message: {
-                Text(deletionErrorMessage ?? "")
             }
         }
     }

@@ -924,7 +924,8 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         pane_source = BIBLE_WINDOW_PANE.read_text(encoding="utf-8")
         reader_source = BIBLE_READER_VIEW.read_text(encoding="utf-8")
 
-        self.assertIn(".sheet(item: $coordinator.presentation)", coordinator_source)
+        self.assertNotIn(".sheet(item: $coordinator.presentation)", coordinator_source)
+        self.assertIn("AIReaderAppOwnedOverlay", coordinator_source)
         self.assertIn("onPresentPromptEditor: (UUID) -> Void", coordinator_source)
         self.assertIn("case .promptEditor(_, let promptID):", coordinator_source)
         self.assertIn("coordinator.presentation = nil", coordinator_source)
@@ -1006,9 +1007,9 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         Keep the post-migration sheet inventory limited to legitimate system ownership boundaries.
 
         Android parity forbids substituting adaptive sheets for app activities or dialogs. The only
-        remaining iOS sheet calls are ShareSheet handoffs and macOS fallbacks for the two iOS
-        full-screen reader chooser routes. A failure means a new app-owned sheet needs an Android
-        source contract and an explicit owner decision before it can ship.
+        remaining reader sheet call is the system ShareSheet handoff. A failure means a new
+        app-owned sheet needs an Android source contract and an explicit owner decision before it
+        can ship.
         """
         page_list_source = MY_DOCUMENT_PAGES_LIST_VIEW.read_text(encoding="utf-8")
         document_list_source = MY_DOCUMENTS_LIST_VIEW.read_text(encoding="utf-8")
@@ -1024,9 +1025,13 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("ShareSheet(items: [url]", import_export_source)
         self.assertIn(".sheet(isPresented: shareSheetBinding)", reader_source)
         self.assertIn("shareSheetContent", reader_source)
-        self.assertIn("#if os(iOS)\n        .fullScreenCover(item: readerDocumentChooserModalBinding)", reader_source)
-        self.assertIn("#else\n        .sheet(item: readerDocumentChooserModalBinding)", reader_source)
-        self.assertIn(".sheet(item: $activeReaderLabelAssignmentRoute)", reader_source)
+        self.assertNotIn(".sheet(item: readerDocumentChooserModalBinding)", reader_source)
+        self.assertNotIn(".fullScreenCover(item: readerDocumentChooserModalBinding)", reader_source)
+        self.assertNotIn(".sheet(item: $activeReaderLabelAssignmentRoute)", reader_source)
+        self.assertNotIn(".fullScreenCover(item: $activeReaderLabelAssignmentRoute)", reader_source)
+        self.assertNotIn(".fullScreenCover(item: $refChooserPresentation)", reader_source)
+        self.assertIn("ReaderAppOwnedOverlay", reader_source)
+        self.assertIn('accessibilityIdentifier("androidReaderAppOwnedOverlay")', reader_source)
         self.assertNotIn(".sheet(item: $historyDialogRequest)", reader_source)
         self.assertNotIn(".sheet(item: $chapterReadHistoryDialogRequest)", reader_source)
         self.assertNotIn("UIActivityViewController", pane_source)
@@ -1069,18 +1074,21 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("Color.black.opacity(0.36)", dialog_source)
         self.assertIn("Button(String(localized: \"okay\"), action: onDismiss)", dialog_source)
 
-    def test_reader_ai_prompt_selection_uses_the_coordinator_owned_presentation_route(self) -> None:
-        """AI routes stay exclusively coordinator-owned while PR #363 supplies their navigation chrome."""
+    def test_reader_ai_prompt_selection_uses_coordinator_owned_app_surfaces(self) -> None:
+        """AI routes remain pane-owned without regressing to adaptive iOS sheets."""
         source = AI_READER_RUN_VIEWS.read_text(encoding="utf-8")
 
-        self.assertIn(".sheet(item: $coordinator.presentation)", source)
-        self.assertIn("destination(for: route)", source)
+        self.assertNotIn(".sheet(item: $coordinator.presentation)", source)
+        self.assertNotIn(".fullScreenCover(item: $rawLogSnapshot)", source)
+        self.assertIn("AIReaderAppOwnedOverlay", source)
+        self.assertIn("switch coordinator.presentation", source)
         self.assertIn("case .promptChooser:", source)
         self.assertIn("AIReaderPromptChooserView(coordinator: coordinator)", source)
         self.assertIn("AIReaderPromptPreparationView(coordinator: coordinator)", source)
         self.assertIn("AIReaderRegenerationView(coordinator: coordinator)", source)
         self.assertIn("AIReaderDocumentMarkerChooserView(coordinator: coordinator)", source)
         self.assertIn("AIReaderRunActivityView(coordinator: coordinator)", source)
+        self.assertIn('accessibilityIdentifier("androidAIReaderAppOwnedOverlay")', source)
         self.assertIn("NavigationStack {", source)
         self.assertIn("coordinator.presentation = nil", source)
         self.assertIn("coordinator.selectPrompt(entry)", source)

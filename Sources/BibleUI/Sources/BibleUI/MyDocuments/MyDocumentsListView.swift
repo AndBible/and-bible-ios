@@ -171,57 +171,29 @@ public struct MyDocumentsListView: View {
             allowsMultipleSelection: true,
             onCompletion: prepareDocumentImport
         )
-        .confirmationDialog(
-            String(localized: "my_document_save_changes", defaultValue: "Save changes?"),
-            isPresented: $showsCloseDecision,
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "save")) {
-                if saveSession() { close() }
+        .overlay {
+            if showsCloseDecision {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "my_document_save_changes", defaultValue: "Save changes?"), message: nil, actions: [
+                    .init(id: "save", title: String(localized: "save"), style: .normal) { if saveSession() { close() } },
+                    .init(id: "discard", title: String(localized: "no", defaultValue: "Don't Save"), style: .destructive) { session.discardChanges(); close() },
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { showsCloseDecision = false }
+                ])
+            } else if showsOpenDocumentDecision {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "my_document_save_changes", defaultValue: "Save changes?"), message: nil, actions: [
+                    .init(id: "save", title: String(localized: "save"), style: .normal) { if saveSession() { openPendingDocument() } },
+                    .init(id: "discard", title: String(localized: "no", defaultValue: "Don't Save"), style: .destructive) { session.discardChanges(); openPendingDocument() },
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingOpenDocumentID = nil; showsOpenDocumentDecision = false }
+                ])
+            } else if pendingDeleteDocument != nil {
+                AndroidMyDocumentDecisionDialog(title: deleteConfirmationTitle, message: nil, actions: [
+                    .init(id: "delete", title: String(localized: "delete"), style: .destructive, perform: deletePendingDocument),
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingDeleteDocument = nil }
+                ])
+            } else if let errorMessage {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "errorTitle", defaultValue: "Error occurred"), message: errorMessage, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { self.errorMessage = nil }
+                ])
             }
-            Button(String(localized: "no", defaultValue: "Don't Save"), role: .destructive) {
-                session.discardChanges()
-                close()
-            }
-            Button(String(localized: "cancel"), role: .cancel) {}
-        }
-        .confirmationDialog(
-            String(localized: "my_document_save_changes", defaultValue: "Save changes?"),
-            isPresented: $showsOpenDocumentDecision,
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "save")) {
-                if saveSession() { openPendingDocument() }
-            }
-            Button(String(localized: "no", defaultValue: "Don't Save"), role: .destructive) {
-                session.discardChanges()
-                openPendingDocument()
-            }
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingOpenDocumentID = nil
-            }
-        }
-        .confirmationDialog(
-            deleteConfirmationTitle,
-            isPresented: Binding(
-                get: { pendingDeleteDocument != nil },
-                set: { if !$0 { pendingDeleteDocument = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "delete"), role: .destructive, action: deletePendingDocument)
-            Button(String(localized: "cancel"), role: .cancel) {}
-        }
-        .alert(
-            String(localized: "errorTitle", defaultValue: "Error occurred"),
-            isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
         }
     }
 

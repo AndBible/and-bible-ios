@@ -82,21 +82,20 @@ struct WindowTabBar: View {
                 )
             }
             .foregroundStyle(surfacePalette.foregroundColor)
-            .alert(String(localized: "go_to_reference"), isPresented: $showGoToRefAlert) {
-                TextField(String(localized: "go_to_reference_placeholder"), text: $goToRefText)
-                Button(String(localized: "go")) {
-                    if let w = goToRefWindow {
-                        if !(onGoToTypedRef?(w, goToRefText) ?? false) {
-                            onShowToast?(String(localized: "go_to_reference_invalid"))
-                        }
-                    }
+            .overlay {
+                if showGoToRefAlert {
+                    WindowTabBarReferenceDialog(
+                        text: $goToRefText,
+                        onGo: {
+                            if let window = goToRefWindow, !(onGoToTypedRef?(window, goToRefText) ?? false) {
+                                onShowToast?(String(localized: "go_to_reference_invalid"))
+                            }
+                            showGoToRefAlert = false
+                        },
+                        onBrowse: { onShowBookChooser?(); showGoToRefAlert = false },
+                        onCancel: { showGoToRefAlert = false }
+                    )
                 }
-                Button(String(localized: "browse"), role: nil) {
-                    onShowBookChooser?()
-                }
-                Button(String(localized: "cancel"), role: .cancel) { }
-            } message: {
-                Text(String(localized: "go_to_reference_message"))
             }
     }
 
@@ -773,5 +772,34 @@ struct WindowTabBar: View {
         let categoryName = pm.currentCategoryName
         return categoryName != DocumentCategory.generalBook.pageManagerKey
             && categoryName != DocumentCategory.epub.pageManagerKey
+    }
+}
+
+/** Android-style typed-reference dialog that preserves the originating window identity. */
+private struct WindowTabBarReferenceDialog: View {
+    @Binding var text: String
+    let onGo: () -> Void
+    let onBrowse: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.36).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 16) {
+                Text(String(localized: "go_to_reference")).font(.headline)
+                Text(String(localized: "go_to_reference_message")).foregroundStyle(.secondary)
+                TextField(String(localized: "go_to_reference_placeholder"), text: $text)
+                    .textFieldStyle(.roundedBorder)
+                HStack { Spacer()
+                    Button(String(localized: "cancel"), action: onCancel)
+                    Button(String(localized: "browse"), action: onBrowse)
+                    Button(String(localized: "go"), action: onGo)
+                }
+            }
+            .padding(20).frame(maxWidth: 500)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(24)
+        }
+        .accessibilityIdentifier("androidGoToReferenceDialog")
     }
 }

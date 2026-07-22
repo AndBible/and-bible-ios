@@ -167,33 +167,17 @@ public struct DailyReadingView: View {
                 )
             }
         }
-        .confirmationDialog(
-            String(localized: "reading_plan_reset_title", defaultValue: "Reset Reading Plan?"),
-            isPresented: $showResetConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "reset", defaultValue: "Reset"), role: .destructive) {
-                resetCurrentPlan()
+        .overlay {
+            if showResetConfirmation {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "reading_plan_reset_title", defaultValue: "Reset Reading Plan?"), message: String(localized: "reading_plan_reset_message", defaultValue: "This removes the plan and its reading progress."), actions: [
+                    .init(id: "reset", title: String(localized: "reset", defaultValue: "Reset"), style: .destructive) { showResetConfirmation = false; resetCurrentPlan() },
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { showResetConfirmation = false }
+                ])
+            } else if let message = actionFailureMessage {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "error_occurred", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "ok", defaultValue: "OK"), style: .normal) { actionFailureMessage = nil }
+                ])
             }
-            Button(String(localized: "cancel"), role: .cancel) {}
-        } message: {
-            Text(String(
-                localized: "reading_plan_reset_message",
-                defaultValue: "This removes the plan and its reading progress."
-            ))
-        }
-        .alert(
-            String(localized: "error_occurred", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { actionFailureMessage != nil },
-                set: { if !$0 { actionFailureMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "ok", defaultValue: "OK"), role: .cancel) {
-                actionFailureMessage = nil
-            }
-        } message: {
-            Text(actionFailureMessage ?? "")
         }
         .onAppear {
             loadPlan()
