@@ -135,7 +135,9 @@ final class ReaderPassageChooserSourceGuardTests: XCTestCase {
         )
         XCTAssertTrue(chooserSource.contains("completeReferenceChooser(with: verseName, for: generation)"))
         XCTAssertFalse(chooserSource.contains("\"\\(osisId).\\(chapter).\\(verse)\""))
-        XCTAssertTrue(source.contains(".fullScreenCover(item: $refChooserPresentation) { generation in"))
+        XCTAssertTrue(source.contains("if let generation = refChooserPresentation"))
+        XCTAssertTrue(source.contains("ReaderAppOwnedOverlay"))
+        XCTAssertFalse(source.contains(".fullScreenCover(item: $refChooserPresentation)"))
         XCTAssertTrue(source.contains("handleReferenceChooserDismissal(for: generation)"))
         XCTAssertTrue(
             source.contains("refChooserPresentation = refChooserRequest.replace(with: completion)")

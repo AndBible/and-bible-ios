@@ -280,12 +280,15 @@ public struct BookmarkListView: View {
             defaultFilename: csvExportFileName,
             onCompletion: completeCSVExport
         )
-        .alert(item: $presentedMessage) { message in
-            Alert(
-                title: Text(message.title),
-                message: Text(message.message),
-                dismissButton: .default(Text(String(localized: "ok", defaultValue: "OK")))
-            )
+        .overlay {
+            if let message = presentedMessage {
+                AndroidMyDocumentDecisionDialog(
+                    title: message.title,
+                    message: message.message,
+                    actions: [.init(id: "okay", title: String(localized: "ok", defaultValue: "OK"), style: .normal) { presentedMessage = nil }]
+                )
+                .accessibilityIdentifier("androidBookmarkListFeedbackDialog")
+            }
         }
     }
 

@@ -207,9 +207,40 @@ public struct BibleReaderView: View {
         /// Window whose WebView should be refreshed after label assignment closes.
         let windowId: UUID?
 
-        /// Stable presentation identity for SwiftUI's item-based full-screen cover.
+        /// Stable presentation identity for the app-owned reader overlay.
         var id: String {
             "labelAssignment::\(windowId?.uuidString ?? "active")::\(bookmarkId.uuidString)"
+        }
+    }
+
+    /**
+     Renders an Android-owned reader dialog or activity over its originating pane.
+
+     The surface preserves the reader's existing window and pane state while an
+     app-owned chooser or label workflow is active. It deliberately avoids
+     SwiftUI sheet and full-screen-cover ownership; callers clear their own
+     route state through the existing completion callbacks.
+     */
+    private struct ReaderAppOwnedOverlay<Content: View>: View {
+        @ViewBuilder let content: Content
+
+        init(@ViewBuilder content: () -> Content) {
+            self.content = content()
+        }
+
+        var body: some View {
+            ZStack {
+                Color.black.opacity(0.36)
+                    .ignoresSafeArea()
+                content
+                    .frame(maxWidth: 760, maxHeight: 820)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .shadow(radius: 16)
+                    .padding(24)
+            }
+            .ignoresSafeArea()
+            .accessibilityIdentifier("androidReaderAppOwnedOverlay")
         }
     }
 
@@ -929,59 +960,55 @@ public struct BibleReaderView: View {
         .navigationDestination(item: $activeAIPromptEditorDestination) { destination in
             aiPromptEditorDestinationContent(destination)
         }
-        .sheet(item: readerSheetModalBinding) { modal in
-            readerModalContent(modal)
-        }
-        #if os(iOS)
-        .fullScreenCover(item: readerDocumentChooserModalBinding) { modal in
-            readerModalContent(modal)
-        }
-        .fullScreenCover(item: $activeReaderLabelAssignmentRoute) { route in
-            readerLabelAssignmentContent(route)
-        }
-        #else
-        .sheet(item: readerDocumentChooserModalBinding) { modal in
-            readerModalContent(modal)
-        }
-        .sheet(item: $activeReaderLabelAssignmentRoute) { route in
-            readerLabelAssignmentContent(route)
-        }
-        #endif
-        .confirmationDialog(
-            localizedAndroidOverflowString(
-                androidKey: "strongs_mode_title",
-                fallbackKey: nil,
-                default: "Choose Strong's mode"
-            ),
-            isPresented: $showReaderStrongsModeDialog,
-            titleVisibility: .visible
-        ) {
-            strongsModeDialogActions
-        }
-        .alert(
-            String(localized: "error_occurred"),
-            isPresented: Binding(
-                get: { pendingGenericQuickModuleSwitchRetry != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingGenericQuickModuleSwitchRetry = nil
-                    }
+        .overlay {
+            if let modal = activeReaderModal, modal.isDocumentChooserRoute {
+                ReaderAppOwnedOverlay {
+                    readerModalContent(modal)
                 }
-            ),
-            presenting: pendingGenericQuickModuleSwitchRetry
-        ) { retry in
-            Button(String(localized: "retry")) {
-                pendingGenericQuickModuleSwitchRetry = nil
-                selectCommentaryQuickModule(
-                    retry.module,
-                    targetWindowId: retry.targetWindowId
-                )
             }
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingGenericQuickModuleSwitchRetry = nil
+        }
+        .overlay {
+            if let route = activeReaderLabelAssignmentRoute {
+                ReaderAppOwnedOverlay {
+                    readerLabelAssignmentContent(route)
+                }
             }
-        } message: { retry in
-            Text(retry.message)
+        }
+        .overlay {
+            if showReaderStrongsModeDialog {
+                ReaderAppOwnedOverlay {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(localizedAndroidOverflowString(androidKey: "strongs_mode_title", fallbackKey: nil, default: "Choose Strong's mode"))
+                            .font(.headline)
+                        ForEach(StrongsMode.allCases) { mode in
+                            Button {
+                                applyStrongsMode(mode.rawValue)
+                                showReaderStrongsModeDialog = false
+                            } label: {
+                                Label(mode.label, systemImage: displaySettings.strongsMode ?? 0 == mode.rawValue ? "checkmark" : "circle")
+                            }
+                        }
+                        Button(String(localized: "cancel")) { showReaderStrongsModeDialog = false }
+                    }.padding(20)
+                }
+            }
+        }
+        .overlay {
+            if let retry = pendingGenericQuickModuleSwitchRetry {
+                ReaderAppOwnedOverlay {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(String(localized: "error_occurred")).font(.headline)
+                        Text(retry.message).foregroundStyle(.secondary)
+                        HStack { Spacer()
+                            Button(String(localized: "cancel")) { pendingGenericQuickModuleSwitchRetry = nil }
+                            Button(String(localized: "retry")) {
+                                pendingGenericQuickModuleSwitchRetry = nil
+                                selectCommentaryQuickModule(retry.module, targetWindowId: retry.targetWindowId)
+                            }
+                        }
+                    }.padding(20)
+                }
+            }
         }
     }
 
@@ -1008,11 +1035,15 @@ public struct BibleReaderView: View {
         .sheet(isPresented: shareSheetBinding) {
             shareSheetContent
         }
-        .fullScreenCover(item: $refChooserPresentation) { generation in
-            refChooserSheetContent(for: generation)
-                .onDisappear {
-                    handleReferenceChooserDismissal(for: generation)
+        .overlay {
+            if let generation = refChooserPresentation {
+                ReaderAppOwnedOverlay {
+                    refChooserSheetContent(for: generation)
+                        .onDisappear {
+                            handleReferenceChooserDismissal(for: generation)
+                        }
                 }
+            }
         }
         // MARK: - Keyboard Shortcuts (iPad/Mac)
         .background {
@@ -1348,7 +1379,7 @@ public struct BibleReaderView: View {
      - Parameters:
        - bookmarkId: Bookmark whose labels should be edited.
        - windowId: Originating pane identifier, used to refresh the correct Vue document afterward.
-     - Side effects: Captures pane presentation target state and presents a full-screen route.
+     - Side effects: Captures pane presentation target state and presents an app-owned reader overlay.
      - Failure modes: Missing window identifiers fall back to the currently active pane.
      */
     private func presentReaderLabelAssignment(bookmarkId: UUID, from windowId: UUID?) {
@@ -2010,7 +2041,7 @@ public struct BibleReaderView: View {
 
      Side effects:
      - targets the requesting pane, captures progress, cancels any superseded bridge request, and
-       presents the chooser sheet
+       presents the chooser overlay
 
      Failure modes:
      - none; a superseded request is completed as cancelled instead of being orphaned
@@ -2025,14 +2056,14 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Resolves the pending chooser and closes its sheet.
+     Resolves the pending chooser and closes its app-owned overlay.
 
      - Parameters:
        - verseName: JSword short `Verse.name`, or `nil` for cancellation or invalid selection.
-       - generation: Sheet identity that owns the completion attempt.
+     - generation: Overlay identity that owns the completion attempt.
 
      Side effects:
-     - completes the matching bridge request at most once, dismisses only its sheet, and clears its
+     - completes the matching bridge request at most once, dismisses only its overlay, and clears its
        progress snapshot
 
      Failure modes:
@@ -3004,43 +3035,6 @@ public struct BibleReaderView: View {
     /// Closes the currently active coordinator-owned modal.
     private func dismissReaderModal() {
         activeReaderModal = nil
-    }
-
-    /**
-     Filters coordinator-owned modal state into the generic sheet presenter.
-
-     Android `ChooseDocument` routes are full-screen app-owned surfaces, so they are intentionally
-     excluded from the sheet binding and routed through `readerDocumentChooserModalBinding`.
-     */
-    private var readerSheetModalBinding: Binding<ReaderModal?> {
-        Binding(
-            get: {
-                guard activeReaderModal?.isDocumentChooserRoute != true else {
-                    return nil
-                }
-                return activeReaderModal
-            },
-            set: { activeReaderModal = $0 }
-        )
-    }
-
-    /**
-     Filters coordinator-owned modal state into Android-style full-screen chooser presentation.
-
-     Both the all-types drawer route and the category-scoped toolbar route map to Android
-     `ChooseDocument`, with or without a type extra. Keeping them in the same full-screen presenter
-     prevents one entry point from silently preserving the old iOS sheet behavior.
-     */
-    private var readerDocumentChooserModalBinding: Binding<ReaderModal?> {
-        Binding(
-            get: {
-                guard activeReaderModal?.isDocumentChooserRoute == true else {
-                    return nil
-                }
-                return activeReaderModal
-            },
-            set: { activeReaderModal = $0 }
-        )
     }
 
     /// Presents the document-category module picker for a pane-scoped action.

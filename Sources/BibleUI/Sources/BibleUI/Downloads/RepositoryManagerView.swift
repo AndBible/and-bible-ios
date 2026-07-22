@@ -102,54 +102,27 @@ public struct RepositoryManagerView: View {
         .navigationDestination(item: $editorState) { _ in
             sourceEditorView
         }
-        .alert(String(localized: "reset_sources_title", defaultValue: "Reset repositories"), isPresented: $showResetConfirm) {
-            Button(String(localized: "reset", defaultValue: "Reset"), role: .destructive) {
-                resetToDefaults()
+        .overlay {
+            if showResetConfirm {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "reset_sources_title", defaultValue: "Reset repositories"), message: String(localized: "reset_sources_message", defaultValue: "Remove custom repositories and restore the built-in Android source list?"), actions: [
+                    .init(id: "reset", title: String(localized: "reset", defaultValue: "Reset"), style: .destructive) { showResetConfirm = false; resetToDefaults() },
+                    .init(id: "cancel", title: String(localized: "cancel", defaultValue: "Cancel"), style: .normal) { showResetConfirm = false }
+                ])
+            } else if let candidate = deletionCandidate {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "delete_custom_repository_title", defaultValue: "Delete repository"), message: String(format: String(localized: "delete_custom_repository_message_format", defaultValue: "Delete %@?"), candidate.source.name), actions: [
+                    .init(id: "delete", title: String(localized: "delete", defaultValue: "Delete"), style: .destructive) { deletionCandidate = nil; deleteSource(candidate.source) },
+                    .init(id: "cancel", title: String(localized: "cancel", defaultValue: "Cancel"), style: .normal) { deletionCandidate = nil }
+                ])
+            } else if showHelp {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "custom_repositories", defaultValue: "Custom repositories"), message: String(localized: "custom_repositories_help_summary", defaultValue: "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs."), actions: [
+                    .init(id: "wiki", title: String(localized: "open_wiki", defaultValue: "Open Wiki"), style: .normal) { showHelp = false; openURL(Self.customRepositoriesWikiURL) },
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { showHelp = false }
+                ])
+            } else if let message = sourceErrorMessage {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "repository_source_error", defaultValue: "Repository source error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { sourceErrorMessage = nil }
+                ])
             }
-            Button(String(localized: "cancel", defaultValue: "Cancel"), role: .cancel) {}
-        } message: {
-            Text(String(
-                localized: "reset_sources_message",
-                defaultValue: "Remove custom repositories and restore the built-in Android source list?"
-            ))
-        }
-        .alert(item: $deletionCandidate) { candidate in
-            Alert(
-                title: Text(String(
-                    localized: "delete_custom_repository_title",
-                    defaultValue: "Delete repository"
-                )),
-                message: Text(String(
-                    format: String(
-                        localized: "delete_custom_repository_message_format",
-                        defaultValue: "Delete %@?"
-                    ),
-                    candidate.source.name
-                )),
-                primaryButton: .destructive(Text(String(localized: "delete", defaultValue: "Delete"))) {
-                    deleteSource(candidate.source)
-                },
-                secondaryButton: .cancel(Text(String(localized: "cancel", defaultValue: "Cancel")))
-            )
-        }
-        .alert(String(localized: "custom_repositories", defaultValue: "Custom repositories"), isPresented: $showHelp) {
-            Button(String(localized: "open_wiki", defaultValue: "Open Wiki")) {
-                openURL(Self.customRepositoriesWikiURL)
-            }
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
-        } message: {
-            Text(String(
-                localized: "custom_repositories_help_summary",
-                defaultValue: "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs."
-            ))
-        }
-        .alert(
-            String(localized: "repository_source_error", defaultValue: "Repository source error"),
-            isPresented: sourceErrorPresented
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
-        } message: {
-            Text(sourceErrorMessage ?? "")
         }
         .onAppear {
             loadSources()

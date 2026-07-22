@@ -157,21 +157,17 @@ struct AndroidDatabaseBackupImportSheet: View {
                     .disabled(isApplying || selectedSelections.isEmpty)
                 }
             }
-            .alert(
-                String(localized: "android_backup_restore_confirm_title", defaultValue: "Restore selected sections?"),
-                isPresented: $showRestoreConfirmation
-            ) {
-                Button(String(localized: "cancel"), role: .cancel) {}
-                Button(String(localized: "restore"), role: .destructive) {
-                    onApply(selectedSelections)
-                }
-            } message: {
-                Text(
-                    String(
-                        localized: "android_backup_restore_confirm_message",
-                        defaultValue: "Restore replaces the selected local data with the Android backup. Import selections in the same batch will remain non-destructive."
+            .overlay {
+                if showRestoreConfirmation {
+                    AndroidMyDocumentDecisionDialog(
+                        title: String(localized: "android_backup_restore_confirm_title", defaultValue: "Restore selected sections?"),
+                        message: String(localized: "android_backup_restore_confirm_message", defaultValue: "Restore replaces the selected local data with the Android backup. Import selections in the same batch will remain non-destructive."),
+                        actions: [
+                            .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { showRestoreConfirmation = false },
+                            .init(id: "restore", title: String(localized: "restore"), style: .destructive) { showRestoreConfirmation = false; onApply(selectedSelections) }
+                        ]
                     )
-                )
+                }
             }
         }
         .interactiveDismissDisabled(isApplying)

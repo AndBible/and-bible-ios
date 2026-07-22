@@ -134,60 +134,35 @@ struct ReadingProgressView: View {
         .onChange(of: selectedTab) { _, tab in
             persistedTabRawValue = tab.rawValue
         }
-        .alert(item: $memorizationDeletionRequest) { request in
-            Alert(
-                title: Text(""),
-                message: Text(request.message),
-                primaryButton: .default(Text(String(localized: "ok", defaultValue: "OK"))) {
-                    performMemorizationDeletion(request)
-                    memorizationDeletionRequest = nil
-                },
-                secondaryButton: .cancel(Text(String(localized: "cancel", defaultValue: "Cancel")))
-            )
-        }
-        .alert(item: $persistenceFailure) { _ in
-            Alert(
-                title: Text(String(
-                    localized: "reading_progress_save_failed",
-                    defaultValue: "Unable to save progress"
-                )),
-                message: Text(String(
-                    localized: "reading_progress_save_failed_message",
-                    defaultValue: "Your existing progress was left unchanged. Try again."
-                )),
-                dismissButton: .default(Text(String(localized: "ok", defaultValue: "OK")))
-            )
-        }
-        .alert(String(localized: "help", defaultValue: "Help"), isPresented: $isHelpPresented) {
-            Button(String(localized: "ok", defaultValue: "OK"), role: .cancel) {}
-        } message: {
-            Text(String(
-                localized: "help_reading_progress_text",
-                defaultValue: "Your Bible reading and memorization progress at a glance. Mark chapters as read manually with the \"Mark as read\" button, or enable automatic tracking. Memorize exercises also feed into this view."
-            ))
-        }
-        .confirmationDialog(
-            String(localized: "reading_progress_new_cycle", defaultValue: "New cycle"),
-            isPresented: $showNewReadingCycleConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "reading_progress_new_cycle", defaultValue: "New cycle")) {
-                guard applyPendingReadingDeletes() else { return }
-                do {
-                    _ = try readingStore?.startNewCycle()
-                    selectedReadingBookOrdinal = nil
-                    selectedReadingDayMilliseconds = nil
-                    readingRevision += 1
-                } catch {
-                    persistenceFailure = ReadingProgressPersistenceFailure()
-                }
+        .overlay {
+            if let request = memorizationDeletionRequest {
+                ReadingProgressDecisionDialog(title: "", message: request.message, actions: [
+                    .init(id: "confirm", title: String(localized: "ok", defaultValue: "OK")) { performMemorizationDeletion(request); memorizationDeletionRequest = nil },
+                    .init(id: "cancel", title: String(localized: "cancel", defaultValue: "Cancel")) { memorizationDeletionRequest = nil }
+                ])
+            } else if persistenceFailure != nil {
+                ReadingProgressDecisionDialog(title: String(localized: "reading_progress_save_failed", defaultValue: "Unable to save progress"), message: String(localized: "reading_progress_save_failed_message", defaultValue: "Your existing progress was left unchanged. Try again."), actions: [
+                    .init(id: "okay", title: String(localized: "ok", defaultValue: "OK")) { persistenceFailure = nil }
+                ])
+            } else if isHelpPresented {
+                ReadingProgressDecisionDialog(title: String(localized: "help", defaultValue: "Help"), message: String(localized: "help_reading_progress_text", defaultValue: "Your Bible reading and memorization progress at a glance. Mark chapters as read manually with the \"Mark as read\" button, or enable automatic tracking. Memorize exercises also feed into this view."), actions: [
+                    .init(id: "okay", title: String(localized: "ok", defaultValue: "OK")) { isHelpPresented = false }
+                ])
+            } else if showNewReadingCycleConfirmation {
+                ReadingProgressDecisionDialog(title: String(localized: "reading_progress_new_cycle", defaultValue: "New cycle"), message: String(localized: "reading_progress_new_cycle_confirm", defaultValue: "Start a new reading cycle? This will begin tracking your progress from scratch, while preserving your previous cycle's data."), actions: [
+                    .init(id: "newCycle", title: String(localized: "reading_progress_new_cycle", defaultValue: "New cycle")) {
+                        showNewReadingCycleConfirmation = false
+                        guard applyPendingReadingDeletes() else { return }
+                        do {
+                            _ = try readingStore?.startNewCycle()
+                            selectedReadingBookOrdinal = nil
+                            selectedReadingDayMilliseconds = nil
+                            readingRevision += 1
+                        } catch { persistenceFailure = ReadingProgressPersistenceFailure() }
+                    },
+                    .init(id: "cancel", title: String(localized: "cancel", defaultValue: "Cancel")) { showNewReadingCycleConfirmation = false }
+                ])
             }
-            Button(String(localized: "cancel", defaultValue: "Cancel"), role: .cancel) {}
-        } message: {
-            Text(String(
-                localized: "reading_progress_new_cycle_confirm",
-                defaultValue: "Start a new reading cycle? This will begin tracking your progress from scratch, while preserving your previous cycle's data."
-            ))
         }
         .onDisappear {
             _ = applyPendingReadingDeletes()
@@ -1490,18 +1465,14 @@ struct ChapterReadHistoryView: View {
             }
         }
         .navigationTitle(String(localized: "reading_progress_history_title", defaultValue: "Read History"))
-        .alert(item: $persistenceFailure) { _ in
-            Alert(
-                title: Text(String(
-                    localized: "reading_progress_save_failed",
-                    defaultValue: "Unable to save progress"
-                )),
-                message: Text(String(
-                    localized: "reading_progress_save_failed_message",
-                    defaultValue: "Your existing progress was left unchanged. Try again."
-                )),
-                dismissButton: .default(Text(String(localized: "ok", defaultValue: "OK")))
-            )
+        .overlay {
+            if persistenceFailure != nil {
+                ReadingProgressDecisionDialog(
+                    title: String(localized: "reading_progress_save_failed", defaultValue: "Unable to save progress"),
+                    message: String(localized: "reading_progress_save_failed_message", defaultValue: "Your existing progress was left unchanged. Try again."),
+                    actions: [.init(id: "okay", title: String(localized: "ok", defaultValue: "OK")) { persistenceFailure = nil }]
+                )
+            }
         }
         .onDisappear {
             _ = applyPendingDeletes()

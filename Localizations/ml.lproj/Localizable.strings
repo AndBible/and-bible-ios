@@ -622,3 +622,16 @@
 
 /* Android shared translations */
 "doc_type_commentary" = "പാഠ്യപുസ്തകം";
+
+/* Android shared translations */
+"administration" = "കാര്യനിര്‍വഹണം";
+"main_menu" = "മെനു";
+"options_menu_night_mode" = "രാത്രി രീതി";
+"rdg_plan_title" = "വായന പദ്ധതി";
+
+/* Android shared translations */
+"backup_and_restore" = "ബാക്കപ്പ് & പൂര്‍വ്വസ്ഥിതിയിലാക്കുക";
+"compare_description" = "പരിഭാഷ താരതമ്യം ചെയ്യുക";
+"prefs_text_size_sample_text" = "സാമ്പിൾ വാചകം";
+"reset_generic" = "പുനഃരാരംഭിക്കൂ";
+"search_bible_section_group_prompt" = "എവിടെ തിരെയണം";

@@ -88,6 +88,38 @@ private final class RemoteSyncNetworkMonitor {
     }
 }
 
+/** App-root decision surface for lifecycle-owned sync and external-import actions. */
+private struct AppDecisionDialog: View {
+    struct Action: Identifiable {
+        enum Style { case normal, destructive }
+        let id: String
+        let title: String
+        let style: Style
+        let perform: () -> Void
+    }
+
+    let title: String
+    let message: String
+    let actions: [Action]
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.36).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 16) {
+                Text(title).font(.headline)
+                Text(message).foregroundStyle(.secondary)
+                HStack { Spacer(); ForEach(actions) { action in
+                    Button(role: action.style == .destructive ? .destructive : nil, action: action.perform) { Text(action.title) }
+                } }
+            }
+            .padding(20).frame(maxWidth: 500)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(24)
+        }
+        .accessibilityIdentifier("appDecisionDialog")
+    }
+}
+
 /**
  Describes the destructive confirmation step for a lifecycle-time remote-sync decision.
 
@@ -788,165 +820,45 @@ struct AndBibleApp: App {
     /// Scene content plus lifecycle remote-sync prompts.
     private var sceneContentWithRemoteSyncAlerts: some View {
         sceneContent
-            .alert(
-                String(localized: "cloud_sync_title"),
-                isPresented: Binding(
-                    get: { pendingRemoteAdoption != nil },
-                    set: { newValue in
-                        if !newValue {
-                            pendingRemoteAdoption = nil
-                            showNextPendingRemoteAdoptionIfNeeded()
-                        }
-                    }
-                ),
-                presenting: pendingRemoteAdoption
-            ) { candidate in
-                Button(String(localized: "cloud_fetch_and_restore_initial")) {
-                    pendingRemoteConfirmation = .resetLocal(candidate)
-                    pendingRemoteAdoption = nil
+            .overlay {
+                if let candidate = pendingRemoteAdoption {
+                    AppDecisionDialog(title: String(localized: "cloud_sync_title"), message: String(format: String(localized: "overrideBackup"), remoteCategoryContentDescription(for: candidate.category)), actions: [
+                        .init(id: "restore", title: String(localized: "cloud_fetch_and_restore_initial"), style: .normal) { pendingRemoteConfirmation = .resetLocal(candidate); pendingRemoteAdoption = nil },
+                        .init(id: "create", title: String(localized: "cloud_create_new"), style: .normal) { pendingRemoteConfirmation = .resetCloud(candidate); pendingRemoteAdoption = nil },
+                        .init(id: "disable", title: String(localized: "cloud_disable_sync"), style: .normal) { disableRemoteSync(for: candidate.category); pendingRemoteAdoption = nil; showNextPendingRemoteAdoptionIfNeeded() }
+                    ])
+                } else if let confirmation = pendingRemoteConfirmation {
+                    AppDecisionDialog(title: String(localized: "are_you_sure"), message: remoteConfirmationMessage(for: confirmation), actions: [
+                        .init(id: "confirm", title: String(localized: "ok"), style: .destructive) { let captured = confirmation; pendingRemoteConfirmation = nil; Task { await continueRemoteSynchronization(after: captured) } },
+                        .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { disableRemoteSync(for: confirmation.category); pendingRemoteConfirmation = nil; showNextPendingRemoteAdoptionIfNeeded() }
+                    ])
+                } else if let message = remoteSyncErrorMessage {
+                    AppDecisionDialog(title: String(localized: "cloud_sync_title"), message: message, actions: [
+                        .init(id: "okay", title: String(localized: "ok"), style: .normal) { remoteSyncErrorMessage = nil }
+                    ])
                 }
-                Button(String(localized: "cloud_create_new")) {
-                    pendingRemoteConfirmation = .resetCloud(candidate)
-                    pendingRemoteAdoption = nil
-                }
-                Button(String(localized: "cloud_disable_sync"), role: .cancel) {
-                    disableRemoteSync(for: candidate.category)
-                    pendingRemoteAdoption = nil
-                    showNextPendingRemoteAdoptionIfNeeded()
-                }
-            } message: { candidate in
-                Text(
-                    String(
-                        format: String(localized: "overrideBackup"),
-                        remoteCategoryContentDescription(for: candidate.category)
-                    )
-                )
-            }
-            .alert(
-                String(localized: "are_you_sure"),
-                isPresented: Binding(
-                    get: { pendingRemoteConfirmation != nil },
-                    set: { newValue in
-                        if !newValue {
-                            pendingRemoteConfirmation = nil
-                            showNextPendingRemoteAdoptionIfNeeded()
-                        }
-                    }
-                ),
-                presenting: pendingRemoteConfirmation
-            ) { confirmation in
-                Button(String(localized: "ok"), role: .destructive) {
-                    let capturedConfirmation = confirmation
-                    pendingRemoteConfirmation = nil
-                    Task {
-                        await continueRemoteSynchronization(after: capturedConfirmation)
-                    }
-                }
-                Button(String(localized: "cancel"), role: .cancel) {
-                    disableRemoteSync(for: confirmation.category)
-                    pendingRemoteConfirmation = nil
-                    showNextPendingRemoteAdoptionIfNeeded()
-                }
-            } message: { confirmation in
-                Text(remoteConfirmationMessage(for: confirmation))
-            }
-            .alert(
-                String(localized: "cloud_sync_title"),
-                isPresented: Binding(
-                    get: { remoteSyncErrorMessage != nil },
-                    set: { newValue in
-                        if !newValue {
-                            remoteSyncErrorMessage = nil
-                        }
-                    }
-                )
-            ) {
-                Button(String(localized: "ok")) {
-                    remoteSyncErrorMessage = nil
-                }
-            } message: {
-                Text(remoteSyncErrorMessage ?? String(localized: "sync_error"))
             }
     }
 
     /// Scene content plus external document import prompts.
     private var sceneContentWithAlerts: some View {
         sceneContentWithRemoteSyncAlerts
-            .alert(
-                String(localized: "import_from_file", defaultValue: "Import from File"),
-                isPresented: Binding(
-                    get: { pendingExternalDocumentImport != nil },
-                    set: { newValue in
-                        if !newValue {
-                            pendingExternalDocumentImport = nil
-                            showNextPendingExternalDocumentImportIfNeeded()
-                        }
-                    }
-                ),
-                presenting: pendingExternalDocumentImport
-            ) { request in
-                Button(String(localized: "ok")) {
-                    pendingExternalDocumentImport = nil
-                    preflightExternalDocumentImport(request)
+            .overlay {
+                if let request = pendingExternalDocumentImport {
+                    AppDecisionDialog(title: String(localized: "import_from_file", defaultValue: "Import from File"), message: externalDocumentImportConfirmationMessage(for: request), actions: [
+                        .init(id: "confirm", title: String(localized: "ok"), style: .normal) { pendingExternalDocumentImport = nil; preflightExternalDocumentImport(request) },
+                        .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingExternalDocumentImport = nil; showNextPendingExternalDocumentImportIfNeeded() }
+                    ])
+                } else if let confirmation = pendingExternalModuleOverwrite {
+                    AppDecisionDialog(title: String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"), message: externalDocumentOverwriteMessage(for: confirmation.inspection), actions: [
+                        .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingExternalModuleOverwrite = nil; isImportingExternalDocument = false; showNextPendingExternalDocumentImportIfNeeded() },
+                        .init(id: "overwrite", title: String(localized: "yes", defaultValue: "Yes"), style: .destructive) { pendingExternalModuleOverwrite = nil; performExternalDocumentImport(confirmation.request, overwritePolicy: .replaceExisting(confirmation.inspection.overwriteAuthorization)) }
+                    ])
+                } else if let message = externalDocumentImportMessage {
+                    AppDecisionDialog(title: String(localized: "import_from_file", defaultValue: "Import from File"), message: message, actions: [
+                        .init(id: "okay", title: String(localized: "ok"), style: .normal) { externalDocumentImportMessage = nil; showNextPendingExternalDocumentImportIfNeeded() }
+                    ])
                 }
-                Button(String(localized: "cancel"), role: .cancel) {
-                    // The dismissal binding owns cancel queue advancement.
-                }
-            } message: { request in
-                Text(externalDocumentImportConfirmationMessage(for: request))
-            }
-            .alert(
-                String(
-                    localized: "android_module_backup_overwrite_title",
-                    defaultValue: "Overwrite existing module files?"
-                ),
-                isPresented: Binding(
-                    get: { pendingExternalModuleOverwrite != nil },
-                    set: { isPresented in
-                        if !isPresented, pendingExternalModuleOverwrite != nil {
-                            pendingExternalModuleOverwrite = nil
-                            isImportingExternalDocument = false
-                            showNextPendingExternalDocumentImportIfNeeded()
-                        }
-                    }
-                ),
-                presenting: pendingExternalModuleOverwrite
-            ) { confirmation in
-                Button(String(localized: "cancel"), role: .cancel) {
-                    pendingExternalModuleOverwrite = nil
-                    isImportingExternalDocument = false
-                    showNextPendingExternalDocumentImportIfNeeded()
-                }
-                Button(String(localized: "yes", defaultValue: "Yes"), role: .destructive) {
-                    pendingExternalModuleOverwrite = nil
-                    performExternalDocumentImport(
-                        confirmation.request,
-                        overwritePolicy: .replaceExisting(
-                            confirmation.inspection.overwriteAuthorization
-                        )
-                    )
-                }
-            } message: { confirmation in
-                Text(externalDocumentOverwriteMessage(for: confirmation.inspection))
-            }
-            .alert(
-                String(localized: "import_from_file", defaultValue: "Import from File"),
-                isPresented: Binding(
-                    get: { externalDocumentImportMessage != nil },
-                    set: { newValue in
-                        if !newValue {
-                            externalDocumentImportMessage = nil
-                            showNextPendingExternalDocumentImportIfNeeded()
-                        }
-                    }
-                )
-            ) {
-                Button(String(localized: "ok")) {
-                    externalDocumentImportMessage = nil
-                    showNextPendingExternalDocumentImportIfNeeded()
-                }
-            } message: {
-                Text(externalDocumentImportMessage ?? "")
             }
     }
 

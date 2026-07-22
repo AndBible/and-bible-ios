@@ -376,7 +376,7 @@
 "restart_required" = "Restart Required";
 "restart_to_apply_sync" = "Please restart the app to apply sync changes.";
 "disable_sync_title" = "Disable iCloud Sync?";
-"disable_sync" = "Disable Sync";
+"disable_sync" = "停用同步";
 "disable_sync_warning" = "Data already synced to iCloud will remain. New changes will only be saved locally.";
 
 
@@ -695,3 +695,67 @@
 
 /* Android shared translations */
 "bug_report_email_text" = "然後，請選擇你想用的電郵程式 (例如Gmail)，將回報發送至開發團隊。";
+
+/* Android shared translations */
+"administration" = "管理";
+"app_licence_title" = "開源許可";
+"app_name_medium" = "研經工具 (AndBible)";
+"buy_development" = "支持開發工作";
+"contact" = "聯絡";
+"help_and_tips" = "說明與提示";
+"how_to_contribute" = "如何可以貢獻？";
+"information" = "資訊";
+"main_menu" = "選單";
+"options_menu_night_mode" = "夜間模式";
+"questions_title" = "問題？";
+"rate_application" = "評分及評論";
+"rdg_plan_title" = "讀經計劃";
+"send_bug_report_title" = "意見或回報錯誤";
+"strongs_mode_title" = "還擇Strong's模式";
+"studypads" = "研習筆記";
+"switch_to_workspace" = "工作區";
+"tell_friend_title" = "分享給朋友";
+"toggle_fullscreen" = "全螢幕";
+"window_pinning_menutitle" = "視窗釘選";
+
+/* Android shared translations */
+"backup_and_restore" = "備份及回復";
+"backup_database" = "資料庫";
+"backup_database_info" = "書籤、標籤、筆記、研習筆記、讀經計劃、工作區等";
+"backup_document_info" = "聖經、註釋、字典、地圖等。";
+"backup_documents" = "文件";
+"backup_to" = "備份至...";
+"book" = "書卷";
+"bug_report" = "在主選單傳送錯誤回報";
+"bug_report_email_title" = "透過電郵發送問題回報";
+"compare_description" = "譯本比較";
+"db_bookmarks" = "書籤、我的筆記、標籤及研習筆記";
+"db_repositories" = "儲存庫及相關設定";
+"document" = "文件";
+"font_size_pt" = "%d 點";
+"font_size_title" = "字型大小";
+"history_for" = "歷史 (%1$@: 視窗 %2$d)";
+"how_to_help" = "請閱讀你可以幫手的地方";
+"line_spacing_title" = "行距";
+"my_notes_description" = "書籤已附帶使用者的筆記";
+"pref_font_family_label" = "字型家族";
+"prefs_in_window_bible_bookmark_modal_buttons_title" = "一鍵功能 (聖經)";
+"prefs_in_window_bookmark_modal_buttons_description" = "點擊文字時，將會顯示一鍵功能視窗。你想顯示哪些功能按鍵？";
+"prefs_in_window_gen_bookmark_modal_buttons_title" = "一鍵功能 (其他)";
+"prefs_line_spacing_pt" = "行距%1.1fx";
+"prefs_text_size_sample_text" = "示範文字";
+"prefs_top_margin_title" = "頂邊界";
+"proceed_google_play" = "到 Google Play";
+"rate_message3" = "如果程式中欠缺某些文本，%@.";
+"rate_message4" = "此程式的開發者並不負責維護各文件。";
+"rate_message5" = "鼓勵及詳細的評論將有效地幫助 And Bible 開源計劃。謝謝你";
+"rate_message6" = "留下負面評論前，請先參看以下訊息：";
+"rate_title" = "評分及評論此app";
+"reset_generic" = "重設";
+"search_bible_section_group_prompt" = "搜尋範圍";
+"send_email" = "傳送電郵至開發者";
+"synchronizing" = "同步中...";
+"text_maintainers" = "請回報問題至文本的維護者";
+"type_text_or_bible_reference" = "輸入文字或聖經參考";
+"unlock_info" = "加密模組解鎖資訊";
+"warn_bad_document" = "警告：此文件 (部份) 質素低下。";

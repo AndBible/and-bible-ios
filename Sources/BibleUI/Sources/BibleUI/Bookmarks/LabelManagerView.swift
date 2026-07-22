@@ -208,12 +208,20 @@ public struct LabelManagerView: View {
                 .accessibilityIdentifier("labelManagerAddButton")
             }
         }
-        .alert(String(localized: "new_label"), isPresented: $showNewLabel) {
-            TextField(String(localized: "label_name"), text: $newLabelName)
-                .accessibilityIdentifier("labelManagerNewLabelNameField")
-            Button(String(localized: "create")) { createLabel() }
-                .accessibilityIdentifier("labelManagerCreateButton")
-            Button(String(localized: "cancel"), role: .cancel) { newLabelName = "" }
+        .overlay {
+            if showNewLabel {
+                AndroidLabelNameDialog(
+                    name: $newLabelName,
+                    onCreate: {
+                        createLabel()
+                        showNewLabel = false
+                    },
+                    onCancel: {
+                        newLabelName = ""
+                        showNewLabel = false
+                    }
+                )
+            }
         }
         .navigationDestination(item: $editingSelection) { selection in
             labelEditDestination(for: selection.id)

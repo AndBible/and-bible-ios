@@ -21,36 +21,68 @@ struct AIReaderCoordinatorHost: View {
     Color.clear
       .frame(width: 0, height: 0)
       .accessibilityHidden(true)
-      .sheet(item: $coordinator.presentation) { route in
-        destination(for: route)
+      .overlay {
+        switch coordinator.presentation {
+        case .promptChooser:
+          AIReaderAppOwnedOverlay {
+            AIReaderPromptChooserView(coordinator: coordinator)
+          }
+        case .promptPreparation:
+          AIReaderAppOwnedOverlay {
+            AIReaderPromptPreparationView(coordinator: coordinator)
+          }
+        case .run:
+          AIReaderAppOwnedOverlay(alignment: .bottom) {
+            AIReaderRunActivityView(coordinator: coordinator)
+          }
+        case .regeneration:
+          AIReaderAppOwnedOverlay {
+            AIReaderRegenerationView(coordinator: coordinator)
+          }
+        case .documentChooser:
+          AIReaderAppOwnedOverlay {
+            AIReaderDocumentMarkerChooserView(coordinator: coordinator)
+          }
+        case .promptEditor(_, let promptID):
+          Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear {
+              AIReaderPromptEditorHandoff.perform(
+                coordinator: coordinator,
+                promptID: promptID,
+                onPresent: onPresentPromptEditor
+              )
+            }
+        case nil:
+          EmptyView()
+        }
       }
   }
+}
 
-  /** Builds the exact native surface associated with a coordinator route. */
-  @ViewBuilder
-  private func destination(for route: AIReaderPresentationRoute) -> some View {
-    switch route {
-    case .promptChooser:
-      AIReaderPromptChooserView(coordinator: coordinator)
-    case .promptPreparation:
-      AIReaderPromptPreparationView(coordinator: coordinator)
-    case .run:
-      AIReaderRunActivityView(coordinator: coordinator)
-    case .regeneration:
-      AIReaderRegenerationView(coordinator: coordinator)
-    case .documentChooser:
-      AIReaderDocumentMarkerChooserView(coordinator: coordinator)
-    case .promptEditor(_, let promptID):
-      Color.clear
-        .frame(width: 0, height: 0)
-        .onAppear {
-          AIReaderPromptEditorHandoff.perform(
-            coordinator: coordinator,
-            promptID: promptID,
-            onPresent: onPresentPromptEditor
-          )
-        }
+/// Draws an Android dialog/activity surface in the reader hierarchy without iOS sheet ownership.
+private struct AIReaderAppOwnedOverlay<Content: View>: View {
+  let alignment: Alignment
+  @ViewBuilder let content: Content
+
+  init(alignment: Alignment = .center, @ViewBuilder content: () -> Content) {
+    self.alignment = alignment
+    self.content = content()
+  }
+
+  var body: some View {
+    ZStack(alignment: alignment) {
+      Color.black.opacity(0.36)
+        .ignoresSafeArea()
+      content
+        .frame(maxWidth: 680, maxHeight: alignment == .bottom ? 680 : 760)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(radius: 16)
+        .padding(24)
     }
+    .ignoresSafeArea()
+    .accessibilityIdentifier("androidAIReaderAppOwnedOverlay")
   }
 }
 
@@ -78,7 +110,6 @@ enum AIReaderPromptEditorHandoff {
 
 /// Grouped prompt chooser matching Android's context-filtered action dialog.
 private struct AIReaderPromptChooserView: View {
-  @Environment(\.dismiss) private var dismiss
   @Bindable var coordinator: AIReaderRunCoordinator
 
   var body: some View {
@@ -119,7 +150,6 @@ private struct AIReaderPromptChooserView: View {
         ToolbarItem(placement: .cancellationAction) {
           Button(String(localized: "cancel", defaultValue: "Cancel")) {
             coordinator.presentation = nil
-            dismiss()
           }
         }
       }
@@ -129,7 +159,6 @@ private struct AIReaderPromptChooserView: View {
 
 /// Collects optional specification and model selection before a prompt starts.
 private struct AIReaderPromptPreparationView: View {
-  @Environment(\.dismiss) private var dismiss
   @Bindable var coordinator: AIReaderRunCoordinator
 
   var body: some View {
@@ -175,7 +204,6 @@ private struct AIReaderPromptPreparationView: View {
         ToolbarItem(placement: .cancellationAction) {
           Button(String(localized: "cancel", defaultValue: "Cancel")) {
             coordinator.presentation = nil
-            dismiss()
           }
         }
         ToolbarItem(placement: .confirmationAction) {
@@ -202,7 +230,6 @@ private struct AIReaderPromptPreparationView: View {
 
 /// Visible activity log and permission suspension surface for one active run.
 private struct AIReaderRunActivityView: View {
-  @Environment(\.dismiss) private var dismiss
   @Bindable var coordinator: AIReaderRunCoordinator
   @State private var permanentPermissionConfirmationID: UUID?
   @State private var rawLogSnapshot: AIReaderLiveRawLogSnapshot?
@@ -274,20 +301,17 @@ private struct AIReaderRunActivityView: View {
           } else {
             Button(String(localized: "done", defaultValue: "Done")) {
               coordinator.dismissCompletedRun()
-              dismiss()
             }
           }
         }
       }
-      #if os(iOS)
-        .fullScreenCover(item: $rawLogSnapshot) { snapshot in
-          AIReaderLiveRawLogView(snapshot: snapshot)
+      .overlay {
+        if let rawLogSnapshot {
+          AIReaderAppOwnedOverlay {
+            AIReaderLiveRawLogView(snapshot: rawLogSnapshot)
+          }
         }
-      #else
-        .sheet(item: $rawLogSnapshot) { snapshot in
-          AIReaderLiveRawLogView(snapshot: snapshot)
-        }
-      #endif
+      }
     }
   }
 
@@ -433,7 +457,6 @@ private struct AIReaderRunActivityView: View {
 
 /// Collects Android's keep/fresh/instruction/model regeneration choices.
 private struct AIReaderRegenerationView: View {
-  @Environment(\.dismiss) private var dismiss
   @Bindable var coordinator: AIReaderRunCoordinator
 
   var body: some View {
@@ -484,7 +507,6 @@ private struct AIReaderRegenerationView: View {
         ToolbarItem(placement: .cancellationAction) {
           Button(String(localized: "cancel", defaultValue: "Cancel")) {
             coordinator.presentation = nil
-            dismiss()
           }
         }
         ToolbarItem(placement: .confirmationAction) {
@@ -506,7 +528,6 @@ private struct AIReaderRegenerationView: View {
 
 /// Chooses one generated My Documents destination when a source has several markers.
 private struct AIReaderDocumentMarkerChooserView: View {
-  @Environment(\.dismiss) private var dismiss
   @Bindable var coordinator: AIReaderRunCoordinator
 
   var body: some View {
@@ -514,7 +535,6 @@ private struct AIReaderDocumentMarkerChooserView: View {
       List(coordinator.documentMarkers) { marker in
         Button {
           coordinator.openDocumentMarker(marker)
-          dismiss()
         } label: {
           VStack(alignment: .leading, spacing: 3) {
             Text(marker.title)
@@ -535,7 +555,6 @@ private struct AIReaderDocumentMarkerChooserView: View {
         ToolbarItem(placement: .cancellationAction) {
           Button(String(localized: "cancel", defaultValue: "Cancel")) {
             coordinator.presentation = nil
-            dismiss()
           }
         }
       }

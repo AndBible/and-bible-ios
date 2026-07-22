@@ -219,91 +219,31 @@ public struct SyncSettingsView: View {
             }
         }
         #endif
-        .alert(
-            String(localized: "cloud_sync_title"),
-            isPresented: Binding(
-                get: { pendingRemoteAdoption != nil },
-                set: { newValue in
-                    if !newValue {
-                        pendingRemoteAdoption = nil
-                    }
-                }
-            ),
-            presenting: pendingRemoteAdoption
-        ) { candidate in
-            Button(String(localized: "cloud_fetch_and_restore_initial")) {
-                pendingRemoteConfirmation = .resetLocal(candidate)
-                pendingRemoteAdoption = nil
+        .overlay {
+            if let candidate = pendingRemoteAdoption {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "cloud_sync_title"), message: String(format: String(localized: "overrideBackup"), remoteCategoryContentDescription(for: candidate.category)), actions: [
+                    .init(id: "restore", title: String(localized: "cloud_fetch_and_restore_initial"), style: .normal) { pendingRemoteConfirmation = .resetLocal(candidate); pendingRemoteAdoption = nil },
+                    .init(id: "create", title: String(localized: "cloud_create_new"), style: .normal) { pendingRemoteConfirmation = .resetCloud(candidate); pendingRemoteAdoption = nil },
+                    .init(id: "disable", title: String(localized: "cloud_disable_sync"), style: .normal) { disableRemoteSync(for: candidate.category); pendingRemoteAdoption = nil }
+                ])
             }
-            Button(String(localized: "cloud_create_new")) {
-                pendingRemoteConfirmation = .resetCloud(candidate)
-                pendingRemoteAdoption = nil
-            }
-            Button(String(localized: "cloud_disable_sync"), role: .cancel) {
-                disableRemoteSync(for: candidate.category)
-                pendingRemoteAdoption = nil
-            }
-        } message: { candidate in
-            Text(
-                String(
-                    format: String(localized: "overrideBackup"),
-                    remoteCategoryContentDescription(for: candidate.category)
-                )
-            )
         }
-        .alert(
-            String(localized: "are_you_sure"),
-            isPresented: Binding(
-                get: { pendingRemoteConfirmation != nil },
-                set: { newValue in
-                    if !newValue {
-                        pendingRemoteConfirmation = nil
-                    }
-                }
-            ),
-            presenting: pendingRemoteConfirmation
-        ) { confirmation in
-            Button(String(localized: "ok"), role: .destructive) {
-                let capturedConfirmation = confirmation
-                pendingRemoteConfirmation = nil
-                Task {
-                    await continueRemoteSynchronization(after: capturedConfirmation)
-                }
+        .overlay {
+            if let confirmation = pendingRemoteConfirmation {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "are_you_sure"), message: remoteConfirmationMessage(for: confirmation), actions: [
+                    .init(id: "confirm", title: String(localized: "ok"), style: .destructive) { let captured = confirmation; pendingRemoteConfirmation = nil; Task { await continueRemoteSynchronization(after: captured) } },
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { disableRemoteSync(for: confirmation.category); pendingRemoteConfirmation = nil }
+                ])
+            } else if showDisableConfirmation {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "disable_sync_title"), message: String(localized: "disable_sync_warning"), actions: [
+                    .init(id: "disable", title: String(localized: "disable_sync"), style: .destructive) { showDisableConfirmation = false; syncService.toggleSync() },
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { showDisableConfirmation = false }
+                ])
+            } else if let message = remoteSyncErrorMessage {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "cloud_sync_title"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "ok"), style: .normal) { remoteSyncErrorMessage = nil }
+                ])
             }
-            Button(String(localized: "cancel"), role: .cancel) {
-                disableRemoteSync(for: confirmation.category)
-                pendingRemoteConfirmation = nil
-            }
-        } message: { confirmation in
-            Text(remoteConfirmationMessage(for: confirmation))
-        }
-        .confirmationDialog(
-            String(localized: "disable_sync_title"),
-            isPresented: $showDisableConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "disable_sync"), role: .destructive) {
-                syncService.toggleSync()
-            }
-        } message: {
-            Text(String(localized: "disable_sync_warning"))
-        }
-        .alert(
-            String(localized: "cloud_sync_title"),
-            isPresented: Binding(
-                get: { remoteSyncErrorMessage != nil },
-                set: { newValue in
-                    if !newValue {
-                        remoteSyncErrorMessage = nil
-                    }
-                }
-            )
-        ) {
-            Button(String(localized: "ok")) {
-                remoteSyncErrorMessage = nil
-            }
-        } message: {
-            Text(remoteSyncErrorMessage ?? String(localized: "sync_error"))
         }
     }
 

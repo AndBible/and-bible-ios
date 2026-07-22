@@ -330,15 +330,15 @@ final class BibleReaderModulePickerTests: XCTestCase {
     }
 
     /**
-     Guards Android `ChooseDocument` routes against regressing to the iOS sheet host.
+     Guards Android `ChooseDocument` routes against regressing to an iOS presentation host.
 
      Android opens both the all-types chooser and category-scoped chooser as an app-owned
      full-screen activity. The iOS coordinator state is private, so this source-level contract
      checks the presentation boundary directly: document chooser routes must be filtered into a
-     full-screen cover, the generic reader-modal sheet must receive only non-chooser routes, and
-     the chooser view itself must not carry medium/large sheet detents.
+     reader-owned overlay, the chooser view itself must not carry medium/large sheet detents, and
+     neither reader route may return to a native sheet or full-screen cover.
      */
-    func testBibleReaderDocumentChooserRoutesUseFullScreenCoverInsteadOfSheetDetents() throws {
+    func testBibleReaderDocumentChooserRoutesUseAppOwnedOverlayInsteadOfNativePresentation() throws {
         let readerSource = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
         )
@@ -346,11 +346,11 @@ final class BibleReaderModulePickerTests: XCTestCase {
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
         )
 
-        XCTAssertTrue(readerSource.contains("var isDocumentChooserRoute: Bool"))
-        XCTAssertTrue(readerSource.contains("case .modulePicker, .chooseDocument:"))
-        XCTAssertTrue(readerSource.contains(".sheet(item: readerSheetModalBinding)"))
-        XCTAssertTrue(readerSource.contains(".fullScreenCover(item: readerDocumentChooserModalBinding)"))
-        XCTAssertFalse(readerSource.contains(".sheet(item: $activeReaderModal)"))
+        XCTAssertTrue(readerSource.contains("ReaderAppOwnedOverlay"))
+        XCTAssertTrue(readerSource.contains("if let modal = activeReaderModal"))
+        XCTAssertFalse(readerSource.contains("readerSheetModalBinding"))
+        XCTAssertFalse(readerSource.contains("readerDocumentChooserModalBinding"))
+        XCTAssertFalse(readerSource.contains(".fullScreenCover(item: $refChooserPresentation)"))
         XCTAssertFalse(pickerSource.contains(".presentationDetents([.medium, .large])"))
     }
 

@@ -484,11 +484,12 @@ private struct SpeakVerseRangeEditor: View {
                 Button(String(localized: "cancel")) { dismiss() }
             }
         }
-        .alert(
-            String(localized: "speak_ending_verse_must_be_later"),
-            isPresented: $rejectedSelection
-        ) {
-            Button(String(localized: "ok"), role: .cancel) {}
+        .overlay {
+            if rejectedSelection {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "speak_ending_verse_must_be_later"), message: nil, actions: [
+                    .init(id: "okay", title: String(localized: "ok"), style: .normal) { rejectedSelection = false }
+                ])
+            }
         }
     }
 

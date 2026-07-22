@@ -140,16 +140,12 @@ public struct ReadingPlanListView: View {
             navigateToPendingStartedPlan()
         }
         .onAppear(perform: recoverDefinitionsAndReconcileSelection)
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { definitionRecoveryError != nil },
-                set: { if !$0 { definitionRecoveryError = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
-        } message: {
-            Text(definitionRecoveryError ?? "")
+        .overlay {
+            if let message = definitionRecoveryError {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { definitionRecoveryError = nil }
+                ])
+            }
         }
     }
 
@@ -583,10 +579,12 @@ private struct AvailablePlansView: View {
         ) { result in
             handleCustomPlanImport(result)
         }
-        .alert(String(localized: "error", defaultValue: "Error"), isPresented: $showDuplicateUserPlanWarning) {
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
-        } message: {
-            Text(duplicateUserPlanWarningMessage)
+        .overlay {
+            if showDuplicateUserPlanWarning {
+                AndroidMyDocumentDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: duplicateUserPlanWarningMessage, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { showDuplicateUserPlanWarning = false }
+                ])
+            }
         }
     }
 

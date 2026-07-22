@@ -25,8 +25,8 @@ class BookmarkLabelStudyPadParityGuardrailsTests(unittest.TestCase):
         self.assertNotIn(".sheet(isPresented: $showLabelManager)", source)
         self.assertNotIn(".sheet(item: $editingLabelsBookmarkId)", source)
 
-    def test_reader_webview_label_assignment_uses_reader_owned_full_screen_route(self) -> None:
-        """WebView assign-label requests should route like Android ManageLabels, not pane sheets."""
+    def test_reader_webview_label_assignment_uses_reader_owned_overlay(self) -> None:
+        """WebView assign-label requests should route like Android ManageLabels, not iOS covers."""
         reader_source = (
             REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
         ).read_text(encoding="utf-8")
@@ -36,13 +36,33 @@ class BookmarkLabelStudyPadParityGuardrailsTests(unittest.TestCase):
 
         self.assertIn("ReaderLabelAssignmentRoute", reader_source)
         self.assertIn("activeReaderLabelAssignmentRoute", reader_source)
-        self.assertIn(".fullScreenCover(item: $activeReaderLabelAssignmentRoute)", reader_source)
+        self.assertIn("ReaderAppOwnedOverlay", reader_source)
+        self.assertNotIn(".fullScreenCover(item: $activeReaderLabelAssignmentRoute)", reader_source)
+        self.assertNotIn(".sheet(item: $activeReaderLabelAssignmentRoute)", reader_source)
         self.assertIn("refreshBookmarkInVueJS", reader_source)
         self.assertIn("onAssignLabels", pane_source)
         self.assertNotIn("pendingLabelBookmarkId", pane_source)
         self.assertNotIn("activeReaderLabelAssignmentRoute", pane_source)
         self.assertNotIn(".sheet(item: $pendingLabelBookmarkId)", pane_source)
         self.assertNotIn("LabelAssignmentView(", pane_source)
+
+    def test_new_label_prompts_use_the_shared_app_owned_dialog(self) -> None:
+        """ManageLabels creation must not regress to a system SwiftUI alert."""
+        assignment_source = (
+            REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bookmarks/LabelAssignmentView.swift"
+        ).read_text(encoding="utf-8")
+        manager_source = (
+            REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bookmarks/LabelManagerView.swift"
+        ).read_text(encoding="utf-8")
+        dialog_source = (
+            REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bookmarks/AndroidLabelNameDialog.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn(".alert(", assignment_source)
+        self.assertNotIn(".alert(", manager_source)
+        self.assertIn("AndroidLabelNameDialog", assignment_source)
+        self.assertIn("AndroidLabelNameDialog", manager_source)
+        self.assertIn('accessibilityIdentifier("androidLabelNameDialog")', dialog_source)
 
     def test_unused_native_studypad_sheet_route_is_removed(self) -> None:
         """StudyPad add/edit must stay in the WebView document route, not the old native sheet."""

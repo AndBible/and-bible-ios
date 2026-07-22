@@ -779,47 +779,14 @@ public struct ModuleBrowserView: View {
      */
     private var moduleAccessPresentedDownloadsScreen: some View {
         documentManagementPresentedDownloadsScreen
-        .alert(
-            pendingUnlockModule.map(ModuleUnlockActionCoordinator.promptTitle(for:)) ?? "",
-            isPresented: Binding(
-                get: { pendingUnlockModule != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        clearUnlockPrompt()
-                    }
-                }
-            ),
-            presenting: pendingUnlockModule
-        ) { module in
-            TextField(
-                String(localized: "passphrase", defaultValue: "Passphrase"),
-                text: $unlockCipherKey
-            )
-            Button(String(localized: "unlock", defaultValue: "Unlock")) {
-                attemptUnlock(module)
+        .overlay {
+            if let module = pendingUnlockModule {
+                ModulePickerUnlockDialog(title: ModuleUnlockActionCoordinator.promptTitle(for: module), message: unlockFailureMessage ?? String(localized: "enter_module_passphrase", defaultValue: "Enter the module passphrase."), cipherKey: $unlockCipherKey, showUnlockInfo: !module.aboutMetadata.unlockInfo.isEmpty, onUnlock: { attemptUnlock(module) }, onShowUnlockInfo: { showUnlockInformation(for: module) }, onCancel: clearUnlockPrompt)
+            } else if showDownloadErrors {
+                ModulePickerDecisionDialog(title: String(localized: "download_errors", defaultValue: "Download errors"), message: downloadErrors.joined(separator: "\n"), actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), role: nil) { showDownloadErrors = false }
+                ])
             }
-            .disabled(unlockCipherKey.isEmpty)
-            if !module.aboutMetadata.unlockInfo.isEmpty {
-                Button(String(localized: "show_unlock_info", defaultValue: "Module & unlock info")) {
-                    showUnlockInformation(for: module)
-                }
-            }
-            Button(String(localized: "cancel"), role: .cancel) {
-                clearUnlockPrompt()
-            }
-        } message: { _ in
-            Text(
-                unlockFailureMessage
-                    ?? String(localized: "enter_module_passphrase", defaultValue: "Enter the module passphrase.")
-            )
-        }
-        .alert(
-            String(localized: "download_errors", defaultValue: "Download errors"),
-            isPresented: $showDownloadErrors
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
-        } message: {
-            Text(downloadErrors.joined(separator: "\n"))
         }
     }
 
@@ -832,50 +799,17 @@ public struct ModuleBrowserView: View {
      */
     private var importFeedbackPresentedDownloadsScreen: some View {
         moduleAccessPresentedDownloadsScreen
-        .alert(
-            String(
-                localized: "android_module_backup_overwrite_title",
-                defaultValue: "Overwrite existing module files?"
-            ),
-            isPresented: Binding(
-                get: { pendingLocalModuleOverwrite != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingLocalModuleOverwrite = nil
-                    }
-                }
-            ),
-            presenting: pendingLocalModuleOverwrite
-        ) { confirmation in
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingLocalModuleOverwrite = nil
+        .overlay {
+            if let confirmation = pendingLocalModuleOverwrite {
+                ModulePickerDecisionDialog(title: String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"), message: Self.localModuleOverwriteMessage(confirmation.inspection), actions: [
+                    .init(id: "cancel", title: String(localized: "cancel"), role: nil) { pendingLocalModuleOverwrite = nil },
+                    .init(id: "overwrite", title: String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) { pendingLocalModuleOverwrite = nil; importExternalDocument(confirmation.request, overwritePolicy: .replaceExisting(confirmation.inspection.overwriteAuthorization)) }
+                ])
+            } else if let message = externalDocumentImportMessage {
+                ModulePickerDecisionDialog(title: String(localized: "install_zip", defaultValue: "Load Documents From Files"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), role: nil) { externalDocumentImportMessage = nil }
+                ])
             }
-            Button(String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) {
-                pendingLocalModuleOverwrite = nil
-                importExternalDocument(
-                    confirmation.request,
-                    overwritePolicy: .replaceExisting(
-                        confirmation.inspection.overwriteAuthorization
-                    )
-                )
-            }
-        } message: { confirmation in
-            Text(Self.localModuleOverwriteMessage(confirmation.inspection))
-        }
-        .alert(
-            String(localized: "install_zip", defaultValue: "Load Documents From Files"),
-            isPresented: Binding(
-                get: { externalDocumentImportMessage != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        externalDocumentImportMessage = nil
-                    }
-                }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
-        } message: {
-            Text(externalDocumentImportMessage ?? "")
         }
     }
 
@@ -888,57 +822,24 @@ public struct ModuleBrowserView: View {
      */
     private var downloadActionPresentedDownloadsScreen: some View {
         importFeedbackPresentedDownloadsScreen
-        .alert(
-            pendingDownloadConfirmation?.title ?? "",
-            isPresented: Binding(
-                get: { pendingDownloadConfirmation != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingDownloadConfirmation = nil
-                    }
-                }
-            ),
-            presenting: pendingDownloadConfirmation
-        ) { confirmation in
-            Button(confirmation.confirmButtonTitle) {
-                pendingDownloadConfirmation = nil
-                installModule(confirmation.module)
-            }
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingDownloadConfirmation = nil
-            }
-        } message: { confirmation in
-            Text(confirmation.message)
-        }
-        .alert(
-            pendingRowActionConfirmation?.title ?? "",
-            isPresented: Binding(
-                get: { pendingRowActionConfirmation != nil },
-                set: { isPresented in
-                    if !isPresented {
+        .overlay {
+            if let confirmation = pendingDownloadConfirmation {
+                ModulePickerDecisionDialog(title: confirmation.title, message: confirmation.message, actions: [
+                    .init(id: "install", title: confirmation.confirmButtonTitle, role: nil) { pendingDownloadConfirmation = nil; installModule(confirmation.module) },
+                    .init(id: "cancel", title: String(localized: "cancel"), role: nil) { pendingDownloadConfirmation = nil }
+                ])
+            } else if let confirmation = pendingRowActionConfirmation {
+                ModulePickerDecisionDialog(title: confirmation.title, message: confirmation.message, actions: [
+                    .init(id: "confirm", title: confirmation.kind == .uninstall ? String(localized: "uninstall") : String(localized: "delete_module_index", defaultValue: "Delete Index"), role: .destructive) {
+                        switch confirmation.kind {
+                        case .uninstall: uninstallModuleAfterCancellingInstall(confirmation.moduleName)
+                        case .deleteIndex: deleteModuleIndex(confirmation.moduleName)
+                        }
                         pendingRowActionConfirmation = nil
-                    }
-                }
-            ),
-            presenting: pendingRowActionConfirmation
-        ) { confirmation in
-            switch confirmation.kind {
-            case .uninstall:
-                Button(String(localized: "uninstall"), role: .destructive) {
-                    uninstallModuleAfterCancellingInstall(confirmation.moduleName)
-                    pendingRowActionConfirmation = nil
-                }
-            case .deleteIndex:
-                Button(String(localized: "delete_module_index", defaultValue: "Delete Index"), role: .destructive) {
-                    deleteModuleIndex(confirmation.moduleName)
-                    pendingRowActionConfirmation = nil
-                }
+                    },
+                    .init(id: "cancel", title: String(localized: "cancel"), role: nil) { pendingRowActionConfirmation = nil }
+                ])
             }
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingRowActionConfirmation = nil
-            }
-        } message: { confirmation in
-            Text(confirmation.message)
         }
     }
 

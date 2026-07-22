@@ -393,12 +393,20 @@ struct LabelAssignmentView: View {
                 .accessibilityIdentifier("labelAssignmentDoneButton")
             }
         }
-        .alert("New Label", isPresented: $showNewLabel) {
-            TextField("Label name", text: $newLabelName)
-                .accessibilityIdentifier("labelManagerNewLabelNameField")
-            Button("Create") { createAndAssignLabel() }
-                .accessibilityIdentifier("labelManagerCreateButton")
-            Button("Cancel", role: .cancel) { newLabelName = "" }
+        .overlay {
+            if showNewLabel {
+                AndroidLabelNameDialog(
+                    name: $newLabelName,
+                    onCreate: {
+                        createAndAssignLabel()
+                        showNewLabel = false
+                    },
+                    onCancel: {
+                        newLabelName = ""
+                        showNewLabel = false
+                    }
+                )
+            }
         }
         .onAppear { loadAssignedLabels() }
     }

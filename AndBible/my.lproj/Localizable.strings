@@ -687,3 +687,51 @@
 
 /* Android shared translations */
 "doc_type_commentary" = "အနက်ဖွင့်ကျမ်း";
+
+/* Android shared translations */
+"administration" = "အုပ်ချုပ်မှု";
+"app_licence_title" = "လိုင်စင်အကြောင်းအရာကို ဖွင့်ပါ";
+"contact" = "အဆက်အစပ်";
+"help_and_tips" = "& ကိုကူညီပါ; အကြံပြုချက်များ";
+"how_to_contribute" = "ဘယ်လိုပံ့ပိုးကူညီမလဲ။";
+"information" = "သတင်းအချက်အလက်";
+"main_menu" = "မီနူး";
+"options_menu_night_mode" = "ညအသွင်";
+"questions_title" = "မေးခွန်းမေးလိုပါသလား။";
+"rate_application" = "& အားအဆင့်သတ်မှတ်ပါ၊ သုံးသပ်ပါ";
+"rdg_plan_title" = "စာဖတ်ခြင်း အစီအစဉ်";
+"send_bug_report_title" = "တုံ့ပြန်ချက် / စက်ချို့ယွင်းမှု သတင်းပို့ခြင်း";
+"strongs_mode_title" = "Strong အသွင်အား ရွေးချယ်ပါ";
+"studypads" = "လေ့လာရေးစာရွက်များ";
+"switch_to_workspace" = "အလုပ်ခွင်များ";
+"tell_friend_title" = "သူငယ်ချင်းတစ်ယောက်ထံ အကြံပြုထောက်ခံပေးပါ";
+"toggle_fullscreen" = "မျက်နှာပြင်အပြည့်";
+"window_pinning_menutitle" = "ဝင်းဒိုးတွင် တွဲထားခြင်း";
+
+/* Android shared translations */
+"backup_and_restore" = "& အားအရန်ဖိုင် ပြုလုပ်ပါ; ပြန်ယူပါ";
+"backup_backup_message" = "ဖုန်း သို့မဟုတ် အခြားနေရာများဖြစ်တဲ့ ဝေမျှ လုပ်ဆောင်ချက် (email, Google Drive etc.)တို့တွင် အရန်ဖိုင် လုပ်လိုပါသလား။";
+"backup_backup_title" = "ဘယ်နေရာတွင် အရန်ဖိုင်လုပ်မည်နည်း။";
+"backup_phone_storage" = "ဖုန်းသိုလှောင်ပမာဏ";
+"book" = "စာအုပ်";
+"bug_report" = "စက်ချို့ယွင်းမှုအတွက် သတင်းပို့ပါ (ဗဟိုမီနူးမှ)";
+"compare_description" = "ဘာသာပြန်များကို နှိုင်းယှဉ်ပါ";
+"document" = "မှတ်တမ်း";
+"font_size_title" = "ဖောင့်စာလုံး အရွယ်အစား";
+"how_to_help" = "ကျွန်တော်တို့အား အကူအညီပေးနိုင်ရန် ကျေးဇူးပြုပြီး ဖတ်ပေးပါ";
+"line_spacing_title" = "စာကြောင်းအကွာအဝေး";
+"my_notes_description" = "အသုံးပြုသူမှတည်းဖြတ်နိုင်သည့် စာညှပ်တွင် ဖိုင်တွဲထားသည့် မှတ်စုများ";
+"pref_font_family_label" = "စာလုံးဖောင့် မိသားစု";
+"prefs_line_spacing_pt" = "စာကြောင်းအကွာအဝေး %1.1f x";
+"prefs_text_size_sample_text" = "နမူနာ စာသား";
+"prefs_top_margin_title" = "အပေါ်မာဂျင်";
+"proceed_google_play" = "Google Play သို့ဆက်သွားပါ";
+"rate_message3" = "အက်ပ်တွင် အချို့စာသားများ မရှိလျှင်%@.";
+"rate_message4" = "မှတ်တမ်းများထိန်းသိမ်းရန် ဤအက်ပ်တီထွင်သူများတွင် တာဝန်မရှိပါ။";
+"rate_message6" = "အနုတ်သဘောမသုံးသပ်ခင် ကျေးဇူးပြုပြီး အောက်ပါအချက်ကိုထည့်သွင်းစဉ်းစားစေလိုပါသည်။";
+"rate_title" = "အက်ပ်အား နှုန်းသတ်မှတ်ခြင်းနှင့်သုံးသပ်ခြင်း";
+"reset_generic" = "ပြန်လည်သတ်မှတ်ပါ";
+"search_bible_section_group_prompt" = "ဘယ်နေရာတွင် ရှာဖွေပါ";
+"send_email" = "တီထွင်သူများထံ အီးမေးလ်ပို့ပါ";
+"text_maintainers" = "ပြဿနာများအတွက် စာသားထိန်းသိမ်းသူများထံသို့ ကျေးဇူးပြုပြီး သတင်းပို့ပါ";
+"unlock_info" = "စကားဝှက်ခံထားသည့်သင်ခန်းစာများ သော့ဖွင့်ခြင်း သတင်းအချက်အလက်";

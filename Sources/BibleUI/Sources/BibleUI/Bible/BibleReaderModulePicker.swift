@@ -301,52 +301,26 @@ struct BibleReaderModulePicker: View {
      */
     private var importFeedbackPresentedScreen: some View {
         documentManagementPresentedScreen
-        .alert(
-            String(
-                localized: "android_module_backup_overwrite_title",
-                defaultValue: "Overwrite existing module files?"
-            ),
-            isPresented: Binding(
-                get: { pendingLocalModuleOverwrite != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingLocalModuleOverwrite = nil
-                    }
-                }
-            ),
-            presenting: pendingLocalModuleOverwrite
-        ) { confirmation in
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingLocalModuleOverwrite = nil
-            }
-            Button(String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) {
-                pendingLocalModuleOverwrite = nil
-                importExternalDocument(
-                    confirmation.request,
-                    overwritePolicy: .replaceExisting(
-                        confirmation.inspection.overwriteAuthorization
-                    )
+        .overlay {
+            if let confirmation = pendingLocalModuleOverwrite {
+                ModulePickerDecisionDialog(
+                    title: String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"),
+                    message: Self.localModuleOverwriteMessage(confirmation.inspection),
+                    actions: [
+                        .init(id: "cancel", title: String(localized: "cancel"), role: nil) { pendingLocalModuleOverwrite = nil },
+                        .init(id: "overwrite", title: String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) {
+                            pendingLocalModuleOverwrite = nil
+                            importExternalDocument(confirmation.request, overwritePolicy: .replaceExisting(confirmation.inspection.overwriteAuthorization))
+                        }
+                    ]
+                )
+            } else if let message = externalDocumentImportMessage {
+                ModulePickerDecisionDialog(
+                    title: String(localized: "install_zip", defaultValue: "Load Documents From Files"),
+                    message: message,
+                    actions: [.init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), role: nil) { externalDocumentImportMessage = nil }]
                 )
             }
-        } message: { confirmation in
-            Text(Self.localModuleOverwriteMessage(confirmation.inspection))
-        }
-        .alert(
-            String(localized: "install_zip", defaultValue: "Load Documents From Files"),
-            isPresented: Binding(
-                get: { externalDocumentImportMessage != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        externalDocumentImportMessage = nil
-                    }
-                }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {
-                externalDocumentImportMessage = nil
-            }
-        } message: {
-            Text(externalDocumentImportMessage ?? "")
         }
     }
 
@@ -359,64 +333,15 @@ struct BibleReaderModulePicker: View {
      */
     private var moduleAccessPresentedScreen: some View {
         importFeedbackPresentedScreen
-        .alert(
-            pendingUnlockModule.map(Self.unlockPromptTitle(for:)) ?? "",
-            isPresented: Binding(
-                get: { pendingUnlockModule != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        clearUnlockPrompt()
-                    }
-                }
-            ),
-            presenting: pendingUnlockModule
-        ) { module in
-            TextField(
-                String(localized: "passphrase", defaultValue: "Passphrase"),
-                text: $unlockCipherKey
-            )
-            Button(String(localized: "unlock", defaultValue: "Unlock")) {
-                attemptUnlock(module)
+        .overlay {
+            if let module = pendingUnlockModule {
+                ModulePickerUnlockDialog(title: Self.unlockPromptTitle(for: module), message: unlockFailureMessage ?? String(localized: "enter_module_passphrase", defaultValue: "Enter the module passphrase."), cipherKey: $unlockCipherKey, showUnlockInfo: !module.aboutMetadata.unlockInfo.isEmpty, onUnlock: { attemptUnlock(module) }, onShowUnlockInfo: { showUnlockInformation(for: module) }, onCancel: clearUnlockPrompt)
+            } else if let module = pendingGenericSwitchRetry {
+                ModulePickerDecisionDialog(title: String(localized: "error_occurred"), message: genericSwitchFailureMessage ?? String(localized: "error_occurred"), actions: [
+                    .init(id: "retry", title: String(localized: "retry"), role: nil) { pendingGenericSwitchRetry = nil; genericSwitchFailureMessage = nil; selectUnlockedModule(module) },
+                    .init(id: "cancel", title: String(localized: "cancel"), role: nil) { pendingGenericSwitchRetry = nil; genericSwitchFailureMessage = nil }
+                ])
             }
-            .disabled(unlockCipherKey.isEmpty)
-            if !module.aboutMetadata.unlockInfo.isEmpty {
-                Button(String(localized: "show_unlock_info", defaultValue: "Module & unlock info")) {
-                    showUnlockInformation(for: module)
-                }
-            }
-            Button(String(localized: "cancel"), role: .cancel) {
-                clearUnlockPrompt()
-            }
-        } message: { _ in
-            Text(
-                unlockFailureMessage
-                    ?? String(localized: "enter_module_passphrase", defaultValue: "Enter the module passphrase.")
-            )
-        }
-        .alert(
-            String(localized: "error_occurred"),
-            isPresented: Binding(
-                get: { pendingGenericSwitchRetry != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingGenericSwitchRetry = nil
-                        genericSwitchFailureMessage = nil
-                    }
-                }
-            ),
-            presenting: pendingGenericSwitchRetry
-        ) { module in
-            Button(String(localized: "retry")) {
-                pendingGenericSwitchRetry = nil
-                genericSwitchFailureMessage = nil
-                selectUnlockedModule(module)
-            }
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingGenericSwitchRetry = nil
-                genericSwitchFailureMessage = nil
-            }
-        } message: { _ in
-            Text(genericSwitchFailureMessage ?? String(localized: "error_occurred"))
         }
     }
 
@@ -429,52 +354,23 @@ struct BibleReaderModulePicker: View {
      */
     private var rowActionPresentedScreen: some View {
         moduleAccessPresentedScreen
-        .alert(
-            pendingRowActionConfirmation?.title ?? "",
-            isPresented: Binding(
-                get: { pendingRowActionConfirmation != nil },
-                set: { isPresented in
-                    if !isPresented {
+        .overlay {
+            if let confirmation = pendingRowActionConfirmation {
+                ModulePickerDecisionDialog(title: confirmation.title, message: confirmation.message, actions: [
+                    .init(id: "confirm", title: confirmation.kind == .uninstall ? String(localized: "uninstall") : String(localized: "delete_module_index", defaultValue: "Delete Index"), role: .destructive) {
+                        switch confirmation.kind {
+                        case .uninstall: uninstallInstalledModule(confirmation.moduleName)
+                        case .deleteIndex: deleteModuleIndex(confirmation.moduleName)
+                        }
                         pendingRowActionConfirmation = nil
-                    }
-                }
-            ),
-            presenting: pendingRowActionConfirmation
-        ) { confirmation in
-            switch confirmation.kind {
-            case .uninstall:
-                Button(String(localized: "uninstall"), role: .destructive) {
-                    uninstallInstalledModule(confirmation.moduleName)
-                    pendingRowActionConfirmation = nil
-                }
-            case .deleteIndex:
-                Button(String(localized: "delete_module_index", defaultValue: "Delete Index"), role: .destructive) {
-                    deleteModuleIndex(confirmation.moduleName)
-                    pendingRowActionConfirmation = nil
-                }
+                    },
+                    .init(id: "cancel", title: String(localized: "cancel"), role: nil) { pendingRowActionConfirmation = nil }
+                ])
+            } else if let message = rowActionErrorMessage {
+                ModulePickerDecisionDialog(title: String(localized: "document_action_failed", defaultValue: "Document action failed"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), role: nil) { rowActionErrorMessage = nil }
+                ])
             }
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingRowActionConfirmation = nil
-            }
-        } message: { confirmation in
-            Text(confirmation.message)
-        }
-        .alert(
-            String(localized: "document_action_failed", defaultValue: "Document action failed"),
-            isPresented: Binding(
-                get: { rowActionErrorMessage != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        rowActionErrorMessage = nil
-                    }
-                }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {
-                rowActionErrorMessage = nil
-            }
-        } message: {
-            Text(rowActionErrorMessage ?? "")
         }
     }
 
