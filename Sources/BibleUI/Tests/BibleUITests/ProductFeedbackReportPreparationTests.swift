@@ -4,6 +4,7 @@ import BibleCore
 
 final class ProductFeedbackReportPreparationTests: XCTestCase {
     /** The prepared payload stays addressed, unsent, and truthful about every retained artifact. */
+    @MainActor
     func testPreparedPayloadIncludesCrashEvidenceAndWarnings() {
         let screenshot = AddressedMailAttachment(data: Data([0x01]), filename: "current_window.jpg", mimeType: "image/jpeg")
         let crash = AddressedMailAttachment(data: Data([0x02]), filename: "recent_crash_diagnostic.json", mimeType: "application/json")
@@ -27,6 +28,7 @@ final class ProductFeedbackReportPreparationTests: XCTestCase {
      This protects the partial-evidence contract: screenshot/MetricKit failures are not allowed to
      cancel a user-initiated report or create a falsely complete attachment list.
      */
+    @MainActor
     func testPartialEvidenceFailureRetainsAvailableAttachmentsAndWarning() {
         let metadata = AndBibleAppVersionMetadata(marketingVersion: "2.1", buildNumber: "42")
         let log = AddressedMailAttachment(data: Data("safe".utf8), filename: "current_application_log.txt", mimeType: "text/plain")
