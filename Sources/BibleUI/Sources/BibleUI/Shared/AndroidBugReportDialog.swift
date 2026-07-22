@@ -57,8 +57,8 @@ struct AndroidBugReportPreparationDialog: View {
                 Text(String(localized: "send_bug_report_title", defaultValue: "Preparing bug report"))
                     .font(.headline)
                 Text(isExportRetry
-                    ? String(localized: "bug_report_attachment_line_1", defaultValue: "Preparing your report for export. Nothing has been sent.")
-                    : String(localized: "bug_report_attachment_line_1", defaultValue: "Collecting available diagnostic evidence. Nothing has been sent."))
+                    ? String(localized: "bug_report_export_preparing", defaultValue: "Preparing your report for export. Nothing has been sent.")
+                    : String(localized: "bug_report_collecting_evidence", defaultValue: "Collecting available diagnostic evidence. Nothing has been sent."))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
