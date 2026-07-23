@@ -94,8 +94,19 @@ enum ProductFeedbackReportExportError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .attachmentTooLarge(let name): "Attachment is too large to export: \(name)"
-        case .archiveTooLarge: "The complete bug report is too large to export."
+        case .attachmentTooLarge(let name):
+            String(
+                format: String(
+                    localized: "bug_report_attachment_too_large",
+                    defaultValue: "Attachment is too large to export: %@"
+                ),
+                name
+            )
+        case .archiveTooLarge:
+            String(
+                localized: "bug_report_archive_too_large",
+                defaultValue: "The complete bug report is too large to export."
+            )
         }
     }
 }

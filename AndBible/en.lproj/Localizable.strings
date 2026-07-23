@@ -1345,7 +1345,6 @@
 "bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
 "bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
 "bug_report_no_attachments" = "No diagnostic attachments were available.";
-"bug_report_attached_evidence" = "Attached diagnostic evidence: %@";
 "bug_report_preparation_notes" = "Preparation notes:";
 "bug_report_app_id" = "App id:";
 "bug_report_version" = "Version:";
@@ -1356,7 +1355,6 @@
 "bug_report_physical_memory" = "Physical memory bytes:";
 "bug_report_free_storage" = "Free storage bytes:";
 "bug_report_unavailable" = "Unavailable";
-"bug_report_reproduction_prompt" = "Please describe what happened, the expected result, and steps to reproduce it below.";
 "chapter_end" = "Chapter End";
 "chapter_start" = "Chapter Start";
 "compare_description" = "Compare translations";
@@ -1431,3 +1429,17 @@
 "verse_start" = "Verse Start";
 "warn_bad_document" = "Warning: This document might be (at least partially) bad technical quality.";
 "word_not_found_in_dictionaries" = "Word not found in any dictionary";
+
+/* Android shared translations */
+"bug_report_archive_too_large" = "The complete bug report is too large to export.";
+"bug_report_attachment_line_1" = "Having these files attached helps app developers a lot in fixing the reported bug.";
+"bug_report_attachment_too_large" = "Attachment is too large to export: %@";
+"bug_report_log_empty" = "Current-process application log contained no exportable entries.";
+"bug_report_log_unavailable" = "Current-process application log could not be captured.";
+"bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
+"report_bug_big_heading" = "PLEASE WRITE YOUR FEEDBACK OR BUG REPORT ABOVE THIS LINE";
+"report_bug_email_subject_3" = "[%1$@] Bug report for %2$@ %3$@";
+"report_bug_heading1" = "Instructions:";
+"report_bug_heading_3" = "Attachments:";
+"report_bug_heading_4" = "Device info:";
+"report_bug_line_1" = "Tell us briefly what did you do / what happened when issue took place.";

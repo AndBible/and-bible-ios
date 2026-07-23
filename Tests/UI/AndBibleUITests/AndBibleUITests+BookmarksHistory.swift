@@ -69,6 +69,41 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies the reader's Feedback / bug report action collects evidence without terminating.
+
+     The baseline fixture provides a real reader shell and the test invokes the production drawer
+     row rather than a test-only seam. The expected result is Android's app-owned consent dialog;
+     Mail remains untouched because the test does not approve the prepared report.
+
+     * - Side effects:
+     *   - launches the baseline reader and opens the production navigation drawer
+     *   - captures the same bounded local evidence used by a manual report
+     * - Failure modes:
+     *   - fails if evidence collection terminates or backgrounds the app
+     *   - fails if collection never advances to the app-owned consent dialog
+     */
+    func testFeedbackBugReportCollectsEvidenceAndPresentsConsentWithoutTerminating() {
+        let app = makeApp()
+        app.launch()
+
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 30),
+            "Expected the baseline reader shell to become ready."
+        )
+        tapReaderAction("readerReportBugAction", in: app, timeout: 30)
+
+        XCTAssertEqual(
+            app.state,
+            .runningForeground,
+            "Feedback / bug report must not terminate or background the app while collecting evidence."
+        )
+        XCTAssertTrue(
+            app.staticTexts["Send bug report via email"].firstMatch.waitForExistence(timeout: 30),
+            "Expected evidence collection to advance to Android's app-owned consent dialog."
+        )
+    }
+
+    /**
      Verifies Read/Memory Progress uses Android's full reader destination rather than a generic sheet.
 
      Android launches `ReadingProgressActivity` from the main drawer and returns to the reader with

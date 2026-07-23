@@ -9,6 +9,7 @@ Checks:
 4. The iOS locale_pref picker must match Android arrays.xml values that have iOS resources.
 5. Runtime Calculator security help must use Android copy plus the truthful iOS name limitation.
 6. Every AI source key and literal fallback must have exact Android provenance.
+7. Product-feedback copy must cover every shipped locale with Android provenance or truthful iOS fallback.
 
 Usage:
   python3 scripts/check_settings_localization_guardrails.py
@@ -17,6 +18,7 @@ Usage:
   python3 scripts/check_settings_localization_guardrails.py --sync-android-shared-translations
   python3 scripts/check_settings_localization_guardrails.py --sync-android-ai-translations
   python3 scripts/check_settings_localization_guardrails.py --sync-discrete-security-copy
+  python3 scripts/check_settings_localization_guardrails.py --sync-product-feedback-copy
 """
 
 from __future__ import annotations
@@ -187,6 +189,60 @@ OBSOLETE_DISCRETE_MODE_SENTENCE = (
     "When enabled, the app always launches as a calculator. Tap = seven times to temporarily "
     "access the Bible. Disable this toggle to return to normal."
 )
+PRODUCT_FEEDBACK_ANDROID_KEYS = (
+    "bug_report_attachment_line_1",
+    "bug_report_email_text",
+    "bug_report_email_title",
+    "cancel",
+    "report_bug_big_heading",
+    "report_bug_email_subject_3",
+    "report_bug_heading1",
+    "report_bug_heading_3",
+    "report_bug_heading_4",
+    "report_bug_line_1",
+    "send_bug_report_title",
+)
+"""Android-owned strings used by the manual feedback and crash-evidence flow."""
+
+PRODUCT_FEEDBACK_IOS_FALLBACKS = {
+    "bug_report_not_sent": "Bug report not sent",
+    "bug_report_mail_unavailable": (
+        "Mail is not configured on this device. No bug report has been sent."
+    ),
+    "bug_report_export_failed": (
+        "The report could not be exported. No bug report has been sent."
+    ),
+    "bug_report_export": "Export report",
+    "bug_report_collecting_evidence": (
+        "Collecting available diagnostic evidence. Nothing has been sent."
+    ),
+    "bug_report_export_preparing": (
+        "Preparing your report for export. Nothing has been sent."
+    ),
+    "bug_report_no_attachments": "No diagnostic attachments were available.",
+    "bug_report_preparation_notes": "Preparation notes:",
+    "bug_report_app_id": "App id:",
+    "bug_report_version": "Version:",
+    "bug_report_operating_system": "Operating system:",
+    "bug_report_device": "Device:",
+    "bug_report_locale": "Locale:",
+    "bug_report_time_zone": "Time zone:",
+    "bug_report_physical_memory": "Physical memory bytes:",
+    "bug_report_free_storage": "Free storage bytes:",
+    "bug_report_unavailable": "Unavailable",
+    "bug_report_screenshot_unavailable": "Current app-window screenshot could not be captured.",
+    "bug_report_log_empty": "Current-process application log contained no exportable entries.",
+    "bug_report_log_unavailable": "Current-process application log could not be captured.",
+    "bug_report_attachment_too_large": "Attachment is too large to export: %@",
+    "bug_report_archive_too_large": "The complete bug report is too large to export.",
+}
+"""Truthful iOS-only report copy shipped as English fallback until Android owns an equivalent."""
+
+REMOVED_PRODUCT_FEEDBACK_KEYS = {
+    "bug_report_attached_evidence",
+    "bug_report_reproduction_prompt",
+}
+"""Superseded iOS-only strings replaced by Android's report-body resources."""
 
 LINE_RE = re.compile(r'^"(?P<key>[^"]+)"\s*=\s*"(?P<val>(?:[^"\\]|\\.)*)";\s*$')
 LOCALE_OPTIONS_BLOCK_RE = re.compile(
@@ -921,6 +977,110 @@ def audit_discrete_security_localizations(
                 for value in actual.values()
             ):
                 failures.append(f"obsolete false security sentence remains: {tree}:{locale}")
+
+    return failures
+
+
+def product_feedback_values_for_locale(
+    catalog: AndroidSharedLocalization,
+    locale: str,
+) -> dict[str, str]:
+    """Return complete product-feedback copy for one iOS locale.
+
+    Android-owned dialog, subject, and report-body text uses Android's translation when available
+    and Android English otherwise. iOS-only evidence, delivery, and export statements use a
+    truthful English fallback until Android owns equivalent resources. The function performs no
+    file I/O and raises ``ValueError`` if the Android-derived catalog is stale or incomplete.
+    """
+    missing = sorted(set(PRODUCT_FEEDBACK_ANDROID_KEYS) - set(catalog.english_by_key))
+    if missing:
+        raise ValueError(f"Android product-feedback copy missing source keys: {', '.join(missing)}")
+
+    translations = catalog.translations_by_locale.get(locale, {})
+    values = {
+        key: translations.get(key, catalog.english_by_key[key])
+        for key in PRODUCT_FEEDBACK_ANDROID_KEYS
+    }
+    values.update(PRODUCT_FEEDBACK_IOS_FALLBACKS)
+    return values
+
+
+def sync_product_feedback_localizations(
+    repo_root: Path,
+    catalog: AndroidSharedLocalization,
+) -> SharedLocalizationSyncResult:
+    """Write complete product-feedback copy to both shipped iOS localization trees.
+
+    Every supported locale receives Android-owned values plus all iOS-only evidence and export
+    fallbacks. Superseded one-off report-body keys are removed from the same files. Writes are
+    limited to ``Localizable.strings`` resources beneath ``repo_root`` and ``ValueError`` is
+    propagated before the first write when Android provenance is incomplete.
+    """
+    values_by_locale = {
+        locale: product_feedback_values_for_locale(catalog, locale)
+        for locale in sorted(LOCALE_TO_ANDROID_VALUES)
+    }
+    changed_paths: set[Path] = set()
+    values_written = 0
+
+    for tree in ("AndBible", "Localizations"):
+        for locale, values in values_by_locale.items():
+            path = repo_root / tree / f"{locale}.lproj" / "Localizable.strings"
+            if not path.exists():
+                continue
+            changed, written = update_ios_strings_file(path, values)
+            if changed:
+                changed_paths.add(path)
+                values_written += written
+            changed, removed = remove_ios_strings_keys(path, REMOVED_PRODUCT_FEEDBACK_KEYS)
+            if changed:
+                changed_paths.add(path)
+                values_written += removed
+
+    return SharedLocalizationSyncResult(
+        files_changed=len(changed_paths),
+        values_written=values_written,
+    )
+
+
+def audit_product_feedback_localizations(
+    repo_root: Path,
+    catalog: AndroidSharedLocalization,
+) -> list[str]:
+    """Enforce complete, provenance-backed product-feedback copy in both resource trees.
+
+    The returned failures identify missing locale directories, missing resources, value drift, and
+    obsolete keys. The audit is read-only and raises ``ValueError`` when required Android source
+    keys are absent from the catalog.
+    """
+    failures: list[str] = []
+    expected_locales = set(LOCALE_TO_ANDROID_VALUES)
+
+    for tree in ("AndBible", "Localizations"):
+        root = repo_root / tree
+        actual_locales = {
+            path.name.removesuffix(".lproj")
+            for path in root.glob("*.lproj")
+            if path.is_dir()
+        }
+        for locale in sorted(expected_locales - actual_locales):
+            failures.append(f"product feedback missing locale: {tree}:{locale}")
+
+        for locale in sorted(expected_locales & actual_locales):
+            path = root / f"{locale}.lproj" / "Localizable.strings"
+            if not path.exists():
+                failures.append(f"product feedback missing resource: {tree}:{locale}")
+                continue
+            actual = parse_ios_strings(path)
+            expected = product_feedback_values_for_locale(catalog, locale)
+            for key, expected_value in sorted(expected.items()):
+                raw_value = actual.get(key)
+                if raw_value is None:
+                    failures.append(f"product feedback missing key: {tree}:{locale}:{key}")
+                elif unescape_ios(raw_value) != expected_value:
+                    failures.append(f"product feedback value drift: {tree}:{locale}:{key}")
+            for key in sorted(REMOVED_PRODUCT_FEEDBACK_KEYS & set(actual)):
+                failures.append(f"obsolete product feedback key remains: {tree}:{locale}:{key}")
 
     return failures
 
@@ -1808,6 +1968,11 @@ def main() -> int:
         action="store_true",
         help="Update runtime Calculator security help from Android plus the iOS limitation",
     )
+    parser.add_argument(
+        "--sync-product-feedback-copy",
+        action="store_true",
+        help="Update product-feedback copy from Android plus truthful iOS-only fallbacks",
+    )
     args = parser.parse_args()
 
     if args.write_android_snapshot:
@@ -1882,6 +2047,19 @@ def main() -> int:
         print(f"- android source: {android_source}")
         return 0
 
+    if args.sync_product_feedback_copy:
+        try:
+            result = sync_product_feedback_localizations(args.repo_root, shared_localization)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print("Product-feedback localization sync summary")
+        print(f"- files changed: {result.files_changed}")
+        print(f"- values written or removed: {result.values_written}")
+        print(f"- locales checked: {len(LOCALE_TO_ANDROID_VALUES)}")
+        print(f"- android source: {android_source}")
+        return 0
+
     audit = run_audit(args.repo_root, non_english_by_key, android_source, shared_localization)
     locale_pref_audit = audit_locale_pref_contract(args.repo_root, locale_pref_options)
 
@@ -1913,6 +2091,17 @@ def main() -> int:
     if discrete_security_failures:
         failures.append("Runtime Calculator security-copy failures:")
         failures.extend(f"  - {item}" for item in discrete_security_failures)
+
+    try:
+        product_feedback_failures = audit_product_feedback_localizations(
+            args.repo_root,
+            shared_localization,
+        )
+    except ValueError as exc:
+        product_feedback_failures = [str(exc)]
+    if product_feedback_failures:
+        failures.append("Product-feedback localization failures:")
+        failures.extend(f"  - {item}" for item in product_feedback_failures)
 
     if audit.tree_mismatches:
         failures.append("Tree consistency failures:")
@@ -1990,6 +2179,7 @@ def main() -> int:
     print(f"- locale_pref unavailable Android values: {len(locale_pref_audit.unsupported_values)}")
     print(f"- locale_pref extra iOS-only resource locales: {len(locale_pref_audit.extra_ios_locales)}")
     print(f"- discrete security-copy locales: {len(LOCALE_TO_ANDROID_VALUES)}")
+    print(f"- product-feedback localization locales: {len(LOCALE_TO_ANDROID_VALUES)}")
     if audit.shared_localization is not None:
         print(f"- android shared source keys: {len(audit.shared_localization.safe_keys)}")
         print(f"- android shared explicit mapped keys: {len(ANDROID_SHARED_KEY_MAPPINGS)}")

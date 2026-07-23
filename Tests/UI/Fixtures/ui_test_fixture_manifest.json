@@ -1,6 +1,7 @@
 {
   "AndBibleUITests/AndBibleUITests/testSingleAppCalculatorGateAndSecuritySettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testReaderDrawerOpensInSpanishAtLargeDynamicType": "baseline",
+  "AndBibleUITests/AndBibleUITests/testFeedbackBugReportCollectsEvidenceAndPresentsConsentWithoutTerminating": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingProgressUsesReaderDestinationAndReturns": "baseline",
   "AndBibleUITests/AndBibleUITests/testHistoryDialogSelectsSeededReferenceInCapturedReaderPane": "bookmark-filter",
   "AndBibleUITests/AndBibleUITests/testReaderNightModeRendersDarkReaderChrome": "reader-night-mode",

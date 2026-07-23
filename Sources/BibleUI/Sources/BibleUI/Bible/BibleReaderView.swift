@@ -355,7 +355,10 @@ public struct BibleReaderView: View {
     /// Reader-owned state for manual evidence collection, consent, and addressed mail handoff.
     @State private var manualBugReportCoordinator = ManualBugReportCoordinator()
 
-    /// Prepared report presented only after the user consents to system mail composition.
+    /// Locally prepared evidence retained for consent or explicit export without presenting Mail.
+    @State private var manualBugReportPreparedPayload: AddressedMailPayload?
+
+    /// Prepared report assigned only after consent and a successful system-Mail capability check.
     @State private var manualBugReportMailPayload: AddressedMailPayload?
 
     /// Complete ZIP retained only while the user chooses an export destination after unavailable mail.
@@ -917,6 +920,7 @@ public struct BibleReaderView: View {
                     manualBugReportMailPayload = nil
                 }, onResult: { result in
                     manualBugReportCoordinator.finishMail(result)
+                    manualBugReportPreparedPayload = nil
                 })
             }
             .sheet(item: $manualBugReportExport) { export in
@@ -924,6 +928,7 @@ public struct BibleReaderView: View {
                     ProductFeedbackReportExportBuilder.remove(export)
                     manualBugReportExport = nil
                     manualBugReportCoordinator.completeExport(success: true)
+                    manualBugReportPreparedPayload = nil
                 }
             }
     }
@@ -1266,7 +1271,7 @@ public struct BibleReaderView: View {
                 .transition(.opacity)
                 .zIndex(20)
         case .awaitingConsent:
-            if let payload = manualBugReportMailPayload {
+            if let payload = manualBugReportPreparedPayload {
                 AndroidBugReportDialog(
                     onDismiss: dismissBugReportDialog,
                     onSendReport: { presentPreparedBugReport(payload) }
@@ -1275,7 +1280,7 @@ public struct BibleReaderView: View {
                 .zIndex(20)
             }
         case .mailUnavailable, .exportFailed:
-            if let payload = manualBugReportMailPayload {
+            if let payload = manualBugReportPreparedPayload {
                 AndroidBugReportUnsentDialog(
                     onDismiss: dismissBugReportDialog,
                     onExport: { exportPreparedBugReport(payload) },
@@ -2329,6 +2334,7 @@ public struct BibleReaderView: View {
     /// Cancels collection or consent without opening a system handoff.
     private func dismissBugReportDialog() {
         manualBugReportCoordinator.cancel()
+        manualBugReportPreparedPayload = nil
         manualBugReportMailPayload = nil
         if let export = manualBugReportExport {
             ProductFeedbackReportExportBuilder.remove(export)
@@ -2341,8 +2347,9 @@ public struct BibleReaderView: View {
         guard manualBugReportCoordinator.beginCollection() else { return }
         Task { @MainActor in
             await Task.yield()
+            let payload = ProductFeedbackReportPreparation.prepare()
             guard manualBugReportCoordinator.completeCollection() else { return }
-            manualBugReportMailPayload = ProductFeedbackReportPreparation.prepare()
+            manualBugReportPreparedPayload = payload
         }
     }
 

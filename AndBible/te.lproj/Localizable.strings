@@ -1261,3 +1261,34 @@
 "verse_start" = "వచనం ప్రారంభం";
 "warn_bad_document" = "హెచ్చరిక: ఈ పత్రం (కనీసం పాక్షికంగా) సాంకేతిక నాణ్యత చెడ్డది కావచ్చు.";
 "word_not_found_in_dictionaries" = "ఏ నిఘంటువులో పదం కనుగొనబడలేదు";
+
+/* Android shared translations */
+"bug_report_app_id" = "App id:";
+"bug_report_archive_too_large" = "The complete bug report is too large to export.";
+"bug_report_attachment_line_1" = "ఈ ఫైల్‌లను జోడించడం వలన నివేదించబడిన బగ్‌ను పరిష్కరించడంలో యాప్ డెవలపర్‌లకు చాలా సహాయపడుతుంది.";
+"bug_report_attachment_too_large" = "Attachment is too large to export: %@";
+"bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
+"bug_report_device" = "Device:";
+"bug_report_export" = "Export report";
+"bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
+"bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
+"bug_report_free_storage" = "Free storage bytes:";
+"bug_report_locale" = "Locale:";
+"bug_report_log_empty" = "Current-process application log contained no exportable entries.";
+"bug_report_log_unavailable" = "Current-process application log could not be captured.";
+"bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
+"bug_report_no_attachments" = "No diagnostic attachments were available.";
+"bug_report_not_sent" = "Bug report not sent";
+"bug_report_operating_system" = "Operating system:";
+"bug_report_physical_memory" = "Physical memory bytes:";
+"bug_report_preparation_notes" = "Preparation notes:";
+"bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
+"bug_report_time_zone" = "Time zone:";
+"bug_report_unavailable" = "Unavailable";
+"bug_report_version" = "Version:";
+"report_bug_big_heading" = "దయచేసి ఈ లైన్ పైన మీ అభిప్రాయాన్ని లేదా బగ్ రిపోర్ట్‌ను వ్రాయండి";
+"report_bug_email_subject_3" = "[%1$@] %2$@ %3$@ కోసం బగ్ నివేదిక";
+"report_bug_heading1" = "సూచనలు:";
+"report_bug_heading_3" = "జోడింపులు:";
+"report_bug_heading_4" = "పరికర సమాచారం:";
+"report_bug_line_1" = "మీరు ఏమి చేస్తున్నారు / సమస్య వచ్చినప్పుడు ఏమి జరిగిందో మాకు క్లుప్తంగా చెప్పండి.";

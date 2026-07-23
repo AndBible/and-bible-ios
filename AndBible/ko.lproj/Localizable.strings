@@ -1259,3 +1259,34 @@
 "verse_start" = "시작 구절";
 "warn_bad_document" = "경고: 이 문서는 기술 품질이 (적어도 부분적으로) 좋지 않을 수 있습니다.";
 "word_not_found_in_dictionaries" = "어떤 사전에서도 단어를 찾을 수 없습니다";
+
+/* Android shared translations */
+"bug_report_app_id" = "App id:";
+"bug_report_archive_too_large" = "The complete bug report is too large to export.";
+"bug_report_attachment_line_1" = "이 파일들을 첨부하면 개발자가 보고된 버그를 고치는데 큰 도움이 됩니다.";
+"bug_report_attachment_too_large" = "Attachment is too large to export: %@";
+"bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
+"bug_report_device" = "Device:";
+"bug_report_export" = "Export report";
+"bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
+"bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
+"bug_report_free_storage" = "Free storage bytes:";
+"bug_report_locale" = "Locale:";
+"bug_report_log_empty" = "Current-process application log contained no exportable entries.";
+"bug_report_log_unavailable" = "Current-process application log could not be captured.";
+"bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
+"bug_report_no_attachments" = "No diagnostic attachments were available.";
+"bug_report_not_sent" = "Bug report not sent";
+"bug_report_operating_system" = "Operating system:";
+"bug_report_physical_memory" = "Physical memory bytes:";
+"bug_report_preparation_notes" = "Preparation notes:";
+"bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
+"bug_report_time_zone" = "Time zone:";
+"bug_report_unavailable" = "Unavailable";
+"bug_report_version" = "Version:";
+"report_bug_big_heading" = "이 라인 위에 피드백이나 버그 리포트를 적어주세요";
+"report_bug_email_subject_3" = "[%1$@] %2$@ %3$@ 버그 리포트";
+"report_bug_heading1" = "안내:";
+"report_bug_heading_3" = "첨부파일:";
+"report_bug_heading_4" = "기기 정보:";
+"report_bug_line_1" = "문제가 발생했을 때 무엇을 하셨는지 / 어떤 일이 일어났는지 간단하게 말씀해 주세요.";

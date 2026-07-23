@@ -1256,3 +1256,34 @@
 "verse_start" = "Začetek vrstice";
 "warn_bad_document" = "Opozorilo: Ta dokument je lahko (vsaj delno) slabe tehnične kakovosti.";
 "word_not_found_in_dictionaries" = "Besede ni v nobenem slovarju";
+
+/* Android shared translations */
+"bug_report_app_id" = "App id:";
+"bug_report_archive_too_large" = "The complete bug report is too large to export.";
+"bug_report_attachment_line_1" = "Če priložite te datoteke, to razvijalcem aplikacij zelo pomaga pri odpravljanju prijavljene napake.";
+"bug_report_attachment_too_large" = "Attachment is too large to export: %@";
+"bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
+"bug_report_device" = "Device:";
+"bug_report_export" = "Export report";
+"bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
+"bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
+"bug_report_free_storage" = "Free storage bytes:";
+"bug_report_locale" = "Locale:";
+"bug_report_log_empty" = "Current-process application log contained no exportable entries.";
+"bug_report_log_unavailable" = "Current-process application log could not be captured.";
+"bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
+"bug_report_no_attachments" = "No diagnostic attachments were available.";
+"bug_report_not_sent" = "Bug report not sent";
+"bug_report_operating_system" = "Operating system:";
+"bug_report_physical_memory" = "Physical memory bytes:";
+"bug_report_preparation_notes" = "Preparation notes:";
+"bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
+"bug_report_time_zone" = "Time zone:";
+"bug_report_unavailable" = "Unavailable";
+"bug_report_version" = "Version:";
+"report_bug_big_heading" = "PROSIMO, DA NAD TO VRSTICO NAPIŠETE POVRATNE INFORMACIJE ALI POROČILO O NAPAKI";
+"report_bug_email_subject_3" = "[%1$@] Poročilo o napaki za %2$@ %3$@";
+"report_bug_heading1" = "Navodila:";
+"report_bug_heading_3" = "Priloge:";
+"report_bug_heading_4" = "Informacije o napravi:";
+"report_bug_line_1" = "Povejte nam na kratko, kaj ste storili / kaj se je zgodilo, ko je prišlo do težave.";
