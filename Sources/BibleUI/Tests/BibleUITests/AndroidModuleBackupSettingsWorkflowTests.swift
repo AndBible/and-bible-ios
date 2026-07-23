@@ -46,11 +46,16 @@ final class AndroidModuleBackupSettingsWorkflowTests: XCTestCase {
     }
 
     /**
-     Verifies cancelling a large provider copy removes its partially written staging archive.
+     Verifies cancelling a provider copy removes its partially written staging archive.
 
-     The sparse source keeps fixture setup bounded while the production 64 KiB loop performs real
-     reads and writes. Failure means closing the picker or leaving Settings can leave a large orphan
-     archive or continue consuming storage after cancellation.
+     A synchronous observer pauses the production copier after its only chunk write. The test
+     cancels at that exact event boundary, then releases the copier so its next cooperative
+     cancellation check must remove the destination before propagating `CancellationError`.
+
+     Side effects: Creates and removes a bounded temporary archive pair.
+
+     Failure modes: A failure means cancellation no longer reaches the production cleanup path, or
+     the staging archive can survive after the Settings operation is cancelled.
      */
     func testProviderArchiveCopyCancellationRemovesPartialOutput() async throws {
         let root = FileManager.default.temporaryDirectory
@@ -59,29 +64,29 @@ final class AndroidModuleBackupSettingsWorkflowTests: XCTestCase {
         let destinationURL = root.appendingPathComponent("staged.abmd.zip")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        XCTAssertTrue(FileManager.default.createFile(atPath: sourceURL.path, contents: Data()))
-        let source = try FileHandle(forWritingTo: sourceURL)
-        try source.truncate(atOffset: 1_073_741_824)
-        try source.close()
+        try Data(repeating: 0xA5, count: 64 * 1_024).write(to: sourceURL, options: .atomic)
 
-        let task = Task.detached(priority: .userInitiated) {
+        let reachedWrite = DispatchSemaphore(value: 0)
+        let resumeCopy = DispatchSemaphore(value: 0)
+        let task = Task.detached {
             try AndroidModuleBackupArchiveFileStager.copy(
                 from: sourceURL,
-                to: destinationURL
+                to: destinationURL,
+                didWriteChunk: { byteCount in
+                    guard byteCount > 0 else { return }
+                    reachedWrite.signal()
+                    resumeCopy.wait()
+                }
             )
         }
-        var observedPartialOutput = false
-        for _ in 0..<10_000 {
-            if let size = try? destinationURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-               size > 0 {
-                observedPartialOutput = true
-                break
-            }
-            try await Task.sleep(nanoseconds: 100_000)
-        }
-        XCTAssertTrue(observedPartialOutput, "Production copy never reached its streamed write phase")
 
+        XCTAssertEqual(
+            reachedWrite.wait(timeout: .now() + 5),
+            .success,
+            "Production copy never reached its deterministic write checkpoint"
+        )
         task.cancel()
+        resumeCopy.signal()
         do {
             try await task.value
             XCTFail("Expected cooperative cancellation")
