@@ -90,7 +90,7 @@ struct AIProviderSettingsDialog: View {
                 ? String(localized: "ai_add_provider", defaultValue: "Add provider")
                 : String(localized: "ai_provider_edit", defaultValue: "Edit")
         ) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     labeledField(String(localized: "ai_provider_name", defaultValue: "Provider name")) {
                         AndroidDialogTextInput(
@@ -169,7 +169,6 @@ struct AIProviderSettingsDialog: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
             }
-            .frame(maxHeight: 520)
         } actions: {
             if let providerID {
                 AIAndroidDialogAction(

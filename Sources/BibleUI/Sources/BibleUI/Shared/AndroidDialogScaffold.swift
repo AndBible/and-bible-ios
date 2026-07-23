@@ -22,6 +22,9 @@ struct AndroidDialogScaffold<Content: View, Actions: View>: View {
     /// Localized AlertDialog title; empty titles omit the heading region.
     let title: String
 
+    /// Optional AppCompat title icon rendered at Android's canonical 32-point size.
+    private let titleIcon: Image?
+
     /// Feature-specific content between title and actions.
     private let content: Content
 
@@ -39,6 +42,7 @@ struct AndroidDialogScaffold<Content: View, Actions: View>: View {
 
      - Parameters:
        - title: Localized heading, or an empty string when Android omits the title.
+       - titleIcon: Optional title-leading image matching `AlertDialog.Builder.setIcon`.
        - showsActionRegion: Whether to reserve Android's trailing action-button region.
        - content: Feature-specific body controls.
        - actions: Android-ordered action controls.
@@ -47,11 +51,13 @@ struct AndroidDialogScaffold<Content: View, Actions: View>: View {
      */
     init(
         title: String,
+        titleIcon: Image? = nil,
         showsActionRegion: Bool = true,
         @ViewBuilder content: () -> Content,
         @ViewBuilder actions: () -> Actions
     ) {
         self.title = title
+        self.titleIcon = titleIcon
         self.showsActionRegion = showsActionRegion
         self.content = content()
         self.actions = actions()
@@ -60,9 +66,22 @@ struct AndroidDialogScaffold<Content: View, Actions: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !title.isEmpty {
-                Text(title)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
+                HStack(spacing: 8) {
+                    if let titleIcon {
+                        titleIcon
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 32, height: 32)
+                            .accessibilityHidden(true)
+                    }
+
+                    Text(title)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(
+                            AndroidDialogSurfacePalette.primaryText(for: colorScheme)
+                        )
+                        .lineLimit(1)
+                }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 22)
                     .padding(.top, 22)

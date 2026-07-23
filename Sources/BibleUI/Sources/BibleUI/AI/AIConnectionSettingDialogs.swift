@@ -134,7 +134,7 @@ struct AIResponseLanguageDialog: View {
         AIAndroidDialogSurface(
             title: String(localized: "ai_language_title", defaultValue: "AI response language")
         ) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(AIResponseLanguageCatalog.options()) { option in
                         Button {
@@ -159,7 +159,6 @@ struct AIResponseLanguageDialog: View {
                     }
                 }
             }
-            .frame(maxHeight: 460)
         } actions: {
             Spacer()
             AIAndroidDialogAction(

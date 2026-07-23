@@ -434,7 +434,9 @@ private struct AIDisclaimerDialog: View {
      */
     var body: some View {
         AIAndroidDialogSurface(title: title) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView(
+                accessibilityIdentifier: "aiDisclaimerScrollView"
+            ) {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(AIDisclaimerCopy.localized().segments.enumerated()), id: \.offset) { _, segment in
                         disclaimerSegment(segment)
@@ -461,8 +463,6 @@ private struct AIDisclaimerDialog: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
             }
-            .frame(maxHeight: mode == .acceptance ? 600 : 520)
-            .accessibilityIdentifier("aiDisclaimerScrollView")
         } actions: {
             Spacer()
             AIAndroidDialogAction(
@@ -555,7 +555,7 @@ private struct AIProviderTypeDialog: View {
         AIAndroidDialogSurface(
             title: String(localized: "ai_provider_select_type", defaultValue: "Select provider type")
         ) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if unsupportedProviders.contains(where: availableProviders.contains) {
                         Button {
@@ -599,7 +599,6 @@ private struct AIProviderTypeDialog: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)
             }
-            .frame(maxHeight: 500)
         } actions: {
             Spacer()
             AIAndroidDialogAction(

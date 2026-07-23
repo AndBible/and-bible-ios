@@ -33,7 +33,7 @@ struct AndroidLicenseDialog: View {
             AndroidDialogScaffold(
                 title: String(localized: "app_licence_title", defaultValue: "Open Source License")
             ) {
-                ScrollView {
+                AndroidAdaptiveDialogScrollView {
                     Text(licenseText)
                         .font(.footnote.monospaced())
                         .frame(maxWidth: .infinity, alignment: .leading)

@@ -70,7 +70,9 @@ struct AndroidMultiselectDialogContent<ID: Hashable>: View {
                 .padding(.top, 22)
                 .padding(.bottom, 12)
 
-            ScrollView {
+            AndroidAdaptiveDialogScrollView(
+                accessibilityIdentifier: "\(accessibilityPrefix)List"
+            ) {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(rows) { row in
                         AndroidCheckboxRow(
@@ -85,15 +87,13 @@ struct AndroidMultiselectDialogContent<ID: Hashable>: View {
                     }
                 }
             }
-            .frame(maxHeight: 520)
-            .accessibilityIdentifier("\(accessibilityPrefix)List")
 
             ViewThatFits(in: .horizontal) {
                 horizontalActions
                 verticalActions
             }
         }
-        .frame(maxWidth: 520, maxHeight: 680)
+        .frame(maxWidth: 520)
         .overlay(alignment: .topLeading) {
             // A container identifier propagates through `ViewThatFits` on current iOS releases and
             // replaces the neutral, Cancel, and OK identifiers. Export the dialog identity on a

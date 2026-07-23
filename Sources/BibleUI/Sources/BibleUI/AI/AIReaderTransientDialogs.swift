@@ -36,14 +36,13 @@ struct AIReaderPromptChooserDialog: View {
       AndroidDialogScaffold(
         title: String(localized: "select_llm_prompt", defaultValue: "Select AI Action")
       ) {
-        ScrollView {
+        AndroidAdaptiveDialogScrollView {
           LazyVStack(spacing: 0) {
             ForEach(coordinator.promptGroups) { group in
               promptGroup(group)
             }
           }
         }
-        .frame(maxHeight: 520)
       } actions: {
         AndroidDialogTextAction(
           title: String(localized: "cancel", defaultValue: "Cancel"),
@@ -500,7 +499,7 @@ struct AIReaderModelSelectionDialog: View {
             .foregroundStyle(AndroidDialogSurfacePalette.secondaryText(for: colorScheme))
             .padding(22)
           } else {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
               LazyVStack(spacing: 0) {
                 ForEach(options) { option in
                   AndroidDialogListActionRow(
@@ -516,7 +515,6 @@ struct AIReaderModelSelectionDialog: View {
                 }
               }
             }
-            .frame(maxHeight: 360)
           }
 
           if let persistSelection {
@@ -572,7 +570,7 @@ struct AIReaderDocumentMarkerDialog: View {
           defaultValue: "Choose AI document page"
         )
       ) {
-        ScrollView {
+        AndroidAdaptiveDialogScrollView {
           LazyVStack(spacing: 0) {
             ForEach(coordinator.documentMarkers) { marker in
               AndroidDialogListActionRow(
@@ -588,7 +586,6 @@ struct AIReaderDocumentMarkerDialog: View {
             }
           }
         }
-        .frame(maxHeight: 420)
       } actions: {
         EmptyView()
       }

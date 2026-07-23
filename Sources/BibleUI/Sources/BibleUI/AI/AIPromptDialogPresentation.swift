@@ -223,7 +223,7 @@ struct AIPromptActionListDialog<Action: Hashable>: View {
 
     var body: some View {
         AIPromptAlertDialogSurface(title: title, showsActionRegion: false) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(actions.enumerated()), id: \.offset) { index, action in
                         Button { onSelect(action) } label: {
@@ -242,7 +242,6 @@ struct AIPromptActionListDialog<Action: Hashable>: View {
                     }
                 }
             }
-            .frame(maxHeight: 520)
         } actions: {
             EmptyView()
         }
@@ -268,7 +267,7 @@ struct AIPromptChoiceDialog<Choice: Hashable>: View {
 
     var body: some View {
         AIPromptAlertDialogSurface(title: title, showsActionRegion: true) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(choices.enumerated()), id: \.offset) { index, choice in
                         Button { onSelect(choice) } label: {
@@ -287,7 +286,6 @@ struct AIPromptChoiceDialog<Choice: Hashable>: View {
                     }
                 }
             }
-            .frame(maxHeight: 520)
         } actions: {
             Spacer()
             AIAndroidDialogAction(

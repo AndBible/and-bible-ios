@@ -209,7 +209,7 @@ struct AndroidReadHistoryDialog: View {
                 .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
 
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 LazyVStack(spacing: 0) {
                     if rows.isEmpty {
                         Text(String(
@@ -232,7 +232,6 @@ struct AndroidReadHistoryDialog: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
             }
-            .frame(maxHeight: 480)
 
             HStack {
                 Spacer()

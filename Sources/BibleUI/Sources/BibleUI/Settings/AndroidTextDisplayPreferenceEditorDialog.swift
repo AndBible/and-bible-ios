@@ -132,7 +132,9 @@ struct AndroidTextDisplayPreferenceEditorDialog: View {
                 Text(String(localized: "pref_font_family_label", defaultValue: "Font family"))
                     .font(.callout)
                     .foregroundStyle(primaryText)
-                ScrollView {
+                AndroidAdaptiveDialogScrollView(
+                    accessibilityIdentifier: "textDisplayFontFamilyOptionList"
+                ) {
                     LazyVStack(spacing: 0) {
                         ForEach(TextDisplaySettingsView.androidFontFamilyOptions()) { option in
                             fontFamilyChoiceRow(option)
@@ -140,8 +142,6 @@ struct AndroidTextDisplayPreferenceEditorDialog: View {
                         }
                     }
                 }
-                .frame(maxHeight: 260)
-                .accessibilityIdentifier("textDisplayFontFamilyOptionList")
             }
         case .margins:
             VStack(alignment: .leading, spacing: 16) {
@@ -222,7 +222,7 @@ struct AndroidTextDisplayPreferenceEditorDialog: View {
         options: [(value: Int, label: String)],
         selection: Binding<Int>
     ) -> some View {
-        ScrollView {
+        AndroidAdaptiveDialogScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(options, id: \.value) { option in
                     AndroidRadioRow(
@@ -238,7 +238,6 @@ struct AndroidTextDisplayPreferenceEditorDialog: View {
                 }
             }
         }
-        .frame(maxHeight: 320)
     }
 
     /// Shared Android seekbar row for numeric editor types.

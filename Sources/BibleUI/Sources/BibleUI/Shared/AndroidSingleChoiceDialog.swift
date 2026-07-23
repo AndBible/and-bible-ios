@@ -41,7 +41,7 @@ struct AndroidSingleChoiceDialog<Value: Hashable>: View {
             onOutsideTap: onCancel
         ) {
             AndroidDialogScaffold(title: title) {
-                ScrollView {
+                AndroidAdaptiveDialogScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(options) { option in
                             AndroidRadioRow(
@@ -59,7 +59,6 @@ struct AndroidSingleChoiceDialog<Value: Hashable>: View {
                     }
                     .padding(.horizontal, 18)
                 }
-                .frame(maxHeight: 320)
             } actions: {
                 AndroidDialogTextAction(
                     title: String(localized: "cancel", defaultValue: "Cancel"),

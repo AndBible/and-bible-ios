@@ -17,7 +17,7 @@ import SwiftUI
  - row-selection callback
  - captured reader-window identity
 
- Output: a content-sized row stack for short histories or a bounded scrolling stack for long ones
+ Output: a wrap-content row list that scrolls only after the dialog viewport is exhausted
 
  Side effects: selecting a row invokes `onNavigate` with its stored navigation key
 
@@ -77,14 +77,10 @@ public struct HistoryView: View {
                     Color.clear
                         .frame(height: 1)
                         .accessibilityIdentifier("historyEmptyState")
-                } else if historySnapshot.count <= 6 {
-                    historyRows(historySnapshot)
                 } else {
-                    ScrollView {
+                    AndroidAdaptiveDialogScrollView {
                         historyRows(historySnapshot)
                     }
-                    .frame(maxHeight: 520)
-                    .scrollIndicators(.automatic)
                 }
             }
             .frame(maxWidth: .infinity)

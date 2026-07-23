@@ -27,7 +27,7 @@ struct AndroidRateReviewDialog: View {
             AndroidDialogScaffold(
                 title: String(localized: "rate_title", defaultValue: "Rating and reviewing app")
             ) {
-                ScrollView {
+                AndroidAdaptiveDialogScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         Text(String(
                             localized: "rate_message5",

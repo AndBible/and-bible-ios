@@ -1035,7 +1035,7 @@ struct ModuleBrowserModuleDetailsDialog: View {
      */
     var body: some View {
         AndroidDialogScaffold(title: "") {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 Text(details.androidAboutAttributedMessage)
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1045,7 +1045,6 @@ struct ModuleBrowserModuleDetailsDialog: View {
                     .padding(.vertical, 20)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 420)
         } actions: {
             AndroidDialogTextAction(
                 title: String(localized: "okay", defaultValue: "OK"),

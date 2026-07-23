@@ -103,7 +103,7 @@ struct AIQuickSetupCredentialDialog: View {
 
     var body: some View {
         AIAndroidDialogSurface(title: dialogTitle) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(
                         String(
@@ -141,7 +141,6 @@ struct AIQuickSetupCredentialDialog: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
             }
-            .frame(maxHeight: 360)
         } actions: {
             AIAndroidDialogAction(
                 title: testing

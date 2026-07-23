@@ -381,7 +381,7 @@ private struct AIReaderAgentPermissionDialog: View {
         title: String(localized: "agent_permission_title", defaultValue: "Agent Permission")
       ) {
         VStack(spacing: 0) {
-          ScrollView {
+          AndroidAdaptiveDialogScrollView {
             Text(permissionMessage)
               .font(.system(size: 16))
               .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
@@ -391,7 +391,6 @@ private struct AIReaderAgentPermissionDialog: View {
               .padding(.top, 16)
               .padding(.bottom, 8)
           }
-          .frame(maxHeight: 220)
 
           VStack(spacing: 0) {
             permissionAction(

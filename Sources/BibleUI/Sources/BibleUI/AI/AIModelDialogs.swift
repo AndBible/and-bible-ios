@@ -117,7 +117,7 @@ private struct AIModelProviderChooserDialog: View {
         AIAndroidDialogSurface(
             title: String(localized: "model_select_provider", defaultValue: "Provider")
         ) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(providers) { provider in
                         Button {
@@ -134,7 +134,6 @@ private struct AIModelProviderChooserDialog: View {
                     }
                 }
             }
-            .frame(maxHeight: 420)
         } actions: {
             Spacer()
             AIAndroidDialogAction(
@@ -242,7 +241,7 @@ private struct AIModelEditorDialog: View {
                 ? String(localized: "add_model", defaultValue: "Add model")
                 : String(localized: "edit_model_title", defaultValue: "Edit model")
         ) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if isLoaded {
                         if isNewModel {
@@ -283,7 +282,6 @@ private struct AIModelEditorDialog: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
             }
-            .frame(maxHeight: 590)
         } actions: {
             if let modelID {
                 AIAndroidDialogAction(

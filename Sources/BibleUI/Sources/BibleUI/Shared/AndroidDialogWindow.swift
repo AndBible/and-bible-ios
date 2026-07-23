@@ -3,11 +3,91 @@
 import SwiftUI
 
 /**
+ Applies Android's `wrap_content` dialog measurement inside a finite window viewport.
+
+ AppCompat measures an AlertDialog's content against an `AT_MOST` height constraint, then reports
+ the content's measured height instead of expanding the dialog to that constraint. SwiftUI's
+ flexible `frame(maxHeight:)` does the opposite: it accepts all proposed height and makes short
+ dialogs appear full-screen. This layout preserves the finite proposal needed by adaptive scroll
+ regions while returning the child's shorter measured height whenever its content fits.
+
+ Inputs: one dialog content view and the parent window's finite proposal
+
+ Output: the content's measured height capped only by the available dialog viewport
+
+ Side effects: none
+
+ Failure modes: an empty layout reports zero size; callers must provide one dialog content view
+ */
+struct AndroidDialogViewportLayout: Layout {
+    /**
+     Measures the dialog with Android's `AT_MOST` height contract.
+
+     - Parameters:
+       - proposal: Finite parent geometry after the shared outer margin.
+       - subviews: The single caller-owned dialog content hierarchy.
+       - cache: Unused because dialog content can change while presented.
+     - Returns: Child-measured width and intrinsic-or-capped height.
+     - Side effects: asks the child to measure once under the bounded proposal.
+     - Failure modes: an absent child reports zero size.
+     */
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let content = subviews.first else {
+            return .zero
+        }
+
+        let availableHeight = proposal.height.map { max($0, 0) }
+        let measuredSize = content.sizeThatFits(
+            ProposedViewSize(width: proposal.width, height: availableHeight)
+        )
+
+        return CGSize(
+            width: measuredSize.width,
+            height: availableHeight.map {
+                min(max(measuredSize.height, 0), $0)
+            } ?? max(measuredSize.height, 0)
+        )
+    }
+
+    /**
+     Places the measured dialog content in the viewport reported by `sizeThatFits`.
+
+     - Parameters:
+       - bounds: Final intrinsic-or-capped dialog bounds.
+       - proposal: Parent proposal retained for the Layout protocol contract.
+       - subviews: The single caller-owned dialog content hierarchy.
+       - cache: Unused.
+     - Side effects: places the child at the viewport origin.
+     - Failure modes: an absent child performs no placement.
+     */
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let content = subviews.first else {
+            return
+        }
+
+        content.place(
+            at: bounds.origin,
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height)
+        )
+    }
+}
+
+/**
  Presents feature content inside the application's shared Android-style dialog window.
 
- The window centralizes the scrim, AppCompat DayNight surface palette, maximum geometry, outside-tap
- policy, and accessibility containment. Callers provide semantic dialog content and decide whether
- outside taps may dismiss while work is active.
+ The window centralizes the scrim, AppCompat DayNight surface palette, Android `wrap_content`
+ measurement, outside-tap policy, and accessibility containment. Callers provide semantic dialog
+ content and decide whether outside taps may dismiss while work is active.
 
  Inputs:
  - current color scheme
@@ -71,8 +151,8 @@ struct AndroidDialogWindow<Content: View>: View {
 
      - Returns: A centered app-owned Android dialog above its blocking scrim.
      - Side effects: A permitted scrim tap invokes `onOutsideTap`.
-     - Failure modes: Long caller content can exceed the fixed maximum unless it supplies a scroll
-       container.
+     - Failure modes: Long caller content is capped to the viewport; semantic overflow regions must
+       still provide scrolling.
      */
     var body: some View {
         ZStack {
@@ -84,8 +164,10 @@ struct AndroidDialogWindow<Content: View>: View {
                     onOutsideTap()
                 }
 
-            content
-                .frame(maxWidth: 640, maxHeight: 760)
+            AndroidDialogViewportLayout {
+                content
+            }
+                .frame(maxWidth: 640)
                 .background(AndroidDialogSurfacePalette.background(for: colorScheme))
                 .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 .shadow(color: .black.opacity(0.45), radius: 20, y: 10)
