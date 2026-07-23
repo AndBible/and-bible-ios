@@ -820,6 +820,98 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
             drift_failures,
         )
 
+    def test_product_feedback_sync_covers_every_key_and_removes_superseded_copy(self) -> None:
+        """Covers Android report text, iOS evidence fallbacks, and obsolete-key removal."""
+        english_by_key = {
+            key: f"English {key}"
+            for key in localization_guardrails.PRODUCT_FEEDBACK_ANDROID_KEYS
+        }
+        catalog = AndroidSharedLocalization(
+            safe_keys=sorted(english_by_key),
+            english_mismatch_keys=[],
+            android_resource_keys=sorted(english_by_key),
+            source_key_by_key={key: key for key in english_by_key},
+            english_by_key=english_by_key,
+            non_english_by_key={key: ["fr"] for key in english_by_key},
+            translations_by_locale={
+                "fr": {key: f"Francais {key}" for key in english_by_key},
+            },
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for tree in ["AndBible", "Localizations"]:
+                for locale in ["en", "fr"]:
+                    self.write_ios_strings(
+                        root,
+                        tree,
+                        locale,
+                        {
+                            "bug_report_attached_evidence": "Superseded attachment copy",
+                            "bug_report_reproduction_prompt": "Superseded reproduction copy",
+                        },
+                    )
+
+            with mock.patch.object(
+                localization_guardrails,
+                "LOCALE_TO_ANDROID_VALUES",
+                {"en": "values", "fr": "values-fr"},
+            ):
+                result = localization_guardrails.sync_product_feedback_localizations(
+                    root,
+                    catalog,
+                )
+                failures = localization_guardrails.audit_product_feedback_localizations(
+                    root,
+                    catalog,
+                )
+
+            self.assertEqual(result.files_changed, 4)
+            for tree in ["AndBible", "Localizations"]:
+                french = parse_ios_strings(
+                    root / tree / "fr.lproj" / "Localizable.strings"
+                )
+                self.assertEqual(
+                    french["report_bug_line_1"],
+                    "Francais report_bug_line_1",
+                )
+                self.assertEqual(
+                    french["bug_report_screenshot_unavailable"],
+                    localization_guardrails.PRODUCT_FEEDBACK_IOS_FALLBACKS[
+                        "bug_report_screenshot_unavailable"
+                    ],
+                )
+                self.assertNotIn("bug_report_attached_evidence", french)
+                self.assertNotIn("bug_report_reproduction_prompt", french)
+
+            drift_path = root / "AndBible" / "fr.lproj" / "Localizable.strings"
+            with drift_path.open("a", encoding="utf-8") as stream:
+                stream.write(
+                    '"bug_report_archive_too_large" = "Drifted export copy";\n'
+                    '"bug_report_reproduction_prompt" = "Superseded reproduction copy";\n'
+                )
+            with mock.patch.object(
+                localization_guardrails,
+                "LOCALE_TO_ANDROID_VALUES",
+                {"en": "values", "fr": "values-fr"},
+            ):
+                drift_failures = (
+                    localization_guardrails.audit_product_feedback_localizations(
+                        root,
+                        catalog,
+                    )
+                )
+
+        self.assertEqual(failures, [])
+        self.assertIn(
+            "product feedback value drift: AndBible:fr:bug_report_archive_too_large",
+            drift_failures,
+        )
+        self.assertIn(
+            "obsolete product feedback key remains: AndBible:fr:bug_report_reproduction_prompt",
+            drift_failures,
+        )
+
     def test_sync_shared_translations_normalizes_android_escape_sequences(self) -> None:
         """Converts Android XML escapes before writing iOS string resources.
 

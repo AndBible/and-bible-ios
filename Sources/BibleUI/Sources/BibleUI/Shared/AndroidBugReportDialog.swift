@@ -19,11 +19,14 @@ struct AndroidBugReportDialog: View {
                 .onTapGesture(perform: onDismiss)
 
             VStack(alignment: .leading, spacing: 16) {
-                Text(String(localized: "bug_report_email_title", defaultValue: "Send bug report?"))
+                Text(String(
+                    localized: "bug_report_email_title",
+                    defaultValue: "Send bug report via email"
+                ))
                     .font(.headline)
                 Text(String(
                     localized: "bug_report_email_text",
-                    defaultValue: "Send an app and device diagnostic report to help investigate this issue?"
+                    defaultValue: "Next, please select your preferred email application (Gmail for example) to send the report to the developer team."
                 ))
                     .foregroundStyle(.secondary)
                 HStack {
@@ -54,7 +57,10 @@ struct AndroidBugReportPreparationDialog: View {
             Color.black.opacity(0.36).ignoresSafeArea()
             VStack(spacing: 16) {
                 ProgressView()
-                Text(String(localized: "send_bug_report_title", defaultValue: "Preparing bug report"))
+                Text(String(
+                    localized: "send_bug_report_title",
+                    defaultValue: "Feedback / bug report"
+                ))
                     .font(.headline)
                 Text(isExportRetry
                     ? String(localized: "bug_report_export_preparing", defaultValue: "Preparing your report for export. Nothing has been sent.")

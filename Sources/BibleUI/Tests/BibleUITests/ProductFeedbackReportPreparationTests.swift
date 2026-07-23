@@ -18,7 +18,13 @@ final class ProductFeedbackReportPreparationTests: XCTestCase {
         XCTAssertEqual(payload.recipient, "errors.andbible@gmail.com")
         XCTAssertEqual(payload.subject, "[42 manual] Bug report for AndBible 2.1")
         XCTAssertEqual(payload.attachments, [screenshot, crash])
+        XCTAssertTrue(payload.body.contains("PLEASE WRITE YOUR FEEDBACK OR BUG REPORT ABOVE THIS LINE"))
+        XCTAssertTrue(payload.body.contains("Instructions:"))
+        XCTAssertTrue(payload.body.contains("Tell us briefly what did you do / what happened when issue took place."))
+        XCTAssertTrue(payload.body.contains("Attachments:"))
         XCTAssertTrue(payload.body.contains("current_window.jpg, recent_crash_diagnostic.json"))
+        XCTAssertTrue(payload.body.contains("Having these files attached helps app developers a lot in fixing the reported bug."))
+        XCTAssertTrue(payload.body.contains("Device info:"))
         XCTAssertTrue(payload.body.contains("Application log could not be captured."))
     }
 
@@ -42,6 +48,18 @@ final class ProductFeedbackReportPreparationTests: XCTestCase {
         XCTAssertEqual(payload.attachments, [log])
         XCTAssertTrue(payload.body.contains("current_application_log.txt"))
         XCTAssertTrue(payload.body.contains("Current app-window screenshot could not be captured."))
+    }
+
+    /** Export failures must use the same localized copy shipped by the report-flow contract. */
+    func testExportFailuresUseLocalizedProductFeedbackCopy() {
+        XCTAssertEqual(
+            ProductFeedbackReportExportError.attachmentTooLarge("large.log").errorDescription,
+            "Attachment is too large to export: large.log"
+        )
+        XCTAssertEqual(
+            ProductFeedbackReportExportError.archiveTooLarge.errorDescription,
+            "The complete bug report is too large to export."
+        )
     }
 
     /**

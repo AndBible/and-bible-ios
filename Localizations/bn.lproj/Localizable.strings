@@ -1244,3 +1244,34 @@ Google ড্রাইভ ব্যবহার করার সময়, %@শ
 "verse_start" = "পদ শুরু";
 "warn_bad_document" = "সতর্কতা: এই নথিটি (অন্তত আংশিকভাবে) খারাপ প্রযুক্তিগত গুণমান হতে পারে।";
 "word_not_found_in_dictionaries" = "কোনো অভিধানে শব্দ পাওয়া যায়নি";
+
+/* Android shared translations */
+"bug_report_app_id" = "App id:";
+"bug_report_archive_too_large" = "The complete bug report is too large to export.";
+"bug_report_attachment_line_1" = "এই ফাইলগুলি সংযুক্ত করা অ্যাপ ডেভেলপারদের রিপোর্ট করা বাগ ঠিক করতে অনেক সাহায্য করে।";
+"bug_report_attachment_too_large" = "Attachment is too large to export: %@";
+"bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
+"bug_report_device" = "Device:";
+"bug_report_export" = "Export report";
+"bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
+"bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
+"bug_report_free_storage" = "Free storage bytes:";
+"bug_report_locale" = "Locale:";
+"bug_report_log_empty" = "Current-process application log contained no exportable entries.";
+"bug_report_log_unavailable" = "Current-process application log could not be captured.";
+"bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
+"bug_report_no_attachments" = "No diagnostic attachments were available.";
+"bug_report_not_sent" = "Bug report not sent";
+"bug_report_operating_system" = "Operating system:";
+"bug_report_physical_memory" = "Physical memory bytes:";
+"bug_report_preparation_notes" = "Preparation notes:";
+"bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
+"bug_report_time_zone" = "Time zone:";
+"bug_report_unavailable" = "Unavailable";
+"bug_report_version" = "Version:";
+"report_bug_big_heading" = "অনুগ্রহ করে এই লাইনের উপরে আপনার প্রতিক্রিয়া বা বাগ রিপোর্ট লিখুন";
+"report_bug_email_subject_3" = "[%1$@] এর জন্য বাগ রিপোর্ট %2$@ %3$@";
+"report_bug_heading1" = "নির্দেশাবলী:";
+"report_bug_heading_3" = "সংযুক্তি:";
+"report_bug_heading_4" = "ডিভাইস তথ্য:";
+"report_bug_line_1" = "আমাদের সংক্ষিপ্তভাবে বলুন আপনি কি করেছেন / যখন সমস্যাটি হয়েছিল তখন কী হয়েছিল।";

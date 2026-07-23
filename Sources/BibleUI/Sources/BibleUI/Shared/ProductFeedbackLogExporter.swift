@@ -73,10 +73,18 @@ enum ProductFeedbackLogExporter {
                 }
                 output.append(data)
             }
-            guard !output.isEmpty else { return .unavailable("Current-process application log contained no exportable entries.") }
+            guard !output.isEmpty else {
+                return .unavailable(String(
+                    localized: "bug_report_log_empty",
+                    defaultValue: "Current-process application log contained no exportable entries."
+                ))
+            }
             return .attachment(.init(data: output, filename: "current_application_log.txt", mimeType: "text/plain"))
         } catch {
-            return .unavailable("Current-process application log could not be captured.")
+            return .unavailable(String(
+                localized: "bug_report_log_unavailable",
+                defaultValue: "Current-process application log could not be captured."
+            ))
         }
     }
 

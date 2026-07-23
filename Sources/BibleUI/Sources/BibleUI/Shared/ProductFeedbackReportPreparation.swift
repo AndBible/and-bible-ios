@@ -31,7 +31,10 @@ enum ProductFeedbackReportPreparation {
         if let screenshot = currentWindowScreenshot() {
             attachments.append(.init(data: screenshot, filename: "current_window.jpg", mimeType: "image/jpeg"))
         } else {
-            warnings.append("Current app-window screenshot could not be captured.")
+            warnings.append(String(
+                localized: "bug_report_screenshot_unavailable",
+                defaultValue: "Current app-window screenshot could not be captured."
+            ))
         }
         if let recentCrash = RecentCrashDiagnosticStore.shared.recentAttachment() {
             attachments.append(recentCrash)
@@ -51,16 +54,39 @@ enum ProductFeedbackReportPreparation {
         attachments: [AddressedMailAttachment],
         warnings: [String]
     ) -> AddressedMailPayload {
-        let attachmentDescription = attachments.isEmpty
-            ? String(localized: "bug_report_no_attachments", defaultValue: "No diagnostic attachments were available.")
-            : String(
-                format: String(localized: "bug_report_attached_evidence", defaultValue: "Attached diagnostic evidence: %@"),
-                attachments.map(\.filename).joined(separator: ", ")
+        let attachmentEvidence = attachments.isEmpty
+            ? String(
+                localized: "bug_report_no_attachments",
+                defaultValue: "No diagnostic attachments were available."
             )
-        let notes = warnings.isEmpty ? "" : "\n\n" + String(localized: "bug_report_preparation_notes", defaultValue: "Preparation notes:") + "\n" + warnings.map { "- \($0)" }.joined(separator: "\n")
+            : attachments.map(\.filename).joined(separator: ", ")
+                + "\n"
+                + String(
+                    localized: "bug_report_attachment_line_1",
+                    defaultValue: "Having these files attached helps app developers a lot in fixing the reported bug."
+                )
+        let attachmentDescription = String(
+            localized: "report_bug_heading_3",
+            defaultValue: "Attachments:"
+        ) + "\n" + attachmentEvidence
+        let notes = warnings.isEmpty
+            ? ""
+            : "\n\n"
+                + String(localized: "bug_report_preparation_notes", defaultValue: "Preparation notes:")
+                + "\n"
+                + warnings.map { "- \($0)" }.joined(separator: "\n")
+        let subject = String(
+            format: String(
+                localized: "report_bug_email_subject_3",
+                defaultValue: "[%1$@] Bug report for %2$@ %3$@"
+            ),
+            "\(metadata.buildNumber) \(ProductFeedbackContract.manualReportSource)",
+            "AndBible",
+            metadata.marketingVersion
+        )
         return AddressedMailPayload(
             recipient: ProductFeedbackContract.diagnosticRecipient,
-            subject: "[\(metadata.buildNumber) \(ProductFeedbackContract.manualReportSource)] Bug report for AndBible \(metadata.marketingVersion)",
+            subject: subject,
             body: diagnosticBody(metadata: metadata, attachmentDescription: attachmentDescription) + notes,
             attachments: attachments
         )
@@ -70,15 +96,24 @@ enum ProductFeedbackReportPreparation {
     private static func diagnosticBody(metadata: AndBibleAppVersionMetadata, attachmentDescription: String) -> String {
         let bundle = Bundle.main
         let processInfo = ProcessInfo.processInfo
-        let freeStorage = (try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage.map(String.init) ?? "Unavailable"
+        let unavailable = String(localized: "bug_report_unavailable", defaultValue: "Unavailable")
+        let freeStorage = (try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage.map(String.init) ?? unavailable
         #if os(iOS)
         let device = UIDevice.current
         let deviceDescription = "\(device.model) (\(device.userInterfaceIdiom == .pad ? "iPad" : "iPhone"))"
         #else
-        let deviceDescription = "Unavailable"
+        let deviceDescription = unavailable
         #endif
         return """
-        \(String(localized: "bug_report_app_id", defaultValue: "App id:")) \(bundle.bundleIdentifier ?? String(localized: "bug_report_unavailable", defaultValue: "Unavailable"))
+        \(String(localized: "report_bug_big_heading", defaultValue: "PLEASE WRITE YOUR FEEDBACK OR BUG REPORT ABOVE THIS LINE"))
+
+        \(String(localized: "report_bug_heading1", defaultValue: "Instructions:"))
+        \(String(localized: "report_bug_line_1", defaultValue: "Tell us briefly what did you do / what happened when issue took place."))
+
+        \(attachmentDescription)
+
+        \(String(localized: "report_bug_heading_4", defaultValue: "Device info:"))
+        \(String(localized: "bug_report_app_id", defaultValue: "App id:")) \(bundle.bundleIdentifier ?? unavailable)
         \(String(localized: "bug_report_version", defaultValue: "Version:")) \(metadata.detailText)
         \(String(localized: "bug_report_operating_system", defaultValue: "Operating system:")) \(processInfo.operatingSystemVersionString)
         \(String(localized: "bug_report_device", defaultValue: "Device:")) \(deviceDescription)
@@ -86,10 +121,6 @@ enum ProductFeedbackReportPreparation {
         \(String(localized: "bug_report_time_zone", defaultValue: "Time zone:")) \(TimeZone.current.identifier)
         \(String(localized: "bug_report_physical_memory", defaultValue: "Physical memory bytes:")) \(processInfo.physicalMemory)
         \(String(localized: "bug_report_free_storage", defaultValue: "Free storage bytes:")) \(freeStorage)
-
-        \(attachmentDescription)
-
-        \(String(localized: "bug_report_reproduction_prompt", defaultValue: "Please describe what happened, the expected result, and steps to reproduce it below."))
         """
     }
 

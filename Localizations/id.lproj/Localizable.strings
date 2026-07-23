@@ -1230,3 +1230,34 @@
 "verse_start" = "Awal Ayat";
 "warn_bad_document" = "Peringatan: Dokumen ini mungkin memiliki kualitas teknis yang buruk (setidaknya sebagian).";
 "word_not_found_in_dictionaries" = "Kata tidak ditemukan di kamus mana pun";
+
+/* Android shared translations */
+"bug_report_app_id" = "App id:";
+"bug_report_archive_too_large" = "The complete bug report is too large to export.";
+"bug_report_attachment_line_1" = "Melampirkan file-file ini sangat membantu pengembang aplikasi dalam memperbaiki bug yang dilaporkan.";
+"bug_report_attachment_too_large" = "Attachment is too large to export: %@";
+"bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
+"bug_report_device" = "Device:";
+"bug_report_export" = "Export report";
+"bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
+"bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
+"bug_report_free_storage" = "Free storage bytes:";
+"bug_report_locale" = "Locale:";
+"bug_report_log_empty" = "Current-process application log contained no exportable entries.";
+"bug_report_log_unavailable" = "Current-process application log could not be captured.";
+"bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
+"bug_report_no_attachments" = "No diagnostic attachments were available.";
+"bug_report_not_sent" = "Bug report not sent";
+"bug_report_operating_system" = "Operating system:";
+"bug_report_physical_memory" = "Physical memory bytes:";
+"bug_report_preparation_notes" = "Preparation notes:";
+"bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
+"bug_report_time_zone" = "Time zone:";
+"bug_report_unavailable" = "Unavailable";
+"bug_report_version" = "Version:";
+"report_bug_big_heading" = "SILAKAN TULIS MASUKAN ATAU LAPORAN BUG ANDA DI ATAS BARIS INI";
+"report_bug_email_subject_3" = "[%1$@] Laporan bug untuk %2$@ %3$@";
+"report_bug_heading1" = "Petunjuk:";
+"report_bug_heading_3" = "Lampiran:";
+"report_bug_heading_4" = "Info perangkat:";
+"report_bug_line_1" = "Ceritakan secara singkat apa yang Anda lakukan / apa yang terjadi saat masalah muncul.";

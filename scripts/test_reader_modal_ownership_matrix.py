@@ -821,6 +821,8 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             / "Shared"
             / "ProductFeedbackReportPreparation.swift"
         ).read_text(encoding="utf-8")
+        collection_body = swift_function_body(source, "presentBugReportDialog")
+        consent_body = swift_function_body(source, "presentPreparedBugReport")
 
         self.assertIn("presentBugReportDialog", report_body)
         self.assertNotIn("openExternalLink", report_body)
@@ -830,6 +832,29 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("ProductFeedbackReportPreparation.prepare()", source)
         self.assertIn("presentPreparedBugReport", source)
         self.assertIn("AddressedMailComposer", source)
+        self.assertIn(
+            "@State private var manualBugReportPreparedPayload: AddressedMailPayload?",
+            source,
+        )
+        self.assertIn(
+            ".sheet(item: $manualBugReportMailPayload)",
+            source,
+        )
+        self.assertNotIn(
+            ".sheet(item: $manualBugReportPreparedPayload)",
+            source,
+        )
+        self.assertIn(
+            "manualBugReportPreparedPayload = payload",
+            collection_body,
+        )
+        self.assertNotIn(
+            "manualBugReportMailPayload = ProductFeedbackReportPreparation.prepare()",
+            collection_body,
+        )
+        self.assertIn("AddressedMailComposer.capability", consent_body)
+        self.assertIn("guard capability == .available else { return }", consent_body)
+        self.assertIn("manualBugReportMailPayload = payload", consent_body)
         self.assertNotIn("shareText = AndroidBugReportDiagnostic.manualReport()", source)
         self.assertIn("bug_report_app_id", preparation_source)
         self.assertIn("bug_report_operating_system", preparation_source)

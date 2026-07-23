@@ -1246,3 +1246,34 @@
 "verse_start" = "بداية الآية";
 "warn_bad_document" = "تحذير: قد يكون هذا المستند (على الأقل جزئياً) ذا جودة تقنية رديئة.";
 "word_not_found_in_dictionaries" = "الكلمة غير موجودة في أي قاموس";
+
+/* Android shared translations */
+"bug_report_app_id" = "App id:";
+"bug_report_archive_too_large" = "The complete bug report is too large to export.";
+"bug_report_attachment_line_1" = "إرفاق هذه الملفات يساعد مطوري التطبيق كثيراً في إصلاح الخطأ المبلغ عنه.";
+"bug_report_attachment_too_large" = "Attachment is too large to export: %@";
+"bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
+"bug_report_device" = "Device:";
+"bug_report_export" = "Export report";
+"bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
+"bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
+"bug_report_free_storage" = "Free storage bytes:";
+"bug_report_locale" = "Locale:";
+"bug_report_log_empty" = "Current-process application log contained no exportable entries.";
+"bug_report_log_unavailable" = "Current-process application log could not be captured.";
+"bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
+"bug_report_no_attachments" = "No diagnostic attachments were available.";
+"bug_report_not_sent" = "Bug report not sent";
+"bug_report_operating_system" = "Operating system:";
+"bug_report_physical_memory" = "Physical memory bytes:";
+"bug_report_preparation_notes" = "Preparation notes:";
+"bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
+"bug_report_time_zone" = "Time zone:";
+"bug_report_unavailable" = "Unavailable";
+"bug_report_version" = "Version:";
+"report_bug_big_heading" = "يرجى كتابة ملاحظاتك أو تقرير الخطأ فوق هذا السطر";
+"report_bug_email_subject_3" = "[%1$@] تقرير خطأ لـ %2$@ %3$@";
+"report_bug_heading1" = "تعليمات:";
+"report_bug_heading_3" = "المرفقات:";
+"report_bug_heading_4" = "بيانات الجهاز:";
+"report_bug_line_1" = "أخبرنا باختصار ماذا فعلت/حدث عندما حدثت المشكلة.";

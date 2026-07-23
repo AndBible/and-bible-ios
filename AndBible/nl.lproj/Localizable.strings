@@ -1242,3 +1242,34 @@
 "verse_start" = "Begin vers";
 "warn_bad_document" = "Waarchuwing: Dit document kan (tenminste deels) van slechte technische kwaliteit zijn.";
 "word_not_found_in_dictionaries" = "Woord niet gevonden in een woordenboek";
+
+/* Android shared translations */
+"bug_report_app_id" = "App id:";
+"bug_report_archive_too_large" = "The complete bug report is too large to export.";
+"bug_report_attachment_line_1" = "Het toevoegen van deze bestanden zal de app-ontwikkelaars veel kunnen helpen in het oplossen van de gerapporteerde fout.";
+"bug_report_attachment_too_large" = "Attachment is too large to export: %@";
+"bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
+"bug_report_device" = "Device:";
+"bug_report_export" = "Export report";
+"bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
+"bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
+"bug_report_free_storage" = "Free storage bytes:";
+"bug_report_locale" = "Locale:";
+"bug_report_log_empty" = "Current-process application log contained no exportable entries.";
+"bug_report_log_unavailable" = "Current-process application log could not be captured.";
+"bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
+"bug_report_no_attachments" = "No diagnostic attachments were available.";
+"bug_report_not_sent" = "Bug report not sent";
+"bug_report_operating_system" = "Operating system:";
+"bug_report_physical_memory" = "Physical memory bytes:";
+"bug_report_preparation_notes" = "Preparation notes:";
+"bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
+"bug_report_time_zone" = "Time zone:";
+"bug_report_unavailable" = "Unavailable";
+"bug_report_version" = "Version:";
+"report_bug_big_heading" = "SCHRIJF ALSTUBLIEFT UW TERUGKOPPELING OF FOUT RAPPORTAGE BOVEN DEZE LIJN";
+"report_bug_email_subject_3" = "[%1$@] Bug-melding voor %2$@ %3$@";
+"report_bug_heading1" = "Instructies:";
+"report_bug_heading_3" = "Bijlagen:";
+"report_bug_heading_4" = "Apparaat info:";
+"report_bug_line_1" = "Vertel in het kort wat u deed of wat er gebeurde toen het probleem zich voor deed.";
