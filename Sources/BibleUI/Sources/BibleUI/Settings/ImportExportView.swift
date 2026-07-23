@@ -20,10 +20,16 @@ enum AndroidModuleBackupArchiveFileStager {
      - Parameters:
        - sourceURL: Readable provider or local archive URL.
        - destinationURL: Unique app-owned staging destination.
-     - Side effects: Creates or replaces `destinationURL` and writes the source bytes to it.
+       - didWriteChunk: Optional synchronous observer invoked after each completed chunk write.
+     - Side effects: Creates or replaces `destinationURL`, writes the source bytes to it, and invokes
+       `didWriteChunk` on the copy task when supplied.
      - Failure modes: Rethrows cancellation and file-system failures after removing partial output.
      */
-    static func copy(from sourceURL: URL, to destinationURL: URL) throws {
+    static func copy(
+        from sourceURL: URL,
+        to destinationURL: URL,
+        didWriteChunk: (@Sendable (_ byteCount: Int) -> Void)? = nil
+    ) throws {
         try Task.checkCancellation()
         let input = try FileHandle(forReadingFrom: sourceURL)
         defer { try? input.close() }
@@ -37,6 +43,7 @@ enum AndroidModuleBackupArchiveFileStager {
                 if chunk.isEmpty { break }
                 try Task.checkCancellation()
                 try output.write(contentsOf: chunk)
+                didWriteChunk?(chunk.count)
             }
             try Task.checkCancellation()
             try output.synchronize()
