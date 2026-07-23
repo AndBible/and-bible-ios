@@ -35,7 +35,7 @@ extension AndBibleUITests {
         app.launch()
 
         _ = openReadingPlans(in: app, timeout: 20)
-        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=readingPlans", in: app, timeout: 10)
         XCTAssertFalse(
             app.navigationBars.buttons["Done"].firstMatch.exists,

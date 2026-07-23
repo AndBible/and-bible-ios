@@ -1023,7 +1023,8 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         Android parity forbids substituting adaptive sheets for app activities or dialogs. The only
         remaining reader sheet call is the system ShareSheet handoff. A failure means a new
         app-owned sheet needs an Android source contract and an explicit owner decision before it
-        can ship.
+        can ship. The shared overlay shell must also remain unidentified because SwiftUI propagates
+        a container identifier through its descendants and replaces their control-specific IDs.
         """
         page_list_source = MY_DOCUMENT_PAGES_LIST_VIEW.read_text(encoding="utf-8")
         document_list_source = MY_DOCUMENTS_LIST_VIEW.read_text(encoding="utf-8")
@@ -1045,7 +1046,7 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertNotIn(".fullScreenCover(item: $activeReaderLabelAssignmentRoute)", reader_source)
         self.assertNotIn(".fullScreenCover(item: $refChooserPresentation)", reader_source)
         self.assertIn("ReaderAppOwnedOverlay", reader_source)
-        self.assertIn('accessibilityIdentifier("androidReaderAppOwnedOverlay")', reader_source)
+        self.assertNotIn('accessibilityIdentifier("androidReaderAppOwnedOverlay")', reader_source)
         self.assertNotIn(".sheet(item: $historyDialogRequest)", reader_source)
         self.assertNotIn(".sheet(item: $chapterReadHistoryDialogRequest)", reader_source)
         self.assertNotIn("UIActivityViewController", pane_source)

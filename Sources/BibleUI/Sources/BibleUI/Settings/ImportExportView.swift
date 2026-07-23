@@ -513,7 +513,7 @@ public struct ImportExportView: View {
         #endif
         .overlay {
             if showBackupDestinationDialog {
-                AndroidMyDocumentDecisionDialog(title: String(localized: "backup_backup_title", defaultValue: "Backup to where?"), message: String(localized: "backup_backup_message", defaultValue: "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"), actions: [
+                AndroidMyDocumentDecisionDialog(title: String(localized: "backup_backup_title", defaultValue: "Backup to where?"), message: String(localized: "backup_backup_message_ios", defaultValue: "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"), actions: [
                     .init(id: "phone", title: String(localized: "backup_phone_storage", defaultValue: "Phone storage"), style: .normal) { showBackupDestinationDialog = false; finishPendingBackupExport(to: .phoneStorage) },
                     .init(id: "share", title: String(localized: "share", defaultValue: "Share"), style: .normal) { showBackupDestinationDialog = false; finishPendingBackupExport(to: .share) },
                     .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { showBackupDestinationDialog = false; cancelPendingBackupExport() }

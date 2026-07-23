@@ -422,7 +422,6 @@ struct BibleReaderModulePicker: View {
         let visibleRows = filteredDocumentRows
 
         return ZStack(alignment: .topTrailing) {
-            documentChooserScreenMarker
             VStack(spacing: 0) {
                 androidTopAppBar
                 androidFilterBar(visibleDocumentCount: visibleRows.count)
@@ -452,23 +451,6 @@ struct BibleReaderModulePicker: View {
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
         #endif
-    }
-
-    /**
-     Builds a stable screen marker without making every child inherit the same identifier.
-
-     SwiftUI accessibility identifiers can propagate from container views. Android parity tests need
-     a route-level marker and concrete row/filter identifiers, so this tiny non-interactive element
-     carries `modulePickerScreen` while the visible layout remains accessible by its own labels.
-     */
-    private var documentChooserScreenMarker: some View {
-        Rectangle()
-            .fill(DocumentChooserPalette.background.opacity(0.001))
-            .frame(width: 1, height: 1)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(String(localized: "document", defaultValue: "Document"))
-            .accessibilityIdentifier("modulePickerScreen")
-            .allowsHitTesting(false)
     }
 
     /**
@@ -657,7 +639,8 @@ struct BibleReaderModulePicker: View {
     /**
      Builds Android's inline free-text document search field.
 
-     - Returns: Plain underlined search input.
+     - Returns: Plain underlined search input whose real text field exposes the stable UI-test
+       identifier through SwiftUI accessibility flattening.
      - Side effects: Typing mutates `searchText` and the root screen aligns filters with Android's
        search-focus behavior.
      - Failure modes: none.
@@ -669,11 +652,11 @@ struct BibleReaderModulePicker: View {
                 .foregroundStyle(DocumentChooserPalette.primaryText)
                 .tint(DocumentChooserPalette.primaryText)
                 .submitLabel(.search)
+                .accessibilityIdentifier("modulePickerSearchField")
             Rectangle()
                 .fill(DocumentChooserPalette.secondaryText)
                 .frame(height: 1)
         }
-        .accessibilityIdentifier("modulePickerSearchField")
     }
 
     /**

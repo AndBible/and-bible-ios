@@ -652,7 +652,9 @@ extension AndBibleUITests {
      * This helper is intentionally explicit for recurring screen/container roots. The earlier
      * generic "try every XCUI type" approach was the main source of CI flakiness because it could
      * resolve the wrong class for a screen root and force XCTest into very expensive cross-type
-     * snapshot evaluation.
+     * snapshot evaluation. App-owned Android dialog roots are the bounded exception: SwiftUI can
+     * flatten their identifiers onto different XCUI element types, so they use one exact full-tree
+     * identifier query rather than a broad type heuristic.
      *
      * - Parameters:
      *   - identifier: Accessibility identifier to resolve.
@@ -665,6 +667,12 @@ extension AndBibleUITests {
         for identifier: String,
         in app: XCUIApplication
     ) -> [XCUIElement] {
+        if identifier.hasPrefix("android"), identifier.hasSuffix("Dialog") {
+            return [
+                app.descendants(matching: .any).matching(identifier: identifier).firstMatch,
+            ]
+        }
+
         if identifier.hasPrefix("labelAssignmentRow::") {
             return screenScopedRowCandidates(identifier, within: "labelAssignmentScreen", in: app)
         }
@@ -954,7 +962,6 @@ extension AndBibleUITests {
             "readingProgressSettingsScreen",
             "colorSettingsScreen",
             "importExportScreen",
-            "modulePickerScreen",
             "moduleBrowserScreen":
             return [
                 app.collectionViews[identifier].firstMatch,

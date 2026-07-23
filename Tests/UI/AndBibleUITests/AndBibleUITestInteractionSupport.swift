@@ -300,7 +300,59 @@ extension AndBibleUITests {
     }
 
     /**
-     Taps one native alert button and waits for the alert to disappear before continuing.
+     Resolves a button from either a system alert or an app-owned Android decision dialog.
+
+     - Parameters:
+       - title: Visible button title expected inside the currently presented decision surface.
+       - app: Running application under test.
+       - timeout: Maximum number of seconds to wait for a matching surface and button.
+     - Returns: The owning decision surface and matching button, or `nil` after the bounded wait.
+     - Side effects: Polls the accessibility hierarchy without activating controls.
+     - Failure modes: Returns `nil` when no supported decision surface exposes the requested button.
+     */
+    func resolveDecisionDialogButton(
+        _ title: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> (surface: XCUIElement, button: XCUIElement)? {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let systemAlert = app.alerts.firstMatch
+            if systemAlert.exists {
+                let button = systemAlert.buttons[title].firstMatch
+                if button.exists {
+                    return (systemAlert, button)
+                }
+            }
+
+            let androidSurfaceIdentifiers = [
+                "androidMyDocumentDecisionDialog",
+                "androidModulePickerDecisionDialog",
+                "androidReadingProgressDecisionDialog",
+            ]
+            let androidSurfaces = androidSurfaceIdentifiers.compactMap { identifier in
+                resolvedElement(identifier, in: app)
+            }
+            for surface in androidSurfaces where surface.exists {
+                let nestedButton = surface.buttons[title].firstMatch
+                if nestedButton.exists {
+                    return (surface, nestedButton)
+                }
+
+                // SwiftUI can flatten overlay controls beside their identified container in the
+                // accessibility tree, so resolve the visible action from the application root.
+                let flattenedButton = app.buttons[title].firstMatch
+                if flattenedButton.exists, flattenedButton.isHittable {
+                    return (surface, flattenedButton)
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+        return nil
+    }
+
+    /**
+     Taps one system-alert or Android decision-dialog button and waits for its surface to disappear.
      *
      * - Parameters:
      *   - title: Visible button title expected inside the currently presented alert.
@@ -309,9 +361,9 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - resolves the live alert button, taps it, and blocks until the alert no longer exists
+     *   - resolves the live decision button, taps it, and blocks until its surface no longer exists
      * - Failure modes:
-     *   - records an XCTest failure if the alert button never appears or the alert does not
+     *   - records an XCTest failure if the decision button never appears or the surface does not
      *     dismiss after the tap
      */
     func tapAlertButton(
@@ -321,28 +373,28 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let alert = app.alerts.firstMatch
+        guard let decision = resolveDecisionDialogButton(title, in: app, timeout: timeout) else {
+            XCTFail(
+                "Expected a system alert or Android decision dialog before tapping '\(title)'.",
+                file: file,
+                line: line
+            )
+            return
+        }
         XCTAssertTrue(
-            alert.waitForExistence(timeout: timeout),
-            "Expected an alert before tapping '\(title)'.",
+            decision.button.exists,
+            "Expected decision button '\(title)' to exist within \(timeout) seconds.",
             file: file,
             line: line
         )
-        let button = alert.buttons[title].firstMatch
-        XCTAssertTrue(
-            button.waitForExistence(timeout: timeout),
-            "Expected alert button '\(title)' to exist within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-        tapElementReliably(button, timeout: timeout, file: file, line: line)
+        tapElementReliably(decision.button, timeout: timeout, file: file, line: line)
 
         let dismissedPredicate = NSPredicate(format: "exists == false")
-        expectation(for: dismissedPredicate, evaluatedWith: alert)
+        expectation(for: dismissedPredicate, evaluatedWith: decision.surface)
         waitForExpectations(timeout: timeout)
         XCTAssertFalse(
-            alert.exists,
-            "Expected the alert to dismiss after tapping '\(title)'.",
+            decision.surface.exists,
+            "Expected the decision surface to dismiss after tapping '\(title)'.",
             file: file,
             line: line
         )
@@ -739,28 +791,39 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to wait for the chooser row and visible My Notes document.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
-	     * - Side effects:
-	     *   - opens the reader drawer, launches Choose Document, filters the Android-style chooser to
-	     *     the `FakeBookFactory` `My Note` initials, selects that row, and waits for the
-	     *     WebView-owned My Notes document to render
-	     * - Failure modes:
-	     *   - records an XCTest failure if the chooser, pseudo-document row, or My Notes state never
-	     *     becomes visible
+     * - Side effects:
+     *   - opens the reader drawer, launches Choose Document, filters the Android-style chooser to
+     *     the `FakeBookFactory` `My Note` initials, selects that row, and waits for the
+     *     WebView-owned My Notes document to render
+     * - Failure modes:
+     *   - records an XCTest failure if the chooser search, pseudo-document row, or My Notes state
+     *     never becomes visible
      */
-	    func openMyNotesFromReader(
-	        in app: XCUIApplication,
-	        timeout: TimeInterval = 20,
-	        file: StaticString = #filePath,
-	        line: UInt = #line
-	    ) {
-	        tapReaderAction("readerChooseDocumentAction", in: app, timeout: timeout, file: file, line: line)
-	        _ = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
-	        let searchField = requireElement("modulePickerSearchField", in: app, timeout: timeout, file: file, line: line)
-	        replaceText(in: searchField, with: "My Note", placeholderHints: ["Search"])
-	        tapElementReliably(
-	            requireElement("modulePickerPseudoRow::myNotes", in: app, timeout: timeout, file: file, line: line),
-	            timeout: timeout
-	        )
+    func openMyNotesFromReader(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 20,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        tapReaderAction("readerChooseDocumentAction", in: app, timeout: timeout, file: file, line: line)
+        let searchField = requireElement(
+            "modulePickerSearchField",
+            in: app,
+            timeout: timeout,
+            file: file,
+            line: line
+        )
+        replaceText(in: searchField, with: "My Note", placeholderHints: ["Search"])
+        tapElementReliably(
+            requireElement(
+                "modulePickerPseudoRow::myNotes",
+                in: app,
+                timeout: timeout,
+                file: file,
+                line: line
+            ),
+            timeout: timeout
+        )
         waitForMyNotesPresentation(in: app, timeout: timeout, file: file, line: line)
         waitForVisibleMyNotesState(
             containing: "myNotesVisible=true",
