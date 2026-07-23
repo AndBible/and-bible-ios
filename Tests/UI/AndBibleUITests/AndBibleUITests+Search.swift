@@ -273,23 +273,28 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Android's per-window Text Options route, parent-link ladder, and pane Close action.
+    Verifies Android's per-window Text Options route, parent-link back stack, and pane Close action.
 
-     Android's pane/window menu owns both per-window Text Options and Close. These are distinct
-     commands, but both require the same setup: create a second reader pane, open that pane's
-     hamburger menu, and exercise a pane-scoped command. Keeping them in one workflow removes a
-     duplicate cold launch while preserving the visible window-scope route and delete transaction.
+    Android's pane/window menu owns both per-window Text Options and Close. These are distinct
+    commands, but both require the same setup: create a second reader pane, open that pane's
+    hamburger menu, and exercise a pane-scoped command. Android's single-top
+    `TextDisplaySettingsActivity` pushes each parent scope onto its internal bundle stack, so Back
+    from workspace scope must first restore window scope before a second Back returns to the reader.
+    Keeping both commands in one workflow removes a duplicate cold launch while preserving that
+    visible scope ladder and the pane-delete transaction.
      *
      * - Side effects:
      *   - launches the app, creates a second reader window through the tab bar, and opens the
      *     active pane hamburger menu
      *   - activates the pane-level All text options command
      *   - taps the workspace parent link from the window-scoped Text Display screen
-     *   - exits the Text Options route, reopens the same pane menu, and activates Close
+     *   - navigates Back through window scope to the reader, reopens the same pane menu, and
+     *     activates Close
      * - Failure modes:
      *   - fails if pane All text options routes to workspace/global scope
      *   - fails if window scope lacks either Android parent link
      *   - fails if the workspace parent link does not navigate to `scope=workspace`
+     *   - fails if Back skips or cannot restore the preceding `scope=window` activity
      *   - fails if pane-menu Close terminates the app, leaves the deleted tab visible, or removes
      *     the remaining pane menu/add-window affordances
      */
@@ -310,6 +315,14 @@ extension AndBibleUITests {
         tapElementReliably(workspaceLink, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
         XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
+        XCTAssertTrue(requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10).exists)
+
+        tapElementReliably(
+            requireElement("textDisplaySettingsTopAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=window", in: app, timeout: 10)
+        XCTAssertTrue(requireElement("textDisplayOpenWorkspaceSettingsButton", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10).exists)
 
         tapElementReliably(
