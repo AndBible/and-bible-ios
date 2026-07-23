@@ -266,8 +266,25 @@ extension AndBibleUITests {
         return readerDocumentHeaderStateValue(in: app) != nil && bookmarkListHidden
     }
 
-    /// Returns whether the bookmark-list surface still exposes one of its lightweight sentinels.
+    /**
+     Returns whether the bookmark list is still the active reader destination.
+
+     The reader state export is authoritative because SwiftUI can leave the bookmark-list state
+     export queryable after the destination has already navigated to a document. Lightweight
+     bookmark-list sentinels remain the fallback for hosts that do not expose reader state.
+
+     - Parameter app: Running application whose bookmark-list presentation is being inspected.
+     - Returns: `true` when the current reader state or fallback sentinels show the bookmark list.
+     - Side effects: Reads accessibility state without activating controls.
+     - Failure modes: Falls back to sentinel existence when reader state is unavailable.
+     */
     func bookmarkListSurfaceIsVisible(in app: XCUIApplication) -> Bool {
+        if let readerState = readerRenderedContentStateValue(in: app),
+           readerState.contains("readerDestination=")
+        {
+            return readerState.contains("readerDestination=bookmarks")
+        }
+
         let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
         if doneButton.exists {
             return true
@@ -658,23 +675,20 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens History from the reader shell's app-owned dialog.
+     Opens History from the reader shell's app-owned Android dialog.
      *
      * - Parameter app: Running application whose reader shell should present History.
-     * - Returns: The root accessibility-identified History screen element.
+     * - Returns: The root accessibility-identified Android History dialog.
      * - Side effects:
      *   - opens the reader navigation drawer and presents History's app-owned dialog
      * - Failure modes:
-     *   - fails if the reader menu button, History action, or History screen root never appears
+     *   - fails if the reader action or Android History dialog never appears
      */
     @discardableResult
     func openHistory(in app: XCUIApplication) -> XCUIElement {
-        openReaderActionDestination(
-            actionIdentifier: "readerOpenHistoryAction",
-            destinationIdentifier: "historyScreen",
-            readinessIdentifiers: ["historyDoneButton", "historyClearButton", "historyEmptyState"],
-            in: app
-        )
+        tapReaderAction("readerOpenHistoryAction", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "historyDialog=presented", in: app, timeout: 10)
+        return requireElement("androidHistoryDialog", in: app, timeout: 10)
     }
 
     /**

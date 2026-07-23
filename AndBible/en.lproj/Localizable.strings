@@ -1323,6 +1323,7 @@
 "ai_settings_sync_title" = "AI Settings";
 "backup_and_restore" = "Backup & Restore";
 "backup_backup_message" = "Backup to phone or elsewhere via Share function (email, Google Drive etc.)?";
+"backup_backup_message_ios" = "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?";
 "backup_backup_title" = "Backup to where?";
 "backup_database" = "Database";
 "backup_database_info" = "Bookmarks, labels, notes, study pads, reading plans, workspaces etc.";

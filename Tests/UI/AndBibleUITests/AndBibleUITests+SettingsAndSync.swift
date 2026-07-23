@@ -117,15 +117,15 @@ extension AndBibleUITests {
         let helpButton = requireSettingsNavigationControl("discreteHelpButton", in: app, timeout: 20)
         tapElementReliably(helpButton, timeout: 10)
         XCTAssertTrue(
-            app.otherElements["discreteModeSecurityHelp"].waitForExistence(timeout: 10)
+            requireElement("androidMyDocumentDecisionDialog", in: app, timeout: 10).exists
         )
         let platformHelpText = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations."
         XCTAssertTrue(
             app.staticTexts.matching(
-                NSPredicate(format: "label == %@", platformHelpText)
-            ).firstMatch.exists
+                NSPredicate(format: "label CONTAINS %@", platformHelpText)
+            ).firstMatch.waitForExistence(timeout: 10)
         )
-        tapElementReliably(requireElement("Done", in: app, timeout: 10), timeout: 10)
+        tapAlertButton("OK", in: app, timeout: 10)
 
         XCTAssertTrue(requireSettingsNavigationControl("calculatorPinRow", in: app, timeout: 20).exists)
         XCTAssertTrue(requireSettingsNavigationControl("discreteModeToggle", in: app, timeout: 20).exists)
@@ -184,27 +184,13 @@ extension AndBibleUITests {
             "iOS backup destination copy must not advertise Google Drive as the native backup target."
         )
 
-        let destinationCancelButton = firstExistingElement(
-            [
-                app.buttons["backupDestinationCancelButton"].firstMatch,
-                app.sheets.buttons["Cancel"].firstMatch,
-                app.alerts.buttons["Cancel"].firstMatch,
-                app.buttons["Cancel"].firstMatch,
-            ],
-            timeout: 10
-        )
-        XCTAssertNotNil(destinationCancelButton, "Expected Backup destination dialog to expose a cancel action.")
-        guard let destinationCancelButton else {
-            return
-        }
-        tapElementReliably(destinationCancelButton, timeout: 10)
+        tapAlertButton("Cancel", in: app, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "idle", in: app, timeout: 10)
 
         tapElementReliably(databaseBackupButton, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "backupDestinationPresented", in: app, timeout: 20)
 
-        let shareButton = requireElement("backupDestinationShareButton", in: app, timeout: 10)
-        tapElementReliably(shareButton, timeout: 10)
+        tapAlertButton("Share", in: app, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "shareSheetPresented", in: app, timeout: 20)
 
         let closeButton = firstExistingElement(

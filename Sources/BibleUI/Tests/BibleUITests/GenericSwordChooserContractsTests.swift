@@ -213,7 +213,7 @@ final class GenericSwordChooserContractsTests: XCTestCase {
         XCTAssertEqual(selection.components(separatedBy: "handleGenericQuickModuleSwitch(").count - 1, 2)
         XCTAssertTrue(routing.contains("case .switchedPreservingKey:"))
         XCTAssertTrue(routing.contains("case .switchedRequiringKeySelection:"))
-        XCTAssertTrue(routing.contains("presentReaderModalPreservingPane(browser)"))
+        XCTAssertTrue(routing.contains("presentReaderDestinationPreservingPane(browser)"))
         XCTAssertTrue(routing.contains("case .failed(let message):"))
         XCTAssertTrue(routing.contains("pendingGenericQuickModuleSwitchRetry = GenericQuickModuleSwitchRetry("))
         XCTAssertTrue(routing.contains("targetWindowId: targetWindowId"))

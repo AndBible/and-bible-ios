@@ -1360,31 +1360,23 @@ extension AndBibleUITests {
             )
         }
 
-        XCTAssertTrue(
-            app.alerts.firstMatch.buttons[title].waitForExistence(timeout: min(timeout, 10)),
-            "Expected the adopt-versus-create alert to expose '\(title)'.",
+        guard let decision = resolveDecisionDialogButton(title, in: app, timeout: min(timeout, 10)) else {
+            XCTFail(
+                "Expected the adopt-versus-create Android dialog to expose '\(title)'.",
+                file: file,
+                line: line
+            )
+            return
+        }
+        tapElementReliably(
+            decision.button,
+            timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)),
             file: file,
             line: line
         )
-
-        repeat {
-            if expectedStateIsVisible() {
-                return
-            }
-
-            let button = app.alerts.firstMatch.buttons[title].firstMatch
-            if button.exists {
-                tapElementReliably(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)), file: file, line: line)
-            }
-
-            if waitForExpectedState(timeout: min(1.5, max(0.2, deadline.timeIntervalSinceNow))) {
-                return
-            }
-
-            if !button.exists {
-                break
-            }
-        } while Date() < deadline
+        if waitForExpectedState(timeout: max(0.2, deadline.timeIntervalSinceNow)) {
+            return
+        }
 
         XCTFail(
             "Expected alert choice '\(title)' to drive syncSettingsState to '\(expectedDescription)' within \(timeout) seconds. Final state: '\(lastState)'.",

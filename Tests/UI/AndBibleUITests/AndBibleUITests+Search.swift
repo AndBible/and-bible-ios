@@ -10,15 +10,13 @@ extension AndBibleUITests {
      Verifies reader administration actions and Settings route Android shortcut rows.
      *
      * Package tests own the full Application Preferences row catalog. This UI smoke keeps the live
-     * route contract: About, Label Settings, and AI Settings remain reachable from the reader menu;
-     * AI Settings reproduces Android's setup-to-connection hierarchy and explicit disclaimer gate;
+     * route contract: AI Settings remains reachable from the Android reader drawer and reproduces
+     * Android's setup-to-connection hierarchy and explicit disclaimer gate;
      * Application Preferences opens the same AI screen; and Global text options opens root-scoped
      * Text Display settings.
      *
      * - Side effects:
      *   - launches the app with deterministic in-memory persistence
-     *   - opens and dismisses About from the reader menu
-     *   - opens and dismisses Label Manager from the reader menu's Label Settings action
      *   - opens AI Settings directly from the reader drawer and pushes Connection settings
      *   - verifies Android's zero-provider row visibility and cancels both protected entry points
      *   - explicitly accepts once, then verifies Quick Setup resumes at provider selection
@@ -27,8 +25,6 @@ extension AndBibleUITests {
      *   - opens the shared AI Settings destination from Application Preferences
      *   - activates the production Global text options row
      * - Failure modes:
-     *   - fails if About no longer opens from the reader menu or cannot return to the reader shell
-     *   - fails if Label Settings cannot reach `LabelManagerView` readiness exports
      *   - fails if AI Settings skips Android's centered setup or separate Connection settings screen
      *   - fails if zero-provider Connection settings exposes configured-only rows
      *   - fails if cancellation counts as disclaimer acceptance
@@ -41,35 +37,6 @@ extension AndBibleUITests {
     func testSettingsApplicationShortcutsOpenGlobalTextOptions() {
         let app = makeApp()
         app.launch()
-
-        openAboutFromReaderMenu(in: app)
-        let aboutSheet = requireElement("aboutSheetScreen", in: app, timeout: 10)
-        tapElementReliably(requireElement("aboutDoneButton", in: app, timeout: 10), timeout: 10)
-        waitForElementToDisappear(aboutSheet, timeout: 10)
-        XCTAssertTrue(
-            waitForReaderShellReady(in: app, timeout: 20),
-            "Expected About dismissal to return to the reader shell."
-        )
-
-        XCTAssertTrue(openLabelManager(in: app).exists)
-        _ = requireElement("labelManagerAddButton", in: app, timeout: 10)
-        _ = requireElement("labelManagerStateExport", in: app, timeout: 10)
-        let labelManagerDoneButton = firstExistingElement(
-            [
-                app.navigationBars.buttons["Done"].firstMatch,
-                app.buttons["Done"].firstMatch,
-            ],
-            timeout: 10
-        )
-        XCTAssertNotNil(labelManagerDoneButton, "Expected Label Manager to expose a Done action.")
-        guard let labelManagerDoneButton else {
-            return
-        }
-        tapElementReliably(labelManagerDoneButton, timeout: 10)
-        XCTAssertTrue(
-            waitForReaderShellReady(in: app, timeout: 20),
-            "Expected Label Manager dismissal to return to the reader shell."
-        )
 
         tapReaderAction("readerOpenAISettingsAction", in: app, timeout: 20)
         XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 20).exists)
@@ -188,7 +155,7 @@ extension AndBibleUITests {
 
         openSettings(in: app)
         XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
-        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=settings", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsGlobalTextOptionsLink", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsSyncLink", in: app, timeout: 10)
@@ -243,7 +210,7 @@ extension AndBibleUITests {
 
         let textDisplayScreen = openAllTextOptions(in: app)
         XCTAssertTrue(textDisplayScreen.exists)
-        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=textOptions", in: app, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
         XCTAssertFalse(

@@ -42,6 +42,9 @@ public struct SettingsView: View {
     /// URL opener used for system-settings actions.
     @Environment(\.openURL) private var openURL
 
+    /// Dismisses active settings search focus before app-owned decision surfaces appear.
+    @Environment(\.dismissSearch) private var dismissSearch
+
     /// Shared effective night-mode state used by the reader.
     @Binding var nightMode: Bool
 
@@ -962,7 +965,8 @@ public struct SettingsView: View {
     /**
      Builds the discrete-mode security section.
 
-     - Side Effects: Updates local security state; `calculatorPin` filtering strips non-numeric input.
+     - Side Effects: Updates local security state, dismisses search before showing security help, and
+       strips non-numeric `calculatorPin` input.
      - Failure Modes: Invalid PIN characters are ignored rather than persisted.
      */
     @ViewBuilder
@@ -970,6 +974,7 @@ public struct SettingsView: View {
         settingsPreferenceSection(String(localized: "settings_security")) {
             if settingsSearchMatchesPreference(.discreteHelp, in: securitySettingsSearchEntries) {
                 Button {
+                    dismissSearch()
                     showDiscreteHelp = true
                 } label: {
                     settingsRowLabel(

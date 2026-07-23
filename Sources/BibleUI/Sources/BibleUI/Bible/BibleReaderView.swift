@@ -219,7 +219,13 @@ public struct BibleReaderView: View {
      The surface preserves the reader's existing window and pane state while an
      app-owned chooser or label workflow is active. It deliberately avoids
      SwiftUI sheet and full-screen-cover ownership; callers clear their own
-     route state through the existing completion callbacks.
+     route state through the existing completion callbacks. The shell deliberately
+     has no accessibility identifier because SwiftUI propagates a container identifier
+     through its descendants, replacing the controls' own accessibility contracts.
+
+     - Returns: A dimmed, app-owned modal surface that preserves descendant accessibility.
+     - Side effects: none.
+     - Failure modes: Content sizing is bounded to the reader viewport.
      */
     private struct ReaderAppOwnedOverlay<Content: View>: View {
         @ViewBuilder let content: Content
@@ -240,7 +246,6 @@ public struct BibleReaderView: View {
                     .padding(24)
             }
             .ignoresSafeArea()
-            .accessibilityIdentifier("androidReaderAppOwnedOverlay")
         }
     }
 
