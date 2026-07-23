@@ -21,12 +21,6 @@ struct AndroidHelpDialog: View {
     /// Canonical topic subset to display.
     let topics: [AndroidHelpTopic]
 
-    /// Optional Android feature-help message; mutually exclusive with topic content.
-    let featureMessage: String?
-
-    /// Exact Android feature manual destination.
-    let featureDocumentationURL: URL?
-
     /// Whether the Android version footer is shown.
     let showsVersion: Bool
 
@@ -52,32 +46,7 @@ struct AndroidHelpDialog: View {
         onDismiss: @escaping () -> Void
     ) {
         self.topics = topics
-        featureMessage = nil
-        featureDocumentationURL = nil
         self.showsVersion = showsVersion
-        self.onDismiss = onDismiss
-    }
-
-    /**
-     Creates Android's feature-filtered Help dialog from the same shared surface and footer as the
-     full Help catalog.
-
-     - Parameters:
-       - featureMessage: Localized feature explanation from Android resources.
-       - documentationURL: Exact public manual URL corresponding to Android's `helpPath`.
-       - onDismiss: Callback for outside-tap or positive-action dismissal.
-     - Side effects: none until the user follows a link or dismisses.
-     - Failure modes: a nil URL omits only the feature-specific manual link.
-     */
-    init(
-        featureMessage: String,
-        documentationURL: URL?,
-        onDismiss: @escaping () -> Void
-    ) {
-        topics = []
-        self.featureMessage = featureMessage
-        featureDocumentationURL = documentationURL
-        showsVersion = false
         self.onDismiss = onDismiss
     }
 
@@ -98,15 +67,7 @@ struct AndroidHelpDialog: View {
                         .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
                 }
 
-                if let featureMessage {
-                    HelpView(
-                        featureMessage: featureMessage,
-                        documentationURL: featureDocumentationURL,
-                        showsVersion: showsVersion
-                    )
-                } else {
-                    HelpView(topics: topics, showsVersion: showsVersion)
-                }
+                HelpView(topics: topics, showsVersion: showsVersion)
 
                 HStack {
                     Spacer()

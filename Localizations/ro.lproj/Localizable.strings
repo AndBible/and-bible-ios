@@ -1471,3 +1471,48 @@
 "search_dictionary_hint" = "Caută în dicționar";
 "search_with_results2" = "%1$@ rezultate în %2$@";
 "task_kill_warning" = "Aceste lucrări de lungă durată se pot întrerupe dacă treci la altă aplicație înainte de terminarea lor.";
+
+/* Android shared translations */
+"creating_index_for" = "Se creează indexul pentru %@…";
+"label_blue" = "Albastru";
+"label_green" = "Verde";
+"label_red" = "Roșu";
+"label_salvation" = "Mîntuire";
+"label_underline" = "Subliniat";
+"plan_description_y1ntpspr" = "Din partea HEARTLIGHT Internet Magazine, http://www.heartlight.org, permission granted";
+"plan_description_y1ot1nt1_OTandNT" = "Citește Biblia în 1 an, cu capitole din VT și NT în fiecare zi.";
+"plan_description_y1ot1nt1_OTthenNT" = "Citește întreaga Biblie în 1 an, începînd cu Geneza și terminînd cu Apocalipsa. Întîi este VT, apoi NT.";
+"plan_description_y1ot1nt1_chronological" = "Plan bazat pe evenimente cronologice din Biblie. Linia cronologică este aproximativă.";
+"plan_description_y1ot1nt2_mcheyne" = "Acest plan se bazează pe sistemul de lectură M'Cheyne, care cuprinde patru lecturi diferite pentru a fi folosite atît în familie, cît și în mod personal. Fiecare zi are două pasaje din Vechiul Testament, unul din Noul Testament și unul fie din Psalmi, fie din Evanghelii. Într-un an, se citește o dată Vechiul Testament și de două ori Noul Testament și Psalmii.";
+"plan_description_y1ot6nt4_profHorner" = "Cu permisiunea profesorului Horner";
+"plan_description_y2ot1ntps2" = "Citește toată Biblia în 2 ani, citind NT și Psalmii de două ori. Prin amabilitatea Wholesome Words, http://www.wholesomewords.org/.";
+"plan_name_y1ntpspr" = "NT, Psalmii și Proverbele într-un an";
+"plan_name_y1ot1nt1_OTandNT" = "VT+NT Simultan în 1 an";
+"plan_name_y1ot1nt1_OTthenNT" = "Toată Biblia în 1 an";
+"plan_name_y1ot1nt1_chronological" = "Cronologic prin Biblie în 1 an";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1 an 4 capitole/zi";
+"plan_name_y1ot6nt4_profHorner" = "Plan de citire al Prof. Horner 10 capitole/zi";
+"plan_name_y2ot1ntps2" = "Toată Biblia în 2 ani, NT+PS de două ori";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Adaugă semn de carte pentru toată pagina";
+"book_menu_group_by_category" = "Grupează cărțile pe categorii";
+"book_menu_show_long_book_name" = "Arată numele lung al cărții";
+"book_menu_show_progress_bars" = "Afișează bare de progres";
+"book_menu_sort_row_opt" = "Ordonează cărțile pe orizontală";
+"create_bookmark" = "Creează un nou semn de carte";
+"create_bookmark_with_a_note" = "Creează un nou semn de carte cu o notiță";
+"export_bookmarks_csv" = "Exportă semnele de carte ca %@";
+"export_fileformat" = "Exportă ca %@";
+"font_size_title_pt" = "Mărime litere (%d pt)";
+"go_to_ref" = "Deschide %@";
+"lang_default" = "Prestabilit";
+"memorize_abbreviation" = "Memorează";
+"multi_description" = "Trimiteri multiple";
+"my_notes_abbreviation" = "Notițele mele";
+"pref_font_family_label_name" = "Tip de litere (%@)";
+"prefs_line_spacing_pt_title" = "Distanța dintre rînduri (%1.1fx)";
+"prefs_margin_size_mm_title" = "Dimensiunile marginilor (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Marginea de sus (%d mm)";
+"share_verse_widget_title" = "Trimite textul";
+"sort_by_alphabetical" = "În ordine alfabetică";

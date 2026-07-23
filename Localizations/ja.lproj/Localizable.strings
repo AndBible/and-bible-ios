@@ -1613,3 +1613,48 @@
 "search_dictionary_hint" = "辞書を検索";
 "search_with_results2" = "%2$@ で %1$@ 件の結果";
 "task_kill_warning" = "完了前に他のアプリに切り替えると、これらの処理が終了する場合があります。";
+
+/* Android shared translations */
+"creating_index_for" = "%@ のインデックスを作成中…";
+"label_blue" = "青";
+"label_green" = "緑";
+"label_red" = "赤";
+"label_salvation" = "救済";
+"label_underline" = "下線";
+"plan_description_y1ntpspr" = "HEARTLIGHT インターネットマガジン（http://www.heartlight.org）のご好意により、許可を得て掲載。";
+"plan_description_y1ot1nt1_OTandNT" = "旧約聖書と新約聖書の章を毎日読みながら、1年で聖書全体を通読します。";
+"plan_description_y1ot1nt1_OTthenNT" = "創世記から始まりヨハネの黙示録で終わる、1年間の聖書通読プランです。旧約聖書を先に読み、次に新約聖書を読みます。";
+"plan_description_y1ot1nt1_chronological" = "聖書の時系列的な出来事に基づいたプランです。 時系列は概算です。";
+"plan_description_y1ot1nt2_mcheyne" = "このプランはマクチェーンの読書システムに基づいており、 家庭礼拝と個人礼拝の両方に使用できる4つの異なる日課読書が特徴です。毎日、旧約聖書から2箇所、新約聖書から1箇所、詩篇または福音書から1箇所を読みます。1年で旧約聖書を1回、新約聖書と詩篇を2回通読します。";
+"plan_description_y1ot6nt4_profHorner" = "ホーナー教授のご好意により、許可を得て掲載";
+"plan_description_y2ot1ntps2" = "新約聖書と詩篇を2回読みながら、2年で聖書全体を通読します。 Wholesome Words（http://www.wholesomewords.org/）のご好意により、許可を得て掲載。";
+"plan_name_y1ntpspr" = "新約聖書・詩篇・箴言を1年で";
+"plan_name_y1ot1nt1_OTandNT" = "旧約・新約同時並行1年プラン";
+"plan_name_y1ot1nt1_OTthenNT" = "聖書を1年で通読";
+"plan_name_y1ot1nt1_chronological" = "時系列で聖書を1年で";
+"plan_name_y1ot1nt2_mcheyne" = "マクチェーン1年4章/日プラン";
+"plan_name_y1ot6nt4_profHorner" = "ホーナー教授の10章/日読書プラン";
+"plan_name_y2ot1ntps2" = "2年で聖書通読・新約＋詩篇2回";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "ページ全体をブックマークに追加";
+"book_menu_group_by_category" = "カテゴリ別に書をグループ化";
+"book_menu_show_long_book_name" = "書の長い名前を表示";
+"book_menu_show_progress_bars" = "進捗バーを表示";
+"book_menu_sort_row_opt" = "書を横方向に並べる";
+"create_bookmark" = "新しいブックマークを作成";
+"create_bookmark_with_a_note" = "ノート付きの新しいブックマークを作成";
+"export_bookmarks_csv" = "ブックマークを %@ としてエクスポート";
+"export_fileformat" = "%@ としてエクスポート";
+"font_size_title_pt" = "フォントサイズ（%d pt）";
+"go_to_ref" = "%@ を開く";
+"lang_default" = "デフォルト";
+"memorize_abbreviation" = "暗記";
+"multi_description" = "複数の参照";
+"my_notes_abbreviation" = "マイノート";
+"pref_font_family_label_name" = "フォントファミリー（%@）";
+"prefs_line_spacing_pt_title" = "行間（%1.1fx）";
+"prefs_margin_size_mm_title" = "余白サイズ（%1$d/%2$d/%3$d mm）";
+"prefs_top_margin_title_mm" = "上部余白（%d mm）";
+"share_verse_widget_title" = "選択範囲を共有";
+"sort_by_alphabetical" = "アルファベット順";

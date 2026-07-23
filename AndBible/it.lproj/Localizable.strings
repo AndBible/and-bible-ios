@@ -1491,3 +1491,48 @@
 "search_dictionary_hint" = "Cerca nel dizionario";
 "search_with_results2" = "%1$@ risultati in %2$@";
 "task_kill_warning" = "Queste operazioni lunghe potrebbero interrompersi se passi ad un'altra applicazione prima della fine.";
+
+/* Android shared translations */
+"creating_index_for" = "Creazione indice per %@…";
+"label_blue" = "Blu";
+"label_green" = "Verde";
+"label_red" = "Rosso";
+"label_salvation" = "Salvezza";
+"label_underline" = "Sottolinea";
+"plan_description_y1ntpspr" = "Per gentile concessione di HEARTLIGHT Internet Magazine, http://www.heartlight.org, autorizzazione concessa";
+"plan_description_y1ot1nt1_OTandNT" = "Leggi la Bibbia in 1 anno, con capitoli dell'AT e del NT, ogni giorno.";
+"plan_description_y1ot1nt1_OTthenNT" = "Leggi la Bibbia in 1 anno, a partire dalla Genesi fino all'Apocalisse. L'AT per primo, poi il NT.";
+"plan_description_y1ot1nt1_chronological" = "Piano basato su eventi cronologici nella Bibbia. La cronologia è approssimativa.";
+"plan_description_y1ot1nt2_mcheyne" = "Questo piano si basa sul sistema di lettura M’Cheyne, con quattro diverse letture da utilizzare sia in famiglia che in devozioni personali. Ogni giorno ha due brani dell'Antico Testamento, uno del Nuovo Testamento e uno dei Salmi o dei Vangeli. In un anno, leggi l'Antico Testamento una volta e il Nuovo Testamento e Salmi due volte.";
+"plan_description_y1ot6nt4_profHorner" = "Per gentile concessione del Prof. Horner, autorizzazione concessa";
+"plan_description_y2ot1ntps2" = "Leggi la Bibbia in 2 anni, leggendo due volte NT e Salmi. Per gentile concessione di Wholesome Words, http://www.wholesomewords.org/, autorizzazione concessa";
+"plan_name_y1ntpspr" = "NT, Salmi e Proverbi in un anno";
+"plan_name_y1ot1nt1_OTandNT" = "1 anno AT+NT contemporaneamente";
+"plan_name_y1ot1nt1_OTthenNT" = "1 anno attraverso la Bibbia";
+"plan_name_y1ot1nt1_chronological" = "Cronologia 1 anno attraverso la Bibbia";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1 anno 4 capitoli/giorno";
+"plan_name_y1ot6nt4_profHorner" = "Piano di lettura 10 capitoli/giorno del prof. Horner";
+"plan_name_y2ot1ntps2" = "2 anni tramite Bibbia, NT + PS due volte";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Aggiungi segnalibro per l'intera pagina";
+"book_menu_group_by_category" = "Raggruppa libri per categoria";
+"book_menu_show_long_book_name" = "Mostra nome libro per esteso";
+"book_menu_show_progress_bars" = "Mostra barre di avanzamento";
+"book_menu_sort_row_opt" = "Ordina i libri orizzontalmente";
+"create_bookmark" = "Crea un nuovo segnalibro";
+"create_bookmark_with_a_note" = "Crea un nuovo segnalibro con una nota";
+"export_bookmarks_csv" = "Esporta segnalibri come %@";
+"export_fileformat" = "Esporta come %@";
+"font_size_title_pt" = "Dimensione carattere (%d pt)";
+"go_to_ref" = "Apri %@";
+"lang_default" = "Predefinito";
+"memorize_abbreviation" = "Memorizza";
+"multi_description" = "Riferimenti multipli";
+"my_notes_abbreviation" = "Annotazioni";
+"pref_font_family_label_name" = "Famiglia di carattere (%@)";
+"prefs_line_spacing_pt_title" = "Interlinea (%1.1fx)";
+"prefs_margin_size_mm_title" = "Dimensioni del margine (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Margine superiore (%d mm)";
+"share_verse_widget_title" = "Condividi selezione";
+"sort_by_alphabetical" = "Ordine alfabetico";

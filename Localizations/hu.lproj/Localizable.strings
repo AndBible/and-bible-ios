@@ -1477,3 +1477,48 @@
 "search_dictionary_hint" = "Keresés a szótárban";
 "search_with_results2" = "%1$@ találat a %2$@-ból";
 "task_kill_warning" = "Ez az időigényes feladat megszakadhat, ha a befejezés előtt másik alkalmazásra váltasz.";
+
+/* Android shared translations */
+"creating_index_for" = "Index létrehozása: %@…";
+"label_blue" = "Kék";
+"label_green" = "Zöld";
+"label_red" = "Piros";
+"label_salvation" = "Üdvözülés";
+"label_underline" = "Aláhúzás";
+"plan_description_y1ntpspr" = "A HEARTLIGHT Internet Managazine engedélyével, http://www.heartlight.org";
+"plan_description_y1ot1nt1_OTandNT" = "A teljes Biiblia egy év alatt, fejezetekkel az Ó- és Újszövetségből minden nap.";
+"plan_description_y1ot1nt1_OTthenNT" = "A teljes Biblia elolvasása egy év alatt, a Teremtéstől a Jelenések könyvéig.";
+"plan_description_y1ot1nt1_chronological" = "A bibliai események hozzávetőleges sorrendjét követő olvasási terv.";
+"plan_description_y1ot1nt2_mcheyne" = "Ez az olvasási terv a M’Cheyne olvsási rendszeren alapszik, amely négy családi és személyes olvasmányt tartalmaz. Minden nap két részlet a Ószövetségből, egy az Újszövetségből és még egy a Zsoltárok könyvéből vagy az evangéliumokból. Az év végéig az Ószövetséget egyszer az Újszövetséget és a Zsoltárokat kétszer veszi végig.";
+"plan_description_y1ot6nt4_profHorner" = "Professzor Horner engedélyével";
+"plan_description_y2ot1ntps2" = "A teljes Biblia elolvasása két év alatt, az Újszövetség és a Zsoltárok kétszer. A Wholesome Words (http://www.wholesomewords.org) engedélyével.";
+"plan_name_y1ntpspr" = "Újszövetség, Zsoltárok és a Példabeszédek könyve egy év alatt";
+"plan_name_y1ot1nt1_OTandNT" = "Ó- és Újszövetség párhuzamosan egy év alatt";
+"plan_name_y1ot1nt1_OTthenNT" = "A teljes Biblia elolvasása egy év alatt";
+"plan_name_y1ot1nt1_chronological" = "A teljes Biblia kronologikus sorrendben egy év alatt";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cneyne éves terv, napi négy fejezet elolvasása";
+"plan_name_y1ot6nt4_profHorner" = "Professzor Horner 10 fejezet/nap-os olvasási terve";
+"plan_name_y2ot1ntps2" = "2 éves bibliaolvasási terv, Újszövetség és Zsoltárok kétszer";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Könyvjelző hozzáadása az egész oldalhoz";
+"book_menu_group_by_category" = "Könyvek kategória szerint való csoportosítása";
+"book_menu_show_long_book_name" = "Hosszú könyvnév mutatása";
+"book_menu_show_progress_bars" = "Folyamatjelző sávok megjelenítése";
+"book_menu_sort_row_opt" = "Könyvek rendezése víszintesen";
+"create_bookmark" = "Új könyvjelző";
+"create_bookmark_with_a_note" = "Új könyvjelző jegyzettel";
+"export_bookmarks_csv" = "Könyvjelzők exportálása: %@";
+"export_fileformat" = "Export mint %@";
+"font_size_title_pt" = "Betűméret (%d pt)";
+"go_to_ref" = "%@ megnyitása";
+"lang_default" = "Alapértelmezett";
+"memorize_abbreviation" = "Memorizálás";
+"multi_description" = "Több hivatkozás";
+"my_notes_abbreviation" = "Jegyzetek";
+"pref_font_family_label_name" = "Betűtípus (%@)";
+"prefs_line_spacing_pt_title" = "Sorköz (%1.1f x)";
+"prefs_margin_size_mm_title" = "Margó méret (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Felső margó (%d mm)";
+"share_verse_widget_title" = "Kiválasztott szöveg megosztása…";
+"sort_by_alphabetical" = "Ábécérend";

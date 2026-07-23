@@ -1614,3 +1614,49 @@
 "search_dictionary_hint" = "Search dictionary";
 "search_with_results2" = "%1$@ results in %2$@";
 "task_kill_warning" = "These long running tasks may terminate if you switch to another application before they finish.";
+
+/* Android shared translations */
+"creating_index_for" = "Creating index for %@…";
+"help_document_sync_text" = "Document sync copies your installed Bibles, commentaries and other documents to the cloud and keeps them in sync across your devices. Use this view to see what is stored in the cloud, download or upload individual documents, remove documents, and control what syncs to this device.";
+"label_blue" = "Blue";
+"label_green" = "Green";
+"label_red" = "Red";
+"label_salvation" = "Salvation";
+"label_underline" = "Underline";
+"plan_description_y1ntpspr" = "Courtesy of HEARTLIGHT Internet Magazine, http://www.heartlight.org, permission granted";
+"plan_description_y1ot1nt1_OTandNT" = "Read through the Bible in 1 year, with chapters in the OT and NT every day.";
+"plan_description_y1ot1nt1_OTthenNT" = "Read through the Bible in 1 year, starting in Genesis and finishing in Revelation. The OT is first, then the NT.";
+"plan_description_y1ot1nt1_chronological" = "Plan based on chronological events in the Bible. The chronological time-line is approximate.";
+"plan_description_y1ot1nt2_mcheyne" = "This plan is based on the M’Cheyne reading system, featuring four different readings for use in both family and personal devotions. Each day has two passages from the Old Testament, one from the New Testament, and one from either the Psalms or the Gospels. In one year, you read the Old Testament once and the New Testament and Psalms twice.";
+"plan_description_y1ot6nt4_profHorner" = "Courtesy of Prof. Horner, permission granted";
+"plan_description_y2ot1ntps2" = "Read through the Bible in 2 years, reading the NT and Psalms twice. Courtesy of Wholesome Words, http://www.wholesomewords.org/, permission granted";
+"plan_name_y1ntpspr" = "NT, Psalms & Proverbs in a Year";
+"plan_name_y1ot1nt1_OTandNT" = "1-Year OT+NT Simultaneously";
+"plan_name_y1ot1nt1_OTthenNT" = "1-Year through Bible";
+"plan_name_y1ot1nt1_chronological" = "Chronological 1-Year through Bible";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1-Year 4-chapter/day";
+"plan_name_y1ot6nt4_profHorner" = "Prof. Horner 10-chapter/day Reading Plan";
+"plan_name_y2ot1ntps2" = "2-Year Through Bible, NT+PS twice";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Add bookmark for whole page";
+"book_menu_group_by_category" = "Group books by category";
+"book_menu_show_long_book_name" = "Show long book name";
+"book_menu_show_progress_bars" = "Show progress bars";
+"book_menu_sort_row_opt" = "Order books horizontally";
+"create_bookmark" = "Create a new Bookmark";
+"create_bookmark_with_a_note" = "Create a new Bookmark with a note";
+"export_bookmarks_csv" = "Export Bookmarks as %@";
+"export_fileformat" = "Export as %@";
+"font_size_title_pt" = "Font size (%d pt)";
+"go_to_ref" = "Open %@";
+"lang_default" = "Default";
+"memorize_abbreviation" = "Memorize";
+"multi_description" = "Multiple references";
+"my_notes_abbreviation" = "My Notes";
+"pref_font_family_label_name" = "Font family (%@)";
+"prefs_line_spacing_pt_title" = "Line spacing (%1.1fx)";
+"prefs_margin_size_mm_title" = "Margin size (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Top margin (%d mm)";
+"share_verse_widget_title" = "Share selection";
+"sort_by_alphabetical" = "Alphabetical order";

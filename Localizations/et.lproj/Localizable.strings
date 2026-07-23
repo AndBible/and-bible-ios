@@ -1479,3 +1479,48 @@
 "search_dictionary_hint" = "Otsi sõnaraamatust";
 "search_with_results2" = "%2$@ sisaldab %1$@ tulemust";
 "task_kill_warning" = "Need kaua töötavad toimingud võivad katkeda, kui sa lülitud enne nende lõpetamist mõnele teisele rakendusele.";
+
+/* Android shared translations */
+"creating_index_for" = "%@ registri loomine …";
+"label_blue" = "Sinine";
+"label_green" = "Roheline";
+"label_red" = "Punane";
+"label_salvation" = "Lunastus";
+"label_underline" = "Alla joonitud";
+"plan_description_y1ntpspr" = "Veebiajalehe HEARTLIGHT, http://www.heartlight.org, juurdepääsuluba antud";
+"plan_description_y1ot1nt1_OTandNT" = "Loe piibel ühe aastaga läbi, lugedes iga päev peatükke uuest ja vanast testamendist.";
+"plan_description_y1ot1nt1_OTthenNT" = "Loe piibel ühe aastaga läbi, alustades 1. Moosese raamatuga ja lõpetades Ilmutuse raamatuga. Esimesena loed VT ja siis UT.";
+"plan_description_y1ot1nt1_chronological" = "Lugemiskavas on Piibli sündmused ajalises järjekorras. Järjekord võib kohati olla umbkaudne.";
+"plan_description_y1ot1nt2_mcheyne" = "See plaan põhineb M'Cheyne lugemissüsteemil, sisaldades nelja erinevat lõiku nii peresiseseks kui ka isiklikuks osaduseks. Igaks päevaks on kaks lõiku Vanast Testamendist, üks Uuest Testamendist ja üks kas Psalmidest või Evangeeliumitest. Ühe aastaga saad kogu Vana Testamendi läbi loetud ja kaks korda nii Uue Testamendi kui ka Psalmid.";
+"plan_description_y1ot6nt4_profHorner" = "Prof. Horneri lahkusest juurdepääsuluba tagatud";
+"plan_description_y2ot1ntps2" = "Loe piibel 2 aastaga läbi ning Uus Testament ja Psalmid kaks korda. Wholesome Words'i (http://www.wholesomewords.org) lahkusest juurdepääsuluba tagatud";
+"plan_name_y1ntpspr" = "Uus testament, Psalmid ja Õpetussõnad ühe aastaga";
+"plan_name_y1ot1nt1_OTandNT" = "1 aasta VT+UT samaaegselt";
+"plan_name_y1ot1nt1_OTthenNT" = "Aastaga piibel läbi";
+"plan_name_y1ot1nt1_chronological" = "Kronoloogiline ühe aastaga piibel läbi";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne ühe aastaga - 4 peatükki päevas";
+"plan_name_y1ot6nt4_profHorner" = "Prof. Horner lugemiskava - 10 peatükki päevas";
+"plan_name_y2ot1ntps2" = "2 aastaga piibel läbi, UT ja Psalmid topelt.";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Lisa järjehoidja tervele leheküljele";
+"book_menu_group_by_category" = "Grupeeri raamatud teema järgi";
+"book_menu_show_long_book_name" = "Näita täisnimesid";
+"book_menu_show_progress_bars" = "Näita edenemisribasid";
+"book_menu_sort_row_opt" = "Järjesta ridadena";
+"create_bookmark" = "Uus järjehoidja";
+"create_bookmark_with_a_note" = "Uus järjehoidja märkmega";
+"export_bookmarks_csv" = "Ekspordi järjehoidjad kui %@";
+"export_fileformat" = "Ekspordi kui %@";
+"font_size_title_pt" = "Teksti suurus (%d punkti)";
+"go_to_ref" = "Ava %@";
+"lang_default" = "Vaikeväärtus";
+"memorize_abbreviation" = "Õpi pähe";
+"multi_description" = "Mitu viidet";
+"my_notes_abbreviation" = "Minu märkmed";
+"pref_font_family_label_name" = "Tekstifondi perekond (%@)";
+"prefs_line_spacing_pt_title" = "Reavahed (%1.1fx)";
+"prefs_margin_size_mm_title" = "Veeriste suurus (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Ülemine veeris (%d mm)";
+"share_verse_widget_title" = "Jaga valitud teksti";
+"sort_by_alphabetical" = "Tähestiku järjekorras";

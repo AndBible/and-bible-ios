@@ -1498,3 +1498,48 @@
 "search_dictionary_hint" = "Найти словарь";
 "search_with_results2" = "%1$@ результатов в %2$@";
 "task_kill_warning" = "Эти задания будут приостановлены, если вы перейдете к другой программе до их завершения.";
+
+/* Android shared translations */
+"creating_index_for" = "Создаю индекс для %@…";
+"label_blue" = "Синий";
+"label_green" = "Зеленый";
+"label_red" = "Красный";
+"label_salvation" = "Спасение";
+"label_underline" = "Подчеркивание";
+"plan_description_y1ntpspr" = "Предоставлено интернет-журналом HEARTLIGHT, http://www.heartlight.org, разрешение предоставлено";
+"plan_description_y1ot1nt1_OTandNT" = "Прочитать Библию за 1 год, с главами от СЗ и НЗ каждый день.";
+"plan_description_y1ot1nt1_OTthenNT" = "Прочитайте Библию за 1 год, начиная с Бытия и заканчивая Откровением. Сначала СЗ, затем НЗ.";
+"plan_description_y1ot1nt1_chronological" = "План основан на хронологических событиях в Библии. Хронологический график является приблизительным.";
+"plan_description_y1ot1nt2_mcheyne" = "Этот план основан на системе чтения Макчейна, с четырьмя различными чтениями для использования как в семейных, так и в личных молитвах. Каждый день имеет два отрывка из Ветхого Завета, один из Нового Завета и один из Псалмов или Евангелий. Через год, вы прочтете Ветхий Завет один раз, а также Новый Завет и Псалмы дважды.";
+"plan_description_y1ot6nt4_profHorner" = "Предоставлено профессором Хорнером, разрешение получено";
+"plan_description_y2ot1ntps2" = "Прочитайте Библию за 2 года, дважды прочитав НЗ и Псалмы. Предоставлено Wholesome Words, http://www.wholesomewords.org/, разрешение получено";
+"plan_name_y1ntpspr" = "НЗ, Псалтырь и Притчи за год";
+"plan_name_y1ot1nt1_OTandNT" = "1 год СЗ + НЗ одновременно";
+"plan_name_y1ot1nt1_OTthenNT" = "Библию за 1 год";
+"plan_name_y1ot1nt1_chronological" = "Хронологически Библию за 1 год";
+"plan_name_y1ot1nt2_mcheyne" = "Макчейна за 1 год, 4 главы/день";
+"plan_name_y1ot6nt4_profHorner" = "План чтения проф. Хорнера, 10 глав / день";
+"plan_name_y2ot1ntps2" = "Библию за 2 года, НЗ + Псал дважды";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Добавить закладку для всей страницы";
+"book_menu_group_by_category" = "Группировать книги по категориям";
+"book_menu_show_long_book_name" = "Показать длинное название книги";
+"book_menu_show_progress_bars" = "Показать индикаторы прогресса";
+"book_menu_sort_row_opt" = "Упорядочить книги по горизонтали";
+"create_bookmark" = "Создать новую закладку";
+"create_bookmark_with_a_note" = "Создать новую закладку с заметкой";
+"export_bookmarks_csv" = "Экспортировать закладки как %@";
+"export_fileformat" = "Экспорт как %@";
+"font_size_title_pt" = "Размер шрифта (%d pt)";
+"go_to_ref" = "Открыть %@";
+"lang_default" = "По умолчанию";
+"memorize_abbreviation" = "Заучивать";
+"multi_description" = "Несколько ссылок";
+"my_notes_abbreviation" = "Мои заметки";
+"pref_font_family_label_name" = "Семейство шрифтов (%@)";
+"prefs_line_spacing_pt_title" = "Межстрочный интервал (%1.1fx)";
+"prefs_margin_size_mm_title" = "Размер поля (%1$d/%2$d/%3$d мм)";
+"prefs_top_margin_title_mm" = "Верхнее поле (%d мм)";
+"share_verse_widget_title" = "Поделиться выделенным текстом";
+"sort_by_alphabetical" = "Сортировка по алфавиту";

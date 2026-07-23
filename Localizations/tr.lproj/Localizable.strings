@@ -1476,3 +1476,48 @@
 "search_dictionary_hint" = "Sözlükte bul";
 "search_with_results2" = "%2$@ içinde %1$@ sonuç";
 "task_kill_warning" = "Bu işlem zaman alacaktır. Eğer uygulamadan çıkarsanız, işlem bitmeden sonlandırılabilir.";
+
+/* Android shared translations */
+"creating_index_for" = "%@ için dizin yeniden oluşturuluyor…";
+"label_blue" = "Mavi";
+"label_green" = "Yeşil";
+"label_red" = "Kırmızı";
+"label_salvation" = "Kurtuluş";
+"label_underline" = "Altı çizili";
+"plan_description_y1ntpspr" = "HEARTLIGHT İnternet Dergisi’nin nezaketiyle, http://www.heartlight.org, izin verildi";
+"plan_description_y1ot1nt1_OTandNT" = "Her gün EA+YA’daki bölümlerle, 1 yılda Kutsal Kitap’ı baştan sona okuyun.";
+"plan_description_y1ot1nt1_OTthenNT" = "Yaratılış ile başlayıp Vahiy ile biten Kutsal Kitap’ı 1 yılda baştan sona okuyun. İlk olarak EA, sonra YA.";
+"plan_description_y1ot1nt1_chronological" = "İncil’deki kronolojik olaylara dayalı plan. Kronolojik zaman çizelgesi yaklaşıktır.";
+"plan_description_y1ot1nt2_mcheyne" = "Bu plan M’Cheyne okuma sistemine dayanmaktadır ve hem aile hem de kişisel adanmışlıklarda kullanılmak üzere dört farklı okuma içermektedir. Her gün Eski Antlaşma’dan iki, Yeni Antlaşma’dan bir ve Mezmurlar ya da İncil’den bir bölüm vardır. Bir yıl içinde Eski Antlaşma’yı bir kez, Yeni Antlaşma ve Mezmurlar’ı ise iki kez okuyabilirsiniz.";
+"plan_description_y1ot6nt4_profHorner" = "Prof. Horner’in nezaketiyle, izin verildi";
+"plan_description_y2ot1ntps2" = "2 yılda Kutsal Kitap’ı baştan sona okuyun, YA ve Mezmurlar’ı iki kez okuyun. Wholosome Words’un nezaketiyle, http://www.wholesomewords.org/, izin verildi";
+"plan_name_y1ntpspr" = "Bir yılda Yeni Antlaşma, Mezmurlar ve Süleyman’ın Özdeyişleri";
+"plan_name_y1ot1nt1_OTandNT" = "1 Yıl EA+YA Eş Zamanlı";
+"plan_name_y1ot1nt1_OTthenNT" = "1 Yılda Kutsal Kitap";
+"plan_name_y1ot1nt1_chronological" = "İncil ile Kronolojik 1-Yıl";
+"plan_name_y1ot1nt2_mcheyne" = "M’Cheyne 1 Yıl 4 bölüm/gün";
+"plan_name_y1ot6nt4_profHorner" = "Prof. Horner 10-bölüm/gün Okuma Planı";
+"plan_name_y2ot1ntps2" = "2 Yıl Boyunca Kutsal Kitap, iki kez YA+MK";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Tüm sayfa için yer imi ekle";
+"book_menu_group_by_category" = "Kitapları kategoriye göre gruplayın";
+"book_menu_show_long_book_name" = "Uzun kitap adını göster";
+"book_menu_show_progress_bars" = "İlerleme çubuklarını göster";
+"book_menu_sort_row_opt" = "Kitaplar yatay olarak dizlensin";
+"create_bookmark" = "Yeni bir Yer İmi Oluşturun";
+"create_bookmark_with_a_note" = "Not içeren yeni bir Yer İmi oluşturun";
+"export_bookmarks_csv" = "Yer İmlerini %@ olarak dışa aktar";
+"export_fileformat" = "%@ olarak dışa aktar";
+"font_size_title_pt" = "Yazı tipi boyutu (%d pt)";
+"go_to_ref" = "%@ aç";
+"lang_default" = "Varsayılan";
+"memorize_abbreviation" = "Memorovať";
+"multi_description" = "Çoklu referanslar";
+"my_notes_abbreviation" = "Notlarım";
+"pref_font_family_label_name" = "Yazı tipi ailesi (%@)";
+"prefs_line_spacing_pt_title" = "Satır aralığı (%1.1fx)";
+"prefs_margin_size_mm_title" = "Kenar boşlukları (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Üst kenar boşluğu (%d mm)";
+"share_verse_widget_title" = "Seçimi paylaş";
+"sort_by_alphabetical" = "Alfabetik sıralama";

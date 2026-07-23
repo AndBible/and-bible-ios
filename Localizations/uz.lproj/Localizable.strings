@@ -708,3 +708,8 @@
 "rebuild_index" = "Indeksni qayta yaratish";
 "search_dictionary_hint" = "Lug'atdan qidir";
 "task_kill_warning" = "Agar boshqa aplikatsiyaga o'tsangiz, ko'p vaqt olayotgan bu vazifalar tugashidan oldin to'xtab qo'ladi.";
+
+/* Android shared translations */
+"lang_default" = "Ilk nastroykalar";
+"my_notes_abbreviation" = "Mening Eslatmalarim";
+"sort_by_alphabetical" = "Alifbo tartibida";

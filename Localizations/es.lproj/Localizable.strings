@@ -1478,3 +1478,48 @@
 "search_dictionary_hint" = "Buscar diccionario";
 "search_with_results2" = "%1$@ resultados en %2$@";
 "task_kill_warning" = "Estas tareas de larga duración pueden interrumpirse si cambia a otra aplicación antes de que terminen.";
+
+/* Android shared translations */
+"creating_index_for" = "Crear índice para %@…";
+"label_blue" = "Azul";
+"label_green" = "Verde";
+"label_red" = "Rojo";
+"label_salvation" = "Salvación";
+"label_underline" = "Subrayar";
+"plan_description_y1ntpspr" = "Cortesía de HEARTLIGHT Internet Magazine, http://www.heartlight.org, permiso otorgado";
+"plan_description_y1ot1nt1_OTandNT" = "Lea la Biblia en 1 año, con capítulos del AT y el NT todos los días.";
+"plan_description_y1ot1nt1_OTthenNT" = "Lea la Biblia en 1 año, comenzando en el Génesis y terminando en Apocalipsis. El AT es primero, luego el NT.";
+"plan_description_y1ot1nt1_chronological" = "Plan basado en eventos cronológicos en la Biblia. La línea de tiempo cronológica es aproximada.";
+"plan_description_y1ot1nt2_mcheyne" = "Este plan se basa en el sistema de lectura M’Cheyne, con cuatro lecturas diferentes para usar en devociones familiares y personales. Cada día tiene dos pasajes del Antiguo Testamento, uno del Nuevo Testamento y uno de los Salmos o los Evangelios. En un año, se lee el Antiguo Testamento una vez y el Nuevo Testamento y los Salmos dos veces.";
+"plan_description_y1ot6nt4_profHorner" = "Cortesía del Prof. Horner, permiso otorgado";
+"plan_description_y2ot1ntps2" = "Lea la Biblia en 2 años, lea el NT y los Salmos dos veces. Cortesía de Wholesome Words, http://www.wholesomewords.org/, permiso otorgado";
+"plan_name_y1ntpspr" = "NT, Salmos y Proverbios en un año";
+"plan_name_y1ot1nt1_OTandNT" = "1 año AT+NT simultáneamente";
+"plan_name_y1ot1nt1_OTthenNT" = "A través de la Biblia en 1 año";
+"plan_name_y1ot1nt1_chronological" = "Cronológico a través de la Biblia en 1 año";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1 año 4-capítulos/día";
+"plan_name_y1ot6nt4_profHorner" = "Plan de lectura Prof. Horner 10-capítulos/día";
+"plan_name_y2ot1ntps2" = "2 años a través de la Biblia, NT+Salmos dos veces";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Añadir marcador para toda la página";
+"book_menu_group_by_category" = "Agrupar libros por categoría";
+"book_menu_show_long_book_name" = "Mostrar nombre de libro largo";
+"book_menu_show_progress_bars" = "Mostrar barras de progreso";
+"book_menu_sort_row_opt" = "Pedir libros horizontal";
+"create_bookmark" = "Crear un nuevo Marcador";
+"create_bookmark_with_a_note" = "Crear un nuevo Marcador con una Nota";
+"export_bookmarks_csv" = "Exportar marcadores como %@";
+"export_fileformat" = "Exportar cómo %@";
+"font_size_title_pt" = "Tamaño de letra (%d pt)";
+"go_to_ref" = "Abrir %@";
+"lang_default" = "Predeterminado";
+"memorize_abbreviation" = "Memorizar";
+"multi_description" = "Referencias múltiples";
+"my_notes_abbreviation" = "Mis Notas";
+"pref_font_family_label_name" = "Tipo de letra (%@)";
+"prefs_line_spacing_pt_title" = "Espaciado entre líneas (%1.1fx)";
+"prefs_margin_size_mm_title" = "Tamaño de margen (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Margen superior (%d mm)";
+"share_verse_widget_title" = "Compartir selección";
+"sort_by_alphabetical" = "Orden alfabético";

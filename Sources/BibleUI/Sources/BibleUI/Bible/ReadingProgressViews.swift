@@ -185,14 +185,8 @@ struct ReadingProgressView: View {
                     accessibilityIdentifier: "androidReadingProgressDecisionDialog"
                 )
             } else if isHelpPresented {
-                AndroidHelpDialog(
-                    featureMessage: String(
-                        localized: "help_reading_progress_text",
-                        defaultValue: "Your Bible reading and memorization progress at a glance. Mark chapters as read manually with the \"Mark as read\" button, or enable automatic tracking. Memorize exercises also feed into this view."
-                    ),
-                    documentationURL: URL(
-                        string: "https://docs.andbible.org/en/latest/reading_progress.html"
-                    ),
+                AndroidFeatureHelpDialog(
+                    topic: .readingProgress,
                     onDismiss: { isHelpPresented = false }
                 )
             } else if showNewReadingCycleConfirmation {

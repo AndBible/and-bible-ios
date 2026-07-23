@@ -1476,3 +1476,48 @@ Kada koristite Google Drive, %@ dozvoljen je pristup samo datotekama aplikacije,
 "search_dictionary_hint" = "Pretraži rječnik";
 "search_with_results2" = "%1$@ rezultata u %2$@";
 "task_kill_warning" = "Zadatci koji dugo traju mogu biti prekinuti ako se prebacite u drugu aplikaciju prije završetka.";
+
+/* Android shared translations */
+"creating_index_for" = "Stvori popis za %@…";
+"label_blue" = "Plava";
+"label_green" = "Zelena";
+"label_red" = "Crvena";
+"label_salvation" = "Spasenje";
+"label_underline" = "Podcrtaj";
+"plan_description_y1ntpspr" = "Ljubaznošću Heartlight internet magazina, http://www.heartlight.org, dozvoljeno je korištenje";
+"plan_description_y1ot1nt1_OTandNT" = "Pročitajte Bibliju za godinu dana, sa poglavljima Staroga i Novoga zavjeta svaki dan";
+"plan_description_y1ot1nt1_OTthenNT" = "Pročitajte Bibliju za godinu dana, počevši sa Postankom i završavajući Otkrivenjem. Prvo je Stari zavjet, zatim Novi zavjet";
+"plan_description_y1ot1nt1_chronological" = "Plan zasnovan na kronološkim događajima iz Biblije. Kronologija vremenske linije je približna";
+"plan_description_y1ot1nt2_mcheyne" = "Plan je zasnovan na M'Cheyne sustavu čitanja, koji se sastoji od četiri različita čitanja za upotrebu i u obiteljskom i osobnom posvećenju. Svaki dan se čitaju dva odjeljka iz Staroga zavjeta, jedan iz Novoga zavjeta, i jedan iz Psalma ili Evanđelja. Za godinu dana, pročitat ćete Stari zavjet jednom, a Novi zavjet i Psalme dva puta";
+"plan_description_y1ot6nt4_profHorner" = "Ljubaznošću profesora Hornera, dozvoljeno je korištenje";
+"plan_description_y2ot1ntps2" = "Pročitajte Bibliju dva puta, čitajući Novi zavjet i Psalme dva puta. Ljubaznošću Wholesome Words, http://www.wholesomewords.org/, dozvoljeno je korištenje";
+"plan_name_y1ntpspr" = "Novi zavjet, Psalmi i Izreke tijekom godine";
+"plan_name_y1ot1nt1_OTandNT" = "Jedna godina Stari zavjet + Novi zavjet usporedno";
+"plan_name_y1ot1nt1_OTthenNT" = "Godinu dana kroz Bibliju";
+"plan_name_y1ot1nt1_chronological" = "Godinu dana kronološki kroz Bibliju";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne jedna godina sa četiri poglavlja po danu";
+"plan_name_y1ot6nt4_profHorner" = "Plan čitanja 10 poglavlja na dan profesora Hornera";
+"plan_name_y2ot1ntps2" = "Dvije godine kroz Bibliju, Novi zavjet + Psalmi dva puta";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Dodaj straničnik za cijelu stranicu";
+"book_menu_group_by_category" = "Grupiraj knjige po kategorijama";
+"book_menu_show_long_book_name" = "Prikaži dugo ime knjige";
+"book_menu_show_progress_bars" = "Prikaži trake napretka";
+"book_menu_sort_row_opt" = "Poredaj knjige vodoravno";
+"create_bookmark" = "Napravi novi straničnik";
+"create_bookmark_with_a_note" = "Napravi novi straničnik sa bilješkom";
+"export_bookmarks_csv" = "Izvezi straničnike kao %@";
+"export_fileformat" = "Izvezi kao %@";
+"font_size_title_pt" = "Veličina teksta (%d pt)";
+"go_to_ref" = "Otvorite %@";
+"lang_default" = "Zadano";
+"memorize_abbreviation" = "Pamćenje";
+"multi_description" = "Više referenci";
+"my_notes_abbreviation" = "Moje bilješke";
+"pref_font_family_label_name" = "Stil teksta (%@)";
+"prefs_line_spacing_pt_title" = "Razmak između redova (%1.1fx)";
+"prefs_margin_size_mm_title" = "Veličina margina (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Gornja margina (%d mm)";
+"share_verse_widget_title" = "Dijelite odabrano";
+"sort_by_alphabetical" = "Poredaj po abecedi";

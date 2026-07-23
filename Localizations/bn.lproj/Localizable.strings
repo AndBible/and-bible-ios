@@ -1480,3 +1480,48 @@ Google ড্রাইভ ব্যবহার করার সময়, %@শ
 "search_dictionary_hint" = "অভিধান অনুসন্ধান করুন";
 "search_with_results2" = "%2$@-এ %1$@ ফলাফল";
 "task_kill_warning" = "এই দীর্ঘ চলমান কাজগুলি যদি আপনি অন্য অ্যাপ্লিকেশনটি শেষ করার আগে সুইচ করেন তবে তা শেস হতে পারে ।";
+
+/* Android shared translations */
+"creating_index_for" = "সূচক তৈরি করা হচ্ছে%@";
+"label_blue" = "্নীল";
+"label_green" = "সবুজ";
+"label_red" = "লাল";
+"label_salvation" = "পরিত্রাণ";
+"label_underline" = "আন্ডারলাইন করুন";
+"plan_description_y1ntpspr" = "HEARTLIGHT Internet Magazine এর সৌজন্যে http://www.heartlight.org, অনুমতি প্রদান করা হয়েছে";
+"plan_description_y1ot1nt1_OTandNT" = "অধ্যায় সহ 1 বছরে বাইবেল মাধ্যমে পড়ুন প্রত্যেক দিন পুরানো নিয়ম এবং নতুন নিয়ম";
+"plan_description_y1ot1nt1_OTthenNT" = "আদিপুস্তক থেকে শুরু করে 1 বছরে বাইবেলের মাধ্যমে পড়ুন এবং প্রকাশিতবাক্যে শেষ করুন। পুরানো নিয়ম প্রথমে, তারপরে নতুন নিয়ম।";
+"plan_description_y1ot1nt1_chronological" = "বাইবেলে কালানুক্রমিক ঘটনার উপর ভিত্তি করে পরিকল্পনা করুন। কালানুক্রমিক আনুমানিক সময়-রেখা ।";
+"plan_description_y1ot1nt2_mcheyne" = "এই পরিকল্পনা M'Cheyne পড়ার পদ্ধতির উপর ভিত্তি করে, পারিবারিক এবং ব্যক্তিগত নিষ্ঠা উভয় ক্ষেত্রে ব্যবহারের জন্য চারটি পৃথক পাঠ্য বৈশিষ্ট্যযুক্ত। প্রতিটি দিনে আছে পুরানো নিয়মে দুটি প্যাসেজ, একটি নতুন নিয়মের, এবং একটি গীতসংহিতা বা সুসমাচার থেকে । এক বছরে, আপনি পুরানো নিয়ম একবার এবং নতুন নিয়ম এবং গীতসংহিতা দুটি বার পড়েন।";
+"plan_description_y1ot6nt4_profHorner" = "অধ্যাপক হর্নারের সৌজন্যে, অনুমতি মঞ্জুর";
+"plan_description_y2ot1ntps2" = "2 বছরে বাইবেলের মাধ্যমে পড়ুন, নতুন নিয়ম এবং গীতসংহিতা দুই বার পড়ুন। সৌজন্যপূর্ণ শব্দ, http://www.wholesomewords.org/, অনুমতি প্রদান করা হয়েছে";
+"plan_name_y1ntpspr" = "এক বছরের মধ্যে নতুন নিয়ম, গীতসংহিতা & হিতোপদেশ";
+"plan_name_y1ot1nt1_OTandNT" = "1 বছর পুরানো নিয়ম+নিতুন নিয়ম একসাথে";
+"plan_name_y1ot1nt1_OTthenNT" = "বাইবেলের মাধ্যমে 1- বছর";
+"plan_name_y1ot1nt1_chronological" = "বাইবেলের মাধ্যমে কালানুক্রমিক 1-বছর";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1-বছর 4-অধ্যায় / দিন";
+"plan_name_y1ot6nt4_profHorner" = "অধ্যাপক হর্নার 10-অধ্যায় / দিনের পঠন পরিকল্পনা";
+"plan_name_y2ot1ntps2" = "বাইবেলের মাধ্যমে 2-বছর, নতুন নিয়ম + গীতসংহিতা দু'বার";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "পুরো পৃষ্ঠার জন্য বুকমার্ক যোগ করুন";
+"book_menu_group_by_category" = "বিভাগ অনুসারে বই গ্রুপ করুন";
+"book_menu_show_long_book_name" = "দীর্ঘ বইয়ের নাম দেখান";
+"book_menu_show_progress_bars" = "অগ্রগতি বার দেখান";
+"book_menu_sort_row_opt" = "অনুভূমিকভাবে বই অর্ডার করুন";
+"create_bookmark" = "একটি নতুন বুকমার্ক তৈরি করুন৷";
+"create_bookmark_with_a_note" = "একটি নোট দিয়ে একটি নতুন বুকমার্ক তৈরি করুন৷";
+"export_bookmarks_csv" = "বুকমার্ক %@ হিসেবে রপ্তানি করুন";
+"export_fileformat" = "হিসাবে রপ্তানি%@";
+"font_size_title_pt" = "ফন্টের আকার(%dpt)";
+"go_to_ref" = "খুলুন%@";
+"lang_default" = "ডিফল্ট/ ত্রুটি";
+"memorize_abbreviation" = "মুখস্থ";
+"multi_description" = "একাধিক রেফারেন্স";
+"my_notes_abbreviation" = "আমার নোটস";
+"pref_font_family_label_name" = "ফন্ট পরিবার(%@)";
+"prefs_line_spacing_pt_title" = "লাইনের ব্যবধান (%1.1f)";
+"prefs_margin_size_mm_title" = "মার্জিনের আকার (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "শীর্ষ মার্জিন(%dmm)";
+"share_verse_widget_title" = "শেয়ার নির্বাচন";
+"sort_by_alphabetical" = "বর্ণা ক্রমানুসারে";

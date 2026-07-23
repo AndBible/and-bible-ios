@@ -1478,3 +1478,47 @@
 "search_dictionary_hint" = "Procurar dicionário";
 "search_with_results2" = "%1$@ resultados em %2$@";
 "task_kill_warning" = "Estas tarefas de longa duração podem ser finalizadas se você for para outra aplicação antes que elas terminem.";
+
+/* Android shared translations */
+"creating_index_for" = "Criar índice para %@…";
+"label_blue" = "Azul";
+"label_green" = "Verde";
+"label_red" = "Vermelho";
+"label_salvation" = "Guardar";
+"label_underline" = "Sublinhar";
+"plan_description_y1ot1nt1_OTandNT" = "Leia a Bíblia em 1 ano, com capítulos no AT e no NT todos os dias.";
+"plan_description_y1ot1nt1_OTthenNT" = "Leia através da Bíblia em 1 ano, começando no Livro do Génesis e acabando no Livro do Apocalipse. Primeiro é o AT e depois o NT cada dia.";
+"plan_description_y1ot1nt1_chronological" = "Plano baseado em eventos cronológicos da Bíblia. A linha do tempo cronológica é aproximada";
+"plan_description_y1ot1nt2_mcheyne" = "Este plano é baseado no sistema de leitura M’Cheyne, apresentando quatro leituras diferentes para uso em devoções familiares e pessoais. Cada dia tem duas passagens do Antigo Testamento, uma do Novo Testamento e uma dos Salmos ou dos Evangelhos. Num ano, você lê o Antigo Testamento uma vez e o Novo Testamento e Salmos duas vezes.";
+"plan_description_y1ot6nt4_profHorner" = "Cortesia do Prof. Horner, permissão concedida";
+"plan_description_y2ot1ntps2" = "Leia a Bíblia em 2 anos, lendo o NT e os Salmos duas vezes. Cortesia de Wholesome Words, http://www.wholesomewords.org/, permissão concedida";
+"plan_name_y1ntpspr" = "NT, Salmos e Provérbios num Ano";
+"plan_name_y1ot1nt1_OTandNT" = "1-Ano AT+NT Simultâneamente";
+"plan_name_y1ot1nt1_OTthenNT" = "1 ano através da Bíblia";
+"plan_name_y1ot1nt1_chronological" = "1 ano cronológico através da Bíblia";
+"plan_name_y1ot1nt2_mcheyne" = "Plano de leitura M'Cheyne - 1 Ano com 4 capítulos por dia";
+"plan_name_y1ot6nt4_profHorner" = "Plano de leitura do Prof. Horner com 10 capítulos por dia";
+"plan_name_y2ot1ntps2" = "2 Anos através da Bíblia, NT + Salmos duas vezes";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Adicionar marcador para a página inteira";
+"book_menu_group_by_category" = "Agrupar livros por categoria";
+"book_menu_show_long_book_name" = "Mostrar nome longo do livro";
+"book_menu_show_progress_bars" = "Mostrar barras de progresso";
+"book_menu_sort_row_opt" = "Ordenar livros na horizontal";
+"create_bookmark" = "Criar um novo Marcador";
+"create_bookmark_with_a_note" = "Criar um novo Marcador com uma nota";
+"export_bookmarks_csv" = "Exportar marcadores como %@";
+"export_fileformat" = "Exportar como %@";
+"font_size_title_pt" = "Tamanho de letra (%d pt)";
+"go_to_ref" = "Abrir %@";
+"lang_default" = "Padrão";
+"memorize_abbreviation" = "Memorizar";
+"multi_description" = "Referências múltiplas";
+"my_notes_abbreviation" = "Anotações";
+"pref_font_family_label_name" = "Família do tipo de letra ( %@ )";
+"prefs_line_spacing_pt_title" = "Espaço entre linhas (%1.1fx)";
+"prefs_margin_size_mm_title" = "Tamanho das margens (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Margem superior ( %d mm)";
+"share_verse_widget_title" = "Partilhar seleção";
+"sort_by_alphabetical" = "Ordem alfabética";

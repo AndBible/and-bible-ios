@@ -111,6 +111,15 @@ ANDROID_READ_HISTORY_DIALOG = (
     / "Shared"
     / "AndroidChapterReadHistoryDialog.swift"
 )
+ANDROID_FEATURE_HELP_DIALOG = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "Shared"
+    / "AndroidFeatureHelpDialog.swift"
+)
 AI_MODELS_VIEW = (
     REPO_ROOT
     / "Sources"
@@ -1673,13 +1682,16 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         progress_source = READING_PROGRESS_VIEW.read_text(encoding="utf-8")
         activity_source = ANDROID_READING_PROGRESS_ACTIVITY_VIEW.read_text(encoding="utf-8")
         settings_source = ANDROID_READING_PROGRESS_SETTINGS_VIEW.read_text(encoding="utf-8")
+        feature_help_source = ANDROID_FEATURE_HELP_DIALOG.read_text(encoding="utf-8")
 
         self.assertIn("readingProgressSettingsAction", activity_source)
         self.assertIn("readingProgressHelpAction", activity_source)
         self.assertIn("AndroidPopupMenuSurface", activity_source)
         self.assertIn("AndroidFixedTabRow", activity_source)
-        self.assertIn('localized: "help_reading_progress_text"', progress_source)
-        self.assertIn("AndroidHelpDialog", progress_source)
+        self.assertIn("AndroidFeatureHelpDialog(", progress_source)
+        self.assertIn("topic: .readingProgress", progress_source)
+        self.assertIn('localized: "help_reading_progress_text"', feature_help_source)
+        self.assertIn('path = "reading_progress.html"', feature_help_source)
         self.assertIn("ReadingProgressSettingsView(", source)
         self.assertIn("surfacePalette: readerThemeSurfacePalette", source)
         self.assertIn("AndroidSwitchPreferenceRow", settings_source)

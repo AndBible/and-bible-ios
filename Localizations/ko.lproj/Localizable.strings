@@ -1478,3 +1478,46 @@
 "search_dictionary_hint" = "사전 검색";
 "search_with_results2" = "%2$@에서 %1$@개의 결과";
 "task_kill_warning" = "다른 어플리케이션으로 전환하면, 이 긴 작업은 마치기 전에 중단될 수 있습니다.";
+
+/* Android shared translations */
+"creating_index_for" = "%@의 색인 생성 중…";
+"label_blue" = "파란색";
+"label_green" = "초록색";
+"label_red" = "빨간색";
+"label_salvation" = "구원";
+"label_underline" = "밑줄";
+"plan_description_y1ot1nt1_OTandNT" = "성경을 1년에 완독합니다 구약과 신약을 매일 함께 읽습니다.";
+"plan_description_y1ot1nt1_OTthenNT" = "성경을 창세기부터 요한계시록까지 1년 동안 읽습니다. 구약을 먼저 읽고, 그리고 신약을 읽습니다.";
+"plan_description_y1ot1nt1_chronological" = "성경의 연대순으로 읽는 계획. 연대 순서는 대략적인 것입니다.";
+"plan_description_y1ot1nt2_mcheyne" = "이 계획은 맥체인 읽기 시스템에 기초한 것으로, 가족 및 개인 묵상을 위해 네 개의 본문을 읽습니다. 매일 구약에서 두 본문, 신약에서 한 본문, 그리고 시편이나 복음서에서 한 본문을 읽습니다. 일년에 구약은 한 번, 신약과 시편은 두 번 읽게 됩니다.";
+"plan_description_y2ot1ntps2" = "성경을 2년에 한 번, 신약과 시편은 두 번 읽습니다. Courtesy of Wholesome Words, http://www.wholesomewords.org/, permission granted";
+"plan_name_y1ntpspr" = "1년에 신약, 시편, 잠언 읽기";
+"plan_name_y1ot1nt1_OTandNT" = "1년에 구약+신약 같이 읽기";
+"plan_name_y1ot1nt1_OTthenNT" = "1년 일독";
+"plan_name_y1ot1nt1_chronological" = "연대순으로 1년 1독";
+"plan_name_y1ot1nt2_mcheyne" = "맥체인 1년 하루 4장";
+"plan_name_y1ot6nt4_profHorner" = "Horner 교수의 하루 10장 읽기 계획";
+"plan_name_y2ot1ntps2" = "2년 일독 성경, 신약과 시편은 두번읽기";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "전체 페이지에 북마크 추가";
+"book_menu_group_by_category" = "카테고리별로 도서 그룹화";
+"book_menu_show_long_book_name" = "긴 도서 이름 표시";
+"book_menu_show_progress_bars" = "진행률 막대 표시";
+"book_menu_sort_row_opt" = "도서를 가로로 정렬";
+"create_bookmark" = "새 북마크 만들기";
+"create_bookmark_with_a_note" = "노트와 함께 새 북마크 만들기";
+"export_bookmarks_csv" = "북마크를 %@로 내보내기";
+"export_fileformat" = "%@ 형식으로 내보내기";
+"font_size_title_pt" = "글꼴 크기 (%d pt)";
+"go_to_ref" = "%@ 열기";
+"lang_default" = "기본";
+"memorize_abbreviation" = "암송";
+"multi_description" = "여러 참조";
+"my_notes_abbreviation" = "내 참고들";
+"pref_font_family_label_name" = "글꼴 패밀리 (%@)";
+"prefs_line_spacing_pt_title" = "줄 간격 (%1.1fx)";
+"prefs_margin_size_mm_title" = "여백 크기 (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "상단 여백 (%d mm)";
+"share_verse_widget_title" = "선택을 공유";
+"sort_by_alphabetical" = "알파벳 순서";

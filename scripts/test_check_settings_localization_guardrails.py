@@ -1199,6 +1199,159 @@ class AILocalizationSourceGuardrailTests(unittest.TestCase):
 class ShippedLocalizationSourceGuardrailTests(unittest.TestCase):
     """Covers the product-wide Android-owned Swift localization inventory."""
 
+    def test_all_static_swift_localization_forms_are_discovered(self) -> None:
+        """Indirect presentation keys must not bypass Android catalog validation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_path = (
+                root
+                / "Sources"
+                / "BibleUI"
+                / "Sources"
+                / "BibleUI"
+                / "Fixture.swift"
+            )
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_text(
+                """
+let direct = String(localized: "direct_key")
+let enumValue = .localized("enum_key")
+let localizationValue = String.LocalizationValue("localization_value_key")
+let foundation = NSLocalizedString("foundation_key", comment: "")
+let bundle = Bundle.main.localizedString(forKey: "bundle_key", value: nil, table: nil)
+let model = Item(
+    titleKey: "title_key",
+    bodyKey: "body_key",
+    localizationKey: "model_key"
+)
+""",
+                encoding="utf-8",
+            )
+
+            keys = localization_guardrails.discover_shipped_swift_localization_keys(root)
+
+        self.assertEqual(
+            keys,
+            {
+                "body_key",
+                "bundle_key",
+                "direct_key",
+                "enum_key",
+                "foundation_key",
+                "localization_value_key",
+                "model_key",
+                "title_key",
+            },
+        )
+
+    def test_unlocalized_swiftui_prose_is_rejected_without_false_dynamic_hits(self) -> None:
+        """Visible prose must use named resources while Android's verbatim tokens remain valid."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_path = (
+                root
+                / "Sources"
+                / "BibleUI"
+                / "Sources"
+                / "BibleUI"
+                / "Fixture.swift"
+            )
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_text(
+                """
+Text("Study Pads")
+Button("Import", action: {})
+Text("Page \\(page)")
+Text("\\(page)")
+Text("M")
+Text("×")
+TextField("RRGGBB", text: $hex)
+Text(String(localized: "localized_title"))
+""",
+                encoding="utf-8",
+            )
+
+            failures = localization_guardrails.discover_unlocalized_swift_ui_literals(root)
+
+        self.assertEqual(len(failures), 3)
+        self.assertTrue(any(":Text:Study Pads" in failure for failure in failures))
+        self.assertTrue(any(":Button:Import" in failure for failure in failures))
+        self.assertTrue(any(r":Text:Page \(page)" in failure for failure in failures))
+
+    def test_android_identical_help_fallback_must_match_android_english(self) -> None:
+        """Compact Help cannot retain an iOS-invented fallback behind a valid resource key."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_path = (
+                root
+                / "Sources"
+                / "BibleUI"
+                / "Sources"
+                / "BibleUI"
+                / "Shared"
+                / "Fixture.swift"
+            )
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_text(
+                'let text = String(localized: "help_ai_settings_text", '
+                'defaultValue: "Invented iOS help")\n',
+                encoding="utf-8",
+            )
+            for tree in ("AndBible", "Localizations"):
+                path = root / tree / "en.lproj" / "Localizable.strings"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("", encoding="utf-8")
+            android_path = root / "android" / "values" / "strings.xml"
+            android_path.parent.mkdir(parents=True, exist_ok=True)
+            android_path.write_text(
+                '<resources><string name="help_ai_settings_text">'
+                "Android help"
+                "</string></resources>",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "Invented iOS help"):
+                build_android_shared_localization(root, root / "android")
+
+    def test_platform_specific_fallback_is_not_forced_to_android_wording(self) -> None:
+        """Truthful iOS fallbacks remain valid while shipped resource values stay Android-backed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_path = (
+                root
+                / "Sources"
+                / "BibleUI"
+                / "Sources"
+                / "BibleUI"
+                / "Shared"
+                / "Fixture.swift"
+            )
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_text(
+                'let text = String(localized: "proceed_google_play", '
+                'defaultValue: "Proceed to App Store")\n',
+                encoding="utf-8",
+            )
+            for tree in ("AndBible", "Localizations"):
+                path = root / tree / "en.lproj" / "Localizable.strings"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("", encoding="utf-8")
+            android_path = root / "android" / "values" / "strings.xml"
+            android_path.parent.mkdir(parents=True, exist_ok=True)
+            android_path.write_text(
+                '<resources><string name="proceed_google_play">'
+                "Proceed to Google Play"
+                "</string></resources>",
+                encoding="utf-8",
+            )
+
+            catalog = build_android_shared_localization(root, root / "android")
+
+        self.assertEqual(
+            catalog.english_by_key["proceed_google_play"],
+            "Proceed to Google Play",
+        )
+
     def test_non_ai_literal_key_is_cataloged_synced_and_audited(self) -> None:
         """Prevents non-AI screens from bypassing Android localization parity.
 

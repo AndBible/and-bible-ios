@@ -1612,3 +1612,46 @@
 "search_dictionary_hint" = "Tìm kiếm từ điển";
 "search_with_results2" = "%1$@ kết quả trong %2$@";
 "task_kill_warning" = "Các tác vụ đang chạy có thể bị kết thúc nếu bạn chuyển sang ứng dụng khác trước khi hoàn thành.";
+
+/* Android shared translations */
+"creating_index_for" = "Đang tạo chỉ mục cho %@…";
+"label_blue" = "Xanh dương";
+"label_green" = "Xanh lá";
+"label_red" = "Đỏ";
+"label_salvation" = "Sự cứu rỗi";
+"label_underline" = "Gạch chân";
+"plan_description_y1ot1nt1_OTandNT" = "Đọc trọn Kinh Thánh trong 1 năm, với các chương trong Cựu Ước và Tân Ước mỗi ngày.";
+"plan_description_y1ot1nt1_OTthenNT" = "Đọc trọn Kinh Thánh trong 1 năm, bắt đầu từ Sáng Thế Ký và kết thúc ở Khải Huyền. Cựu Ước trước, rồi đến Tân Ước.";
+"plan_description_y1ot1nt1_chronological" = "Kế hoạch dựa trên các sự kiện theo thứ tự thời gian trong Kinh Thánh. Mốc thời gian biên niên là gần đúng.";
+"plan_description_y1ot1nt2_mcheyne" = "Kế hoạch này dựa trên hệ thống đọc M'Cheyne, với bốn bài đọc khác nhau dùng cho cả thờ phượng gia đình lẫn cá nhân. Mỗi ngày có hai đoạn từ Cựu Ước, một từ Tân Ước, và một từ Thi Thiên hoặc Phúc Âm. Trong một năm, bạn đọc Cựu Ước một lần và Tân Ước cùng Thi Thiên hai lần.";
+"plan_description_y2ot1ntps2" = "Đọc trọn Kinh Thánh trong 2 năm, đọc Tân Ước và Thi Thiên hai lần. Courtesy of Wholesome Words, http://www.wholesomewords.org/, permission granted";
+"plan_name_y1ntpspr" = "Tân Ước, Thi Thiên & Châm Ngôn trong Một Năm";
+"plan_name_y1ot1nt1_OTandNT" = "Kế Hoạch M'Cheyne 1 Năm 4 Chương/Ngày";
+"plan_name_y1ot1nt1_OTthenNT" = "Đọc Kinh Thánh 1 Năm";
+"plan_name_y1ot1nt1_chronological" = "Biên Niên Sử 1 Năm qua Kinh Thánh";
+"plan_name_y1ot1nt2_mcheyne" = "Đọc Kinh Thánh Đồng Thời Cả Hai Giao Ước 1 Năm";
+"plan_name_y1ot6nt4_profHorner" = "Kế Hoạch Đọc 10 Chương/Ngày của Giáo Sư Horner";
+"plan_name_y2ot1ntps2" = "Đọc Kinh Thánh 2 Năm, NT+TT hai lần";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Thêm đánh dấu cho toàn trang";
+"book_menu_group_by_category" = "Nhóm sách theo danh mục";
+"book_menu_show_long_book_name" = "Hiển thị tên sách đầy đủ";
+"book_menu_show_progress_bars" = "Hiển thị thanh tiến trình";
+"book_menu_sort_row_opt" = "Sắp xếp sách theo chiều ngang";
+"create_bookmark" = "Tạo đánh dấu mới";
+"create_bookmark_with_a_note" = "Tạo đánh dấu mới kèm ghi chú";
+"export_bookmarks_csv" = "Xuất Đánh dấu dưới dạng %@";
+"export_fileformat" = "Xuất dưới dạng %@";
+"font_size_title_pt" = "Cỡ chữ (%d pt)";
+"go_to_ref" = "Mở %@";
+"lang_default" = "Mặc định";
+"memorize_abbreviation" = "Thuộc lòng";
+"multi_description" = "Nhiều tham chiếu";
+"my_notes_abbreviation" = "Ghi chú của tôi";
+"pref_font_family_label_name" = "Họ phông chữ (%@)";
+"prefs_line_spacing_pt_title" = "Giãn dòng (%1.1fx)";
+"prefs_margin_size_mm_title" = "Kích thước lề (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Lề trên (%d mm)";
+"share_verse_widget_title" = "Chia sẻ lựa chọn";
+"sort_by_alphabetical" = "Thứ tự bảng chữ cái";

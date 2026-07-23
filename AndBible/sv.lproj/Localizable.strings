@@ -1485,3 +1485,48 @@
 "search_dictionary_hint" = "Sök i lexikon";
 "search_with_results2" = "%1$@ resultat i %2$@";
 "task_kill_warning" = "Dessa aktiviteter kan avbrytas om du växlar till en annan app innan de är klara.";
+
+/* Android shared translations */
+"creating_index_for" = "Skapar register för%@...";
+"label_blue" = "Blå";
+"label_green" = "Grön";
+"label_red" = "Röd";
+"label_salvation" = "Frälsning";
+"label_underline" = "Understrykning";
+"plan_description_y1ntpspr" = "Med tillåtelse av HEARTLIGHT Internet Magazine, http://www.heartlight.org, tillstånd beviljat";
+"plan_description_y1ot1nt1_OTandNT" = "Läs igenom Bibeln inom 1 år, med kapitel i GT och NT varje dag.";
+"plan_description_y1ot1nt1_OTthenNT" = "Läs igenom Bibeln på 1 år, från Första Moseboken till Uppenbarelseboken. GT är först, sedan NT.";
+"plan_description_y1ot1nt1_chronological" = "Plan baserad på kronologiska händelser i Bibeln. Den kronologiska tidslinjen är ungefärlig.";
+"plan_description_y1ot1nt2_mcheyne" = "Den här planen baseras på M’Cheynes läsningssystem, med fyra olika läsningar som kan användas både inom familjen och i personliga andakter. Varje dag har två avsnitt ur Gamla testamentet, ett ur Nya testamentet, och ett ur antingen Psaltaren eller evangelierna. På ett år läser du Gamla testamentet en gång samt Nya testamentet och Psaltaren två gånger.";
+"plan_description_y1ot6nt4_profHorner" = "Med tillåtelse av prof. Horner, tillstånd beviljat";
+"plan_description_y2ot1ntps2" = "Läs igenom Bibeln på 2 år och läs NT samt Psaltaren två gånger. Med tillåtelse av Wholesome Words, http://www.wholesomewords.org/, tillstånd beviljat";
+"plan_name_y1ntpspr" = "NT, Psaltaren & Ordspråksboken på ett år";
+"plan_name_y1ot1nt1_OTandNT" = "1 år GT+NT samtidigt";
+"plan_name_y1ot1nt1_OTthenNT" = "1 år igenom hela Bibeln";
+"plan_name_y1ot1nt1_chronological" = "1 år genom Bibeln kronologiskt";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1 år 4 kapitel/dag";
+"plan_name_y1ot6nt4_profHorner" = "Prof. Horners läsningsplan med 10 kapitel/dag";
+"plan_name_y2ot1ntps2" = "2 år genom Bibeln, NT+Ps två gånger";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Lägg till bokmärke för hela sidan";
+"book_menu_group_by_category" = "Gruppera böcker enligt kategori";
+"book_menu_show_long_book_name" = "Visa långt boknamn";
+"book_menu_show_progress_bars" = "Visa förloppsindikatorer";
+"book_menu_sort_row_opt" = "Sortera böckerna horisontellt";
+"create_bookmark" = "Skapa nytt bokmärke";
+"create_bookmark_with_a_note" = "Skapa nytt bokmärke med anteckning";
+"export_bookmarks_csv" = "Exportera bokmärken som %@";
+"export_fileformat" = "Exportera som %@";
+"font_size_title_pt" = "Textstorlek (%d pt)";
+"go_to_ref" = "Öppna %@";
+"lang_default" = "Standard";
+"memorize_abbreviation" = "Memorera";
+"multi_description" = "Flera hänvisningar";
+"my_notes_abbreviation" = "Egna anteckningar";
+"pref_font_family_label_name" = "Typsnittfamilj (%@)";
+"prefs_line_spacing_pt_title" = "Radavstånd (%1.1fx)";
+"prefs_margin_size_mm_title" = "Marginalstorlek (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Övre marginal (%d mm)";
+"share_verse_widget_title" = "Dela markering";
+"sort_by_alphabetical" = "Alfabetisk ordning";

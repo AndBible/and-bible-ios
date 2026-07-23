@@ -1484,3 +1484,48 @@
 "search_dictionary_hint" = "إبحث في القاموس";
 "search_with_results2" = "%1$@ نتيجة في %2$@";
 "task_kill_warning" = "قد ينقطع تنفيذ المهام إذا تحولت إلى برنامج آخر قبل أن تنتهي العملية.";
+
+/* Android shared translations */
+"creating_index_for" = "إنشاء فهرس لـ %@...";
+"label_blue" = "أزرق";
+"label_green" = "أخضر";
+"label_red" = "أحمر";
+"label_salvation" = "الخلاص";
+"label_underline" = "ضع خطاً تحت";
+"plan_description_y1ntpspr" = "بإذن من مجلة HEARTLIGHT الإنترنتية، http://www.heartlight.org";
+"plan_description_y1ot1nt1_OTandNT" = "اقرأ الكتاب المقدس خلال 1-سنة، مع إصحاحات في العهد القديم و الجديد كل يوم";
+"plan_description_y1ot1nt1_OTthenNT" = "إقرأ الكتاب المقدس في 1-سنة، بدءاً من سفر التكوين و انتهاءاً بسفر الرؤيا. العهد القديم أولاً، ثم العهد الجديد.";
+"plan_description_y1ot1nt1_chronological" = "خطة مبنية على التسلسل الزمني للاحداث في الكتاب المقدس التسلسل الزمني تقريبي";
+"plan_description_y1ot1nt2_mcheyne" = "تستند هذه الخطة إلى نظام قراءة M'Cheyne، وتتضمن أربع قراءات يومية للاستخدام في التأملات العائلية والشخصية. كل يوم يحتوي على مقطعين من العهد القديم، ومقطع من العهد الجديد، ومقطع من المزامير أو الأناجيل. في سنة واحدة، تقرأ العهد القديم مرة واحدة، والعهد الجديد والمزامير مرتين.";
+"plan_description_y1ot6nt4_profHorner" = "بإذن من البروفيسور هورنر ، تم منح الإذن";
+"plan_description_y2ot1ntps2" = "اقرأ الكتاب المقدس في سنتين، مع قراءة العهد الجديد والمزامير مرتين. بإذن من Wholesome Words، http://www.wholesomewords.org/";
+"plan_name_y1ntpspr" = "العهد الجديد، المزامير و الامثال في سنة.";
+"plan_name_y1ot1nt1_OTandNT" = "العهد القديم + العهد الجديد بنفس الوقت في 1-سنة";
+"plan_name_y1ot1nt1_OTthenNT" = "1 سنة خلال الكتاب المقدس";
+"plan_name_y1ot1nt1_chronological" = "الكتاب المقدس كاملاً بترتيب زمني في سنة واحدة";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne سنة-1 4-إصحاح/باليوم";
+"plan_name_y1ot6nt4_profHorner" = "خطة البروفيسور هورنر لقراءة 10-إصحاح/باليوم";
+"plan_name_y2ot1ntps2" = "2-سنة في الكتاب المقدس، العهد الجديد + المزامير مرتين";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "إضافة إشارة مرجعية للصفحة كاملة";
+"book_menu_group_by_category" = "تجميع الأسفار حسب الفئة";
+"book_menu_show_long_book_name" = "إظهار اسم السفر الكامل";
+"book_menu_show_progress_bars" = "إظهار أشرطة التقدم";
+"book_menu_sort_row_opt" = "ترتيب الأسفار أفقياً";
+"create_bookmark" = "أنشئ إشارة مرجعية جديدة";
+"create_bookmark_with_a_note" = "أنشئ إشارة مرجعية جديدة مع ملاحظة";
+"export_bookmarks_csv" = "تصدير الإشارات المرجعية بتنسيق %@";
+"export_fileformat" = "تصدير بتنسيق %@";
+"font_size_title_pt" = "حجم الخط (%d نقطة)";
+"go_to_ref" = "افتح %@";
+"lang_default" = "إفتراضي";
+"memorize_abbreviation" = "حفظ";
+"multi_description" = "مراجع متعددة";
+"my_notes_abbreviation" = "ملاحظاتي";
+"pref_font_family_label_name" = "عائلة الخط (%@)";
+"prefs_line_spacing_pt_title" = "تباعد الأسطر (%1.1fx)";
+"prefs_margin_size_mm_title" = "حجم الهامش (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "الهامش العلوي (%d مم)";
+"share_verse_widget_title" = "مشاركة التحديد";
+"sort_by_alphabetical" = "ترتيب ابجدي";

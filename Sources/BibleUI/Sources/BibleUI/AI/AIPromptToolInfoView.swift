@@ -72,13 +72,7 @@ struct AIPromptToolInfoView: View {
                 accessibilityIdentifier: "aiPromptToolInfoHelpButton",
                 foregroundColor: surfacePalette.toolbarForegroundColor
             ) {
-                helpDialog = .information(
-                    title: String(localized: "help", defaultValue: "Help"),
-                    message: String(
-                        localized: "help_tool_info_text",
-                        defaultValue: "AI tools are specialised functions the AI can call to read your data or make changes on your behalf. Read tools (verses, commentaries, dictionaries, bookmarks) never require permission. Write tools (creating bookmarks, notes, study pad entries) are gated by the permission system."
-                    )
-                )
+                helpDialog = .help(.toolInfo)
             }
         } content: {
             ScrollView {

@@ -1293,7 +1293,7 @@ public final class BookmarkService {
         // Color.argb(255, 100, 0, 150) = 0xFF640096 = -10223466
 
         let red = Label(
-            name: "Red",
+            name: String(localized: "label_red", defaultValue: "Red"),
             color: Int(Int32(bitPattern: 0xFFFF0000)),
             underlineStyleWholeVerse: false,
             favourite: true
@@ -1301,7 +1301,7 @@ public final class BookmarkService {
         red.type = LabelType.highlight.rawValue
 
         let green = Label(
-            name: "Green",
+            name: String(localized: "label_green", defaultValue: "Green"),
             color: Int(Int32(bitPattern: 0xFF00FF00)),
             underlineStyleWholeVerse: false,
             favourite: true
@@ -1309,7 +1309,7 @@ public final class BookmarkService {
         green.type = LabelType.highlight.rawValue
 
         let blue = Label(
-            name: "Blue",
+            name: String(localized: "label_blue", defaultValue: "Blue"),
             color: Int(Int32(bitPattern: 0xFF0000FF)),
             underlineStyleWholeVerse: false,
             favourite: true
@@ -1317,7 +1317,7 @@ public final class BookmarkService {
         blue.type = LabelType.highlight.rawValue
 
         let underline = Label(
-            name: "Underline",
+            name: String(localized: "label_underline", defaultValue: "Underline"),
             color: Int(Int32(bitPattern: 0xFFFF00FF)),
             underlineStyle: true,
             underlineStyleWholeVerse: true,
@@ -1326,7 +1326,7 @@ public final class BookmarkService {
         underline.type = LabelType.highlight.rawValue
 
         let salvation = Label(
-            name: "Salvation",
+            name: String(localized: "label_salvation", defaultValue: "Salvation"),
             color: Int(Int32(bitPattern: 0xFF640096))
         )
         salvation.type = LabelType.example.rawValue

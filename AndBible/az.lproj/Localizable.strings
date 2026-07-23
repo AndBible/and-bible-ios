@@ -732,3 +732,8 @@
 "rebuild_index" = "İndeki yenidən qur.";
 "search_dictionary_hint" = "Lüğətdə tap";
 "task_kill_warning" = "Bu əməliyyat üçün vaxt lazımdır. Əgər tətbiqi dayandırsanız əməliyyat qurtarmamış dayanacaq. Əməliyyat görən vəzifə yoxdur.";
+
+/* Android shared translations */
+"lang_default" = "İlkin təyin olunan";
+"my_notes_abbreviation" = "Qeydlərim";
+"sort_by_alphabetical" = "Əlifba sırası ilə";

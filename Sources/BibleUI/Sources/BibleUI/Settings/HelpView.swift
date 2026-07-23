@@ -115,12 +115,6 @@ struct HelpView: View {
     /// Android help topics rendered in caller-supplied order.
     let topics: [AndroidHelpTopic]
 
-    /// Optional feature-specific copy used by Android's filtered `showHelpDialog` overload.
-    let featureMessage: String?
-
-    /// Optional exact documentation destination paired with `featureMessage`.
-    let featureDocumentationURL: URL?
-
     /// Whether to include Android's version footer.
     let showsVersion: Bool
 
@@ -139,49 +133,12 @@ struct HelpView: View {
      */
     init(topics: [AndroidHelpTopic] = AndroidHelpTopic.allCases, showsVersion: Bool = true) {
         self.topics = topics
-        featureMessage = nil
-        featureDocumentationURL = nil
-        self.showsVersion = showsVersion
-    }
-
-    /**
-     Creates Android's single-feature Help content while retaining the shared documentation and
-     support footer used by the complete Help catalog.
-
-     - Parameters:
-       - featureMessage: Localized feature explanation from Android string resources.
-       - documentationURL: Exact Android `helpPath` projected onto the public documentation site.
-       - showsVersion: Whether to include the application version footer.
-     - Side effects: none until a link is tapped.
-     - Failure modes: a nil documentation URL omits only the feature manual link.
-     */
-    init(featureMessage: String, documentationURL: URL?, showsVersion: Bool = false) {
-        topics = []
-        self.featureMessage = featureMessage
-        featureDocumentationURL = documentationURL
         self.showsVersion = showsVersion
     }
 
     var body: some View {
-        ScrollView {
+        AndroidAdaptiveDialogScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                if let featureMessage {
-                    Text(featureMessage)
-                        .font(.system(size: 17))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let featureDocumentationURL {
-                        Link(
-                            String(
-                                localized: "help_read_more_link",
-                                defaultValue: "Read more in the manual"
-                            ),
-                            destination: featureDocumentationURL
-                        )
-                        .font(.system(size: 17).italic())
-                    }
-                }
-
                 ForEach(topics, id: \.self) { topic in
                     helpSection(topic)
                 }

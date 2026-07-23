@@ -204,13 +204,7 @@ struct AIToolPermissionsView: View {
                         accessibilityIdentifier: "aiToolPermissionsHelpMenuItem"
                     ) {
                         showsOverflowMenu = false
-                        helpDialog = .information(
-                            title: String(localized: "help", defaultValue: "Help"),
-                            message: String(
-                                localized: "help_global_tool_permissions_text",
-                                defaultValue: "Configure permissions for individual AI tools. For each read tool, choose whether the AI may use it (Enabled or Disabled). For each write tool, choose Always allow, Always deny, or Ask (which falls back to the global permission mode set in AI Connection settings)."
-                            )
-                        )
+                        helpDialog = .help(.globalToolPermissions)
                     }
                 }
             }
@@ -586,13 +580,7 @@ struct AIDocumentAccessView: View {
                         accessibilityIdentifier: "aiDocumentAccessHelpMenuItem"
                     ) {
                         showsOverflowMenu = false
-                        helpDialog = .information(
-                            title: String(localized: "help", defaultValue: "Help"),
-                            message: String(
-                                localized: "help_ai_document_filter_text",
-                                defaultValue: "Limit which Bibles, commentaries and other modules the AI agent can read. By default the AI sees all installed modules; filtering helps reduce noise and cost when you only want it to consider specific sources."
-                            )
-                        )
+                        helpDialog = .help(.aiDocumentFilter)
                     }
                 }
             }

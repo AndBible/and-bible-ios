@@ -1498,3 +1498,48 @@
 "search_dictionary_hint" = "Etsi sanakirjasta";
 "search_with_results2" = "%2$@: %1$@ tulosta";
 "task_kill_warning" = "Pitkäkestoiset tehtävät voivat keskeytyä, jos siirryt toiseen sovellukseen ennen kuin ne on suoritettu loppuun.";
+
+/* Android shared translations */
+"creating_index_for" = "Luodaan indeksiä: %@...";
+"label_blue" = "Sininen";
+"label_green" = "Vihreä";
+"label_red" = "Punainen";
+"label_salvation" = "Pelastus";
+"label_underline" = "Alleviivaus";
+"plan_description_y1ntpspr" = "HEARTLIGHT Internet Magazinen luvalla http://www.heartlight.org, lupa myönnetty";
+"plan_description_y1ot1nt1_OTandNT" = "Lue Raamatun läpi vuodessa, lukien päivittäin lukuja sekä VT:stä että UT:sta.";
+"plan_description_y1ot1nt1_OTthenNT" = "Lue läpi Raamatun vuodessa, aloittaen 1. Mooseksen kirjasta ja päättäen Ilmestyskirjaan. VT ensin, sitten UT.";
+"plan_description_y1ot1nt1_chronological" = "Lukusuunnitelma perustuu Raamatun kronologisiin tapahtumiin. Kronologinen aikajana on likimääräinen";
+"plan_description_y1ot1nt2_mcheyne" = "Tämä lukusuunnitelma perustuu M’Cheyne lukujärjestelmään, jonka ominaisuutena on neljä erilaista kappaletta joita voi käyttää sekä henkilökohtaisissa että perheen hartaushetkissä. Joka päivällä on kaksi kappaletta Vanhasta Testamentista ja yksi kappale Uudesta Testamentista, ja yksi joko Psalmeista tai Evankeliumeista. Vuoden aikana luet kerran läpi Vanhan Testamentin ja Uuden Testamentin ja Psalmit kahdesti.";
+"plan_description_y1ot6nt4_profHorner" = "Prof. Hornerin luvalla, lupa myönnetty";
+"plan_description_y2ot1ntps2" = "Lue läpi Raamatun kahdessa vuodessa, lukien UT:n ja Psalmit kahdesti. Wholesome Words:n luvalla, http://www.wholesomewords.org/, lupa myönnetty.";
+"plan_name_y1ntpspr" = "UT, Psalmit & Sananlaskut vuodessa";
+"plan_name_y1ot1nt1_OTandNT" = "VT+UT yhtä aikaa läpi vuodessa";
+"plan_name_y1ot1nt1_OTthenNT" = "Vuodessa läpi Raamatun";
+"plan_name_y1ot1nt1_chronological" = "Kronologisesti läpi raamatun vuodessa";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne vuodessa 4 lukua päivässä";
+"plan_name_y1ot6nt4_profHorner" = "Prof. Hornerin 10 lukua / päivässä";
+"plan_name_y2ot1ntps2" = "2 vuodessa läpi Raamatun, UT+Psalmit kahdesti";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Lisää kirjanmerkki koko sivulle";
+"book_menu_group_by_category" = "Ryhmittele kirjat kategorian mukaan";
+"book_menu_show_long_book_name" = "Näytä kirjan pitkä nimi";
+"book_menu_show_progress_bars" = "Näytä edistymispalkit";
+"book_menu_sort_row_opt" = "Järjestä kirjat vaakatasoon";
+"create_bookmark" = "Luo uusi kirjanmerkki";
+"create_bookmark_with_a_note" = "Luo uusi kirjanmerkki huomion kanssa";
+"export_bookmarks_csv" = "Vie kirjanmerkit muodossa %@";
+"export_fileformat" = "Vie muodossa %@";
+"font_size_title_pt" = "Kirjaisimen koko (%d pt)";
+"go_to_ref" = "Avaa %@";
+"lang_default" = "Oletus";
+"memorize_abbreviation" = "Opettele";
+"multi_description" = "Useita viittauksia";
+"my_notes_abbreviation" = "Omat merkinnät";
+"pref_font_family_label_name" = "Kirjasimen tyyppi (%@)";
+"prefs_line_spacing_pt_title" = "Rivin väli (%1.1fx)";
+"prefs_margin_size_mm_title" = "Marginaalin koko (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Ylämarginaali (%d mm)";
+"share_verse_widget_title" = "Jaa valinta";
+"sort_by_alphabetical" = "Aakkosjärjestys";

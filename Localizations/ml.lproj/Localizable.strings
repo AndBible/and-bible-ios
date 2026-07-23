@@ -698,3 +698,8 @@
 "rebuild_index" = "സൂചിക വീണ്ടും ഉണ്ടാക്കുക";
 "search_dictionary_hint" = "നിഘണ്ടുവിൽ തിരയുക";
 "task_kill_warning" = "ഈ പ്രവർത്തനം തീരുന്നതിനു മുമ്പായി മറ്റൊരു പ്രവർത്തനം തുടങ്ങിയാൽ ദീർഘസമയം വേണ്ടിവരുന്ന ഇതു നിലച്ചുപോകാൻ സാധ്യത ഉണ്ട്";
+
+/* Android shared translations */
+"lang_default" = "ഉറപ്പിച്ചിട്ടുള്ളതു";
+"my_notes_abbreviation" = "എന്റെ കുറിപ്പുകൾ";
+"sort_by_alphabetical" = "അക്ഷരമാല ക്രമത്തിൽ";

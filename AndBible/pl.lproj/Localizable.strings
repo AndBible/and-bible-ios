@@ -1491,3 +1491,48 @@
 "search_dictionary_hint" = "Znajdź w słowniku";
 "search_with_results2" = "%1$@ wyników w %2$@";
 "task_kill_warning" = "To zadanie może zostać przerwane jeśli przed jego zakończeniem przejdziesz do innej aplikacji.";
+
+/* Android shared translations */
+"creating_index_for" = "Indeksowanie: %@…";
+"label_blue" = "Niebieski";
+"label_green" = "Zielony";
+"label_red" = "Czerwony";
+"label_salvation" = "Zbawienie";
+"label_underline" = "Podkreślony";
+"plan_description_y1ntpspr" = "Dzięki uprzejmości magazynu internetowego Heartlight, https://www.heartlight.org, za ich zgodą";
+"plan_description_y1ot1nt1_OTandNT" = "Przeczytaj Biblię w rok, rozdziały ze ST i NT każdego dnia.";
+"plan_description_y1ot1nt1_OTthenNT" = "Przeczytaj Biblię w rok, od Księgi Rodzaju do Apokalipsy Świętego Jana. Najpierw ST, następnie NT.";
+"plan_description_y1ot1nt1_chronological" = "Plan oparty na chronologicznych wydarzeniach w Biblii, kolejność zdarzeń jest oszacowana.";
+"plan_description_y1ot1nt2_mcheyne" = "Plan oparty na systemie M’Cheyne, charakteryzujący się czterema różnymi tekstami do czytania w rodzinie bądź samodzielnie. Każdego dnia są po dwa rozdziały ze Starego Testamentu, jeden z Nowego Testamentu i jeden z Psalmów bądź z ewangelii. W ciągu roku przeczytasz Stary Testament raz i Nowy Testament z Psalmami dwa razy.";
+"plan_description_y1ot6nt4_profHorner" = "Dzięki uprzejmości prof. Hornera, za jego zgodą";
+"plan_description_y2ot1ntps2" = "Przeczytaj Biblię w 2 lata, czytając Nowy Testament i Psalmy dwukrotnie. Dzięki uprzejmości Wholesome Words, https://www.wholesomewords.org/, za ich zgodą";
+"plan_name_y1ntpspr" = "NT, Psalmy i Księga Przysłów w rok";
+"plan_name_y1ot1nt1_OTandNT" = "ST i NT jednocześnie w rok";
+"plan_name_y1ot1nt1_OTthenNT" = "Przez Biblię w rok";
+"plan_name_y1ot1nt1_chronological" = "Chronologicznie przez Biblię w rok";
+"plan_name_y1ot1nt2_mcheyne" = "Plan czytania M'Cheyne, 1 rok, po 4 rozdziały dziennie";
+"plan_name_y1ot6nt4_profHorner" = "Plan czytania prof. Hornera, po 10 rozdziałów dziennie";
+"plan_name_y2ot1ntps2" = "Przez Biblię w 2 lata, NT i Psalmy dwukrotnie";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Dodaj zakładkę dla całej strony";
+"book_menu_group_by_category" = "Grupuj wg. kategorii";
+"book_menu_show_long_book_name" = "Wyświetl pełne tytuły";
+"book_menu_show_progress_bars" = "Pokaż paski postępu";
+"book_menu_sort_row_opt" = "Uszereguj księgi poziomo";
+"create_bookmark" = "Utwórz nową zakładkę";
+"create_bookmark_with_a_note" = "Utwórz nową zakładkę z notatką";
+"export_bookmarks_csv" = "Eksportuj zakładki jako %@";
+"export_fileformat" = "Eksportuj jako %@";
+"font_size_title_pt" = "Rozmiar czcionki (%d p.)";
+"go_to_ref" = "Otwórz %@";
+"lang_default" = "Domyślny";
+"memorize_abbreviation" = "Nauka na pamięć";
+"multi_description" = "Mnogie odsyłacze";
+"my_notes_abbreviation" = "Moje notatki";
+"pref_font_family_label_name" = "Krój czcionki (%@)";
+"prefs_line_spacing_pt_title" = "Interlinia (%1.1f×)";
+"prefs_margin_size_mm_title" = "Szerokość marginesów (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Górny margines (%d mm)";
+"share_verse_widget_title" = "Udostępnij fragment";
+"sort_by_alphabetical" = "Porządek alfabetyczny";

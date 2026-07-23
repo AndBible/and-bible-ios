@@ -1612,3 +1612,48 @@
 "search_dictionary_hint" = "لغت میں تلاش کریں";
 "search_with_results2" = "%2$@ میں %1$@ نتائج";
 "task_kill_warning" = "یہ طویل کام ختم ہو سکتے ہیں اگر آپ انہیں مکمل ہونے سے پہلے کسی اور ایپ پر چلے جائیں۔";
+
+/* Android shared translations */
+"creating_index_for" = "%@ کے لیے انڈیکس بنایا جا رہا ہے…";
+"label_blue" = "نیلا";
+"label_green" = "سبز";
+"label_red" = "سرخ";
+"label_salvation" = "نجات";
+"label_underline" = "انڈر لائن";
+"plan_description_y1ntpspr" = "HEARTLIGHT انٹرنیٹ میگزین کی مہربانی سے، http://www.heartlight.org، اجازت دی گئی";
+"plan_description_y1ot1nt1_OTandNT" = "ایک سال میں بائبل پڑھیں، روزانہ OT اور NT کے ابواب کے ساتھ۔";
+"plan_description_y1ot1nt1_OTthenNT" = "ایک سال میں بائبل پڑھیں، پیدائش سے شروع کر کے مکاشفہ پر ختم کریں۔ پہلے OT، پھر NT۔";
+"plan_description_y1ot1nt1_chronological" = "بائبل میں تاریخی واقعات کی ترتیب پر مبنی منصوبہ۔ تاریخی ترتیب تقریبی ہے۔";
+"plan_description_y1ot1nt2_mcheyne" = "یہ منصوبہ M'Cheyne پڑھنے کے نظام پر مبنی ہے، جس میں خاندانی اور ذاتی عبادات دونوں کے لیے چار مختلف مطالعے شامل ہیں۔ ہر دن پرانے عہدنامے کے دو، نئے عہدنامے کا ایک، اور زبور یا انجیل کا ایک اقتباس۔ ایک سال میں OT ایک بار اور NT اور زبور دو بار پڑھتے ہیں۔";
+"plan_description_y1ot6nt4_profHorner" = "پروفیسر Horner کی مہربانی سے، اجازت دی گئی";
+"plan_description_y2ot1ntps2" = "دو سال میں بائبل پڑھیں، NT اور زبور دو بار پڑھتے ہوئے۔ Wholesome Words کی مہربانی سے، http://www.wholesomewords.org/، اجازت دی گئی";
+"plan_name_y1ntpspr" = "ایک سال میں NT، زبور اور امثال";
+"plan_name_y1ot1nt1_OTandNT" = "ایک سال: OT+NT بیک وقت";
+"plan_name_y1ot1nt1_OTthenNT" = "ایک سال میں بائبل";
+"plan_name_y1ot1nt1_chronological" = "تاریخی ترتیب کے مطابق ایک سال میں بائبل";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne ایک سال 4 ابواب/روز";
+"plan_name_y1ot6nt4_profHorner" = "پروفیسر Horner کا 10 ابواب/روز مطالعہ منصوبہ";
+"plan_name_y2ot1ntps2" = "دو سال: بائبل، NT+PS دو بار";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "پورے صفحے کا بک مارک شامل کریں";
+"book_menu_group_by_category" = "کتابیں زمرے کے مطابق گروپ کریں";
+"book_menu_show_long_book_name" = "کتاب کا مکمل نام دکھائیں";
+"book_menu_show_progress_bars" = "پیشرفت بار دکھائیں";
+"book_menu_sort_row_opt" = "کتابیں افقی ترتیب دیں";
+"create_bookmark" = "ایک نیا بک مارک بنائیں";
+"create_bookmark_with_a_note" = "ایک نوٹ کے ساتھ نیا بک مارک بنائیں";
+"export_bookmarks_csv" = "بک مارکس %@ کے طور پر برآمد کریں";
+"export_fileformat" = "%@ کے طور پر برآمد کریں";
+"font_size_title_pt" = "فونٹ سائز (%d pt)";
+"go_to_ref" = "%@ کھولیں";
+"lang_default" = "ڈیفالٹ";
+"memorize_abbreviation" = "حفظ";
+"multi_description" = "متعدد حوالہ جات";
+"my_notes_abbreviation" = "میرے نوٹس";
+"pref_font_family_label_name" = "فونٹ فیملی (%@)";
+"prefs_line_spacing_pt_title" = "لائن اسپیسنگ (%1.1fx)";
+"prefs_margin_size_mm_title" = "حاشیے کا سائز (%1$d/%2$d/%3$d ملی میٹر)";
+"prefs_top_margin_title_mm" = "اوپری حاشیہ (%d ملی میٹر)";
+"share_verse_widget_title" = "انتخاب شیئر کریں";
+"sort_by_alphabetical" = "حروف تہجی کی ترتیب";

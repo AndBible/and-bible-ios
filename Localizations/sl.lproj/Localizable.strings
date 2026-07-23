@@ -1475,3 +1475,48 @@
 "search_dictionary_hint" = "Išči po slovarju";
 "search_with_results2" = "%1$@ rezultatov v %2$@";
 "task_kill_warning" = "Ta dolgo trajajoča opravila lahko končate, če preklopite na drugo aplikacijo, še preden se le-ta zaključijo.";
+
+/* Android shared translations */
+"creating_index_for" = "Izdelujem kazalo za %@…";
+"label_blue" = "Modra";
+"label_green" = "Zelena";
+"label_red" = "Rdeča";
+"label_salvation" = "Rešitev duše";
+"label_underline" = "Podčrtaj";
+"plan_description_y1ntpspr" = "Z dovoljenjem spletnega časopisa HEARTLIGHT, http://www.heartlight.org.";
+"plan_description_y1ot1nt1_OTandNT" = "Preberite biblijo v enem letu, s poglavji v SZ in NZ.";
+"plan_description_y1ot1nt1_OTthenNT" = "Preberite biblijo v enem letu, od Geneze do Razodetja. Najprej SZ, nato NZ.";
+"plan_description_y1ot1nt1_chronological" = "Načrt temelji na časovnem zaporedju dogodkov v bibliji. Časovno zaporedje je približno.";
+"plan_description_y1ot1nt2_mcheyne" = "Ta načrt temelji na sistemu branja M'Cheyne, s štirimi različnimi branji, za uporabo tako v družinskih, kot osebnih predanostih. Vsak dan ima dva odlomka iz Stare zaveze, enega iz Nove zaveze in enega iz Psalmov ali evangelijev. V enem letu preberete Staro zavezo in Novo zavezo in dvakrat Psalme.";
+"plan_description_y1ot6nt4_profHorner" = "Z dovoljenjem prof. Hornerja.";
+"plan_description_y2ot1ntps2" = "V dveh letih preberete biblijo, dvakrat preberete NZ in Psalme. Z dovoljenjem Wholesome Words, http://www.wholesomewords.org/";
+"plan_name_y1ntpspr" = "NZ, Psalmi in Pregovori v enem letu";
+"plan_name_y1ot1nt1_OTandNT" = "V enem letu hkrati SZ + NZ";
+"plan_name_y1ot1nt1_OTthenNT" = "V enem letu skozi biblijo";
+"plan_name_y1ot1nt1_chronological" = "Kronološko v enem letu skozi biblijo.";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne v enem letu skozi biblijo, štiri poglavja na dan";
+"plan_name_y1ot6nt4_profHorner" = "Bralni načrt prof. Hornerja z desetimi poglavji na dan";
+"plan_name_y2ot1ntps2" = "V dveh letih skozi biblijo, NZ + Ps dvakrat";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Dodaj zaznamek za celotno stran";
+"book_menu_group_by_category" = "Razvrsti knjige po kategorijah";
+"book_menu_show_long_book_name" = "Prikaži dolgo ime knjige";
+"book_menu_show_progress_bars" = "Prikaži potek napredka";
+"book_menu_sort_row_opt" = "Knjige postavi vodoravno";
+"create_bookmark" = "Ustvari nov zaznamek";
+"create_bookmark_with_a_note" = "Ustvarite nov zaznamek z opombo";
+"export_bookmarks_csv" = "Izvozi zaznamke kot %@";
+"export_fileformat" = "Izvozi kot %@";
+"font_size_title_pt" = "Velikost besedila (%d)";
+"go_to_ref" = "Odpri %@";
+"lang_default" = "Privzet";
+"memorize_abbreviation" = "Zapomni si";
+"multi_description" = "Več referenc";
+"my_notes_abbreviation" = "Moje opombe";
+"pref_font_family_label_name" = "Družina pisav (%@)";
+"prefs_line_spacing_pt_title" = "Razmik med vrsticami (%1.1fx)";
+"prefs_margin_size_mm_title" = "Robovi (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Levi rob (%d mm)";
+"share_verse_widget_title" = "Deli izbrano";
+"sort_by_alphabetical" = "Abecedni vrstni red";

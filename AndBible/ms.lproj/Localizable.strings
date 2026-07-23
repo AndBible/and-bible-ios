@@ -1640,3 +1640,48 @@
 "search_dictionary_hint" = "Cari kamus";
 "search_with_results2" = "%1$@ keputusan dalam %2$@";
 "task_kill_warning" = "Tugasan yang berjalan lama ini mungkin tamat jika anda beralih ke aplikasi lain sebelum ia selesai.";
+
+/* Android shared translations */
+"creating_index_for" = "Membuat indeks untuk %@…";
+"label_blue" = "Biru";
+"label_green" = "Hijau";
+"label_red" = "Merah";
+"label_salvation" = "Keselamatan";
+"label_underline" = "Garis bawah";
+"plan_description_y1ntpspr" = "Ihsan HEARTLIGHT Internet Magazine, http://www.heartlight.org, kebenaran diberikan";
+"plan_description_y1ot1nt1_OTandNT" = "Baca Alkitab dalam 1 tahun, dengan bab dalam PL dan PB setiap hari.";
+"plan_description_y1ot1nt1_OTthenNT" = "Baca Alkitab dalam 1 tahun, bermula dari Kejadian dan berakhir di Wahyu. PL dahulu, kemudian PB.";
+"plan_description_y1ot1nt1_chronological" = "Rancangan berdasarkan peristiwa kronologi dalam Alkitab. Garis masa kronologi adalah anggaran.";
+"plan_description_y1ot1nt2_mcheyne" = "Rancangan ini berdasarkan sistem bacaan M'Cheyne, menampilkan empat bacaan berbeza untuk digunakan dalam ibadat keluarga dan peribadi. Setiap hari mempunyai dua petikan dari Perjanjian Lama, satu dari Perjanjian Baharu, dan satu dari Mazmur atau Injil. Dalam satu tahun, anda membaca Perjanjian Lama sekali dan Perjanjian Baharu dan Mazmur dua kali.";
+"plan_description_y1ot6nt4_profHorner" = "Ihsan Prof. Horner, kebenaran diberikan";
+"plan_description_y2ot1ntps2" = "Baca Alkitab dalam 2 tahun, membaca PB dan Mazmur dua kali. Ihsan Wholesome Words, http://www.wholesomewords.org/, kebenaran diberikan";
+"plan_name_y1ntpspr" = "PB, Mazmur & Amsal Dalam Setahun";
+"plan_name_y1ot1nt1_OTandNT" = "1 Tahun PL+PB Serentak";
+"plan_name_y1ot1nt1_OTthenNT" = "1 Tahun Melalui Alkitab";
+"plan_name_y1ot1nt1_chronological" = "Kronologi 1 Tahun Melalui Alkitab";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1 Tahun 4 bab/hari";
+"plan_name_y1ot6nt4_profHorner" = "Rancangan Bacaan Prof. Horner 10 bab/hari";
+"plan_name_y2ot1ntps2" = "2 Tahun Melalui Alkitab, PB+MZ dua kali";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Tambah penanda buku untuk keseluruhan halaman";
+"book_menu_group_by_category" = "Kumpulkan buku mengikut kategori";
+"book_menu_show_long_book_name" = "Tunjukkan nama buku panjang";
+"book_menu_show_progress_bars" = "Tunjukkan bar kemajuan";
+"book_menu_sort_row_opt" = "Susun buku secara mendatar";
+"create_bookmark" = "Buat Penanda Buku baharu";
+"create_bookmark_with_a_note" = "Buat Penanda Buku baharu dengan nota";
+"export_bookmarks_csv" = "Eksport Penanda Buku sebagai %@";
+"export_fileformat" = "Eksport sebagai %@";
+"font_size_title_pt" = "Saiz fon (%d pt)";
+"go_to_ref" = "Buka %@";
+"lang_default" = "Lalai";
+"memorize_abbreviation" = "Hafal";
+"multi_description" = "Pelbagai rujukan";
+"my_notes_abbreviation" = "Nota Saya";
+"pref_font_family_label_name" = "Keluarga fon (%@)";
+"prefs_line_spacing_pt_title" = "Jarak baris (%1.1fx)";
+"prefs_margin_size_mm_title" = "Saiz jidar (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Jidar atas (%d mm)";
+"share_verse_widget_title" = "Kongsi pilihan";
+"sort_by_alphabetical" = "Susunan abjad";

@@ -297,12 +297,12 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
 
         let planCodes = catalog.templates.map(\.code)
         let builtInCodes = [
-            "y1ot1nt1_OTthenNT",
-            "y1ot1nt1_OTandNT",
+            "y1ntpspr",
             "y1ot1nt1_chronological",
+            "y1ot1nt1_OTandNT",
+            "y1ot1nt1_OTthenNT",
             "y1ot1nt2_mcheyne",
             "y1ot6nt4_profHorner",
-            "y1ntpspr",
             "y2ot1ntps2",
         ]
         XCTAssertEqual(Array(planCodes.prefix(builtInCodes.count)), builtInCodes)

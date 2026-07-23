@@ -8990,8 +8990,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
   public func bridge(_ bridge: BibleBridge, showHelp scope: BibleBridgeHelpScope) {
     switch scope {
     case .memorize:
-      guard let presentation = AIReaderHelpCatalog.memorize() else { return }
-      onShowReaderHelp?(presentation)
+      onShowReaderHelp?(AIReaderHelpCatalog.memorize())
     }
   }
 

@@ -1497,3 +1497,47 @@
 "search_dictionary_hint" = "அகராதியில் தேடு";
 "search_with_results2" = "%2$@ இல் %1$@ முடிவுகள்";
 "task_kill_warning" = "நெடுநேரம் இயங்கும் இந்தப் பணிகள் முடிவதற்குள் வேறொரு ஆப்புக்கு மாறினால் இவை நிறுத்தப்படலாம்.";
+
+/* Android shared translations */
+"creating_index_for" = "%@-க்கான அட்டவணை உருவாக்கப்படுகிறது…";
+"label_blue" = "நீலம்";
+"label_green" = "பச்சை";
+"label_red" = "சிவப்பு";
+"label_salvation" = "மீட்பு";
+"label_underline" = "அடிக்கோடு";
+"plan_description_y1ntpspr" = "உபயம்: HEARTLIGHT Internet Magazine, http://www.heartlight.org, அனுமதி பெற்றது";
+"plan_description_y1ot1nt1_OTandNT" = "ஒவ்வொரு நாளும் புதிய மற்றும் பழைய ஏற்பாட்டு அதிகாரங்களோடு விவிலியத்தை 1 வருடத்தில் படிக்க.";
+"plan_description_y1ot1nt1_OTthenNT" = "தொடக்க நூல் முதல் திருவெளிப்பாடு வரை 1 ஆண்டில் விவிலியம் முழுதும் படிக்கலாம். முதலில் பழைய ஏற்பாடு, பின் புதிய ஏற்பாடு.";
+"plan_description_y1ot1nt1_chronological" = "விவிலிய நிகழ்வுகளின் காலவரிசை அடிப்படையில் அமைந்த திட்டம். காலவரிசை தோராயமானது.";
+"plan_description_y1ot1nt2_mcheyne" = "இந்தத் திட்டம் M'Cheyne வாசிப்பு முறையை அடிப்படையாகக் கொண்டது, இதில் குடும்பமாகவோ அல்லது தனியாகவோ பயன்படுத்த நான்கு வெவ்வேறு வாசகங்கள் உள்ளன. ஒவ்வொரு நாளுக்கும் பழைய ஏற்பாட்டில் இருந்து இரண்டு வாசகங்கள், புதிய ஏற்பாட்டில் இருந்து ஒரு வாசகமும், மற்றும் நற்செய்தி நூல்கள் அல்லது திருப்பாடல்களிலிருந்து ஓரு வாசகமும் உள்ளது. ஒரு ஆண்டில், பழைய ஏற்பாட்டை ஒரு முறையும், புதிய ஏற்பாடு மற்றும் திருப்பாடல்களை இரண்டு முறையும் படிப்பீர்கள்.";
+"plan_description_y1ot6nt4_profHorner" = "உபயம் பேராசிரியர் ஹார்னர், அனுமதி பெற்றது";
+"plan_description_y2ot1ntps2" = "2 ஆண்டுகளில் விவிலியம் முழுவதையும், புதிய ஏற்பாடு மற்றும் திருப்பாடல்களை இரண்டு முறையும் படிக்கலாம். உபயம்: Wholesome Words, http://www.wholesomewords.org/, அனுமதி பெற்றது.";
+"plan_name_y1ntpspr" = "ஒரு ஆண்டில் புதிய ஏற்பாடு திருப்பாடல்கள் மற்றும் நீதிமொழிகள்";
+"plan_name_y1ot1nt1_OTandNT" = "1 ஆண்டில் பழைய ஏற்பாடும் புதிய ஏற்பாடும் ஒரே நேரத்தில்";
+"plan_name_y1ot1nt1_OTthenNT" = "விவிலியம் முழுவது 1 ஆண்டில்";
+"plan_name_y1ot1nt1_chronological" = "காலவரிசை அடிப்படையில் 1-ஆண்டில் விவிலியம்";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1-ஆண்டு 4-அதிகாரங்கள்/நாள்";
+"plan_name_y1ot6nt4_profHorner" = "பேராசிரியர் ஹார்னரின் 10அதிகாரங்கள்/நாள் வாசிப்புத் திட்டம்";
+"plan_name_y2ot1ntps2" = "2-ஆண்டுகளில் விவிலியம், NT+PS இருமுறை";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "முழுப் பக்கத்திற்கும் புக்மார்க் சேர்";
+"book_menu_group_by_category" = "நூல்களை வகை அடிப்படையில் அடுக்கு";
+"book_menu_show_long_book_name" = "நூலின் முழு பெயரையும் காட்டு";
+"book_menu_show_progress_bars" = "முன்னேற்ற பட்டைகளை காட்டு";
+"book_menu_sort_row_opt" = "நூல்களை கிடைமட்டமாக அடுக்கு";
+"create_bookmark" = "புது புக் மார்க் உருவாக்கு";
+"create_bookmark_with_a_note" = "குறிப்போடு புது புக் மார்க் உருவாக்கு";
+"export_bookmarks_csv" = "புக்மார்க்குகளை %@ ஆக ஏற்றுமதி செய்";
+"export_fileformat" = "%@ஆக வெளியேற்று";
+"font_size_title_pt" = "எழுத்துரு அளவு (%d pt)";
+"go_to_ref" = "%@ஐ திற";
+"lang_default" = "தானியல்பு";
+"memorize_abbreviation" = "மனன பயிற்சி";
+"my_notes_abbreviation" = "என் குறிப்புகள்";
+"pref_font_family_label_name" = "எழுத்துரு குடும்பம் (%@)";
+"prefs_line_spacing_pt_title" = "வரி இடைவெளி (%1.1fx)";
+"prefs_margin_size_mm_title" = "விளிம்பு அளவு (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "மேல் விளிம்பு (%d mm)";
+"share_verse_widget_title" = "தேர்வைப் பகிரவும்";
+"sort_by_alphabetical" = "அகரவரிசை";

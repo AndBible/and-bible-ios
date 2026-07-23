@@ -10,6 +10,8 @@ Checks:
 5. Runtime Calculator security help must use Android copy plus the truthful iOS name limitation.
 6. Every AI source key and literal fallback must have exact Android provenance.
 7. Product-feedback copy must cover every shipped locale with Android provenance or truthful iOS fallback.
+8. Every statically declared shipped localization key must participate in Android-source discovery.
+9. Shipped SwiftUI presentation code may not embed user-visible prose as an unlocalized literal.
 
 Usage:
   python3 scripts/check_settings_localization_guardrails.py
@@ -452,19 +454,82 @@ SHIPPED_SWIFT_LOCALIZATION_DIRECTORIES = (
     "AndBible",
     "Sources",
 )
-SHIPPED_SWIFT_LOCALIZATION_PATTERN = re.compile(
-    r'String\s*\(\s*localized:\s*"([^"]+)"',
-    re.DOTALL,
+SHIPPED_SWIFT_LOCALIZATION_PATTERNS = (
+    re.compile(r'String\s*\(\s*localized:\s*"([^"]+)"', re.DOTALL),
+    re.compile(r'\.localized\(\s*"([^"]+)"', re.DOTALL),
+    re.compile(r'String\.LocalizationValue\(\s*"([^"]+)"', re.DOTALL),
+    re.compile(r'NSLocalizedString\(\s*"([^"]+)"', re.DOTALL),
+    re.compile(r'localizedString\(\s*forKey:\s*"([^"]+)"', re.DOTALL),
+    re.compile(
+        r'\b(?:titleKey|bodyKey|labelKey|emphasizedTextKey|localizationKey|'
+        r'messageKey|summaryKey|descriptionKey|placeholderKey)\s*:\s*"([^"]+)"',
+        re.DOTALL,
+    ),
+)
+SHIPPED_SWIFT_UI_LITERAL_START_PATTERN = re.compile(
+    r'(?<![A-Za-z0-9_])'
+    r'(?P<owner>Text|Button|Label|TextField|SecureField|Toggle|Picker|Menu|Section|'
+    r'navigationTitle|alert|confirmationDialog)'
+    r'\s*\(\s*"',
+)
+SHIPPED_SWIFT_UI_VERBATIM_ALLOWLIST = frozenset(
+    {
+        "AI",
+        "F",
+        "M",
+        "RRGGBB",
+        "W",
+    }
+)
+ANDROID_EXACT_DEFAULT_KEYS = frozenset(
+    {
+        "creating_index_for",
+        "help",
+        "help_ai_connection_text",
+        "help_ai_document_filter_text",
+        "help_ai_models_text",
+        "help_ai_providers_text",
+        "help_ai_settings_text",
+        "help_document_sync_text",
+        "help_global_tool_permissions_text",
+        "help_memorize_text",
+        "help_prompt_edit_text",
+        "help_read_more_link",
+        "help_reading_progress_text",
+        "help_tool_info_text",
+        "label_blue",
+        "label_green",
+        "label_red",
+        "label_salvation",
+        "label_underline",
+        "okay",
+        "plan_description_y1ntpspr",
+        "plan_description_y1ot1nt1_OTandNT",
+        "plan_description_y1ot1nt1_OTthenNT",
+        "plan_description_y1ot1nt1_chronological",
+        "plan_description_y1ot1nt2_mcheyne",
+        "plan_description_y1ot6nt4_profHorner",
+        "plan_description_y2ot1ntps2",
+        "plan_name_y1ntpspr",
+        "plan_name_y1ot1nt1_OTandNT",
+        "plan_name_y1ot1nt1_OTthenNT",
+        "plan_name_y1ot1nt1_chronological",
+        "plan_name_y1ot1nt2_mcheyne",
+        "plan_name_y1ot6nt4_profHorner",
+        "plan_name_y2ot1ntps2",
+        "workspace_number",
+    }
 )
 
 
 def discover_shipped_swift_localization_keys(repo_root: Path) -> set[str]:
-    """Return literal ``String(localized:)`` keys used by shipped Swift sources.
+    """Return every statically declared localization key used by shipped Swift.
 
-    The inventory deliberately walks product code rather than a feature allowlist,
-    while excluding test fixtures and interpolated localization values. Interpolated
-    values are format patterns, not stable resource keys, so treating them as a
-    key would create a false raw-key failure. This function performs read-only
+    The inventory deliberately walks product code rather than a feature allowlist. It
+    recognizes direct Foundation/Swift localization APIs, typed `.localized` values,
+    and indirect localization-key fields used by presentation models. Test fixtures
+    and interpolated localization values are excluded because interpolated values are
+    format patterns rather than stable resource keys. The function performs read-only
     source-file I/O and returns an empty set for focused fixtures without product
     source directories.
     """
@@ -477,12 +542,105 @@ def discover_shipped_swift_localization_keys(repo_root: Path) -> set[str]:
             if "Tests" in source_path.parts:
                 continue
             source = source_path.read_text(encoding="utf-8")
-            keys.update(
-                key
-                for key in SHIPPED_SWIFT_LOCALIZATION_PATTERN.findall(source)
-                if r"\(" not in key
-            )
+            for pattern in SHIPPED_SWIFT_LOCALIZATION_PATTERNS:
+                keys.update(key for key in pattern.findall(source) if r"\(" not in key)
     return keys
+
+
+def discover_unlocalized_swift_ui_literals(repo_root: Path) -> list[str]:
+    """Return shipped SwiftUI prose that bypasses named localization resources.
+
+    Literal-only technical glyphs and the exact Android calendar/format tokens in
+    ``SHIPPED_SWIFT_UI_VERBATIM_ALLOWLIST`` are permitted. Interpolated values are
+    permitted only when their non-interpolated remainder contains no letters; this
+    allows dynamic values such as a verse number while rejecting prose such as
+    ``"Page \\(number)"``. Each deterministic result includes source path, line,
+    constructor, and literal so CI failures point directly at the escape path.
+
+    The scan is read-only. It intentionally covers the standard SwiftUI controls
+    that create visible text while excluding accessibility-only automation markers.
+    """
+    failures: list[str] = []
+    for relative_directory in SHIPPED_SWIFT_LOCALIZATION_DIRECTORIES:
+        root = repo_root / relative_directory
+        if not root.is_dir():
+            continue
+        for source_path in sorted(root.rglob("*.swift")):
+            if "Tests" in source_path.parts:
+                continue
+            source = source_path.read_text(encoding="utf-8")
+            for match in SHIPPED_SWIFT_UI_LITERAL_START_PATTERN.finditer(source):
+                parsed_literal = parse_swift_string_literal(source, match.end())
+                if parsed_literal is None:
+                    continue
+                literal, prose = parsed_literal
+                if literal in SHIPPED_SWIFT_UI_VERBATIM_ALLOWLIST:
+                    continue
+                if not any(character.isalpha() for character in prose):
+                    continue
+                line = source.count("\n", 0, match.start()) + 1
+                relative_path = source_path.relative_to(repo_root)
+                failures.append(
+                    f"{relative_path}:{line}:{match.group('owner')}:{literal}"
+                )
+    return failures
+
+
+def parse_swift_string_literal(source: str, start: int) -> tuple[str, str] | None:
+    """Parse one ordinary Swift string after its opening quote.
+
+    - Parameters:
+      - source: Complete Swift source text.
+      - start: Offset immediately after the opening quote.
+    - Returns: Raw literal content plus only the text outside interpolations, or
+      ``None`` for an unterminated literal.
+    - Side effects: none.
+    - Failure modes: malformed source returns ``None`` rather than inventing a
+      localization violation.
+    """
+    raw: list[str] = []
+    prose: list[str] = []
+    interpolation_depth = 0
+    index = start
+
+    while index < len(source):
+        character = source[index]
+
+        if interpolation_depth == 0:
+            if character == '"':
+                return "".join(raw), "".join(prose)
+            if character == "\\" and index + 1 < len(source):
+                next_character = source[index + 1]
+                raw.extend((character, next_character))
+                index += 2
+                if next_character == "(":
+                    interpolation_depth = 1
+                continue
+            raw.append(character)
+            prose.append(character)
+            index += 1
+            continue
+
+        raw.append(character)
+        if character == '"':
+            index += 1
+            while index < len(source):
+                nested_character = source[index]
+                raw.append(nested_character)
+                index += 1
+                if nested_character == "\\" and index < len(source):
+                    raw.append(source[index])
+                    index += 1
+                elif nested_character == '"':
+                    break
+            continue
+        if character == "(":
+            interpolation_depth += 1
+        elif character == ")":
+            interpolation_depth -= 1
+        index += 1
+
+    return None
 
 
 def discover_android_owned_swift_localization_keys(
@@ -569,6 +727,28 @@ def discover_ai_localization_defaults(repo_root: Path) -> dict[str, set[str]]:
     for relative_directory in AI_LOCALIZATION_SOURCE_DIRECTORIES:
         for path in sorted((repo_root / relative_directory).rglob("*.swift")):
             source = path.read_text(encoding="utf-8")
+            for key, raw_default in AI_LOCALIZATION_DEFAULT_RE.findall(source):
+                defaults.setdefault(key, set()).add(unescape_ios(raw_default))
+    return defaults
+
+
+def discover_shipped_swift_localization_defaults(repo_root: Path) -> dict[str, set[str]]:
+    """Return every shipped literal localization fallback grouped by resource key.
+
+    Product code can render a ``defaultValue`` whenever a resource is unavailable, so
+    Android parity requires those fallbacks to match Android English just as strictly
+    as the bundled `.strings` value. Test sources are excluded, interpolation remains
+    outside this literal-only contract, and all file access is read-only.
+    """
+    defaults: dict[str, set[str]] = {}
+    for relative_directory in SHIPPED_SWIFT_LOCALIZATION_DIRECTORIES:
+        root = repo_root / relative_directory
+        if not root.is_dir():
+            continue
+        for source_path in sorted(root.rglob("*.swift")):
+            if "Tests" in source_path.parts:
+                continue
+            source = source_path.read_text(encoding="utf-8")
             for key, raw_default in AI_LOCALIZATION_DEFAULT_RE.findall(source):
                 defaults.setdefault(key, set()).add(unescape_ios(raw_default))
     return defaults
@@ -1350,7 +1530,11 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
         )
 
     mismatched_defaults: list[str] = []
-    for ios_key, defaults in sorted(discover_ai_localization_defaults(repo_root).items()):
+    exact_defaults = discover_ai_localization_defaults(repo_root)
+    for ios_key, defaults in discover_shipped_swift_localization_defaults(repo_root).items():
+        if ios_key in ANDROID_EXACT_DEFAULT_KEYS:
+            exact_defaults.setdefault(ios_key, set()).update(defaults)
+    for ios_key, defaults in sorted(exact_defaults.items()):
         android_key = ANDROID_SHARED_KEY_MAPPINGS.get(ios_key, ios_key)
         expected = android_base.get(android_key)
         if expected is None:
@@ -1362,7 +1546,7 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
                 )
     if mismatched_defaults:
         raise ValueError(
-            "AI localization defaults differ from Android English: "
+            "Shipped localization defaults differ from Android English: "
             + "; ".join(mismatched_defaults)
         )
 
@@ -2105,6 +2289,11 @@ def main() -> int:
 
     failures: list[str] = []
 
+    unlocalized_swift_ui_literals = discover_unlocalized_swift_ui_literals(args.repo_root)
+    if unlocalized_swift_ui_literals:
+        failures.append("Unlocalized shipped SwiftUI literals:")
+        failures.extend(f"  - {item}" for item in unlocalized_swift_ui_literals)
+
     try:
         discrete_security_failures = audit_discrete_security_localizations(
             args.repo_root,
@@ -2204,6 +2393,7 @@ def main() -> int:
     print(f"- locale_pref extra iOS-only resource locales: {len(locale_pref_audit.extra_ios_locales)}")
     print(f"- discrete security-copy locales: {len(LOCALE_TO_ANDROID_VALUES)}")
     print(f"- product-feedback localization locales: {len(LOCALE_TO_ANDROID_VALUES)}")
+    print(f"- unlocalized shipped SwiftUI literals: {len(unlocalized_swift_ui_literals)}")
     if audit.shared_localization is not None:
         print(f"- android shared source keys: {len(audit.shared_localization.safe_keys)}")
         print(f"- android shared explicit mapped keys: {len(ANDROID_SHARED_KEY_MAPPINGS)}")

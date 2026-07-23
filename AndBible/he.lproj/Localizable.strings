@@ -1498,3 +1498,48 @@
 "search_dictionary_hint" = "חיפוש במילון";
 "search_with_results2" = "%1$@ תוצאות ב %2$@";
 "task_kill_warning" = "יותר מדי משימות רצות כעת, ולכן אם תצא מהתוכנה הן עלולות להסגר לפני שיסתיימו.";
+
+/* Android shared translations */
+"creating_index_for" = "יוצר אינדקס עבור %@…";
+"label_blue" = "כחול";
+"label_green" = "ירוק";
+"label_red" = "אדום";
+"label_salvation" = "ישועה";
+"label_underline" = "קו תחתי";
+"plan_description_y1ntpspr" = "Courtesy of HEARTLIGHT Internet Magazine, http://www.heartlight.org, ניתנה הרשאה";
+"plan_description_y1ot1nt1_OTandNT" = "קריאת התנך בשנה אחת פרקים מהתנך והברית החדשה בכל יום.";
+"plan_description_y1ot1nt1_OTthenNT" = "קריאה בתנך בשנה אחת, מבראשית ועד חזון יוחנן. קודם התנך ואז הברית החדשה.";
+"plan_description_y1ot1nt1_chronological" = "התוכניות בנויה על אירועים מהתנך בסדר כרונולוגי. חישוב הזמנים הוא בקירוב";
+"plan_description_y1ot1nt2_mcheyne" = "תוכנית זו מבוססת על תוכנית הקריאה של M’Cheyne. עבור כל יום, ישנם שני קטעים מהתנ\"ך, קטע אחד מהברית החדשה, וקטע אחד מתהילים או מהבשורות. בשנה שלמה, קוראים פעם אחת את כל התנ\"ך, ופעמיים את הברית החדשה ואת תהילים.";
+"plan_description_y1ot6nt4_profHorner" = "באדיבות פרופ' הורנר, ניתנת הרשות";
+"plan_description_y2ot1ntps2" = "קריאה בכל הכתובים תוך שנתיים, כאשר חוזרים פעמיים על הברית החדשה ותהילים. באדיבות Wholesome Words, http://www.wholesomewords.org";
+"plan_name_y1ntpspr" = "הברית החדשה, תהלים ומשלי בשנה אחת";
+"plan_name_y1ot1nt1_OTandNT" = "שנה אחת תנך+ברית חדשה במקביל";
+"plan_name_y1ot1nt1_OTthenNT" = "מעבר על כל הכתובים בשנה אחת";
+"plan_name_y1ot1nt1_chronological" = "שנה שלמה לפי סדר כרונולוגי";
+"plan_name_y1ot1nt2_mcheyne" = "התוכנית השנתית של מקיני, 4 פרקים ליום";
+"plan_name_y1ot6nt4_profHorner" = "תוכנית קריאה 10 פרקים ליום של פרופ' הורנר";
+"plan_name_y2ot1ntps2" = "תוכנית לשנתיים של התנ\"ך, ופעמיים תהלים והברית החדשה";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "הוסף סימניה לכל העמוד";
+"book_menu_group_by_category" = "קבץ ספרים לפי קטגוריה";
+"book_menu_show_long_book_name" = "הצגת שם הספר המלא";
+"book_menu_show_progress_bars" = "הצג פסי התקדמות";
+"book_menu_sort_row_opt" = "סדר ספרים אופקית";
+"create_bookmark" = "סימניה חדשה";
+"create_bookmark_with_a_note" = "יצירת סימניה חדשה עם הערה";
+"export_bookmarks_csv" = "יצא סימניות כ-%@";
+"export_fileformat" = "ייצוא כ %@";
+"font_size_title_pt" = "גודל גופן (%d נק)";
+"go_to_ref" = "פתיחת %@";
+"lang_default" = "ברירת מחדל";
+"memorize_abbreviation" = "שינון";
+"multi_description" = "מספר מראי מקום";
+"my_notes_abbreviation" = "הערות אישיות";
+"pref_font_family_label_name" = "סוג גופן (%@)";
+"prefs_line_spacing_pt_title" = "מרווח שורות (%1.1fx)";
+"prefs_margin_size_mm_title" = "מידת שוליים (%1$d/%2$d/%3$d מ\"מ)";
+"prefs_top_margin_title_mm" = "שוליים עליונים (%d מ\"מ)";
+"share_verse_widget_title" = "שיתוף הקטע המסומן";
+"sort_by_alphabetical" = "סדר לפי א-ב";

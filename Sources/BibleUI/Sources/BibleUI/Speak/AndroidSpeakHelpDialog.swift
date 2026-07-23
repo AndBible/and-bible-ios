@@ -42,11 +42,10 @@ struct AndroidSpeakHelpDialog: View {
             onOutsideTap: onDismiss
         ) {
             VStack(alignment: .leading, spacing: 18) {
-                ScrollView {
+                AndroidAdaptiveDialogScrollView {
                     helpContent
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 520)
 
                 HStack {
                     Spacer()

@@ -732,13 +732,7 @@ public struct AIPromptManagementView: View {
                     title: String(localized: "help", defaultValue: "Help"),
                     identifier: "aiPromptHelpMenuItem"
                 ) {
-                    helpDialog = .information(
-                        title: String(localized: "help", defaultValue: "Help"),
-                        message: String(
-                            localized: "help_ai_settings_text",
-                            defaultValue: "AI Settings is where you manage your prompts and categories. From here you can create new prompts, organise them into categories, import/export prompts as CSV, install add-on prompt packs, and reach the AI connection settings."
-                        )
-                    )
+                    helpDialog = .help(.aiSettings)
                 }
             }
         }
@@ -2895,13 +2889,7 @@ struct AIPromptEditorView: View {
 
     /** Opens Android's prompt-editor help copy in the shared app-owned information dialog. */
     private func showHelp() {
-        helpDialog = .information(
-            title: String(localized: "help", defaultValue: "Help"),
-            message: String(
-                localized: "help_prompt_edit_text",
-                defaultValue: "Custom prompts let you create reusable AI instructions for your study. Set a name, description, template, the contexts where it should appear, and optionally a custom provider/model. Built-in prompts cannot be edited directly — use \"Copy to customize\" to create your own version."
-            )
-        )
+        helpDialog = .help(.promptEditor)
     }
 
     /**

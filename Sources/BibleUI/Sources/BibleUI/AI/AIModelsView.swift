@@ -232,13 +232,7 @@ struct AIModelsView: View {
                 accessibilityIdentifier: "aiModelsHelpMenuItem"
             ) {
                 showsOverflowMenu = false
-                configurationDialog = .information(
-                    title: String(localized: "help", defaultValue: "Help"),
-                    message: String(
-                        localized: "help_ai_models_text",
-                        defaultValue: "Manage models for this provider. You can refresh the model list from the provider's API to pick up new releases, or add a model name manually if it is not in the fetched list."
-                    )
-                )
+                configurationDialog = .help(.aiModels)
             }
         }
     }

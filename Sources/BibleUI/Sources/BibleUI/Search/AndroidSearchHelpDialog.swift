@@ -103,7 +103,7 @@ struct AndroidSearchHelpDialog: View {
             onOutsideTap: onDismiss
         ) {
             AndroidDialogScaffold(title: title) {
-                ScrollView {
+                AndroidAdaptiveDialogScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         HStack(alignment: .top, spacing: 14) {
                             Image("DrawerLogo", bundle: .module)
@@ -130,7 +130,6 @@ struct AndroidSearchHelpDialog: View {
                     .padding(.horizontal, 22)
                     .padding(.bottom, 12)
                 }
-                .frame(maxHeight: 360)
             } actions: {
                 AndroidDialogTextAction(
                     title: String(localized: "okay", defaultValue: "OK"),

@@ -1497,3 +1497,48 @@
 "search_dictionary_hint" = "查询字典";
 "search_with_results2" = "在 %2$@ 中找到 %1$@ 个结果";
 "task_kill_warning" = "当前任务可能运行很久，若你在完成前切换到其它应用，可能会导致任务终止。";
+
+/* Android shared translations */
+"creating_index_for" = "为%@建立索引";
+"label_blue" = "蓝色";
+"label_green" = "绿色";
+"label_red" = "红色";
+"label_salvation" = "救恩";
+"label_underline" = "下划线";
+"plan_description_y1ntpspr" = "感谢 HEARTLIGHT Internet Magazine http://www.heartlight.org 准予使用";
+"plan_description_y1ot1nt1_OTandNT" = "一年读完整本圣经。 每天包括新约及旧约经文。";
+"plan_description_y1ot1nt1_OTthenNT" = "一年顺序由创世记至启示录读完整本圣经。 先由旧约开始，再到旧约。";
+"plan_description_y1ot1nt1_chronological" = "按圣经时序编定的计划。 所述时序只属概略。";
+"plan_description_y1ot1nt2_mcheyne" = "此计划基于M'Cheyne读经系统， 集中在家庭及个人的灵修。 每天均有2篇旧约、1篇新约、及1篇诗篇或福音。 一年内可完成旧约1次、新约及诗篇2次。";
+"plan_description_y1ot6nt4_profHorner" = "感谢 Prof. Horner 准予使用";
+"plan_description_y2ot1ntps2" = "两年完成圣经。阅读新约及诗篇两次 感谢 Wholesome Words http://www.wholesomewords.org/ 准予使用";
+"plan_name_y1ntpspr" = "新约、诗篇与箴言一年计划";
+"plan_name_y1ot1nt1_OTandNT" = "一年同时读新、旧约";
+"plan_name_y1ot1nt1_OTthenNT" = "一年完成圣经";
+"plan_name_y1ot1nt1_chronological" = "按时序一年完成圣经";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne每日四章一年计划";
+"plan_name_y1ot6nt4_profHorner" = "Prof. Horner每日十章读经计划";
+"plan_name_y2ot1ntps2" = "两年完成圣经。新约及诗篇两次";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "为整页添加书签";
+"book_menu_group_by_category" = "根据分类为书卷分组";
+"book_menu_show_long_book_name" = "显示长书卷名";
+"book_menu_show_progress_bars" = "显示进度条";
+"book_menu_sort_row_opt" = "垂直排列书本";
+"create_bookmark" = "新建书签";
+"create_bookmark_with_a_note" = "新建带笔记的书签";
+"export_bookmarks_csv" = "将书签导出为 %@";
+"export_fileformat" = "以%@导出";
+"font_size_title_pt" = "字型大小 (%d pt)";
+"go_to_ref" = "打开 %@";
+"lang_default" = "预设";
+"memorize_abbreviation" = "记忆";
+"multi_description" = "多重参考";
+"my_notes_abbreviation" = "笔记列表";
+"pref_font_family_label_name" = "字型家族 (%@)";
+"prefs_line_spacing_pt_title" = "行距（%1.1fx）";
+"prefs_margin_size_mm_title" = "边距大小（%1$d/%2$d/%3$d mm）";
+"prefs_top_margin_title_mm" = "顶边界 (%d mm)";
+"share_verse_widget_title" = "分享选取部份";
+"sort_by_alphabetical" = "字母顺序";

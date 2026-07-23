@@ -279,13 +279,7 @@ private struct AISettingsSetupView: View {
                     accessibilityIdentifier: "aiSettingsHelpMenuItem"
                 ) {
                     showsOverflowMenu = false
-                    activeDialog = .information(
-                        title: String(localized: "help", defaultValue: "Help"),
-                        message: String(
-                            localized: "help_ai_settings_text",
-                            defaultValue: "AI Settings is where you manage your prompts and categories. From here you can create new prompts, organise them into categories, import/export prompts as CSV, install add-on prompt packs, and reach the AI connection settings."
-                        )
-                    )
+                    activeDialog = .help(.aiSettings)
                 }
             }
         }

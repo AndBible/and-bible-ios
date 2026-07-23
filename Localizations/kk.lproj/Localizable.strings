@@ -934,3 +934,43 @@ Google Drive пайдаланған кезде, %@ кез келген жеке 
 "search_dictionary_hint" = "Сөздікті іздеу";
 "search_with_results2" = "%2$@ ішінде %1$@ нәтиже";
 "task_kill_warning" = "Егер сіз тапсырмалардың соңына жетпей басқа қолдабаға ауыстарсаңыз, осы ұзақ жұмыс істейтін тапсырмалар тоқтатылуы мүмкін.";
+
+/* Android shared translations */
+"label_blue" = "Көк";
+"label_green" = "Жасыл";
+"label_red" = "Қызыл";
+"label_salvation" = "Құтқарылу";
+"label_underline" = "Астын сызу";
+"plan_description_y1ntpspr" = "HEARTLIGHT Интернет Журналдың әдептілігі, http://www.heartlight.org, рұқсат берілген";
+"plan_description_y1ot1nt1_OTandNT" = "ЕӨ пен ЖӨ күнделікті тарау тараумен, Киелі Кітапты 1 жылдың ішінде оқып шығыңыз.";
+"plan_description_y1ot1nt1_OTthenNT" = "Жаратылыстың басталуы кітаптан бастап және Аян кітабымен бітіріп, Киелі Кітапты 1 жылдың ішінде оқыңыз. Алдымен ЕӨ, содан кейін ЖӨ.";
+"plan_description_y1ot1nt1_chronological" = "Киелі Кітаптағы хронологиялық оқиғаларға негізделген жоспар. Хронологиялық уақыт кестесі шамамен алынған.";
+"plan_description_y1ot1nt2_mcheyne" = "Бұл жоспар M'Cheyne оқу жүйесіне негізделген, отбасы мен жеке өмірдің арнауларында да қолдануға арналған төрт түрлі оқылым. Әр күнде Ескі Өсиеттен екі үзінді бар, ал бір үзінді Жаңа Өсиеттен, және тағы бір үзінді не Забур Жырларынан не Інжілдерден болады. Бір жылдың ішінде, сіз Ескі Өсиетті бір рет және Жаңа Өсиет пен Забурды екі рет оқып шығысыз.";
+"plan_description_y1ot6nt4_profHorner" = "Проф. Хорнердің әдептілігі, рұқсат берілген";
+"plan_description_y2ot1ntps2" = "Киелі Кітапты 2 жылдың ішінде оқып шығыңыз, ЖӨ пен Забур Жырларын екі реттен оқыңыз. Wholesome Words әдептілігі, http://www.wholesomewords.org/, рұқсат берілген";
+"plan_name_y1ntpspr" = "Жылына ЖӨ, Забур Жырлары & Нақыл Сөздер";
+"plan_name_y1ot1nt1_OTandNT" = "1-Жылда ЕӨ+ЖӨ Бір Уақытта";
+"plan_name_y1ot1nt1_OTthenNT" = "1-Жылда Киелі Кітапты оқып шығу";
+"plan_name_y1ot1nt1_chronological" = "1-Жылда Киелі Кітапті Хронология ретімен оқып шығу";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1-Жыл 4-тарау/күніне";
+"plan_name_y1ot6nt4_profHorner" = "Проф. Хорнер 10-тарау/күніне Оқу Жоспары";
+"plan_name_y2ot1ntps2" = "2-Жылда Киелі Кітап оқып шығу, ЖӨ+ЗЖ екі қайтара";
+
+/* Android shared translations */
+"book_menu_group_by_category" = "Кітаптарды санаттары бойынша топтастыру";
+"book_menu_show_long_book_name" = "Ұзын кітап атын көрсетіңіз";
+"book_menu_sort_row_opt" = "Кітаптарды көлденеңінен тапсырыс беру";
+"create_bookmark" = "Жаңа бетбелгі жасаңыз";
+"create_bookmark_with_a_note" = "Жазбамен жаңа бетбелгі жасаңыз";
+"export_fileformat" = "%@ Ретінде экспорттау";
+"font_size_title_pt" = "Қаріп өлшемі (%d pt)";
+"go_to_ref" = "Ашу %@";
+"lang_default" = "Дефолт";
+"multi_description" = "Бірнеше сілтемелер";
+"my_notes_abbreviation" = "Менің Ескертпелерім";
+"pref_font_family_label_name" = "Қаріптер тобы (%@)";
+"prefs_line_spacing_pt_title" = "Жол арасын кеңейту (%1.1fx)";
+"prefs_margin_size_mm_title" = "Маржа өлшемі (%1$d/%2$d/%3$d мм)";
+"prefs_top_margin_title_mm" = "Жоғарғы шекара (%d mm)";
+"share_verse_widget_title" = "Таңдаумен бөлісу";
+"sort_by_alphabetical" = "Әліппе реті бойынша";

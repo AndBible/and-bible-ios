@@ -1487,3 +1487,48 @@
 "search_dictionary_hint" = "Hledat ve slovníku";
 "search_with_results2" = "%1$@ výsledků v %2$@";
 "task_kill_warning" = "Tyto dlouho běžící úlohy mohou být zrušeny pokud před jejich dokončením přepnete na jinou aplikaci.";
+
+/* Android shared translations */
+"creating_index_for" = "Vytváří se index pro %@…";
+"label_blue" = "Modrá";
+"label_green" = "Zelená";
+"label_red" = "Červená";
+"label_salvation" = "Pozdrav";
+"label_underline" = "Podtržení";
+"plan_description_y1ntpspr" = "Se svolením internetového časopisu HEARTLIGHT, http://www.heartlight.org, povolení uděleno";
+"plan_description_y1ot1nt1_OTandNT" = "Přečtení celé Bible za 1 rok, každý den kapitoly ze SZ a NZ.";
+"plan_description_y1ot1nt1_OTthenNT" = "Přečtení celé Bible za 1 rok, začíná Genesí a končí Zjevením. SZ je první, poté NZ.";
+"plan_description_y1ot1nt1_chronological" = "Plán založený na chronologických událostech v Bibli. Chronologická časová linka je přibližná.";
+"plan_description_y1ot1nt2_mcheyne" = "Plán se zakládá na M’Cheyneho systému čtení a zahrnuje čtyři různá čtení pro použití jak při rodinném tak osobním ztišení. Každý den má dvě pasáže ze Starého zákona, jednu z Nového zákona a jednu buď z žalmů nebo evangelií. Během jednoho roku se přečte celý Starý zákon jednou a Nový zákon s žalmy dvakrát.";
+"plan_description_y1ot6nt4_profHorner" = "Se svolením prof. Hornera, povolení uděleno";
+"plan_description_y2ot1ntps2" = "Přečtení celé Bible za 2 roky. NZ a žalmy se přečtou dvakrát. Se svolením Wholesome Words, http://www.wholesomewords.org/, povolení uděleno";
+"plan_name_y1ntpspr" = "NZ, Žalmy a Přísloví za rok";
+"plan_name_y1ot1nt1_OTandNT" = "SZ a NZ za 1 rok současně";
+"plan_name_y1ot1nt1_OTthenNT" = "Čtení celé Bible za 1 rok";
+"plan_name_y1ot1nt1_chronological" = "Chronologické čtení celé Bible za 1 rok";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheynův 1 rok, 4 kapitoly/den";
+"plan_name_y1ot6nt4_profHorner" = "Prof. Hornerův plán čtení 10 kapitol/den";
+"plan_name_y2ot1ntps2" = "Čtení Bible za 2 roky, NZ+Žalmy dvakrát";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Přidat záložku pro celou stránku";
+"book_menu_group_by_category" = "Seskupit podle kategorie";
+"book_menu_show_long_book_name" = "Zobrazit dlouhý název knihy";
+"book_menu_show_progress_bars" = "Zobrazit ukazatele průběhu";
+"book_menu_sort_row_opt" = "Horizontální pořadí";
+"create_bookmark" = "Vytvořit novou záložku";
+"create_bookmark_with_a_note" = "Vytvořit novou záložku s poznámkou";
+"export_bookmarks_csv" = "Exportovat záložky jako %@";
+"export_fileformat" = "Exportovat jako %@";
+"font_size_title_pt" = "Velikost písma (%d bodů)";
+"go_to_ref" = "Otevřít %@";
+"lang_default" = "Výchozí";
+"memorize_abbreviation" = "Zapamatovat";
+"multi_description" = "Více odkazů";
+"my_notes_abbreviation" = "Poznámky";
+"pref_font_family_label_name" = "Typ písma (%@)";
+"prefs_line_spacing_pt_title" = "Řádkování (%1.1fx)";
+"prefs_margin_size_mm_title" = "Velikost okrajů (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Horní okraj (%d mm)";
+"share_verse_widget_title" = "Sdílet výběr";
+"sort_by_alphabetical" = "Abecední pořadí";

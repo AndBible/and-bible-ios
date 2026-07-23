@@ -1482,3 +1482,48 @@
 "search_dictionary_hint" = "Намери речник";
 "search_with_results2" = "%1$@ резултата в %2$@";
 "task_kill_warning" = "Тези дълги задачи могат да бъдат прекъснати, ако затворите And Bible преди те да са приключили.";
+
+/* Android shared translations */
+"creating_index_for" = "Създаване на индекс за %@…";
+"label_blue" = "Син";
+"label_green" = "Зелен";
+"label_red" = "Червен";
+"label_salvation" = "Спасение";
+"label_underline" = "Подчертаване";
+"plan_description_y1ntpspr" = "С любезното съдействие на интернет списание HEARTLIGHT, http://www.heartlight.org, с разрешение";
+"plan_description_y1ot1nt1_OTandNT" = "Прочетете Библията за 1 година, с глави от СЗ и НЗ всеки ден.";
+"plan_description_y1ot1nt1_OTthenNT" = "Прочетете Библията за 1 година, започвайки от Битие и завършвайки с Откровение. Първо е СЗ, после НЗ.";
+"plan_description_y1ot1nt1_chronological" = "План, базиран на хронологичните събития в Библията. Хронологичната времева линия е приблизителна.";
+"plan_description_y1ot1nt2_mcheyne" = "Този план е базиран на системата за четене на M'Cheyne, включваща четири различни четива за семейни и лични молитвени времена. Всеки ден има два пасажа от Стария Завет, един от Новия Завет и един от Псалмите или Евангелията. За една година прочитате Стария Завет веднъж, а Новия Завет и Псалмите — два пъти.";
+"plan_description_y1ot6nt4_profHorner" = "С любезното съдействие на проф. Хорнер, с разрешение";
+"plan_description_y2ot1ntps2" = "Прочетете Библията за 2 години, като НЗ и Псалмите се четат два пъти. С любезното съдействие на Wholesome Words, http://www.wholesomewords.org/, с разрешение";
+"plan_name_y1ntpspr" = "НЗ, Псалми и Притчи за една година";
+"plan_name_y1ot1nt1_OTandNT" = "1 година – СЗ+НЗ едновременно";
+"plan_name_y1ot1nt1_OTthenNT" = "Четене на Библията за 1 година";
+"plan_name_y1ot1nt1_chronological" = "Хронологично четене на Библията за 1 година";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne – 1 година, 4 глави на ден";
+"plan_name_y1ot6nt4_profHorner" = "План за четене на проф. Хорнер – 10 глави на ден";
+"plan_name_y2ot1ntps2" = "2 години през Библията, НЗ+ПС два пъти";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Добави отметка за цялата страница";
+"book_menu_group_by_category" = "Групирай книгите по категория";
+"book_menu_show_long_book_name" = "Показвай пълното име на книгата";
+"book_menu_show_progress_bars" = "Показвай ленти за напредък";
+"book_menu_sort_row_opt" = "Наредба на книгите хоризонтално";
+"create_bookmark" = "Създай нова отметка";
+"create_bookmark_with_a_note" = "Създай нова отметка с бележка";
+"export_bookmarks_csv" = "Експортирай отметки като %@";
+"export_fileformat" = "Експортирай като %@";
+"font_size_title_pt" = "Размер на шрифта (%d pt)";
+"go_to_ref" = "Отвори %@";
+"lang_default" = "По подразбиране";
+"memorize_abbreviation" = "Наизуст";
+"multi_description" = "Множество препратки";
+"my_notes_abbreviation" = "Мои бележки";
+"pref_font_family_label_name" = "Шрифтово семейство (%@)";
+"prefs_line_spacing_pt_title" = "Разстояние между редове (%1.1fx)";
+"prefs_margin_size_mm_title" = "Размер на полетата (%1$d/%2$d/%3$d мм)";
+"prefs_top_margin_title_mm" = "Горно поле (%d мм)";
+"share_verse_widget_title" = "Сподели избраното";
+"sort_by_alphabetical" = "По азбучен ред";

@@ -116,7 +116,7 @@ public struct AndroidDecisionDialog: View {
         ) {
             AndroidDialogScaffold(title: title) {
                 if let message, !message.isEmpty {
-                    ScrollView {
+                    AndroidAdaptiveDialogScrollView {
                         Text(message)
                             .font(.system(size: 17))
                             .foregroundStyle(AndroidDialogSurfacePalette.secondaryText(for: colorScheme))

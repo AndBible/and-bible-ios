@@ -1476,3 +1476,46 @@
 "search_dictionary_hint" = "Søk i ordbok";
 "search_with_results2" = "%1$@ resultater i %2$@";
 "task_kill_warning" = "Vær klar over at Android kan avlutte disse tidkrevende jobbende hvis du skifter til en annen applikasjon før jobben er utført.";
+
+/* Android shared translations */
+"creating_index_for" = "Oppretter indeks for %@…";
+"label_blue" = "Blå";
+"label_green" = "Grønn";
+"label_red" = "Rød";
+"label_salvation" = "Frelse";
+"label_underline" = "Understreket";
+"plan_description_y1ot1nt1_OTandNT" = "Les igjennom Bibelen på ett år med kapitler i GT og NT hver dag.";
+"plan_description_y1ot1nt1_OTthenNT" = "Les igjennom Bibelen på ett år fra 1. Mosebok og avslutt i Åpenbaringsboken. GT først, deretter NT.";
+"plan_description_y1ot1nt1_chronological" = "Leseplan basert på kronologiske hendelser i Bibelen. Den kronologiske tidslinjen er omtrentlig.";
+"plan_description_y1ot1nt2_mcheyne" = "Denne planen er basert på M'Cheynes leseopplegg, med fire forskjellige lesninger for bruk i både familie- og personlig andakt. Hver dag har to tekster fra Det gamle testamentet, én fra Det nye testamentet og én fra enten Salmene eller evangeliene. I løpet av ett år leser du Det gamle testamentet én gang og Det nye testamentet og Salmene to ganger.";
+"plan_description_y2ot1ntps2" = "Les igjennom Bibelen på to år der du leser NT og salmene to ganger. Courtesy of Wholesome Words, http://www.wholesomewords.org/, permission granted";
+"plan_name_y1ntpspr" = "NT, Salmene og Ordspråkene på ett år";
+"plan_name_y1ot1nt1_OTandNT" = "Ett år GT+NT samtidig";
+"plan_name_y1ot1nt1_OTthenNT" = "Ett år igjennom Bibelen";
+"plan_name_y1ot1nt1_chronological" = "Kronologisk ett år igjennom Bibelen";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1 år, 4 kapittel/dag";
+"plan_name_y1ot6nt4_profHorner" = "Professor Horner 10 kap./dag leseplan";
+"plan_name_y2ot1ntps2" = "2 år igjennom bibelen, NT+salmene to ganger";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Legg til bokmerke for hele siden";
+"book_menu_group_by_category" = "Grupper bøker etter kategori";
+"book_menu_show_long_book_name" = "Vis langt boknavn";
+"book_menu_show_progress_bars" = "Vis fremdriftslinjer";
+"book_menu_sort_row_opt" = "Sorter bøker horisontalt";
+"create_bookmark" = "Lag et nytt bokmerke";
+"create_bookmark_with_a_note" = "Lag et nytt bokmerke med et notat";
+"export_bookmarks_csv" = "Eksporter bokmerker som %@";
+"export_fileformat" = "Eksporter som %@";
+"font_size_title_pt" = "Skriftstørrelse (%dpunkt)";
+"go_to_ref" = "Åpne %@";
+"lang_default" = "Standard";
+"memorize_abbreviation" = "Memorer";
+"multi_description" = "Flere referanser";
+"my_notes_abbreviation" = "Mine notater";
+"pref_font_family_label_name" = "Skrifttype (%@)";
+"prefs_line_spacing_pt_title" = "Linjeavstand (%1.1fx)";
+"prefs_margin_size_mm_title" = "Margstørrelse (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Toppmarg (%dmm)";
+"share_verse_widget_title" = "Del utvalg";
+"sort_by_alphabetical" = "Alfabetisk rekkefølge";

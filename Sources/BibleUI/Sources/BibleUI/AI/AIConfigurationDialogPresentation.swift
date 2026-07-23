@@ -6,8 +6,8 @@ import SwiftUI
 
 /** Dialog states used by Android's disclaimer-protected AI configuration workflows. */
 enum AIConfigurationDialog: Equatable {
-    /// Android's app-owned Help dialog with screen-specific source copy.
-    case information(title: String, message: String)
+    /// Android's typed, app-owned `CommonUtils.showHelpDialog` contract.
+    case help(AndroidFeatureHelpTopic)
     /// Read-only responsibility notice opened from Connection settings.
     case disclaimerInformation
     /// One-time acceptance gate retaining the exact requested action.
@@ -70,6 +70,21 @@ enum AIConfigurationDialog: Equatable {
         case .addProvider: return .providerType
         }
     }
+
+    /**
+     Returns whether Android permits a scrim tap to cancel the represented dialog.
+
+     - Returns: `true` only for informational feature Help; configuration and destructive workflows
+       remain blocking until an explicit action is selected.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var allowsOutsideDismissal: Bool {
+        if case .help = self {
+            return true
+        }
+        return false
+    }
 }
 
 /**
@@ -98,8 +113,8 @@ private struct AIConfigurationDialogOverlay: View {
         AndroidDialogWindow(
             colorScheme: colorScheme,
             accessibilityIdentifier: "aiConfigurationDialogOverlay",
-            allowsOutsideDismissal: false,
-            onOutsideTap: {}
+            allowsOutsideDismissal: dialog?.allowsOutsideDismissal ?? false,
+            onOutsideTap: dismissDialog
         ) {
             dialogContent
         }
@@ -118,12 +133,8 @@ private struct AIConfigurationDialogOverlay: View {
     @ViewBuilder
     private var dialogContent: some View {
         switch dialog {
-        case .information(let title, let message):
-            AIInformationDialog(
-                title: title,
-                message: message,
-                onDismiss: dismissDialog
-            )
+        case .help(let topic):
+            AndroidFeatureHelpDialogContent(topic: topic, onDismiss: dismissDialog)
         case .disclaimerInformation:
             AIDisclaimerDialog(mode: .information, onCancel: dismissDialog)
         case .disclaimerAcceptance(let request):
@@ -333,35 +344,6 @@ private struct AIConfigurationDialogOverlay: View {
         } catch {
             return String(localized: "error_occurred", defaultValue: "An error has occurred")
         }
-    }
-}
-
-/** Android's shared one-message Help dialog. */
-private struct AIInformationDialog: View {
-    /// Localized dialog heading.
-    let title: String
-    /// Localized screen-specific help copy.
-    let message: String
-    /// Positive dismissal callback.
-    let onDismiss: () -> Void
-
-    var body: some View {
-        AIAndroidDialogSurface(title: title) {
-            ScrollView {
-                Text(message)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-            }
-            .frame(maxHeight: 520)
-        } actions: {
-            Spacer()
-            AIAndroidDialogAction(
-                title: String(localized: "okay", defaultValue: "OK"),
-                action: onDismiss
-            )
-        }
-        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiInformationDialog")
     }
 }
 

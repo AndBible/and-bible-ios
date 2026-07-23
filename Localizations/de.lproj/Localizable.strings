@@ -1466,3 +1466,48 @@ Wenn Google Drive verwendet wird, hat %@ nur Zugriff auf Dateien der Anwendung, 
 "search_dictionary_hint" = "Durchsuche Wörterbuch";
 "search_with_results2" = "%1$@ Ergebnisse in %2$@";
 "task_kill_warning" = "Diese Aufgaben dauern länger und könnten abgebrochen werden, wenn Sie zu einem anderen Programm wechseln.";
+
+/* Android shared translations */
+"creating_index_for" = "Der Index für %@ wird erstellt...";
+"label_blue" = "Blau";
+"label_green" = "Grün";
+"label_red" = "Rot";
+"label_salvation" = "Errettung";
+"label_underline" = "Unterstreichung";
+"plan_description_y1ntpspr" = "Mit freundlicher Genehmigung von HEARTLIGHT Internet Magazine, http://www.heartlight.org";
+"plan_description_y1ot1nt1_OTandNT" = "In 1 Jahr die ganze Bibel lesen. Jeden Tag eine Stelle aus dem AT und dem NT.";
+"plan_description_y1ot1nt1_OTthenNT" = "Die ganze Bibel in einem Jahr, beginnend mit 1. Mose fortlaufend bis zur Offenbarung.";
+"plan_description_y1ot1nt1_chronological" = "Leseplan, der versucht, annähernd der zeitlichen Abfolge der Ereignisse in der Bibel zu folgen.";
+"plan_description_y1ot1nt2_mcheyne" = "Dieser Leseplan basiert auf dem System von M'Cheyne und beinhaltet vier Lesungen für die Familie und die private Andacht. Jeder Tag hat zwei Abschnitte aus dem AT, einen aus dem NT und einen aus den Psalmen oder den Evangelien. In einem Jahr kommt man so einmal durch das AT und zweimal durch das NT und die Psalmen.";
+"plan_description_y1ot6nt4_profHorner" = "Mit freundlicher Genehmigung von Prof. Horner";
+"plan_description_y2ot1ntps2" = "Die ganze Bibel in 2 Jahren durchlesen, dabei das NT und die Psalmen zwei Mal. Mit freundlicher Genehmigung von http://www.wholesomewords.org/.";
+"plan_name_y1ntpspr" = "NT, Psalmen & Sprüche innerhalb eines Jahres";
+"plan_name_y1ot1nt1_OTandNT" = "In 1 Jahr durchs AT und NT";
+"plan_name_y1ot1nt1_OTthenNT" = "In 1 Jahr durch die Bibel";
+"plan_name_y1ot1nt1_chronological" = "In 1 Jahr chronologisch durch die Bibel";
+"plan_name_y1ot1nt2_mcheyne" = "Die ganze Bibel in 1 Jahr nach M'Cheyne: 4 Kapitel pro Tag";
+"plan_name_y1ot6nt4_profHorner" = "10 Kapitel pro Tag nach Prof. Horner";
+"plan_name_y2ot1ntps2" = "In 2 Jahren durch die Bibel, NT und Ps zwei Mal";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Lesezeichen für die gesamte Seite hinzufügen";
+"book_menu_group_by_category" = "Bücher nach Kategorie gruppieren";
+"book_menu_show_long_book_name" = "Zeige langen Buchnamen";
+"book_menu_show_progress_bars" = "Fortschrittsbalken anzeigen";
+"book_menu_sort_row_opt" = "Sortiere Bücher horizontal";
+"create_bookmark" = "Neues Lesezeichen erstellen";
+"create_bookmark_with_a_note" = "Erstelle ein neues Lesezeichen mit Notiz";
+"export_bookmarks_csv" = "Exportiere Lesezeichen als %@";
+"export_fileformat" = "Exportiere als %@";
+"font_size_title_pt" = "Schriftgröße (%d pt)";
+"go_to_ref" = "%@ öffnen";
+"lang_default" = "Vorgabe";
+"memorize_abbreviation" = "Auswendig lernen";
+"multi_description" = "Mehrere Querverweise";
+"my_notes_abbreviation" = "Eigene Notizen";
+"pref_font_family_label_name" = "Schriftart (%@)";
+"prefs_line_spacing_pt_title" = "Zeilenabstand (%1.1fx)";
+"prefs_margin_size_mm_title" = "Randgröße (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Oberer Rand (%d mm)";
+"share_verse_widget_title" = "Auswahl teilen";
+"sort_by_alphabetical" = "Alphabetisch sortieren";

@@ -1648,3 +1648,48 @@
 "search_dictionary_hint" = "शब्दकोशमा खोज्नुहोस्";
 "search_with_results2" = "%2$@ मा %1$@ परिणामहरू";
 "task_kill_warning" = "यी लामो समय चल्ने कार्यहरू सम्पन्न हुनुअघि अर्को अनुप्रयोगमा गए समाप्त हुन सक्छन्।";
+
+/* Android shared translations */
+"creating_index_for" = "%@ को लागि अनुक्रमणिका बनाउँदैछ…";
+"label_blue" = "नीलो";
+"label_green" = "हरियो";
+"label_red" = "रातो";
+"label_salvation" = "उद्धार";
+"label_underline" = "रेखांकन";
+"plan_description_y1ntpspr" = "HEARTLIGHT Internet Magazine को सौजन्यले, http://www.heartlight.org, अनुमति प्रदान गरिएको";
+"plan_description_y1ot1nt1_OTandNT" = "१ वर्षमा बाइबल पढ्नुहोस्, प्रत्येक दिन OT र NT मा अध्यायहरूसहित।";
+"plan_description_y1ot1nt1_OTthenNT" = "१ वर्षमा बाइबल पढ्नुहोस्, उत्पत्तिबाट सुरु गरेर प्रकाशको पुस्तकसम्म। पहिले OT, त्यसपछि NT।";
+"plan_description_y1ot1nt1_chronological" = "बाइबलमा कालक्रमानुसार घटनाहरूमा आधारित योजना। कालक्रम अनुमानित छ।";
+"plan_description_y1ot1nt2_mcheyne" = "यो योजना M'Cheyne पठन प्रणालीमा आधारित छ, पारिवारिक र व्यक्तिगत भक्तिको लागि चारवटा फरक पठनहरू सहित। प्रत्येक दिन पुरानो नियमबाट दुईवटा, नयाँ नियमबाट एउटा र भजनसंग्रह वा सुसमाचारबाट एउटा। एक वर्षमा, पुरानो नियम एक पटक र नयाँ नियम र भजनसंग्रह दुई पटक पढिन्छ।";
+"plan_description_y1ot6nt4_profHorner" = "Prof. Horner को सौजन्यले, अनुमति प्रदान गरिएको";
+"plan_description_y2ot1ntps2" = "२ वर्षमा बाइबल पढ्नुहोस्, NT र भजनसंग्रह दुई पटक। Wholesome Words को सौजन्यले, http://www.wholesomewords.org/, अनुमति प्रदान गरिएको";
+"plan_name_y1ntpspr" = "एक वर्षमा NT, भजनसंग्रह र नीतिवचन";
+"plan_name_y1ot1nt1_OTandNT" = "१-वर्ष OT+NT एकसाथ";
+"plan_name_y1ot1nt1_OTthenNT" = "१-वर्षमा सम्पूर्ण बाइबल";
+"plan_name_y1ot1nt1_chronological" = "कालक्रमानुसार १-वर्षमा सम्पूर्ण बाइबल";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne १-वर्ष ४-अध्याय/दिन";
+"plan_name_y1ot6nt4_profHorner" = "Prof. Horner १०-अध्याय/दिन पठन योजना";
+"plan_name_y2ot1ntps2" = "२-वर्षमा सम्पूर्ण बाइबल, NT+PS दुई पटक";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "सम्पूर्ण पृष्ठको लागि बुकमार्क थप्नुहोस्";
+"book_menu_group_by_category" = "पुस्तकहरू वर्गअनुसार समूह गर्नुहोस्";
+"book_menu_show_long_book_name" = "पुस्तकको लामो नाम देखाउनुहोस्";
+"book_menu_show_progress_bars" = "प्रगति पट्टीहरू देखाउनुहोस्";
+"book_menu_sort_row_opt" = "पुस्तकहरू तेर्सो क्रमबद्ध गर्नुहोस्";
+"create_bookmark" = "नयाँ बुकमार्क बनाउनुहोस्";
+"create_bookmark_with_a_note" = "टिप्पणीसहित नयाँ बुकमार्क बनाउनुहोस्";
+"export_bookmarks_csv" = "बुकमार्कहरू %@ को रूपमा निर्यात गर्नुहोस्";
+"export_fileformat" = "%@ को रूपमा निर्यात गर्नुहोस्";
+"font_size_title_pt" = "फन्ट आकार (%d pt)";
+"go_to_ref" = "%@ खोल्नुहोस्";
+"lang_default" = "पूर्वनिर्धारित";
+"memorize_abbreviation" = "कण्ठस्थ";
+"multi_description" = "धेरै सन्दर्भहरू";
+"my_notes_abbreviation" = "मेरा टिप्पणी";
+"pref_font_family_label_name" = "फन्ट परिवार (%@)";
+"prefs_line_spacing_pt_title" = "रेखा अन्तर (%1.1fx)";
+"prefs_margin_size_mm_title" = "किनारा आकार (%1$d/%2$d/%3$d मिमी)";
+"prefs_top_margin_title_mm" = "माथिल्लो किनारा (%d मिमी)";
+"share_verse_widget_title" = "छनोट साझा गर्नुहोस्";
+"sort_by_alphabetical" = "वर्णमाला क्रम";

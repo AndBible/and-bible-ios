@@ -1484,7 +1484,15 @@ struct AndBibleApp: App {
             return
         }
 
-        let newWorkspace = resolvedWorkspaceStore.createWorkspace(name: "Default")
+        let newWorkspace = resolvedWorkspaceStore.createWorkspace(
+            name: String(
+                format: String(
+                    localized: "workspace_number",
+                    defaultValue: "Workspace %d"
+                ),
+                1
+            )
+        )
         windowManager.setActiveWorkspace(newWorkspace)
         resolvedSettingsStore.activeWorkspaceId = newWorkspace.id
     }

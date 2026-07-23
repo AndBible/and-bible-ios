@@ -1638,3 +1638,48 @@
 "search_dictionary_hint" = "Søg i ordbog";
 "search_with_results2" = "%1$@ resultater i %2$@";
 "task_kill_warning" = "Disse langvarige opgaver kan afsluttes, hvis du skifter til et andet program, før de er færdige.";
+
+/* Android shared translations */
+"creating_index_for" = "Opretter indeks for %@…";
+"label_blue" = "Blå";
+"label_green" = "Grøn";
+"label_red" = "Rød";
+"label_salvation" = "Frelse";
+"label_underline" = "Understregning";
+"plan_description_y1ntpspr" = "Venligst stillet til rådighed af HEARTLIGHT Internet Magazine, http://www.heartlight.org, med tilladelse";
+"plan_description_y1ot1nt1_OTandNT" = "Læs hele Bibelen på 1 år med kapitler fra både GT og NT hver dag.";
+"plan_description_y1ot1nt1_OTthenNT" = "Læs hele Bibelen på 1 år, startende i 1. Mosebog og afsluttende i Åbenbaringen. GT er først, derefter NT.";
+"plan_description_y1ot1nt1_chronological" = "Plan baseret på kronologiske begivenheder i Bibelen. Den kronologiske tidslinje er omtrentlig.";
+"plan_description_y1ot1nt2_mcheyne" = "Denne plan er baseret på M'Cheyne-læsesystemet, med fire forskellige læsninger til brug i både familie- og personlig andagt. Hver dag har to tekststeder fra Det Gamle Testamente, ét fra Det Nye Testamente og ét fra enten Salmerne eller evangelierne. På et år læser du Det Gamle Testamente én gang og Det Nye Testamente og Salmerne to gange.";
+"plan_description_y1ot6nt4_profHorner" = "Venligst stillet til rådighed af prof. Horner, med tilladelse";
+"plan_description_y2ot1ntps2" = "Læs Bibelen på 2 år, med NT og Salmerne to gange. Venligst stillet til rådighed af Wholesome Words, http://www.wholesomewords.org/, med tilladelse";
+"plan_name_y1ntpspr" = "NT, Salmer og Ordsprog på et år";
+"plan_name_y1ot1nt1_OTandNT" = "1-årsplan: GT+NT samtidigt";
+"plan_name_y1ot1nt1_OTthenNT" = "Gennemlæsning af Bibelen på 1 år";
+"plan_name_y1ot1nt1_chronological" = "Kronologisk gennemlæsning af Bibelen på 1 år";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1-årsplan 4 kapitler/dag";
+"plan_name_y1ot6nt4_profHorner" = "Prof. Horners 10-kapitler/dag læseplan";
+"plan_name_y2ot1ntps2" = "2-årsplan gennem Bibelen, NT+Salmer to gange";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Tilføj bogmærke for hele siden";
+"book_menu_group_by_category" = "Gruppér bøger efter kategori";
+"book_menu_show_long_book_name" = "Vis langt bognavn";
+"book_menu_show_progress_bars" = "Vis fremskridtslinjer";
+"book_menu_sort_row_opt" = "Sortér bøger vandret";
+"create_bookmark" = "Opret nyt bogmærke";
+"create_bookmark_with_a_note" = "Opret nyt bogmærke med en note";
+"export_bookmarks_csv" = "Eksportér bogmærker som %@";
+"export_fileformat" = "Eksportér som %@";
+"font_size_title_pt" = "Skriftstørrelse (%d pt)";
+"go_to_ref" = "Åbn %@";
+"lang_default" = "Standard";
+"memorize_abbreviation" = "Memorér";
+"multi_description" = "Flere referencer";
+"my_notes_abbreviation" = "Mine noter";
+"pref_font_family_label_name" = "Skriftfamilie (%@)";
+"prefs_line_spacing_pt_title" = "Linjeafstand (%1.1fx)";
+"prefs_margin_size_mm_title" = "Margenbredde (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Øverste margen (%d mm)";
+"share_verse_widget_title" = "Del markering";
+"sort_by_alphabetical" = "Alfabetisk orden";

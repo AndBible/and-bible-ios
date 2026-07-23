@@ -1613,3 +1613,48 @@
 "search_dictionary_hint" = "ค้นหาพจนานุกรม";
 "search_with_results2" = "%1$@ ผลลัพธ์ใน %2$@";
 "task_kill_warning" = "งานที่ใช้เวลานานเหล่านี้อาจสิ้นสุดหากคุณสลับไปใช้แอปพลิเคชันอื่นก่อนที่จะเสร็จสิ้น";
+
+/* Android shared translations */
+"creating_index_for" = "กำลังสร้างดัชนีสำหรับ %@…";
+"label_blue" = "น้ำเงิน";
+"label_green" = "เขียว";
+"label_red" = "แดง";
+"label_salvation" = "ความรอด";
+"label_underline" = "ขีดเส้นใต้";
+"plan_description_y1ntpspr" = "ได้รับความอนุเคราะห์จาก HEARTLIGHT Internet Magazine, http://www.heartlight.org, ได้รับอนุญาต";
+"plan_description_y1ot1nt1_OTandNT" = "อ่านพระคัมภีร์ใน 1 ปี โดยมีบท จาก OT และ NT ทุกวัน";
+"plan_description_y1ot1nt1_OTthenNT" = "อ่านพระคัมภีร์ใน 1 ปี เริ่มจากปฐมกาล และจบที่วิวรณ์ โดยอ่าน OT ก่อน แล้วตามด้วย NT";
+"plan_description_y1ot1nt1_chronological" = "แผนตามลำดับเหตุการณ์ในพระคัมภีร์ ลำดับเวลาเชิงลำดับเหตุการณ์เป็นค่าโดยประมาณ";
+"plan_description_y1ot1nt2_mcheyne" = "แผนนี้อิงตามระบบการอ่านของ M'Cheyne มี 4 ตอนอ่านสำหรับใช้ทั้งในการอ่านในครอบครัวและส่วนตัว แต่ละวันมี สองตอนจาก OT หนึ่งตอนจาก NT และหนึ่งตอนจากสดุดีหรือพระกิตติคุณ ใน 1 ปี คุณจะอ่าน OT หนึ่งครั้ง และ NT กับสดุดีสองครั้ง";
+"plan_description_y1ot6nt4_profHorner" = "ได้รับความอนุเคราะห์จาก ศ.ฮอร์เนอร์ ได้รับอนุญาต";
+"plan_description_y2ot1ntps2" = "อ่านพระคัมภีร์ใน 2 ปี โดยอ่าน NT และสดุดีสองครั้ง ได้รับความอนุเคราะห์จาก Wholesome Words, http://www.wholesomewords.org/, ได้รับอนุญาต";
+"plan_name_y1ntpspr" = "NT สดุดี & สุภาษิต ใน 1 ปี";
+"plan_name_y1ot1nt1_OTandNT" = "อ่าน OT+NT พร้อมกันใน 1 ปี";
+"plan_name_y1ot1nt1_OTthenNT" = "อ่านพระคัมภีร์ใน 1 ปี";
+"plan_name_y1ot1nt1_chronological" = "อ่านพระคัมภีร์ตามลำดับเหตุการณ์ใน 1 ปี";
+"plan_name_y1ot1nt2_mcheyne" = "แผน M'Cheyne 1 ปี 4 บท/วัน";
+"plan_name_y1ot6nt4_profHorner" = "แผนการอ่าน 10 บท/วัน ของศ.ฮอร์เนอร์";
+"plan_name_y2ot1ntps2" = "อ่านพระคัมภีร์ใน 2 ปี NT+สดุดี 2 รอบ";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "เพิ่มที่คั่นหน้าสำหรับทั้งหน้า";
+"book_menu_group_by_category" = "จัดกลุ่มหนังสือตามหมวดหมู่";
+"book_menu_show_long_book_name" = "แสดงชื่อหนังสือแบบเต็ม";
+"book_menu_show_progress_bars" = "แสดงแถบความคืบหน้า";
+"book_menu_sort_row_opt" = "เรียงหนังสือในแนวนอน";
+"create_bookmark" = "สร้างที่คั่นหน้าใหม่";
+"create_bookmark_with_a_note" = "สร้างที่คั่นหน้าใหม่พร้อมบันทึก";
+"export_bookmarks_csv" = "ส่งออกที่คั่นหน้าเป็น %@";
+"export_fileformat" = "ส่งออกเป็น %@";
+"font_size_title_pt" = "ขนาดตัวอักษร (%d pt)";
+"go_to_ref" = "เปิด %@";
+"lang_default" = "ค่าเริ่มต้น";
+"memorize_abbreviation" = "จดจำ";
+"multi_description" = "หลายข้ออ้างอิง";
+"my_notes_abbreviation" = "บันทึกของฉัน";
+"pref_font_family_label_name" = "ตระกูลแบบอักษร (%@)";
+"prefs_line_spacing_pt_title" = "ระยะบรรทัด (%1.1f เท่า)";
+"prefs_margin_size_mm_title" = "ขนาดขอบ (%1$d/%2$d/%3$d มม.)";
+"prefs_top_margin_title_mm" = "ขอบบน (%d มม.)";
+"share_verse_widget_title" = "แชร์ส่วนที่เลือก";
+"sort_by_alphabetical" = "เรียงตามตัวอักษร";

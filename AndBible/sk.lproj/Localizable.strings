@@ -1488,3 +1488,48 @@
 "search_dictionary_hint" = "Hľadať v slovníku";
 "search_with_results2" = "%1$@ výsledkov v %2$@";
 "task_kill_warning" = "Tieto dlho trvajúce úlohy môžu byť zrušené, ak sa prepnete na inú aplikáciu pre ich dokončením.";
+
+/* Android shared translations */
+"creating_index_for" = "Vytváranie indexu pre %@…";
+"label_blue" = "Modrá";
+"label_green" = "Zelená";
+"label_red" = "Červená";
+"label_salvation" = "Spasenie";
+"label_underline" = "Podčiarknutie";
+"plan_description_y1ntpspr" = "S láskavým súhlasom HEARTLIGHT Internet Magazine, http://www.heartlight.org, povolenie udelené";
+"plan_description_y1ot1nt1_OTandNT" = "Prečítajte si Bibliu za 1 rok, SZ a NZ s kapitolami na každý deň.";
+"plan_description_y1ot1nt1_OTthenNT" = "Prečítanie Biblie za 1 rok, začínajúc v Genesis a končiac v Zjavení. Najprv SZ, potom NZ.";
+"plan_description_y1ot1nt1_chronological" = "Plán založený na chronologických udalostiach v Biblii. Chronologická časová os je približná.";
+"plan_description_y1ot1nt2_mcheyne" = "Tento plán je založený na systéme čítania M’Cheyne, obsahuje štyri rôzne čítania na použitie pri rodinnom alebo osobnom stíšení. Každý deň má dve pasáže zo Starého zákona, jednu z Nového zákona a jednu buď zo Žalmov alebo z evanjelií. V jednom roku, si prečítate Starý zákon raz a Nový zákon a Žalmy dvakrát.";
+"plan_description_y1ot6nt4_profHorner" = "S láskavým súhlasom Prof. Hornera, povolenie udelené";
+"plan_description_y2ot1ntps2" = "Prečítanie Biblie za 2 roky, čítanie NZ a Žalmov dva kráť. S láskavým súhlasom Wholesome Words, http://www.wholesomewords.org/, povolenie udelené";
+"plan_name_y1ntpspr" = "NZ, Žalmy a Príslovia za jeden rok";
+"plan_name_y1ot1nt1_OTandNT" = "SZ+NT za 1 rok simultánne";
+"plan_name_y1ot1nt1_OTthenNT" = "Biblia za 1 rok";
+"plan_name_y1ot1nt1_chronological" = "Biblia za 1 rok chronologicky";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1-rok 4-kapitoly/deň";
+"plan_name_y1ot6nt4_profHorner" = "Plán čítania Prof. Hornera 10-kapitol/deň";
+"plan_name_y2ot1ntps2" = "Bibliou za 2-roky, NZ+Ž dva krát";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Pridať záložku pre celú stránku";
+"book_menu_group_by_category" = "Zoskupiť knihy podľa kategórie";
+"book_menu_show_long_book_name" = "Zobraziť dlhý názov knihy";
+"book_menu_show_progress_bars" = "Zobraziť ukazovatele postupu";
+"book_menu_sort_row_opt" = "Horizontálne usporiadať knihy";
+"create_bookmark" = "Vytvoriť novú záložku";
+"create_bookmark_with_a_note" = "Vytvoriť novú záložku s poznámkou";
+"export_bookmarks_csv" = "Exportovať záložky ako %@";
+"export_fileformat" = "Exportovať ako %@";
+"font_size_title_pt" = "Veľkosť písmen (%d pt)";
+"go_to_ref" = "Otvoriť %@";
+"lang_default" = "Predvolené";
+"memorize_abbreviation" = "Memorovať";
+"multi_description" = "Viac referencií";
+"my_notes_abbreviation" = "Moje poznámky";
+"pref_font_family_label_name" = "Typ písma (%@)";
+"prefs_line_spacing_pt_title" = "Riadkovanie (%1.1fx)";
+"prefs_margin_size_mm_title" = "Veľkosť okraja (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Horný okraj (%d mm)";
+"share_verse_widget_title" = "Zdieľať výber";
+"sort_by_alphabetical" = "Zoradiť abecedne";

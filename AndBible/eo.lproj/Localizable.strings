@@ -1497,3 +1497,48 @@
 "search_dictionary_hint" = "Serĉi en vortaro";
 "search_with_results2" = "%1$@ rezultoj en %2$@";
 "task_kill_warning" = "Tiuj ĉi tempokupaj taskoj povas interrompiĝi, se vi iros al alia aplikaĵo antaŭ ol ili finiĝos.";
+
+/* Android shared translations */
+"creating_index_for" = "Kreado de indekso por %@…";
+"label_blue" = "Blua";
+"label_green" = "Verda";
+"label_red" = "Ruĝa";
+"label_salvation" = "Saviĝo";
+"label_underline" = "Substrekita";
+"plan_description_y1ntpspr" = "Danke al la interreta revuo Heartlight, https://www.heartlight.org, laŭ ilia permeso";
+"plan_description_y1ot1nt1_OTandNT" = "Tralegi Biblion en 1 jaro, ĉapitroj de MT kaj NT ĉiutage.";
+"plan_description_y1ot1nt1_OTthenNT" = "Tralegi Biblion en 1 jaro, komencante je Genezo kaj finante je Apokalipso. Unue la MT, sekve la NT.";
+"plan_description_y1ot1nt1_chronological" = "Plano bazita sur laŭtempa ordo de okazaĵoj en Biblio, tiu ĉi ordo estas proksimuma.";
+"plan_description_y1ot1nt2_mcheyne" = "La plano bazita sur la sistemo de s-ro M'Cheyne, karakterizanta per kvar diversaj legaĵoj por legi kun familio aŭ sole. Po du alineoj el la Malnova Testamento, po unu el la Nova Testamento kaj po unu aŭ el Psalmoj aŭ evangelio por tago. Dum unu jaro vi legos la Malnovan Testamenton unufoje kaj la Malnovan Testamenton kaj Psalmojn dufoje.";
+"plan_description_y1ot6nt4_profHorner" = "Danke al p-ro Horner, laŭ lia permeso";
+"plan_description_y2ot1ntps2" = "Tralegi Biblion en 2 jaroj, tralegi la Novan Testamenton kaj Psalmojn dufoje. Danke al Wholesome Words, https://www.wholesomewords.org, laŭ ilia permeso.";
+"plan_name_y1ntpspr" = "NT, Psalmaro kaj Sentencoj jare";
+"plan_name_y1ot1nt1_OTandNT" = "MT+NT dum jaro samtempe";
+"plan_name_y1ot1nt1_OTthenNT" = "Tra Biblio jare";
+"plan_name_y1ot1nt1_chronological" = "Tra Biblio laŭtempe jare";
+"plan_name_y1ot1nt2_mcheyne" = "Legplano de M'Cheyne: 1 jaro, po 4 ĉapitroj tage";
+"plan_name_y1ot6nt4_profHorner" = "Legplano de Horner: po 10 ĉapitroj tage";
+"plan_name_y2ot1ntps2" = "Tra Biblio 2-jare, NT k Psalmoj dufoje";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Aldoni legosignon por tuta paĝo";
+"book_menu_group_by_category" = "Grupigi laŭ kategorioj";
+"book_menu_show_long_book_name" = "Montri longajn nomojn";
+"book_menu_show_progress_bars" = "Montri progres-striojn";
+"book_menu_sort_row_opt" = "Ordigi librojn horizontale";
+"create_bookmark" = "Krei novan legosignon";
+"create_bookmark_with_a_note" = "Krei novan legosignon kun noto";
+"export_bookmarks_csv" = "Elporti legosignojn kiel %@";
+"export_fileformat" = "Elporti kiel %@";
+"font_size_title_pt" = "Grando de tiparo (%d p.)";
+"go_to_ref" = "Malfermi %@";
+"lang_default" = "Implicita";
+"memorize_abbreviation" = "Parkerigi";
+"multi_description" = "Pluraj referencoj";
+"my_notes_abbreviation" = "Notoj";
+"pref_font_family_label_name" = "Familio de tiparo (%@)";
+"prefs_line_spacing_pt_title" = "Interlinia distanco (%1.1f×)";
+"prefs_margin_size_mm_title" = "Larĝoj de marĝenoj (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Supra marĝeno (%d mm)";
+"share_verse_widget_title" = "Kunhavigi elekton";
+"sort_by_alphabetical" = "Laŭ alfabeta ordo";

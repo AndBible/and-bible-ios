@@ -1483,3 +1483,48 @@ Google డ్రైవ్ ని ఉపయోగిస్తున్నప�
 "search_dictionary_hint" = "నిఘంటువులో వెతకుట";
 "search_with_results2" = "%2$@లో %1$@ ఫలితాలు";
 "task_kill_warning" = "ఎక్కువ సమయం తీసుకొనే ఇ కార్యాలు పూర్తయ్యేలోపు మీరు మరొక అప్లికేషన్‌కి మారితే అవి ఆగిపోవచ్చు.";
+
+/* Android shared translations */
+"creating_index_for" = "%@ కోసం సూచికను సృష్టిస్తోంది";
+"label_blue" = "నీలం";
+"label_green" = "ఆకుపచ్చ";
+"label_red" = "ఎరుపు";
+"label_salvation" = "రక్షణ";
+"label_underline" = "అండర్లైన్";
+"plan_description_y1ntpspr" = "హార్ట్‌లైట్ ఇంటర్నెట్ మ్యాగజైన్ సౌజన్యంతో, http://www.heartlight.org, అనుమతి మంజూరు చేయబడింది";
+"plan_description_y1ot1nt1_OTandNT" = "బైబిల్‌ను 1 సంవత్సరంలో అధ్యాయాలతో చదవండి ప్రతి రోజు పాత నిబంధన మరియు కొత్త నిబంధన లో.";
+"plan_description_y1ot1nt1_OTthenNT" = "ఆదికాండము నుండి ప్రారంభించి 1 సంవత్సరంలో బైబిల్ చదవండి మరియు రివిలేషన్‌లో పూర్తి చేయడం. మొదట పాత నిబంధన, తర్వాత కొత్త నిబంధన.";
+"plan_description_y1ot1nt1_chronological" = "బైబిల్‌లోని కాలక్రమానుసార సంఘటనల ఆధారంగా ప్లాన్ చేయండి. కాలక్రమానుసారం కాలక్రమం సుమారుగా ఉంటుంది.";
+"plan_description_y1ot1nt2_mcheyne" = "ఈ ప్లాన్ M'Cheyne రీడింగ్ సిస్టమ్‌పై ఆధారపడి ఉంటుంది, కుటుంబం మరియు వ్యక్తిగత ఆరాధనలు రెండింటిలోనూ ఉపయోగించడం కోసం నాలుగు వేర్వేరు రీడింగ్‌లను కలిగి ఉంది. ప్రతి రోజు ఉంది పాత నిబంధన నుండి రెండు భాగాలు, కొత్త నిబంధన నుండి ఒకటి, మరియు ఒకటి కీర్తనలు లేదా సువార్తల నుండి. ఒక సంవత్సరంలో, మీరు పాత నిబంధన ఒకసారి మరియు కొత్త నిబంధన మరియు కీర్తనలు రెండుసార్లు పూర్తిచేయగలరు.";
+"plan_description_y1ot6nt4_profHorner" = "ప్రొఫెసర్ హార్నర్ సౌజన్యంతో, అనుమతి మంజూరు చేయబడింది";
+"plan_description_y2ot1ntps2" = "2 సంవత్సరాలలో బైబిల్ చదవండి, క్రొత్త నిబంధన మరియు కీర్తనలను రెండుసార్లు చదవండి. సంపూర్ణ పదాల సౌజన్యంతో, http://www.wholesomewords.org/, అనుమతి మంజూరు చేయబడింది";
+"plan_name_y1ntpspr" = "కొత్త నిబంధన, కీర్తనలు & ఒక సంవత్సరంలో సామెతలు";
+"plan_name_y1ot1nt1_OTandNT" = "1-సంవత్సరంలో పాత నిబంధన+కొత్త నిబంధన ఏకకాలంలో";
+"plan_name_y1ot1nt1_OTthenNT" = "బైబిల్ ద్వారా 1-సంవత్సరం";
+"plan_name_y1ot1nt1_chronological" = "బైబిల్ ద్వారా కాలక్రమానుసారం 1-సంవత్సరం";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1-సంవత్సరం 4-అధ్యాయం/రోజు";
+"plan_name_y1ot6nt4_profHorner" = "ప్రొ. హార్నర్ 10-అధ్యాయం/రోజు పఠన ప్రణాళిక";
+"plan_name_y2ot1ntps2" = "2 సంవత్సరాలలో బైబిల్, కొత్త నిబంధన+కీర్తనలు రెండుసార్లు";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "మొత్తం పేజీకి బుక్‌మార్క్ జోడించు";
+"book_menu_group_by_category" = "వర్గం వారీగా పుస్తకాలను సమూహపరచండి";
+"book_menu_show_long_book_name" = "పూర్తి పుస్తకం పేరు చూపించు";
+"book_menu_show_progress_bars" = "ప్రోగ్రెస్ బార్లు చూపించు";
+"book_menu_sort_row_opt" = "గ్రంధాలను అడ్డంగా ఆర్డర్ చేయండి";
+"create_bookmark" = "కొత్త బుక్‌మార్క్‌ని సృష్టించండి";
+"create_bookmark_with_a_note" = "నోట్ ద్వారా కొత్త బుక్‌మార్క్‌ని సృష్టించండి";
+"export_bookmarks_csv" = "బుక్‌మార్క్‌లను %@ గా ఎగుమతి చేయండి";
+"export_fileformat" = "%@ గా ఎగుమతి చేయండి";
+"font_size_title_pt" = "ఫాంట్ పరిమాణం (%d pt)";
+"go_to_ref" = "%@ తెరవండి";
+"lang_default" = "డిఫాల్ట్";
+"memorize_abbreviation" = "కంఠస్థం";
+"multi_description" = "బహుళ సూచనలు";
+"my_notes_abbreviation" = "నా నోట్స్";
+"pref_font_family_label_name" = "ఫాంట్ కుటుంబం (%@)";
+"prefs_line_spacing_pt_title" = "పంక్తి అంతరం (%1.1fx)";
+"prefs_margin_size_mm_title" = "మార్జిన్ పరిమాణం (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "ఎగువ అంచు (%dmm)";
+"share_verse_widget_title" = "ఎంపికను భాగస్వామ్యం చేయండి";
+"sort_by_alphabetical" = "వర్ణమాల క్రమం";

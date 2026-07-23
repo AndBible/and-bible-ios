@@ -33,6 +33,8 @@ struct AIReaderHelpLink: Equatable, Sendable {
 
 /** Complete semantic content for a reader help dialog. */
 struct AIReaderHelpPresentation: Identifiable, Equatable, Sendable {
+    /// Shared compact Android help owner, when the bridge selected a typed feature.
+    let featureTopic: AndroidFeatureHelpTopic?
     /// Localized or explicit dialog title.
     let title: AIReaderHelpText
     /// Optional leading tutorial link.
@@ -44,9 +46,64 @@ struct AIReaderHelpPresentation: Identifiable, Equatable, Sendable {
     /// Optional trailing documentation link.
     let documentationLink: AIReaderHelpLink?
 
+    /**
+     Creates rich bridge-supplied help or a topic-derived compact Android help payload.
+
+     - Parameters:
+       - title: Localized or explicit rich-dialog title.
+       - tutorialLink: Optional Android tutorial destination.
+       - emphasizedTextKey: Optional Android bold-tip resource.
+       - body: Localized or trusted bridge HTML body.
+       - documentationLink: Optional Android manual destination.
+       - featureTopic: Shared compact-help owner, or `nil` for rich help.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    init(
+        title: AIReaderHelpText,
+        tutorialLink: AIReaderHelpLink?,
+        emphasizedTextKey: String?,
+        body: AIReaderHelpText,
+        documentationLink: AIReaderHelpLink?,
+        featureTopic: AndroidFeatureHelpTopic? = nil
+    ) {
+        self.featureTopic = featureTopic
+        self.title = title
+        self.tutorialLink = tutorialLink
+        self.emphasizedTextKey = emphasizedTextKey
+        self.body = body
+        self.documentationLink = documentationLink
+    }
+
+    /**
+     Builds a bridge payload whose rendering remains owned by shared compact Android Help.
+
+     - Parameter topic: Semantic Android `CommonUtils.showHelpDialog` route.
+     - Returns: Compatibility payload derived entirely from the shared topic.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func androidFeature(_ topic: AndroidFeatureHelpTopic) -> Self {
+        Self(
+            title: .localized("help"),
+            tutorialLink: nil,
+            emphasizedTextKey: nil,
+            body: .localized(topic.localizationKey),
+            documentationLink: AIReaderHelpLink(
+                labelKey: "help_read_more_link",
+                destination: topic.documentationURL,
+                isItalic: true
+            ),
+            featureTopic: topic
+        )
+    }
+
     /// Stable identity used by SwiftUI item presentation.
     var id: String {
-        [
+        if let featureTopic {
+            return "android-feature-help:\(featureTopic.rawValue)"
+        }
+        return [
             title.localizedValue,
             tutorialLink?.destination.absoluteString ?? "",
             emphasizedTextKey ?? "",
@@ -61,11 +118,6 @@ enum AIReaderHelpCatalog {
     /// Exact tutorial playlist used by Android's `helpBookmarks()` dialog.
     static let bookmarkTutorialURL = URL(
         string: "https://www.youtube.com/playlist?list=PLD-W_Iw-N2MlzNt0Zpna-QoTBpEpWSden"
-    )
-
-    /// Exact documentation destination used by Android's Memorize help scope.
-    static let memorizeDocumentationURL = URL(
-        string: "https://docs.andbible.org/en/latest/memorize.html"
     )
 
     /** Builds Android's localized Bookmarks and My Notes help dialog. */
@@ -85,19 +137,8 @@ enum AIReaderHelpCatalog {
     }
 
     /** Builds the only allowlisted scoped help request exposed by Android's bridge. */
-    static func memorize() -> AIReaderHelpPresentation? {
-        guard let memorizeDocumentationURL else { return nil }
-        return AIReaderHelpPresentation(
-            title: .localized("help"),
-            tutorialLink: nil,
-            emphasizedTextKey: nil,
-            body: .localized("help_memorize_text"),
-            documentationLink: AIReaderHelpLink(
-                labelKey: "help_read_more_link",
-                destination: memorizeDocumentationURL,
-                isItalic: true
-            )
-        )
+    static func memorize() -> AIReaderHelpPresentation {
+        .androidFeature(.memorize)
     }
 
     /** Wraps trusted generic BibleView help HTML in the same native presentation path. */
@@ -123,15 +164,30 @@ struct AIReaderHelpDialog: View {
     /// Closes the app-owned Android-style dialog.
     let onDismiss: () -> Void
 
-    /** Renders title, links, emphasis, and body in Android's vertical content order. */
+    /**
+     Routes compact Android topics through the shared renderer and retains rich bridge help.
+
+     Typed topics must not be reconstructed here: AI Settings, Memorize, Reading Progress, and the
+     other `showHelpDialog` routes share one content and sizing contract.
+     */
+    @ViewBuilder
     var body: some View {
+        if let featureTopic = presentation.featureTopic {
+            AndroidFeatureHelpDialog(topic: featureTopic, onDismiss: onDismiss)
+        } else {
+            richHelpDialog
+        }
+    }
+
+    /** Renders bridge-specific rich title, links, emphasis, and body in Android order. */
+    private var richHelpDialog: some View {
         AndroidDialogWindow(
             colorScheme: colorScheme,
             accessibilityIdentifier: "androidAIReaderHelpDialog",
             onOutsideTap: onDismiss
         ) {
             AndroidDialogScaffold(title: presentation.title.localizedValue) {
-                ScrollView {
+                AndroidAdaptiveDialogScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         if let tutorialLink = presentation.tutorialLink {
                             helpLink(tutorialLink)

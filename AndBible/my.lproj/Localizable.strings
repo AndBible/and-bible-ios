@@ -889,3 +889,37 @@
 "do_in_background" = "နောက်ခံတွင် ဆက်အသုံးပြုပါ";
 "search_dictionary_hint" = "အဘိဓာန်တွင် ရှာပါ";
 "task_kill_warning" = "လည်ပတ်နေသောလုပ်ငန်းများသည် မပြီးဆုံးသေးခင် အခြားအက်ပ်များ ပြောင်းလဲအသုံးပြုပါက ရပ်တန့်သွားနိုင်သည်။";
+
+/* Android shared translations */
+"label_blue" = "အပြာရောင်";
+"label_green" = "အစိမ်းရောင်";
+"label_red" = "အနီရောင်";
+"label_salvation" = "ကယ်တင်ခြင်း";
+"label_underline" = "မျဉ်းတားပါ";
+"plan_description_y1ntpspr" = "Courtesy of HEARTLIGHT Internet Magazine, http://www.heartlight.org, ခွင့်ပြုချက်ပေးအပ်ပြီး";
+"plan_description_y1ot1nt1_OTandNT" = "ကျမ်းစာထဲမှ အခန်းကြီးများကို 1 နှစ်တာ ဖတ်ပါ နေ့စဉ် ဓမ္မဟောင်းနှင့် ဓမ္မသစ် ထဲမှ";
+"plan_description_y1ot1nt1_OTthenNT" = "ကမ္ဘာဦးကျမ်းမှစပြီး ကျမ်းစာကို 1 နှစ်အတွင်းဖတ်ပါ ဗျာဒိတ်ကျမ်းတွင် ဆုံးရန်။ ဓမ္မဟောင်းကျမ်းကို အရင်ဖတ်ပြီးမှ ဓမ္မသစ်ကျမ်းကိုဖတ်ပါ။";
+"plan_description_y1ot1nt1_chronological" = "ကျမ်းစာရှိ နှစ်အစဉ်လိုက် အဖြစ်အပျက်များအပေါ် အခြေခံထားသည့် အစီအစဉ်။ နှစ်အစဉ်လိုက် အဖြစ်အပျက်ပြအချိန်ဇယားသည်ခန့်မှန်းခြေဖြစ်သည်။";
+"plan_description_y1ot1nt2_mcheyne" = "ဤအစီအစဉ်ကို M'Cheyne ဖတ်စာစနစ်မှ အခြေခံထားပြီး မိသားစုနှင့် တစ်ဦးချင်း ဆက်ကပ်ဝတ်ပြုခြင်းအတွက် မတူညီသည့် ဖတ်စာလေးမျိုးကို တင်ပေးထားပါသည်။ နေ့စဉ် ဓမ္မဟောင်းကျမ်းမှ နှစ်ခု၊ ဓမ္မသစ်ကျမ်းမှ တစ်ခုနှင့် ဆာလံ သို့မဟုတ် ခရစ်ဝင်ကျမ်း ၄ အုပ်မှ တစ်ခုစီတို့ ပါဝင်ပါမည်။ တစ်နှစ်အတွင်း ဓမ္မဟောင်းကို တစ်ကြိမ်၊ ဓမ္မသစ်နှင့်ဆာလံတို့ကို နှစ်ကြိမ် ဖတ်ပြီးသားဖြစ်သွားပါမည်။";
+"plan_description_y1ot6nt4_profHorner" = "Prof. Horner ၏ လောကဝတ်, ခွင့်ပြုချက် ပေးထားပြီး";
+"plan_description_y2ot1ntps2" = "ကျမ်းစာထဲမှ 2 နှစ်ဖတ်ပြီး၊ ဓမ္မသစ်နှင့် ဆာလံအား နှစ်ကြိမ်ဖတ်ရန် Wholesome Words ၏လောကဝတ်, http://www.wholesomewords.org/, permission granted";
+"plan_name_y1ntpspr" = "တစ်နှစ်တာ ဓမ္မသစ်ကျမ်း၊ ဆာလံကျမ်း & နှင့် သုတ္တံကျမ်း";
+"plan_name_y1ot1nt1_OTandNT" = "1 နှစ် သမ္မာကျမ်းစာဟောင်း+သစ် တစ်ချိန်တည်း";
+"plan_name_y1ot1nt1_OTthenNT" = "1 နှစ်တာ ကျမ်းစာထဲမှ";
+"plan_name_y1ot1nt1_chronological" = "1 နှစ်တာ ကျမ်းစာတစ်အုပ်လုံး အစဉ်လိုက်";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1 နှစ် အခန်းကြီး 4 ခု/တစ်ရက်";
+"plan_name_y1ot6nt4_profHorner" = "Prof. Horner အခန်းကြီး 10ခု/နေ့စဉ် ဖတ်ရှုခြင်း အစီအစဉ်";
+"plan_name_y2ot1ntps2" = "ကျမ်းစာထဲမှ 2 နှစ်၊ ဓမ္မသစ် + ဆာလံအား နှစ်ကြိမ်";
+
+/* Android shared translations */
+"book_menu_sort_row_opt" = "စာအုပ်များကို အလျားလိုက်စီပါ";
+"export_fileformat" = "%@အဖြစ် ပို့ပါ";
+"font_size_title_pt" = "ဖောင့်စာလုံးအရွယ်အစား (%d pt)";
+"lang_default" = "ပုံသေ";
+"multi_description" = "ကိုးကားချက် အများအပြား";
+"my_notes_abbreviation" = "ကိုယ်ပိုင်မှတ်စုများ";
+"pref_font_family_label_name" = "ဖောင့်စာလုံး မိသားစု (%@)";
+"prefs_line_spacing_pt_title" = "စာကြောင်းအကွာအဝေး (%1.1f x)";
+"prefs_top_margin_title_mm" = "အပေါ်မာဂျင် (%d mm)";
+"share_verse_widget_title" = "ရွေးချယ်မှုကို ဝေမျှပါ";
+"sort_by_alphabetical" = "အက္ခရာစဉ်";

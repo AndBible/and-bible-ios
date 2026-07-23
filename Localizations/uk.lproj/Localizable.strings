@@ -1483,3 +1483,48 @@
 "search_dictionary_hint" = "Пошук в словнику";
 "search_with_results2" = "%1$@ результати у %2$@";
 "task_kill_warning" = "Ці тривалі завдання можуть припинитися, якщо ви перейдете до іншого застосунку/програми, перш ніж вони закінчаться.";
+
+/* Android shared translations */
+"creating_index_for" = "Створення індексу для %@…";
+"label_blue" = "Синя";
+"label_green" = "Зелена";
+"label_red" = "Червона";
+"label_salvation" = "Спасіння";
+"label_underline" = "Підкреслити";
+"plan_description_y1ntpspr" = "Надано дозволом HEARTLIGHT Internet Magazine, http://www.heartlight.org.";
+"plan_description_y1ot1nt1_OTandNT" = "Читання Біблії за 1 рік, розділів з СЗ і НЗ на кожний день.";
+"plan_description_y1ot1nt1_OTthenNT" = "Прочитайте Біблію за 1 рік, починаючи з Буття і кінчаючи Об'явленням. Спочатку СЗ, а потім НЗ.";
+"plan_description_y1ot1nt1_chronological" = "План на основі хронологічних подій у Біблії. Хронологічна часова шкала є приблизна.";
+"plan_description_y1ot1nt2_mcheyne" = "Цей план базується на системі читання Макчейна, із чотирма різними читаннями для використання як у сімейному, так і в особистому читанні. Кожен день має два уривки із Старого Завіту, один із Нового Завіту та один із Псалмів чи Євангелій. Через один рік ви читаєте Старий Завіт один раз, Новий Завіт та Псалтир двічі.";
+"plan_description_y1ot6nt4_profHorner" = "Надано дозволом професора Хорнера";
+"plan_description_y2ot1ntps2" = "Читання Біблії за 2 роки, читання НЗ і Псалмів двічі. Надано дозволом Wholesome Words, http://www.wholesomewords.org/";
+"plan_name_y1ntpspr" = "НЗ, Псалми та Приповісті за рік";
+"plan_name_y1ot1nt1_OTandNT" = "За 1-рік СЗ+НЗ одночасно";
+"plan_name_y1ot1nt1_OTthenNT" = "Читання Біблії за 1-рік";
+"plan_name_y1ot1nt1_chronological" = "Хронологічне читання Біблії за 1 рік";
+"plan_name_y1ot1nt2_mcheyne" = "Макчейна 1-річний план читання, 4 розділа на день";
+"plan_name_y1ot6nt4_profHorner" = "План читання професора Хорнера, 10 розділів на день";
+"plan_name_y2ot1ntps2" = "2-річне читання Біблії, НЗ+Псалми двічі";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Додати закладку для всієї сторінки";
+"book_menu_group_by_category" = "Групувати книги за категоріями";
+"book_menu_show_long_book_name" = "Показати довгу назву книги";
+"book_menu_show_progress_bars" = "Показати смуги прогресу";
+"book_menu_sort_row_opt" = "Упорядкувати книги по горизонталі";
+"create_bookmark" = "Створити нову закладку";
+"create_bookmark_with_a_note" = "Створити нову закладку з приміткою";
+"export_bookmarks_csv" = "Експортувати закладки як %@";
+"export_fileformat" = "Експортувати як %@";
+"font_size_title_pt" = "Розмір шрифту (%d точ)";
+"go_to_ref" = "Відкрити %@";
+"lang_default" = "За замовчуванням";
+"memorize_abbreviation" = "Завчити";
+"multi_description" = "Кілька посилань";
+"my_notes_abbreviation" = "Мої примітки";
+"pref_font_family_label_name" = "Сімейство шрифтів (%@)";
+"prefs_line_spacing_pt_title" = "Міжрядковий інтервал (%1.1fx)";
+"prefs_margin_size_mm_title" = "Розмір поля (%1$d/%2$d/%3$d мм)";
+"prefs_top_margin_title_mm" = "Верхнє поле (%d мм)";
+"share_verse_widget_title" = "Поділитися виділенням";
+"sort_by_alphabetical" = "Сортувати за алфавітом";

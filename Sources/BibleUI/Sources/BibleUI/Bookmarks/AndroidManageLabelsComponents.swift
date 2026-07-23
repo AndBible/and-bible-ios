@@ -561,7 +561,7 @@ struct AndroidManageLabelsHelpDialog: View {
                         .font(.system(size: 24, weight: .semibold))
                 }
 
-                ScrollView {
+                AndroidAdaptiveDialogScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         Link(
                             String(localized: "watch_tutorial_video", defaultValue: "Watch tutorial video (English)"),

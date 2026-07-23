@@ -1481,3 +1481,48 @@
 "search_dictionary_hint" = "शब्दकोश में खोजें";
 "search_with_results2" = "%2$@ में %1$@ परिणाम";
 "task_kill_warning" = "अगर आप आन्ड बाइबिल को छोड़ जाऐं, तो लंबे कार्य अंत होने की संभावना है";
+
+/* Android shared translations */
+"creating_index_for" = "%@ के लिए सूचकांक बनाया जा रहा है…";
+"label_blue" = "नीला";
+"label_green" = "हरा";
+"label_red" = "लाल";
+"label_salvation" = "मोक्ष";
+"label_underline" = "रेखांकन";
+"plan_description_y1ntpspr" = "HEARTLIGHT इंटरनेट पत्रिका के सौजन्य से, http://www.heartlight.org, अनुमति प्रदान की गई";
+"plan_description_y1ot1nt1_OTandNT" = "1 वर्ष में बाइबिल के माध्यम से पढ़िए, प्रतिदिन पुराने नियम और नए नियम में अध्याय के साथ।";
+"plan_description_y1ot1nt1_OTthenNT" = "1 वर्ष में बाइबिल के माध्यम से पढ़े, उत्त्पति से शुरू और प्रकाशित वाक्य पे खत्म। पुराना नियम पहले, फिर नया नियम।";
+"plan_description_y1ot1nt1_chronological" = "बाइबल में कालानुक्रमिक घटनाओं पर आधारित योजना। कालानुक्रमिक समय-रेखा अनुमानित है।";
+"plan_description_y1ot1nt2_mcheyne" = "यह योजना म'चेने रीडिंग सिस्टम पर आधारित है, जिसमें परिवार और व्यक्तिगत भक्ति दोनों में उपयोग के लिए चार अलग-अलग रीडिंग हैं। प्रत्येक दिन में पुराने नियम से दो मार्ग होते हैं, एक नए नियम से, और एक या तो भजन संहिता या सुसमाचार से। एक वर्ष में, आप पुराने नियम को एक बार और नए नियम और भजन संहिता को दो बार पढ़ते हैं।";
+"plan_description_y1ot6nt4_profHorner" = "प्रोफेसर हॉर्नर के सौजन्य से अनुमति दी गई";
+"plan_description_y2ot1ntps2" = "2 वर्षों में बाइबिल के माध्यम से, नए नियम और भजन संहिता को दो बार पढ़ें। Wholesome Words के सौजन्य से, http://www.wholesomewords.org/, अनुमति प्रदान की गई";
+"plan_name_y1ntpspr" = "एक साल में नया नियम, भजन संहिता & नीतिवचन";
+"plan_name_y1ot1nt1_OTandNT" = "1 साल पुराना नियम+नया नियम एक साथ";
+"plan_name_y1ot1nt1_OTthenNT" = "बाइबिल के माध्यम से 1 वर्ष।";
+"plan_name_y1ot1nt1_chronological" = "बाइबिल के माध्यम से कालानुक्रमिक 1-वर्ष";
+"plan_name_y1ot1nt2_mcheyne" = "म'चेने 1 वर्ष 4 अध्याय / दिन";
+"plan_name_y1ot6nt4_profHorner" = "प्रोफेसर हॉर्नर 10-अध्याय / दिन पढ़ने की योजना";
+"plan_name_y2ot1ntps2" = "2-वर्ष बाइबिल के माध्यम से, नया नियम + भजन संहिता दो बार";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "पूरे पेज के लिए बुकमार्क जोड़ें";
+"book_menu_group_by_category" = "श्रेणी के अनुसार पुस्तकें समूहित करें";
+"book_menu_show_long_book_name" = "लंबा पुस्तक नाम दिखाएं";
+"book_menu_show_progress_bars" = "प्रगति बार दिखाएं";
+"book_menu_sort_row_opt" = "पुस्तकों को क्षैतिज रूप से ऑर्डर करें";
+"create_bookmark" = "नया बुकमार्क बनाएं";
+"create_bookmark_with_a_note" = "नोट के साथ नया बुकमार्क बनाएं";
+"export_bookmarks_csv" = "बुकमार्क %@ के रूप में निर्यात करें";
+"export_fileformat" = "%@ के रूप में निर्यात करें";
+"font_size_title_pt" = "फ़ॉन्ट आकार (%d pt)";
+"go_to_ref" = "%@ खोलें";
+"lang_default" = "डिफॉल्ट";
+"memorize_abbreviation" = "याद करें";
+"multi_description" = "एकाधिक संदर्भ";
+"my_notes_abbreviation" = "मेरे टिप्पणीयां";
+"pref_font_family_label_name" = "फ़ॉन्ट परिवार (%@)";
+"prefs_line_spacing_pt_title" = "पंक्ति रिक्ति (%1.1fx)";
+"prefs_margin_size_mm_title" = "मार्जिन आकार (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "ऊपरी किनारा (%d mm)";
+"share_verse_widget_title" = "चयन साझा करें";
+"sort_by_alphabetical" = "वर्णमाला क्रम";

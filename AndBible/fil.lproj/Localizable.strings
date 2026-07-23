@@ -1618,3 +1618,47 @@
 "search_dictionary_hint" = "Maghanap sa diksyonaryo";
 "search_with_results2" = "%1$@ mga resulta sa %2$@";
 "task_kill_warning" = "Maaaring materminate ang mga matagalang gawaing ito kung lumipat ka sa ibang application bago pa matapos ang mga ito.";
+
+/* Android shared translations */
+"creating_index_for" = "Gumagawa ng index para sa %@…";
+"label_blue" = "Asul";
+"label_green" = "Berde";
+"label_red" = "Pula";
+"label_salvation" = "Kaligtasan";
+"label_underline" = "Salungguhit";
+"plan_description_y1ntpspr" = "Nagmula sa HEARTLIGHT Internet Magazine, http://www.heartlight.org, may pahintulot";
+"plan_description_y1ot1nt1_OTandNT" = "Basahin ang Bibliya sa loob ng 1 taon, kasama ang mga kabanata mula sa OT at NT araw-araw.";
+"plan_description_y1ot1nt1_OTthenNT" = "Basahin ang Bibliya sa loob ng 1 taon, simula sa Genesis at nagtatapos sa Apocalipsis. Ang OT ay una, pagkatapos ay ang NT.";
+"plan_description_y1ot1nt1_chronological" = "Plano batay sa kronolohikal na mga pangyayari sa Bibliya. Ang kronolohikal na timeline ay approximate.";
+"plan_description_y1ot1nt2_mcheyne" = "Ang planong ito ay batay sa sistema ng pagbabasa ng M'Cheyne, na nagtatampok ng apat na iba't ibang pagbabasa para gamitin sa pamilya at personal na debosyon. Bawat araw ay may dalawang talata mula sa Lumang Tipan, isa mula sa Bagong Tipan, at isa mula sa Mga Awit o sa Mga Ebanghelyo. Sa isang taon, mababasa mo ang Lumang Tipan nang isang beses at ang Bagong Tipan at Mga Awit nang dalawang beses.";
+"plan_description_y1ot6nt4_profHorner" = "Nagmula kay Prof. Horner, may pahintulot";
+"plan_description_y2ot1ntps2" = "Basahin ang Bibliya sa loob ng 2 taon, binabasa ang NT at Mga Awit nang dalawang beses. Nagmula sa Wholesome Words, http://www.wholesomewords.org/, may pahintulot";
+"plan_name_y1ntpspr" = "NT, Mga Awit at Kawikaan sa Isang Taon";
+"plan_name_y1ot1nt1_OTandNT" = "1-Taon OT+NT Sabay-sabay";
+"plan_name_y1ot1nt1_OTthenNT" = "1-Taon sa Buong Bibliya";
+"plan_name_y1ot1nt1_chronological" = "Kronolohikal na 1-Taon sa Buong Bibliya";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1-Taon 4-kabanata/araw";
+"plan_name_y1ot6nt4_profHorner" = "Plano sa Pagbabasa ni Prof. Horner na 10-kabanata/araw";
+"plan_name_y2ot1ntps2" = "2-Taon sa Buong Bibliya, NT+PS nang dalawang beses";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Magdagdag ng bookmark para sa buong pahina";
+"book_menu_group_by_category" = "Pangkatin ang mga aklat ayon sa kategorya";
+"book_menu_show_long_book_name" = "Ipakita ang mahabang pangalan ng aklat";
+"book_menu_show_progress_bars" = "Ipakita ang mga progress bar";
+"book_menu_sort_row_opt" = "Ayusin ang mga aklat nang pahalang";
+"create_bookmark" = "Lumikha ng bagong Bookmark";
+"create_bookmark_with_a_note" = "Lumikha ng bagong Bookmark na may tala";
+"export_bookmarks_csv" = "I-export ang Mga Bookmark bilang %@";
+"export_fileformat" = "I-export bilang %@";
+"font_size_title_pt" = "Laki ng font (%d pt)";
+"go_to_ref" = "Buksan ang %@";
+"memorize_abbreviation" = "Isaulo";
+"multi_description" = "Maraming sanggunian";
+"my_notes_abbreviation" = "Mga Tala Ko";
+"pref_font_family_label_name" = "Pamilya ng font (%@)";
+"prefs_line_spacing_pt_title" = "Espasyo ng linya (%1.1fx)";
+"prefs_margin_size_mm_title" = "Laki ng margin (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Tuktok na margin (%d mm)";
+"share_verse_widget_title" = "I-share ang seleksyon";
+"sort_by_alphabetical" = "Pagkakasunud-sunod ng alpabeto";

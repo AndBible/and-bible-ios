@@ -1473,3 +1473,48 @@
 "search_dictionary_hint" = "Recherche dans le dictionnaire";
 "search_with_results2" = "%1$@ résultats dans %2$@";
 "task_kill_warning" = "Merci de patienter. Ne pas basculer vers une autre application, ces tâches risqueraient d'être interrompues.";
+
+/* Android shared translations */
+"creating_index_for" = "Créer un index pour %@…";
+"label_blue" = "Bleu";
+"label_green" = "Vert";
+"label_red" = "Rouge";
+"label_salvation" = "Salut";
+"label_underline" = "Surligner";
+"plan_description_y1ntpspr" = "Avec l'aimable autorisation de HEARTLIGHT Internet Magazine, http://www.heartlight.org";
+"plan_description_y1ot1nt1_OTandNT" = "Lecture de la Bible en 1 an, avec des chapitres dans l'AT et le NT chaque jour.";
+"plan_description_y1ot1nt1_OTthenNT" = "Lecture de la Bible en 1 an, commence par la Genèse et se termine par l'Apocalypse. AT en premier, puis NT.";
+"plan_description_y1ot1nt1_chronological" = "Plan basé sur l'ordre chronologique des événements dans la Bible. La chronologie est approximative.";
+"plan_description_y1ot1nt2_mcheyne" = "Plan de Robert Murray McCheyne, pasteur écossais. 4 passages différents à lire chaque jour: 2 passages de l'AT + 1 passage du NT + 1 passage des Psaumes ou des Évangiles. En une année, l'AT est lu 1 fois et les Psaumes et le NT sont lus 2 fois .";
+"plan_description_y1ot6nt4_profHorner" = "Avec l'aimable autorisation de Prof. Horner";
+"plan_description_y2ot1ntps2" = "Lecture de la Bible en 2 ans, le NT et les Psaumes sont lus 2 fois. Avec l'aimable autorisation de Wholesome Words, http://www.wholesomewords.org/";
+"plan_name_y1ntpspr" = "NT, Psaumes & Proverbes en un an";
+"plan_name_y1ot1nt1_OTandNT" = "Bible en 1 an, AT et NT simultanément";
+"plan_name_y1ot1nt1_OTthenNT" = "Bible en 1 an";
+"plan_name_y1ot1nt1_chronological" = "Bible chronologique en 1 an";
+"plan_name_y1ot1nt2_mcheyne" = "Bible en 1 an, 4 chapitres/jour de McCheyne";
+"plan_name_y1ot6nt4_profHorner" = "Plan de lecture du Prof. Horner. 10 chapitres/jour";
+"plan_name_y2ot1ntps2" = "Bible en 2 ans, NT+Psaumes 2 fois";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Ajouter un signet pour la page entière";
+"book_menu_group_by_category" = "Groupe de livres par catégories";
+"book_menu_show_long_book_name" = "Montrer le nom long du livre";
+"book_menu_show_progress_bars" = "Afficher les barres de progression";
+"book_menu_sort_row_opt" = "Ranger les livres horizontalement";
+"create_bookmark" = "Créer un nouveau marque-page";
+"create_bookmark_with_a_note" = "Créer un nouveau signet avec une note";
+"export_bookmarks_csv" = "Exporter des signets comme %@";
+"export_fileformat" = "Exporter comme %@";
+"font_size_title_pt" = "Taille de la police (%d pt)";
+"go_to_ref" = "Ouvrir %@";
+"lang_default" = "Par défaut";
+"memorize_abbreviation" = "Mémoriser";
+"multi_description" = "références multiples";
+"my_notes_abbreviation" = "Mes notes";
+"pref_font_family_label_name" = "Famille de police (%@)";
+"prefs_line_spacing_pt_title" = "Espace inter-lignes (%1.1fx)";
+"prefs_margin_size_mm_title" = "Taille de la marge (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Marge supérieure (%d mm)";
+"share_verse_widget_title" = "Partager la sélection";
+"sort_by_alphabetical" = "Ordre alphabétique";

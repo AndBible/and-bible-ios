@@ -1495,3 +1495,48 @@
 "search_dictionary_hint" = "Pretraga rečnika";
 "search_with_results2" = "%1$@ rezultata u %2$@";
 "task_kill_warning" = "Ovi dugotrajni zadaci mogu biti prekinuti ako se prebaciti na drugu aplikaciju pre no što završe.";
+
+/* Android shared translations */
+"creating_index_for" = "Kreiranje indeksa za %@…";
+"label_blue" = "Plava";
+"label_green" = "Zelena";
+"label_red" = "Crvena";
+"label_salvation" = "Spasonosna";
+"label_underline" = "Podvuci";
+"plan_description_y1ntpspr" = "Ljubaznošću Hartlajt internet magazina, http://www.heartlight.org, dozvoljeno je korišćenje";
+"plan_description_y1ot1nt1_OTandNT" = "Pročitajte Bibliju za godinu dana, sa poglavljima Starog i Novog Zaveta svaki dan.";
+"plan_description_y1ot1nt1_OTthenNT" = "Pročitajte Bibliju za godinu dana, počevši sa Postanjem i završavajući Otkrivenjem. Prvo je Stari, zatim Novi Zavet.";
+"plan_description_y1ot1nt1_chronological" = "Plan zasnovan na hronološkim događajima iz Biblije. Hronologija vremenske linije je približna.";
+"plan_description_y1ot1nt2_mcheyne" = "Plan je zasnovan na Em Čejni sistemu čitanja, koji se sastoji od četiri različita čitanja za upotrebu i u porodičnom i ličnom posvećenju. Svaki dan se čitaju dva odeljka iz Starog Zaveta, jedan iz Novog Zaveta, i jedan iz Psalama ili Jevanđelja. Za godinu dana, pročitaćete Stari Zaver jednom, a Novi Zavet i Psalme dva puta.";
+"plan_description_y1ot6nt4_profHorner" = "Ljubaznošću profesora Hornera, dozvoljeno je korišćenje";
+"plan_description_y2ot1ntps2" = "Pročitajte Bibliju dvaput, čitajući Novi Zavet i Psalme dvaput. Ljubaznoću Holsom Vords, http://www.wholesomewords.org/, dozvoljeno je korišćenje";
+"plan_name_y1ntpspr" = "Novi Zavet, Psalmi i Priče Solomonove tokom godine";
+"plan_name_y1ot1nt1_OTandNT" = "Jedna godina Stari Zavet + Novi Zavet uporedo";
+"plan_name_y1ot1nt1_OTthenNT" = "Godinu dana kroz Bibliju";
+"plan_name_y1ot1nt1_chronological" = "Godinu dana hronološki kroz Bibliju";
+"plan_name_y1ot1nt2_mcheyne" = "Em Čejnijeva godina sa četiri poglavlja po danu";
+"plan_name_y1ot6nt4_profHorner" = "Plan čitanja 10 poglavlja na dan profesora Hornera";
+"plan_name_y2ot1ntps2" = "Dve godine kroz Bibliju, Novi Zavet + Psalmi dva puta";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Dodaj obeleživač za celu stranicu";
+"book_menu_group_by_category" = "Grupiši knjige po kategorijama";
+"book_menu_show_long_book_name" = "Prikaži dugo ime knjige";
+"book_menu_show_progress_bars" = "Prikaži trake napretka";
+"book_menu_sort_row_opt" = "Poređaj knjige horizontalno";
+"create_bookmark" = "Napravi novi Obeleživač";
+"create_bookmark_with_a_note" = "Napravi novi Obeleživač sa beleškom";
+"export_bookmarks_csv" = "Izvezi obeleživače kao %@";
+"export_fileformat" = "Izvezi kao %@";
+"font_size_title_pt" = "Veličina slova (%dpt)";
+"go_to_ref" = "Otvorite %@";
+"lang_default" = "Podrazumevani";
+"memorize_abbreviation" = "Memorisanje";
+"multi_description" = "Više referenci";
+"my_notes_abbreviation" = "Moje beleške";
+"pref_font_family_label_name" = "Porodica fontova (%@)";
+"prefs_line_spacing_pt_title" = "Razmak između redova (%1.1fx)";
+"prefs_margin_size_mm_title" = "Veličina margina (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Gornja margina (%dmm)";
+"share_verse_widget_title" = "Podelite izabrano";
+"sort_by_alphabetical" = "Alfabetni redosled";

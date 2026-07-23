@@ -1652,3 +1652,48 @@
 "search_dictionary_hint" = "Tafuta kamusi";
 "search_with_results2" = "Matokeo %1$@ katika %2$@";
 "task_kill_warning" = "Kazi hizi zinazochukua muda mrefu zinaweza kusimama ikiwa utabadilisha programu nyingine kabla ya kukamilika.";
+
+/* Android shared translations */
+"creating_index_for" = "Kuunda faharasa kwa %@…";
+"label_blue" = "Bluu";
+"label_green" = "Kijani";
+"label_red" = "Nyekundu";
+"label_salvation" = "Wokovu";
+"label_underline" = "Pigia mstari";
+"plan_description_y1ntpspr" = "Kwa heshima ya HEARTLIGHT Internet Magazine, http://www.heartlight.org, ruhusa imetolewa";
+"plan_description_y1ot1nt1_OTandNT" = "Soma Biblia yote kwa mwaka 1, na sura za Agano la Kale na Agano Jipya kila siku.";
+"plan_description_y1ot1nt1_OTthenNT" = "Soma Biblia yote kwa mwaka 1, ukianza katika Mwanzo na kukamilika katika Ufunuo. Agano la Kale ni la kwanza, kisha Agano Jipya.";
+"plan_description_y1ot1nt1_chronological" = "Mpango unaozingatia matukio ya mpangilio wa matukio katika Biblia. Mstari wa wakati wa matukio ni wa makadirio.";
+"plan_description_y1ot1nt2_mcheyne" = "Mpangilioo huu unazingatia mfumo wa kusoma wa M'Cheyne, ukiwa na masomo manne tofauti ya kutumia katika ibada za familia na za kibinafsi. Kila siku ina vifungu viwili kutoka Agano la Kale, kimoja kutoka Agano Jipya, na kimoja kutoka Zaburi au Injili. Katika mwaka mmoja, unasoma Agano la Kale mara moja na Agano Jipya na Zaburi mara mbili.";
+"plan_description_y1ot6nt4_profHorner" = "Kwa heshima ya Prof. Horner, ruhusa imetolewa";
+"plan_description_y2ot1ntps2" = "Soma Biblia yote kwa miaka 2, ukisoma Agano Jipya na Zaburi mara mbili. Kwa heshima ya Wholesome Words, http://www.wholesomewords.org/, ruhusa imetolewa";
+"plan_name_y1ntpspr" = "Agano Jipya, Zaburi na Mithali katika Mwaka Mmoja";
+"plan_name_y1ot1nt1_OTandNT" = "Mwaka 1 Agano la Kale+Agano Jipya Wakati Mmoja";
+"plan_name_y1ot1nt1_OTthenNT" = "Mwaka 1 kupitia Biblia";
+"plan_name_y1ot1nt1_chronological" = "Mpangilio wa Matukio mwaka 1 kupitia Biblia";
+"plan_name_y1ot1nt2_mcheyne" = "Mpangilio wa kufuata M'Cheyne: Mwaka 1 sura 4/siku";
+"plan_name_y1ot6nt4_profHorner" = "Mpango wa Kusoma wa Prof. Horner sura 10/siku";
+"plan_name_y2ot1ntps2" = "Miaka 2 Kupitia Biblia, Agano Jipya+Zaburi mara mbili";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Ongeza alamisho kwa ukurasa wote";
+"book_menu_group_by_category" = "Panga vitabu kwa kitengo";
+"book_menu_show_long_book_name" = "Onyesha jina refu la kitabu";
+"book_menu_show_progress_bars" = "Onyesha mwambaa wa maendeleo";
+"book_menu_sort_row_opt" = "Panga vitabu kwa usawa";
+"create_bookmark" = "Unda Alamisho jipya";
+"create_bookmark_with_a_note" = "Unda Alamisho jipya lenye maelezo";
+"export_bookmarks_csv" = "Safirisha Alamisho kama %@";
+"export_fileformat" = "Safirisha kama %@";
+"font_size_title_pt" = "Ukubwa wa fonti (%d pt)";
+"go_to_ref" = "Fungua %@";
+"lang_default" = "Chaguo-msingi";
+"memorize_abbreviation" = "Kariri";
+"multi_description" = "Marejeleo mengi";
+"my_notes_abbreviation" = "Maelezo Yangu";
+"pref_font_family_label_name" = "Familia ya fonti (%@)";
+"prefs_line_spacing_pt_title" = "Nafasi ya mstari (%1.1fx)";
+"prefs_margin_size_mm_title" = "Ukubwa wa ukingo (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Ukingo wa juu (%d mm)";
+"share_verse_widget_title" = "Shiriki uteuzi";
+"sort_by_alphabetical" = "Mpangilio wa alfabeti";

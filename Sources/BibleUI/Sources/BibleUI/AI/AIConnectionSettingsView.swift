@@ -243,13 +243,7 @@ struct AIConnectionSettingsView: View {
                     accessibilityIdentifier: "aiConnectionSettingsHelpMenuItem"
                 ) {
                     showsOverflowMenu = false
-                    activeDialog = .information(
-                        title: String(localized: "help", defaultValue: "Help"),
-                        message: String(
-                            localized: "help_ai_connection_text",
-                            defaultValue: "Configure your AI providers, models, permissions and other connection options here. Each provider needs its own API key. You can add multiple providers and select a default model."
-                        )
-                    )
+                    activeDialog = .help(.aiConnection)
                 }
             }
         }
@@ -854,13 +848,7 @@ private struct AIProvidersView: View {
                     accessibilityIdentifier: "aiProvidersHelpMenuItem"
                 ) {
                     showsOverflowMenu = false
-                    activeDialog = .information(
-                        title: String(localized: "help", defaultValue: "Help"),
-                        message: String(
-                            localized: "help_ai_providers_text",
-                            defaultValue: "Manage AI providers (Google Gemini, OpenAI, Anthropic, etc.). Each provider needs its own API key. You can add multiple providers and assign different ones to specific prompts."
-                        )
-                    )
+                    activeDialog = .help(.aiProviders)
                 }
             }
         }

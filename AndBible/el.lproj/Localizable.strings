@@ -1495,3 +1495,48 @@
 "search_dictionary_hint" = "Αναζήτηση λεξικού";
 "search_with_results2" = "%1$@ αποτελέσματα σε %2$@";
 "task_kill_warning" = "Αυτές οι μακροχρόνιες εργασίες λειτουργίας μπορεί να τερματίστουν αν μεταβείτε σε μια άλλη εφαρμογή πριν τελειώσουν.";
+
+/* Android shared translations */
+"creating_index_for" = "Δημιουργία ευρετηρίου για %@...";
+"label_blue" = "Μπλε";
+"label_green" = "Πράσινο";
+"label_red" = "Κόκκινο";
+"label_salvation" = "Σωτηρία";
+"label_underline" = "Υπογραμμισμένα";
+"plan_description_y1ntpspr" = "Ευγενική προσφορά του ιντερνετικού περιοδικού HEARTLIGHT, http://www.heartlight.org, κατόπιν άδειας";
+"plan_description_y1ot1nt1_OTandNT" = "Ανάγνωση της Βίβλου σε 1 χρόνο με κεφάλαια της Παλαιάς και της Καινής Διαθήκης κάθε μέρα.";
+"plan_description_y1ot1nt1_OTthenNT" = "Ανάγνωση όλης της Βίβλου σε 1 χρόνο, ξεκινώντας από την Γένεση και τελειώνοντας με την Αποκάλυψη. Πρώτα η Παλαιά, μετά η Καινή Διαθήκη.";
+"plan_description_y1ot1nt1_chronological" = "Σχέδιο βασισμένο σε χρονολογικά γεγονότα της Βίβλου. Η χρονολογική σειρά είναι κατά προσέγγιση.";
+"plan_description_y1ot1nt2_mcheyne" = "Σχέδιο βασισμένο στο σύστημα ανάγνωσης M’Cheyne, περιλαμβάνοντας τέσσερις διαφορετικές αναγνώσεις για χρήση τόσο σε οικογενειακές όσο και σε προσωπικές λατρείες. Κάθε μέρα περιλαμβάνει δύο αποσπάσματα από την Παλαιά Διαθήκη, ένα από την Καινή Διαθήκη, και άλλο ένα είτε από τους Ψαλμούς είτε από τα Ευαγγέλια. Σε ένα χρόνο, ολοκληρώνετε μία φορά την Παλαιά Διαθήκη, και δύο φορές την Καινή Διαθήκη και τους Ψαλμούς.";
+"plan_description_y1ot6nt4_profHorner" = "Ευγενική προσφορά του καθ. Horner, κατόπιν αδείας";
+"plan_description_y2ot1ntps2" = "Ανάγνωση Βίβλου σε 2 χρόνια, διαβάζοντας την Καινή Διαθήκη και τους Ψαλμούς δύο φορές Ευγενική προσφορά του Wholesome Words, http://www.wholesomewords.org/, κατόπιν άδειας";
+"plan_name_y1ntpspr" = "Καινή Διαθήκη, Ψαλμοί & Παροιμίες σε ένα χρόνο";
+"plan_name_y1ot1nt1_OTandNT" = "1 χρόνος ΠΔ+ΚΔ ταυτόχρονα";
+"plan_name_y1ot1nt1_OTthenNT" = "Η Βίβλος σε 1 χρόνο";
+"plan_name_y1ot1nt1_chronological" = "Η Βίβλος χρονολογικά σε 1 χρόνο";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1 χρόνος με 4 κεφάλαια ανά ημέρα";
+"plan_name_y1ot6nt4_profHorner" = "Σχέδιο καθ. Horner 10 κεφάλαια ανά ημέρα";
+"plan_name_y2ot1ntps2" = "2 χρόνια ολόκληρη Βίβλος, ΚΔ+Ψλμ δύο φορές";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Προσθήκη σελιδοδείκτη για ολόκληρη τη σελίδα";
+"book_menu_group_by_category" = "Διάταξη βιβλίων ανα κατηγορία";
+"book_menu_show_long_book_name" = "Εμφάνιση ολόκληρου ονόματος βιβλίου";
+"book_menu_show_progress_bars" = "Εμφάνιση γραμμών προόδου";
+"book_menu_sort_row_opt" = "Οριζόντια διάταξη βιβλίων";
+"create_bookmark" = "Δημιουργία νέου Σελιδοδείκτη";
+"create_bookmark_with_a_note" = "Δημιουργία νέου Σελιδοδείκτη με σημείωση";
+"export_bookmarks_csv" = "Εξαγωγή σελιδοδικτών ως %@";
+"export_fileformat" = "Εξαγωγή ως %@";
+"font_size_title_pt" = "Μέγεθος γραμματοσειράς (%d pt)";
+"go_to_ref" = "Άνοιξε %@";
+"lang_default" = "Προεπιλογή";
+"memorize_abbreviation" = "Απομνημόνευση";
+"multi_description" = "Πολλαπλές παραπομπές";
+"my_notes_abbreviation" = "Οι σημειώσεις μου";
+"pref_font_family_label_name" = "Οικογένεια γραμματοσειρών (%@)";
+"prefs_line_spacing_pt_title" = "Απόσταση γραμμών (%1.1fx)";
+"prefs_margin_size_mm_title" = "Μέγεθος περιθωρίου (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Επάνω περιθώριο (%d mm)";
+"share_verse_widget_title" = "Κοινοποίηση επιλογής";
+"sort_by_alphabetical" = "Αλφαβητική σειρά";

@@ -33,7 +33,7 @@ struct AndroidTextDisplayHelpDialog: View {
                 Text(title)
                     .font(.system(size: 24, weight: .semibold))
 
-                ScrollView {
+                AndroidAdaptiveDialogScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         Link(
                             String(

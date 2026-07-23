@@ -894,7 +894,16 @@ public struct SearchView: View {
 
                 if let service = searchIndexService {
                     VStack(spacing: 8) {
-                        Text("Creating index. Processing \(service.indexingModule)")
+                        Text(
+                            String(
+                                format: String(
+                                    localized: "creating_index_for",
+                                    defaultValue: "Creating index for %@…"
+                                ),
+                                locale: .current,
+                                service.indexingModule
+                            )
+                        )
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
 

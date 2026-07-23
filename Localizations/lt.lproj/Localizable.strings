@@ -1482,3 +1482,48 @@
 "search_dictionary_hint" = "Ieškoti žodyne";
 "search_with_results2" = "Rezultatų (%1$@): %2$@";
 "task_kill_warning" = "Šie ilgai trunkantys darbai gali sustoti, jei jiems nepabaigus persijungsite į kitą programą.";
+
+/* Android shared translations */
+"creating_index_for" = "Kuriamas %@ indeksas…";
+"label_blue" = "Mėlyna";
+"label_green" = "Žalia";
+"label_red" = "Raudona";
+"label_salvation" = "Išgelbėjimas";
+"label_underline" = "Pabraukimas";
+"plan_description_y1ntpspr" = "HEARTLIGHT internetiniam žurnalui leidus, http://www.heartlight.org, leidimas suteiktas";
+"plan_description_y1ot1nt1_OTandNT" = "Perskaitykite Bibliją per 1 metus. Kasdieną skyriai iš ST ir NT.";
+"plan_description_y1ot1nt1_OTthenNT" = "Perskaitykite Bibliją per 1 metus, pradėdami Pradžios knyga ir užbaigdami Apreiškimo knyga. Iš pradžių ST, tuomet NT.";
+"plan_description_y1ot1nt1_chronological" = "Planas yra pagrįstas chronologiniais įvykiais Biblijoje. Chronologinė laiko linija yra apytikslė.";
+"plan_description_y1ot1nt2_mcheyne" = "Šis planas yra pagrįstas M’Cheyne skaitymo sistema su keturiais skirtingais skaitiniais, skirtais naudoti tiek šeimyniniame, tiek asmeniniame pamaldume. Kiekviena diena turi dvi ištraukas iš Senojo Testamento, vieną ištrauką iš Naujojo Testamento, ir vieną iš Psalmių arba Evangelijų. Per vienerius metus vieną kartą perskaitysite Senąjį Testamentą ir po du kartus Naująjį Testamentą bei Psalmes.";
+"plan_description_y1ot6nt4_profHorner" = "Prof. Horner'iui leidus, leidimas suteiktas";
+"plan_description_y2ot1ntps2" = "Perskaitykite Bibliją per 2 metus, perskaitydami NT ir Psalmes po du kartus. Wholesome Words leidus, http://www.wholesomewords.org/, leidimas suteiktas";
+"plan_name_y1ntpspr" = "NT, Psalmės ir Patarlės per metus";
+"plan_name_y1ot1nt1_OTandNT" = "1 metai, vienu metu ST+NT";
+"plan_name_y1ot1nt1_OTthenNT" = "Biblija per 1 metus";
+"plan_name_y1ot1nt1_chronological" = "Chronologinė Biblija per 1 metus";
+"plan_name_y1ot1nt2_mcheyne" = "M'Cheyne 1 metai, 4 skyriai per dieną";
+"plan_name_y1ot6nt4_profHorner" = "Prof. Horner'io 10 skyrių per dieną skaitymo planas";
+"plan_name_y2ot1ntps2" = "Biblija per 2 metus, NT+PS po du kartus";
+
+/* Android shared translations */
+"add_whole_page_bookmark" = "Pridėti žymę visam puslapiui";
+"book_menu_group_by_category" = "Grupuoti knygas pagal kategoriją";
+"book_menu_show_long_book_name" = "Rodyti ilguosius knygų pavadinimus";
+"book_menu_show_progress_bars" = "Rodyti eigos juostas";
+"book_menu_sort_row_opt" = "Rikiuoti knygas horizontaliai";
+"create_bookmark" = "Sukurti naują žymę";
+"create_bookmark_with_a_note" = "Sukurti naują žymę su pastaba";
+"export_bookmarks_csv" = "Eksportuoti žymes kaip %@";
+"export_fileformat" = "Eksportuoti kaip %@";
+"font_size_title_pt" = "Šrifto dydis (%d tšk.)";
+"go_to_ref" = "Atverti %@";
+"lang_default" = "Įprastinė";
+"memorize_abbreviation" = "Išmokti mintinai";
+"multi_description" = "Sudėtinės nuorodos";
+"my_notes_abbreviation" = "Mano pastabos";
+"pref_font_family_label_name" = "Šriftas (%@)";
+"prefs_line_spacing_pt_title" = "Atstumai tarp eilučių (%1.1fx)";
+"prefs_margin_size_mm_title" = "Paraščių plotis (%1$d/%2$d/%3$d mm)";
+"prefs_top_margin_title_mm" = "Viršutinė paraštė (%d mm)";
+"share_verse_widget_title" = "Bendrinti žymėjimą";
+"sort_by_alphabetical" = "Abėcėlinė tvarka";
