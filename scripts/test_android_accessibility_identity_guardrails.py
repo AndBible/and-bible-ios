@@ -83,14 +83,25 @@ class AndroidAccessibilityIdentityGuardrailTests(unittest.TestCase):
     def test_ai_disclaimer_identifies_its_real_scroll_container(self) -> None:
         """Disclaimer automation must scroll visible content without weakening modal identity."""
         ai_configuration = source(BIBLE_UI / "AI" / "AIConfigurationDialogPresentation.swift")
+        adaptive_scroll = source(
+            BIBLE_UI / "Shared" / "AndroidAdaptiveDialogScrollView.swift"
+        )
         disclaimer = source_between(
             ai_configuration,
             "private struct AIDisclaimerDialog: View",
             "/// Android's distinct title for informational and acceptance dialogs.",
         )
 
-        self.assertIn("ScrollView {", disclaimer)
-        self.assertIn('.accessibilityIdentifier("aiDisclaimerScrollView")', disclaimer)
+        self.assertIn("AndroidAdaptiveDialogScrollView(", disclaimer)
+        self.assertIn(
+            'accessibilityIdentifier: "aiDisclaimerScrollView"',
+            disclaimer,
+        )
+        self.assertIn("ScrollView {", adaptive_scroll)
+        self.assertIn(
+            ".accessibilityIdentifier(accessibilityIdentifier)",
+            adaptive_scroll,
+        )
         self.assertIn('.accessibilityIdentifier("aiDisclaimerAcceptButton")', disclaimer)
         self.assertIn('accessibilityIdentifier: "aiDisclaimerScreen"', disclaimer)
         self.assertIn(".androidAccessibilityIdentityMarker(", disclaimer)
